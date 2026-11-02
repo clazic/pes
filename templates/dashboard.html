@@ -99,6 +99,7 @@
   .oname { display: grid; } .oname b { font-size: 13.5px; } .oname small { color: var(--muted); font-size: 12px; }
   .ofiles { display: flex; gap: 6px; flex-wrap: wrap; }
   .ofiles a { display: grid; width: 150px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; text-decoration: none; color: var(--fg); background: var(--card); line-height: 1.3; }
+  .ofiles a.prt { width: 110px; border-style: dashed; } .ofiles a.prt b { color: var(--fg); }
   .ofiles a:hover { border-color: var(--accent); } .ofiles a b { font-size: 13px; color: var(--accent); }
   .ofiles a small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   @media (max-width: 760px) { .ohead { display: none; } .orow { grid-template-columns: 1fr 1fr; } .oname, .orow .ofiles { grid-column: 1 / -1; } }
@@ -656,7 +657,7 @@ function reports() {
   const order = ['eli5', 'html', 'md', 'hwpx', 'docx', 'pdf', 'pptx'];
   r.sort((a, b) => order.indexOf(a.format) - order.indexOf(b.format));
   return `<section class="box" style="border:2px solid var(--ok)"><h2>${esc(RNAME[SEL] || '단계 보고서')} <span class="meta">R${esc(st().round)} 기준 · ${esc(st().reports_built || '')}</span></h2>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">${r.map(x => `<a href="${esc(x.path)}" target="_blank" style="display:inline-flex;gap:6px;align-items:center;padding:8px 14px;border:1px solid var(--line);border-radius:10px;text-decoration:none;background:var(--card)"><span><b>${esc(x.label)}</b><br><span class="meta">${esc(x.path.split('/').pop())} · ${Math.max(1, Math.round(x.bytes / 1024))}KB</span></span></a>`).join('')}</div></section>`;
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${r.map(x => `<a href="${esc(x.path)}" target="_blank" style="display:inline-flex;gap:6px;align-items:center;padding:8px 14px;border:1px solid var(--line);border-radius:10px;text-decoration:none;background:var(--card)"><span><b>${esc(x.label)}</b><br><span class="meta">${esc(x.path.split('/').pop())} · ${Math.max(1, Math.round(x.bytes / 1024))}KB</span></span></a>`).join('')}${(r.find(x => x.format === 'html') || null) ? `<a href="${esc(r.find(x => x.format === 'html').path)}?print=1" target="_blank" style="display:inline-flex;align-items:center;padding:8px 14px;border:1px dashed var(--line);border-radius:10px;text-decoration:none;color:var(--fg);background:var(--card)"><span><b>인쇄</b><br><span class="meta">A4 · PDF로 저장도 가능</span></span></a>` : ''}</div></section>`;
 }
 // ---- 전체 보기 ----
 const FBK = { reopen: '다시 열기', review: '점검 답', stage_start: '시작 답', approve: '승인 요청', resume: '이어하기', feedback: '피드백' };
@@ -735,13 +736,14 @@ function gallery() {
   const kb = n => n >= 1024 * 1024 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB';
   const rows = STG.map(s => {
     const x = P.stages[s.key] || {}, r = [...(x.reports || [])].sort((a, b) => order.indexOf(a.format) - order.indexOf(b.format));
-    const files = r.length ? `<div class="ofiles">${r.map(f => `<a href="${esc(f.path)}" target="_blank"><b>${esc(T[f.format] || f.format)}</b><small>${esc(f.path.split('/').pop())} · ${kb(f.bytes || 0)}</small></a>`).join('')}</div>`
+    const prt = r.find(f => f.format === 'html');
+    const files = r.length ? `<div class="ofiles">${r.map(f => `<a href="${esc(f.path)}" target="_blank"><b>${esc(T[f.format] || f.format)}</b><small>${esc(f.path.split('/').pop())} · ${kb(f.bytes || 0)}</small></a>`).join('')}${prt ? `<a class="prt" href="${esc(prt.path)}?print=1" target="_blank" title="웹 보고서를 열고 바로 인쇄 창을 띄웁니다 (PDF로 저장도 여기서)"><b>인쇄</b><small>A4 · PDF 저장</small></a>` : ''}</div>`
       : `<span class="cell none">${x.status === 'approved' ? '만드는 중' : `${esc(s.label)} 승인 후 생성`}</span>`;
     return `<div class="orow${r.length ? '' : ' blank'}"><span class="oname"><b>${esc(RNAME[s.key])}</b><small>${esc(s.label)} 단계</small></span>
       <span>${r.length ? `R${esc(x.round)}` : '—'}</span><span>${r.length ? esc(String(x.reports_built || '').slice(5)) : '—'}</span>${files}</div>`;
   }).join('');
   const outs = (D.outputs || []).length
-    ? `<div class="ofiles">${D.outputs.map(o => `<a href="${esc(o)}" target="_blank"><b>${esc(o.replace(/^out\//, ''))}</b></a>`).join('')}</div>`
+    ? `<div class="ofiles">${D.outputs.map(o => `<a href="${esc(o)}" target="_blank"><b>${esc(o.replace(/^out\//, ''))}</b></a>`).join('')}${D.outputs.includes('out/report.html') ? `<a class="prt" href="out/report.html?print=1" target="_blank"><b>인쇄</b><small>최종 보고서 · A4</small></a>` : ''}</div>`
     : `<span class="cell none">산출·공유 단계에서 생성</span>`;
   return `<section class="box"><h2>산출물</h2><div class="meta">단계를 승인할 때마다 그 단계의 보고서가 만들어집니다. 파일을 누르면 새 창으로 열립니다.</div>
     <div class="ogrid"><div class="ohead"><span>보고서</span><span>기준</span><span>만든 때</span><span>파일</span></div>${rows}

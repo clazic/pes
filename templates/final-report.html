@@ -69,14 +69,16 @@
 
   @media (max-width: 900px) { .wrap { display: block; padding: 16px 16px 64px; } nav.toc { position: static; max-height: 260px; margin-bottom: 16px; } article { padding: 24px 20px; } .cover .in { padding: 32px 24px; } .cover h1 { font-size: 24px; } }
   @media print {
-    @page { size: A4; margin: 18mm 16mm; }
+    @page { size: A4; margin: 18mm 16mm 20mm; @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #666; } }
+    @page :first { @bottom-center { content: none; } }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { background: #fff; color: #000; font-size: 10.5pt; line-height: 1.7; }
     .globalbar, .bar, nav.toc { display: none; }
     .cover { margin: 0; padding: 0; } .cover .in { border: 0; padding: 60mm 0 0; min-height: 250mm; break-after: page; }
     .cover h1 { font-size: 24pt; }
     .wrap { display: block; padding: 0; } article { border: 0; padding: 0; max-width: none; }
     article h2 { break-before: page; break-after: avoid; } article .summary + h2, article h2:first-child { break-before: auto; }
-    h3, h4, .cap { break-after: avoid; } table, figure { break-inside: avoid; }
+    h3, h4, .cap { break-after: avoid; } figure { break-inside: avoid; } tr { break-inside: avoid; }
     article a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8pt; color: #555; word-break: break-all; }
     section.notes, section.appendix { break-before: page; }
   }
@@ -174,6 +176,9 @@ document.getElementById('toc').innerHTML = '<b>목차</b>' + toc.map(h => { cons
 const links = [...document.querySelectorAll('nav.toc a')];
 const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '0px 0px -75% 0px' });
 document.querySelectorAll('article h2[id], article h3[id]').forEach(h => io.observe(h));
+
+// ?print=1 로 열면 그린 뒤 바로 인쇄 창을 띄운다 (대시보드의 '인쇄' 링크)
+if (/[?&]print=1/.test(location.search)) addEventListener('load', () => setTimeout(() => print(), 300));
 </script>
 </body>
 </html>

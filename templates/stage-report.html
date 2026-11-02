@@ -39,6 +39,23 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 
 body{background:var(--bg);color:var(--fg);font:14.5px/1.75 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif}.wrap{max-width:1296px;grid-template-columns:240px minmax(0,1fr);gap:32px;padding:32px 24px 80px}nav.toc{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:16px;font-size:13px;top:24px}nav.toc b{display:block;margin-bottom:8px}nav.toc a{padding:4px 0}article{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:32px;max-width:920px}.bar{gap:8px;margin:0 0 32px}.bar a,.bar button{border-radius:5px;padding:8px 12px;background:var(--card)}.kicker{font-size:13px}h1{font-size:24px;margin:4px 0 16px}h2{margin:48px 0 16px;border-color:var(--line);padding-bottom:12px}h3{margin:32px 0 12px}h4{margin:24px 0 8px}p{margin:8px 0 16px}table{margin:16px 0 24px;font-size:13.5px}th,td{padding:8px 12px}th{background:var(--soft)}
 @media(max-width:860px){.wrap{display:block;padding:24px 16px 64px}nav.toc{position:static;max-height:240px;margin-bottom:24px}article{padding:24px}}@media print{.globalbar{display:none}article{border:0;padding:0}.wrap{padding:0}nav.toc,.bar{display:none}body{background:#fff;color:#000}}
+
+/* ---- 인쇄 (A4) ---- */
+@page { size: A4; margin: 18mm 16mm 20mm; @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #666; } }
+@media print {
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a { color: inherit; text-decoration: none; }
+  figure, img, svg, blockquote { break-inside: avoid; } tr { break-inside: avoid; } thead { display: table-header-group; }
+  h1, h2, h3, h4 { break-after: avoid; }
+  p, li { orphans: 3; widows: 3; }
+}
+@media print {
+  .wrap, article { max-width: none; } article { font-size: 10.5pt; line-height: 1.7; }
+  .kicker { color: #24589e !important; } h2 { break-before: auto; border-bottom: 1.5pt solid #000; }
+  article a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8pt; color: #555; word-break: break-all; }
+  .printmeta { display: block !important; font-size: 9pt; color: #555; margin: 0 0 12pt; }
+}
+.printmeta { display: none; }
 </style>
 </head>
 <body>
@@ -79,8 +96,11 @@ function md(src) {
   fP(); fL(); return out;
 }
 const body = md(D.md);
-document.getElementById('doc').innerHTML = `<div class="bar"><a href="../../index.html#${esc(D.stage)}">← 대시보드</a><a href="report.md">마크다운</a><a href="eli5.html">그림 설명(eli5)</a><button onclick="print()">인쇄·PDF</button></div>` + body;
+document.getElementById('doc').innerHTML = `<div class="bar"><a href="../../index.html#${esc(D.stage)}">← 대시보드</a><a href="report.md">마크다운</a><a href="eli5.html">그림 설명(eli5)</a><button onclick="print()">인쇄·PDF</button></div><div class="printmeta">${esc(D.label)} 단계 · ${esc(D.name)} · R${esc(D.round)}${D.approved_at ? ' · 승인 ' + esc(D.approved_at) : ''} · 출력 ${new Date().toLocaleDateString('ko-KR')}</div>` + body;
 document.getElementById('toc').innerHTML = '<b>목차</b>' + toc.map(h => `<a class="l${h.n}" href="#${h.id}">${inline(h.t)}</a>`).join('');
+
+// ?print=1 로 열면 그린 뒤 바로 인쇄 창을 띄운다 (대시보드의 '인쇄' 링크)
+if (/[?&]print=1/.test(location.search)) addEventListener('load', () => setTimeout(() => print(), 300));
 </script>
 </body>
 </html>
