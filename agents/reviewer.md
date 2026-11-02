@@ -14,6 +14,7 @@ description: PES 모든 단계의 라운드 결과를 메인의 자체 점검과
 ## 보는 것
 
 ### QC (품질관리 — 규칙대로 만들어졌나)
+- **도구 경로**: `ego-browser`·`kosis`·`vworld`가 PATH에 없으면(`command not found`) `python3 -I <PES>/scripts/pes.py which <도구>`로 전체 경로를 얻어 쓴다(macOS 기본 `~/.local/bin/`). 브라우저가 필요한 확인을 curl·WebFetch로 대신했으면 출처 method를 fetch로 적는다.
 - **근거**: 모든 주장·수치에 출처가 있는가. 출처 없는 문장, 출처가 주장과 맞지 않는 곳.
 - **원문 확인**: 핵심 수치의 출처가 search·fetch(원문 미확인)뿐인가.
 - **수치**: 단위·기준일·기준면적이 적혔나, 항목 사이 같은 대상의 값이 다른가, 합계·비율 계산이 맞나, AI 가공 표시가 있나.
