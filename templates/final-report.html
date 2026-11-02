@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  /* PES 최종 웹 보고서 — 다른 화면과 같은 색·글꼴·간격 체계(4·8·12·16·24·32·48) */
+  :root { --bg:#f3f5f7; --fg:#202c3c; --muted:#5f6f80; --card:#fff; --line:#d7dfe7; --accent:#245e9e; --ok:#317057; --warn:#98681b; --chip:#edf1f5; --soft:#f7f9fb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#131b25; --fg:#e3eaf2; --muted:#a8b6c5; --card:#1c2735; --line:#39495d; --accent:#92bffe; --ok:#8bd5af; --warn:#f0c276; --chip:#293747; --soft:#212e3d; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14.5px/1.8 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  .globalbar { max-width: 1296px; margin: 0 auto; padding: 32px 24px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; }
+  .globalbar b { font-size: 19px; letter-spacing: .08em; } .globalbar span { font-size: 13px; color: var(--muted); }
+  .bar { max-width: 1296px; margin: 0 auto; padding: 16px 24px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  .bar a, .bar button { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--card); color: var(--fg); text-decoration: none; cursor: pointer; }
+
+  .cover { max-width: 1296px; margin: 24px auto 0; padding: 0 24px; }
+  .cover .in { background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--accent); border-radius: 6px; padding: 48px 48px 40px; }
+  .cover .kind { font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .04em; margin-bottom: 12px; }
+  .cover h1 { font-size: 30px; line-height: 1.35; letter-spacing: -.02em; margin: 0 0 8px; text-wrap: balance; }
+  .cover .sub { font-size: 16px; color: var(--muted); margin: 0 0 32px; }
+  .cover dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px 24px; margin: 0; padding-top: 24px; border-top: 1px solid var(--line); }
+  .cover dt { font-size: 12px; color: var(--muted); margin-bottom: 4px; } .cover dd { margin: 0; font-size: 14px; font-weight: 600; }
+
+  .wrap { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 32px; max-width: 1296px; margin: 0 auto; padding: 24px 24px 80px; }
+  nav.toc { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 16px; font-size: 13px; }
+  nav.toc b { display: block; margin-bottom: 8px; }
+  nav.toc a { display: block; color: var(--muted); text-decoration: none; padding: 4px 0; line-height: 1.5; }
+  nav.toc a:hover, nav.toc a.on { color: var(--accent); } nav.toc a.l3 { padding-left: 12px; font-size: 12.5px; }
+  nav.toc a.app { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  article { min-width: 0; max-width: 880px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 40px 48px; }
+
+  article h2 { font-size: 20px; line-height: 1.4; margin: 48px 0 16px; padding-bottom: 12px; border-bottom: 2px solid var(--fg); }
+  article h2:first-child { margin-top: 0; }
+  article h3 { font-size: 16px; margin: 32px 0 12px; color: var(--accent); }
+  article h4 { font-size: 14.5px; margin: 24px 0 8px; }
+  article p { margin: 0 0 16px; }
+  article ul, article ol { margin: 0 0 16px; padding-left: 22px; } article li { margin: 4px 0; }
+  ul.uri { list-style: none; padding-left: 0; } ul.uri li { position: relative; padding-left: 20px; }
+  ul.uri li::before { position: absolute; left: 0; color: var(--muted); }
+  ul.uri li.u1::before { content: "□"; color: var(--fg); } ul.uri li.u2 { margin-left: 20px; } ul.uri li.u2::before { content: "○"; }
+  ul.uri li.u3 { margin-left: 40px; } ul.uri li.u3::before { content: "-"; }
+  blockquote { margin: 0 0 16px; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--soft); color: var(--fg); }
+  .summary { background: color-mix(in srgb, var(--accent) 6%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 6px; padding: 24px 28px; margin: 0 0 32px; }
+  .summary h2 { border: 0; margin: 0 0 12px; padding: 0; font-size: 17px; color: var(--accent); }
+  .summary > :last-child { margin-bottom: 0; }
+
+  figure { margin: 24px 0; } figure img { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .cap { font-size: 13.5px; font-weight: 700; margin: 24px 0 8px; }
+  .src { font-size: 12.5px; color: var(--muted); margin: -8px 0 24px; }
+  .tbl { overflow-x: auto; margin: 0 0 24px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; } td.num { text-align: right; }
+  code { background: var(--chip); padding: 0 4px; border-radius: 3px; font-size: 90%; }
+
+  sup.fn a { text-decoration: none; font-size: 11px; font-weight: 700; padding: 0 2px; }
+  section.notes, section.appendix { margin-top: 48px; }
+  ol.fnlist { font-size: 13px; padding-left: 28px; } ol.fnlist li { margin: 6px 0; } ol.fnlist li:target { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .back { text-decoration: none; margin-left: 4px; font-size: 12px; }
+  .vf { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 3px; margin-left: 6px; border: 1px solid currentColor; }
+  .vf.ok { color: var(--ok); } .vf.no { color: var(--warn); }
+  .appendix table th:first-child, .appendix table td:first-child { width: 64px; white-space: nowrap; text-align: right; color: var(--muted); }
+  .colophon { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 900px) { .wrap { display: block; padding: 16px 16px 64px; } nav.toc { position: static; max-height: 260px; margin-bottom: 16px; } article { padding: 24px 20px; } .cover .in { padding: 32px 24px; } .cover h1 { font-size: 24px; } }
+  @media print {
+    @page { size: A4; margin: 18mm 16mm; }
+    body { background: #fff; color: #000; font-size: 10.5pt; line-height: 1.7; }
+    .globalbar, .bar, nav.toc { display: none; }
+    .cover { margin: 0; padding: 0; } .cover .in { border: 0; padding: 60mm 0 0; min-height: 250mm; break-after: page; }
+    .cover h1 { font-size: 24pt; }
+    .wrap { display: block; padding: 0; } article { border: 0; padding: 0; max-width: none; }
+    article h2 { break-before: page; break-after: avoid; } article .summary + h2, article h2:first-child { break-before: auto; }
+    h3, h4, .cap { break-after: avoid; } table, figure { break-inside: avoid; }
+    article a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8pt; color: #555; word-break: break-all; }
+    section.notes, section.appendix { break-before: page; }
+  }
+</style>
+</head>
+<body>
+<div class="globalbar"><b>PES</b><span>프로젝트 실행 시스템</span></div>
+<div class="bar" id="bar"></div>
+<header class="cover" id="cover"></header>
+<div class="wrap"><nav class="toc" id="toc" aria-label="목차"></nav><article id="doc"></article></div>
+<script id="data" type="application/json">/*__DATA__*/null</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent) || {};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const SRC = Object.fromEntries((D.sources || []).map(s => [String(s.n), s]));
+const used = [];
+const inline = s => esc(s)
+  .replace(/`([^`]+)`/g, '<code>$1</code>')
+  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .replace(/\[\^(\d+)\]/g, (m, n) => { if (!used.includes(n)) used.push(n); return `<sup class="fn"><a href="#fn-${n}" id="ref-${n}-${used.filter(x => x === n).length}">${n}</a></sup>`; })
+  .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+  .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+
+const toc = []; let hid = 0;
+const notes = {};
+function md(src) {
+  const lines = String(src || '').split('\n'); let out = '', list = null, para = [], inSum = false;
+  const fP = () => { if (para.length) { out += '<p>' + inline(para.join(' ')) + '</p>'; para = []; } };
+  const fL = () => { if (list) { out += `</${list === 'uri' ? 'ul' : list}>`; list = null; } };
+  const open = k => { if (list !== k) { fL(); out += k === 'uri' ? '<ul class="uri">' : `<${k}>`; list = k; } };
+  const closeSum = () => { if (inSum) { fP(); fL(); out += '</div>'; inSum = false; } };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]; let m;
+    if ((m = l.match(/^\[\^(\d+)\]:\s*(.*)/))) { fP(); fL(); notes[m[1]] = m[2]; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l)) {
+      fP(); fL(); const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]); i--;
+      const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+      const td = c => /^[-+]?[\d,.]+%?$/.test(c) ? `<td class="num">${inline(c)}</td>` : `<td>${inline(c)}</td>`;
+      out += '<div class="tbl"><table>' + body.map((r, k) => '<tr>' + cells(r).map(c => k ? td(c) : `<th>${inline(c)}</th>`).join('') + '</tr>').join('') + '</table></div>';
+      continue;
+    }
+    if ((m = l.match(/^(#{1,4})\s+(.*)/))) {
+      fP(); fL(); const n = m[1].length;
+      if (n === 1) continue; // 제목은 표지에
+      if (n === 2) closeSum();
+      if (n === 2 && /^(요약|핵심 요약|연구 요약)(\s|$)/.test(m[2].trim())) { out += `<div class="summary"><h2 id="h${++hid}">${inline(m[2])}</h2>`; toc.push({ n, id: 'h' + hid, t: m[2] }); inSum = true; continue; }
+      const id = 'h' + (++hid); toc.push({ n, id, t: m[2] }); out += `<h${n} id="${id}">${inline(m[2])}</h${n}>`; continue;
+    }
+    if ((m = l.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)\)/))) { fP(); fL(); out += `<figure><img src="${esc(m[2])}" alt="${esc(m[1])}" loading="lazy"></figure>`; continue; }
+    if ((m = l.match(/^\s*<(표|그림)\s*([\d-]+)>\s*(.*)/))) { fP(); fL(); out += `<div class="cap">&lt;${esc(m[1])} ${esc(m[2])}&gt; ${inline(m[3])}</div>`; continue; }
+    if ((m = l.match(/^\s*(자료|출처|주)\s*:\s*(.*)/))) { fP(); fL(); out += `<div class="src">${esc(m[1])}: ${inline(m[2])}</div>`; continue; }
+    if ((m = l.match(/^\s*>\s?(.*)/))) { fP(); fL(); out += `<blockquote>${inline(m[1])}</blockquote>`; continue; }
+    if ((m = l.match(/^\s*□\s+(.*)/))) { fP(); open('uri'); out += `<li class="u1">${inline(m[1])}</li>`; continue; }
+    if ((m = l.match(/^\s*○\s+(.*)/))) { fP(); open('uri'); out += `<li class="u2">${inline(m[1])}</li>`; continue; }
+    if (list === 'uri' && (m = l.match(/^\s+-\s+(.*)/))) { fP(); out += `<li class="u3">${inline(m[1])}</li>`; continue; }
+    if ((m = l.match(/^\s*[-*]\s+(.*)/))) { fP(); open('ul'); out += `<li>${inline(m[1])}</li>`; continue; }
+    if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { fP(); open('ol'); out += `<li>${inline(m[1])}</li>`; continue; }
+    if (!l.trim()) { fP(); fL(); continue; }
+    fL(); para.push(l.trim());
+  }
+  fP(); fL(); closeSum(); return out;
+}
+
+const C = D.cover || {};
+const metaRows = [['발간일', C.date || D.built_date], ['연구진', C.authors], ['기관', C.org], ['발주처', C.client], ['기준일', C.asof]].filter(r => r[1]);
+document.getElementById('cover').innerHTML = `<div class="in"><div class="kind">${esc(C.kind || '최종 보고서')}</div><h1>${esc(C.title || D.topic)}</h1>${C.subtitle ? `<p class="sub">${esc(C.subtitle)}</p>` : '<p class="sub"></p>'}
+  ${metaRows.length ? `<dl>${metaRows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd></div>`).join('')}</dl>` : ''}</div>`;
+document.getElementById('bar').innerHTML = `<a href="../index.html">← 대시보드</a><a href="report.md">마크다운</a><button onclick="print()">인쇄·PDF</button>`;
+
+let body = md(D.md);
+// 각주: 본문에 쓰인 번호 순서대로, 정의가 없으면 sources.json 에서
+const fnIds = [...new Set([...used, ...Object.keys(notes)])].sort((a, b) => a - b);
+const vf = n => { const s = SRC[n]; return s ? (s.verified ? '<span class="vf ok">확인됨</span>' : '<span class="vf no">미확인</span>') : ''; };
+if (fnIds.length) {
+  body += `<section class="notes"><h2 id="notes">각주</h2><ol class="fnlist">${fnIds.map(n => {
+    const t = notes[n] || [SRC[n]?.title, SRC[n]?.url, SRC[n]?.date && `(${SRC[n].date})`].filter(Boolean).join(', ');
+    return `<li id="fn-${esc(n)}" value="${esc(n)}">${inline(t)}${vf(n)}<a class="back" href="#ref-${esc(n)}-1" aria-label="본문으로">↩</a></li>`;
+  }).join('')}</ol></section>`;
+  toc.push({ n: 2, id: 'notes', t: '각주', app: true });
+}
+const S = D.sources || [];
+if (S.length) {
+  const ok = S.filter(s => s.verified).length;
+  body += `<section class="appendix"><h2 id="appendix">부록 · 출처 목록</h2><p>본문에 인용한 출처 ${S.length}개 중 원문·원자료를 직접 확인한 것 ${ok}개(확인됨), 검색 결과로만 본 것 ${S.length - ok}개(미확인).</p>
+    <div class="tbl"><table><tr><th>번호</th><th>출처</th><th>기준일</th><th>확인</th></tr>${S.map(s => `<tr><td>${esc(s.n)}</td><td>${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a>` : esc(s.title)}</td><td>${esc(s.date || '')}</td><td>${s.verified ? '확인됨' : '미확인'}</td></tr>`).join('')}</table></div></section>`;
+  toc.push({ n: 2, id: 'appendix', t: '부록 · 출처 목록', app: true });
+}
+body += `<div class="colophon">${esc(C.title || D.topic)} · ${esc(D.built || '')} 생성 · PES 프로젝트 실행 시스템</div>`;
+document.getElementById('doc').innerHTML = body;
+let firstApp = true;
+document.getElementById('toc').innerHTML = '<b>목차</b>' + toc.map(h => { const c = `l${h.n}${h.app && firstApp ? ' app' : ''}`; if (h.app) firstApp = false; return `<a class="${c}" href="#${h.id}">${inline(h.t)}</a>`; }).join('');
+// 읽는 위치 표시
+const links = [...document.querySelectorAll('nav.toc a')];
+const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '0px 0px -75% 0px' });
+document.querySelectorAll('article h2[id], article h3[id]').forEach(h => io.observe(h));
+</script>
+</body>
+</html>

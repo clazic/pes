@@ -44,6 +44,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `status` / `pending` / `mark <파일…>` | 요약 / 처리 안 한 답 / 처리 완료 표시 |
 | `chat <dir> <stage> "텍스트" [kind]` | 채팅으로 받은 지시도 기록 (타임라인이 끊기지 않게) |
 | `assemble <dir>` | 집필 원고 → `out/report.md` (각주 번호 정리) |
+| `web <dir> [--assemble]` | 최종 웹 보고서 `out/report.html` (`templates/final-report.html`; 표지 정보 `out/cover.json`, 출처 확인 여부 `out/sources.json` — assemble 이 만든다) |
 | `serve` / `stop` / `watch` | 로컬 서버 — 홈마다 포트 하나(127.0.0.1:8760, 프로젝트는 `/<slug>/`) / 종료(홈 전체) / Monitor 명령 |
 
 ## 프로젝트 폴더

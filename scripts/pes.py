@@ -22,7 +22,8 @@
   note <dir> "메모"                     인계 메모 추가 (대화에서 나온 결정·선호 — 새 세션이 먼저 읽는다)
   report <dir> <stage>                 단계 보고서: reports/<stage>/report.md·report.html 생성, eli5.json 이 있으면
                                        eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
-  assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리)
+  assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리) + out/sources.json
+  web <dir> [--assemble]               최종 웹 보고서 out/report.html (표지·목차·각주·출처 부록·인쇄용). 표지 정보는 out/cover.json
   serve <dir>                          로컬 서버 시작 (홈마다 포트 하나 — 이미 떠 있으면 이 프로젝트 주소만)
   stop [dir]                           로컬 서버 종료 (그 홈의 목록·모든 프로젝트 화면이 함께 꺼짐)
   watch <dir>                          Monitor 에 넣을 명령 출력
@@ -812,7 +813,7 @@ def cmd_assemble(args):
     p = load(d)
     items = [i for i in p["stages"]["write"]["items"] if i.get("status") != "removed"]
     items.sort(key=lambda i: (i.get("order", i["id"]), i["id"]))
-    out, notes, key = [f"# {p['topic']}", ""], [], {}
+    out, notes, key, srcs_out = [f"# {p['topic']}", ""], [], {}, []
     if p.get("executive_summary"):
         out += ["## 요약", "", p["executive_summary"], ""]
     for it in items:
@@ -826,6 +827,8 @@ def cmd_assemble(args):
             ident = s.get("url") or s.get("title")
             if ident not in key:
                 key[ident] = len(key) + 1
+                srcs_out.append({"n": key[ident], "title": s.get("title", ""), "url": s.get("url", ""), "date": s.get("date", ""),
+                                 "method": s.get("method", ""), "verified": s.get("method") in VERIFIED_METHODS})
                 notes.append(f"[^{key[ident]}]: {s.get('title', '')}" + (f", {s['url']}" if s.get("url") else "")
                              + (f" ({s['date']})" if s.get("date") else ""))
             return f"[^{key[ident]}]"
@@ -839,6 +842,31 @@ def cmd_assemble(args):
     f = d / "out" / "report.md"
     f.write_text("\n".join(out) + "\n", encoding="utf-8")
     print(f"{f}  (장·절 {len(items)}개, 각주 {len(notes)}개)")
+    (d / "out" / "sources.json").write_text(json.dumps(srcs_out, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+VERIFIED_METHODS = {"browser", "kosis", "law", "vworld"}  # 원문·원자료를 직접 확인한 방법 (대시보드와 같은 기준)
+
+
+def cmd_web(args):
+    """최종 웹 보고서: out/report.md(+sources.json, cover.json) → out/report.html"""
+    d = pdir(args[0])
+    p = load(d)
+    od = d / "out"
+    if not (od / "report.md").exists() or "--assemble" in args:
+        cmd_assemble([str(d)])
+    md = (od / "report.md").read_text(encoding="utf-8")
+    srcs = []
+    if (od / "sources.json").exists():
+        srcs = json.loads((od / "sources.json").read_text(encoding="utf-8"))
+    cover = {}
+    if (od / "cover.json").exists():
+        cover = json.loads((od / "cover.json").read_text(encoding="utf-8"))
+    data = {"topic": p.get("topic", ""), "md": md, "sources": srcs, "cover": cover, "built": now(), "built_date": now()[:10]}
+    f = od / "report.html"
+    f.write_text(fill(TPL / "final-report.html", cover.get("title") or p.get("topic", "최종 보고서"), data), encoding="utf-8")
+    ok = sum(1 for s in srcs if s.get("verified"))
+    print(f"{f}  (출처 {len(srcs)}개 · 확인됨 {ok}개{'' if cover else ' · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다'})")
 
 
 # ---------- 서버 ----------
@@ -1202,7 +1230,7 @@ def doctor_env(R):
     v = sys.version_info
     R.add("환경", "ok" if v >= (3, 9) else "bad", f"Python {v.major}.{v.minor}.{v.micro}", "" if v >= (3, 9) else "3.9 이상 필요")
     R.add("환경", "ok", f"PES 플러그인 {ROOT}", "")
-    miss = [t for t in ("dashboard.html", "ask.html", "_questions.html", "hub.html", "stage-report.html", "eli5.html") if not (TPL / t).exists()]
+    miss = [t for t in ("dashboard.html", "ask.html", "_questions.html", "hub.html", "stage-report.html", "eli5.html", "final-report.html") if not (TPL / t).exists()]
     R.add("환경", "bad" if miss else "ok", "템플릿", "없음: " + ", ".join(miss) if miss else "")
     h = pes_home()
     src = "PES_HOME 환경변수" if os.environ.get("PES_HOME") else ("설정 파일" if CONFIG.exists() else "기본값")
@@ -1501,7 +1529,7 @@ def cmd_unlock(args):
 CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start": cmd_round_start,
         "merge": cmd_merge, "render": cmd_render, "approve": cmd_approve, "reopen": cmd_reopen,
         "status": cmd_status, "pending": cmd_pending, "mark": cmd_mark, "chat": cmd_chat,
-        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
+        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock}
 
 if __name__ == "__main__":

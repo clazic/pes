@@ -16,7 +16,8 @@ description: PES 산출·공유 단계 — 검증을 마친 out/report.md 를 HW
    - **hwpx**: `anthropic-skills:hwpx-uri` 스킬 — report.md를 그 작성가이드 규칙(장·절 표기, 개조식, 표·그림 캡션, 각주)에 맞는지 점검해 필요한 만큼 고친 사본 `out/report-uri.md`를 만든 뒤 변환 → `out/report.hwpx`.
    - **docx**: `anthropic-skills:docx` 스킬 → `out/report.docx`.
    - **pdf**: `anthropic-skills:pdf` 스킬 (docx나 html에서) → `out/report.pdf`.
-   - **web**: 한 장짜리 HTML 보고서를 `out/report.html`로 쓰고, 공유하려면 artifacts로 게시(사용자에게 링크).
+   - **web**: HTML을 직접 쓰지 않는다. 표지 정보를 `out/cover.json`에 쓰고(`{"subtitle", "authors": [..], "org", "client", "asof", "kind"}` — 기획 답에 있는 것만, 모르면 빼거나 점검 질문으로) `web <dir>` → `out/report.html` (표지·목차·요약 상자·각주·출처 부록[확인됨/미확인]·인쇄용 A4). 표 캡션은 `<표 n> 제목`, 자료 줄은 `자료: …`, 그림은 `![설명](경로)`. 공유하려면 artifacts로 게시(사용자에게 링크).
+   - **pdf**를 웹 보고서에서 만들 때는 브라우저 인쇄(표지 한 쪽·장마다 새 쪽)를 쓰면 된다.
    - **slides**: `anthropic-skills:pptx` 스킬 → `out/slides.pptx`.
 3. 부록: sources → `out/appendix-sources.md`(조사 전 단계 출처를 확인됨/미확인으로 구분), stats → 통계 원표 목록(KOSIS 링크), log → 단계·라운드 이력(project.json history·changes).
 4. 산출물마다 kind=`output` 항목: title=형식, `path`=out/ 상대 경로, summary=쪽수·크기·특이사항. 변환에서 손으로 고친 것은 details에.
