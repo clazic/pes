@@ -1,0 +1,92 @@
+<!-- 공용 질문 폼 모듈: index.html · ask.html 에 index.py/ask.py 가 끼워 넣는다 -->
+<style>
+  .qs .q { padding: 12px 0; border-top: 1px solid var(--line); }
+  .qs .q:first-child { border-top: 0; }
+  .qs .q.hidden { display: none; }
+  .q-label { font-weight: 650; }
+  .q-label .req { color: var(--bad); margin-left: 2px; }
+  .q-help { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .opts { display: grid; gap: 6px; margin-top: 8px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; background: var(--card); }
+  .opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
+  .opt input { margin-top: 4px; }
+  .opt small { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .rec { font-size: 11px; color: var(--accent); margin-left: 6px; font-weight: 650; }
+  .qs input.qt, .qs input.qo { width: 100%; margin-top: 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; }
+  .qs textarea { margin-top: 8px; }
+  .gap { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; margin-bottom: 4px; }
+  .gk { font-size: 11px; padding: 1px 8px; border-radius: 4px; color: #fff; background: var(--muted); white-space: nowrap; }
+  .gk-conflict { background: var(--warn); } .gk-weak { background: var(--bad); } .gk-blank { background: var(--accent); }
+  .gk-stale { background: #7a5cc4; } .gk-decide { background: var(--ok); } .gk-scope { background: var(--muted); }
+  .gap .detail { color: var(--muted); }
+  .q-missing { outline: 2px solid var(--bad); outline-offset: 4px; border-radius: 6px; }
+</style>
+<script>
+const QF = (() => {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const GAP = { blank: '빈칸', weak: '근거 부족', conflict: '충돌', stale: '오래된 자료', decide: '결정 필요', scope: '범위 이탈' };
+
+  function ctrl(q, p) {
+    const id = esc(q.id);
+    if (q.type === 'text') return `<input type="text" class="qt" data-q="${id}" value="${esc(q.default || '')}" placeholder="${esc(q.placeholder || '')}">`;
+    if (q.type === 'textarea') return `<textarea data-q="${id}" placeholder="${esc(q.placeholder || '')}">${esc(q.default || '')}</textarea>`;
+    const multi = q.type === 'multi';
+    const opts = q.options || [];
+    const first = (opts.find(o => o.recommended) || {}).value;
+    const items = opts.map(o => {
+      const on = multi ? !!o.recommended : o.value === first;
+      return `<label class="opt"><input type="${multi ? 'checkbox' : 'radio'}" name="${esc(p + q.id)}" value="${esc(o.value)}" data-q="${id}" ${on ? 'checked' : ''}>
+        <span>${esc(o.label)}${o.recommended ? '<span class="rec">추천</span>' : ''}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</span></label>`;
+    }).join('');
+    const other = q.other ? `<input type="text" class="qo" data-qo="${id}" placeholder="${esc(q.other === true ? '기타 · 덧붙일 말' : q.other)}">` : '';
+    return `<div class="opts">${items}</div>${other}`;
+  }
+
+  function render(qs, p = 'q-') {
+    return `<div class="qs">${(qs || []).map((q, k) => {
+      const gap = q.gap ? `<div class="gap"><span class="gk gk-${esc(q.gap.kind)}">${esc(GAP[q.gap.kind] || q.gap.kind)}</span>${q.gap.item ? `<a href="#item-${esc(q.gap.item)}">#${esc(q.gap.item)}</a>` : ''}<span class="detail">${esc(q.gap.detail || '')}</span></div>` : '';
+      return `<div class="q" data-qid="${esc(q.id)}">${gap}
+        <div class="q-label">${q.gap ? `${k + 1}. ` : ''}${esc(q.label)}${q.required ? '<span class="req">*</span>' : ''}</div>
+        ${q.help ? `<div class="q-help">${esc(q.help)}</div>` : ''}${ctrl(q, p)}</div>`;
+    }).join('')}</div>`;
+  }
+
+  function values(root, q) {
+    const els = [...root.querySelectorAll(`[data-q="${CSS.escape(q.id)}"]`)];
+    if (q.type === 'text' || q.type === 'textarea') return els.map(e => e.value.trim()).filter(Boolean);
+    return els.filter(e => e.checked).map(e => e.value);
+  }
+  const box = (root, q) => root.querySelector(`.q[data-qid="${CSS.escape(q.id)}"]`);
+
+  function applyShow(root, qs) {
+    const byId = Object.fromEntries((qs || []).map(q => [q.id, q]));
+    for (const q of qs || []) {
+      if (!q.show_if) continue;
+      const dep = byId[q.show_if.id];
+      const depBox = dep && box(root, dep);
+      const v = dep && !(depBox && depBox.classList.contains('hidden')) ? values(root, dep) : [];
+      box(root, q)?.classList.toggle('hidden', !v.some(x => (q.show_if.in || []).includes(x)));
+    }
+  }
+
+  // answers: {id: 값 또는 [값]} · lines: 사람이 읽는 문장 · missing: 필수인데 빈 질문
+  function collect(root, qs) {
+    const answers = {}, lines = [], missing = [];
+    (qs || []).forEach((q, k) => {
+      const b = box(root, q);
+      if (!b || b.classList.contains('hidden')) return;
+      b.classList.remove('q-missing');
+      const v = values(root, q);
+      const other = root.querySelector(`[data-qo="${CSS.escape(q.id)}"]`)?.value.trim() || '';
+      if (!v.length && !other) { if (q.required) { missing.push(q); b.classList.add('q-missing'); } return; }
+      answers[q.id] = q.type === 'multi' ? v : (v[0] ?? '');
+      if (other) answers[q.id + '__other'] = other;
+      const label = v.map(x => ((q.options || []).find(o => o.value === x) || {}).label || x).join(', ');
+      const said = [label, other && `(덧붙임: ${other})`].filter(Boolean).join(' ');
+      lines.push(q.gap ? `[점검 ${k + 1}${q.gap.item ? ` · #${q.gap.item}` : ''}] ${q.label} → ${said}` : `${q.label}: ${said}`);
+    });
+    return { answers, lines, missing };
+  }
+  return { render, collect, applyShow, esc };
+})();
+</script>

@@ -1,0 +1,284 @@
+# PES — Project Execution System
+
+Claude Code 플러그인. 연구·정책 보고서를 **기획 → 조사 → 분석·종합 → 집필 → 검증 → 산출·공유** 6단계로 진행한다.
+단계마다 **라운드**를 돌고, 모든 질문·답·승인은 **로컬 웹 화면**(대시보드·질문 폼)에서 주고받는다.
+
+```
+한 단계:  시작 질문(폼) → R1 결과 → AI 점검 질문 → 사용자 답 → R2 → … → 승인 → 단계 보고서
+전체:     기획 ─ 조사 ─ 분석·종합 ─ 집필 ─ 검증 ─ 산출·공유
+```
+
+- 모든 상태는 파일에 저장된다. 세션이 끊기거나 `/clear` 해도 `/pes:run`으로 이어진다.
+- 승인한 단계는 다시 열어 고칠 수 있다. 뒤 단계에는 '다시 확인 필요'가 표시된다.
+- 단계를 승인할 때마다 그 단계 보고서(기획보고서·조사보고서…)가 웹·그림 설명(eli5)·마크다운 등으로 만들어진다.
+
+---
+
+## 1. 설치
+
+### 필요한 것
+
+| 구분 | 내용 | 필수 |
+|---|---|---|
+| Claude Code | CLI 또는 데스크톱 앱 | 필수 |
+| Python | 3.9 이상 (macOS `python3`, Windows `py -3`) | 필수 |
+| tail·grep | 답 자동 수신용. macOS 기본 / Windows는 **Git Bash** | 필수 |
+| ego-browser | 브라우저 조사 (ego lite) | 조사에 권장 |
+| kosis | 통계청 KOSIS API CLI (`npm install -g @clazic/kosis`) + API 키 | 통계가 필요할 때 |
+| korean-law | 법령 CLI (`korean-law-mcp`) + `LAW_OC` | 법령이 필요할 때 |
+| vworld | 국가공간정보 CLI + API 키 | 공간정보가 필요할 때 |
+
+설치 상태는 설치 후 `/pes:doctor`로 한 번에 확인한다.
+
+### 플러그인 설치
+
+**GitHub 저장소에서 (권장)** — 비공개 저장소면 그 컴퓨터에서 GitHub 로그인(`gh auth login` 또는 git 자격 증명)이 되어 있어야 한다.
+
+```bash
+claude plugin marketplace add <GitHub계정>/pes
+claude plugin install pes@pes-local
+```
+
+**로컬 폴더에서** (개발용):
+
+```bash
+claude plugin marketplace add <pes 폴더 경로>      # 예: ~/work/pes, C:\work\pes
+claude plugin install pes@pes-local
+```
+
+설치 후 Claude Code 안에서 `/reload-plugins` (또는 재시작) → `/pes:doctor`로 환경 점검.
+
+### 업데이트
+
+```bash
+claude plugin marketplace update pes-local && claude plugin update pes@pes-local
+```
+
+그다음 `/reload-plugins`. 로컬 폴더 설치라면 `/reload-plugins`만으로 반영된다.
+지금 버전은 `.claude-plugin/plugin.json`의 version, 바뀐 내용은 아래 「변경 이력」.
+
+### 배포하는 쪽 (개발 Mac)
+
+```bash
+cd ~/work/pes
+# 코드 수정 → README 「변경 이력」과 plugin.json version 갱신
+git add -A && git commit -m "0.x.y: 바뀐 내용"
+git tag v0.x.y && git push && git push --tags
+```
+
+### API 키·환경변수
+
+Claude가 실행하는 명령에서도 보이도록 **Claude Code 설정**에 넣는다 (`~/.claude/settings.json`, Windows는 `C:\Users\<이름>\.claude\settings.json`):
+
+```json
+{
+  "env": {
+    "LAW_OC": "<법령 API 인증값>",
+    "NODE_EXTRA_CA_CERTS": "<회사·기관 망에서 인증서 오류가 날 때만: 루트 인증서 파일 경로>"
+  }
+}
+```
+
+- KOSIS 키: `kosis config set-key <키>` (발급 https://kosis.kr/openapi/)
+- vworld 키: vworld 스킬 안내대로 등록
+- 셸 설정 파일(`.zshrc` 등)에만 넣으면 Claude 명령에서 안 보일 수 있다. `/pes:doctor`가 알려 준다.
+
+### Windows 메모
+
+- Claude Code의 셸은 Git Bash를 쓴다 (답 자동 수신에 `tail -F`·`grep` 필요).
+- `python3`가 없으면 `py -3`. 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다.
+- 브라우저 열기는 PES가 직접 처리한다 (`open`/`start` 불필요).
+- 인증서 파일 경로는 macOS와 다르다. 오류가 나면 `/pes:doctor`의 안내를 따른다.
+
+---
+
+## 2. 빠른 시작
+
+```
+/pes:start 울산 청년 주거실태
+```
+
+1. 브라우저에 **기획 시작 질문** 폼이 열린다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 **보내기**.
+2. Claude가 기획 R1(연구 질문·목차·조사 항목)을 대시보드에 올리고 **AI 점검 질문**을 붙인다.
+3. 대시보드에서 점검 질문에 답하거나 항목별로 심화·삭제·수정을 체크하고 **Claude에게 보내기** → R2 …
+4. 충분하면 **이 단계 승인** → 기획보고서가 만들어지고 조사 단계 시작 질문이 열린다.
+5. 같은 방식으로 6단계까지.
+
+기존 research-loop 조사가 있으면 참고자료로 가져온다:
+
+```
+/pes:start 공공지원 민간임대주택 공급촉진지구 --import research/private-rental-promotion-zones
+```
+
+---
+
+## 3. 명령
+
+| 명령 | 하는 일 |
+|---|---|
+| `/pes:start <주제> [--import <폴더>]` | 새 프로젝트 + 기획 시작 질문 폼 |
+| `/pes:run [프로젝트]` | 받은 답을 처리하고 현재 단계를 이어서 진행. 프로젝트가 여럿이면 고르게 한다 |
+| `/pes:status [프로젝트]` | 상태 요약 + 대시보드 열기 |
+| `/pes:list` | 모든 프로젝트 목록 화면 (http://127.0.0.1:8760/) |
+| `/pes:plan` · `research` · `analyze` · `write` · `verify` · `publish` | 그 단계를 직접 진행 / 다시 열기 |
+| `/pes:report <단계>` | 단계 보고서 다시 만들기 |
+| `/pes:home [새 폴더]` | 프로젝트 위치(PES 홈) 보기 / 바꾸기 (전부 이동) |
+| `/pes:doctor [프로젝트] [fix]` | 진단 (환경·도구·키·API 연결·포트·프로젝트 상태). `fix`는 안전한 것만 고침 |
+
+`[프로젝트]` 자리에는 경로 대신 프로젝트 이름(slug)만 써도 된다.
+
+---
+
+## 4. 화면
+
+### 대시보드 (프로젝트마다, http://127.0.0.1:8765/ ~ 8775)
+
+- **전체 보기** (첫 화면)
+  - 지금 할 일 (내 차례 / Claude 작업 중) + 바로가기
+  - 프로젝트 전체 숫자 (단계별 내역 포함)
+  - **단계별 진행** 표: 단계 × (시작 질문 · 라운드 R1·R2… · 승인 · 단계 보고서). 칸에 마우스를 올리면 변경점·받은 답이 정리되어 보인다
+  - **산출물** 표: 단계 보고서 6종 + 최종 결과물 + 참고자료
+- **단계 탭** (기획 ~ 산출·공유)
+  - 그 단계 기준 숫자, 단계 보고서, AI 점검 질문(폼), 타임라인, 항목 × 라운드 표, 항목 카드(연결·출처·통계)
+  - 아래 막대: 보내기 · 복사 · **이 단계 승인** · (승인된 단계) **이 단계 다시 열기**
+  - 추가 요청: 새 항목, **꼭 조사할 링크·파일**, 기타 지시
+- 맨 위 "← 프로젝트 목록"으로 목록 화면에 간다 (목록 서버가 켜져 있을 때).
+
+### 질문 폼
+
+단계 시작 질문은 `ask-<단계>-start.html`. 추천 답이 미리 골라져 있다. 조사 시작 질문에서 정하는 것:
+도구 · 깊이(비용 표시) · 병렬 · **조사 모델(혼합/Opus/Sonnet)** · 자료 범위 · **꼭 조사할 링크·자료** · 통계·법령·기사 범위.
+
+### 프로젝트 목록 (http://127.0.0.1:8760/)
+
+프로젝트별 단계 진행 막대 · 현재 단계 · 지금 할 일 · 단계 보고서 수 · [열기] / [서버 켜고 열기]. '내 차례'가 맨 위.
+
+---
+
+## 5. 단계 보고서
+
+단계를 승인할 때마다 `reports/<단계>/`에 만든다. 형식은 기획 시작 질문에서 고른다 (기본: 웹 · eli5 · 마크다운).
+
+| 단계 | 보고서 |
+|---|---|
+| 기획 | 기획보고서 |
+| 조사 | 조사보고서 |
+| 분석·종합 | 분석·종합보고서 |
+| 집필 | 원고 검토본 |
+| 검증 | 검증보고서 |
+| 산출·공유 | 산출 보고서 (+ `out/` 최종 결과물: HWPX·Word·PDF·웹·발표자료) |
+
+- **웹 보고서** `report.html`: 목차 · 표 · 출처(확인됨/미확인) · 인쇄/PDF
+- **그림 설명** `eli5.html`: 큰 그림, 적은 글 — 처음 보는 사람이 1분에 이해하도록
+- **마크다운** `report.md`: 원본 (HWPX·Word·PDF 변환의 입력)
+
+---
+
+## 6. 사용자 제공 링크
+
+조사할 때 꼭 봐야 할 자료가 있으면:
+
+- 조사 시작 질문 "꼭 조사할 링크·자료", 또는 대시보드 조사 탭 "추가 요청"의 링크 칸에 한 줄씩:
+  ```
+  주소 | 항목 번호(선택) | 메모(선택)
+  https://www.molit.go.kr/... | 7 | 2026년 고시 원문
+  C:\자료\내부자료.pdf | 11 | 내부 자료
+  ```
+- Claude가 직접 열어 읽고 출처에 **사용자 제공**으로 표시한다. 항목 번호를 비우면 맞는 항목에 배정한다. 열지 못한 링크는 점검 질문으로 다시 묻는다.
+
+---
+
+## 7. 여러 프로젝트
+
+- 프로젝트는 **PES 홈** 아래에 모인다. 기본 `~/pes-projects` (Windows `C:\Users\<이름>\pes-projects`). 실행한 폴더와 상관없다.
+- 위치 바꾸기: `/pes:home D:\work\pes` → 서버를 끄고 **모든 프로젝트를 옮긴 뒤** 다시 켠다. 이름이 겹치거나 다른 세션이 쓰는 중이면 아무것도 옮기지 않는다.
+- 우선순위: 환경변수 `PES_HOME` > `~/.pes/config.json` > 기본값.
+- **한 Claude Code 세션 = 한 프로젝트**를 권한다. 터미널 탭마다 `/pes:run <프로젝트>`.
+- 같은 프로젝트를 두 세션이 동시에 고치지 못하게 **잠금**이 걸린다 (2시간 기록이 없으면 자동 해제).
+
+---
+
+## 8. 토큰(비용) 절약
+
+- 화면·보고서 생성과 상태 저장은 CLI가 한다 (토큰 0).
+- 조사·집필·검증 서브에이전트는 결과를 `rounds/<단계>-R<n>/<id>.json` **파일로** 쓰고 한 줄만 돌려준다.
+- AI 점검은 압축 요약(`digest`)으로 한다. 큰 파일은 통째로 읽지 않는다 (`show`로 필요한 부분만).
+- 단계를 승인하면 대화에서 나온 결정을 **인계 메모**로 남기므로, `/clear` 후 `/pes:run`으로 이어도 된다.
+- 조사 모델 **혼합**(기본): 이어받는 항목·단순 수집은 Sonnet, 새 조사·법령·판단은 Opus.
+- 조사 깊이(빠른·표준·심층)가 비용에 가장 크게 영향을 준다.
+
+---
+
+## 9. 프로젝트 폴더 구조
+
+```
+<PES 홈>/
+  index.html                 프로젝트 목록 화면
+  <slug>/
+    project.json             상태의 기준 (단계·라운드·항목·설정·인계 메모)
+    library.json             참고자료 (가져온 기존 조사)
+    index.html               대시보드
+    ask-<단계>-start.html     시작 질문 폼   ask/  폼 명세
+    feedback/*.json          웹에서 보낸 답     feedback.log  답 도착 기록
+    snapshots/<단계>-R<n>.json 라운드 기록
+    rounds/<단계>-R<n>/*.json  서브에이전트 결과
+    reports/<단계>/           단계 보고서 (report.md · report.html · eli5.html …)
+    out/                     최종 결과물
+    shots/                   스크린샷·지도
+```
+
+## 10. 플러그인 구조
+
+```
+.claude-plugin/   plugin.json, marketplace.json (pes-local)
+commands/         /pes:* 명령
+skills/core       공통 규칙 (생명주기·CLI·답 받기·AI 점검·토큰·여러 프로젝트)
+skills/<단계>      plan · research · analyze · write · verify · publish
+agents/           researcher · writer · verifier (결과를 파일로)
+scripts/pes.py    상태 CLI          scripts/serve.py  로컬 서버 (127.0.0.1 전용)
+templates/        dashboard · ask · _questions · hub · stage-report · eli5
+questions/        단계별 시작 질문 은행
+```
+
+CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status <slug>`, `pes.py digest <slug> research`.
+
+---
+
+## 11. 문제 해결
+
+| 증상 | 해결 |
+|---|---|
+| 무엇이 문제인지 모르겠다 | `/pes:doctor` (API 접속까지 확인), `/pes:doctor fix` |
+| 대시보드가 안 열린다 | `/pes:status <프로젝트>` — 서버를 켜고 연다 |
+| 보낸 답이 반영되지 않는다 | `/pes:run <프로젝트>` — 처리 안 한 답부터 처리 |
+| "다른 세션이 이 프로젝트를 쓰고 있습니다" | 그 세션을 닫고, Claude에게 "가져와"라고 하면 `--force`로 넘겨받는다 |
+| 법령 조회 인증서 오류 (`SELF_SIGNED_CERT_IN_CHAIN`) | 설정의 `NODE_EXTRA_CA_CERTS`에 기관 루트 인증서 파일 |
+| 마크다운 한글이 깨진다 | 0.2.0 이후 서버가 UTF-8로 보낸다. 서버 재시작: `/pes:status` |
+| 포트가 모두 사용 중 | 쓰지 않는 프로젝트 서버 끄기 (Claude에게 "OO 서버 꺼") |
+
+---
+
+## 변경 이력
+
+### 0.4.1 — 2026-11-02
+- 배포 준비: 스킬 문서에서 이 Mac 전용 경로(`~/.local/bin`, 인증서 파일)를 없애고 `which`(도구 경로 찾기, Windows 포함)와 Claude Code 설정 env를 쓰도록 변경.
+- `.gitignore`, GitHub 설치·업데이트·배포 방법을 README에 추가.
+
+### 0.4.0 — 2026-11-02
+- 조사할 때 **사용자 제공 링크·파일**을 받는다 (조사 시작 질문, 대시보드 추가 요청). 출처에 '사용자 제공' 표시, 열지 못하면 다시 묻는다.
+- README 정리 (설치·사용법·Windows·문제 해결).
+
+### 0.3.0 — 2026-11-02
+- 토큰 절약: 서브에이전트 결과를 파일로, `digest`(점검용 압축 요약)·`show`(부분 보기)·`note`(인계 메모), 참고자료를 `library.json`으로 분리, 대시보드 데이터 축소.
+- 조사 모델 선택(혼합/Opus/Sonnet), 조사 깊이에 비용 표시.
+- `/pes:doctor`: API 실제 연결 확인(`--net`), `LAW_OC`·인증서 경로 점검.
+
+### 0.2.0 — 2026-11-02
+- PES 홈(`~/pes-projects`) 도입, `/pes:home`으로 위치 변경 시 전체 이동.
+- 프로젝트 목록 화면(`/pes:list`), `/pes:run` 프로젝트 선택, 세션 잠금.
+- `/pes:doctor` 진단. Windows 대응(서버 실행·종료, 브라우저 열기, 경로).
+- 대시보드: 전체 보기(지금 할 일·단계별 진행 표·산출물 표), 범위가 표시된 숫자, 승인된 단계 다시 열기, 정리된 팝업, 이모지 정리, 같은 크기의 단계 카드.
+- 단계 보고서(웹·eli5·마크다운 등), 서버 UTF-8 응답.
+
+### 0.1.0 — 2026-11-02
+- 6단계 라운드 진행, 웹 질문 폼·대시보드·답 자동 수신, 기존 research-loop 조사 가져오기.

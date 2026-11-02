@@ -1,0 +1,281 @@
+{
+ "id": "plan-start",
+ "kind": "stage_start",
+ "stage": "plan",
+ "stage_label": "기획",
+ "round": 0,
+ "title": "기획 — 무엇을, 누구를 위해, 어디까지",
+ "intro": "추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 'Claude에게 보내기'를 누르면 R1을 시작합니다.",
+ "_note": "Claude는 pes ask-prep 으로 복사된 ask/<id>.json 을 다듬는다: (1) 이미 정해진 질문은 지우고 inherited 로 옮긴다 (2) _when 조건이 맞지 않는 질문은 지운다 (3) 환경 확인 결과를 desc 에 반영한다 (4) 추천(recommended)을 주제·목적에 맞게 바꾼다. 그 다음 pes ask 로 렌더.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "topic",
+   "label": "주제",
+   "type": "text",
+   "required": true,
+   "_when": "주제를 아직 모를 때만",
+   "placeholder": "예: 공공지원 민간임대주택 공급촉진지구 지정현황"
+  },
+  {
+   "id": "purpose",
+   "label": "결과물 용도",
+   "type": "single",
+   "options": [
+    {
+     "value": "report",
+     "label": "보고서 작성",
+     "recommended": true
+    },
+    {
+     "value": "decision",
+     "label": "의사결정 자료"
+    },
+    {
+     "value": "learn",
+     "label": "학습·현황 파악"
+    },
+    {
+     "value": "present",
+     "label": "발표"
+    }
+   ],
+   "required": true,
+   "other": true
+  },
+  {
+   "id": "audience",
+   "label": "누가 읽나요?",
+   "type": "single",
+   "options": [
+    {
+     "value": "internal",
+     "label": "내부 연구진",
+     "recommended": true
+    },
+    {
+     "value": "client",
+     "label": "시청·발주처"
+    },
+    {
+     "value": "council",
+     "label": "의회·위원회"
+    },
+    {
+     "value": "public",
+     "label": "시민"
+    }
+   ],
+   "other": true,
+   "help": "용어 수준과 요약 분량을 정합니다."
+  },
+  {
+   "id": "format",
+   "label": "최종 결과물 형식",
+   "type": "single",
+   "options": [
+    {
+     "value": "hwpx",
+     "label": "울산연구원 기본정책과제 HWPX",
+     "recommended": true
+    },
+    {
+     "value": "docx",
+     "label": "Word"
+    },
+    {
+     "value": "web",
+     "label": "웹 페이지"
+    },
+    {
+     "value": "slides",
+     "label": "발표자료"
+    }
+   ],
+   "other": true
+  },
+  {
+   "id": "length",
+   "label": "분량",
+   "type": "single",
+   "options": [
+    {
+     "value": "brief",
+     "label": "요약 (5쪽 이내)"
+    },
+    {
+     "value": "normal",
+     "label": "보통 (20~40쪽)",
+     "recommended": true
+    },
+    {
+     "value": "full",
+     "label": "본보고서 (80쪽 이상)"
+    }
+   ]
+  },
+  {
+   "id": "space",
+   "label": "공간 범위",
+   "type": "single",
+   "options": [
+    {
+     "value": "national",
+     "label": "전국",
+     "recommended": true
+    },
+    {
+     "value": "metro",
+     "label": "특·광역시"
+    },
+    {
+     "value": "ulsan",
+     "label": "울산 중심"
+    }
+   ],
+   "other": true
+  },
+  {
+   "id": "period",
+   "label": "시간 범위",
+   "type": "single",
+   "options": [
+    {
+     "value": "since-start",
+     "label": "제도 도입 이후 전체",
+     "recommended": true
+    },
+    {
+     "value": "5y",
+     "label": "최근 5년"
+    }
+   ],
+   "other": true
+  },
+  {
+   "id": "research_type",
+   "label": "과제 유형",
+   "type": "single",
+   "options": [
+    {
+     "value": "basic",
+     "label": "기본과제",
+     "recommended": true
+    },
+    {
+     "value": "adhoc",
+     "label": "수시과제"
+    },
+    {
+     "value": "contract",
+     "label": "수탁과제"
+    },
+    {
+     "value": "none",
+     "label": "해당 없음"
+    }
+   ],
+   "_when": "형식이 연구보고서(hwpx)일 때",
+   "show_if": {
+    "id": "format",
+    "in": [
+     "hwpx"
+    ]
+   }
+  },
+  {
+   "id": "team",
+   "label": "연구진 구성",
+   "type": "text",
+   "placeholder": "예: 연구책임 1, 공동연구 1",
+   "show_if": {
+    "id": "format",
+    "in": [
+     "hwpx"
+    ]
+   }
+  },
+  {
+   "id": "stage_reports",
+   "label": "단계마다 승인하면 만들 보고서 형식",
+   "type": "multi",
+   "help": "기획·조사·분석·종합 등 각 단계의 라운드를 마치고 승인하면 이 형식으로 기획보고서·조사보고서…를 만듭니다. 대시보드 단계 탭에서 바로 열 수 있습니다.",
+   "options": [
+    {
+     "value": "html",
+     "label": "웹 보고서 (목차·표·출처, 인쇄 가능)",
+     "recommended": true
+    },
+    {
+     "value": "eli5",
+     "label": "그림 설명 eli5 — 큰 그림, 적은 글",
+     "recommended": true
+    },
+    {
+     "value": "md",
+     "label": "마크다운 (원본)",
+     "recommended": true
+    },
+    {
+     "value": "hwpx",
+     "label": "HWPX (울산연구원 양식)"
+    },
+    {
+     "value": "docx",
+     "label": "Word"
+    },
+    {
+     "value": "pdf",
+     "label": "PDF"
+    }
+   ]
+  },
+  {
+   "id": "deadline",
+   "label": "마감일",
+   "type": "text",
+   "placeholder": "예: 2026-12-20 (없으면 비워 두세요)",
+   "help": "마감을 기준으로 단계별 일정을 거꾸로 짭니다."
+  },
+  {
+   "id": "library",
+   "label": "기존 조사 결과",
+   "type": "single",
+   "options": [
+    {
+     "value": "reuse",
+     "label": "참고자료로 활용 — 겹치는 조사 항목은 이어받아 보완",
+     "recommended": true
+    },
+    {
+     "value": "ignore",
+     "label": "참고만 하고 새로 조사"
+    }
+   ],
+   "_when": "project.library 가 있을 때만"
+  },
+  {
+   "id": "policy",
+   "label": "정책 제안까지 가나요?",
+   "type": "single",
+   "options": [
+    {
+     "value": "yes",
+     "label": "제언까지",
+     "recommended": true
+    },
+    {
+     "value": "no",
+     "label": "현황·문제 분석까지"
+    }
+   ],
+   "show_if": {
+    "id": "purpose",
+    "in": [
+     "report",
+     "decision"
+    ]
+   }
+  }
+ ]
+}

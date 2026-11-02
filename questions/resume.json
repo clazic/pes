@@ -1,0 +1,30 @@
+{
+ "id": "resume",
+ "kind": "resume",
+ "stage": "",
+ "round": 0,
+ "title": "이전 프로젝트가 있습니다",
+ "_note": "project.json 이 이미 있을 때. inherited 에 주제·현재 단계·라운드를 채운다.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "resume",
+   "label": "어떻게 할까요?",
+   "type": "single",
+   "options": [
+    {
+     "value": "continue",
+     "label": "이어서 하기",
+     "desc": "현재 단계의 AI 점검부터",
+     "recommended": true
+    },
+    {
+     "value": "restart",
+     "label": "새로 시작",
+     "desc": "기존 폴더는 그대로 두고 새 폴더로"
+    }
+   ],
+   "required": true
+  }
+ ]
+}

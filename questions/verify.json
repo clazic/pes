@@ -1,0 +1,104 @@
+{
+ "id": "verify-start",
+ "kind": "stage_start",
+ "stage": "verify",
+ "stage_label": "검증",
+ "round": 0,
+ "title": "검증 — 얼마나 확인할 것인가",
+ "intro": "추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 'Claude에게 보내기'를 누르면 R1을 시작합니다.",
+ "_note": "Claude는 pes ask-prep 으로 복사된 ask/<id>.json 을 다듬는다: (1) 이미 정해진 질문은 지우고 inherited 로 옮긴다 (2) _when 조건이 맞지 않는 질문은 지운다 (3) 환경 확인 결과를 desc 에 반영한다 (4) 추천(recommended)을 주제·목적에 맞게 바꾼다. 그 다음 pes ask 로 렌더.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "range",
+   "label": "검증 범위",
+   "type": "single",
+   "options": [
+    {
+     "value": "numbers",
+     "label": "수치·법령 조문 전부",
+     "recommended": true
+    },
+    {
+     "value": "key",
+     "label": "핵심 주장만"
+    },
+    {
+     "value": "all",
+     "label": "모든 문장"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "method",
+   "label": "판정 방식",
+   "type": "single",
+   "options": [
+    {
+     "value": "source",
+     "label": "원문 대조 (브라우저·KOSIS·법령 재조회)",
+     "recommended": true
+    },
+    {
+     "value": "list",
+     "label": "출처 목록 확인만"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "asof",
+   "label": "기준일",
+   "type": "single",
+   "options": [
+    {
+     "value": "today",
+     "label": "오늘 기준 최신",
+     "recommended": true
+    },
+    {
+     "value": "research",
+     "label": "조사 시점 기준"
+    }
+   ]
+  },
+  {
+   "id": "law_cite",
+   "label": "법령 인용",
+   "type": "single",
+   "options": [
+    {
+     "value": "current",
+     "label": "현행 조문으로 고치기",
+     "recommended": true
+    },
+    {
+     "value": "keep",
+     "label": "당시 조문 유지하고 기준일 표기"
+    }
+   ],
+   "_when": "원고에 법령 인용이 있을 때"
+  },
+  {
+   "id": "unsupported",
+   "label": "근거 없음(unsupported)이 나오면",
+   "type": "single",
+   "options": [
+    {
+     "value": "ask",
+     "label": "점검 질문으로 하나씩 묻기",
+     "recommended": true
+    },
+    {
+     "value": "soften",
+     "label": "표현 완화로 일괄 처리"
+    },
+    {
+     "value": "research",
+     "label": "다시 조사"
+    }
+   ]
+  }
+ ]
+}

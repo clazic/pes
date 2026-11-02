@@ -1,0 +1,7 @@
+{
+  "name": "pes-local",
+  "owner": { "name": "clazic" },
+  "plugins": [
+    { "name": "pes", "source": "./", "description": "Project Execution System (기획→산출 6단계 라운드 진행)" }
+  ]
+}

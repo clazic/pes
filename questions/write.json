@@ -1,0 +1,136 @@
+{
+ "id": "write-start",
+ "kind": "stage_start",
+ "stage": "write",
+ "stage_label": "집필",
+ "round": 0,
+ "title": "집필 — 어떻게 쓸 것인가",
+ "intro": "추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 'Claude에게 보내기'를 누르면 R1을 시작합니다.",
+ "_note": "Claude는 pes ask-prep 으로 복사된 ask/<id>.json 을 다듬는다: (1) 이미 정해진 질문은 지우고 inherited 로 옮긴다 (2) _when 조건이 맞지 않는 질문은 지운다 (3) 환경 확인 결과를 desc 에 반영한다 (4) 추천(recommended)을 주제·목적에 맞게 바꾼다. 그 다음 pes ask 로 렌더.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "template",
+   "label": "양식",
+   "type": "single",
+   "options": [
+    {
+     "value": "uri",
+     "label": "울산연구원 기본정책과제 양식",
+     "recommended": true
+    },
+    {
+     "value": "general",
+     "label": "일반 보고서"
+    },
+    {
+     "value": "free",
+     "label": "자유"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "style",
+   "label": "문체",
+   "type": "single",
+   "options": [
+    {
+     "value": "bullet",
+     "label": "개조식 (□ ○ -)",
+     "recommended": true
+    },
+    {
+     "value": "prose",
+     "label": "서술식"
+    },
+    {
+     "value": "mixed",
+     "label": "혼합"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "summary",
+   "label": "요약",
+   "type": "single",
+   "options": [
+    {
+     "value": "one",
+     "label": "요약 1쪽 + 본문",
+     "recommended": true
+    },
+    {
+     "value": "none",
+     "label": "요약 없음"
+    },
+    {
+     "value": "brief",
+     "label": "정책 브리프 별도"
+    }
+   ]
+  },
+  {
+   "id": "order",
+   "label": "쓰는 순서",
+   "type": "single",
+   "options": [
+    {
+     "value": "chapter",
+     "label": "장별로 차례대로 (장마다 라운드)",
+     "recommended": true
+    },
+    {
+     "value": "draft",
+     "label": "전체 초안 먼저"
+    }
+   ]
+  },
+  {
+   "id": "footnote",
+   "label": "출처 표기",
+   "type": "single",
+   "options": [
+    {
+     "value": "footnote",
+     "label": "각주",
+     "recommended": true
+    },
+    {
+     "value": "inline",
+     "label": "본문 괄호"
+    }
+   ]
+  },
+  {
+   "id": "chart_style",
+   "label": "차트 스타일",
+   "type": "single",
+   "options": [
+    {
+     "value": "mono",
+     "label": "흑백 인쇄용",
+     "recommended": true
+    },
+    {
+     "value": "color",
+     "label": "컬러"
+    }
+   ],
+   "_when": "분석 단계에 차트가 있을 때"
+  },
+  {
+   "id": "pages",
+   "label": "장별 쪽수 배분",
+   "type": "textarea",
+   "help": "비워 두면 기획의 분량에 맞춰 기본안을 만들고 점검 질문에서 확인합니다."
+  },
+  {
+   "id": "human",
+   "label": "사람이 직접 쓰는 장",
+   "type": "text",
+   "placeholder": "예: 5장 (AI는 그 장을 쓰지 않고 검토만)"
+  }
+ ]
+}

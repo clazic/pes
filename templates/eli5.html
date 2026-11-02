@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #eef1ec; --ink: #1f2a2e; --board: #2d4a3e; --chalk: #f4f1e4;
+  --mustard: #e3a92b; --tomato: #d9553b; --muted: #5d6b66;
+  --display: "Jua", "Apple SD Gothic Neo", sans-serif;
+  --body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); }
+main { max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; display: grid; gap: 56px; }
+h1, h2 { font-family: var(--display); font-weight: 400; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.1; }
+h2 { font-size: clamp(26px, 4vw, 38px); }
+.kicker { font-family: var(--display); color: var(--tomato); font-size: 18px; }
+.lead { font-size: 20px; color: var(--muted); margin: 10px 0 0; }
+section { display: grid; gap: 14px; }
+.step { font-family: var(--display); color: var(--tomato); font-size: 18px; }
+.say { font-size: 20px; margin: 0; max-width: 34em; }
+.pic { background: #fff; border-radius: 18px; padding: 12px; box-shadow: 0 2px 0 rgba(31,42,46,.08); overflow-x: auto; }
+.pic svg { width: 100%; height: auto; display: block; } .pic svg text { font-family: var(--display); }
+.emoji { font-size: clamp(56px, 11vw, 96px); line-height: 1.15; text-align: center; padding: 18px 8px; letter-spacing: .08em; }
+.map { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.map div { background: #fff; border-radius: 14px; padding: 16px; display: grid; gap: 4px; border-top: 6px solid var(--mustard); }
+.map .e { font-size: 42px; } .map b { font-family: var(--display); font-weight: 400; font-size: 24px; } .map span { color: var(--muted); }
+.end { background: var(--board); color: var(--chalk); border-radius: 18px; padding: 24px; font-family: var(--display); font-size: clamp(22px, 3.4vw, 30px); line-height: 1.5; }
+.end strong { color: var(--mustard); font-weight: 400; }
+dl.words { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: 18px; margin: 0; }
+dl.words dt { font-family: var(--display); color: var(--board); } dl.words dd { margin: 0; color: var(--muted); }
+.back { font-size: 14px; } .back a { color: var(--board); margin-right: 12px; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script id="data" type="application/json">/*__DATA__*/null</script>
+<script>
+const E = JSON.parse(document.getElementById('data').textContent) || {};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const em = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+const pic = s => s.svg ? `<div class="pic">${s.svg}</div>` : s.emoji ? `<div class="pic emoji" role="img" aria-label="${esc(s.alt || s.big || '')}">${esc(s.emoji)}</div>` : '';
+document.getElementById('app').innerHTML = `
+  <div class="back"><a href="../../index.html">← 대시보드</a><a href="report.html">자세한 보고서</a></div>
+  <header><div class="kicker">${esc(E.stage_label)} 단계 · ${esc(E.name)}</div><h1>${em(E.title)}</h1>${E.lead ? `<p class="lead">${em(E.lead)}</p>` : ''}</header>
+  ${(E.scenes || []).map((s, k) => `<section><div class="step">${esc(s.step || `그림 ${k + 1}`)}</div>${s.big ? `<h2>${em(s.big)}</h2>` : ''}${pic(s)}${s.say ? `<p class="say">${em(s.say)}</p>` : ''}</section>`).join('')}
+  ${(E.cards || []).length ? `<section>${E.cards_title ? `<h2>${em(E.cards_title)}</h2>` : ''}<div class="map">${E.cards.map(c => `<div>${c.emoji ? `<span class="e">${esc(c.emoji)}</span>` : ''}<b>${em(c.big)}</b>${c.small ? `<span>${em(c.small)}</span>` : ''}</div>`).join('')}</div></section>` : ''}
+  ${E.takeaway ? `<div class="end">${em(E.takeaway)}</div>` : ''}
+  ${(E.words || []).length ? `<section><h2>어려운 말, 쉽게</h2><dl class="words">${E.words.map(w => `<dt>${esc(w.w)}</dt><dd>${em(w.plain)}</dd>`).join('')}</dl></section>` : ''}`;
+</script>
+</body>
+</html>

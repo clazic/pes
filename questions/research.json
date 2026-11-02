@@ -1,0 +1,280 @@
+{
+ "id": "research-start",
+ "kind": "stage_start",
+ "stage": "research",
+ "stage_label": "조사",
+ "round": 0,
+ "title": "조사 — 어떻게, 얼마나 깊게",
+ "intro": "추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 'Claude에게 보내기'를 누르면 R1을 시작합니다.",
+ "_note": "Claude는 pes ask-prep 으로 복사된 ask/<id>.json 을 다듬는다: (1) 이미 정해진 질문은 지우고 inherited 로 옮긴다 (2) _when 조건이 맞지 않는 질문은 지운다 (3) 환경 확인 결과를 desc 에 반영한다 (4) 추천(recommended)을 주제·목적에 맞게 바꾼다. 그 다음 pes ask 로 렌더.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "tools",
+   "label": "조사 도구",
+   "type": "single",
+   "options": [
+    {
+     "value": "mixed",
+     "label": "혼용",
+     "desc": "국내 자료는 ego-browser로 네이버·구글, 해외는 WebSearch, 원문 확인은 ego-browser",
+     "recommended": true
+    },
+    {
+     "value": "browser",
+     "label": "ego-browser만",
+     "desc": "국내 주제·로그인 사이트 위주일 때"
+    },
+    {
+     "value": "websearch",
+     "label": "WebSearch만",
+     "desc": "빠른 개요용, 원문 확인 제한적"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "depth",
+   "label": "조사 깊이",
+   "type": "single",
+   "options": [
+    {
+     "value": "standard",
+     "label": "표준",
+     "desc": "항목당 출처 3~5개 · 비용 보통",
+     "recommended": true
+    },
+    {
+     "value": "quick",
+     "label": "빠른 개요",
+     "desc": "서브에이전트 없이 메인이 직접 · 비용 가장 적음, 깊이 얕음"
+    },
+    {
+     "value": "deep",
+     "label": "심층",
+     "desc": "항목마다 원문 확인 · 비용 많음(표준의 약 2배 이상)"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "parallel",
+   "label": "병렬 처리",
+   "type": "single",
+   "options": [
+    {
+     "value": "auto",
+     "label": "자동",
+     "desc": "항목당 서브에이전트 1개 (최대 5개)",
+     "recommended": true
+    },
+    {
+     "value": "sequential",
+     "label": "순차",
+     "desc": "메인이 직접 (비용 절약)"
+    },
+    {
+     "value": "max",
+     "label": "최대",
+     "desc": "항목마다 + 완료 전 검증 에이전트"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "model",
+   "label": "조사 모델",
+   "type": "single",
+   "required": true,
+   "help": "조사 서브에이전트에 쓸 모델. 판단은 메인(기획·분석·AI 점검)이 맡습니다.",
+   "options": [
+    {
+     "value": "mixed",
+     "label": "혼합",
+     "desc": "이어받아 보완하는 항목·단순 수집은 Sonnet, 새 조사·법령 해석·판단이 많은 항목은 Opus",
+     "recommended": true
+    },
+    {
+     "value": "opus",
+     "label": "모두 Opus",
+     "desc": "품질 우선 · 비용 많음"
+    },
+    {
+     "value": "sonnet",
+     "label": "모두 Sonnet",
+     "desc": "비용 우선 · 법령 해석·미묘한 충돌 판단이 약할 수 있음"
+    }
+   ]
+  },
+  {
+   "id": "scope",
+   "label": "자료 범위 (여러 개 선택)",
+   "type": "multi",
+   "options": [
+    {
+     "value": "gov",
+     "label": "국내 정부·공공기관",
+     "recommended": true
+    },
+    {
+     "value": "law",
+     "label": "법령·조례",
+     "desc": "korean-law로 조문 원문 확인"
+    },
+    {
+     "value": "stats",
+     "label": "통계",
+     "desc": "KOSIS"
+    },
+    {
+     "value": "academic",
+     "label": "학술·연구보고서"
+    },
+    {
+     "value": "press",
+     "label": "언론 기사"
+    },
+    {
+     "value": "overseas",
+     "label": "해외 사례"
+    },
+    {
+     "value": "spatial",
+     "label": "공간정보",
+     "desc": "위치·용도지역·지도 (vworld)"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "user_links",
+   "label": "꼭 조사할 링크·자료 (있으면)",
+   "type": "textarea",
+   "placeholder": "한 줄에 하나씩. 형식: 주소 | 항목 번호(선택) | 메모(선택)\n예) https://www.molit.go.kr/... | 7 | 2026년 고시 원문\n예) https://news.example.com/... | | 울산 야음지구 최근 기사\n예) C:\\자료\\울산시_내부자료.pdf | 11 | 내부 자료",
+   "help": "넣어 주신 링크·파일은 Claude가 직접 열어 읽고, 출처에 '사용자 제공'으로 표시합니다. 항목 번호를 비우면 내용에 맞는 항목에 배정합니다. 조사 중에도 대시보드 '추가 요청'에서 더 넣을 수 있습니다."
+  },
+  {
+   "id": "stats",
+   "label": "통계를 어떻게 가져올까요?",
+   "type": "single",
+   "options": [
+    {
+     "value": "kosis+browser",
+     "label": "KOSIS + 브라우저 확인",
+     "desc": "수치는 API로 정확히, 주석·기준·단위는 kosis.kr 원표로 확인",
+     "recommended": true
+    },
+    {
+     "value": "kosis",
+     "label": "KOSIS만",
+     "desc": "가장 빠름"
+    },
+    {
+     "value": "browser",
+     "label": "kosis.kr 직접",
+     "desc": "API 키가 없거나 화면·다운로드가 필요할 때"
+    },
+    {
+     "value": "websearch",
+     "label": "인용 수치",
+     "desc": "뉴스·보고서 수치 (2차 출처로 표시)"
+    }
+   ],
+   "show_if": {
+    "id": "scope",
+    "in": [
+     "stats"
+    ]
+   }
+  },
+  {
+   "id": "law_range",
+   "label": "법령 확인 범위",
+   "type": "single",
+   "options": [
+    {
+     "value": "statute",
+     "label": "법률·시행령·시행규칙",
+     "recommended": true
+    },
+    {
+     "value": "ordinance",
+     "label": "+ 조례"
+    },
+    {
+     "value": "cases",
+     "label": "+ 조례 + 판례·해석례"
+    }
+   ],
+   "show_if": {
+    "id": "scope",
+    "in": [
+     "law"
+    ]
+   }
+  },
+  {
+   "id": "press_range",
+   "label": "기사 범위",
+   "type": "single",
+   "options": [
+    {
+     "value": "3y-fact",
+     "label": "최근 3년 · 사실 보도 위주",
+     "recommended": true
+    },
+    {
+     "value": "3y-all",
+     "label": "최근 3년 · 여론·갈등 포함"
+    },
+    {
+     "value": "all",
+     "label": "전체 기간"
+    }
+   ],
+   "show_if": {
+    "id": "scope",
+    "in": [
+     "press"
+    ]
+   }
+  },
+  {
+   "id": "overseas_countries",
+   "label": "해외 사례 국가",
+   "type": "text",
+   "default": "일본, 독일, 미국",
+   "show_if": {
+    "id": "scope",
+    "in": [
+     "overseas"
+    ]
+   }
+  },
+  {
+   "id": "vworld_install",
+   "label": "이 컴퓨터에 vworld(국가공간정보 CLI)가 없습니다. 설치할까요?",
+   "type": "single",
+   "options": [
+    {
+     "value": "install",
+     "label": "설치",
+     "desc": "사용자 범위 설치, 관리자 권한 불필요. 설치 후 인증키 발급을 안내합니다",
+     "recommended": true
+    },
+    {
+     "value": "skip",
+     "label": "이번엔 건너뛰기",
+     "desc": "위치·지도는 브라우저로 확인"
+    }
+   ],
+   "_when": "vworld 미설치일 때만",
+   "show_if": {
+    "id": "scope",
+    "in": [
+     "spatial"
+    ]
+   }
+  }
+ ]
+}

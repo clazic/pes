@@ -1,0 +1,178 @@
+{
+ "id": "analyze-start",
+ "kind": "stage_start",
+ "stage": "analyze",
+ "stage_label": "분석·종합",
+ "round": 0,
+ "title": "분석·종합 — 어떤 틀로 볼 것인가",
+ "intro": "추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 'Claude에게 보내기'를 누르면 R1을 시작합니다.",
+ "_note": "Claude는 pes ask-prep 으로 복사된 ask/<id>.json 을 다듬는다: (1) 이미 정해진 질문은 지우고 inherited 로 옮긴다 (2) _when 조건이 맞지 않는 질문은 지운다 (3) 환경 확인 결과를 desc 에 반영한다 (4) 추천(recommended)을 주제·목적에 맞게 바꾼다. 그 다음 pes ask 로 렌더.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "axes",
+   "label": "비교 축 (여러 개 선택)",
+   "type": "multi",
+   "options": [
+    {
+     "value": "region",
+     "label": "지역별",
+     "recommended": true
+    },
+    {
+     "value": "year",
+     "label": "연도별",
+     "recommended": true
+    },
+    {
+     "value": "type",
+     "label": "유형별 (사업 방식·규모)"
+    },
+    {
+     "value": "actor",
+     "label": "주체별 (LH·지방공사·민간)"
+    }
+   ],
+   "required": true,
+   "other": true
+  },
+  {
+   "id": "lens",
+   "label": "분석 관점",
+   "type": "single",
+   "options": [
+    {
+     "value": "diagnose",
+     "label": "현황 진단"
+    },
+    {
+     "value": "problem",
+     "label": "문제점과 원인",
+     "recommended": true
+    },
+    {
+     "value": "evaluate",
+     "label": "성과 평가"
+    },
+    {
+     "value": "alternative",
+     "label": "정책 대안 도출"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "baseline",
+   "label": "기준 지역",
+   "type": "single",
+   "options": [
+    {
+     "value": "ulsan",
+     "label": "울산",
+     "recommended": true
+    },
+    {
+     "value": "national",
+     "label": "전국 평균"
+    },
+    {
+     "value": "none",
+     "label": "없음"
+    }
+   ],
+   "help": "'울산은 어떤가'를 따로 보여 줄지 정합니다."
+  },
+  {
+   "id": "conclusion",
+   "label": "결론 성격",
+   "type": "single",
+   "options": [
+    {
+     "value": "neutral",
+     "label": "중립적 정리"
+    },
+    {
+     "value": "implication",
+     "label": "시사점 제시"
+    },
+    {
+     "value": "policy",
+     "label": "정책 제언까지",
+     "recommended": true
+    }
+   ]
+  },
+  {
+   "id": "conflicts",
+   "label": "남은 충돌(⚠)은 어떻게 할까요?",
+   "type": "single",
+   "options": [
+    {
+     "value": "pick",
+     "label": "출처별 근거를 보여 주고 점검 질문에서 하나씩 정하기",
+     "recommended": true
+    },
+    {
+     "value": "both",
+     "label": "모두 병기"
+    }
+   ],
+   "_when": "조사 단계에 conflicts 가 남아 있을 때"
+  },
+  {
+   "id": "derived",
+   "label": "통계 가공",
+   "type": "single",
+   "options": [
+    {
+     "value": "derive",
+     "label": "증감률·인구 대비 비율 등 가공 지표 사용 (가공 표시)",
+     "recommended": true
+    },
+    {
+     "value": "raw",
+     "label": "원자료만"
+    }
+   ],
+   "_when": "조사 단계에 통계가 있을 때"
+  },
+  {
+   "id": "feasibility",
+   "label": "정책 제언의 실현 가능성 평가",
+   "type": "single",
+   "options": [
+    {
+     "value": "yes",
+     "label": "한다",
+     "recommended": true
+    },
+    {
+     "value": "no",
+     "label": "하지 않는다"
+    }
+   ],
+   "show_if": {
+    "id": "conclusion",
+    "in": [
+     "policy"
+    ]
+   }
+  },
+  {
+   "id": "charts",
+   "label": "차트",
+   "type": "single",
+   "options": [
+    {
+     "value": "yes",
+     "label": "주요 비교에 차트 초안 만들기",
+     "recommended": true
+    },
+    {
+     "value": "no",
+     "label": "표만"
+    }
+   ]
+  }
+ ]
+}

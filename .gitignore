@@ -1,0 +1,17 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+
+# 편집기
+.vscode/
+.idea/
+
+# 혹시 플러그인 폴더 안에서 만든 프로젝트·키
+pes-projects/
+*.pem
+.env

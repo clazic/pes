@@ -1,0 +1,116 @@
+{
+ "id": "publish-start",
+ "kind": "stage_start",
+ "stage": "publish",
+ "stage_label": "산출·공유",
+ "round": 0,
+ "title": "산출·공유 — 어떻게 내보낼 것인가",
+ "intro": "추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 'Claude에게 보내기'를 누르면 R1을 시작합니다.",
+ "_note": "Claude는 pes ask-prep 으로 복사된 ask/<id>.json 을 다듬는다: (1) 이미 정해진 질문은 지우고 inherited 로 옮긴다 (2) _when 조건이 맞지 않는 질문은 지운다 (3) 환경 확인 결과를 desc 에 반영한다 (4) 추천(recommended)을 주제·목적에 맞게 바꾼다. 그 다음 pes ask 로 렌더.",
+ "inherited": [],
+ "questions": [
+  {
+   "id": "formats",
+   "label": "최종 형식 (여러 개 선택)",
+   "type": "multi",
+   "options": [
+    {
+     "value": "hwpx",
+     "label": "HWPX (울산연구원 양식)",
+     "recommended": true
+    },
+    {
+     "value": "docx",
+     "label": "Word"
+    },
+    {
+     "value": "pdf",
+     "label": "PDF"
+    },
+    {
+     "value": "web",
+     "label": "웹 공유 페이지"
+    },
+    {
+     "value": "slides",
+     "label": "발표자료"
+    }
+   ],
+   "required": true
+  },
+  {
+   "id": "audience",
+   "label": "공유 대상",
+   "type": "single",
+   "options": [
+    {
+     "value": "me",
+     "label": "나만",
+     "recommended": true
+    },
+    {
+     "value": "team",
+     "label": "팀"
+    },
+    {
+     "value": "client",
+     "label": "발주처"
+    }
+   ]
+  },
+  {
+   "id": "appendix",
+   "label": "부록 (여러 개 선택)",
+   "type": "multi",
+   "options": [
+    {
+     "value": "sources",
+     "label": "출처 목록",
+     "recommended": true
+    },
+    {
+     "value": "stats",
+     "label": "통계 원표"
+    },
+    {
+     "value": "log",
+     "label": "조사 과정 기록 (라운드 이력)"
+    }
+   ]
+  },
+  {
+   "id": "strip",
+   "label": "외부 공유 시 내부 메모·AI 추천 기록 빼기",
+   "type": "single",
+   "options": [
+    {
+     "value": "strip",
+     "label": "뺀다",
+     "recommended": true
+    },
+    {
+     "value": "keep",
+     "label": "그대로"
+    }
+   ],
+   "show_if": {
+    "id": "audience",
+    "in": [
+     "client"
+    ]
+   }
+  },
+  {
+   "id": "slides_n",
+   "label": "발표 장표 수·시간",
+   "type": "text",
+   "placeholder": "예: 15장, 20분",
+   "show_if": {
+    "id": "formats",
+    "in": [
+     "slides"
+    ]
+   }
+  }
+ ]
+}
