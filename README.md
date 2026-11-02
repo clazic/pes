@@ -18,6 +18,31 @@ Claude Code 플러그인. 연구·정책 보고서를 **기획 → 조사 → �
 
 ### 한 줄 설치 (권장)
 
+#### Claude Desktop에서 쓸 때 (Claude Code를 따로 설치하지 않음)
+
+Claude Desktop 안에는 Claude Code가 들어 있고, Code 탭과 Claude Code는 **같은 설정 폴더**(`~/.claude`, Windows `%USERPROFILE%\.claude`)를 쓴다. 아래 명령은 **Claude Desktop 안의 Claude Code로 플러그인을 등록**하고, 별도의 Claude Code CLI는 설치하지 않는다.
+
+먼저 Claude Desktop을 설치하고 **Code 탭을 한 번 열어 둔다** (그때 Desktop 안의 Claude Code가 준비된다).
+
+**Windows** — PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/clazic/pes/main/scripts/install-desktop.ps1 | iex
+```
+
+**macOS** — 터미널:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install-desktop.sh | bash
+```
+
+- Desktop 안의 Claude Code 위치: macOS `~/Library/Application Support/Claude/claude-code/<버전>/…/claude`, Windows `%APPDATA%\Claude\claude-code\…\claude.exe` 근처를 찾는다 (가장 최근 것).
+- 찾지 못하면(Code 탭을 아직 안 열었을 때) CLI를 설치하지 않고, Claude 설정 파일(`settings.json`)에 PES 마켓플레이스와 플러그인만 등록해 둔다 → Code 탭을 열고 `/reload-plugins`.
+- 나머지(기본 도구 · 조사 도구 · 업그레이드 · API 키 화면 · 진단)는 아래 일반 한 줄 설치와 같다.
+- 끝나면 Claude Desktop을 **완전히 종료**(작업 표시줄·메뉴 막대 아이콘에서도)했다가 다시 열고 Code 탭에서 `/pes:start <주제>`.
+
+#### 일반 (Claude Code CLI · Desktop 자동 선택)
+
 **Windows** — PowerShell(시작 메뉴 → "PowerShell")에 붙여넣기:
 
 ```powershell
@@ -37,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 한 번에 이것까지 한다 (다시 실행해도 된다 — **없는 것은 설치, 이미 있는 것은 최신 버전으로 업그레이드**):
 
 1. Git(Git Bash) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
-2. Claude Code CLI — 없으면 공식 설치 스크립트로 설치 (플러그인 등록에 필요)
+2. 플러그인을 등록할 Claude 찾기 — PATH의 Claude Code → 없으면 **Claude Desktop 안의 Claude Code** → 둘 다 없으면 Claude Code CLI 설치 (`PES_TARGET=desktop` 이면 CLI를 설치하지 않음, `PES_TARGET=cli` 이면 CLI만)
 3. PES 플러그인 등록·설치 (`clazic/pes` → `pes@pes-local`)
 4. 조사 도구: kosis · vworld · korean-law (ego lite는 내려받기 페이지를 연다 — 설치와 첫 실행 안내는 직접)
    - 이미 있으면 **최신 버전으로 업그레이드**: kosis·vworld(**CLI와 스킬을 따로 확인** — 둘 중 하나라도 뒤처지면 공식 설치 스크립트로 다시 설치해 맞춘다. kosis는 이전 스킬 폴더를 `~/.pes/backup/`에 백업, vworld는 LEARNINGS.md 보존), korean-law(CLI와 MCP가 같은 npm 패키지), ego lite(앱 자체 업데이트 — **ego-browser 스킬은 앱 안에 들어 있어 함께 갱신**되고, 스킬 연결과 버전이 앱과 맞는지 확인), Claude Code CLI(`claude update`). 업그레이드를 원하지 않으면 `PES_NO_UPGRADE=1`
@@ -568,6 +593,10 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.8.0 — 2026-11-02
+- **Claude Desktop 전용 한 줄 설치**: `install-desktop.ps1` · `install-desktop.sh` — Claude Desktop 안에 들어 있는 Claude Code로 플러그인을 등록하고 별도 CLI를 설치하지 않음. 못 찾으면 설정 파일에 마켓플레이스·플러그인만 등록.
+- 일반 한 줄 설치도 PATH에 claude가 없으면 Desktop 안의 Claude Code를 먼저 찾음 (`PES_TARGET=auto|desktop|cli`).
 
 ### 0.7.3 — 2026-11-02
 - README 「OneDrive로 옮기기」를 Windows·macOS로 나누어 다시 씀: 경로 확인, 옮기기, OneDrive 설정, 두 번째 컴퓨터, 섞어 쓰기, 그리고 OS별 `.pes/config.json` 위치·내용·직접 고칠 때 주의(Windows `\\`·`/`), 동기화하지 않는 이유.
