@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 2. Claude Code CLI — 없으면 공식 설치 스크립트로 설치 (플러그인 등록에 필요)
 3. PES 플러그인 등록·설치 (`clazic/pes` → `pes@pes-local`)
 4. 조사 도구: kosis · vworld · korean-law (ego lite는 내려받기 페이지를 연다 — 설치와 첫 실행 안내는 직접)
-   - 이미 있으면 **최신 버전으로 업그레이드**: kosis·vworld(CLI + 스킬 문서), korean-law(CLI와 MCP가 같은 npm 패키지), ego lite(앱 자체 업데이트), Claude Code CLI(`claude update`). 업그레이드를 원하지 않으면 `PES_NO_UPGRADE=1`
+   - 이미 있으면 **최신 버전으로 업그레이드**: kosis·vworld(CLI + 스킬 문서), korean-law(CLI와 MCP가 같은 npm 패키지), ego lite(앱 자체 업데이트 — **ego-browser 스킬은 앱 안에 들어 있어 함께 갱신**되고, 스킬 연결과 버전이 앱과 맞는지 확인), Claude Code CLI(`claude update`). 업그레이드를 원하지 않으면 `PES_NO_UPGRADE=1`
 5. **API 키 입력 화면**이 브라우저에 열림 → 필요한 키만 넣고 **마치기** (키는 이 컴퓨터의 도구 설정에만 저장)
 6. 진단(`doctor`) 후 완료 표시
 
@@ -475,6 +475,9 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.7.1 — 2026-11-02
+- ego-browser 스킬 점검: 스킬은 ego lite 앱 안에 있고 `~/.claude/skills/ego-browser`가 앱을 가리키는 링크다. 설치 점검·`/pes:doctor`·업그레이드 결과에 스킬 연결 여부와 버전(앱 안내 버전과 일치하는지)을 표시. 스킬이 없으면 `ego-browser skill` 출력으로 대신 진행.
 
 ### 0.7.0 — 2026-11-02
 - 설치할 때 이미 있는 도구를 **최신 버전으로 업그레이드**: kosis·vworld(CLI+스킬), korean-law(CLI·MCP), ego lite, Claude Code CLI. `setup.py upgrade`, `/pes:setup`·한 줄 설치에 포함, `PES_NO_UPGRADE=1`로 끌 수 있음. 업그레이드 후 실제 버전을 다시 확인해 결과를 보고.

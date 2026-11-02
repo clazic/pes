@@ -93,6 +93,34 @@ def vworld_keys():
     return out.count('"masked"')
 
 
+def ego_skill():
+    """ego-browser 스킬: ego lite 앱 안에 들어 있고 ~/.claude/skills/ego-browser 는 앱 쪽을 가리키는 링크.
+    반환 (state, 설명, 스킬 버전, 앱 안내 버전)"""
+    sk = HOME / ".claude" / "skills" / "ego-browser" / "SKILL.md"
+    t = tool("ego-browser")
+    sv = None
+    if sk.exists():
+        m = re.search(r'version:\s*"?([\d.]+)', sk.read_text(encoding="utf-8", errors="replace"))
+        sv = m.group(1) if m else "?"
+    gv = None
+    if t:
+        _, out = run([t, "skill"], 30)
+        m = re.search(r"usage guide v([\d.]+)", out)
+        gv = m.group(1) if m else None
+    if not t:
+        return "user", "ego lite 설치 후 생김", sv, gv
+    if not sv:
+        return "missing", ("스킬 연결이 없음 — ego lite 앱을 열어 첫 실행 안내(온보딩)를 다시 진행하면 연결된다. "
+                           "PES 는 `ego-browser skill` 출력으로도 쓸 수 있다"), sv, gv
+    if gv and sv != gv:
+        return "missing", f"스킬 {sv} ≠ 앱 안내 {gv} — 연결이 옛 버전을 가리킴. ego lite 앱을 다시 열거나 재설치", sv, gv
+    try:
+        real = str((HOME / ".claude" / "skills" / "ego-browser").resolve())
+    except Exception:
+        real = ""
+    return "ok", f"v{sv}" + (" (앱과 연결)" if "ego" in real.lower() else ""), sv, gv
+
+
 def gitbash():
     if not WIN:
         return shutil.which("bash")
@@ -128,6 +156,8 @@ def check():
 
     t = tool("ego-browser")
     add("ego-browser", "ok" if t else "user", "ego lite (ego-browser)", t or "앱 설치 + 첫 실행 안내(온보딩)는 사용자가 직접")
+    st_, why, _, _ = ego_skill()
+    add("ego-browser-skill", st_ if st_ != "user" else "optional", "ego-browser 스킬", why)
     sk = HOME / ".claude" / "skills"
     t = tool("kosis")
     add("kosis", "ok" if t and (sk / "kosis" / "SKILL.md").exists() else "missing", "kosis CLI + 스킬",
@@ -291,6 +321,7 @@ def upgrade_ego():
         return "SKIP", "설치되어 있지 않음"
     _, v0 = run([t, "--version"], 30)
     cur = (v0.split() + ["", ""])[1]
+    _, _, sk0, _ = ego_skill()
     code, out = run([t, "upgrade"], 600)
     _, v1 = run([t, "--version"], 30)
     new = (v1.split() + ["", ""])[1]
@@ -299,9 +330,13 @@ def upgrade_ego():
         if "Unknown command" in out:
             return "FAIL", "이 ego lite 는 너무 오래되어 자동 업그레이드가 안 됨 — https://lite.ego.app/ 에서 다시 설치"
         return "FAIL", last or "업그레이드 실패 (진행 중인 브라우저 작업이 있으면 ego lite 창의 확인 대화상자를 보세요)"
+    st_, why, sk1, gv = ego_skill()
+    skill = f" · 스킬 {sk0} → {sk1}" if sk0 != sk1 else f" · 스킬 v{sk1}"
+    if st_ != "ok":
+        return "FAIL", f"앱 {cur} → {new or cur}, 그러나 스킬 문제: {why}"
     if new and new != cur:
-        return "UPGRADED", f"{cur} → {new}"
-    return "OK", f"{cur} ({last or '최신'})"
+        return "UPGRADED", f"앱 {cur} → {new}{skill} (앱이 스킬도 함께 갱신)"
+    return "OK", f"앱 {cur}{skill} ({last or '최신'})"
 
 
 UPGRADERS = {

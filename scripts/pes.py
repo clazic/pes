@@ -1188,6 +1188,13 @@ def doctor_env(R):
     if t:
         _, out = run_quiet([t, "--version"])
         R.add("도구", "ok", f"ego-browser {out.split()[1] if len(out.split()) > 1 else ''}".strip(), "" if shutil.which("ego-browser") else f"PATH 밖: {t}")
+        try:
+            import importlib
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            st_, why, _, _ = importlib.import_module("setup").ego_skill()
+            R.add("도구", {"ok": "ok", "missing": "warn"}.get(st_, "info"), "ego-browser 스킬", why)
+        except Exception as e:
+            R.add("도구", "info", "ego-browser 스킬 확인 못함", str(e)[:100])
     else:
         R.add("도구", "warn", "ego-browser 없음", "브라우저 조사 불가 — ego-browser 스킬의 설치 안내")
     t = find_tool("kosis")
