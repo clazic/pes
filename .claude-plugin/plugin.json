@@ -1,6 +1,6 @@
 {
   "name": "pes",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Project Execution System: 기획→조사→분석·종합→집필→검증→산출·공유 6단계를 단계마다 라운드(AI 결과→AI 점검 질문→사용자 답→수정)로 진행하고, 모든 질문과 승인을 로컬 웹 대시보드에서 받는다.",
   "author": { "name": "clazic" },
   "keywords": ["research", "report", "workflow", "korean"]

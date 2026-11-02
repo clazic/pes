@@ -4,7 +4,7 @@
 사용: python3 -I setup.py <명령>
   check [--json]            설치·키 상태 (항목마다 ok|missing|user|optional)
   install <이름…|missing>    설치: kosis vworld korean-law korean-law-mcp ego-browser  (missing = 빠진 것 전부)
-  keys [--no-open]          API 키 입력 화면(127.0.0.1:8759)을 띄우고 주소 출력. 결과는 ~/.pes/setup.log 에
+  keys [--no-open] [--wait] API 키 입력 화면(127.0.0.1:8759)을 띄우고 주소 출력. 결과는 ~/.pes/setup.log 에
                             "SETUP keys …" 한 줄로 남는다 (Monitor 로 기다린다). 키 값은 Claude 대화로 오지 않는다.
   mark                      설치 완료 표시 (~/.pes/setup.json) — 다른 PES 명령이 이것을 보고 setup 필요 여부를 안다
   needed                    setup 이 필요하면 이유를 출력하고 종료 코드 1, 아니면 0
@@ -437,10 +437,26 @@ def cmd_keys(args):
         if pes.port_busy(KEY_PORT):
             break
         time.sleep(0.1)
+    start = LOG.stat().st_size if LOG.exists() else 0
     if "--no-open" not in args:
         webbrowser.open(url)
-    print(url)
-    print(f"WATCH tail -n0 -F {LOG.as_posix()} | grep --line-buffered 'SETUP keys'")
+    print(url, flush=True)
+    if "--wait" not in args:
+        print(f"WATCH tail -n0 -F {LOG.as_posix()} | grep --line-buffered 'SETUP keys'")
+        return
+    print("브라우저의 API 키 화면에서 '마치기'를 누르면 이어서 진행합니다 (건너뛰려면 Ctrl+C).", flush=True)
+    try:
+        while True:
+            time.sleep(1)
+            if LOG.exists() and LOG.stat().st_size > start:
+                with LOG.open(encoding="utf-8") as fh:
+                    fh.seek(start)
+                    new = [l for l in fh.read().splitlines() if "SETUP keys" in l]
+                if new:
+                    print(new[-1].split(" ", 2)[-1])
+                    return
+    except KeyboardInterrupt:
+        print("API 키 입력을 건너뜀 — 나중에 /pes:setup keys")
 
 
 def cmd_check(args):

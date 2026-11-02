@@ -16,6 +16,36 @@ Claude Code 플러그인. 연구·정책 보고서를 **기획 → 조사 → �
 
 ## 1. 설치
 
+### 한 줄 설치 (권장)
+
+**Windows** — PowerShell(시작 메뉴 → "PowerShell")에 붙여넣기:
+
+```powershell
+irm https://raw.githubusercontent.com/clazic/pes/main/scripts/install.ps1 | iex
+```
+
+**macOS** — 터미널에 붙여넣기:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | sh
+```
+
+한 번에 이것까지 한다 (다시 실행해도 된다 — 있는 것은 건너뜀):
+
+1. Git(Git Bash) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
+2. Claude Code CLI — 없으면 공식 설치 스크립트로 설치 (플러그인 등록에 필요)
+3. PES 플러그인 등록·설치 (`clazic/pes` → `pes@pes-local`)
+4. 조사 도구: kosis · vworld · korean-law (ego lite는 내려받기 페이지를 연다 — 설치와 첫 실행 안내는 직접)
+5. **API 키 입력 화면**이 브라우저에 열림 → 필요한 키만 넣고 **마치기** (키는 이 컴퓨터의 도구 설정에만 저장)
+6. 진단(`doctor`) 후 완료 표시
+
+끝나면 **Claude Desktop을 완전히 종료했다가 다시 열고** Code 탭에서 `/pes:start <주제>`.
+
+- 키 화면 건너뛰기: Windows `$env:PES_SKIP_KEYS=1` / macOS `PES_SKIP_KEYS=1`를 앞에 두고 실행 → 나중에 `/pes:setup keys`.
+- 관리자 권한 창(UAC)이 뜨면 **예**. Windows에서 Git을 처음 설치했으면 PowerShell 창을 새로 열어 한 번 더 실행하면 확실하다.
+- 이 방법은 저장소가 **공개**일 때 바로 된다. 비공개 저장소라면 아래 「플러그인 설치」의 단계별 방법을 쓴다.
+
+
 ### 필요한 것
 
 | 구분 | 내용 | 필수 |
@@ -441,6 +471,10 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.6.0 — 2026-11-02
+- **한 줄 설치**: Windows `irm …/install.ps1 | iex`, macOS `curl …/install.sh | sh` — 기본 도구 · Claude Code CLI · 플러그인 · 조사 도구 · API 키 화면 · 진단까지.
+- `setup.py keys --wait`: 키 화면에서 '마치기'를 누를 때까지 기다림.
 
 ### 0.5.2 — 2026-11-02
 - README: OneDrive로 PES 홈 옮기기 상세 안내(경로 확인 · 첫 컴퓨터 옮기기 · 두 번째 컴퓨터 지정 · 컴퓨터 바꿔 쓰기 · 충돌 사본 · 되돌리기).
