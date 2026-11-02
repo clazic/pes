@@ -38,10 +38,7 @@ try {
 $py = $null
 & powershell -NoProfile -ExecutionPolicy Bypass -File $tmp | ForEach-Object {
   $line = "$_"
-  if ($line -like "PYTHON *") { $py = $line.Substring(7).Trim() }
-  elseif ($line -like "OK *" -or $line -like "INSTALLED *") { Ok $line }
-  elseif ($line -like "FAIL *" -or $line -like "MISSING *") { Fail $line }
-  else { Write-Host "  $line" }
+  if ($line -like "PYTHON *") { $py = $line.Substring(7).Trim() } elseif ($line -like "OK *" -or $line -like "INSTALLED *") { Ok $line } elseif ($line -like "FAIL *" -or $line -like "MISSING *") { Fail $line } else { Write-Host "  $line" }
 }
 Remove-Item $tmp -ErrorAction SilentlyContinue
 Refresh-Path
@@ -55,15 +52,13 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
   Warn "claude 명령이 없어 공식 설치 스크립트로 설치합니다 (https://claude.ai/install.ps1)"
   try { Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression } catch { Fail "Claude Code CLI 설치 실패: $($_.Exception.Message)" }
   Refresh-Path
-}
-elseif (-not $env:PES_NO_UPGRADE) {
+} elseif (-not $env:PES_NO_UPGRADE) {
   $before = & claude --version 2>$null
   & claude update 2>&1 | Out-Null
   $after = & claude --version 2>$null
   if ($after -ne $before) { Ok "claude 업그레이드: $before → $after" }
 }
-if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude $(& claude --version 2>$null)" }
-else { Fail "claude 명령을 찾지 못함 — 새 PowerShell 창에서 다시 실행하거나, Claude Desktop Code 탭의 + → Add plugins 로 $Repo 를 추가하세요"; return }
+if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude $(& claude --version 2>$null)" } else { Fail "claude 명령을 찾지 못함 — 새 PowerShell 창에서 다시 실행하거나, Claude Desktop Code 탭의 + → Add plugins 로 $Repo 를 추가하세요"; return }
 
 # 3. PES 플러그인
 Step 3 "PES 플러그인"
@@ -75,8 +70,7 @@ $plist = & claude plugin list 2>&1 | Out-String
 if ($plist -match "pes") { Ok "pes@pes-local 설치됨" } else { Warn "플러그인 목록에서 pes 를 확인하지 못함 — Claude Desktop 에서 /reload-plugins 후 /pes:doctor" }
 
 # 설치 도우미 스크립트 (같은 저장소를 ~/.pes/src 에 받아 둔다)
-if (Test-Path (Join-Path $Src ".git")) { & git -C $Src pull -q 2>&1 | Out-Null }
-else { New-Item -ItemType Directory -Force -Path (Split-Path $Src) | Out-Null; & git clone -q "https://github.com/$Repo.git" $Src 2>&1 | Out-Null }
+if (Test-Path (Join-Path $Src ".git")) { & git -C $Src pull -q 2>&1 | Out-Null } else { New-Item -ItemType Directory -Force -Path (Split-Path $Src) | Out-Null; & git clone -q "https://github.com/$Repo.git" $Src 2>&1 | Out-Null }
 $Setup = Join-Path $Src "scripts\setup.py"
 $Pes = Join-Path $Src "scripts\pes.py"
 if (-not (Test-Path $Setup)) { Fail "설치 도우미를 받지 못함 ($Src)"; return }
@@ -99,8 +93,7 @@ if ($env:PES_NO_UPGRADE -ne "1") {
 
 # 5. API 키
 Step 5 "API 키"
-if ($env:PES_SKIP_KEYS -eq "1") { Warn "건너뜀 (PES_SKIP_KEYS=1) — 나중에 Claude 에서 /pes:setup keys" }
-else { PY $Setup keys --wait | ForEach-Object { Write-Host "  $_" } }
+if ($env:PES_SKIP_KEYS -eq "1") { Warn "건너뜀 (PES_SKIP_KEYS=1) — 나중에 Claude 에서 /pes:setup keys" } else { PY $Setup keys --wait | ForEach-Object { Write-Host "  $_" } }
 
 # 6. 진단
 Step 6 "진단"
