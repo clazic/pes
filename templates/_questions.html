@@ -32,8 +32,10 @@ const QF = (() => {
 
   function ctrl(q, p) {
     const id = esc(q.id);
-    if (q.type === 'text') return `<input type="text" class="qt" data-q="${id}" value="${esc(q.default || '')}" placeholder="${esc(q.placeholder || '')}">`;
-    if (q.type === 'textarea') return `<textarea data-q="${id}" placeholder="${esc(q.placeholder || '')}">${esc(q.default || '')}</textarea>`;
+    // 모든 질문(선택형·글쓰기형)에 '기타 · 덧붙일 말' 칸을 둔다 (spec 의 other 가 문자열이면 그 안내문)
+    const other = `<input type="text" class="qo" data-qo="${id}" aria-label="${esc(q.label)} — 기타 · 덧붙일 말" placeholder="${esc(typeof q.other === 'string' ? q.other : '기타 · 덧붙일 말 (선택)')}">`;
+    if (q.type === 'text') return `<input type="text" class="qt" data-q="${id}" value="${esc(q.default || '')}" placeholder="${esc(q.placeholder || '')}">${other}`;
+    if (q.type === 'textarea') return `<textarea data-q="${id}" placeholder="${esc(q.placeholder || '')}">${esc(q.default || '')}</textarea>${other}`;
     const multi = q.type === 'multi';
     const opts = q.options || [];
     const first = (opts.find(o => o.recommended) || {}).value;
@@ -42,8 +44,6 @@ const QF = (() => {
       return `<label class="opt"><input type="${multi ? 'checkbox' : 'radio'}" name="${esc(p + q.id)}" value="${esc(o.value)}" data-q="${id}" ${on ? 'checked' : ''}>
         <span>${esc(o.label)}${o.recommended ? '<span class="rec">추천</span>' : ''}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</span></label>`;
     }).join('');
-    // 선택형 질문에는 항상 '요청사항' 칸을 둔다 (spec 의 other 가 문자열이면 그 안내문을 쓴다)
-    const other = `<input type="text" class="qo" data-qo="${id}" aria-label="${esc(q.label)} — 요청사항" placeholder="${esc(typeof q.other === 'string' ? q.other : '이 질문에 대한 요청사항 (선택)')}">`;
     return `<div class="opts">${items}</div>${other}`;
   }
 
@@ -87,7 +87,7 @@ const QF = (() => {
       answers[q.id] = q.type === 'multi' ? v : (v[0] ?? '');
       if (other) answers[q.id + '__other'] = other;
       const label = v.map(x => ((q.options || []).find(o => o.value === x) || {}).label || x).join(', ');
-      const said = [label, other && `(요청사항: ${other})`].filter(Boolean).join(' ');
+      const said = [label, other && `(기타·덧붙임: ${other})`].filter(Boolean).join(' ');
       lines.push(q.gap ? `[점검 ${k + 1}${q.gap.item ? ` · #${q.gap.item}` : ''}] ${q.label} → ${said}` : `${q.label}: ${said}`);
     });
     return { answers, lines, missing };
