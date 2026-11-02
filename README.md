@@ -315,104 +315,197 @@ claude plugin install pes@pes-local
 
 ## 8. OneDrive로 옮기기 (여러 컴퓨터에서 같은 프로젝트 쓰기)
 
-PES 홈(`pes-projects`)을 OneDrive 안으로 옮기면 집·사무실 컴퓨터에서 같은 프로젝트를 이어서 쓸 수 있다.
-PES 홈 위치는 **컴퓨터마다 따로** 저장된다(`~/.pes/config.json`, 동기화되지 않음). 그래서 **첫 컴퓨터는 "옮기기"**, **다른 컴퓨터는 "위치만 지정"** 한다. 명령은 둘 다 `/pes:home`이다.
+PES 홈(`pes-projects`)을 OneDrive 안으로 옮기면 집·사무실 컴퓨터(Windows·Mac 섞여 있어도)에서 같은 프로젝트를 이어서 쓸 수 있다.
 
-### 8-1. OneDrive 폴더 경로 확인
+### 8-0. 먼저 알아 둘 것 — 무엇이 동기화되고 무엇이 컴퓨터마다 따로인가
 
-| 환경 | 보통의 경로 | 확인 방법 |
+| 구분 | 위치 | OneDrive로 동기화? |
 |---|---|---|
-| Windows 개인 계정 | `C:\Users\<이름>\OneDrive` | 파일 탐색기 왼쪽 'OneDrive - 개인' → 주소 표시줄 클릭 |
-| Windows 회사·기관 계정 | `C:\Users\<이름>\OneDrive - <회사명>` | 탐색기 왼쪽 'OneDrive - <회사명>' → 주소 표시줄 |
-| macOS | `~/Library/CloudStorage/OneDrive-개인` 또는 `OneDrive-<회사명>` | Finder 사이드바 OneDrive → 폴더 정보(⌘I)의 위치 |
+| 프로젝트 (상태·답·보고서·스크린샷) | PES 홈 = `…\OneDrive\pes-projects\<프로젝트>` | **된다** — 이것을 옮기는 것이 목적 |
+| **PES 홈 설정** `config.json` | Windows `C:\Users\<이름>\.pes\config.json` / Mac `/Users/<이름>/.pes/config.json` | **안 된다 — 컴퓨터마다 따로** |
+| 설치 기록·백업 (`setup.json`, `setup.log`, `backup\`) | 같은 `.pes` 폴더 | 안 된다 (컴퓨터마다) |
+| API 키, 설치된 도구, Claude Code 설정 | 각 도구·`.claude` 폴더 | 안 된다 (컴퓨터마다 `/pes:setup`) |
 
-PowerShell에서 바로 확인: `echo $env:OneDrive` (개인), `echo $env:OneDriveCommercial` (회사).
-옮길 위치는 그 아래 `pes-projects`로 한다. 예: `C:\Users\hong\OneDrive - 울산연구원\pes-projects`
-- 경로가 너무 길면(Windows 260자 제한) 회사 OneDrive 이름이 긴 경우 문제가 될 수 있다 — `pes-projects`처럼 짧게, 더 깊이 넣지 않는다.
+그래서 **첫 컴퓨터는 "옮기기"**, **다른 컴퓨터는 "위치만 지정"** 한다. 명령은 둘 다 `/pes:home`이다.
 
-### 8-2. 옮기기 전 준비 (첫 컴퓨터)
+### 8-1. `config.json` 이해하기 (두 OS 공통 개념)
 
-1. **진행 중인 작업 마무리**: 보낸 답이 다 처리됐는지 `/pes:status`로 확인 (처리 안 한 답 0개).
-2. **다른 Claude 세션 닫기**: 같은 프로젝트를 쓰는 다른 Code 탭·터미널을 닫는다. 쓰는 중인 프로젝트가 있으면 `/pes:home`이 아무것도 옮기지 않고 멈춘다.
-3. **OneDrive가 켜져 있고 로그인되어 있는지** 확인 (작업 표시줄/메뉴 막대의 구름 아이콘).
-4. (권장) 현재 상태 점검: `/pes:doctor` → 문제 0.
+PES는 프로젝트 위치를 이 순서로 정한다.
 
-### 8-3. 옮기기 (첫 컴퓨터)
+```
+1. PES_HOME 환경변수        ← 있으면 가장 우선 (보통 쓰지 않음)
+2. .pes/config.json 의 "home" ← /pes:home 이 쓰고 고치는 곳
+3. 기본값 <홈 폴더>/pes-projects
+```
 
-Code 탭에서 (경로에 공백이 있으면 따옴표로 감싼다):
+`config.json` 내용은 한 줄짜리다.
+
+```json
+{
+ "home": "<PES 홈 경로>"
+}
+```
+
+- **`/pes:home <새 폴더>`가 만들고 고친다.** 직접 편집할 필요는 없다.
+- **OneDrive 안에 넣지 않는다.** 이 파일은 "이 컴퓨터에서 OneDrive가 어디 있는지"를 적는 것이라, 컴퓨터마다 값이 달라야 한다 (Windows는 `C:\Users\…`, Mac은 `/Users/…/Library/CloudStorage/…`).
+- 지금 값 확인: `/pes:home` → `PES 홈: … (설정 파일 …config.json)`.
+- 파일을 지우면 기본값(`<홈 폴더>/pes-projects`)으로 돌아간다 — 프로젝트는 옮겨지지 않으므로, 프로젝트가 OneDrive에 있으면 `/pes:list`에서 안 보이게 된다. 되돌릴 때는 지우지 말고 8-8의 `/pes:home`을 쓴다.
+- `PES_HOME` 환경변수가 설정돼 있으면 `config.json`보다 우선한다 — `/pes:doctor`가 둘이 다르면 알려 준다. 특별한 이유가 없으면 환경변수는 쓰지 않는다.
+
+---
+
+### 8-2. Windows
+
+#### ① OneDrive 경로 확인
+
+| 계정 | 보통의 경로 |
+|---|---|
+| 개인 | `C:\Users\<이름>\OneDrive` |
+| 회사·기관 | `C:\Users\<이름>\OneDrive - <회사명>` |
+
+- 파일 탐색기 왼쪽 'OneDrive - 개인' 또는 'OneDrive - <회사명>' → 주소 표시줄 클릭하면 전체 경로가 보인다.
+- PowerShell: `echo $env:OneDrive` (개인), `echo $env:OneDriveCommercial` (회사).
+- 옮길 위치는 그 아래 `pes-projects`. 예: `C:\Users\hong\OneDrive - 울산연구원\pes-projects`
+- Windows 경로 길이 제한(260자) 때문에 더 깊은 폴더에 넣지 않는다.
+
+#### ② 준비
+
+1. `/pes:status`로 처리 안 한 답이 0개인지 확인.
+2. 같은 프로젝트를 쓰는 다른 Code 탭·터미널을 닫는다.
+3. 작업 표시줄의 OneDrive(구름) 아이콘이 로그인·동기화 중인지 확인.
+4. (권장) `/pes:doctor` → 문제 0.
+
+#### ③ 옮기기 (첫 컴퓨터)
+
+Claude Desktop Code 탭에서 — 경로에 공백이 있으면 **따옴표**로 감싼다:
 
 ```
 /pes:home "C:\Users\<이름>\OneDrive - <회사명>\pes-projects"
 ```
 
-PES가 순서대로 한다:
-1. 켜져 있던 대시보드·목록 서버를 끈다
-2. 모든 프로젝트 폴더와 목록 화면을 새 위치로 옮긴다 (이름이 겹치면 아무것도 옮기지 않고 멈춤)
-3. 이 컴퓨터의 설정(`~/.pes/config.json`)에 새 위치를 저장한다
-4. 켜져 있던 서버를 새 위치에서 다시 켠다
+PES가 서버를 끄고 → 모든 프로젝트를 옮기고 → `C:\Users\<이름>\.pes\config.json`에 새 위치를 저장하고 → 서버를 다시 켠다.
 
-확인:
+`config.json`은 이렇게 된다 (JSON이라 `\`가 `\\`로 저장되는 것이 정상):
 
-```
-/pes:home        → "PES 홈: …OneDrive…\pes-projects · 프로젝트 N개"
-/pes:list        → 프로젝트 목록
-/pes:doctor      → "PES 홈이 클라우드 동기화 폴더(OneDrive) 안에 있음" 참고 표시가 나오면 정상
+```json
+{
+ "home": "C:\\Users\\hong\\OneDrive - 울산연구원\\pes-projects"
+}
 ```
 
-### 8-4. OneDrive 설정 (컴퓨터마다 꼭)
+- 직접 고쳐야 할 때(드묾): 메모장으로 열어 `"home"` 값만 바꾼다. 경로의 `\`는 **`\\` 두 개**로 쓰거나 **`/`**로 써도 된다 (`"C:/Users/hong/OneDrive - 울산연구원/pes-projects"`). 고친 뒤 `/pes:home`으로 확인. 단, 직접 고치면 프로젝트는 옮겨지지 않는다 — 옮기기는 항상 `/pes:home <새 폴더>`로.
+- 파일 위치를 탐색기로 열기: 주소 표시줄에 `%USERPROFILE%\.pes` 입력.
 
-1. **"항상 이 장치에 유지"**: 탐색기에서 `pes-projects` 폴더 오른쪽 클릭 → **항상 이 장치에 유지**. (macOS: Finder에서 폴더 오른쪽 클릭 → **항상 이 Mac에 보관**)
-   - 이렇게 하지 않으면 '파일 주문형' 때문에 파일이 클라우드에만 있고 필요할 때 내려받는다 — 대시보드가 느려지거나 답 수신(feedback.log 감시)이 늦어질 수 있다.
-2. **동기화가 끝났는지 확인하는 법**: 폴더·파일 아이콘의 초록 체크(✓). 파란 화살표(동기화 중)가 있으면 기다린다.
+#### ④ OneDrive 설정
 
-### 8-5. 두 번째 컴퓨터에서
+1. 탐색기에서 `pes-projects` 폴더 오른쪽 클릭 → **항상 이 장치에 유지**.
+   - '파일 주문형' 상태(구름 아이콘)로 두면 파일을 열 때마다 내려받아 대시보드가 느려지고 답 수신이 늦어질 수 있다.
+2. 동기화 완료 = 초록 체크(✓). 파란 화살표면 기다린다.
+3. `.pes` 폴더(`C:\Users\<이름>\.pes`)는 OneDrive 밖에 그대로 둔다.
 
-1. 그 컴퓨터에 PES 설치·점검 (`/pes:setup`).
-2. OneDrive에서 `pes-projects` 폴더가 내려와 있는지 확인하고 **항상 이 장치에 유지**.
-3. **위치만 지정** — 그 컴퓨터의 OneDrive 경로로:
+#### ⑤ 두 번째 Windows 컴퓨터
+
+1. 그 컴퓨터에 PES 설치·점검 (한 줄 설치 또는 `/pes:setup`).
+2. OneDrive에서 `pes-projects`가 내려와 있는지 확인 → **항상 이 장치에 유지**.
+3. **위치만 지정** (그 컴퓨터의 OneDrive 경로로):
    ```
    /pes:home "C:\Users\<이름>\OneDrive - <회사명>\pes-projects"
    ```
-   그 컴퓨터의 기존 `pes-projects`가 비어 있으면 옮길 것 없이 설정만 바뀐다 ("프로젝트 0개 이동").
-   그 컴퓨터에도 프로젝트가 있었다면 함께 OneDrive로 옮겨진다 — 같은 이름이 OneDrive에 이미 있으면 멈추므로, 그때는 어느 쪽을 남길지 정한 뒤 다시 한다.
-4. `/pes:list`로 프로젝트가 보이는지 확인 → `/pes:run <프로젝트>`로 이어서.
+   → 그 컴퓨터의 `C:\Users\<이름>\.pes\config.json`이 OneDrive 경로를 가리키게 된다. 그 컴퓨터의 기존 `pes-projects`가 비어 있으면 "프로젝트 0개 이동"으로 설정만 바뀐다.
+4. `/pes:list`로 확인 → `/pes:run <프로젝트>`.
 
-### 8-6. 컴퓨터를 바꿔 가며 쓸 때 (중요)
+---
 
-**한 번에 한 컴퓨터에서만** 작업한다. 같은 프로젝트를 두 컴퓨터에서 동시에 고치면 OneDrive가 충돌 사본을 만든다.
+### 8-3. macOS
 
-컴퓨터 A → B로 넘어갈 때:
-1. A: 진행 중인 라운드가 끝나고 답이 모두 처리됐는지 확인 (`/pes:status`).
-2. A: Claude Code 세션을 닫는다 (Code 탭 닫기). 대시보드 서버는 그대로 둬도 되지만 끄려면 Claude에게 "서버 꺼".
-3. A: OneDrive 동기화 완료(초록 체크)를 확인.
-4. B: OneDrive 동기화 완료를 확인한 뒤 `/pes:run <프로젝트>`.
-   - **"다른 세션이 이 프로젝트를 쓰고 있습니다"**가 나오면: A의 잠금이 동기화되어 온 것이다(잠금은 2시간 동안 기록이 없으면 자동 해제). A를 확실히 닫았다면 Claude에게 **"A는 닫았어, 가져와"** → `--force`로 넘겨받는다.
+#### ① OneDrive 경로 확인
+
+| 계정 | 보통의 경로 |
+|---|---|
+| 개인 | `~/Library/CloudStorage/OneDrive-개인` (영문 환경 `OneDrive-Personal`) |
+| 회사·기관 | `~/Library/CloudStorage/OneDrive-<회사명>` |
+
+- Finder 사이드바의 OneDrive → 폴더를 선택하고 ⌘I(정보 가져오기) → '위치'.
+- 터미널: `ls ~/Library/CloudStorage/`
+- 옮길 위치는 그 아래 `pes-projects`. 예: `~/Library/CloudStorage/OneDrive-울산연구원/pes-projects`
+- 예전 방식으로 설치한 OneDrive는 `~/OneDrive`일 수 있다 — 위 `ls`로 확인.
+
+#### ② 준비
+
+Windows와 같다: 처리 안 한 답 0개(`/pes:status`), 다른 세션 닫기, 메뉴 막대의 OneDrive 아이콘 확인, `/pes:doctor`.
+
+#### ③ 옮기기 (첫 컴퓨터)
+
+Claude Code(터미널 또는 Claude Desktop Code 탭)에서 — 공백이 있으면 따옴표:
+
+```
+/pes:home "~/Library/CloudStorage/OneDrive-<회사명>/pes-projects"
+```
+
+`/Users/<이름>/.pes/config.json`은 이렇게 된다 (`~`는 실제 경로로 풀려 저장된다):
+
+```json
+{
+ "home": "/Users/hong/Library/CloudStorage/OneDrive-울산연구원/pes-projects"
+}
+```
+
+- 직접 볼 때: 터미널 `cat ~/.pes/config.json`, Finder는 ⌘⇧G → `~/.pes` (점으로 시작하는 숨김 폴더). 고치는 경우는 Windows와 같다(드묾, 옮기기는 항상 `/pes:home`).
+
+#### ④ OneDrive 설정
+
+1. Finder에서 `pes-projects` 폴더 오른쪽 클릭 → **항상 이 Mac에 보관** (Always Keep on This Device).
+2. 동기화 완료 표시를 확인한 뒤 다른 컴퓨터로 넘어간다.
+3. `~/.pes` 폴더는 OneDrive 밖에 그대로 둔다.
+4. macOS가 처음에 'Library/CloudStorage' 접근 권한을 물으면 허용한다 (터미널·Claude가 OneDrive 폴더를 읽어야 한다).
+
+#### ⑤ 두 번째 Mac
+
+Windows ⑤와 같다 — 설치·점검 → **항상 이 Mac에 보관** → 그 Mac의 OneDrive 경로로 `/pes:home "…/pes-projects"` → `/pes:list`.
+
+---
+
+### 8-4. Windows와 Mac을 섞어 쓸 때
+
+- 프로젝트 폴더는 같고, **`config.json`만 컴퓨터마다 다르다.**
+  - Windows: `"home": "C:\\Users\\hong\\OneDrive - 울산연구원\\pes-projects"`
+  - Mac: `"home": "/Users/hong/Library/CloudStorage/OneDrive-울산연구원/pes-projects"`
+- 각 컴퓨터에서 한 번씩 `/pes:home "<그 컴퓨터의 OneDrive>/pes-projects"`를 실행하면 된다.
+- 프로젝트 안의 파일은 OS와 상관없이 같은 형식이라 그대로 이어진다. 답 기록(`feedback.log`)에 두 OS의 경로가 섞여 남는 것은 정상(기록용).
+
+### 8-5. 컴퓨터를 바꿔 가며 쓸 때 (중요)
+
+**한 번에 한 컴퓨터에서만** 작업한다. 같은 프로젝트를 두 곳에서 동시에 고치면 OneDrive가 충돌 사본을 만든다.
+
+A → B로 넘어갈 때:
+1. A: 라운드가 끝나고 답이 모두 처리됐는지 확인 (`/pes:status`).
+2. A: Claude 세션을 닫는다 (Code 탭·터미널).
+3. A: OneDrive 동기화 완료 확인.
+4. B: 동기화 완료 확인 → `/pes:run <프로젝트>`.
+   - **"다른 세션이 이 프로젝트를 쓰고 있습니다"**: A의 잠금이 동기화되어 온 것(2시간 기록이 없으면 자동 해제). A를 확실히 닫았으면 Claude에게 **"A는 닫았어, 가져와"** → `--force`로 넘겨받는다.
    - 대시보드 주소(포트)는 컴퓨터마다 다를 수 있다 — `/pes:status`가 그 컴퓨터의 주소를 알려 준다.
 
-### 8-7. 충돌 사본이 생겼을 때
+### 8-6. 충돌 사본이 생겼을 때
 
-OneDrive는 두 곳에서 동시에 바뀐 파일을 `project-<컴퓨터이름>.json`, `project (1).json`처럼 사본으로 남긴다. `/pes:doctor`가 **[문제] 클라우드 동기화 충돌 사본**으로 알려 준다.
+OneDrive는 두 곳에서 동시에 바뀐 파일을 `project-<컴퓨터이름>.json`, `project (1).json` 같은 사본으로 남긴다. `/pes:doctor`가 **[문제] 클라우드 동기화 충돌 사본**으로 알려 준다.
 
 1. 두 컴퓨터 모두 Claude 세션을 닫는다.
-2. 어느 쪽이 최신인지 정한다 — 파일 수정 시각, 또는 Claude에게 "충돌 사본 비교해 줘" (`show`/`digest`로 라운드·항목 수를 비교한다).
-3. 최신본을 `project.json`으로 두고, 나머지 사본은 프로젝트 폴더 밖(예: 바탕화면)으로 옮겨 보관한다. 지우는 것은 확인이 끝난 뒤에.
+2. 어느 쪽이 최신인지 정한다 — 파일 수정 시각, 또는 Claude에게 "충돌 사본 비교해 줘".
+3. 최신본을 `project.json`으로 두고, 나머지 사본은 프로젝트 폴더 밖(바탕화면 등)으로 옮겨 보관한다. 지우는 것은 확인이 끝난 뒤에.
 4. `/pes:doctor fix` → 대시보드·목록 다시 만들기.
 
-### 8-8. 되돌리기 (OneDrive에서 빼기)
+### 8-7. 되돌리기 (OneDrive에서 빼기)
 
-```
-/pes:home "C:\Users\<이름>\pes-projects"
-```
+- Windows: `/pes:home "C:\Users\<이름>\pes-projects"`
+- Mac: `/pes:home ~/pes-projects`
 
-모든 프로젝트를 다시 로컬 폴더로 옮긴다. 다른 컴퓨터는 그 컴퓨터에서도 `/pes:home`으로 각자 위치를 바꾼다(그렇지 않으면 OneDrive에 남은 사본을 계속 본다).
+모든 프로젝트가 로컬 폴더로 옮겨지고 그 컴퓨터의 `config.json`이 바뀐다. **다른 컴퓨터는 각자** `/pes:home`으로 위치를 바꾼다 (그 컴퓨터의 `config.json`은 여전히 OneDrive를 가리키므로).
 
-### 8-9. 알아 둘 것
+### 8-8. 알아 둘 것
 
-- 동기화되는 것: 프로젝트 폴더 전체(상태·답·보고서·스크린샷). 동기화되지 않는 것: 각 컴퓨터의 PES 홈 설정, API 키, 설치된 도구.
-- 서버 기록 파일(`.pes-port`, `.pes-server`)은 컴퓨터마다 달라 다른 컴퓨터에서 보면 '꺼진 서버의 기록'으로 나온다 — `/pes:doctor fix`로 정리되고, 동작에는 영향 없다.
-- 답 기록(`feedback.log`)에는 각 컴퓨터의 경로가 섞여 남을 수 있다 — 기록용이라 동작에는 영향 없다.
-- 기관 보안 정책상 OneDrive에 넣으면 안 되는 자료(내부 문서 등)가 프로젝트에 들어가는지 먼저 확인한다.
-- iCloud·Dropbox·Google Drive도 같은 방법으로 쓸 수 있다 (`/pes:doctor`가 클라우드 폴더로 인식한다).
+- 서버 기록 파일(`.pes-port`, `.pes-server`)은 컴퓨터마다 달라 다른 컴퓨터에서는 '꺼진 서버의 기록'으로 보인다 — `/pes:doctor fix`로 정리, 동작에는 영향 없음.
+- 기관 보안 정책상 OneDrive에 넣으면 안 되는 자료가 프로젝트에 들어가는지 먼저 확인한다.
+- iCloud·Dropbox·Google Drive도 같은 방법이다 (`/pes:doctor`가 클라우드 폴더로 인식).
 
 ## 9. 토큰(비용) 절약
 
@@ -475,6 +568,9 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.7.3 — 2026-11-02
+- README 「OneDrive로 옮기기」를 Windows·macOS로 나누어 다시 씀: 경로 확인, 옮기기, OneDrive 설정, 두 번째 컴퓨터, 섞어 쓰기, 그리고 OS별 `.pes/config.json` 위치·내용·직접 고칠 때 주의(Windows `\\`·`/`), 동기화하지 않는 이유.
 
 ### 0.7.2 — 2026-11-02
 - kosis·vworld 업그레이드 수정: 자체 `update`가 스킬 갱신 질문을 비대화형으로 받지 못해 **CLI만 바뀌고 스킬은 옛 버전으로 남던 문제** — CLI와 스킬 버전(kosis `VERSION`, vworld 스킬 안 `app/` 바이너리)을 따로 확인하고, 뒤처지면 공식 설치 스크립트로 다시 설치. 업그레이드 후 두 버전을 다시 확인해 보고.
