@@ -24,6 +24,7 @@
                                        eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
   assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리) + out/sources.json
   web <dir> [--assemble]               최종 웹 보고서 out/report.html (표지·목차·각주·출처 부록·인쇄용). 표지 정보는 out/cover.json
+  remote [list|add <주소>|remove <주소>] 다른 기기(Tailscale serve 등) 화면에서도 답 보내기 허용 — 허용한 주소의 사람은 답·승인을 보낼 수 있다
   qa-brief <dir> <stage>               독립 검토(QC/QA) 지시문 rounds/<stage>-R<n>/qa-brief.md (digest·자체 점검 초안·기준 포함)
   qa <dir> <stage> [--file f]          독립 검토 결과 qa.json 을 stages.<stage>.qa 에 기록 (자체 점검은 review_log 에)
   serve <dir>                          로컬 서버 시작 (홈마다 포트 하나 — 이미 떠 있으면 이 프로젝트 주소만)
@@ -1000,6 +1001,36 @@ def cmd_qa(args):
         print(f"  [{x.get('id')}] #{x.get('item')} {x.get('finding')}")
 
 
+def cmd_remote(args):
+    """다른 기기에서 연 화면(Tailscale serve 등)도 답을 보낼 수 있게 허용할 주소 관리 — ~/.pes/config.json trusted_origins."""
+    args = [a for a in args if a != "--"]
+    cfg = {}
+    try:
+        cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    cur = list(cfg.get("trusted_origins") or [])
+    if not args or args[0] == "list":
+        print("답을 보낼 수 있는 다른 주소: " + (", ".join(cur) if cur else "없음 (이 컴퓨터의 127.0.0.1·localhost 만)"))
+        return
+    op, vals = args[0], [v.rstrip("/") for v in args[1:]]
+    for v in vals:
+        if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(:\d+)?", v):
+            die(f"주소 형식이 아닙니다: {v} (예: https://m5.example.ts.net)")
+    if op == "add":
+        cur += [v for v in vals if v not in cur]
+    elif op in ("remove", "rm"):
+        cur = [v for v in cur if v not in vals]
+    elif op == "clear":
+        cur = []
+    else:
+        die("사용: remote [list|add <주소>|remove <주소>|clear]")
+    cfg["trusted_origins"] = cur
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("답을 보낼 수 있는 다른 주소: " + (", ".join(cur) if cur else "없음"))
+
+
 # ---------- 서버 ----------
 def spawn(cmd, log):
     kw = dict(stdout=log, stderr=log, stdin=subprocess.DEVNULL)
@@ -1660,11 +1691,11 @@ def cmd_unlock(args):
 CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start": cmd_round_start,
         "merge": cmd_merge, "render": cmd_render, "approve": cmd_approve, "reopen": cmd_reopen,
         "status": cmd_status, "pending": cmd_pending, "mark": cmd_mark, "chat": cmd_chat,
-        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
+        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock}
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2 and sys.argv[1] in ("list", "hub", "home", "doctor", "stop"):
+    if len(sys.argv) == 2 and sys.argv[1] in ("list", "hub", "home", "doctor", "stop", "remote"):
         sys.argv.append("--")
     if len(sys.argv) < 3 or sys.argv[1] not in CMDS:
         print(__doc__)

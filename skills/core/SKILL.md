@@ -161,6 +161,7 @@ EOF
 - Monitor (timeout_ms 1800000, 만료되면 다시 건다): `$PES watch <dir>`가 출력하는 명령 —
   `tail -n0 -F <dir>/feedback.log | grep --line-buffered FEEDBACK`
   줄 형식: `FEEDBACK <stage> R<n> <kind> <json 경로>` (kind: stage_start | review | feedback | approve | resume | reopen)
+- 다른 기기(Tailscale serve 등)에서 보낸 답은 `via: "remote"`·`origin`·`who`가 붙는다 — 처리할 때 채팅에 "원격(<who 또는 origin>)에서 온 답"이라고 밝힌다. 허용 주소는 `remote list|add|remove`.
 - 알림이 오면 그 json을 읽어 처리하고 `mark`. 세션을 다시 시작했으면 `pending`부터 처리한다.
 - 사용자가 채팅으로 지시하면 `chat`으로 기록한 뒤 같은 방식으로 처리.
 

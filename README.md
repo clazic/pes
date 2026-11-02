@@ -596,6 +596,11 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 
 ## 변경 이력
 
+### 0.15.0 — 2026-11-02
+- **다른 기기에서 보고 답하기**: Tailscale `serve`로 PES 서버(8760)를 내 tailnet에 열면 다른 기기·공유받은 사람도 `https://<기기>.<tailnet>.ts.net/`으로 대시보드·보고서를 본다(`tailscale serve --bg 8760`, 끄기 `tailscale serve --https=443 off`). 다른 사람 컴퓨터는 Tailscale 관리 화면 Machines → 기기 ⋯ → Share 로 초대 링크(1회용)를 보낸다.
+- 그 주소에서 **답 보내기·승인**까지 하려면 `pes remote add https://<기기>.<tailnet>.ts.net` (해제 `remote remove`, 목록 `remote list`). 등록하지 않은 주소에서 온 보내기는 계속 거부된다. 원격으로 온 답은 `via: remote`, 보낸 주소(`origin`), Tailscale 사용자(`who`, 있으면)를 기록한다.
+- 주의: 허용한 주소로 접속할 수 있는 사람은 승인·다시 열기도 보낼 수 있다.
+
 ### 0.14.4 — 2026-11-02
 - 할 일·독립 검토 지적이 남은 채 사용자가 승인하면 지우지 않고 `carry_over`로 다음 단계에 넘긴다 — 단계 보고서 「4-1. 남은 일」에 실리고 다음 단계 첫 라운드에서 먼저 처리.
 

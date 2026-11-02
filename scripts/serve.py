@@ -28,6 +28,14 @@ def main():
     root = Path(sys.argv[1]).resolve()
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 8760
     allowed = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+    CONFIG = Path.home() / ".pes" / "config.json"
+
+    def trusted():
+        """~/.pes/config.json 의 trusted_origins (예: Tailscale serve 주소) — 그 주소에서 연 화면도 답을 보낼 수 있다."""
+        try:
+            return set(json.loads(CONFIG.read_text(encoding="utf-8")).get("trusted_origins") or [])
+        except Exception:
+            return set()
 
     def project_of(path: str):
         """'/<slug>/...' → (프로젝트 폴더, 나머지 경로). 홈 자체가 프로젝트면 '/...' 도."""
@@ -103,8 +111,9 @@ def main():
                 rest = ["feedback"]
             if d is None or rest != ["feedback"]:
                 return self._json(404, {"ok": False})
-            if self.headers.get("Origin") not in allowed:
-                return self._json(403, {"ok": False, "error": "origin"})
+            origin = self.headers.get("Origin") or ""
+            if origin not in allowed and origin not in trusted():
+                return self._json(403, {"ok": False, "error": "origin", "hint": "pes remote add " + origin})
             n = int(self.headers.get("Content-Length") or 0)
             if n <= 0 or n > MAX_BODY:
                 return self._json(413, {"ok": False})
@@ -130,7 +139,8 @@ def main():
                 k += 1
                 fp = fb_dir / f"{stage}-R{rnd}-{ts}-{k}.json"
             rec = {"stage": stage, "round": rnd, "time": ts, "kind": kind, "text": text, "answers": answers,
-                   "spec": str(data.get("spec", ""))[:80], "via": "html"}
+                   "spec": str(data.get("spec", ""))[:80], "via": "html" if origin in allowed else "remote",
+                   "origin": origin, "who": self.headers.get("Tailscale-User-Login") or ""}
             fp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
             with (d / "feedback.log").open("a", encoding="utf-8") as f:
                 f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
