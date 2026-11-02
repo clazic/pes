@@ -331,12 +331,17 @@ def cmd_merge(args):
             for k in ("title", "kind", "question", "summary", "details", "confidence", "verify", "order", "verdict", "path"):
                 if k in r and r[k] not in (None, ""):
                     it[k] = norm_text(r[k])
-            seen = {x.get("url") for x in it["sources"] if x.get("url")}
-            for x in r.get("sources") or []:
-                if x.get("url") and x["url"] in seen:
-                    continue
-                seen.add(x.get("url"))
-                it["sources"].append(x)
+            if s == "write" or it.get("kind") == "section":
+                # 원고의 각주 [^k] 는 sources 의 순서(k번째)를 가리킨다 — 중복 제거·누적하면 번호가 밀리므로 통째로 바꾼다
+                if r.get("sources") is not None:
+                    it["sources"] = list(r.get("sources") or [])
+            else:
+                seen = {x.get("url") for x in it["sources"] if x.get("url")}
+                for x in r.get("sources") or []:
+                    if x.get("url") and x["url"] in seen:
+                        continue
+                    seen.add(x.get("url"))
+                    it["sources"].append(x)
             if "stats" in r:
                 it["stats"] = [dict(x, name=x.get("name") or x.get("label", "")) for x in r["stats"] or []]
             for sh in r.get("shots") or []:
@@ -878,7 +883,7 @@ def cmd_assemble(args):
             if not 1 <= k <= len(srcs):
                 return m.group(0)
             s = srcs[k - 1]
-            ident = s.get("url") or s.get("title")
+            ident = (s.get("url") or "", s.get("title") or "")  # 같은 주소라도 제목(조문·문서)이 다르면 다른 각주
             if ident not in key:
                 key[ident] = len(key) + 1
                 srcs_out.append({"n": key[ident], "title": s.get("title", ""), "url": s.get("url", ""), "date": s.get("date", ""),
@@ -886,6 +891,9 @@ def cmd_assemble(args):
                 notes.append(f"[^{key[ident]}]: {s.get('title', '')}" + (f", {s['url']}" if s.get("url") else "")
                              + (f" ({s['date']})" if s.get("date") else ""))
             return f"[^{key[ident]}]"
+        bad = sorted({int(k) for k in re.findall(r"\[\^(\d+)\]", it.get("details") or "") if not 1 <= int(k) <= len(srcs)})
+        if bad:
+            print(f"경고: #{it['id']} 각주 번호 {bad} 가 이 장 출처({len(srcs)}개) 범위 밖 — 원고와 sources 순서를 확인", file=sys.stderr)
         body = re.sub(r"\[\^(\d+)\]", sub, it.get("details") or "")
         out += [body.strip(), ""]
     if p.get("conclusion"):
