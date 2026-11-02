@@ -44,6 +44,10 @@
   ul.uri li::before { position: absolute; left: 0; color: var(--muted); }
   ul.uri li.u1::before { content: "□"; color: var(--fg); } ul.uri li.u2 { margin-left: 20px; } ul.uri li.u2::before { content: "○"; }
   ul.uri li.u3 { margin-left: 40px; } ul.uri li.u3::before { content: "-"; }
+  ul.uri li.o1::before { content: "○"; color: var(--fg); } ul.uri li.o1 { margin-top: 8px; }
+  ul.uri li.o1 + li.u3, ul.uri li.u3 + li.u3 { margin-left: 20px; } ul.uri li.u3::before { content: "–"; }
+  ul.uri li.ref { margin-left: 20px; font-size: 12.5px; color: var(--muted); } ul.uri li.ref::before { content: "•"; }
+  p.note { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
   blockquote { margin: 0 0 16px; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--soft); color: var(--fg); }
   .summary { background: color-mix(in srgb, var(--accent) 6%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 6px; padding: 24px 28px; margin: 0 0 32px; }
   .summary h2 { border: 0; margin: 0 0 12px; padding: 0; font-size: 17px; color: var(--accent); }
@@ -106,6 +110,7 @@ const toc = []; let hid = 0;
 const notes = {};
 function md(src) {
   const lines = String(src || '').split('\n'); let out = '', list = null, para = [], inSum = false;
+  const hasBox = /^\s*□\s/m.test(String(src || ''));
   const fP = () => { if (para.length) { out += '<p>' + inline(para.join(' ')) + '</p>'; para = []; } };
   const fL = () => { if (list) { out += `</${list === 'uri' ? 'ul' : list}>`; list = null; } };
   const open = k => { if (list !== k) { fL(); out += k === 'uri' ? '<ul class="uri">' : `<${k}>`; list = k; } };
@@ -132,10 +137,16 @@ function md(src) {
     if ((m = l.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)\)/))) { fP(); fL(); out += `<figure><img src="${esc(m[2])}" alt="${esc(m[1])}" loading="lazy"></figure>`; continue; }
     if ((m = l.match(/^\s*<(표|그림)\s*([\d-]+)>\s*(.*)/))) { fP(); fL(); out += `<div class="cap">&lt;${esc(m[1])} ${esc(m[2])}&gt; ${inline(m[3])}</div>`; continue; }
     if ((m = l.match(/^\s*(자료|출처|주)\s*:\s*(.*)/))) { fP(); fL(); out += `<div class="src">${esc(m[1])}: ${inline(m[2])}</div>`; continue; }
+    // 울산연구원 작성가이드: **[표 2-1] 제목** · *자료: …* · ※ 비고
+    if ((m = l.match(/^\s*\*\*\[(표|그림)\s*([\d-]+)\]\s*(.*?)\*\*\s*$/))) { fP(); fL(); out += `<div class="cap">[${esc(m[1])} ${esc(m[2])}] ${inline(m[3])}</div>`; continue; }
+    if ((m = l.match(/^\s*\*(자료|출처|주)\s*:\s*(.*?)\*\s*$/))) { fP(); fL(); out += `<div class="src">${esc(m[1])}: ${inline(m[2])}</div>`; continue; }
+    if ((m = l.match(/^\s*※\s*(.*)/))) { fP(); fL(); out += `<p class="note">※ ${inline(m[1])}</p>`; continue; }
     if ((m = l.match(/^\s*>\s?(.*)/))) { fP(); fL(); out += `<blockquote>${inline(m[1])}</blockquote>`; continue; }
     if ((m = l.match(/^\s*□\s+(.*)/))) { fP(); open('uri'); out += `<li class="u1">${inline(m[1])}</li>`; continue; }
-    if ((m = l.match(/^\s*○\s+(.*)/))) { fP(); open('uri'); out += `<li class="u2">${inline(m[1])}</li>`; continue; }
-    if (list === 'uri' && (m = l.match(/^\s+-\s+(.*)/))) { fP(); out += `<li class="u3">${inline(m[1])}</li>`; continue; }
+    // ○: □ 아래면 2단계, 맨 앞(들여쓰기 없음)이고 □가 없으면 1단계(울산연구원 작성가이드)
+    if ((m = l.match(/^(\s*)○\s+(.*)/))) { fP(); open('uri'); out += `<li class="${m[1].length || hasBox ? 'u2' : 'o1'}">${inline(m[2])}</li>`; continue; }
+    if (list === 'uri' && (m = l.match(/^\s+[-–]\s+(.*)/))) { fP(); out += `<li class="u3">${inline(m[1])}</li>`; continue; }
+    if (list === 'uri' && (m = l.match(/^\s*•\s+(.*)/))) { fP(); out += `<li class="ref">${inline(m[1])}</li>`; continue; }
     if ((m = l.match(/^\s*[-*]\s+(.*)/))) { fP(); open('ul'); out += `<li>${inline(m[1])}</li>`; continue; }
     if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { fP(); open('ol'); out += `<li>${inline(m[1])}</li>`; continue; }
     if (!l.trim()) { fP(); fL(); continue; }
