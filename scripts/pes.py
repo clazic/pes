@@ -1171,6 +1171,10 @@ def doctor_env(R):
     else:
         ok = os.access(h, os.W_OK)
         R.add("환경", "ok" if ok else "bad", f"PES 홈 {h} ({src})", "" if ok else "쓰기 권한 없음")
+        cloud = next((c for c in ("OneDrive", "CloudStorage", "iCloud", "Mobile Documents", "Dropbox", "Google Drive") if c.lower() in str(h).lower()), None)
+        if cloud:
+            R.add("환경", "info", f"PES 홈이 클라우드 동기화 폴더({cloud}) 안에 있음",
+                  "한 번에 한 컴퓨터에서만 작업, 폴더는 '항상 이 장치에 유지', 다른 컴퓨터로 옮기기 전 동기화 완료 확인 (README 「OneDrive」)")
     try:
         cfg = json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
         if os.environ.get("PES_HOME") and cfg.get("home") and Path(cfg["home"]).expanduser().resolve() != h:
@@ -1257,6 +1261,10 @@ def doctor_project(R, d: Path):
         return
     p = load(d)
     R.add(tag, "ok", f"{p.get('topic', '')}", f"현재 {LABEL.get(p.get('current'), p.get('current'))}")
+    dup = [x.name for x in d.glob("*.json") if x.name not in ("project.json", "library.json")
+           and re.match(r"(project|library)[ _-].+\.json$|(project|library) \(\d+\)\.json$", x.name)]
+    if dup:
+        R.add(tag, "bad", "클라우드 동기화 충돌 사본", ", ".join(dup) + " — 두 컴퓨터에서 동시에 고친 흔적. 어느 쪽이 최신인지 확인 후 사본을 정리 (README 「OneDrive」)")
     if (d / "project.json.tmp").exists():
         R.add(tag, "warn", "저장 중 끊긴 임시 파일", "project.json.tmp", fix=lambda: (d / "project.json.tmp").unlink(missing_ok=True))
     # 단계 일관성
