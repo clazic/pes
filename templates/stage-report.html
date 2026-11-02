@@ -29,9 +29,20 @@
   .bar a, .bar button { font: inherit; font-size: 13px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--fg); text-decoration: none; cursor: pointer; }
   @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } nav.toc { position: static; max-height: none; } }
   @media print { nav.toc, .bar { display: none; } .wrap { display: block; padding: 0; } body { background: #fff; color: #000; font-size: 11pt; } h2 { break-after: avoid; } table { display: table; } }
+
+:root { --bg:#f3f5f7; --fg:#202c3c; --muted:#5f6f80; --card:#fff; --line:#d7dfe7; --accent:#245e9e; --ok:#317057; --warn:#98681b; --bad:#ad3e3e; --chip:#edf1f5; --soft:#f7f9fb; }
+@media(prefers-color-scheme:dark){:root{--bg:#131b25;--fg:#e3eaf2;--muted:#a8b6c5;--card:#1c2735;--line:#39495d;--accent:#92bffe;--ok:#8bd5af;--warn:#f0c276;--bad:#ffaaa4;--chip:#293747;--soft:#212e3d;color-scheme:dark;}}
+.globalbar { max-width:1296px; margin:0 auto; padding:32px 0 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; color:var(--fg); font:700 21px/1.4 -apple-system,BlinkMacSystemFont,"Malgun Gothic",sans-serif; letter-spacing:.08em; }
+.globalbar span{font-size:13px;font-weight:400;letter-spacing:0;color:var(--muted)}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+@media(max-width:1360px){.globalbar{margin:0 32px}}@media(max-width:600px){.globalbar{margin:0 16px;padding-top:20px}}
+
+body{background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif}.wrap{max-width:1296px;grid-template-columns:240px minmax(0,1fr);gap:32px;padding:32px 24px 80px}nav.toc{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:16px;font-size:13px;top:24px}nav.toc b{display:block;margin-bottom:8px}nav.toc a{padding:4px 0}article{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:32px;max-width:920px}.bar{gap:8px;margin:0 0 32px}.bar a,.bar button{border-radius:5px;padding:8px 12px;background:var(--card)}.kicker{font-size:13px}h1{font-size:30px;margin:4px 0 16px}h2{margin:48px 0 16px;border-color:var(--line);padding-bottom:12px}h3{margin:32px 0 12px}h4{margin:24px 0 8px}p{margin:8px 0 16px}table{margin:16px 0 24px;font-size:14px}th,td{padding:8px 12px}th{background:var(--soft)}
+@media(max-width:860px){.wrap{display:block;padding:24px 16px 64px}nav.toc{position:static;max-height:240px;margin-bottom:24px}article{padding:24px}}@media print{.globalbar{display:none}article{border:0;padding:0}.wrap{padding:0}nav.toc,.bar{display:none}body{background:#fff;color:#000}}
 </style>
 </head>
 <body>
+<div class="globalbar"><b>PES</b><span>프로젝트 실행 시스템</span></div>
 <div class="wrap"><nav class="toc" id="toc" aria-label="목차"></nav><article id="doc"></article></div>
 <script id="data" type="application/json">/*__DATA__*/null</script>
 <script>

@@ -38,9 +38,23 @@
   .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.on { opacity: 1; }
   .sent { text-align: center; padding: 30px; font-size: 17px; }
+
+:root { --bg:#f3f5f7; --fg:#202c3c; --muted:#5f6f80; --card:#fff; --line:#d7dfe7; --accent:#245e9e; --ok:#317057; --warn:#98681b; --bad:#ad3e3e; --chip:#edf1f5; --soft:#f7f9fb; }
+@media(prefers-color-scheme:dark){:root{--bg:#131b25;--fg:#e3eaf2;--muted:#a8b6c5;--card:#1c2735;--line:#39495d;--accent:#92bffe;--ok:#8bd5af;--warn:#f0c276;--bad:#ffaaa4;--chip:#293747;--soft:#212e3d;color-scheme:dark;}}
+.globalbar { max-width:1296px; margin:0 auto; padding:32px 0 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; color:var(--fg); font:700 21px/1.4 -apple-system,BlinkMacSystemFont,"Malgun Gothic",sans-serif; letter-spacing:.08em; }
+.globalbar span{font-size:13px;font-weight:400;letter-spacing:0;color:var(--muted)}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+@media(max-width:1360px){.globalbar{margin:0 32px}}@media(max-width:600px){.globalbar{margin:0 16px;padding-top:20px}}
+
+body { font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif; font-size:15px; line-height:1.65; }
+main { max-width:960px; padding:32px 24px 144px; }
+h1 { font-size:28px; line-height:1.3; margin:0 0 8px; }.meta{font-size:13px}.pipeline{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));flex-wrap:nowrap;overflow-x:auto;margin:24px 0 32px;border:1px solid var(--line);border-radius:6px}.stage{min-width:0;border:0;border-right:1px solid var(--line);border-top:3px solid transparent;padding:12px 8px;font-size:14px}.stage:first-child,.stage:last-child{border-radius:0}.stage:last-child{border-right:0}.stage.done{border-top-color:var(--ok)}.stage.cur{border-top-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--card));color:var(--accent)}
+section.box{border-radius:6px;padding:24px;margin:0 0 24px}section.box h2{font-size:18px;margin:0 0 16px}dl.inh{gap:8px 16px}.bar{padding:12px 24px}.bar .inner{max-width:912px;gap:12px}.bar button{border-radius:5px}button.primary{background:var(--accent);color:#fff}@media(prefers-color-scheme:dark){button.primary{color:#13263d}}
+@media(max-width:600px){main{padding:24px 16px 180px}.bar .inner{flex-wrap:wrap}.bar .hint{flex-basis:100%}section.box{padding:16px}}
 </style>
 </head>
 <body>
+<div class="globalbar"><b>PES</b><span>프로젝트 실행 시스템</span></div>
 <main id="app"></main>
 <div class="bar"><div class="inner">
   <div class="hint" id="hint">추천 답이 미리 골라져 있습니다. 바꿀 것만 바꾸고 보내세요.</div>

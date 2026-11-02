@@ -200,7 +200,6 @@ a { text-underline-offset:3px; }
 .meta { font-size:13px; }
 .workbar { display:flex; justify-content:space-between; align-items:center; padding-bottom:16px; margin-bottom:24px; border-bottom:1px solid var(--line); gap:16px; }
 .brand { display:flex; align-items:baseline; gap:12px; }.brand b { font-size:21px; letter-spacing:.08em; }.brand span { font-size:13px; color:var(--muted); }
-.mock-label { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:3px 9px; white-space:nowrap; }
 .eyebrow { color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.05em; }
 .page-heading { margin-bottom:26px; }.page-heading .meta { display:flex; gap:8px 20px; flex-wrap:wrap; }
 .kcap { font-size:13px; color:var(--muted); margin:24px 0 10px; letter-spacing:0; font-weight:600; }
@@ -243,6 +242,39 @@ article.item { border-radius:6px; margin:16px 0; }.ihead { background:var(--soft
 @media(prefers-color-scheme:dark) { :root { --on-accent:#13263d; --on-status:#172b23; } }
 button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
 .pill.approved,.pill.active,.pill.asking,.pill.stale,.badge.v-supported,.badge.v-partial,.badge.v-unsupported,.tag.new,.tag.deep,.tag.fix,.tag.rm { color:var(--on-status); }
+/* 세로 간격 체계: 4 · 8 · 12 · 16 · 24 · 32 · 48
+   묶음 사이(구역↔구역) 32 · 제목↔내용 12 · 같은 묶음 안 8 · 글자 줄 사이 4 */
+:root { --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; }
+.workbar { padding-bottom:var(--s4); margin-bottom:var(--s6); }
+.page-heading { margin:0 0 var(--s6); }
+.page-heading .eyebrow { margin-bottom:var(--s1); }
+.page-heading h1, h1 { margin:0 0 var(--s2); line-height:1.3; }
+.kpi { min-height:0; padding:var(--s4) 18px; gap:0; }
+.kpi .scope { margin:0 0 var(--s2); }
+.kpi b { margin:0 0 var(--s1); line-height:1.15; }
+.kpi .ksub { margin-top:var(--s2); padding-top:var(--s2); border-top:1px dashed var(--line); }
+
+.page-heading { margin-bottom:var(--s5); }
+.pipeline { margin:0 0 var(--s6); }
+section.box { margin:0 0 var(--s5); padding:var(--s5); }
+section.box.now { margin:0 0 var(--s6); padding:20px var(--s5); }
+.now .meta { margin-bottom:var(--s1); }
+section.box > h2 { margin:0 0 var(--s1); line-height:1.35; }
+section.box > h2 + .meta { margin:0 0 var(--s4); }
+section.box > h2 + :not(.meta) { margin-top:var(--s3); }
+.kcap { margin:0 0 var(--s3); }
+.kpis { margin:0 0 var(--s6); }
+.shead { margin:0 0 var(--s3); }
+.whead, .ohead { padding:10px 12px; }
+.wrow, .orow { padding:var(--s4) 12px; min-height:0; }
+.wrow.pending, .orow.blank { padding:10px 12px; color:var(--muted); }
+.wrow.pending small, .orow.blank small { margin-top:0; }
+article.item { margin:0 0 var(--s4); }
+.ihead { padding:var(--s4) 20px; } .ibody { padding:var(--s4) 20px 20px; }
+.wrow.pending .wname, .orow.blank .oname { display:flex; align-items:baseline; gap:var(--s2); flex-wrap:wrap; }
+.wrow.pending .wname small, .orow.blank .oname small { display:inline; margin:0; }
+
+@media(max-width:600px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.workbar{margin-bottom:24px;}section.box{padding:16px;}.pipeline{overflow-x:auto;grid-template-columns:repeat(7,minmax(120px,1fr));}}
 </style>
 </head>
 <body>
@@ -285,6 +317,8 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
   .gk-stale { background: #7a5cc4; } .gk-decide { background: var(--ok); } .gk-scope { background: var(--muted); }
   .gap .detail { color: var(--muted); }
   .q-missing { outline: 2px solid var(--bad); outline-offset: 4px; border-radius: 6px; }
+
+.qs .q{padding:24px 0}.qs .q:first-child{padding-top:0}.qs .q:last-child{padding-bottom:0}.q-label{font-size:16px;line-height:1.4}.q-help{font-size:13px;margin-top:4px}.opts{gap:8px;margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));grid-auto-rows:1fr}.opt{border-radius:5px;padding:12px;line-height:1.5}.opt small{font-size:13px;line-height:1.5;margin-top:4px}.rec{font-size:12px}.qs input.qt,.qs input.qo{margin-top:8px;padding:10px 12px}.gap{margin-bottom:8px}.gk{font-size:12px}
 </style>
 <script>
 const QF = (() => {
