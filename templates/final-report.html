@@ -88,7 +88,11 @@
     h3, h4, .cap { break-after: avoid; } figure { break-inside: avoid; } tr { break-inside: avoid; }
     article a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8pt; color: #555; word-break: break-all; }
     section.notes, section.appendix { break-before: page; }
+    .ptoc { display: block !important; break-after: page; } .ptoc h2 { break-before: auto; font-size: 16pt; margin: 0 0 6mm; }
+    .ptoc a { display: block; color: #000; text-decoration: none; padding: 1.2mm 0; border-bottom: 0.2mm dotted #bbb; } .ptoc a.l3 { padding-left: 6mm; font-size: 9.5pt; color: #333; } .ptoc a.app { margin-top: 3mm; }
+    .ptoc a::after { content: none !important; }
   }
+  .ptoc { display: none; }
 </style>
 </head>
 <body>
@@ -183,7 +187,9 @@ if (S.length) {
   toc.push({ n: 2, id: 'appendix', t: '부록 · 출처 목록', app: true });
 }
 body += `<div class="colophon">${esc(C.title || D.topic)} · ${esc(D.built || '')} 생성 · PES 프로젝트 실행 시스템</div>`;
-document.getElementById('doc').innerHTML = body;
+// 인쇄용 목차 (장·절) — 화면에서는 숨김, 인쇄·PDF에서 표지 다음 쪽
+const ptoc = '<nav class="ptoc" aria-hidden="true"><h2>목차</h2>' + toc.filter(h => h.n <= 3).map(h => `<a class="l${h.n}${h.app ? ' app' : ''}">${inline(h.t)}</a>`).join('') + '</nav>';
+document.getElementById('doc').innerHTML = ptoc + body;
 let firstApp = true;
 document.getElementById('toc').innerHTML = '<b>목차</b>' + toc.map(h => { const c = `l${h.n}${h.app && firstApp ? ' app' : ''}`; if (h.app) firstApp = false; return `<a class="${c}" href="#${h.id}">${inline(h.t)}</a>`; }).join('');
 // 읽는 위치 표시

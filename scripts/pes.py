@@ -918,6 +918,8 @@ def cmd_web(args):
     if not (od / "report.md").exists() or "--assemble" in args:
         cmd_assemble([str(d)])
     md = (od / "report.md").read_text(encoding="utf-8")
+    if (od / "appendix.md").exists():  # 부록(통계 원표·계산 방법·확인 과제 등) — 본문 뒤, 각주·출처 목록 앞
+        md = md.rstrip() + "\n\n" + (od / "appendix.md").read_text(encoding="utf-8")
     srcs = []
     if (od / "sources.json").exists():
         srcs = json.loads((od / "sources.json").read_text(encoding="utf-8"))
