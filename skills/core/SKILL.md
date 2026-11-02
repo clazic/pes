@@ -206,6 +206,7 @@ EOF
 
 ## 공통 작업 규칙
 
+- **HWP·HWPX**: ego-browser에서 클릭하면 브라우저 안에서 열린다 — 한글 파일 출처도 열어 읽는다(method=browser, note "hwp 열람"). 조사·검증·독립 검토 모두.
 - **ego-browser**: 쓰기 전 ego-browser 스킬 로드 → `ego-browser skill` 출력대로. 작업 하나에 TaskSpace 하나, 끝나면 `finish({keep:[]})`. 보안문자(CAPTCHA)는 풀지 않고 사용자에게 넘긴다. 브라우저 알림 프롬프트에 1분 이상 기다리지 않는다. 쿠키·캐시·스토리지는 지우지 않는다. 비밀번호는 받지 않는다.
 - 서브에이전트가 끝나면 남은 Space를 확인해(`listTaskSpaces()`) 노는 Space를 닫는다.
 - API 키는 사용자가 줄 때만 등록하고 채팅에 원문을 다시 쓰지 않는다.

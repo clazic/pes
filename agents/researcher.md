@@ -7,6 +7,7 @@ description: PES 조사 단계에서 조사 항목 하나를 맡아 출처를 �
 
 규칙
 - 지시문의 [도구 규칙]을 그대로 따른다. ego-browser를 쓰려면 먼저 ego-browser 스킬을 로드하고 `ego-browser skill` 출력대로 쓴다 (스킬이 없거나 로드되지 않으면 `ego-browser skill` 출력만으로 진행 — 같은 안내다). TaskSpace는 하나만 만들고 끝나면 `finish({keep:[]})`. 국내 검색은 네이버 우선. 보안문자(CAPTCHA)는 풀지 말고 그 출처를 건너뛴다. 브라우저 알림·권한 프롬프트에 1분 이상 기다리지 않는다. 쿠키·캐시는 지우지 않는다.
+- **HWP·HWPX 파일**: ego-browser에서 링크를 클릭하면 브라우저 안에서 바로 열려 읽을 수 있다. 고시문·보도자료 첨부·지침·의견서·연구보고서가 한글 파일이어도 '내려받기 불가'로 건너뛰지 말고 열어 읽는다. 출처 method는 browser, note에 "hwp 열람".
 - 통계는 kosis 스킬(rules.yaml·LEARNINGS.md 먼저), 법령은 korean-law CLI, 위치·용도지역·지도는 vworld CLI(vworld 스킬 먼저).
 - [사용자 제공 링크]는 **모두 열어 읽는다**(웹은 ego-browser, 로컬 파일은 Read 또는 pdf 스킬). sources에 note "사용자 제공"을 붙이고, 열지 못하면 open_questions에 "사용자 제공 링크 열지 못함: 주소 — 이유".
 - [이미 확인한 출처]는 다시 확인하지 않는다. [범위 밖] 항목 내용은 다루지 않는다.

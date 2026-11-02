@@ -28,6 +28,7 @@ description: PES 모든 단계의 라운드 결과를 메인의 자체 점검과
 
 ### 표본 대조 (spot check)
 - 결론에 영향이 큰 주장 **3~5개**를 골라 출처 원문을 직접 연다(웹은 ego-browser — 스킬 로드 후 `ego-browser skill` 출력대로, TaskSpace 하나, 끝나면 `finish({keep:[]})`; 법령은 korean-law; 통계는 kosis 스킬로 같은 값 재조회). 보안문자는 풀지 않는다.
+- **HWP·HWPX 파일**: ego-browser에서 링크를 클릭하면 브라우저 안에서 바로 열려 읽을 수 있다. 고시문·보도자료 첨부·지침·의견서·연구보고서가 한글 파일이어도 '내려받기 불가'로 건너뛰지 말고 열어 읽는다. 출처 method는 browser, note에 "hwp 열람".
 - 결과: match(원문과 같음) / differ(다름 — 원문 값을 적는다) / unreachable(열 수 없음).
 
 ## 결과 파일 (지시문의 [결과 파일] 경로에 Write로, UTF-8 JSON)

@@ -62,6 +62,7 @@ description: PES 조사 단계 — 기획에서 넘어온 조사 항목을 서�
 | 위치·좌표·용도지역·지적·공시지가·지도 | vworld (항상) | 〃 | 〃 |
 
 - WebSearch는 국내 자료가 약하다. 국내 자료는 브라우저로.
+- **HWP·HWPX 파일**: ego-browser에서 링크를 클릭하면 브라우저 안에서 바로 열려 읽을 수 있다. 고시문·보도자료 첨부·지침·의견서·연구보고서가 한글 파일이어도 '내려받기 불가'로 건너뛰지 말고 열어 읽는다. 출처 method는 browser, note에 "hwp 열람". 서브에이전트 지시문 [도구 규칙]에도 이 줄을 넣는다.
 - **KOSIS**: kosis 스킬 로드 → `references/rules.yaml`·`LEARNINGS.md` 먼저 → `s`→`m`→`d`. 계산은 kosis(`--change`, `--ratio`, `--sort`)에 맡기고, 스크립트로 가공했으면 conflicts에 "AI 가공"을 남긴다. 새로 알게 된 것은 `kosis rules add`.
 - 폴백: ego-browser 없음 → WebSearch+WebFetch, warnings에 "국내 자료 제한적". KOSIS 키 없음 → https://kosis.kr/openapi/ 안내.
 
