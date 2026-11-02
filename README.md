@@ -83,6 +83,15 @@ Claude가 실행하는 명령에서도 보이도록 **Claude Code 설정**에 �
 - vworld 키: vworld 스킬 안내대로 등록
 - 셸 설정 파일(`.zshrc` 등)에만 넣으면 Claude 명령에서 안 보일 수 있다. `/pes:doctor`가 알려 준다.
 
+### Windows · Claude Desktop
+
+- **Claude Desktop의 Code 탭(로컬 세션)에서 쓴다.** Cowork 모드는 가상 머신에서 돌고 플러그인 형식·저장 위치가 달라, 내 컴퓨터의 대시보드 서버·CLI 도구를 쓰는 PES와 맞지 않는다.
+- 플러그인 설치: Code 탭 입력창 옆 **+ → Add plugins**, 또는 터미널에서 `claude plugin marketplace add …`. 데스크톱 앱과 CLI는 같은 설정 폴더(`%USERPROFILE%\.claude`)를 읽는다.
+- **Git for Windows(Git Bash) 설치 필수**: 웹에서 보낸 답을 자동으로 받는 기능(Monitor)이 Windows에서는 Git Bash가 있어야 동작하고, GitHub에서 플러그인을 받을 때도 git이 필요하다.
+- **PATH는 Windows 환경 변수에** 넣고 Claude Desktop을 다시 시작한다 (데스크톱 앱은 PowerShell 프로필을 읽지 않는다). Python·kosis·korean-law·vworld·ego-browser가 PATH에 있어야 한다.
+- **API 키 등 환경변수**: `settings.json`의 env도 읽지만, 데스크톱 앱 설정의 환경(Environment) → **Environment variables**에 넣는 것이 확실하다 (`LAW_OC`, 필요하면 `NODE_EXTRA_CA_CERTS`).
+- 설치 후 `/pes:doctor`로 확인.
+
 ### Windows 메모
 
 - Claude Code의 셸은 Git Bash를 쓴다 (답 자동 수신에 `tail -F`·`grep` 필요).
@@ -261,6 +270,7 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ## 변경 이력
 
 ### 0.4.1 — 2026-11-02
+- README: Windows용 Claude Desktop(Code 탭) 사용 안내 — Git Bash 필수, PATH·환경변수 설정 위치, Cowork 모드 비권장.
 - 배포 준비: 스킬 문서에서 이 Mac 전용 경로(`~/.local/bin`, 인증서 파일)를 없애고 `which`(도구 경로 찾기, Windows 포함)와 Claude Code 설정 env를 쓰도록 변경.
 - `.gitignore`, GitHub 설치·업데이트·배포 방법을 README에 추가.
 
