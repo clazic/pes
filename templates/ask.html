@@ -27,7 +27,7 @@
   section.box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 16px 0; }
   section.box h2 { font-size: 14.5px; margin: 0 0 8px; }
   dl.inh { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13.5px; }
-  dl.inh dt { color: var(--muted); } dl.inh dd { margin: 0; }
+  dl.inh dt { color: var(--muted); } dl.inh dd { margin: 0; } dl.inh dd.full { grid-column: 1 / -1; }
   textarea { width: 100%; min-height: 70px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; }
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 10px 20px; }
   .bar .inner { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
@@ -76,7 +76,9 @@ const qs = SP.questions || [];
 function render() {
   const ST = (D.stages || STAGES.map(l => ({ label: l }))).map(s => ({ ...s, label: ({ analyze: '분석-종합', publish: '산출-공유' })[s.key] || s.label }));
   const cur = ST.findIndex(x => x.key === SP.stage || x.label === SP.stage_label);
-  const inh = (SP.inherited || []).length ? `<section class="box"><h2>이미 정해진 것</h2><dl class="inh">${SP.inherited.map(x => `<dt>${esc(x.label)}</dt><dd>${esc(x.value)}</dd>`).join('')}</dl></section>` : '';
+  // inherited 는 {label, value} 객체 또는 "라벨: 값" 문자열 둘 다 받는다
+  const inhPair = x => { if (x && typeof x === 'object') return [x.label || '', String(x.value ?? '')]; const s = String(x ?? ''), i = s.indexOf(':'); return i > 0 && i < 30 ? [s.slice(0, i).trim(), s.slice(i + 1).trim()] : ['', s]; };
+  const inh = (SP.inherited || []).length ? `<section class="box"><h2>이미 정해진 것</h2><dl class="inh">${SP.inherited.map(inhPair).map(([l, v]) => l ? `<dt>${esc(l)}</dt><dd>${esc(v)}</dd>` : `<dd class="full">${esc(v)}</dd>`).join('')}</dl></section>` : '';
   document.getElementById('app').innerHTML = `
     <h1>${esc(SP.title || '질문')}</h1>
     <div class="meta">${esc(KIND[SP.kind] || '')}${D.topic ? ' · ' + esc(D.topic) : ''} · 만든 시각 ${esc(D.built || '')}</div>

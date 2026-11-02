@@ -111,7 +111,7 @@ EOF
 
 ## 단계 생명주기 (모든 단계 스킬이 따른다)
 
-1. **시작 질문** (status=asking): `ask-prep` → 명세 다듬기(이미 정해진 것은 지우고 `inherited`로, `_when`이 안 맞는 질문 삭제, 추천을 주제에 맞게) → `ask` → `serve` → 브라우저로 연다 → Monitor. 채팅엔 한 줄: "질문 폼을 열었습니다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 보내 주세요."
+1. **시작 질문** (status=asking): `ask-prep` → 명세 다듬기(이미 정해진 것은 지우고 `inherited`로 — 항목은 `{"label": "주제", "value": "…"}` 또는 `"주제: …"` 문자열, `_when`이 안 맞는 질문 삭제, 추천을 주제에 맞게) → `ask` → `serve` → 브라우저로 연다 → Monitor. 채팅엔 한 줄: "질문 폼을 열었습니다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 보내 주세요."
 2. **답(kind=stage_start)** → answers를 `stages.<단계>.settings`에 저장 (기획 답은 `p.settings`에도) → `mark`.
 3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge` 또는 직접) → `changes`에 3~5줄(각 줄 `짧은 라벨: 내용` 형식 — 대시보드 팝업에서 라벨·내용 두 칸으로 보인다) → **AI 점검 작성** → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개를 올렸습니다."
 4. **답(kind=review/feedback)** → 아래 「답 해석」대로 항목 status/request 갱신 → `mark` → 계획 3~5줄을 채팅에 밝히고 바로 다음 라운드. 할 일 항목(new·deepen·revise·browser)만 작업, done은 건드리지 않는다.
