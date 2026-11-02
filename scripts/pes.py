@@ -290,6 +290,12 @@ def cmd_round_start(args):
     d, s = pdir(args[0]), stage_arg(args[1])
     p = load(d)
     st = p["stages"][s]
+    if st["round"] > 0 and st.get("changes"):  # 끝난 라운드의 변경점을 이력에 한 줄로 남긴다 (본문은 snapshots/)
+        labels = [str(c).split(":", 1)[0].strip() for c in st["changes"]]
+        qa = next((q for q in reversed(st.get("qa") or []) if int(q.get("round") or 0) == st["round"]), None)
+        st.setdefault("history", []).append(f"R{st['round']} ({now()}): " + " · ".join(labels)
+                                             + (f" / 독립 검토 {qa.get('verdict')}" if qa else "")
+                                             + f" — 상세 snapshots/{s}-R{st['round']}.json")
     st["round"] += 1
     st["status"] = "active"
     st["changes"] = []
