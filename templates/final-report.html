@@ -30,7 +30,7 @@
   nav.toc { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 16px; font-size: 13px; }
   nav.toc b { display: block; margin-bottom: 8px; }
   nav.toc a { display: block; color: var(--muted); text-decoration: none; padding: 4px 0; line-height: 1.5; }
-  nav.toc a:hover, nav.toc a.on { color: var(--accent); } nav.toc a.l3 { padding-left: 12px; font-size: 12.5px; }
+  nav.toc a:hover, nav.toc a.on { color: var(--accent); } nav.toc a.l3 { padding-left: 12px; font-size: 12.5px; } nav.toc a.l4 { padding-left: 24px; font-size: 12px; }
   nav.toc a.app { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
   article { min-width: 0; max-width: 880px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 40px 48px; }
 
@@ -40,13 +40,16 @@
   article h4 { font-size: 14.5px; margin: 24px 0 8px; }
   article p { margin: 0 0 16px; }
   article ul, article ol { margin: 0 0 16px; padding-left: 22px; } article li { margin: 4px 0; }
-  ul.uri { list-style: none; padding-left: 0; } ul.uri li { position: relative; padding-left: 20px; }
-  ul.uri li::before { position: absolute; left: 0; color: var(--muted); }
-  ul.uri li.u1::before { content: "□"; color: var(--fg); } ul.uri li.u2 { margin-left: 20px; } ul.uri li.u2::before { content: "○"; }
-  ul.uri li.u3 { margin-left: 40px; } ul.uri li.u3::before { content: "-"; }
-  ul.uri li.o1::before { content: "○"; color: var(--fg); } ul.uri li.o1 { margin-top: 8px; }
-  ul.uri li.o1 + li.u3, ul.uri li.u3 + li.u3 { margin-left: 20px; } ul.uri li.u3::before { content: "–"; }
-  ul.uri li.ref { margin-left: 20px; font-size: 12.5px; color: var(--muted); } ul.uri li.ref::before { content: "•"; }
+  /* 개조식 목록: 들여쓰기는 padding 으로만 (margin 은 다른 규칙과 겹치지 않게 0) */
+  article ul.uri { list-style: none; padding-left: 0; margin: 0 0 16px; }
+  article ul.uri li { position: relative; margin: 4px 0; padding-left: 20px; }
+  article ul.uri li::before { position: absolute; left: 0; color: var(--muted); }
+  article ul.uri li.u1::before { content: "□"; color: var(--fg); }
+  article ul.uri li.o1 { margin-top: 10px; } article ul.uri li.o1::before { content: "○"; color: var(--fg); }
+  article ul.uri li.u2 { padding-left: 40px; } article ul.uri li.u2::before { content: "○"; left: 20px; }
+  article ul.uri li.u3 { padding-left: 40px; } article ul.uri li.u3::before { content: "–"; left: 20px; }
+  article ul.uri li.u3.deep { padding-left: 60px; } article ul.uri li.u3.deep::before { left: 40px; }
+  article ul.uri li.ref { padding-left: 40px; font-size: 12.5px; color: var(--muted); } article ul.uri li.ref::before { content: "•"; left: 22px; }
   p.note { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
   blockquote { margin: 0 0 16px; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--soft); color: var(--fg); }
   .summary { background: color-mix(in srgb, var(--accent) 6%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 6px; padding: 24px 28px; margin: 0 0 32px; }
@@ -145,7 +148,7 @@ function md(src) {
     if ((m = l.match(/^\s*□\s+(.*)/))) { fP(); open('uri'); out += `<li class="u1">${inline(m[1])}</li>`; continue; }
     // ○: □ 아래면 2단계, 맨 앞(들여쓰기 없음)이고 □가 없으면 1단계(울산연구원 작성가이드)
     if ((m = l.match(/^(\s*)○\s+(.*)/))) { fP(); open('uri'); out += `<li class="${m[1].length || hasBox ? 'u2' : 'o1'}">${inline(m[2])}</li>`; continue; }
-    if (list === 'uri' && (m = l.match(/^\s+[-–]\s+(.*)/))) { fP(); out += `<li class="u3">${inline(m[1])}</li>`; continue; }
+    if (list === 'uri' && (m = l.match(/^\s+[-–]\s+(.*)/))) { fP(); out += `<li class="u3${hasBox ? ' deep' : ''}">${inline(m[1])}</li>`; continue; }
     if (list === 'uri' && (m = l.match(/^\s*•\s+(.*)/))) { fP(); out += `<li class="ref">${inline(m[1])}</li>`; continue; }
     if ((m = l.match(/^\s*[-*]\s+(.*)/))) { fP(); open('ul'); out += `<li>${inline(m[1])}</li>`; continue; }
     if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { fP(); open('ol'); out += `<li>${inline(m[1])}</li>`; continue; }
