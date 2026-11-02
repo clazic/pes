@@ -572,7 +572,7 @@ skills/core       공통 규칙 (생명주기·CLI·답 받기·AI 점검·토�
 skills/<단계>      plan · research · analyze · write · verify · publish
 agents/           researcher · writer · verifier (결과를 파일로)
 scripts/pes.py    상태 CLI          scripts/serve.py  로컬 서버 (127.0.0.1 전용)
-templates/        dashboard · ask · _questions · hub · stage-report · eli5
+templates/        dashboard · ask · _questions · hub · stage-report · eli5 · final-report
 questions/        단계별 시작 질문 은행
 ```
 
