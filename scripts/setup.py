@@ -159,11 +159,19 @@ def check():
     st_, why, _, _ = ego_skill()
     add("ego-browser-skill", st_ if st_ != "user" else "optional", "ego-browser 스킬", why)
     sk = HOME / ".claude" / "skills"
-    t = tool("kosis")
-    add("kosis", "ok" if t and (sk / "kosis" / "SKILL.md").exists() else "missing", "kosis CLI + 스킬",
-        t or "통계청 KOSIS")
-    t = tool("vworld")
-    add("vworld", "ok" if t and (sk / "vworld" / "SKILL.md").exists() else "missing", "vworld CLI + 스킬", t or "국가공간정보")
+    for nm, what in (("kosis", "통계청 KOSIS"), ("vworld", "국가공간정보")):
+        t = tool(nm)
+        sv = skill_version(nm)
+        cv = None
+        if t:
+            _, o = run([t, "--version"], 20)
+            m = re.search(r"(\d+\.\d+\.\d+)", o)
+            cv = _norm(m.group(1)) if m else None
+        if t and sv and cv and sv != "?" and sv != cv:
+            add(nm, "missing", f"{nm} CLI + 스킬", f"CLI {cv} · 스킬 {sv} — 버전이 다름 (설치 도우미가 맞춘다)")
+        else:
+            add(nm, "ok" if t and sv else "missing", f"{nm} CLI + 스킬",
+                f"CLI {cv or '-'} · 스킬 {sv or '없음'}" if t else what)
     t = tool("korean-law")
     add("korean-law", "ok" if t else "missing", "korean-law CLI", t or "법령 조회")
     m = mcp_status()
@@ -269,27 +277,56 @@ def _vers(out):
     return (cur.group(1) if cur else None), (new.group(1) if new else None)
 
 
-def upgrade_selfupdating(name, extra):
-    """kosis·vworld: '<cli> update --check' 로 비교 → 새 버전이면 '<cli> update' (바이너리 + 스킬 문서)"""
+def _norm(v):
+    return ("v" + v.lstrip("v")) if v else None
+
+
+def skill_version(name):
+    """설치된 스킬의 버전 — kosis: VERSION 파일, vworld: 스킬 안 app/ 바이너리 버전"""
+    d = HOME / ".claude" / "skills" / name
+    if not (d / "SKILL.md").exists():
+        return None
+    if name == "kosis":
+        try:
+            return _norm((d / "VERSION").read_text(encoding="utf-8").strip())
+        except Exception:
+            return "?"
+    if name == "vworld":
+        exe = d / "app" / ("vworld-windows.exe" if WIN else "vworld-macos" if sys.platform == "darwin" else "vworld-linux")
+        if exe.exists():
+            _, out = run([str(exe), "--version"], 30)
+            m = re.search(r"(\d+\.\d+\.\d+)", out)
+            return _norm(m.group(1)) if m else "?"
+    return "?"
+
+
+def upgrade_cli_skill(name):
+    """kosis·vworld: CLI 와 스킬을 따로 확인하고, 둘 중 하나라도 뒤처지면 공식 설치 스크립트를 다시 실행한다.
+    (자체 'update' 는 스킬 갱신 질문을 비대화형으로 받지 못하는 경우가 있어 설치 스크립트가 확실하다)"""
     t = tool(name)
     if not t:
         return "SKIP", "설치되어 있지 않음"
     code, out = run([t, "update", "--check"], 120)
     cur, new = _vers(out)
+    cur, new = _norm(cur), _norm(new)
     if code != 0 or not new:
         return "FAIL", "최신 버전 확인 실패: " + ((out.strip().splitlines() or ["응답 없음"])[-1][:120])
-    if "이미 최신" in out or cur == new:
-        return "OK", f"{cur} (최신)"
-    try:  # kosis 는 y/N 을 묻는다(바이너리·스킬) — 표준입력으로 y 를 준다. vworld 는 --yes
-        r = subprocess.run([t, "update"] + extra, input="y\ny\ny\ny\n", capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=900, env=node_env())
-        code, out2 = r.returncode, (r.stdout or "") + (r.stderr or "")
-    except Exception as e:
-        code, out2 = -1, str(e)
-    after, _ = _vers(run([tool(name) or t, "update", "--check"], 120)[1])
-    if after == new:
-        return "UPGRADED", f"{cur} → {new}"
-    return "FAIL", f"{cur} → {new} 실패 (지금 {after or '?'}): " + ((out2.strip().splitlines() or ["?"])[-1][:120])
+    sk = skill_version(name)
+    if cur == new and sk == new:
+        return "OK", f"CLI {cur} · 스킬 {sk} (최신)"
+    note = ""
+    if name == "kosis" and (HOME / ".claude" / "skills" / "kosis").exists():
+        bak = PESDIR / "backup" / f"kosis-skill-{time.strftime('%Y%m%d-%H%M%S')}"
+        bak.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(HOME / ".claude" / "skills" / "kosis", bak, symlinks=True, ignore=shutil.ignore_patterns("apps"))
+        note = f" · 이전 스킬 백업 {bak}"
+    code, out2 = install_one(name)
+    c2, n2 = _vers(run([tool(name) or t, "update", "--check"], 120)[1])
+    c2, sk2 = _norm(c2), skill_version(name)
+    if c2 == new and sk2 == new:
+        return "UPGRADED", f"CLI {cur} → {c2} · 스킬 {sk or '없음'} → {sk2}{note}"
+    return "FAIL", (f"CLI {cur} → {c2} · 스킬 {sk} → {sk2} (최신 {new}) — "
+                    + ((out2.strip().splitlines() or ["?"])[-1][:120]) + note)
 
 
 def upgrade_korean_law():
@@ -340,8 +377,8 @@ def upgrade_ego():
 
 
 UPGRADERS = {
-    "kosis": lambda: upgrade_selfupdating("kosis", []),
-    "vworld": lambda: upgrade_selfupdating("vworld", ["--yes"]),
+    "kosis": lambda: upgrade_cli_skill("kosis"),
+    "vworld": lambda: upgrade_cli_skill("vworld"),
     "korean-law": upgrade_korean_law,
     "ego-browser": upgrade_ego,
 }

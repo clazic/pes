@@ -1204,6 +1204,23 @@ def doctor_env(R):
         R.add("도구", "ok" if n or os.environ.get("KOSIS_API_KEY") else "warn", f"kosis (API 키 {n}개)", ("" if shutil.which("kosis") else f"PATH 밖: {t}") if n else "키 없음 — https://kosis.kr/openapi/")
     else:
         R.add("도구", "warn", "kosis 없음", "통계 API 불가 — npm install -g @clazic/kosis")
+    try:
+        import importlib
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        _su = importlib.import_module("setup")
+        for nm in ("kosis", "vworld"):
+            sv = _su.skill_version(nm)
+            if find_tool(nm) and not sv:
+                R.add("도구", "warn", f"{nm} 스킬 없음", "CLI 만 있음 — /pes:setup 이 스킬을 설치")
+            elif sv:
+                _, vo = run_quiet([find_tool(nm), "--version"]) if find_tool(nm) else (0, "")
+                cv = re.search(r"v?(\d+\.\d+\.\d+)", vo)
+                if cv and sv not in ("?", "v" + cv.group(1)):
+                    R.add("도구", "warn", f"{nm} 스킬 {sv} ≠ CLI v{cv.group(1)}", "/pes:setup 으로 맞추기")
+                else:
+                    R.add("도구", "ok", f"{nm} 스킬 {sv}" + (" (CLI 와 같음)" if cv else ""), "")
+    except Exception as e:
+        R.add("도구", "info", "스킬 버전 확인 못함", str(e)[:100])
     t = find_tool("korean-law")
     if t:
         oc = os.environ.get("LAW_OC")
