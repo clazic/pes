@@ -34,6 +34,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `approve <dir> <stage>` | 승인 → 다음 단계 asking. 기획 승인 시 조사 항목 자동 생성 |
 | `list [projects]` · `hub [projects]` | 프로젝트 목록 (채팅용 · 화면 8760) |
 | `which <도구>` | 도구 경로 (PATH + 사용자별 설치 위치, Windows 포함) |
+| `setup.py check · install missing · keys · mark · needed` | 설치 도우미 (`/pes:setup`) — 도구 설치, API 키 화면(127.0.0.1:8759), 완료 표시 |
 | `doctor [dir] [--fix] [--json]` | 진단 (환경·도구·키·포트·프로젝트 상태·잠금·답·보고서·연결). 명령이 이상하게 실패하면 먼저 실행 |
 | `lock <dir> [--force]` · `unlock <dir>` | 세션 표시 (PES_OWNER) |
 | `digest <dir> <stage> [--round N]` · `show <dir> <stage> [id…] [--fields a,b]` | 점검용 압축 요약 · 필요한 부분만 보기 |

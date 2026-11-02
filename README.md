@@ -30,6 +30,20 @@ Claude Code 플러그인. 연구·정책 보고서를 **기획 → 조사 → �
 
 설치 상태는 설치 후 `/pes:doctor`로 한 번에 확인한다.
 
+### 한 번에 설치·점검: `/pes:setup` (Windows·macOS)
+
+플러그인을 설치한 뒤 Claude Code(또는 Claude Desktop의 Code 탭)에서 **`/pes:setup`** 한 번. 처음 `/pes:start`·`/pes:run`을 실행할 때도 점검이 안 되어 있으면 자동으로 먼저 실행된다.
+
+1. **기본 도구**: Git(Windows는 Git Bash 포함) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
+2. **조사 도구**: kosis(CLI+스킬) · vworld(CLI+스킬) · korean-law(CLI, Claude CLI가 있으면 MCP도) — 공식 설치 스크립트·npm으로 설치
+3. **ego lite**: 앱 설치와 첫 실행 안내(온보딩)는 직접 해야 한다 — 내려받기 페이지를 열어 준다 (macOS는 설치 스크립트로 설치까지)
+4. **API 키**: 브라우저에 키 입력 화면(http://127.0.0.1:8759)이 열린다. 발급 방법이 함께 있고, 넣은 키는 확인 후 각 도구 설정에 바로 등록된다 — **키는 Claude 대화로 전달되지 않는다.** 필요 없는 기능은 비워 두면 된다
+5. **`/pes:doctor`**로 API 접속까지 확인하고 완료 표시
+
+- 키만 다시 넣기: `/pes:setup keys`
+- Windows에서 Git을 새로 설치했으면 Claude Desktop을 다시 시작한 뒤 `/pes:setup`을 한 번 더 (답 자동 수신에 Git Bash가 필요).
+- 법령 API(LAW_OC)는 틀린 값에도 응답해서 값 자체는 확인할 수 없다 — 발급받은 이메일 ID 앞부분을 정확히 넣는다.
+
 ### 플러그인 설치
 
 **GitHub 저장소에서 (권장)** — 비공개 저장소면 그 컴퓨터에서 GitHub 로그인(`gh auth login` 또는 git 자격 증명)이 되어 있어야 한다.
@@ -46,7 +60,7 @@ claude plugin marketplace add <pes 폴더 경로>      # 예: ~/work/pes, C:\wor
 claude plugin install pes@pes-local
 ```
 
-설치 후 Claude Code 안에서 `/reload-plugins` (또는 재시작) → `/pes:doctor`로 환경 점검.
+설치 후 Claude Code 안에서 `/reload-plugins` (또는 재시작) → **`/pes:setup`**.
 
 ### 업데이트
 
@@ -132,6 +146,7 @@ Claude가 실행하는 명령에서도 보이도록 **Claude Code 설정**에 �
 | `/pes:plan` · `research` · `analyze` · `write` · `verify` · `publish` | 그 단계를 직접 진행 / 다시 열기 |
 | `/pes:report <단계>` | 단계 보고서 다시 만들기 |
 | `/pes:home [새 폴더]` | 프로젝트 위치(PES 홈) 보기 / 바꾸기 (전부 이동) |
+| `/pes:setup [keys]` | 설치·점검: 기본 도구·조사 도구 설치, API 키 화면, doctor |
 | `/pes:doctor [프로젝트] [fix]` | 진단 (환경·도구·키·API 연결·포트·프로젝트 상태). `fix`는 안전한 것만 고침 |
 
 `[프로젝트]` 자리에는 경로 대신 프로젝트 이름(slug)만 써도 된다.
@@ -268,6 +283,11 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.5.0 — 2026-11-02
+- `/pes:setup`: Git·Python·Node.js(bootstrap, Windows winget / macOS), kosis·vworld·korean-law(CLI·스킬·MCP) 자동 설치, ego lite 설치 안내, API 키 입력 화면(키는 대화로 오지 않음, 등록 전 확인), doctor 로 마무리, 완료 표시.
+- `/pes:start`·`/pes:run`이 설치 점검 여부를 먼저 확인.
+- 도구 찾기에 Windows npm·LOCALAPPDATA·스킬 안 바이너리 위치 추가.
 
 ### 0.4.1 — 2026-11-02
 - README: Windows용 Claude Desktop(Code 탭) 사용 안내 — Git Bash 필수, PATH·환경변수 설정 위치, Cowork 모드 비권장.

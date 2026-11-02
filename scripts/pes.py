@@ -1124,10 +1124,19 @@ def find_tool(name):
     p = shutil.which(name)
     if p:
         return p
-    cands = [Path.home() / ".local" / "bin" / name]
+    H = Path.home()
+    cands = [H / ".local" / "bin" / name]
+    if sys.platform == "darwin":
+        cands += [Path("/opt/homebrew/bin") / name, Path("/usr/local/bin") / name]
+        if name == "vworld":
+            cands += [H / ".claude" / "skills" / "vworld" / "app" / "vworld-macos"]
     if os.name == "nt":
-        la = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-        cands += [la / "Programs" / name / f"{name}.exe", Path.home() / ".local" / "bin" / f"{name}.exe"]
+        la = Path(os.environ.get("LOCALAPPDATA", H / "AppData" / "Local"))
+        ap = Path(os.environ.get("APPDATA", H / "AppData" / "Roaming"))
+        cands += [la / "Programs" / name / f"{name}.exe", la / name / f"{name}.exe", H / ".local" / "bin" / f"{name}.exe",
+                  ap / "npm" / f"{name}.cmd", la / "Programs" / "ego lite" / f"{name}.exe"]
+        if name == "vworld":
+            cands += [H / ".claude" / "skills" / "vworld" / "app" / "vworld-windows.exe"]
     for c in cands:
         if c.exists():
             return str(c)

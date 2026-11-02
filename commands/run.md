@@ -3,6 +3,8 @@ description: PES 프로젝트를 이어서 진행 — 처리 안 한 답을 읽�
 argument-hint: "[프로젝트 폴더]"
 ---
 
+0. 먼저 `python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/setup.py needed`(Windows는 `py -3`) — 종료 코드 1이면 한 줄 알리고 `/pes:setup` 절차를 먼저 끝낸 뒤 돌아온다.
+
 `pes:core`를 로드해 따른다. 인자: $ARGUMENTS
 
 1. 프로젝트 폴더: 인자. 인자가 없으면 `list`를 실행해 — 프로젝트가 1개면 그것, 2개 이상이면 AskUserQuestion으로 고르게 한다(선택지: 「내 차례」 → 최근 순, 라벨=주제, 설명=단계·할 일. 4개 넘으면 상위 3개 + '목록 화면 열기'(`hub` 후 open)).
