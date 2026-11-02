@@ -8,7 +8,8 @@
 #   4. 조사 도구 설치: kosis · vworld · korean-law (ego lite 는 내려받기 페이지를 연다)
 #   5. API 키 입력 화면(브라우저) — 키는 이 컴퓨터의 각 도구 설정에만 저장된다
 #   6. 진단(doctor) 후 완료 표시
-# 다시 실행해도 된다 (있는 것은 건너뛴다). 환경변수: PES_REPO (기본 clazic/pes), PES_SKIP_KEYS=1 (키 화면 건너뛰기)
+# 다시 실행해도 된다 — 없는 것은 설치, 이미 있는 것은 최신 버전으로 업그레이드.
+# 환경변수: PES_REPO (기본 clazic/pes), PES_SKIP_KEYS=1 (키 화면 건너뛰기), PES_NO_UPGRADE=1 (업그레이드 안 함)
 
 $ErrorActionPreference = "Continue"
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
@@ -55,6 +56,12 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
   try { Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression } catch { Fail "Claude Code CLI 설치 실패: $($_.Exception.Message)" }
   Refresh-Path
 }
+elseif (-not $env:PES_NO_UPGRADE) {
+  $before = & claude --version 2>$null
+  & claude update 2>&1 | Out-Null
+  $after = & claude --version 2>$null
+  if ($after -ne $before) { Ok "claude 업그레이드: $before → $after" }
+}
 if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude $(& claude --version 2>$null)" }
 else { Fail "claude 명령을 찾지 못함 — 새 PowerShell 창에서 다시 실행하거나, Claude Desktop Code 탭의 + → Add plugins 로 $Repo 를 추가하세요"; return }
 
@@ -82,6 +89,13 @@ PY $Setup install missing | ForEach-Object {
   if ($l -like "OK *") { Ok $l } elseif ($l -like "USER *") { Warn $l } elseif ($l -like "FAIL *") { Fail $l } elseif ($l -like "SKIP *") { Write-Host "  $l" }
 }
 Refresh-Path
+if ($env:PES_NO_UPGRADE -ne "1") {
+  Write-Host "  이미 있던 도구를 최신 버전으로 맞춥니다"
+  PY $Setup upgrade all | ForEach-Object {
+    $l = "$_"
+    if ($l -like "UPGRADED *") { Ok $l } elseif ($l -like "OK *") { Write-Host "  $l" } elseif ($l -like "FAIL *") { Warn $l }
+  }
+}
 
 # 5. API 키
 Step 5 "API 키"

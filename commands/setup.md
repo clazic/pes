@@ -18,6 +18,7 @@ PES 설치 도우미. 인자: $ARGUMENTS
 3. **설치**: `PY -I PLUG/scripts/setup.py install missing` (kosis·vworld = 공식 설치 스크립트로 CLI+스킬, korean-law = npm, MCP 등록은 claude CLI가 있을 때만).
    - 출력 `USER ego-browser …`: ego lite는 앱 설치와 첫 실행 안내(온보딩)를 사용자가 직접 해야 한다. 안내 문장을 그대로 전하고, 끝났다고 하면 `PY -I PLUG/scripts/pes.py which ego-browser`로 확인. 사용자가 나중에 하겠다면 넘어간다(조사는 WebSearch로 대체 가능하다고 한 줄).
    - FAIL은 마지막 줄 원인과 함께 표로 정리하고 다음으로 진행한다.
+3-1. **업그레이드**: `PY -I PLUG/scripts/setup.py upgrade all` — 이미 설치된 kosis·vworld(CLI+스킬), korean-law(CLI·MCP 공용), ego lite 를 최신으로. 줄마다 `UPGRADED|OK|FAIL`; UPGRADED·FAIL만 채팅에 한 줄씩. ego lite 업그레이드가 진행 중인 브라우저 작업 때문에 막히면(확인 대화상자) 그대로 알리고 넘어간다. 사용자가 '업그레이드는 하지 마'라고 했으면 건너뛴다.
 4. **API 키**: `PY -I PLUG/scripts/setup.py keys` → 첫 줄 주소가 브라우저로 열린다. 둘째 줄 `WATCH …` 명령으로 Monitor(timeout 1800000)를 건다. 채팅엔 한 줄: "브라우저에 API 키 화면을 열었습니다. 발급 방법이 함께 있으니 필요한 키만 넣고 '마치기'를 눌러 주세요." 키가 모두 있으면 이 단계는 "키가 모두 등록되어 있습니다(추가하려면 `/pes:setup keys`)"로 건너뛴다.
    - `SETUP keys …` 줄이 오면 결과(ok/fail)를 읽는다. fail은 doctor 결과와 함께 알린다.
 5. **진단**: `PY -I PLUG/scripts/pes.py doctor --net` → 요약 한 줄 + [문제]·[주의] 표.

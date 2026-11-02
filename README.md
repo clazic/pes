@@ -34,12 +34,13 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | sh
 ```
 
-한 번에 이것까지 한다 (다시 실행해도 된다 — 있는 것은 건너뜀):
+한 번에 이것까지 한다 (다시 실행해도 된다 — **없는 것은 설치, 이미 있는 것은 최신 버전으로 업그레이드**):
 
 1. Git(Git Bash) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
 2. Claude Code CLI — 없으면 공식 설치 스크립트로 설치 (플러그인 등록에 필요)
 3. PES 플러그인 등록·설치 (`clazic/pes` → `pes@pes-local`)
 4. 조사 도구: kosis · vworld · korean-law (ego lite는 내려받기 페이지를 연다 — 설치와 첫 실행 안내는 직접)
+   - 이미 있으면 **최신 버전으로 업그레이드**: kosis·vworld(CLI + 스킬 문서), korean-law(CLI와 MCP가 같은 npm 패키지), ego lite(앱 자체 업데이트), Claude Code CLI(`claude update`). 업그레이드를 원하지 않으면 `PES_NO_UPGRADE=1`
 5. **API 키 입력 화면**이 브라우저에 열림 → 필요한 키만 넣고 **마치기** (키는 이 컴퓨터의 도구 설정에만 저장)
 6. 진단(`doctor`) 후 완료 표시
 
@@ -69,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 플러그인을 설치한 뒤 Claude Code(또는 Claude Desktop의 Code 탭)에서 **`/pes:setup`** 한 번. 처음 `/pes:start`·`/pes:run`을 실행할 때도 점검이 안 되어 있으면 자동으로 먼저 실행된다.
 
 1. **기본 도구**: Git(Windows는 Git Bash 포함) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
-2. **조사 도구**: kosis(CLI+스킬) · vworld(CLI+스킬) · korean-law(CLI, Claude CLI가 있으면 MCP도) — 공식 설치 스크립트·npm으로 설치
+2. **조사 도구**: kosis(CLI+스킬) · vworld(CLI+스킬) · korean-law(CLI, Claude CLI가 있으면 MCP도) — 없으면 공식 설치 스크립트·npm으로 설치, **있으면 최신으로 업그레이드** (kosis·vworld는 자체 `update`, korean-law는 npm 최신판, ego lite는 `ego-browser upgrade`)
 3. **ego lite**: 앱 설치와 첫 실행 안내(온보딩)는 직접 해야 한다 — 내려받기 페이지를 열어 준다 (macOS는 설치 스크립트로 설치까지)
 4. **API 키**: 브라우저에 키 입력 화면(http://127.0.0.1:8759)이 열린다. 발급 방법이 함께 있고, 넣은 키는 확인 후 각 도구 설정에 바로 등록된다 — **키는 Claude 대화로 전달되지 않는다.** 필요 없는 기능은 비워 두면 된다
 5. **`/pes:doctor`**로 API 접속까지 확인하고 완료 표시
@@ -474,6 +475,9 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.7.0 — 2026-11-02
+- 설치할 때 이미 있는 도구를 **최신 버전으로 업그레이드**: kosis·vworld(CLI+스킬), korean-law(CLI·MCP), ego lite, Claude Code CLI. `setup.py upgrade`, `/pes:setup`·한 줄 설치에 포함, `PES_NO_UPGRADE=1`로 끌 수 있음. 업그레이드 후 실제 버전을 다시 확인해 결과를 보고.
 
 ### 0.6.1 — 2026-11-02
 - 저장소 공개(커밋 작성자 이메일은 GitHub noreply로 변경). macOS·Linux 한 줄 설치에 `| bash` 형식 추가, 설치 안내에서 비공개 저장소 로그인 단계 제거.

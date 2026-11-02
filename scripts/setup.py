@@ -4,6 +4,8 @@
 사용: python3 -I setup.py <명령>
   check [--json]            설치·키 상태 (항목마다 ok|missing|user|optional)
   install <이름…|missing>    설치: kosis vworld korean-law korean-law-mcp ego-browser  (missing = 빠진 것 전부)
+  upgrade [이름…|all]        이미 설치된 것을 최신으로: kosis(CLI+스킬) vworld(CLI+스킬) korean-law(CLI·MCP 공용 npm)
+                            ego-browser(ego lite 앱) — 줄마다 "UPGRADED|OK|FAIL|SKIP <이름> <버전>"
   keys [--no-open] [--wait] API 키 입력 화면(127.0.0.1:8759)을 띄우고 주소 출력. 결과는 ~/.pes/setup.log 에
                             "SETUP keys …" 한 줄로 남는다 (Monitor 로 기다린다). 키 값은 Claude 대화로 오지 않는다.
   mark                      설치 완료 표시 (~/.pes/setup.json) — 다른 PES 명령이 이것을 보고 setup 필요 여부를 안다
@@ -228,6 +230,100 @@ def cmd_install(args):
         tail = [l for l in out.strip().splitlines() if l.strip()][-3:]
         state = "OK" if code == 0 else ("USER" if code == 2 else ("SKIP" if code == 3 else "FAIL"))
         print(f"{state} {n}" + (" — " + " / ".join(tail) if state != "OK" and tail else ""), flush=True)
+
+
+# ---------- 업그레이드 ----------
+def _vers(out):
+    cur = re.search(r"현재 버전:\s*(\S+)", out)
+    new = re.search(r"최신 버전:\s*(\S+)", out)
+    return (cur.group(1) if cur else None), (new.group(1) if new else None)
+
+
+def upgrade_selfupdating(name, extra):
+    """kosis·vworld: '<cli> update --check' 로 비교 → 새 버전이면 '<cli> update' (바이너리 + 스킬 문서)"""
+    t = tool(name)
+    if not t:
+        return "SKIP", "설치되어 있지 않음"
+    code, out = run([t, "update", "--check"], 120)
+    cur, new = _vers(out)
+    if code != 0 or not new:
+        return "FAIL", "최신 버전 확인 실패: " + ((out.strip().splitlines() or ["응답 없음"])[-1][:120])
+    if "이미 최신" in out or cur == new:
+        return "OK", f"{cur} (최신)"
+    try:  # kosis 는 y/N 을 묻는다(바이너리·스킬) — 표준입력으로 y 를 준다. vworld 는 --yes
+        r = subprocess.run([t, "update"] + extra, input="y\ny\ny\ny\n", capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=900, env=node_env())
+        code, out2 = r.returncode, (r.stdout or "") + (r.stderr or "")
+    except Exception as e:
+        code, out2 = -1, str(e)
+    after, _ = _vers(run([tool(name) or t, "update", "--check"], 120)[1])
+    if after == new:
+        return "UPGRADED", f"{cur} → {new}"
+    return "FAIL", f"{cur} → {new} 실패 (지금 {after or '?'}): " + ((out2.strip().splitlines() or ["?"])[-1][:120])
+
+
+def upgrade_korean_law():
+    npm = shutil.which("npm")
+    if not npm or not tool("korean-law"):
+        return "SKIP", "설치되어 있지 않음"
+    code, out = run([npm, "ls", "-g", "korean-law-mcp", "--json"], 60)
+    try:
+        cur = json.loads(out)["dependencies"]["korean-law-mcp"]["version"]
+    except Exception:
+        cur = None
+    code, out = run([npm, "view", "korean-law-mcp", "version"], 60, env=node_env())
+    new = (out.strip().splitlines() or [""])[-1].strip() if code == 0 else None
+    if not new or not re.fullmatch(r"\d+(\.\d+)*", new):
+        return "FAIL", "최신 버전 확인 실패 (인증서 오류면 NODE_EXTRA_CA_CERTS)"
+    if cur == new:
+        return "OK", f"{cur} (최신)"
+    cmd = [npm, "install", "-g", f"korean-law-mcp@{new}", "--ignore-scripts", "--omit=optional"]
+    ca = node_env().get("NODE_EXTRA_CA_CERTS")
+    if ca and Path(ca).exists():
+        cmd += ["--cafile", ca]
+    code, out = run(cmd, 900, env=node_env())
+    return ("UPGRADED", f"{cur} → {new} (CLI·MCP 함께)") if code == 0 else ("FAIL", out.strip()[-160:])
+
+
+def upgrade_ego():
+    t = tool("ego-browser")
+    if not t:
+        return "SKIP", "설치되어 있지 않음"
+    _, v0 = run([t, "--version"], 30)
+    cur = (v0.split() + ["", ""])[1]
+    code, out = run([t, "upgrade"], 600)
+    _, v1 = run([t, "--version"], 30)
+    new = (v1.split() + ["", ""])[1]
+    last = (out.strip().splitlines() or [""])[-1][:140]
+    if code != 0:
+        if "Unknown command" in out:
+            return "FAIL", "이 ego lite 는 너무 오래되어 자동 업그레이드가 안 됨 — https://lite.ego.app/ 에서 다시 설치"
+        return "FAIL", last or "업그레이드 실패 (진행 중인 브라우저 작업이 있으면 ego lite 창의 확인 대화상자를 보세요)"
+    if new and new != cur:
+        return "UPGRADED", f"{cur} → {new}"
+    return "OK", f"{cur} ({last or '최신'})"
+
+
+UPGRADERS = {
+    "kosis": lambda: upgrade_selfupdating("kosis", []),
+    "vworld": lambda: upgrade_selfupdating("vworld", ["--yes"]),
+    "korean-law": upgrade_korean_law,
+    "ego-browser": upgrade_ego,
+}
+
+
+def cmd_upgrade(args):
+    names = [a for a in args if a != "all"] or list(UPGRADERS)
+    for n in names:
+        if n not in UPGRADERS:
+            print(f"FAIL {n} 알 수 없는 항목")
+            continue
+        print(f"... {n} 최신 버전 확인", flush=True)
+        try:
+            state, msg = UPGRADERS[n]()
+        except Exception as e:
+            state, msg = "FAIL", str(e)[:160]
+        print(f"{state} {n} {msg}", flush=True)
 
 
 # ---------- API 키 화면 ----------
@@ -493,7 +589,7 @@ def cmd_needed(args):
     print("OK")
 
 
-CMDS = {"check": cmd_check, "install": cmd_install, "keys": cmd_keys, "keys-serve": cmd_keys_serve,
+CMDS = {"check": cmd_check, "install": cmd_install, "upgrade": cmd_upgrade, "keys": cmd_keys, "keys-serve": cmd_keys_serve,
         "mark": cmd_mark, "needed": cmd_needed}
 
 if __name__ == "__main__":

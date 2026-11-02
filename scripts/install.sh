@@ -2,7 +2,8 @@
 # PES 한 줄 설치 (macOS·Linux)
 #   curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | bash   (| sh 도 된다)
 # 하는 일: 기본 도구(Git·Python·Node.js) → Claude Code CLI → PES 플러그인 → 조사 도구 → API 키 화면 → 진단
-# 다시 실행해도 된다. 환경변수: PES_REPO (기본 clazic/pes), PES_SKIP_KEYS=1
+# 다시 실행해도 된다 — 없는 것은 설치, 이미 있는 것은 최신으로 업그레이드.
+# 환경변수: PES_REPO (기본 clazic/pes), PES_SKIP_KEYS=1, PES_NO_UPGRADE=1
 REPO="${PES_REPO:-clazic/pes}"
 SRC="$HOME/.pes/src"
 PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"; export PATH
@@ -28,6 +29,10 @@ if ! command -v claude >/dev/null 2>&1; then
   say "claude 명령이 없어 공식 설치 스크립트로 설치합니다 (https://claude.ai/install.sh)"
   curl -fsSL https://claude.ai/install.sh | bash || say "XX Claude Code CLI 설치 실패"
 fi
+if command -v claude >/dev/null 2>&1 && [ "$PES_NO_UPGRADE" != 1 ]; then
+  B=$(claude --version 2>/dev/null); claude update >/dev/null 2>&1; A=$(claude --version 2>/dev/null)
+  [ "$A" != "$B" ] && say "OK claude 업그레이드: $B → $A"
+fi
 command -v claude >/dev/null 2>&1 && say "OK claude $(claude --version 2>/dev/null)" || { echo "  XX claude 명령 없음 — 새 터미널에서 다시 실행"; exit 1; }
 
 step 3 "PES 플러그인"
@@ -39,6 +44,10 @@ if [ -d "$SRC/.git" ]; then git -C "$SRC" pull -q; else mkdir -p "$(dirname "$SR
 
 step 4 "조사 도구 (kosis · vworld · korean-law · ego lite)"
 $PY -I "$SRC/scripts/setup.py" install missing | while IFS= read -r l; do say "$l"; done
+if [ "$PES_NO_UPGRADE" != 1 ]; then
+  say "이미 있던 도구를 최신 버전으로 맞춥니다"
+  $PY -I "$SRC/scripts/setup.py" upgrade all | grep -v '^\.\.\.' | while IFS= read -r l; do say "$l"; done
+fi
 
 step 5 "API 키"
 if [ "$PES_SKIP_KEYS" = 1 ]; then say "건너뜀 — 나중에 Claude 에서 /pes:setup keys"
