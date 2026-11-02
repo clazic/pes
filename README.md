@@ -24,7 +24,11 @@ Claude Code 플러그인. 연구·정책 보고서를 **기획 → 조사 → �
 irm https://raw.githubusercontent.com/clazic/pes/main/scripts/install.ps1 | iex
 ```
 
-**macOS** — 터미널에 붙여넣기:
+**macOS·Linux** — 터미널에 붙여넣기 (bash·sh 어느 쪽이든 된다):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | bash
+```
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | sh
@@ -41,9 +45,9 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 
 끝나면 **Claude Desktop을 완전히 종료했다가 다시 열고** Code 탭에서 `/pes:start <주제>`.
 
-- 키 화면 건너뛰기: Windows `$env:PES_SKIP_KEYS=1` / macOS `PES_SKIP_KEYS=1`를 앞에 두고 실행 → 나중에 `/pes:setup keys`.
+- 키 화면을 건너뛰면 나중에 Claude에서 `/pes:setup keys`.
 - 관리자 권한 창(UAC)이 뜨면 **예**. Windows에서 Git을 처음 설치했으면 PowerShell 창을 새로 열어 한 번 더 실행하면 확실하다.
-- 이 방법은 저장소가 **공개**일 때 바로 된다. 비공개 저장소라면 아래 「플러그인 설치」의 단계별 방법을 쓴다.
+- 키 화면 건너뛰기 예: `curl -fsSL …/install.sh | PES_SKIP_KEYS=1 bash` (변수는 파이프 오른쪽 `bash` 앞에), Windows는 `$env:PES_SKIP_KEYS=1; irm …/install.ps1 | iex`.
 
 
 ### 필요한 것
@@ -76,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 
 ### 플러그인 설치
 
-**GitHub 저장소에서 (권장)** — 비공개 저장소면 그 컴퓨터에서 GitHub 로그인(`gh auth login` 또는 git 자격 증명)이 되어 있어야 한다.
+**GitHub 저장소에서** (공개 저장소 — 로그인 불필요):
 
 ```bash
 claude plugin marketplace add <GitHub계정>/pes
@@ -134,7 +138,7 @@ Windows용 Claude Desktop에서는 **Code 탭(로컬 세션)**에서 설치하�
 #### 0. 준비 (처음 한 번)
 
 1. **Claude Desktop 최신 버전**으로 업데이트.
-2. **Git for Windows 설치** — 비공개 저장소(`clazic/pes`)에서 플러그인을 받는 데 필요하고, 답 자동 수신(Monitor)에 필요한 Git Bash도 함께 설치된다.
+2. **Git for Windows 설치** — 저장소(`clazic/pes`)에서 플러그인을 받는 데 필요하고, 답 자동 수신(Monitor)에 필요한 Git Bash도 함께 설치된다. (한 줄 설치를 쓰면 자동으로 설치된다)
    - https://git-scm.com/download/win 에서 받아 기본값으로 설치, 또는 PowerShell에서 `winget install --id Git.Git -e`
 3. **Claude Desktop을 완전히 종료**(작업 표시줄 아이콘에서도 종료)했다가 다시 연다 — 새로 설치한 git이 인식되도록.
 
@@ -148,7 +152,6 @@ Claude Desktop 위쪽 **Code** 탭 → 로컬 세션 시작. 작업 폴더는 �
 1. 입력창 옆 **+** → **Add plugins**
 2. 마켓플레이스 추가에 **`clazic/pes`** 입력
 3. 목록에 나온 **pes** 설치
-4. 비공개 저장소라 처음에 **GitHub 로그인 창**(Git Credential Manager)이 뜨면 로그인
 
 **방법 B — 명령으로** (Claude Code CLI가 있을 때)
 
@@ -186,7 +189,7 @@ claude plugin install pes@pes-local
 
 | 증상 | 해결 |
 |---|---|
-| 플러그인 추가 중 저장소를 못 찾음 / 권한 오류 | GitHub 로그인이 안 된 것 — PowerShell에서 `git ls-remote https://github.com/clazic/pes` 실행하면 로그인 창이 뜬다 |
+| 플러그인 추가 중 저장소를 못 찾음 | git이 PATH에 없음 — Git for Windows 설치 후 Claude Desktop 재시작, 또는 한 줄 설치 |
 | `/pes:` 명령이 안 보임 | `/reload-plugins` 또는 앱 재시작 |
 | 법령 조회가 안 됨 | Claude Desktop 설정의 **Environment variables**에 `LAW_OC` 추가 후 재시작 (설정 파일 env를 무시하는 경우가 있음) |
 | kosis 등을 "찾지 못함" | Windows PATH가 아직 반영되지 않음 — Claude Desktop 재시작 |
@@ -471,6 +474,9 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.6.1 — 2026-11-02
+- 저장소 공개(커밋 작성자 이메일은 GitHub noreply로 변경). macOS·Linux 한 줄 설치에 `| bash` 형식 추가, 설치 안내에서 비공개 저장소 로그인 단계 제거.
 
 ### 0.6.0 — 2026-11-02
 - **한 줄 설치**: Windows `irm …/install.ps1 | iex`, macOS `curl …/install.sh | sh` — 기본 도구 · Claude Code CLI · 플러그인 · 조사 도구 · API 키 화면 · 진단까지.

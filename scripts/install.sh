@@ -1,6 +1,6 @@
 #!/bin/sh
 # PES 한 줄 설치 (macOS·Linux)
-#   curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh | bash   (| sh 도 된다)
 # 하는 일: 기본 도구(Git·Python·Node.js) → Claude Code CLI → PES 플러그인 → 조사 도구 → API 키 화면 → 진단
 # 다시 실행해도 된다. 환경변수: PES_REPO (기본 clazic/pes), PES_SKIP_KEYS=1
 REPO="${PES_REPO:-clazic/pes}"
