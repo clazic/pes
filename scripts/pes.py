@@ -776,6 +776,10 @@ def stage_md(d: Path, p: dict, s: str) -> str:
             if t:
                 L.append(f"- R{f.get('round')} {f.get('kind')}: {t[:400]}")
         L.append("")
+    if st.get("carry_over"):
+        L += ["## 4-1. 남은 일 — 다음 단계로 넘김", "", "승인 때 끝내지 못한 할 일이다. 다음 단계 첫 라운드에서 먼저 처리한다.", ""]
+        L += [f"- #{c.get('item')} {c.get('title', '')}: {c.get('request', '')}" for c in st["carry_over"]]
+        L.append("")
     qas = st.get("qa") or []
     rlog = {int(r.get("round") or 0): r for r in st.get("review_log") or []}
     if qas or rlog:
