@@ -24,6 +24,8 @@
                                        eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
   assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리) + out/sources.json
   web <dir> [--assemble]               최종 웹 보고서 out/report.html (표지·목차·각주·출처 부록·인쇄용). 표지 정보는 out/cover.json
+  qa-brief <dir> <stage>               독립 검토(QC/QA) 지시문 rounds/<stage>-R<n>/qa-brief.md (digest·자체 점검 초안·기준 포함)
+  qa <dir> <stage> [--file f]          독립 검토 결과 qa.json 을 stages.<stage>.qa 에 기록 (자체 점검은 review_log 에)
   serve <dir>                          로컬 서버 시작 (홈마다 포트 하나 — 이미 떠 있으면 이 프로젝트 주소만)
   stop [dir]                           로컬 서버 종료 (그 홈의 목록·모든 프로젝트 화면이 함께 꺼짐)
   watch <dir>                          Monitor 에 넣을 명령 출력
@@ -703,6 +705,7 @@ def stage_md(d: Path, p: dict, s: str) -> str:
                 seen.add(k)
                 srcs.append(x)
     ok = sum(1 for x in srcs if x.get("method") in VERIFIED)
+    sidx = {(x.get("url") or x.get("title")): k for k, x in enumerate(srcs, 1)}
     L = [f"# {p.get('topic', '')} — {REPORT_NAME[s]}", "",
          f"- 단계: {LABEL[s]} · 라운드 {st['round']}회 · 승인 {st.get('approved_at') or '미승인'}",
          f"- 항목 {len(items)}개 · 출처 {len(srcs)}개 (원문 확인 {ok}개)", f"- 작성 {now()} · PES", ""]
@@ -733,6 +736,15 @@ def stage_md(d: Path, p: dict, s: str) -> str:
                 L.append("- " + " · ".join(meta))
             if lk:
                 L.append(f"- 연결: {lk}")
+            refs = []
+            for sx in it.get("sources") or []:
+                k2 = sx.get("url") or sx.get("title")
+                if k2 in sidx:
+                    refs.append(f"[{sidx[k2]}{'' if sx.get('method') in VERIFIED else '·미확인'}]")
+            if refs:
+                L.append(f"- 근거 출처: {' '.join(refs)} (아래 「출처」 번호, 원문 확인 {sum(1 for r in refs if '미확인' not in r)}/{len(refs)})")
+            elif it.get("kind") not in ("rq", "chapter", "schedule", "topic") or s != "plan":
+                L.append("- 근거 출처: 없음 ⚠ — 이 항목의 내용은 출처로 뒷받침되지 않았다")
             L.append("")
             if it.get("summary"):
                 L += [it["summary"].strip(), ""]
@@ -758,8 +770,39 @@ def stage_md(d: Path, p: dict, s: str) -> str:
             if t:
                 L.append(f"- R{f.get('round')} {f.get('kind')}: {t[:400]}")
         L.append("")
+    qas = st.get("qa") or []
+    rlog = {int(r.get("round") or 0): r for r in st.get("review_log") or []}
+    if qas or rlog:
+        L += ["## 5. 검토 기록 (자체 점검 → 독립 QC/QA 검토)", ""]
+        for q in sorted(qas, key=lambda q: int(q.get("round") or 0)):
+            r = int(q.get("round") or 0)
+            rv = rlog.get(r) or {}
+            L += [f"### R{r}", ""]
+            if rv.get("questions"):
+                L.append(f"- 자체 점검: 질문 {len(rv['questions'])}개 — " + "; ".join(
+                    f"[{(qq.get('gap') or {}).get('kind', '-')}] {qq.get('label')}" for qq in rv["questions"]))
+            sc = q.get("spot_checks") or []
+            L.append(f"- 독립 검토(pes:reviewer): 판정 **{q.get('verdict')}** — {q.get('summary', '')}")
+            if sc:
+                L.append(f"- 표본 대조: {sum(1 for c in sc if c.get('result') == 'match')}/{len(sc)} 일치")
+            L.append("")
+            fs = (q.get("qc") or []) + (q.get("qa") or [])
+            if fs:
+                L += ["| 구분 | 항목 | 심각도 | 지적 | 근거 | 조치 권고 |", "|---|---|---|---|---|---|"]
+                cell = lambda v: str(v or "").replace("|", "/").replace("\n", " ")
+                L += [f"| {cell(f.get('id'))} | #{cell(f.get('item'))} | {cell(f.get('severity'))} | {cell(f.get('finding'))} | {cell(f.get('evidence'))} | {cell(f.get('recommendation'))} |" for f in fs]
+                L.append("")
+            if sc:
+                L += ["| 항목 | 대조한 주장 | 출처 | 결과 | 메모 |", "|---|---|---|---|---|"]
+                cell = lambda v: str(v or "").replace("|", "/").replace("\n", " ")
+                L += [f"| #{cell(c.get('item'))} | {cell(c.get('claim'))} | {cell(c.get('source'))} | {cell(c.get('result'))} | {cell(c.get('note'))} |" for c in sc]
+                L.append("")
+            if q.get("missed_by_self_review"):
+                L += ["- 자체 점검이 놓친 것: " + "; ".join(map(str, q["missed_by_self_review"])), ""]
+            if q.get("evidence_gaps"):
+                L += ["- 근거가 부족한 문장: " + "; ".join(f"#{g.get('item')} {g.get('statement')} → {g.get('needed')}" for g in q["evidence_gaps"]), ""]
     if srcs:
-        L += ["## 5. 출처", ""]
+        L += [f"## {6 if (qas or rlog) else 5}. 출처", ""]
         for k, x in enumerate(srcs, 1):
             mark = "확인됨" if x.get("method") in VERIFIED else "미확인"
             L.append(f"{k}. {x.get('title') or x.get('url')}" + (f" — {x['url']}" if x.get("url") else "")
@@ -845,7 +888,7 @@ def cmd_assemble(args):
     (d / "out" / "sources.json").write_text(json.dumps(srcs_out, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-VERIFIED_METHODS = {"browser", "kosis", "law", "vworld"}  # 원문·원자료를 직접 확인한 방법 (대시보드와 같은 기준)
+VERIFIED_METHODS = VERIFIED  # 원문·원자료를 직접 확인한 방법 (대시보드와 같은 기준)
 
 
 def cmd_web(args):
@@ -867,6 +910,84 @@ def cmd_web(args):
     f.write_text(fill(TPL / "final-report.html", cover.get("title") or p.get("topic", "최종 보고서"), data), encoding="utf-8")
     ok = sum(1 for s in srcs if s.get("verified"))
     print(f"{f}  (출처 {len(srcs)}개 · 확인됨 {ok}개{'' if cover else ' · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다'})")
+
+
+# ---------- 독립 검토 (QC/QA) ----------
+def cmd_qa_brief(args):
+    """pes:reviewer 지시문을 rounds/<stage>-R<n>/qa-brief.md 로 쓴다 (digest·자체 점검 초안·기준 포함)."""
+    d, s = pdir(args[0]), stage_arg(args[1])
+    p = load(d)
+    st = p["stages"][s]
+    rnd = st["round"]
+    rd = d / "rounds" / f"{s}-R{rnd}"
+    rd.mkdir(parents=True, exist_ok=True)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_digest([str(d), s] + (["--round", str(rnd)] if s != "plan" else []))
+    (rd / "digest.txt").write_text(buf.getvalue(), encoding="utf-8")
+    (rd / "self-review.json").write_text(json.dumps(st.get("review") or {}, ensure_ascii=False, indent=1), encoding="utf-8")
+    basis = [f"- 주제: {p.get('topic', '')}"]
+    ps = p.get("settings") or {}
+    if ps:
+        basis.append("- 기획 답(사용자): " + ", ".join(f"{k}={v}" for k, v in ps.items() if k not in ("stage_reports",))[:1500])
+    if st.get("settings"):
+        basis.append(f"- {LABEL[s]} 시작 답(사용자): " + ", ".join(f"{k}={v}" for k, v in st["settings"].items())[:1500])
+    rqs = [i for i in p["stages"]["plan"]["items"] if i.get("kind") == "rq" and i.get("status") != "removed"]
+    if rqs:
+        basis.append("- 연구 질문(기획): " + " / ".join(f"#{i['id']} {i['title']}" for i in rqs))
+    for n in (p.get("notes") or [])[-5:]:
+        basis.append(f"- 인계 메모: {n.get('text')}")
+    pes = Path(__file__).resolve()
+    b = f"""[검토 대상] {p.get('topic', '')} — {LABEL[s]} 단계 R{rnd} 결과 (프로젝트 폴더 {d})
+[단계 목적] {STAGE_GOAL.get(s, '')}
+[읽을 것]
+1. 요약: {rd / 'digest.txt'}
+2. 항목 본문: python3 -I {pes} show {d} {s} <id...> --fields summary,details,sources,stats,conflicts,links
+3. 메인의 자체 점검 초안(마지막에): {rd / 'self-review.json'}
+[기준 — 사용자가 정한 것]
+""" + "\n".join(basis) + f"""
+[이번 라운드 변경점(메인)]
+""" + "\n".join(f"- {c}" for c in st.get("changes") or []) + f"""
+[결과 파일] {rd / 'qa.json'}
+pes:reviewer 형식대로 QC·QA·표본 대조(3~5개)를 하고 결과 파일에 쓴 뒤 한 줄만 돌려준다. project.json 은 고치지 않는다.
+"""
+    f = rd / "qa-brief.md"
+    f.write_text(b, encoding="utf-8")
+    print(f)
+
+
+STAGE_GOAL = {"plan": "연구 질문·목차·조사 항목·일정이 주제와 사용자 답에 맞고 서로 연결되어 있는가",
+              "research": "기획의 조사 질문에 출처 있는 사실로 답했는가 (원문 확인·수치 정합·충돌 표시)",
+              "analyze": "조사 사실에서 쟁점·표·시사점을 근거 연결과 함께 끌어냈는가",
+              "write": "원고의 모든 주장·수치가 분석·조사 근거와 각주로 이어지는가, 목차·분량·문체",
+              "verify": "핵심 주장 검증이 충분하고 판정이 원문에 근거하는가",
+              "publish": "산출물이 승인된 원고와 같고 형식·부록·근거 표기가 빠짐없는가"}
+
+
+def cmd_qa(args):
+    """독립 검토 결과(qa.json)를 stages.<s>.qa 에 기록하고, 그때의 자체 점검도 review_log 에 남긴다."""
+    d, s = pdir(args[0]), stage_arg(args[1])
+    p = load(d)
+    st = p["stages"][s]
+    rnd = st["round"]
+    f = Path(args[args.index("--file") + 1]) if "--file" in args else d / "rounds" / f"{s}-R{rnd}" / "qa.json"
+    if not f.exists():
+        die(f"검토 결과 없음: {f} — qa-brief 로 지시문을 만들고 pes:reviewer 를 먼저 돌리세요")
+    q = json.loads(f.read_text(encoding="utf-8"))
+    q["round"] = int(q.get("round") or rnd)
+    q["recorded"] = now()
+    st["qa"] = [x for x in st.get("qa") or [] if int(x.get("round") or 0) != q["round"]] + [q]
+    if st.get("review"):
+        st["review_log"] = [x for x in st.get("review_log") or [] if int(x.get("round") or 0) != q["round"]] + [dict(st["review"], round=q["round"])]
+    save(d, p)
+    fs = (q.get("qc") or []) + (q.get("qa") or [])
+    hi = [x for x in fs if x.get("severity") == "high"]
+    sc = q.get("spot_checks") or []
+    print(f"{LABEL[s]} R{q['round']} 독립 검토: {q.get('verdict')} · QC {len(q.get('qc') or [])} · QA {len(q.get('qa') or [])} · high {len(hi)}"
+          f" · 표본 일치 {sum(1 for x in sc if x.get('result') == 'match')}/{len(sc)} · 자체 점검이 놓친 것 {len(q.get('missed_by_self_review') or [])}")
+    for x in hi:
+        print(f"  [{x.get('id')}] #{x.get('item')} {x.get('finding')}")
 
 
 # ---------- 서버 ----------
@@ -1529,7 +1650,7 @@ def cmd_unlock(args):
 CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start": cmd_round_start,
         "merge": cmd_merge, "render": cmd_render, "approve": cmd_approve, "reopen": cmd_reopen,
         "status": cmd_status, "pending": cmd_pending, "mark": cmd_mark, "chat": cmd_chat,
-        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
+        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock}
 
 if __name__ == "__main__":

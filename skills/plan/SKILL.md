@@ -39,6 +39,8 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 
 ## 승인 전 마무리
 
+0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
+
 1. topic마다 question·links가 있는지 확인. `p.settings`에 기획 결정 정리.
 2. `stages.plan.summary`에 기획 요약 3~5줄 (연구 질문·장 수·조사 항목 수·재사용 수).
 3. `approve <dir> plan` → 조사 항목이 생성된다(재사용 항목은 status=deepen과 보완 요청이 붙는다).

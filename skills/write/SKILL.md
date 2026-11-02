@@ -39,6 +39,8 @@ description: PES 집필 단계 — 기획 목차대로 장·절 원고(section �
 
 ## 승인 전 마무리
 
+0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
+
 1. 모든 chapter에 section, 모든 section에 links.analyze와 sources가 있는지.
 2. `assemble` → `stages.write.summary`에 장 수·분량·각주 수.
 3. `approve <dir> write` → pes:verify.

@@ -35,6 +35,8 @@ description: PES 검증 단계 — 원고에서 수치·법령 조문·핵심 �
 
 ## 승인 전 마무리
 
+0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
+
 1. unsupported 0개 또는 사용자가 남기기로 정한 것만 남았는지.
 2. `assemble` 다시 → `stages.verify.summary`: 판정 수(supported/partial/unsupported), 고친 문장 수.
 3. `approve <dir> verify` → pes:publish.

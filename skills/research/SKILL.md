@@ -100,6 +100,8 @@ $V staticmap "<x,y>" --zoom 14 --size 800,600 -o <dir>/shots/<id>-1.png
 
 ## 승인 전 마무리
 
+0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
+
 1. parallel=max면 pes:verifier로 핵심 주장 검증. 법령 인용 verify_citations.
 2. 남은 conflicts·원문 미확인 비율을 `stages.research.summary`에 정직하게 적는다.
 3. `approve <dir> research` → pes:analyze 시작 질문.

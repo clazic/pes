@@ -35,6 +35,8 @@ description: PES 분석·종합 단계 — 조사 결과를 비교 축(지역·�
 
 ## 승인 전 마무리
 
+0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
+
 1. 모든 issue·table에 links.research가 있는지, 모든 rq에 issue가 있는지 확인.
 2. `stages.analyze.summary`: 핵심 쟁점 3~5줄.
 3. `approve <dir> analyze` → pes:write.

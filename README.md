@@ -570,7 +570,7 @@ OneDrive는 두 곳에서 동시에 바뀐 파일을 `project-<컴퓨터이름>.
 commands/         /pes:* 명령
 skills/core       공통 규칙 (생명주기·CLI·답 받기·AI 점검·토큰·여러 프로젝트)
 skills/<단계>      plan · research · analyze · write · verify · publish
-agents/           researcher · writer · verifier (결과를 파일로)
+agents/           researcher · writer · verifier · reviewer(QC/QA) (결과를 파일로)
 scripts/pes.py    상태 CLI          scripts/serve.py  로컬 서버 (127.0.0.1 전용)
 templates/        dashboard · ask · _questions · hub · stage-report · eli5 · final-report
 questions/        단계별 시작 질문 은행
@@ -595,6 +595,16 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.14.0 — 2026-11-02
+- **독립 검토(QC/QA)를 모든 단계·모든 라운드에**: 메인의 자체 점검(AI 점검) 뒤에 검토 전문 에이전트 `pes:reviewer`가 따로 본다.
+  - QC(규칙대로 만들었나): 주장마다 출처, 원문 확인, 수치·단위·기준일, 충돌·추정 표시, 법령 조·항·호와 시행일.
+  - QA(목적에 맞나): 기획 질문에 답했나, 논리 비약, 누락, 사용자 결정과 어긋남.
+  - 표본 대조: 결론에 영향이 큰 주장 3~5개는 출처 원문을 직접 열어 확인.
+  - 자체 점검이 놓친 것을 따로 적는다. 메인의 결론은 검토원에게 넘기지 않는다(자체 점검 초안은 마지막에 읽음).
+  - 명령: `qa-brief <dir> <stage>`(지시문) → `pes:reviewer` → `qa <dir> <stage>`(기록). 대시보드 단계 탭에 '독립 검토' 칸(판정·지적·근거·표본 대조).
+  - high 지적은 점검 질문(`[QA]`)이나 다음 라운드 할 일로. 판정 fail이면 승인을 권하지 않음.
+- **근거 기록**: 단계 보고서에 항목마다 「근거 출처」 번호(원문 확인 n/m), 출처 없는 항목은 '근거 없음 ⚠'. 「검토 기록」 장(라운드별 자체 점검 → 독립 검토 지적·근거·조치 권고·표본 대조). 단계 요약은 줄마다 `(근거: 조사 #n)`.
 
 ### 0.13.0 — 2026-11-02
 - **보고서 인쇄**: 단계 보고서·그림 설명(eli5)·최종 웹 보고서를 A4로 인쇄(또는 인쇄 창에서 PDF로 저장).

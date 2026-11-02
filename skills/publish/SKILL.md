@@ -31,6 +31,8 @@ description: PES 산출·공유 단계 — 검증을 마친 out/report.md 를 HW
 
 ## 승인
 
+먼저 마지막 라운드의 독립 검토(QC/QA, `qa-brief`→`pes:reviewer`→`qa`)로 산출물이 승인된 원고와 같은지·근거 표기가 빠짐없는지 확인한다.
+
 `approve <dir> publish` → project.complete=true. 서버는 그대로 둔다(열람용, 다른 프로젝트와 함께 쓰는 서버라 끄지 않는다). 사용자가 원하면 `stop` — 목록과 모든 프로젝트 화면이 함께 꺼진다.
 
 ## 단계 보고서

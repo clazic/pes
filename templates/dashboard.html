@@ -276,6 +276,7 @@ article.item { margin:0 0 var(--s4); }
 .wrow.pending .wname small, .orow.blank .oname small { display:inline; margin:0; }
 
 @media(max-width:600px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.workbar{margin-bottom:24px;}section.box{padding:16px;}.pipeline{overflow-x:auto;grid-template-columns:repeat(7,minmax(120px,1fr));}}
+.box.qa { border-left: 4px solid var(--accent); } .box.qa .pill.ok { background: var(--ok); color: #fff; } .box.qa .pill.warn { background: var(--warn); color: #fff; } .box.qa .pill.bad { background: var(--bad); color: #fff; } td.sev-high { color: var(--bad); font-weight: 700; } td.sev-medium { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -532,6 +533,20 @@ function reviewBox() {
     <div class="meta">${esc(r.summary || '다음 라운드 전에 정할 것입니다. 추천 답이 미리 골라져 있으니 바꿀 것만 바꾸고 아래에서 보내세요.')}</div>
     ${QF.render(r.questions || [], 'rv-')}</section>`;
 }
+// 독립 검토(QC/QA) — 자체 점검 뒤 pes:reviewer 가 다시 본 결과
+function qaBox() {
+  const all = st().qa || []; if (!all.length) return '';
+  const q = all[all.length - 1];
+  const fs = [...(q.qc || []), ...(q.qa || [])];
+  const sc = q.spot_checks || [];
+  const V = { pass: ['통과', 'ok'], pass_with_issues: ['조건부 통과', 'warn'], fail: ['보완 필요', 'bad'] }[q.verdict] || [q.verdict || '-', ''];
+  const sev = { high: '높음', medium: '중간', low: '낮음' };
+  const rows = fs.map(f => `<tr><td>${esc(f.id)}</td><td>${f.item ? `<a href="#${esc(SEL)}/${esc(f.item)}">#${esc(f.item)}</a>` : ''}</td><td class="sev-${esc(f.severity)}">${esc(sev[f.severity] || f.severity || '')}</td><td>${inline(f.finding || '')}</td><td class="meta">${inline(f.evidence || '')}</td><td>${inline(f.recommendation || '')}</td></tr>`).join('');
+  return `<section class="box qa"><h2>독립 검토 (QC/QA) — R${esc(q.round)} <span class="pill ${V[1]}">${esc(V[0])}</span></h2>
+    <div class="meta">자체 점검 뒤 검토 전문 에이전트가 따로 확인했습니다 · ${esc(q.summary || '')}${sc.length ? ` · 출처 표본 대조 ${sc.filter(c => c.result === 'match').length}/${sc.length} 일치` : ''}${(q.missed_by_self_review || []).length ? ` · 자체 점검이 놓친 것 ${q.missed_by_self_review.length}개` : ''}</div>
+    ${fs.length ? `<details ${fs.some(f => f.severity === 'high') ? 'open' : ''}><summary>지적 ${fs.length}개 (높음 ${fs.filter(f => f.severity === 'high').length})</summary><div class="tbl"><table class="stats"><tr><th>구분</th><th>항목</th><th>심각도</th><th>지적</th><th>근거</th><th>조치 권고</th></tr>${rows}</table></div></details>` : ''}
+    ${sc.length ? `<details><summary>표본 대조 ${sc.length}건</summary><div class="tbl"><table class="stats"><tr><th>항목</th><th>주장</th><th>출처</th><th>결과</th><th>메모</th></tr>${sc.map(c => `<tr><td>#${esc(c.item)}</td><td>${inline(c.claim || '')}</td><td>${inline(c.source || '')}</td><td>${esc({ match: '일치', differ: '다름', unreachable: '열람 불가' }[c.result] || c.result)}</td><td>${inline(c.note || '')}</td></tr>`).join('')}</table></div></details>` : ''}</section>`;
+}
 function stageHead() {
   const s = st();
   const QL = (D.qlabels || {})[SEL] || {};
@@ -765,7 +780,7 @@ function render() {
     return;
   }
   document.querySelector('.bar').style.display = '';
-  document.getElementById('app').innerHTML = header() + stageHead() + kpisStage() + reports() + reopenNote() + reviewBox() + emptyStage() + library() + warnBox() + timeline() + matrix() + itemsSection() + outputs() + suggestions() + extra();
+  document.getElementById('app').innerHTML = header() + stageHead() + kpisStage() + reports() + reopenNote() + reviewBox() + qaBox() + emptyStage() + library() + warnBox() + timeline() + matrix() + itemsSection() + outputs() + suggestions() + extra();
   const r = RV(); if (r) QF.applyShow(document.getElementById('rvbox'), r.questions);
   document.getElementById('approve').style.display = isCur() && st().status === 'active' ? '' : 'none';
   document.getElementById('reopen').style.display = st().status === 'approved' ? '' : 'none';

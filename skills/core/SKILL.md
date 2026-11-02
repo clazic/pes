@@ -44,6 +44,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `status` / `pending` / `mark <파일…>` | 요약 / 처리 안 한 답 / 처리 완료 표시 |
 | `chat <dir> <stage> "텍스트" [kind]` | 채팅으로 받은 지시도 기록 (타임라인이 끊기지 않게) |
 | `assemble <dir>` | 집필 원고 → `out/report.md` (각주 번호 정리) |
+| `qa-brief <dir> <stage>` · `qa <dir> <stage>` | 독립 검토(QC/QA) 지시문 만들기 · 결과 기록 (`pes:reviewer`) |
 | `web <dir> [--assemble]` | 최종 웹 보고서 `out/report.html` (`templates/final-report.html`; 표지 정보 `out/cover.json`, 출처 확인 여부 `out/sources.json` — assemble 이 만든다) |
 | `serve` / `stop` / `watch` | 로컬 서버 — 홈마다 포트 하나(127.0.0.1:8760, 프로젝트는 `/<slug>/`) / 종료(홈 전체) / Monitor 명령 |
 
@@ -114,7 +115,20 @@ EOF
 
 1. **시작 질문** (status=asking): `ask-prep` → 명세 다듬기(이미 정해진 것은 지우고 `inherited`로 — 항목은 `{"label": "주제", "value": "…"}` 또는 `"주제: …"` 문자열, `_when`이 안 맞는 질문 삭제, 추천을 주제에 맞게) → `ask` → `serve` → 브라우저로 연다 → Monitor. 채팅엔 한 줄: "질문 폼을 열었습니다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 보내 주세요."
 2. **답(kind=stage_start)** → answers를 `stages.<단계>.settings`에 저장 (기획 답은 `p.settings`에도) → `mark`.
-3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge` 또는 직접) → `changes`에 3~5줄(각 줄 `짧은 라벨: 내용` 형식 — 대시보드 팝업에서 라벨·내용 두 칸으로 보인다) → **AI 점검 작성** → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개를 올렸습니다."
+3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge` 또는 직접) → `changes`에 3~5줄(각 줄 `짧은 라벨: 내용` 형식 — 대시보드 팝업에서 라벨·내용 두 칸으로 보인다) → **AI 점검(자체 검토) 작성** → **독립 검토(QC/QA)** (아래) → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개, 독립 검토 결과를 올렸습니다."
+
+### 독립 검토 (QC/QA) — 모든 단계·모든 라운드, 생략하지 않는다
+자체 점검(review)만으로 끝내지 않는다. 자체 점검을 쓴 뒤 **다른 에이전트가 다시 본다** (사용자 지시, 2026-11-02).
+1. `qa-brief <dir> <stage>` → `rounds/<stage>-R<n>/qa-brief.md` (digest·자체 점검 초안·사용자 기준 포함).
+2. `pes:reviewer` 서브에이전트(Agent, model opus) 1개: "지시문 파일을 읽고 따르라"만 넘긴다. **메인의 결론·기대를 프롬프트에 쓰지 않는다** (자체 점검 초안은 파일로만, 검토원이 마지막에 읽음).
+3. 끝나면 `qa <dir> <stage>` → `stages.<stage>.qa`에 기록(그때의 자체 점검은 `review_log`로). 대시보드 단계 탭에 '독립 검토' 칸이 생긴다.
+4. 반영: severity high와 `missed_by_self_review`는 **점검 질문에 추가**(gap.kind는 지적의 kind, label 앞에 "[QA]")하거나, 사실 오류처럼 답이 분명한 것은 바로 다음 라운드 할 일(revise/browser)로 건다. 반영한 것과 반영하지 않은 것(이유)을 changes에 한 줄.
+5. 판정이 fail이면 승인을 권하지 않는다(마지막 질문을 "한 라운드 더"로 추천).
+
+### 근거 기록 — 보고서에 쓰는 모든 내용
+- 항목의 summary·details에 쓰는 사실·수치는 그 항목의 `sources`에 있어야 한다. 출처 없이 쓴 판단·추정은 문장에 "(판단)" "(추정)"을 붙이고 conflicts에 이유를 남긴다.
+- `stages.<stage>.summary`(보고서 첫 장)의 각 줄 끝에 근거 항목을 붙인다: `… 2곳이다 (근거: 조사 #7·#8)`.
+- 단계 보고서는 항목마다 「근거 출처」 번호(원문 확인 여부)와 「검토 기록」(자체 점검 → 독립 검토 지적·근거·표본 대조)을 자동으로 싣는다. 출처 없는 항목은 '근거 없음 ⚠'으로 드러난다 — 승인 전에 채우거나 이유를 적는다.
 4. **답(kind=review/feedback)** → 아래 「답 해석」대로 항목 status/request 갱신 → `mark` → 계획 3~5줄을 채팅에 밝히고 바로 다음 라운드. 할 일 항목(new·deepen·revise·browser)만 작업, done은 건드리지 않는다.
 5. **승인(kind=approve)** → 단계 스킬의 「승인 전 마무리」 → `approve` → **단계 보고서**(아래) → 다음 단계의 1로. 사용자가 채팅으로 "승인"이라고 해도 같다(`chat … approve`로 기록).
 6. **다시 열기(kind=reopen)**: 대시보드의 승인된 단계 탭에서 '이 단계 다시 열기' + 고칠 내용이 온다 → `reopen <dir> <단계>` → `mark` → 고칠 내용을 그 단계 항목의 request/status로 반영 → `round-start` → 라운드(3) → 다시 승인되면 단계 보고서를 새로 만들고, 뒤 단계는 '다시 확인 필요' 항목부터 처리한다.
@@ -125,7 +139,7 @@ EOF
 단계를 승인하면 그 단계의 결과를 독립 보고서로 남긴다: 기획보고서·조사보고서·분석·종합보고서·원고 검토본·검증보고서·산출 보고서.
 형식은 `p.settings.stage_reports` (기획 시작 질문, 기본 `html, eli5, md`).
 
-1. `stages.<단계>.summary`를 5~8줄로 채운다 (이 단계에서 정한 것·찾은 것·남은 문제). 보고서 첫 장이 된다.
+1. `stages.<단계>.summary`를 5~8줄로 채운다 (이 단계에서 정한 것·찾은 것·남은 문제). 보고서 첫 장이 된다. **줄마다 근거 항목 표기** `(근거: 조사 #3·#7)`. 승인 라운드의 독립 검토(qa)가 기록돼 있어야 한다.
 2. `report <dir> <단계>` → `reports/<단계>/report.md`(원본)·`report.html`(웹 보고서: 목차·표·출처 확인됨/미확인).
 3. **eli5** (형식에 있으면): `eli5:eli5` 스킬 원칙대로 — 큰 그림, 적은 글, 비유 하나로 일관. 이 단계의 결과를 처음 보는 사람이 1분에 이해하게. `reports/<단계>/eli5.json`을 쓰고 `report`를 다시 실행 → `eli5.html`.
    ```json
