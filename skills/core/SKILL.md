@@ -176,6 +176,7 @@ EOF
 
 | 받은 것 | 처리 |
 |---|---|
+| 질문 폼 답의 `<질문 id>__other` | 그 질문에 붙인 **요청사항** — 선택한 답보다 구체적인 조건이므로 그대로 반영하고, 반영 방식을 라운드 changes 에 한 줄로 적는다 |
 | "N번 심화: …" | status=deepen, request=지시 |
 | "N번 삭제" / "N번 복구" | removed / done |
 | "N번 수정: …" | status=revise, request=지시 |
