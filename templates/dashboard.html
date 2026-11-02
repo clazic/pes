@@ -457,7 +457,7 @@ function pipeline() {
 function header() {
  return WORKBAR + `<header class="page-heading"><div class="eyebrow"><a href="../index.html">프로젝트 목록</a> / 연구 프로젝트</div><h1>${esc(P.topic)}</h1><div class="meta"><span>시작 ${esc(P.created||'')}</span><span>갱신 ${esc(D.built||'')}</span><span>현재 단계: ${esc(LBL[P.current]||'완료')}${P.complete?' · 전체 완료':''}</span></div></header>${pipeline()}`;
 }
-const WORKBAR = "<div class=\"workbar\"><div class=\"brand\"><b>PES</b><span>정책 연구 작업실</span></div></div>";
+const WORKBAR = "<div class=\"workbar\"><div class=\"brand\"><b>PES</b><span>프로젝트 실행 시스템</span></div></div>";
 const kpi = (v,l,sub) => `<div class="kpi"><span class="scope">${SEL === 'overview' ? '프로젝트 전체' : esc(LBL[SEL]) + ' 단계'} 기준</span><b>${v}</b><span>${l}</span>${sub ? `<span class="ksub">${sub}</span>` : ''}</div>`;
 function srcStat(items) {
   const seen = new Map(); items.flatMap(i => i.sources || []).forEach(x => { const k = x.url || x.title; if (k && !seen.has(k)) seen.set(k, x); });
