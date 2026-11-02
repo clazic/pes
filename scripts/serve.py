@@ -90,6 +90,11 @@ def main():
             path = urlsplit(self.path).path
             if path == "/whoami":
                 return self._json(200, {"root": str(root), "single": True}, cors=True)
+            if path == "/version" or path.endswith("/version"):  # 열린 화면이 새 결과를 알아채도록 (index.html·ask-*.html 수정 시각)
+                d0, _ = project_of(path[: -len("version")] or "/")
+                base = d0 if d0 is not None else root
+                fs = [base / "index.html", *base.glob("ask-*.html")]
+                return self._json(200, {"v": max([int(f.stat().st_mtime) for f in fs if f.exists()] or [0])})
             if path == "/ping" or path.endswith("/ping"):
                 return self._json(200, {"ok": True})
             d, rest = project_of(path)

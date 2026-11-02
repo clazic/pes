@@ -809,6 +809,33 @@ document.addEventListener('mouseover', e => { const el = e.target.closest('[data
 document.addEventListener('focusin', e => { const el = e.target.closest('[data-pop]'); if (el) showPop(el); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') POP.classList.remove('on'); });
 render();
+
+// ---- 새 결과 알림: 다른 컴퓨터(원격)에서 열어 둔 화면도 결과가 바뀌면 알아챈다 ----
+(function liveUpdate() {
+  if (!location.protocol.startsWith('http')) return;
+  let base = null, shown = false, dirty = false;
+  document.addEventListener('input', () => { dirty = true; }, true);
+  const bar = document.createElement('div');
+  bar.id = 'pes-live';
+  bar.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;display:none;gap:12px;align-items:center;padding:10px 16px;border-radius:6px;background:var(--accent,#245e9e);color:#fff;font:600 14px/1.4 system-ui,-apple-system,"Malgun Gothic",sans-serif;box-shadow:0 6px 20px #0003';
+  bar.innerHTML = '<span>새 결과가 올라왔습니다</span><button style="font:inherit;padding:4px 12px;border:0;border-radius:4px;background:#fff;color:#245e9e;cursor:pointer">새로 보기</button>';
+  bar.querySelector('button').onclick = () => location.reload();
+  document.addEventListener('DOMContentLoaded', () => document.body.appendChild(bar));
+  if (document.body) document.body.appendChild(bar);
+  const tick = async () => {
+    try {
+      const j = await (await fetch('version', { cache: 'no-store' })).json();
+      if (base === null) { base = j.v; return; }
+      if (j.v > base && !shown) {
+        shown = true;
+        if (!dirty) { location.reload(); return; }   // 입력 중이 아니면 바로 새로고침
+        bar.style.display = 'flex';                  // 입력 중이면 알림만
+        try { document.title = '● ' + document.title; } catch (e) {}
+      }
+    } catch (e) {}
+  };
+  tick(); setInterval(tick, 10000);
+})();
 </script>
 </body>
 </html>
