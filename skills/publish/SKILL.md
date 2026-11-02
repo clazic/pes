@@ -30,7 +30,7 @@ description: PES 산출·공유 단계 — 검증을 마친 out/report.md 를 HW
 
 ## 승인
 
-`approve <dir> publish` → project.complete=true. 서버는 그대로 두고(열람용), 사용자가 원하면 `stop`.
+`approve <dir> publish` → project.complete=true. 서버는 그대로 둔다(열람용, 다른 프로젝트와 함께 쓰는 서버라 끄지 않는다). 사용자가 원하면 `stop` — 목록과 모든 프로젝트 화면이 함께 꺼진다.
 
 ## 단계 보고서
 

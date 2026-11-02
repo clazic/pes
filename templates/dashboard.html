@@ -310,7 +310,7 @@ function pipeline() {
 }
 function header() {
   return `<h1>${esc(P.topic)}</h1>
-    <div class="meta"><a href="http://127.0.0.1:8760/" title="pes hub 로 목록 서버를 켜야 열립니다">← 프로젝트 목록</a> · 시작 ${esc(P.created || '')} · 갱신 ${esc(D.built || '')}${P.complete ? ' · <b>전체 완료</b>' : ''}</div>
+    <div class="meta"><a href="../index.html">← 프로젝트 목록</a> · 시작 ${esc(P.created || '')} · 갱신 ${esc(D.built || '')}${P.complete ? ' · <b>전체 완료</b>' : ''}</div>
     ${pipeline()}`;
 }
 const kpi = (v, l, sub) => `<div class="kpi"><b>${v}</b><span>${l}</span>${sub ? `<span class="ksub">${sub}</span>` : ''}</div>`;
@@ -638,7 +638,7 @@ async function copy(text) {
 }
 const sendBtn = document.getElementById('send'); let served = false;
 async function post(body) {
-  const r = await fetch('/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const r = await fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(r.status);
 }
 async function send() {
@@ -651,7 +651,7 @@ async function send() {
     sendBtn.disabled = true; sendBtn.textContent = '보냈습니다 ✓'; toast('Claude에게 보냈습니다. 다음 라운드가 준비되면 새로고침하세요.');
   } catch { toast('보내기 실패 — 복사해서 채팅에 붙여넣어 주세요.'); copy(text); }
 }
-if (location.protocol.startsWith('http')) fetch('/ping').then(r => r.ok && r.json()).then(j => { if (j && j.ok) { served = true; sendBtn.style.display = isCur() ? '' : 'none'; } }).catch(() => {});
+if (location.protocol.startsWith('http')) fetch('ping').then(r => r.ok && r.json()).then(j => { if (j && j.ok) { served = true; sendBtn.style.display = isCur() ? '' : 'none'; } }).catch(() => {});
 document.getElementById('copy').onclick = () => { const t = build(); t ? copy(t) : toast('보낼 내용이 없습니다.'); };
 sendBtn.onclick = send;
 const modal = document.getElementById('modal');

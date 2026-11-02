@@ -46,14 +46,12 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const PS = D.projects || [], STG = D.stages || [];
 const WHO = { you: '내 차례', ai: 'Claude 작업 중', done: '완료', err: '오류' };
 const RN = { plan: '기획', research: '조사', analyze: '분석·종합', write: '집필', verify: '검증', publish: '산출' };
-let F = 'all'; const LIVE = {};
+let F = 'all';
 const n = w => PS.filter(p => p.who === w).length;
 function row(p) {
   const cur = (p.stages || []).find(s => s.key === p.current) || {};
   const reps = (p.stages || []).filter(s => (s.reports || []).length);
-  const live = LIVE[p.slug];
-  const open = live ? `<a href="http://127.0.0.1:${live}/" target="_blank">열기</a><small>:${live} · 서버 켜짐</small>`
-    : `<button data-start="${esc(p.slug)}">서버 켜고 열기</button><small>서버 꺼짐</small>`;
+  const open = `<a href="${encodeURIComponent(p.slug)}/index.html">대시보드 열기</a>`;
   return `<div class="row ${esc(p.who)}">
     <div class="name"><b>${esc(p.topic)}</b><small>${esc(p.slug)} · 시작 ${esc(String(p.created || '').slice(5))} · 갱신 ${esc(String(p.updated || '').slice(5))}</small>${p.lock ? `<small class="lock">Claude 세션이 사용 중 (${esc(p.lock.owner)}…, ${esc(String(p.lock.since || '').slice(5))}부터)</small>` : ''}</div>
     <div><div class="steps">${(p.stages || []).map(s => `<i class="${esc(s.stale ? 'stale' : s.status)}" title="${esc(s.label)}: ${esc(s.status)}${s.round ? ' R' + s.round : ''}"></i>`).join('')}</div><div class="slab">${STG.map(s => `<span>${esc(RN[s.key] || s.label)}</span>`).join('')}</div></div>
@@ -80,22 +78,8 @@ function render() {
   <div class="foot">막대 색: 초록 = 승인, 파랑 = 진행 중, 주황 = 앞 단계가 바뀌어 다시 확인 필요, 회색 = 대기. '내 차례'가 맨 위로 옵니다.<br>
   'Claude 작업 중'인 프로젝트는 그 프로젝트를 연 Claude Code 세션에서 진행됩니다. 세션이 없으면 <code>/pes:run 폴더</code>로 이어 가세요.</div>`;
 }
-document.addEventListener('click', async e => {
-  const f = e.target.closest('[data-f]'); if (f) { F = f.dataset.f; return render(); }
-  const b = e.target.closest('[data-start]'); if (!b) return;
-  b.disabled = true; b.textContent = '켜는 중…';
-  try {
-    const r = await fetch('/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: b.dataset.start }) });
-    const j = await r.json();
-    if (j.ok) { const port = +(j.url.match(/:(\d+)\//) || [])[1]; LIVE[b.dataset.start] = port; render(); window.open(j.url, '_blank'); }
-    else { b.textContent = '실패 — /pes:status 로'; }
-  } catch { b.textContent = '실패 — /pes:status 로'; }
+document.addEventListener('click', e => {
+  const f = e.target.closest('[data-f]'); if (f) { F = f.dataset.f; render(); }
 });
-async function probe() {
-  await Promise.all(PS.filter(p => p.port).map(async p => {
-    try { const r = await fetch(`http://127.0.0.1:${p.port}/whoami`, { cache: 'no-store' }); const j = await r.json(); if (j.root === p.path) LIVE[p.slug] = p.port; } catch {}
-  }));
-  render();
-}
-render(); probe();
+render();
 </script></body></html>

@@ -32,7 +32,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `merge <dir> <stage> <결과.json…>` | 서브에이전트 결과 병합 (출처 url 중복 제거·누적, open_questions→제안, depth+1) |
 | `render <dir> [stage]` | 스냅샷 + 대시보드 `index.html` |
 | `approve <dir> <stage>` | 승인 → 다음 단계 asking. 기획 승인 시 조사 항목 자동 생성 |
-| `list [projects]` · `hub [projects]` | 프로젝트 목록 (채팅용 · 화면 8760) |
+| `list [projects]` · `hub [projects]` | 프로젝트 목록 (채팅용 · 화면 127.0.0.1:8760/) |
 | `which <도구>` | 도구 경로 (PATH + 사용자별 설치 위치, Windows 포함) |
 | `setup.py check · install missing · keys · mark · needed` | 설치 도우미 (`/pes:setup`) — 도구 설치, API 키 화면(127.0.0.1:8759), 완료 표시 |
 | `doctor [dir] [--fix] [--json]` | 진단 (환경·도구·키·포트·프로젝트 상태·잠금·답·보고서·연결). 명령이 이상하게 실패하면 먼저 실행 |
@@ -44,7 +44,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `status` / `pending` / `mark <파일…>` | 요약 / 처리 안 한 답 / 처리 완료 표시 |
 | `chat <dir> <stage> "텍스트" [kind]` | 채팅으로 받은 지시도 기록 (타임라인이 끊기지 않게) |
 | `assemble <dir>` | 집필 원고 → `out/report.md` (각주 번호 정리) |
-| `serve` / `stop` / `watch` | 로컬 서버(127.0.0.1:8765~) / 종료 / Monitor 명령 |
+| `serve` / `stop` / `watch` | 로컬 서버 — 홈마다 포트 하나(127.0.0.1:8760, 프로젝트는 `/<slug>/`) / 종료(홈 전체) / Monitor 명령 |
 
 ## 프로젝트 폴더
 
@@ -107,7 +107,7 @@ EOF
 - **세션 표시(PES_OWNER)**: 세션 처음에 이 세션 ID를 정해(모르면 `uuidgen`으로 한 번 만들고 대화 동안 같은 값) 모든 pes 호출에 `PES_OWNER=<ID>`를 붙인다. 예: `pes(){ PES_OWNER=<ID> python3 -I <플러그인>/scripts/pes.py "$@"; }`
 - 프로젝트를 열면 `lock <dir>`. 쓰기 명령은 다른 세션이 2시간 안에 기록한 프로젝트면 거부된다(종료 코드 3) — 억지로 풀지 말고 사용자에게 알린다. 그 세션을 닫았다고 하면 `lock <dir> --force`.
 - 한 세션에서는 한 프로젝트만 진행한다. 다른 프로젝트는 다른 Claude Code 세션(터미널 탭)에서 `/pes:run <폴더>`.
-- `list` = 채팅용 목록, `hub` = 목록 화면(127.0.0.1:8760, 프로젝트 서버 켜기 버튼 포함). 프로젝트 대시보드를 다시 만들 때마다 목록 화면도 갱신된다.
+- `list` = 채팅용 목록, `hub` = 목록 화면(127.0.0.1:8760/). 서버는 PES 홈마다 **포트 하나**이고, 목록은 `/`, 각 프로젝트 대시보드는 `/<slug>/` 로 열린다 — 프로젝트마다 서버를 따로 띄우지 않는다. 프로젝트 대시보드를 다시 만들 때마다 목록 화면도 갱신된다.
 
 ## 단계 생명주기 (모든 단계 스킬이 따른다)
 
@@ -142,7 +142,7 @@ EOF
 
 ## 답 받기 (자동)
 
-- 서버: `$PES serve <dir>` (이미 떠 있으면 주소만). 브라우저는 `$PES open <dir|주소>` (macOS·Windows 공통, 사용자 기본 브라우저).
+- 서버: `$PES serve <dir>` (홈 서버가 이미 떠 있으면 이 프로젝트 주소 `http://127.0.0.1:8760/<slug>/` 만 출력). 브라우저는 `$PES open <dir|주소>` (macOS·Windows 공통, 사용자 기본 브라우저).
 - Monitor (timeout_ms 1800000, 만료되면 다시 건다): `$PES watch <dir>`가 출력하는 명령 —
   `tail -n0 -F <dir>/feedback.log | grep --line-buffered FEEDBACK`
   줄 형식: `FEEDBACK <stage> R<n> <kind> <json 경로>` (kind: stage_start | review | feedback | approve | resume | reopen)

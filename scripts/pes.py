@@ -23,14 +23,14 @@
   report <dir> <stage>                 단계 보고서: reports/<stage>/report.md·report.html 생성, eli5.json 이 있으면
                                        eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
   assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리)
-  serve <dir>                          로컬 서버 시작 (이미 떠 있으면 주소만)
-  stop <dir>                           로컬 서버 종료
+  serve <dir>                          로컬 서버 시작 (홈마다 포트 하나 — 이미 떠 있으면 이 프로젝트 주소만)
+  stop [dir]                           로컬 서버 종료 (그 홈의 목록·모든 프로젝트 화면이 함께 꺼짐)
   watch <dir>                          Monitor 에 넣을 명령 출력
   home                                 PES 홈(프로젝트들이 모이는 폴더) 보기 — 기본 ~/pes-projects
   home <새 폴더> [--from <옛 폴더>]     PES 홈 변경: 서버를 끄고 모든 프로젝트를 새 폴더로 옮긴 뒤 다시 켠다
   open <dir|주소>                      기본 브라우저로 열기 (macOS·Windows 공통)
   list                                 프로젝트 목록 (차례·단계·서버)
-  hub                                  프로젝트 목록 화면 생성 + 목록 서버(8760) 시작, 주소 출력
+  hub                                  프로젝트 목록 화면 생성 + 서버(8760) 시작, 주소 출력
   <dir> 자리에 경로 대신 프로젝트 이름(slug)만 쓰면 PES 홈 아래에서 찾는다.
   doctor [dir] [--fix] [--net] [--json] 진단 (--net: 법령·KOSIS API 실제 연결 확인): 환경(Python·도구·키·포트·PES 홈)과 프로젝트(상태·잠금·답·보고서·연결)
                                        --fix 는 안전한 것만 고친다 (낡은 잠금·포트 파일, 남은 .tmp, 대시보드 재생성, 보고서 등록 갱신)
@@ -528,8 +528,8 @@ def cmd_status(args):
         x = json.loads(f.read_text(encoding="utf-8"))
         first = (x.get("text") or "").splitlines()[:1]
         print(f"  - {f}  [{x.get('stage','')}/{x.get('kind','')}/R{x.get('round',0)}] {first[0][:80] if first else ''}")
-    port = server_port(d)
-    print(f"서버: {'http://127.0.0.1:%d/' % port if port else '꺼짐'}")
+    url = server_url(d)
+    print(f"대시보드: {url or '서버 꺼짐 — serve ' + d.name}")
 
 
 def cmd_pending(args):
@@ -860,41 +860,16 @@ def kill_pid(pid):
         return False
 
 
-def whoami(port):
+def whoami_info(port):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/whoami", timeout=1) as r:
-            return json.loads(r.read()).get("root")
+            return json.loads(r.read())
     except Exception:
         return None
 
 
-def server_port(d):
-    for port in range(8765, 8776):
-        if whoami(port) == str(d):
-            return port
-    return None
-
-
-def cmd_serve(args):
-    d = pdir(args[0])
-    load(d)
-    port = server_port(d)
-    if not port:
-        for cand in range(8765, 8776):
-            if whoami(cand) is None and not port_busy(cand):
-                port = cand
-                break
-        if not port:
-            die("8765~8775 포트가 모두 사용 중")
-        log = open(d / "serve.out", "a", encoding="utf-8")
-        pr = spawn([sys.executable, "-I", str(ROOT / "scripts" / "serve.py"), str(d), str(port)], log)
-        (d / ".pes-server").write_text(json.dumps({"pid": pr.pid, "port": port}), encoding="utf-8")
-        for _ in range(30):
-            if whoami(port) == str(d):
-                break
-            time.sleep(0.1)
-    (d / ".pes-port").write_text(str(port), encoding="utf-8")
-    print(f"http://127.0.0.1:{port}/")
+def whoami(port):
+    return (whoami_info(port) or {}).get("root")
 
 
 def port_busy(port):
@@ -903,29 +878,112 @@ def port_busy(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def cmd_stop(args):
-    d = pdir(args[0])
-    stop_server(d)
-    print("서버 종료")
+# 서버는 PES 홈마다 하나(포트 하나, 기본 8760). 프로젝트는 그 아래 /<slug>/ 로 열린다.
+# 예전 버전의 프로젝트별 서버(8765~8775)는 보이면 끈다.
+LEGACY_PORTS = range(8765, 8776)
 
 
-def stop_server(d: Path, hub=False):
-    """pid 파일로 끄고, 그래도 떠 있으면 포트에서 찾아 /quit 대신 pid 를 다시 확인한다."""
-    f = d / (".pes-hub-server" if hub else ".pes-server")
+def serve_root(d: Path) -> Path:
+    """d 를 서빙할 서버의 루트: 프로젝트면 그 부모(홈), 아니면 d 자신."""
+    return d.parent if (d / "project.json").exists() else d
+
+
+def root_port(root: Path):
+    """root 를 서빙하는 (포트 하나 방식) 서버의 포트."""
+    for pt in HUB_PORTS:
+        i = whoami_info(pt) or {}
+        if i.get("root") == str(root) and i.get("single"):
+            return pt
+    return None
+
+
+def server_url(d: Path):
+    """켜져 있으면 d(프로젝트 또는 홈)의 주소, 꺼져 있으면 None."""
+    root = serve_root(d)
+    port = root_port(root)
+    if not port:
+        return None
+    return f"http://127.0.0.1:{port}/" + ("" if d == root else f"{d.name}/")
+
+
+def server_port(d):
+    return root_port(serve_root(d))
+
+
+def ensure_server(root: Path) -> int:
+    root.mkdir(parents=True, exist_ok=True)
+    port = root_port(root)
+    if port:
+        return port
+    if any(whoami(pt) == str(root) for pt in HUB_PORTS):  # 예전 버전의 목록 전용 서버
+        stop_server(root, old=True)
+    port = next((pt for pt in HUB_PORTS if whoami(pt) is None and not port_busy(pt)), None)
+    if not port:
+        die(f"{HUB_PORTS.start}~{HUB_PORTS.stop - 1} 포트가 모두 사용 중 — 다른 PES 홈의 서버나 다른 프로그램을 끄세요")
+    log = open(root / ".pes-hub.out", "a", encoding="utf-8")
+    pr = spawn([sys.executable, "-I", str(ROOT / "scripts" / "serve.py"), str(root), str(port)], log)
+    (root / ".pes-hub-server").write_text(json.dumps({"pid": pr.pid, "port": port}), encoding="utf-8")
+    for _ in range(30):
+        if whoami(port) == str(root):
+            break
+        time.sleep(0.1)
+    return port
+
+
+def stop_legacy(d: Path):
+    """예전 프로젝트별 서버(8765~)를 끄고 기록 파일을 지운다."""
+    f = d / ".pes-server"
     try:
-        x = json.loads(f.read_text(encoding="utf-8"))
-        kill_pid(x.get("pid"))
+        kill_pid(json.loads(f.read_text(encoding="utf-8")).get("pid"))
+    except Exception:
+        pass
+    for name in (".pes-server", ".pes-port"):
+        (d / name).unlink(missing_ok=True)
+    for pt in LEGACY_PORTS:
+        if whoami(pt) == str(d):
+            if os.name != "nt":
+                subprocess.run(["pkill", "-f", f"serve.py {d} "], check=False)
+            break
+
+
+def cmd_serve(args):
+    d = pdir(args[0])
+    p = load(d)
+    stop_legacy(d)
+    if not (d / "index.html").exists():
+        build_index(d, p)
+    root = serve_root(d)
+    if (root / ".pes-hub").exists() or not (root / "index.html").exists():
+        build_hub(root)
+    ensure_server(root)
+    print(server_url(d))
+
+
+def cmd_stop(args):
+    args = [a for a in args if a != "--"]
+    d = pdir(args[0]) if args else pes_home()
+    root = serve_root(d)
+    stop_legacy(d) if (d / "project.json").exists() else None
+    stop_server(root, old=True)
+    print(f"서버 종료 ({root} — 이 홈의 모든 프로젝트 화면이 함께 꺼집니다)")
+
+
+def stop_server(root: Path, old=False):
+    """홈 서버를 pid 파일로 끄고, 그래도 떠 있으면 프로세스 이름으로 찾는다. old=True 면 예전 목록 전용 서버."""
+    alive = (lambda: any(whoami(pt) == str(root) for pt in HUB_PORTS)) if old else (lambda: bool(root_port(root)))
+    f = root / ".pes-hub-server"
+    try:
+        kill_pid(json.loads(f.read_text(encoding="utf-8")).get("pid"))
     except Exception:
         pass
     f.unlink(missing_ok=True)
-    ports = HUB_PORTS if hub else range(8765, 8776)
     for _ in range(20):
-        if not any(whoami(pt) == str(d) for pt in ports):
+        if not alive():
             return True
         time.sleep(0.1)
-    if os.name != "nt":  # 예전 방식으로 띄운 서버
-        subprocess.run(["pkill", "-f", f"serve.py {d} "], check=False)
-    return not any(whoami(pt) == str(d) for pt in ports)
+    if os.name != "nt":
+        subprocess.run(["pkill", "-f", f"serve.py {root} "], check=False)
+    return not alive()
 
 
 def cmd_watch(args):
@@ -962,18 +1020,13 @@ def brief(d: Path) -> dict:
         who, todo = "ai", f"{L} R{x['round'] or 1} 작업 중"
     else:
         who, todo = "you", f"{L} 시작"
-    port = None
-    try:
-        port = int((d / ".pes-port").read_text(encoding="utf-8"))
-    except Exception:
-        pass
     lk = lock_info(d)
     times = [f.stat().st_mtime for f in [d / "project.json", *(d / "feedback").glob("*.json")] if f.exists()] if (d / "feedback").exists() else [(d / "project.json").stat().st_mtime]
     return {"slug": d.name, "path": str(d), "topic": p.get("topic", d.name), "created": p.get("created", ""), "current": cur,
             "stages": [{"key": k, "label": v, "status": p["stages"][k]["status"], "round": p["stages"][k]["round"],
                         "stale": p["stages"][k].get("stale"), "reports": [r["format"] for r in p["stages"][k].get("reports", [])]}
                        for k, v in STAGES],
-            "complete": bool(p.get("complete")), "who": who, "todo": todo, "pending": len(pend), "port": port,
+            "complete": bool(p.get("complete")), "who": who, "todo": todo, "pending": len(pend),
             "updated": time.strftime("%Y-%m-%d %H:%M", time.localtime(max(times))),
             "lock": {"owner": str(lk.get("owner"))[:8], "since": lk.get("since")} if lk and lk["live"] else None}
 
@@ -1000,12 +1053,12 @@ def cmd_list(args):
         print(f"프로젝트 없음: {root}")
         return
     W = {"you": "내 차례", "ai": "Claude", "done": "완료", "err": "오류"}
+    url = server_url(root)
     for k, b in enumerate(bs, 1):
         cur = next((x for x in b["stages"] if x["key"] == b.get("current")), None)
-        port = whoami(b["port"]) == str(root / b["slug"]) and b["port"] if b.get("port") else None
         print(f"{k}. [{W.get(b['who'], b['who'])}] {b['topic']}  ({b['slug']})")
         print(f"   {cur['label'] + ' R' + str(cur['round']) if cur else '-'} · {b['todo']} · 갱신 {b.get('updated', '')}"
-              f" · 서버 {'http://127.0.0.1:%d/' % port if port else '꺼짐'}" + (f" · 사용 중 세션 {b['lock']['owner']}" if b.get("lock") else ""))
+              f" · {(url + b['slug'] + '/') if url else '서버 꺼짐'}" + (f" · 사용 중 세션 {b['lock']['owner']}" if b.get("lock") else ""))
 
 
 def build_hub(root: Path) -> Path:
@@ -1020,20 +1073,12 @@ def build_hub(root: Path) -> Path:
 def cmd_hub(args):
     root = projects_root(args)
     root.mkdir(parents=True, exist_ok=True)
+    for d in (f.parent for f in root.glob("*/project.json")):
+        if (d / ".pes-server").exists() or (d / ".pes-port").exists():
+            stop_legacy(d)
     build_hub(root)
-    port = next((pt for pt in HUB_PORTS if whoami(pt) == str(root)), None)
-    if not port:
-        port = next((pt for pt in HUB_PORTS if whoami(pt) is None and not port_busy(pt)), None)
-        if not port:
-            die("8760~8764 포트가 모두 사용 중")
-        log = open(root / ".pes-hub.out", "a", encoding="utf-8")
-        pr = spawn([sys.executable, "-I", str(ROOT / "scripts" / "serve.py"), str(root), str(port), "hub"], log)
-        (root / ".pes-hub-server").write_text(json.dumps({"pid": pr.pid, "port": port}), encoding="utf-8")
-        for _ in range(30):
-            if whoami(port) == str(root):
-                break
-            time.sleep(0.1)
-    print(f"http://127.0.0.1:{port}/")
+    ensure_server(root)
+    print(server_url(root))
 
 
 def cmd_open(args):
@@ -1041,8 +1086,7 @@ def cmd_open(args):
     a = args[0]
     if not a.startswith("http"):
         d = pdir(a)
-        port = server_port(d)
-        a = f"http://127.0.0.1:{port}/" if port else (d / "index.html").as_uri()
+        a = server_url(d) or (d / "index.html").as_uri()
     webbrowser.open(a)
     print(a)
 
@@ -1072,12 +1116,11 @@ def cmd_home(args):
     if busy and not force:
         die(f"다른 Claude 세션이 쓰는 프로젝트가 있습니다: {', '.join(busy)} — 그 세션을 닫고 다시 하거나 --force", 3)
     # 1) 서버 끄기 (켜져 있던 것만 기억)
-    was_on = [d for d in projects if server_port(d)]
     hub_on = any(whoami(pt) == str(old) for pt in HUB_PORTS)
     for d in projects:
-        stop_server(d)
+        stop_legacy(d)
     if old.exists():
-        stop_server(old, hub=True)
+        stop_server(old, old=True)
     # 2) 옮기기
     new.mkdir(parents=True, exist_ok=True)
     moved = []
@@ -1109,12 +1152,9 @@ def cmd_home(args):
     if os.environ.get("PES_HOME") and Path(os.environ["PES_HOME"]).expanduser().resolve() != new:
         print("주의: PES_HOME 환경변수가 설정 파일보다 우선합니다 — 환경변수도 바꾸거나 지우세요")
     # 4) 다시 켜기
-    for d in was_on:
-        nd = new / d.name
-        p = load(nd)
-        build_index(nd, p)
-        cmd_serve([str(nd)])
-    if hub_on or (new / ".pes-hub").exists() or was_on:
+    for d in projects:
+        build_index(new / d.name, load(new / d.name))
+    if hub_on:
         cmd_hub([str(new)])
     print("Monitor 가 옛 경로의 feedback.log 를 보고 있었다면 새 경로로 다시 거세요.")
 
@@ -1261,19 +1301,23 @@ def doctor_env(R):
     for tool in ("tail", "grep"):
         if not shutil.which(tool):
             R.add("도구", "bad", f"{tool} 없음", "답 자동 수신(Monitor)에 필요 — Windows는 Git Bash")
-    # 포트
+    # 서버 (홈마다 포트 하나)
     hubs = [(pt, whoami(pt)) for pt in HUB_PORTS]
-    projs = [(pt, whoami(pt)) for pt in range(8765, 8776)]
-    for pt, root in hubs + projs:
+    for pt, root in hubs:
         if root and not Path(root).exists():
             R.add("서버", "warn", f":{pt} 고아 서버", f"폴더가 없는 서버가 떠 있음: {root} — 필요 없으면 끄세요")
-        elif root and pt in HUB_PORTS and Path(root).resolve() != h:
-            R.add("서버", "warn", f":{pt} 목록 서버가 다른 홈을 보고 있음", root)
-    used = sum(1 for _, r in projs if r) + sum(1 for pt, r in projs if not r and port_busy(pt))
-    R.add("서버", "ok" if used < 11 else "bad", f"프로젝트 서버 포트 8765~8775: {used}/11 사용",
-          "" if used < 11 else "모두 사용 중 — 쓰지 않는 프로젝트 서버를 stop")
-    hub_on = next((pt for pt, r in hubs if r and Path(r).resolve() == h), None)
-    R.add("서버", "ok" if hub_on else "info", f"목록 화면 {'http://127.0.0.1:%d/' % hub_on if hub_on else '꺼짐'}", "" if hub_on else "/pes:list 로 켜기")
+        elif root and Path(root).resolve() != h:
+            R.add("서버", "info", f":{pt} 다른 폴더를 서빙 중", root)
+        elif root and not (whoami_info(pt) or {}).get("single"):
+            R.add("서버", "warn", f":{pt} 예전 방식 목록 서버", "프로젝트 화면이 안 열림 — /pes:list 로 다시 켜면 바뀜")
+    legacy = [(pt, r) for pt, r in ((pt, whoami(pt)) for pt in LEGACY_PORTS) if r]
+    if legacy:
+        R.add("서버", "warn", f"예전 방식 프로젝트별 서버 {len(legacy)}개", ", ".join(f":{pt}" for pt, _ in legacy) + " — 이제 포트 하나로 충분",
+              fix=lambda: [stop_legacy(Path(r)) for _, r in legacy])
+    on = root_port(h)
+    if not on and not any(whoami(pt) is None and not port_busy(pt) for pt in HUB_PORTS):
+        R.add("서버", "bad", f"포트 {HUB_PORTS.start}~{HUB_PORTS.stop - 1} 모두 사용 중", "다른 프로그램이 쓰고 있음")
+    R.add("서버", "ok" if on else "info", f"PES 서버 {'http://127.0.0.1:%d/ (목록과 모든 프로젝트)' % on if on else '꺼짐'}", "" if on else "/pes:list 로 켜기")
 
 
 def doctor_project(R, d: Path):
@@ -1355,15 +1399,15 @@ def doctor_project(R, d: Path):
         R.add(tag, "info", "만료된 잠금 파일", f"{lk.get('since')} 세션", fix=lambda: (d / ".pes-lock").unlink(missing_ok=True))
     elif lk and lk.get("owner") != os.environ.get("PES_OWNER"):
         R.add(tag, "info", "다른 Claude 세션이 사용 중", f"{str(lk.get('owner'))[:8]}… · {lk.get('since')}부터 · {int(lk['age'] // 60)}분 전 기록")
-    port = server_port(d)
+    url = server_url(d)
     for name in (".pes-port", ".pes-server"):
         fp = d / name
-        if fp.exists() and not port:
-            R.add(tag, "info", f"꺼진 서버의 기록 파일 {name}", "", fix=lambda fp=fp: fp.unlink(missing_ok=True))
+        if fp.exists():
+            R.add(tag, "info", f"예전 방식 서버 기록 파일 {name}", "", fix=lambda: stop_legacy(d))
     idx = d / "index.html"
     if not idx.exists() or idx.stat().st_mtime + 1 < (d / "project.json").stat().st_mtime:
         R.add(tag, "info", "대시보드가 최신 상태보다 오래됨", "", fix=lambda: build_index(d, load(d)))
-    R.add(tag, "ok" if port else "info", f"대시보드 서버 {'http://127.0.0.1:%d/' % port if port else '꺼짐'}", "" if port else f"/pes:status {d.name}")
+    R.add(tag, "ok" if url else "info", f"대시보드 {url or '서버 꺼짐'}", "" if url else f"/pes:status {d.name}")
 
 
 class DocReport:
@@ -1461,7 +1505,7 @@ CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock}
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2 and sys.argv[1] in ("list", "hub", "home", "doctor"):
+    if len(sys.argv) == 2 and sys.argv[1] in ("list", "hub", "home", "doctor", "stop"):
         sys.argv.append("--")
     if len(sys.argv) < 3 or sys.argv[1] not in CMDS:
         print(__doc__)

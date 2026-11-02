@@ -90,13 +90,13 @@ async function copy(text) {
   toast('복사했습니다. 채팅창에 붙여넣으세요.');
 }
 const sendBtn = document.getElementById('send');
-if (location.protocol.startsWith('http')) fetch('/ping').then(r => r.ok && r.json()).then(j => { if (j && j.ok) sendBtn.style.display = ''; }).catch(() => {});
+if (location.protocol.startsWith('http')) fetch('ping').then(r => r.ok && r.json()).then(j => { if (j && j.ok) sendBtn.style.display = ''; }).catch(() => {});
 document.getElementById('copy').onclick = () => { const p = payload(); if (p.c.missing.length) return toast('필수 질문(*)에 답해 주세요.'); copy(p.text); };
 sendBtn.onclick = async () => {
   const p = payload();
   if (p.c.missing.length) { p.c.missing[0] && root().querySelector('.q-missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('필수 질문(*)에 답해 주세요.'); }
   try {
-    const r = await fetch('/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.body) });
+    const r = await fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.body) });
     if (!r.ok) throw new Error(r.status);
     sendBtn.disabled = true; sendBtn.textContent = '보냈습니다 ✓';
     document.getElementById('hint').textContent = 'Claude가 답을 받아 다음 작업을 시작합니다. 결과가 준비되면 대시보드(/index.html)에 나타납니다.';
