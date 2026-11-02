@@ -97,21 +97,78 @@ Claude가 실행하는 명령에서도 보이도록 **Claude Code 설정**에 �
 - vworld 키: vworld 스킬 안내대로 등록
 - 셸 설정 파일(`.zshrc` 등)에만 넣으면 Claude 명령에서 안 보일 수 있다. `/pes:doctor`가 알려 준다.
 
-### Windows · Claude Desktop
+### Windows · Claude Desktop 설치 (단계별)
 
-- **Claude Desktop의 Code 탭(로컬 세션)에서 쓴다.** Cowork 모드는 가상 머신에서 돌고 플러그인 형식·저장 위치가 달라, 내 컴퓨터의 대시보드 서버·CLI 도구를 쓰는 PES와 맞지 않는다.
-- 플러그인 설치: Code 탭 입력창 옆 **+ → Add plugins**, 또는 터미널에서 `claude plugin marketplace add …`. 데스크톱 앱과 CLI는 같은 설정 폴더(`%USERPROFILE%\.claude`)를 읽는다.
-- **Git for Windows(Git Bash) 설치 필수**: 웹에서 보낸 답을 자동으로 받는 기능(Monitor)이 Windows에서는 Git Bash가 있어야 동작하고, GitHub에서 플러그인을 받을 때도 git이 필요하다.
-- **PATH는 Windows 환경 변수에** 넣고 Claude Desktop을 다시 시작한다 (데스크톱 앱은 PowerShell 프로필을 읽지 않는다). Python·kosis·korean-law·vworld·ego-browser가 PATH에 있어야 한다.
-- **API 키 등 환경변수**: `settings.json`의 env도 읽지만, 데스크톱 앱 설정의 환경(Environment) → **Environment variables**에 넣는 것이 확실하다 (`LAW_OC`, 필요하면 `NODE_EXTRA_CA_CERTS`).
-- 설치 후 `/pes:doctor`로 확인.
+Windows용 Claude Desktop에서는 **Code 탭(로컬 세션)**에서 설치하고 쓴다. Cowork 모드는 가상 머신에서 돌고 플러그인 형식·저장 위치가 달라, 내 컴퓨터의 대시보드 서버·CLI 도구를 쓰는 PES와 맞지 않는다.
 
-### Windows 메모
+#### 0. 준비 (처음 한 번)
 
-- Claude Code의 셸은 Git Bash를 쓴다 (답 자동 수신에 `tail -F`·`grep` 필요).
-- `python3`가 없으면 `py -3`. 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다.
-- 브라우저 열기는 PES가 직접 처리한다 (`open`/`start` 불필요).
-- 인증서 파일 경로는 macOS와 다르다. 오류가 나면 `/pes:doctor`의 안내를 따른다.
+1. **Claude Desktop 최신 버전**으로 업데이트.
+2. **Git for Windows 설치** — 비공개 저장소(`clazic/pes`)에서 플러그인을 받는 데 필요하고, 답 자동 수신(Monitor)에 필요한 Git Bash도 함께 설치된다.
+   - https://git-scm.com/download/win 에서 받아 기본값으로 설치, 또는 PowerShell에서 `winget install --id Git.Git -e`
+3. **Claude Desktop을 완전히 종료**(작업 표시줄 아이콘에서도 종료)했다가 다시 연다 — 새로 설치한 git이 인식되도록.
+
+#### 1. Code 탭 열기
+
+Claude Desktop 위쪽 **Code** 탭 → 로컬 세션 시작. 작업 폴더는 아무 곳이나 된다 (예: `C:\Users\<이름>\work`). 프로젝트는 폴더와 상관없이 `C:\Users\<이름>\pes-projects`에 모인다.
+
+#### 2. 플러그인 설치
+
+**방법 A — 화면에서**
+1. 입력창 옆 **+** → **Add plugins**
+2. 마켓플레이스 추가에 **`clazic/pes`** 입력
+3. 목록에 나온 **pes** 설치
+4. 비공개 저장소라 처음에 **GitHub 로그인 창**(Git Credential Manager)이 뜨면 로그인
+
+**방법 B — 명령으로** (Claude Code CLI가 있을 때)
+
+```
+claude plugin marketplace add clazic/pes
+claude plugin install pes@pes-local
+```
+
+설치 후 입력창에 `/reload-plugins` (또는 앱 재시작). `/pes`를 쳤을 때 `/pes:setup`·`/pes:start` 등이 보이면 설치된 것이다.
+
+> 방법 A 화면에서 직접 만든 마켓플레이스를 추가할 수 있는지는 아직 확인하지 못했다. 막히면 Code 탭에서 Claude에게 "claude plugin marketplace add clazic/pes 실행해줘"라고 하거나 방법 B를 쓴다.
+
+#### 3. `/pes:setup` 실행
+
+| 순서 | 일어나는 일 | 직접 할 일 |
+|---|---|---|
+| 1 | Git·Python·Node.js 확인, 없으면 winget으로 설치 | 관리자 권한 창(UAC)이 뜨면 **예** |
+| 2 | Git을 이번에 새로 설치했다면 멈춤 | Claude Desktop **재시작** 후 `/pes:setup` 한 번 더 |
+| 3 | kosis·vworld·korean-law 설치 | 없음 |
+| 4 | ego lite 내려받기 페이지가 열림 | 설치 → 앱 실행 → **첫 실행 안내(온보딩)** 끝내기 → Claude에게 "다 했어". SmartScreen이 막으면 **추가 정보 → 실행** |
+| 5 | 브라우저에 **API 키 입력 화면** | KOSIS·VWorld·법령(LAW_OC) 키를 발급 안내대로 받아 붙여넣고 **등록·확인** → **마치기**. 필요 없는 키는 비워 둔다 |
+| 6 | `/pes:doctor` 점검 후 완료 표시 | 결과 확인 |
+
+마지막에 **Claude Desktop을 한 번 재시작**하면 키·PATH 변경이 모든 세션에 적용된다.
+
+#### 4. 사용 시작
+
+```
+/pes:start 울산 청년 주거실태
+```
+
+브라우저에 기획 질문 폼이 열린다. 대시보드 `http://127.0.0.1:8765/`, 프로젝트 목록 `/pes:list`.
+
+#### Windows에서 막힐 때
+
+| 증상 | 해결 |
+|---|---|
+| 플러그인 추가 중 저장소를 못 찾음 / 권한 오류 | GitHub 로그인이 안 된 것 — PowerShell에서 `git ls-remote https://github.com/clazic/pes` 실행하면 로그인 창이 뜬다 |
+| `/pes:` 명령이 안 보임 | `/reload-plugins` 또는 앱 재시작 |
+| 법령 조회가 안 됨 | Claude Desktop 설정의 **Environment variables**에 `LAW_OC` 추가 후 재시작 (설정 파일 env를 무시하는 경우가 있음) |
+| kosis 등을 "찾지 못함" | Windows PATH가 아직 반영되지 않음 — Claude Desktop 재시작 |
+| 그 밖 | `/pes:doctor` 결과를 Claude에게 보여 준다 |
+
+#### Windows 동작 메모
+
+- 데스크톱 앱과 CLI는 같은 설정 폴더(`%USERPROFILE%\.claude`)를 읽는다.
+- 데스크톱 앱은 PowerShell 프로필을 읽지 않으므로 PATH는 **Windows 환경 변수**에 있어야 한다 (`/pes:setup`이 설치하는 도구는 사용자 PATH에 등록된다).
+- API 키 등 환경변수는 `settings.json`의 env도 읽지만, 앱 설정의 **Environment variables**가 가장 확실하다.
+- Claude의 셸은 Git Bash(답 자동 수신에 `tail -F`·`grep` 필요). Python은 `py -3`. 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다. 브라우저 열기는 PES가 직접 처리한다.
+- 인증서 오류가 나면 `/pes:doctor`의 안내를 따른다 (기관 루트 인증서 → `NODE_EXTRA_CA_CERTS`).
 
 ---
 
@@ -283,6 +340,9 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 ---
 
 ## 변경 이력
+
+### 0.5.1 — 2026-11-02
+- README: Windows용 Claude Desktop 단계별 설치 안내(준비 · Code 탭 · 플러그인 설치 · /pes:setup · 막힐 때).
 
 ### 0.5.0 — 2026-11-02
 - `/pes:setup`: Git·Python·Node.js(bootstrap, Windows winget / macOS), kosis·vworld·korean-law(CLI·스킬·MCP) 자동 설치, ego lite 설치 안내, API 키 입력 화면(키는 대화로 오지 않음, 등록 전 확인), doctor 로 마무리, 완료 표시.
