@@ -15,7 +15,7 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif; }
+         font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif; }
   main { max-width: 860px; margin: 0 auto; padding: 32px 20px 120px; }
   h1 { font-size: 24px; margin: 0 0 4px; text-wrap: balance; }
   .meta { color: var(--muted); font-size: 13px; }
@@ -55,12 +55,12 @@
 const D = JSON.parse(document.getElementById('data').textContent) || {};
 const SP = D.spec || {};
 const esc = QF.esc;
-const STAGES = ['기획', '조사', '분석·종합', '집필', '검증', '산출·공유'];
+const STAGES = ['기획', '조사', '분석-종합', '집필', '검증', '산출-공유'];
 const KIND = { stage_start: '단계 시작 질문', review: '라운드 점검 질문', approve: '단계 승인', resume: '이어하기 확인' };
 const qs = SP.questions || [];
 
 function render() {
-  const ST = D.stages || STAGES.map(l => ({ label: l }));
+  const ST = (D.stages || STAGES.map(l => ({ label: l }))).map(s => ({ ...s, label: ({ analyze: '분석-종합', publish: '산출-공유' })[s.key] || s.label }));
   const cur = ST.findIndex(x => x.key === SP.stage || x.label === SP.stage_label);
   const inh = (SP.inherited || []).length ? `<section class="box"><h2>이미 정해진 것</h2><dl class="inh">${SP.inherited.map(x => `<dt>${esc(x.label)}</dt><dd>${esc(x.value)}</dd>`).join('')}</dl></section>` : '';
   document.getElementById('app').innerHTML = `
