@@ -1,9 +1,9 @@
-# 0단계 기반 다지기 — 계획서
+# 0단계 기반 다지기 — 계획서 (확정)
 
 - 작성: 2026-11-04, Claude 종합
 - 입력: [stage-0-codex.md](discussion/stage-0-codex.md)(Codex, GPT-6.1-Sol high), [stage-0-opencode.md](discussion/stage-0-opencode.md)(OpenCode, DeepSeek V4.1 Flash high), [00-brief.md](00-brief.md)
 - 검토: Opus 5.5(2026-11-04) — 확정 15, 수정함 2, 수정 필요 7, 사용자 결정 4. 수정 필요 7건은 이슈 보강·새 이슈(SEL-31)로 반영했고, 사용자 결정 4건은 사용자가 답함(7절).
-- 상태: **모든 항목 확정·반영 — 사용자 최종 승인 대기**(SEL-20).
+- 상태: **확정** — 사용자 승인 2026-11-04 ("0단계 계획 확정").
 
 ## 1. 목표
 
