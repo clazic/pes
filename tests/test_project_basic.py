@@ -100,3 +100,50 @@ def test_main_preserves_die_exit_code(pes, tmp_path):
     with pytest.raises(SystemExit) as exc:
         pes.main(["init", str(project), "--topic", "주제"])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("command", ["list", "hub", "home", "doctor", "stop", "remote"])
+def test_main_single_argument_dispatch_does_not_mutate_argv(pes, monkeypatch, command):
+    received = []
+    monkeypatch.setitem(pes.CMDS, command, lambda args: received.append(args))
+    argv = [command]
+    pes.main(argv)
+    assert argv == [command]
+    assert received == [["--"]]
+
+
+@pytest.mark.parametrize("command", ["list", "home", "remote"])
+def test_main_matches_subprocess_for_safe_single_command(pes, cli, capsys, command):
+    code, stdout, stderr = cli(command)
+    pes.main([command])
+    captured = capsys.readouterr()
+    assert (code, stdout, stderr) == (0, captured.out, captured.err)
+
+
+@pytest.mark.parametrize("command", ["init", "status", "unknown"])
+def test_main_single_non_special_command_prints_usage(pes, capsys, command):
+    argv = [command]
+    with pytest.raises(SystemExit) as exc:
+        pes.main(argv)
+    assert exc.value.code == 1
+    assert pes.__doc__.strip() in capsys.readouterr().out
+    assert argv == [command]
+
+
+def test_main_default_argv_does_not_mutate_sys_argv(pes, monkeypatch):
+    seen = []
+    monkeypatch.setitem(pes.CMDS, "home", lambda args: seen.append(args))
+    argv = ["pes.py", "home"]
+    monkeypatch.setattr(sys, "argv", argv)
+    pes.main()
+    assert argv == ["pes.py", "home"]
+    assert seen == [["--"]]
+
+
+def test_main_passes_multiple_arguments_unchanged(pes, monkeypatch):
+    received = []
+    monkeypatch.setitem(pes.CMDS, "init", lambda args: received.append(args))
+    argv = ["init", "경로 공백", "--topic", "합성 주제"]
+    pes.main(argv)
+    assert argv == ["init", "경로 공백", "--topic", "합성 주제"]
+    assert received == [["경로 공백", "--topic", "합성 주제"]]
