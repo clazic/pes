@@ -1704,10 +1704,15 @@ CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start
         "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock}
 
-if __name__ == "__main__":
-    if len(sys.argv) == 2 and sys.argv[1] in ("list", "hub", "home", "doctor", "stop", "remote"):
-        sys.argv.append("--")
-    if len(sys.argv) < 3 or sys.argv[1] not in CMDS:
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) == 1 and args[0] in ("list", "hub", "home", "doctor", "stop", "remote"):
+        args.append("--")
+    if len(args) < 2 or args[0] not in CMDS:
         print(__doc__)
         sys.exit(1)
-    CMDS[sys.argv[1]](sys.argv[2:])
+    CMDS[args[0]](args[1:])
+
+
+if __name__ == "__main__":
+    main()
