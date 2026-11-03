@@ -1,5 +1,5 @@
---- a/Users/clazic/work/pes/templates/dashboard.html
-+++ b/Users/clazic/work/pes/templates/dashboard.html
+--- a<PES_SRC>/templates/dashboard.html
++++ b<PES_SRC>/templates/dashboard.html
 @@ -189,6 +189,22 @@
    .modal.on { display: flex; }
    .modal .card { background: var(--card); border-radius: 12px; padding: 20px; max-width: 520px; width: 100%; }
@@ -23,8 +23,8 @@
  </style>
  </head>
  <body>
---- a/Users/clazic/work/pes/templates/hub.html
-+++ b/Users/clazic/work/pes/templates/hub.html
+--- a<PES_SRC>/templates/hub.html
++++ b<PES_SRC>/templates/hub.html
 @@ -38,6 +38,14 @@
  .foot { margin-top:14px; font-size:12px; color:var(--muted); }
  .empty { padding:40px; text-align:center; color:var(--muted); }
@@ -40,8 +40,8 @@
  </style></head><body><main id="app"></main>
  <script id="data" type="application/json">/*__DATA__*/null</script>
  <script>
---- a/Users/clazic/work/pes/templates/ask.html
-+++ b/Users/clazic/work/pes/templates/ask.html
+--- a<PES_SRC>/templates/ask.html
++++ b<PES_SRC>/templates/ask.html
 @@ -38,6 +38,11 @@
    .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
    .toast.on { opacity: 1; }
@@ -54,8 +54,8 @@
  </style>
  </head>
  <body>
---- a/Users/clazic/pes-projects/private-rental-promotion-zones/index.html
-+++ b/Users/clazic/pes-projects/private-rental-promotion-zones/index.html
+--- a<PES_HOME>/sample-project/index.html
++++ b<PES_HOME>/sample-project/index.html
 @@ -189,6 +189,22 @@
    .modal.on { display: flex; }
    .modal .card { background: var(--card); border-radius: 12px; padding: 20px; max-width: 520px; width: 100%; }
@@ -79,8 +79,8 @@
  </style>
  </head>
  <body>
---- a/Users/clazic/pes-projects/index.html
-+++ b/Users/clazic/pes-projects/index.html
+--- a<PES_HOME>/index.html
++++ b<PES_HOME>/index.html
 @@ -38,6 +38,14 @@
  .foot { margin-top:14px; font-size:12px; color:var(--muted); }
  .empty { padding:40px; text-align:center; color:var(--muted); }
@@ -94,5 +94,5 @@
 +.grid { border-radius: 6px; }
 +.head { background: color-mix(in srgb, var(--chip) 45%, var(--card)); }
  </style></head><body><main id="app"></main>
- <script id="data" type="application/json">{"projects": [{"slug": "private-rental-promotion-zones", "path": "/Users/clazic/pes-projects/private-rental-promotion-zones", "topic": "공공지원 민간임대주택 공급촉진지구 지정현황", "created": "2026-11-02", "current": "research", "stages": [{"key": "plan", "label": "기획", "status": "approved", "round": 1, "stale": false, "reports": ["eli5", "html", "md"]}, {"key": "research", "label": "조사", "status": "asking", "round": 0, "stale": false, "reports": []}, {"key": "analyze", "label": "분석·종합", "status": "pending", "round": 0, "stale": false, "reports": []}, {"key": "write", "label": "집필", "status": "pending", "round": 0, "stale": false, "reports": []}, {"key": "verify", "label": "검증", "status": "pending", "round": 0, "stale": false, "reports": []}, {"key": "publish", "label": "산출·공유", "status": "pending", "round": 0, "stale": false, "reports": []}], "complete": false, "who": "you", "todo": "조사 시작 질문에 답하기", "pending": 0, "updated": "2026-11-02 09:58", "lock": null}], "root": "/Users/clazic/pes-projects", "built": "2026-11-02 15:35", "stages": [{"key": "plan", "label": "기획"}, {"key": "research", "label": "조사"}, {"key": "analyze", "label": "분석·종합"}, {"key": "write", "label": "집필"}, {"key": "verify", "label": "검증"}, {"key": "publish", "label": "산출·공유"}]}</script>
+ <script id="data" type="application/json">{"projects": [{"slug": "sample-project", "path": "<PES_HOME>/sample-project", "topic": "지역 청년 주거 지원 현황(예시)", "created": "2026-11-02", "current": "research", "stages": [{"key": "plan", "label": "기획", "status": "approved", "round": 1, "stale": false, "reports": ["eli5", "html", "md"]}, {"key": "research", "label": "조사", "status": "asking", "round": 0, "stale": false, "reports": []}, {"key": "analyze", "label": "분석·종합", "status": "pending", "round": 0, "stale": false, "reports": []}, {"key": "write", "label": "집필", "status": "pending", "round": 0, "stale": false, "reports": []}, {"key": "verify", "label": "검증", "status": "pending", "round": 0, "stale": false, "reports": []}, {"key": "publish", "label": "산출·공유", "status": "pending", "round": 0, "stale": false, "reports": []}], "complete": false, "who": "you", "todo": "조사 시작 질문에 답하기", "pending": 0, "updated": "2026-11-02 09:58", "lock": null}], "root": "/Users/clazic/pes-projects", "built": "2026-11-02 15:35", "stages": [{"key": "plan", "label": "기획"}, {"key": "research", "label": "조사"}, {"key": "analyze", "label": "분석·종합"}, {"key": "write", "label": "집필"}, {"key": "verify", "label": "검증"}, {"key": "publish", "label": "산출·공유"}]}</script>
  <script>

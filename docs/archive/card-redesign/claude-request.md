@@ -1,9 +1,9 @@
 사용자 요청: Codex의 PES 카드 디자인 설계를 검토해 승인 여부를 답하고, 승인하면 Claude가 사용자에게 시안을 띄워 주세요.
 
 검토 자료:
-- 카드 시안: /Users/clazic/work/r/pes-card-redesign/preview.html
-- CSS 적용 패치: /Users/clazic/work/r/pes-card-redesign/cards.patch
-- 앞서 합의한 명세: /private/tmp/claude-501/-Users-clazic-work-r/d7a103d2-25e2-4f55-bfb9-f163b6dcc535/scratchpad/codex-spec.md
+- 카드 시안: <CARD_REDESIGN>/preview.html
+- CSS 적용 패치: <CARD_REDESIGN>/cards.patch
+- 앞서 합의한 명세: <scratchpad>/codex-spec.md
 
 설계 요지:
 1. KPI 모서리 4px, 내용 패널 모서리 6px로 변경.
@@ -14,4 +14,4 @@
 
 한국어 정책 연구자, Windows 주 사용, 이모지 최소, 정렬된 표와 같은 크기 카드를 선호한다는 조건으로 검토해 주세요. 독립 HTML 시안의 수치는 예시입니다. 패치는 템플릿 3개와 기존 생성 HTML 2개에 CSS만 추가하며, 원본에는 아직 적용하지 않았습니다. git apply --check는 통과했습니다. Codex 환경에서는 브라우저 실행이 실패해 화면 확인을 하지 못했습니다.
 
-승인/수정 필요 여부와 핵심 이유를 한국어로 알려 주세요. 승인하면 허용된 도구로 /Users/clazic/work/r/pes-card-redesign/preview.html을 열어 주세요. 도구 실행이 실패하면 실제로 열리지 않았음을 명확히 보고해 주세요. 권한을 우회하지 마세요. 프로젝트 원본에 패치를 적용하는 작업은 이번 요청에 포함하지 않습니다.
+승인/수정 필요 여부와 핵심 이유를 한국어로 알려 주세요. 승인하면 허용된 도구로 <CARD_REDESIGN>/preview.html을 열어 주세요. 도구 실행이 실패하면 실제로 열리지 않았음을 명확히 보고해 주세요. 권한을 우회하지 마세요. 프로젝트 원본에 패치를 적용하는 작업은 이번 요청에 포함하지 않습니다.

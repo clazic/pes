@@ -166,6 +166,5 @@
 ---
 
 ### 근거 원본 위치 (로컬, 세션 임시 폴더)
-- REA 네트워크 기록: `~/.claude/projects/-Users-clazic-projects-pes/b17b62a9-…/tool-results/mcp-rea-capture_browser_scenario-1793734702533.txt`(Linear 로그인), `…-1793734844685.txt`(Notion 로그인), `…-1793734679452.txt`(linear.app 홈)
-- 내려받은 번들: 세션 scratchpad `linear-js/`, `notion-js/` (임시, 저장소에 넣지 않음)
+- REA 네트워크 기록·내려받은 번들: 조사 세션의 임시 폴더에만 있었고 저장소에 넣지 않음.
 - 번들 파일명은 배포마다 바뀐다(예: `startup-root.-0Wb1wiG.js`). 위 문자열은 2026-11-04 기준.

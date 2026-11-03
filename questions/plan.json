@@ -15,7 +15,7 @@
    "type": "text",
    "required": true,
    "_when": "주제를 아직 모를 때만",
-   "placeholder": "예: 공공지원 민간임대주택 공급촉진지구 지정현황"
+   "placeholder": "예: 지역 청년 주거 지원 현황(예시)"
   },
   {
    "id": "purpose",

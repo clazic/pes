@@ -206,7 +206,7 @@ claude plugin install pes@pes-local
 #### 4. 사용 시작
 
 ```
-/pes:start 울산 청년 주거실태
+/pes:start 지역 청년 주거실태
 ```
 
 브라우저에 기획 질문 폼이 열린다. 대시보드 `http://127.0.0.1:8760/<프로젝트>/`, 프로젝트 목록 `http://127.0.0.1:8760/` (`/pes:list`).
@@ -234,7 +234,7 @@ claude plugin install pes@pes-local
 ## 2. 빠른 시작
 
 ```
-/pes:start 울산 청년 주거실태
+/pes:start 지역 청년 주거실태
 ```
 
 1. 브라우저에 **기획 시작 질문** 폼이 열린다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 **보내기**.
@@ -246,7 +246,7 @@ claude plugin install pes@pes-local
 기존 research-loop 조사가 있으면 참고자료로 가져온다:
 
 ```
-/pes:start 공공지원 민간임대주택 공급촉진지구 --import research/private-rental-promotion-zones
+/pes:start 지역 청년 주거 지원(예시) --import research/sample-project
 ```
 
 ---

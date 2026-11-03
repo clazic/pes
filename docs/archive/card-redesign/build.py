@@ -36,11 +36,11 @@ ask = """
   @media (max-width: 480px) { section.box { padding: 16px; } }
 """
 targets = [
-    (Path('/Users/clazic/work/pes/templates/dashboard.html'), dashboard),
-    (Path('/Users/clazic/work/pes/templates/hub.html'), hub),
-    (Path('/Users/clazic/work/pes/templates/ask.html'), ask),
-    (Path('/Users/clazic/pes-projects/private-rental-promotion-zones/index.html'), dashboard),
-    (Path('/Users/clazic/pes-projects/index.html'), hub),
+    (Path('<PES_SRC>/templates/dashboard.html'), dashboard),
+    (Path('<PES_SRC>/templates/hub.html'), hub),
+    (Path('<PES_SRC>/templates/ask.html'), ask),
+    (Path('<PES_HOME>/sample-project/index.html'), dashboard),
+    (Path('<PES_HOME>/index.html'), hub),
 ]
 diffs = []
 before = {}

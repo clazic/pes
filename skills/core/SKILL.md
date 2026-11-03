@@ -96,7 +96,7 @@ EOF
 - 모든 프로젝트는 **PES 홈** 아래 `<홈>/<slug>/`에 만든다. 기본 `~/pes-projects` (Windows: `C:\Users\<이름>\pes-projects`). 작업 폴더와 상관없다.
 - 확인: `$PES home`. 우선순위: 환경변수 `PES_HOME` > `~/.pes/config.json`의 home > 기본값.
 - 바꾸기: `$PES home <새 폴더>` — 서버를 끄고 **모든 프로젝트와 목록 화면을 새 폴더로 옮긴 뒤** 설정을 저장하고 켜져 있던 서버를 다시 켠다. 같은 이름이 새 폴더에 있거나 다른 세션이 쓰는 프로젝트가 있으면 아무것도 옮기지 않고 멈춘다. 옮긴 뒤 Monitor는 새 경로로 다시 건다.
-- `<dir>` 자리에 프로젝트 이름(slug)만 써도 홈 아래에서 찾는다 (`$PES status private-rental-promotion-zones`).
+- `<dir>` 자리에 프로젝트 이름(slug)만 써도 홈 아래에서 찾는다 (`$PES status sample-project`).
 
 ## Windows
 
