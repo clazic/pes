@@ -15,3 +15,6 @@ __pycache__/
 pes-projects/
 *.pem
 .env
+
+# 큰 대화 기록(로컬에만 보관)
+docs/archive/**/*.jsonl

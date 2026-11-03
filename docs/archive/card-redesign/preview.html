@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PES 카드 변경 시안</title>
+<style>
+:root { --bg:#f7f7f4; --fg:#1f2328; --muted:#6a737d; --card:#fff; --line:#e2e2dc; --accent:#2f6fde; --chip:#efefea; }
+@media(prefers-color-scheme:dark) { :root { --bg:#16181c; --fg:#e6e6e6; --muted:#9aa0a6; --card:#1f2227; --line:#33373d; --accent:#6ea0ff; --chip:#2a2e34; color-scheme:dark; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+main { max-width:1080px; margin:auto; padding:32px 20px; }
+h1 { font-size:25px; margin:0; } h2 { font-size:16px; margin:0 0 8px; }
+.meta { color:var(--muted); font-size:13px; }
+.kcap { font-size:13px; color:var(--muted); margin:24px 0 8px; }
+.kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr)); gap:12px; grid-auto-rows:1fr; }
+.kpi { background:var(--card); border:1px solid var(--line); border-top:3px solid var(--fg); border-radius:4px; min-height:132px; padding:16px 18px; display:flex; flex-direction:column; }
+.kpi b { font-size:28px; line-height:1.25; margin-bottom:8px; font-variant-numeric:tabular-nums; }
+.kpi span { font-size:13px; color:var(--muted); }
+.kpi small { font-size:12px; color:var(--muted); margin-top:6px; }
+.box { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:20px 24px; margin:20px 0; }
+.now { border-left:4px solid var(--accent); }
+.item { background:var(--card); border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:16px 0; }
+.ihead { padding:14px 20px; background:color-mix(in srgb,var(--chip) 45%,var(--card)); border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; }
+.num { font-weight:700; color:var(--accent); }
+.ihead h2 { margin:0; }
+.ibody { padding:12px 20px 20px; }
+.ibody p { margin:0; }
+.question h2 { padding-bottom:10px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+.choices { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.choice { padding:8px 14px; border:1px solid var(--line); border-radius:4px; }
+.choice.selected { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 8%,var(--card)); }
+@media(max-width:480px) { .box { padding:16px; } }
+</style>
+<main>
+<h1>PES 카드 변경 시안</h1>
+<p class="meta">작은 모서리 · 얇은 테두리 · 동일 크기 KPI · 구분된 항목 제목</p>
+<div class="kcap">프로젝트 전체 — 예시 수치</div>
+<div class="kpis">
+  <div class="kpi"><b>1 / 6</b><span>승인된 단계</span><small>기획</small></div>
+  <div class="kpi"><b>24</b><span>항목</span><small>기획 8 · 조사 16</small></div>
+  <div class="kpi"><b>12</b><span>출처</span><small>조사 단계의 참고자료</small></div>
+  <div class="kpi"><b>0</b><span>처리 안 한 답</span><small>모두 처리됨</small></div>
+</div>
+<section class="box now"><div class="meta">지금 할 일</div><h2>조사 결과를 검토하고 다음 라운드의 보완 사항을 정하세요.</h2><div class="meta">조사 단계 · R2</div></section>
+<article class="item"><header class="ihead"><span class="num">01</span><h2>촉진지구 지정현황의 집계 기준</h2></header><div class="ibody"><p>지구 수·면적·계획 호수·사업 단계를 같은 기준일로 비교합니다.</p><p class="meta">예시 항목 · 실제 연구 결과가 아닙니다.</p></div></article>
+<section class="box question"><h2>질문 카드</h2><b>어떤 범위로 비교할까요?</b><div class="choices"><span class="choice selected">특·광역시 중심</span><span class="choice">전국 전체</span></div><div class="meta">질문 카드의 모양을 확인하기 위한 예시입니다.</div></section>
+</main>
+</html>
