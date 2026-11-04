@@ -5,6 +5,7 @@
 - 규칙: **이슈 하나 = PR 하나.** `stage-1-db.md:176-199`의 PR 번호를 기준으로 하되 **PR20만 20a(Claude Code·앱)·20b(Codex CLI·OpenCode TUI)로 나눈다.** 2단계는 23개이며, 누적은 `roadmap.md` 2절 참고. 하위 이슈를 만들지 않고 각 PR은 자기 테스트를 포함한다.
 - 테스트 명령: macOS/Linux `python3 -m pytest -q <파일>` · Windows `python -m pytest -q <파일>`. 전체는 `python3 -m pytest -q`.
 - 공통 금지: 실제 `~/pes-projects`·`~/.pes/` 접근, 실키·기관 자료·실제 프로젝트 내용, `project.json`·DB 직접 쓰기(스킬·CLI 모두), 이 단계에서 플러그인 버전 올리기. 테스트는 `tests/conftest.py`의 `isolated_home`·`cli`·`synthetic_project`를 쓴다.
+- **2단계 공통 인계(WEB0)**: PR4·13의 계약 fixture가 나온 직후 5단계 WEB0를 조기 실행해 결과를 기록하고, 후속 구현 언어 결정에 반영한다. **PR14 완료는 WEB0의 필수 전제가 아니다.** WEB0는 5단계 15개에 포함되므로 새 이슈를 만들지 않는다.
 
 ## PR 1 — [2단계] 스키마 001 + SQLite 연결
 
@@ -32,7 +33,7 @@
   - [ ] `tests/d1/wrangler.toml`·`package.json`·`package-lock.json`: Node LTS·wrangler 버전 고정, 로컬 D1 바인딩.
   - [ ] `scripts/pes_core/d1_smoke.py`: `001_initial.sql` 적용, batch 명령, 대표 SELECT/INSERT/UPDATE, 0행 실패.
   - [ ] `tests/test_d1_smoke.py`: batch 원자성, deferred FK, 부분 인덱스, `json_valid`/`json_type`, 0행 실패, 뒤늦은 실패 전체 롤백.
-  - [ ] `docs/plan/decisions/0002-d1-compat.md`: SQLite와 D1의 차이·실행 제한·재검토 조건.
+  - [ ] `docs/plan/decisions/<미사용 번호>-d1-compat.md`: SQLite와 D1의 차이·실행 제한·재검토 조건. 기존 0002~0004와 예약 0006을 재사용하지 않고, 등록 시 `decisions/README.md` 색인에서 빈 번호를 확인한다.
   - [ ] CI job `d1-smoke`: 마이그레이션·DB 어댑터 변경 PR과 `main`에서 필수. 사용자 설치를 요구하지 않는다.
 - **선행**: PR 1.
 - **완료 기준**:
@@ -63,16 +64,19 @@
 - **할 일**:
   - [ ] `scripts/pes_core/errors.py`: `ApiError(code, message, retryable, target, details, next_action)`, `error_envelope()`.
   - [ ] `scripts/pes_core/commands.py`: `CommandService.execute(name, payload, ctx)`, 닫힌 `COMMANDS` 레지스트리, `MutationContext(actor, via, idempotency_key, base_control_rev, lease_id, fence)`.
-  - [ ] 순서: 인증·권한 → `mutation_commits` 영수증 재생 → rev/lease 검사 → 변경 → `events`·영수증 같은 tx. 0행 CAS는 실패, 전부 롤백.
+  - [ ] 순서: 인증·권한·**현재 정책·목적지 검사** → `mutation_commits` 영수증 재생 → rev/lease 검사 → 변경 → `events`·영수증 같은 tx. 0행 CAS는 실패, 전부 롤백.
+  - [ ] PR4는 정책 검사 인터페이스(예: `PolicyChecker`)를 정의하고, PR10이 구현을 주입한다. PR4 단독 시험은 가짜 정책 검사기로 하고, 실제 정책 연결은 PR10에서 검증한다. **OFF 전 완료한 요청을 OFF 후 같은 키로 재요청해도 금지된 결과·전송 경로가 재생되지 않아야 한다.**
   - [ ] `mutation_commits`의 `request_hash`, `action`, `result_json`; `events`의 `tx_id/tx_index/tx_size`; `counters.next_no`; actor/via는 서버가 확정.
   - [ ] `tests/fixtures/contracts/commands/*.json`: 언어 중립 요청·응답·오류 예제.
-  - [ ] `tests/test_command_service.py`: 같은 키 같은 요청 재생, 같은 키 다른 요청 거부, 0행/늦은 실패 롤백, 모든 변경에 사건·영수증, system/채택 actor 정합성.
+  - [ ] `tests/test_command_service.py`: 같은 키 같은 요청 재생, 같은 키 다른 요청 거부, 0행/늦은 실패 롤백, 모든 변경에 사건·영수증, system/채택 actor 정합성, **정책 검사→영수증 재생 순서와 OFF 전/후 같은 키 재생 거부**.
 - **선행**: PR 1.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_command_service.py` 통과.
   - [ ] 영수증 장기 보존(큰 응답만 정리) 계약이 테스트에 있음.
+  - [ ] 정책·목적지 검사가 영수증 재생보다 앞서고, OFF 전 완료 요청의 재생이 금지된다.
   - [ ] 서비스 밖에서 업무 표를 직접 쓰는 코드 0.
-- **지킬 것**: 표 CRUD·임의 ops 없음. SQLite/D1 같은 실패 의미. 영수증 재생을 권한 검사 뒤에 둔다.
+  - [ ] 계약 fixture 완료 뒤 WEB0 조기 실행 입력을 남긴다.
+- **지킬 것**: 표 CRUD·임의 ops 없음. SQLite/D1 같은 실패 의미. 영수증 재생을 권한·정책 검사 뒤에 둔다.
 
 ## PR 5 — [2단계] run·lease·fence
 
@@ -97,14 +101,14 @@
   - [ ] `scripts/pes_core/editions.py`: `create_edition`, `start_round`, `seal_round`, `approve_stage`, `reopen_stage`, `release_completion`, `carry_over`, `snapshot`.
   - [ ] `snapshots`·`round_contents`·`approvals`·`stages.stale_since_event_seq`·`rounds.state`를 서비스가 검증.
   - [ ] reopen 뒤 실행 기반 무효화(`base_control_rev`·`run_targets`), `complete_run`≠`approve_stage`, 승인 snapshot/manifest.
-  - [ ] carry_over를 `stages.settings_json`의 임시 JSON이 아니라 기획 `artifacts`(kind='topic')의 정확한 버전에서 조사 `artifacts`(kind='topic')를 만들고 `origin_version_id`·`version_relations`로 연결해 다음 단계 R1에 넣는다. 4단계 판 비교·이월 마법사는 만들지 않는다.
-  - [ ] `tests/test_editions_stages.py`: 합성 6단계, reopen 뒤 stale·승인 유지, 승인 snapshot, complete≠approve.
+  - [ ] carry_over를 두 갈래로 분리한다. **(a) 조사 주제 파생**은 기획 `artifacts`(kind='topic')의 정확한 버전에서 조사 `artifacts`(kind='topic')를 만들고 `origin_version_id`·`version_relations`로 연결한다. **(b) 단계 미완료 작업 이월**은 어느 단계든 승인 때 남은 QA 지적·할 일의 `item/title/request/from`을 `followups`·`followup_versions(kind='next_round_task', target_stage_id, target_round_id)`에 원 요청·대상·출처·버전과 함께 보존하고 다음 단계 R1에서 조회한다. 4단계 판 비교·이월 마법사는 만들지 않는다.
+  - [ ] `tests/test_editions_stages.py`: 합성 6단계, reopen 뒤 stale·승인 유지, 승인 snapshot, complete≠approve, **승인 전 봉인 성공·허가된 에이전트 봉인 성공·에이전트 단계 승인 거부**, **여러 단계의 남은 QA 지적이 승인·이전 뒤에도 남고 다음 R1에 보임**.
 - **선행**: PR 4·5·9.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_editions_stages.py` 통과.
-  - [ ] 활성 판 하나, 승인 없는 봉인 0, reopen 뒤 옛 run 채택 거부.
-  - [ ] snapshot/manifest가 정확한 버전을 가리킴.
-- **지킬 것**: 1판 흐름 보존. 4단계 판 기능을 앞당기지 않는다. 승인은 사람만(PR10/14와 공동).
+  - [ ] 활성 판 하나, **정확한 스냅샷/manifest 없는 봉인 0**, reopen 뒤 옛 run 채택 거부. 승인 전 봉인과 허가된 에이전트 봉인은 성공하고, 에이전트 단계 승인은 거부된다.
+  - [ ] snapshot/manifest가 정확한 버전을 가리키며 complete·seal·approve가 별개다. 미완료 QA 지적·할 일이 승인·이전 뒤에도 보존되고 다음 R1에 조회된다.
+- **지킬 것**: 1판 흐름 보존. 4단계 판 기능을 앞당기지 않는다. 승인은 사람만(PR10/14와 공동). 봉인은 승인과 별개다.
 
 ## PR 7 — [2단계] 항목·버전·출처·연결
 
@@ -163,7 +167,7 @@
   - [ ] 표: `actors`, `agent_tokens`, `project_policy_versions`, `outbound_dispatches`; 토큰은 해시·범위·30일·회수, 원문 1회 표시.
   - [ ] 기본 ON 표시, 정책 손상 시 차단, 합성 자료도 우회 금지, OFF 뒤 prepared 차단·authorized 미송신만 차단, in-flight 취소/unknown·sent 이력.
   - [ ] 소유자 세션·CSRF 귀속, 사람만 정책 변경·재허용, 재허용 뒤 자동 재시작 없음, 옛 lease 채택 차단.
-  - [ ] `tests/test_actors_policy.py`: 토큰 범위·회수, 정책 변경 사람만, OFF 차단, unknown 예약, 옛 lease 거부.
+  - [ ] `tests/test_actors_policy.py`: 토큰 범위·회수, 정책 변경 사람만, OFF 차단, unknown 예약, 옛 lease 거부, **정책 검사→영수증 재생 순서와 OFF 전 완료 요청의 재생 차단**.
 - **선행**: PR 1·4.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_actors_policy.py` 통과.
@@ -179,11 +183,13 @@
   - [ ] 입력: `project.json`, `library.json`, `feedback/`, `feedback.log`, `snapshots/`, `reports/`, `out/`, `shots/`, `ask/`, `rounds/`, `library/`.
   - [ ] 표: `import_batches`(state=staging), `legacy_mappings`; 옛 승인은 `legacy_unknown` actor·사용자 NULL·`legacy_unverified`.
   - [ ] 그때 본 질문/폼 버전, `__other`/자유 의견, 미처리 답, 새 정책 기본값을 과거 동의로 기록하지 않음.
-  - [ ] `tests/test_legacy_import.py`: `synthetic_project("broken")`·`"large"`·완전 합성, 재실행 멱등, 원본 hash 불변, 미지 필드 보고.
+  - [ ] 옛 단계 `carry_over`를 `followups`·`followup_versions(kind='next_round_task')`로 옮겨 `item/title/request/from`과 원 요청·대상·출처·버전을 보존하고, `migration-map.md:90`과 맞춘다. 조사 주제 파생과 미완료 작업 이월을 섞지 않는다.
+  - [ ] `tests/test_legacy_import.py`: `synthetic_project("broken")`·`"large"`·완전 합성, 재실행 멱등, 원본 hash 불변, 미지 필드 보고, **여러 단계의 남은 carry_over가 다음 R1 후속으로 보존**.
 - **선행**: PR 1·6·7·8·9·10, SEL-17.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_legacy_import.py` 통과.
   - [ ] 깨진/2MB fixture에서 원본 무변경, 재실행 중복 0.
+  - [ ] 옛 carry_over가 `next_round_task`로 보존되고 다음 R1에서 조회된다. `migration-map.md:90`과 일치한다.
   - [ ] 실제 manifest·경로·이전 보고서는 로컬에만; PR 산출물은 합성·익명.
 - **지킬 것**: 실제 `~/pes-projects` 읽기 금지. 기본값 보완을 과거 결정처럼 꾸미지 않는다. 원본 삭제 금지.
 
@@ -206,7 +212,9 @@
 
 - **목표**: 한 run의 최소 경로 `context→claim→submit→complete`를 HTTP/JSON 계약으로 만든다.
 - **할 일**:
-  - [ ] `scripts/pes_core/api.py`: `ApiApp`, 라우트 `GET /api/v1/capabilities`, `GET /api/v1/projects/{id}/context`, `POST /api/v1/projects/{id}/claims`, `POST /api/v1/projects/{id}/runs/{r}/results`, `POST /api/v1/projects/{id}/runs/{r}/complete`.
+  - [ ] `scripts/pes_core/api.py`: `ApiApp`, 라우트 `GET /api/v1/capabilities`, `GET /api/v1/projects/{id}/context`, `POST /api/v1/projects/{id}/runs`, `POST /api/v1/projects/{id}/claims`, `POST /api/v1/projects/{id}/runs/{r}/wait`, `POST /api/v1/projects/{id}/runs/{r}/results`, `POST /api/v1/projects/{id}/runs/{r}/complete`.
+  - [ ] **파일 HTTP는 PR13이 맡는다**: `POST P/uploads`(예약) → `PUT P/uploads/{u}` → `POST P/uploads/{u}/complete`(ready), `GET P/files/{b}/content`(Go OFF 정책 검사 읽기). 저장 코어는 PR9다.
+  - [ ] **2단계 HTTP 담당표**를 OpenAPI에 반영한다: `POST P/runs`(H, PR6, `test_api_runs`), `POST P/claims`(E, PR5, `test_api_claim`), `POST P/runs/{r}/wait`(E, PR5, `test_api_wait`), `POST P/runs/{r}/complete`(E, PR5, `test_api_complete`), `GET P/objects/{o}/versions/{v}`(H/E/W, PR7, `test_api_version`), `GET P/runs/{r}/inputs`·`POST P/runs/{r}/input-receipts`(E, PR5/14, `test_api_inputs`), `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`·`GET P/files/{b}/content`(H/E, **PR13**, `test_api_files_policy`), `POST P/stages/{s}/rounds`·`POST P/rounds/{r}/seal`(H/E, PR6/14, `test_api_rounds`), `POST P/policies/opencode-go/revisions`(H, PR10/14, `test_api_policy`), `POST P/runs/{r}/handoffs`(H/E, PR5/14, `test_api_handoff`), `POST P/runs/{r}/release`(E/H, PR14, `test_api_release`), `GET P/operations/{id}`·`GET P/requests/{key}`(E/H, PR14, `test_api_operation`), `GET P/changes`(H/E/W, PR14, `test_api_changes`). **3단계 U5는 이 run_start를 새로 만들지 않고 재사용한다.**
   - [ ] `scripts/serve.py`: `/api/v1`를 정적 서빙보다 먼저, loopback·Origin·소유자 세션·CSRF, Bearer 토큰.
   - [ ] 봉투 `format_version:"1.0"`, 오류 코드, `Idempotency-Key`, 10진 문자열 rev/fence/event_seq, 모르는 필드 거부.
   - [ ] context digest+manifest, claim=run 전이+lease 원자, submit 작은 묶음, long-poll이 tx를 잡지 않음, `complete`≠승인.
@@ -214,16 +222,18 @@
 - **선행**: PR 4·5·6·7·9·10.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_api_context.py` 통과.
-  - [ ] rev 충돌 부분 저장 0, 토큰 범위 위반 403, `policy_blocked` 자동 재시도 금지.
+  - [ ] rev 충돌 부분 저장 0, 토큰 범위 위반 403, `policy_blocked` 자동 재시도 금지, **OFF 전 완료 요청을 OFF 후 같은 키로 재요청해도 재생되지 않음**.
   - [ ] 한 run 최소 경로가 OpenAPI 예제와 일치. 한 라운드 전체는 PR14와 함께.
+  - [ ] A/B HTTP 왕복(run 시작→claim→wait→답→재개)과 파일 ready·Go OFF 읽기 차단이 `test_api_files_policy`에 포함된다.
+  - [ ] API fixture 완료 뒤 WEB0 조기 실행 입력을 남긴다.
 - **지킬 것**: 표 CRUD·임의 ops 없음. 에이전트가 승인·reopen 불가. 응답의 선택 필드 추가만 허용.
 
 ## PR 14 — [2단계] API: 질문·답·변경분·오류
 
 - **목표**: 질문 게시·수정, 답 제출, 변경분 커서, 사람 전용 승인·reopen, 오류 봉투를 완성한다.
 - **할 일**:
-  - [ ] `scripts/pes_core/api.py`에 `P = /api/v1/projects/{id}` 기준으로 `POST P/questions`, `POST P/questions/{q}/revisions`, `POST P/submissions`, `GET P/changes?cursor=`, `POST P/stages/{s}/approve`, `POST P/stages/{s}/reopen`을 추가한다.
-  - [ ] capabilities, `GET P/runs/{r}/inputs?wait_ms=`, `POST P/runs/{r}/input-receipts`, `P/runs/{r}/heartbeat`·`/release`·`/interrupt`·`/cancel`·`/handoff`, 202 operation 조회.
+  - [ ] `scripts/pes_core/api.py`에 `P = /api/v1/projects/{id}` 기준으로 `POST P/questions`, `POST P/questions/{q}/revisions`, `POST P/submissions`, `GET P/changes?cursor=`, `POST P/stages/{s}/approve`, `POST P/stages/{s}/reopen`을 추가한다. **PR13의 2단계 HTTP 담당표**를 그대로 따르고, 여기서 새 명령 이름을 만들지 않는다.
+  - [ ] capabilities, `GET P/runs/{r}/inputs?wait_ms=`, `POST P/runs/{r}/input-receipts`, `P/runs/{r}/heartbeat`·`/release`·`/interrupt`·`/cancel`·`/handoffs`, `GET P/operations/{id}`·`GET P/requests/{key}`, 202 operation 조회.
   - [ ] 사람 세션과 에이전트 토큰 구분; 승인·reopen은 소유자 사람만. 커서 epoch 재동기화, 공개 tx 단위, 숨긴 사건 스캔.
   - [ ] 요청 제한·poll 최소 간격·429 Retry-After, 서버 답 초안 없음, 가짜 성공 없음.
   - [ ] `tests/test_api_questions.py`: 사람/에이전트 구분, 승인 거부, 커서 무효, long-poll, 202 조회.
@@ -231,6 +241,7 @@
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_api_questions.py` 통과.
   - [ ] 한 라운드 `context→...→wait→답→재개`가 PR13+14 합동 시험으로 통과.
+  - [ ] WEB0는 PR4·13 계약 fixture 직후 실행하며, **PR14 완료는 필수 전제가 아니다.**
   - [ ] 승인·reopen 에이전트 403, 커서 무효에도 미제출 답 보존(화면은 PR18).
 - **지킬 것**: 사람만 승인·reopen. WebMCP·에이전트 토큰에 승인 도구 없음. `202`는 영속 접수만 뜻한다.
 
@@ -353,7 +364,7 @@
   - [ ] `tests/test_cross_contract.py`: 가짜 A/B 런타임으로 같은 프로젝트·같은 결과, A→B·B→A 인계, 지연 응답, 프로세스 종료, Go OFF, 예산, 중복/충돌. **B는 Claude Code·Claude 앱·Codex CLI·OpenCode TUI를 포함**한다.
   - [ ] `tests/fixtures/contracts/cross/*.json`: seen/applied 중복, 사람 시작 인계, 권한 응답 지연 거부, 예산 인계 유지, unknown 예약 미해제.
   - [ ] SQLite/D1 같은 성공·충돌·부분 실패; 유료 실측은 PR19/20a·20b, 반복 계약은 가짜 런타임.
-  - [ ] `docs/plan/decisions/0003-cross-contract.md`: 공통 의미·차이·재검토 조건.
+  - [ ] `docs/plan/decisions/<미사용 번호>-cross-contract.md`: 공통 의미·차이·재검토 조건. 기존 0002~0004와 예약 0006을 재사용하지 않고, 등록 시 색인에서 빈 번호를 확인한다.
 - **선행**: PR 18·19·20a·20b.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_cross_contract.py` 통과.
@@ -366,13 +377,15 @@
 - **목표**: Windows/Mac 설치·복구·백업·이전 runbook을 검증하고, 사용자 허용 시 실제 프로젝트 1개 파일럿을 한다.
 - **할 일**:
   - [ ] `docs/guides/stage-2.md`: 설치·업그레이드·다운그레이드, DB·객체 위치, `pes home`, 백업/복원, legacy 읽기, 삭제 정책, **Codex CLI·OpenCode TUI 연결·재개·A OpenCode와의 구분**, 알려진 한계.
-  - [ ] `docs/plan/decisions/0004-stage-2-release.md`: 0.16.0 배포 조건, 새 DB 경로 개발 플래그 해제, 되돌리기·손실 범위.
+  - [ ] `docs/plan/decisions/<미사용 번호>-stage-2-release.md`: 0.16.0 배포 조건, 새 DB 경로 개발 플래그 해제, 되돌리기·손실 범위. 기존 0002~0004와 예약 0006을 재사용하지 않고, 등록 시 색인에서 빈 번호를 확인한다.
   - [ ] `tests/test_transition_docs.py`: 문서 링크·명령·경로 검사; CI 매 PR·main Windows/Mac, Playwright, D1 smoke.
   - [ ] 실제 파일럿: 사용자 허용 slug 1개, 사본/백업, A 실행 없이 답·승인·reopen·인쇄·기존 화면, 원본 보존. 실제 manifest·경로·보고서는 로컬에만.
+  - [ ] **실제 자료 사용 허용 기록**: 프로젝트·자료 범위·목적지(B Code·앱·Codex·OpenCode, A Go)·기간·철회를 로컬에 기록하고 실제 접근 전 사용자 확인을 받는다. PR22 미실시면 T1이 최초 기록을 만들고, 기록이 있으면 새 목적지만 추가한다. 로컬 이전 허용과 B 외부 전달·A Go 전달을 구분하고 기간 만료·철회 뒤 사용 차단을 확인한다. 허용이 없으면 합성 검증/미실시로 남긴다.
   - [ ] `README.md` 사용자 안내 갱신, 플러그인 버전은 PR22 통과·사용자 승인 뒤 한 번만 올린다.
 - **선행**: PR 2·12·18·21 + SEL-18·19.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_transition_docs.py` 통과.
   - [ ] CI 매 PR·main Windows/Mac, 복원 훈련, 실제 파일럿(허용 시) 원본 보존.
+  - [ ] 실제 자료 허용 기록이 로컬에 있고, PR22 미실시 시 T1 최초 기록 인계가 확인된다. 기간 만료·철회 뒤 접근 차단.
   - [ ] 문서만 보고 재현, 공개 저장소 민감 자료 0, 사용자 "3단계로 넘어가도 된다" 승인.
 - **지킬 것**: 실제 프로젝트 이전은 사용자 허용 전 금지. 2단계 PR에서 버전 올리지 않음. 실제 자료는 PR·로그·문서에 넣지 않는다.

@@ -2,10 +2,11 @@
 
 - 입력: [stage-3.md](../stage-3.md)(검수 반영본), [stage-1-db.md](../stage-1-db.md), [stage-1-api.md](../stage-1-api.md), [stage-1-ui.md](../stage-1-ui.md), [stage-1-runners.md](../stage-1-runners.md), [DDL 초안](../schemas/stage-1-ddl-draft.sql)
 - 원칙: **이슈 하나 = PR 하나.** 9개(U1~U6, W1, R1, T1). Linear에는 아직 만들지 않는다.
-- 공통 전제: 2단계 22개 PR과 0단계 게이트가 끝난 뒤. 새 표를 만들지 않고 기존 54개 표·읽기 모델·계산을 쓴다. 실제 `~/pes-projects`·`~/.pes`는 읽지 않고 합성 fixture만 쓴다.
+- 공통 전제: **2단계 23개 PR**(기존 22개 중 PR20을 20a·20b로 분할, 결정 0012)과 0단계 게이트가 끝난 뒤. 새 표를 만들지 않고 기존 54개 표·읽기 모델·계산을 쓴다. 실제 `~/pes-projects`·`~/.pes`는 읽지 않고 합성 fixture만 쓴다.
 - 공통 파일 경계: `scripts/pes.py`(CLI·명령 서비스 진입), `scripts/serve.py`(로컬 HTTP·API 라우트)는 2단계 경계를 따른다. `templates/workspace/`·`static/workspace/`(현재 저장소에 `static/` 없음)·`tests/test_stage3_*.py`·`tests/e2e/test_stage3_*.py`(2단계에서 만든 e2e 경계)·`tests/fixtures/stage3/`는 3단계에서 새로 만든다.
 - 공통 테스트: macOS/Linux는 `python3 -m pytest -q ...`, Windows는 `python -m pytest -q ...`로 실행한다(아래 명령의 `python`은 Windows 기준). Playwright가 없는 환경은 CI에서 설치하며, 브라우저가 없으면 실패한다(건너뛰지 않음).
-- 공통 완료 조건: 각 이슈에 접근성(대비·초점·키보드·200% 확대)·보안(권한·비밀·Markdown/외부 인용 렌더)·A/B 같은 상태→같은 문구 검증을 포함한다.
+- 공통 완료 조건: 각 이슈에 접근성(대비·초점·키보드·200% 확대)·보안(권한·비밀·Markdown/외부 인용 렌더)·A/B 같은 상태→같은 문구 검증을 포함한다. **U2~U5·R1은 Codex CLI·OpenCode TUI의 최소 왕복·재개·상태 표시를 완료 조건에 포함하고, Claude Code 6단계 시험과 구분한다.**
+- B 어댑터 공통: U2~U5·R1의 MCP/스킬 확장과 상태 표시는 **네 어댑터(Claude Code·Claude 앱·Codex CLI·OpenCode TUI)** 에 같은 계약으로 적용한다. `PR 20`은 20a·20b의 집합 약칭이며, Claude Code의 PES 6단계 시험과 다른 어댑터의 **최소 왕복·재개** 검증 범위를 구분한다.
 
 ---
 
@@ -172,17 +173,17 @@
 
 **할 일**
 - [ ] `templates/workspace/prompt.html`, `static/workspace/prompt.js`, `static/workspace/context-actions.js`를 만든다.
-- [ ] `scripts/serve.py`에 `POST P/questions`, `POST P/runs`, `POST P/claims`, `GET P/runs/{r}/inputs`, `POST P/runs/{r}/input-receipts` 라우트를 연결한다.
+- [ ] `scripts/serve.py`에 `POST P/questions`, `GET P/runs/{r}/inputs`, `POST P/runs/{r}/input-receipts`를 연결한다. **`POST P/runs`·`POST P/claims`는 2단계 PR13/14의 기존 경로를 재사용하고 U5에서 새로 만들지 않는다.**
 - [ ] `questions`·`question_versions`·`submissions`·`answers`·`runs`·`run_input_receipts`·`events`·`outbound_dispatches`를 프롬프트/대기 읽기 모델에 연결한다.
-- [ ] 명령 서비스에 `human_question_create`, `run_start`, `input_receipt`, `prompt_build`를 추가한다. `prompt_build`는 서버 상태를 쓰지 않는 조립 함수다.
+- [ ] 명령 서비스에 `human_question_create`, `input_receipt`, `prompt_build`를 추가한다. **`run_start`는 2단계 PR13/14 계약을 재사용한다.** `prompt_build`는 서버 상태를 쓰지 않는 조립 함수다.
 - [ ] B MCP `pes_ask`·`pes_wait`와 A 세션 도구가 같은 질문/답/대기 명령을 쓰게 한다.
 - [ ] 프롬프트에 선택 범위·정확한 버전·관련 가정/결정·제약·복귀 링크를 넣고, 포함·제외·경고 미리보기 UI를 `prompt.html`에 만든다. 미제출 초안은 `미제출 초안`, 로컬 경로·토큰·비밀은 제외한다.
 - [ ] 접수/외부 수신/답 수신/읽음을 구분하고 경과 시간을 표시한다. 복사만으로 run/`waiting_human`을 만들지 않는다.
-- [ ] A의 `AI에게 묻기`는 `POST P/runs`+claim으로 시작하고, 복사 성공과 실행 성공을 같은 상태로 표시하지 않는다.
+- [ ] A의 `AI에게 묻기`는 기존 `POST P/runs`+claim 경로로 시작하고, 복사 성공과 실행 성공을 같은 상태로 표시하지 않는다.
 - [ ] 클립보드 실패 시 직접 선택 대안을 제공하고, 서버 답 초안 API를 만들지 않는다.
-- [ ] B Code와 Claude 앱 양쪽 경로를 확인하고, 사람 붙여넣기는 actor=human, 도구/모델 주장은 미검증 출처로 기록한다.
+- [ ] B 네 어댑터(Claude Code·Claude 앱·Codex CLI·OpenCode TUI)의 공통 MCP/스킬 확장을 확인하고, 사람 붙여넣기는 actor=human, 도구/모델 주장은 미검증 출처로 기록한다. Claude Code 6단계와 다른 어댑터의 최소 왕복·재개 범위를 구분한다.
 
-**선행 이슈**: U1·U2·U4, 2단계 PR 5·13·19·20.
+**선행 이슈**: U1·U2·U4, 2단계 PR 5·13·19·20(20a·20b 집합 약칭).
 
 **완료 기준**
 - [ ] 복사는 B의 수동 전달 통로이며 Code MCP·앱 직접 연결을 대체하지 않는다.
@@ -191,6 +192,8 @@
 - [ ] A의 실행과 복사가 같은 성공으로 표시되지 않는다.
 - [ ] 미제출 초안 표시, 포함/제외/경고 미리보기, 클립보드 실패 대안이 동작한다.
 - [ ] 서버 답 초안 API가 없고, 로컬 경로·토큰·비밀이 프롬프트에 들어가지 않는다.
+- [ ] `run_start`·`claim`은 2단계 PR13/14 경로를 재사용하고, U5가 같은 기능의 두 번째 경로를 만들지 않는다.
+- [ ] Claude Code·Claude 앱·Codex CLI·OpenCode TUI의 최소 왕복·재개·actor 기록이 같은 계약으로 확인된다(Claude Code만 6단계 전체).
 - [ ] `python -m pytest -q tests/test_stage3_u5.py tests/e2e/test_stage3_u5.py`
 - [ ] `python -m pytest -q tests/test_stage3_u5.py -k "prompt or copy or waiting or actor"`
 
@@ -208,9 +211,10 @@
 
 **할 일**
 - [ ] `templates/workspace/print.html`(또는 `templates/print/workspace.html`)과 `static/workspace/print.js`를 만든다.
-- [ ] `scripts/serve.py`에 `GET P/print?scope=round|stage|edition&snapshot=`과 읽기 모델을 연결한다. 이 경로는 1단계 API 6절에 없으므로 페이지 라우트로 둘지 API 계약에 등록할지 U6에서 명시한다.
+- [ ] `scripts/serve.py`에 `GET P/print?scope=round|stage|edition&snapshot=`과 읽기 모델을 연결한다. **GET은 이미 저장된 고정본만 읽는 순수 조회**이며, 새 고정본·출력물 blob을 만들지 않는다. 이 경로는 1단계 API 6절에 없으므로 페이지 라우트로 둘지 API 계약에 등록할지 U6에서 명시한다.
 - [ ] `scripts/pes.py`의 `cmd_report`·`cmd_assemble`·`cmd_web`가 쓰는 보고서 경계를 재사용하고, 인쇄용 HTML은 PR9의 버전·blob 경계를 지킨다.
 - [ ] `snapshots`·`blobs`·`round_contents`·`artifact_versions`·`artifact_components`로 봉인·승인본 또는 출력 시점 고정 manifest를 만든다.
+- [ ] **출력 시점 고정본 생성은 `print_prepare`/`print_commit`(또는 기존 PR9 저장 명령)으로 분리한다.** 프로젝트 읽기 권한을 가진 사람이 실행하고, 에이전트는 별도 허가가 있을 때만 허용한다. 멱등 키·사건/영수증·실패 시 전체 롤백을 지키고, 이후 GET 재열람은 저장된 고정본을 읽는다.
 - [ ] 열린 라운드는 저장 버전·사건 경계·manifest를 고정하되 **라운드를 봉인하지 않는다**. 미제출 초안·토큰 스트림은 제외한다.
 - [ ] 기본은 현재 라운드/현재 단계/현재 판 6단계, `모든 판`은 고급 옵션+분량 확인으로 둔다. DDL에 없는 프로젝트 전체 scope를 가정하지 않는다.
 - [ ] 포함 항목(본문·표·각주·첨언·가정·결정·반영)을 고르는 UI와 manifest 목록을 만들고, 제외 항목을 manifest에 남긴다.
@@ -221,13 +225,14 @@
 
 **완료 기준**
 - [ ] 봉인·승인본은 그 스냅숏을 쓰고, 열린 라운드는 출력 시점 고정이며 봉인되지 않는다.
+- [ ] `GET P/print`만으로 새 snapshot·출력물 blob이 생기지 않고, `print_commit`의 권한·멱등·사건/영수증·실패 롤백이 시험된다.
 - [ ] 미제출 초안·토큰 스트림이 빠지고, `lost` 첨언 상태가 인쇄에서 숨지 않는다.
 - [ ] 모든 판은 고급 옵션+분량 확인을 거치고, 프로젝트 전체 scope를 가정하지 않는다.
 - [ ] 포함/제외 항목이 manifest에 기록되고, 같은 manifest 재출력에 그대로 쓰인다.
 - [ ] A4·표 머리 반복·흑백·각주가 Windows Chrome/Edge에서 읽힌다.
 - [ ] 같은 manifest 재출력이 같은 내용이다.
 - [ ] `python -m pytest -q tests/test_stage3_u6.py tests/e2e/test_stage3_u6.py`
-- [ ] `python -m pytest -q tests/test_stage3_u6.py -k "snapshot or manifest or print or lost"`
+- [ ] `python -m pytest -q tests/test_stage3_u6.py -k "snapshot or manifest or print or lost or commit"`
 
 **지킬 것**
 - 인쇄 때문에 라운드를 봉인하지 않는다.
@@ -279,21 +284,23 @@
 
 **할 일**
 - [ ] `templates/workspace/run.html`, `static/workspace/resume.js`에 `준비됨/차단 이유`·opt-in·경과·중복 방지 상태를 표시한다.
-- [ ] `scripts/serve.py`에 자동 재개 조회·켜기/끄기와 `POST P/runs/{r}/claims`·`GET P/runs/{r}/inputs`·`POST P/runs/{r}/input-receipts` 연결을 추가한다.
+- [ ] `scripts/serve.py`에 자동 재개 조회·켜기/끄기와 `POST P/claims`·`GET P/runs/{r}/inputs`·`POST P/runs/{r}/input-receipts` 연결을 추가한다.
 - [ ] `scripts/pes.py` 또는 새 `scripts/resume.py`에 `auto_resume_ready`, `auto_resume_schedule`, `auto_resume_cancel`을 추가한다. 준비 검사 자체는 2단계 PR 8/14의 것을 재사용한다.
-- [ ] 프로젝트별 opt-in이므로 `projects`의 설정 열(새 표가 아니라 PR4 마이그레이션)을 우선 쓰고, `editions.settings_json`은 판별 기본값으로만 쓴다.
+- [ ] **opt-in 저장은 `project_policy_versions`의 새 열(예: `allow_auto_resume`)과 R1 소유 새 마이그레이션으로 한다.** 소유자만 변경하고 불변 이력·현재 정책 조회·멱등 키를 쓰며, `projects` 설정 열이나 `editions.settings_json` 기본값으로 대체하지 않는다. 기본 꺼짐, 새 판의 적용 규칙, 비소유자 변경 거부, 재시작 뒤 보존을 시험한다. DDL·`check_ddl.py`·기준 문서 갱신도 R1에 둔다.
+- [ ] 현재 정책 조회·변경 명령(`policy_auto_resume_get`/`set` 또는 동등)을 두고, 소유자 step-up·멱등·불변 이력을 검사한다.
 - [ ] `runs`·`project_leases`·`run_input_receipts`·`project_policy_versions`·`question_sets`·`questions`·`question_versions`·`answers`·`submissions`로 현재 질문/폼·조건부 필수·의견 응답·미루기·run 상태·Go 정책·기한/한도·새 claim을 검사한다.
 - [ ] `실행 form 응답·질문 없는 후속`에는 연구 답 제출을 요구하지 않는다. 연속 제출·동시 클릭은 중복 예약하지 않는다.
 - [ ] 자동 재개도 run·단계·프로젝트 누적 비용 상한과 unknown 예약을 지키고, 상한이 없으면 유료 자동 재개를 하지 않는다.
 - [ ] Go OFF→재허용만으로 자동 재개하지 않고, 재허용 뒤 첫 시작·재개는 사람이 명시하게 한다.
 - [ ] 자동 재개도 새 claim/fence를 쓰고 이전 lease를 부활시키지 않는다. 자동 인계는 추가하지 않는다.
 - [ ] 재시작 뒤 opt-in·중복 방지 상태를 보존하고, 모든 자동 재개를 `mutation_commits`·`events`에 남긴다.
-- [ ] A/B 실제 재개 경로(PR 19·20)와 같은 계약을 쓰는지 확인한다.
+- [ ] A/B 실제 재개 경로(PR 19·20a·20b)와 같은 계약을 쓰는지 확인하고, Codex CLI·OpenCode TUI의 최소 재개 왕복도 포함한다.
 
 **선행 이슈**: U1·U2, 2단계 PR 5·8·10·14·19·20. RUN C4.
 
 **완료 기준**
 - [ ] opt-in 기본 꺼짐, 수동 흐름이 그대로 동작한다.
+- [ ] opt-in이 `project_policy_versions` 새 열·R1 새 마이그레이션·소유자만 변경·불변 이력으로 저장되고, 새 판 적용·재시작 보존·비소유자 변경 거부·멱등이 통과한다.
 - [ ] 준비 검사는 2단계 몫이며 수동 재개에도 필요함을 확인한다.
 - [ ] Go OFF→재허용만으로 자동 재개하지 않는다.
 - [ ] 유효 제출만으로 자동 재개하지 않고 현재 질문/폼·조건부·의견·미루기·run·정책·기한/한도·새 claim을 검사한다.
@@ -301,8 +308,9 @@
 - [ ] 연속 제출·동시 클릭이 중복 예약하지 않고, 재시작 뒤 opt-in·중복 방지가 보존된다.
 - [ ] 자동 재개도 새 claim/fence, 자동 인계 없음, 사건·영수증 기록.
 - [ ] 누적 비용 상한을 넘거나 상한이 없으면 유료 자동 재개를 하지 않고, unknown 예약을 자동 해제하지 않는다.
+- [ ] Codex CLI·OpenCode TUI의 최소 재개 왕복이 Claude Code·Claude 앱과 같은 계약으로 확인된다.
 - [ ] `python -m pytest -q tests/test_stage3_r1.py`
-- [ ] `python -m pytest -q tests/test_stage3_r1.py -k "auto_resume or go_off or duplicate or restart"`
+- [ ] `python -m pytest -q tests/test_stage3_r1.py -k "auto_resume or go_off or duplicate or restart or policy"`
 
 **지킬 것**
 - 자동 재개를 기본값으로 두지 않는다.
@@ -321,8 +329,8 @@
 - [ ] `tests/fixtures/stage3/t1/`에 공개 가능한 합성 재현 자료를 두고, 실제 사본·export/import·백업·인쇄물·캡처는 저장소 밖에 둔다.
 - [ ] `scripts/pes.py`의 PR3 export/import와 PR12 쓰기 전/후 복구를 재사용해 분리 시험 홈/DB를 만든다.
 - [ ] `import_batches`·`legacy_mappings`·`snapshots`·`blobs`·`mutation_commits`·`events`·`db_meta`를 시험·복원 확인에 쓴다.
-- [ ] PR22 파일럿 프로젝트를 재사용할지 다른 프로젝트를 쓸지 정하고, PR22 runbook·백업을 재사용한다.
-- [ ] B(Claude Code)를 먼저 시험한다. Go 반출이 없어 로컬 복구가 쉽다는 범위에서만 그렇고, B도 연구 내용을 외부로 보낼 수 있으며 이미 보낸 정보는 DB 복원으로 회수되지 않음을 기록한다.
+- [ ] PR22 파일럿 프로젝트를 재사용할지 다른 프로젝트를 쓸지 정하고, PR22 runbook·백업을 재사용한다. **PR22가 실제 자료 허용 기록을 만들었다면 그 기록에 B 목적지를 추가하고, PR22 미실시면 T1에서 프로젝트·자료 범위·목적지·기간·철회를 담은 최초 기록을 만든다.** 로컬 이전 허용·B 외부 전달·A Go 전달을 구분하고, 기간 만료·철회 뒤 사용을 차단한다.
+- [ ] B(Claude Code)를 먼저 시험한다. Go 반출이 없어 로컬 복구가 쉽다는 범위에서만 그렇고, B도 연구 내용을 외부로 보낼 수 있으며 이미 보낸 정보는 DB 복원으로 회수되지 않음을 기록한다. **B 전달 허용은 실제 시험할 어댑터(Claude Code·Claude 앱·Codex CLI·OpenCode TUI)와 목적지에 맞춰 범위를 명시하고, 허용되지 않은 어댑터로 보내지 않는다.**
 - [ ] 시험 왕복: 작업 공간 열기 → 질문 고치기/더하기 → 묶음 답 → 수동 재개 → 결과 글 → 첨언 → AI에게 묻기(B 접수/복사) → 할 일로 → 반영 내역 → 인쇄 → 기존 대시보드/ask 링크 → 단계 승인/다시 열기(사본) → 재접속.
 - [ ] 중단 기준: 자료 손실, 답 중복·유실, 잘못된 승인, 조용한 오부착·원문 인용/스레드 유실(정상 `lost`는 실패 아님), 인쇄 불일치, 접근성 차단.
 - [ ] 차단 결함은 복구 후 수정·동일 시나리오 재시험 전 종료하지 않는다. 비차단 결함만 이월하고, 수정 규모가 크면 단일 목적 결함 PR로 분리한다.
@@ -335,8 +343,8 @@
 - [ ] 자료 손실 0, 답 중복·유실 0, 잘못된 승인 0, 조용한 오부착·원문 인용/스레드 유실 0, 인쇄 불일치 0.
 - [ ] 복원 시험 성공, 사용자 확인, 차단 결함 수정·재시험 완료, 비차단 결함 목록·이월.
 - [ ] 실제 사본·캡처가 저장소 밖에 있고, 공개 PR·fixture에 실제 자료·키가 없다.
-- [ ] PR22 파일럿 재사용 여부·runbook·백업이 명시되고, 사용 안내가 갱신됐다.
-- [ ] 사용자 허용이 없으면 T1을 `미실시`로 기록하고, 단계 승인 때 검증 범위를 알린다.
+- [ ] PR22 파일럿 재사용 여부·runbook·백업이 명시되고, 실제 자료 허용 기록(프로젝트·범위·목적지·기간·철회)과 사용 안내가 갱신됐다.
+- [ ] 사용자 허용이 없으면 T1을 `미실시`로 기록하고, 허용 기록이 없으면 최초 기록을 만들거나 합성 검증으로 남기며, 단계 승인 때 검증 범위를 알린다.
 - [ ] `python -m pytest -q tests/test_stage3_t1.py`
 - [ ] 수동: `docs/plan/runbooks/stage-3-real-project.md` 체크리스트를 사용자 입회로 완료한다.
 

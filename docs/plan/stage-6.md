@@ -3,7 +3,7 @@
 - 작성: 2026-11-05, OpenCode (DeepSeek V4.1 Flash)
 - Linear: **SEL-29** ("넓히기")
 - 입력: [00-brief.md](00-brief.md), 확정 [stage-0.md](stage-0.md), 합의 [stage-1-db.md](stage-1-db.md)·[stage-1-api.md](stage-1-api.md)·[stage-1-ui.md](stage-1-ui.md)·[stage-1-runners.md](stage-1-runners.md), [DDL 초안](schemas/stage-1-ddl-draft.sql), [notion-linear.md](research/notion-linear.md), [stage-3.md](stage-3.md)·[stage-4.md](stage-4.md)·[stage-5.md](stage-5.md)
-- 상태: **Codex·Opus 검수 반영**
+- 상태: **Codex·Opus 검수와 Codex 최종 검수 반영 — 사용자 승인 대기** (2026-11-05)
 - 전제: stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다. 실제 `~/pes-projects`·`~/.pes/`는 읽지 않았고, 공개 저장소 문서만 근거로 썼다. 이 문서는 계획만 바꾸며 코드는 고치지 않는다.
 - 범위: 6단계는 **마지막 확장 단계**다. 코어 데이터 모델을 새로 만들지 않고, 1~5단계의 같은 DB·API 위에 다른 에이전트·여러 사람·한 방향 내보내기·다중 worker·hc-team·hwpx를 얹는다.
 
@@ -12,13 +12,13 @@
 **PES를 한 사람·한 에이전트·한 방향 화면에서, 여러 에이전트와 여러 사람이 같은 연구 기록을 안전하게 나눠 쓰는 도구로 넓힌다.** 6단계가 끝나면 다음이 참이어야 한다.
 
 1. **2단계에서 붙인 Codex CLI·OpenCode TUI**가 Claude Code와 **같은 PES API/MCP·같은 자격 체계·같은 오류 의미**로 작업하고, 6단계는 이 어댑터를 회귀한다. 추가 에이전트는 후보·계약 시험만 한다. 어느 에이전트도 `project.json`·DB를 직접 쓰지 않는다.
-2. owner/approver/editor/reader가 한 프로젝트에서 역할별로 일하고, 같은 글을 동시에 고쳐도 **덮어쓰기 없이 새 버전·충돌 표시**로 남는다. 승인은 **owner 또는 허가된 approver 사람만** 하며 감사 가능하다.
+2. owner/editor/reader가 한 프로젝트에서 역할별로 일하고, 같은 글을 동시에 고쳐도 **덮어쓰기 없이 새 버전·충돌 표시**로 남는다. **approver 역할의 도입 여부와 도입 시 위임 범위는 M1에서 결정**(0010)하며, 도입하면 승인은 owner 또는 허가된 approver 사람만 하고 감사 가능하다. 도입하지 않으면 5단계처럼 owner만 승인한다.
 3. Linear에는 **사람이 '할 일로'에서 고른 항목**만(제목+사람이 쓴 요약, UI 결정 11·F12, 연구 내용 자동 포함 없음), Notion에는 **사람이 고른 보고서 버전 사본**만 한 방향으로 보낸다. 전송 전 상관키·영수증·payload hash·시도·목적지 ID가 남고, 응답 유실은 `unknown`으로 남기며 왕복 동기화는 하지 않는다.
 4. 한 프로젝트의 **채택 책임자(에이전트 lease) 하나**를 유지한다. 이 제한은 에이전트의 결과 채택에만 걸리고 사람의 답·첨언·허가된 직접 편집을 막지 않는다. 여러 worker는 서로 다른 대상에 동시에 제안하고, 채택은 충돌 없이 직렬화된다.
 5. hc-team은 이미 0단계부터 PES 개발에 쓰이고 있다. 6단계에서는 지금까지의 운영 결과(주기·테스트·리뷰 지적·사람 재작업)를 평가하고, 적용 범위·제외 경계·중단 기준을 문서로 갱신한다. Codex·OpenCode TUI는 2단계 PR20b로 옮겼으므로 6단계 hc-team 평가 대상으로 고정하지 않는다.
 6. 마지막으로 미뤄 둔 **hwpx 변환**을 실제 Windows 한글 환경에서 확인한다. 표·그림·각주·긴 한글이 깨지지 않고, 실패하면 조용히 다른 형식으로 대체하지 않고 실패를 기록한다. 변환은 어느 런타임에서도 부를 수 있는 로컬 명령으로 감싸는 것을 우선한다.
 
-**하지 않는 것**: 실시간 공동 편집(CRDT/OT), Linear·Notion 양방향 동기화, 조직 SSO/SCIM, 공개 API·웹훅, 모바일 앱·오프라인, 다중 테넌트 과금, 5단계 탈출 조건(Free: DB 500 MB 도달) 또는 유료 전환 뒤 프로젝트별 DB 분리. 이들은 6단계 이후 운영 백로그로 넘긴다.
+**하지 않는 것**: 실시간 공동 편집(CRDT/OT), Linear·Notion 양방향 동기화, 조직 SSO/SCIM, 공개 API·웹훅, 모바일 앱·오프라인, 다중 테넌트 과금, 5단계 WEB10의 **350 MB 안전 정지·유료 전환 검토 신호와 500 MB 하드 캡**을 넘어서는 추가 운영 확장(프로젝트별 D1 분리 등). 6단계는 5단계의 안전 정지·하드 캡 계약을 승계하고, 프로젝트별 분리 같은 추가 확장은 후속 검토·운영 백로그로 넘긴다.
 
 ## 2. 주제와 결정
 
@@ -37,16 +37,16 @@
 - **정할 것**: 6단계에서 추가 에이전트(Gemini 등)를 실제로 붙일지, 후보로만 남길지, G3를 2단계 어댑터 회귀에 어떻게 쓸지.
 - **선택지**: (A) 6단계에 추가 에이전트를 넣지 않고 G3를 2단계 회귀로만 쓴다, (B) **2단계 어댑터 회귀 + Gemini 등 추가 에이전트는 후보·계약 시험만**, (C) 6단계에 새 에이전트 어댑터를 바로 추가한다.
 - **판단 기준**: 2단계에서 이미 붙인 어댑터의 회귀 위험, 새 에이전트의 실제 수요·도구 지원, 코어 분기 금지, 어댑터 노트의 중립성, 6단계 범위 팽창.
-- **추천**: **B**. G3는 **2단계 PR20b의 Claude Code·Claude 앱·Codex CLI·OpenCode TUI 어댑터를 회귀**하고, M1·M3·E2·A 회귀를 교차 검증한다. Gemini 등 추가 에이전트는 **후보·계약 시험만** 두고, 실제 어댑터 이슈는 수요가 확인될 때 별도로 만든다. 2단계 PR20b의 D4 노트는 `opencode`(A)·`claude-code`·`claude-app`에 `codex`·`opencode-tui`를 더한다(`docs/adapters/`). OpenCode TUI는 사람이 직접 켜는 화면판이며, PES가 서버로 돌리는 방식 A의 OpenCode와 다르다. 승인·reopen·정책·토큰·삭제·외부 export는 어떤 에이전트 도구에도 넣지 않는다.
+- **추천**: **B**. G3는 **2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI 어댑터를 회귀**하고, M1·M3·E2·A 회귀를 교차 검증한다. Gemini 등 추가 에이전트는 **후보·계약 시험만** 두고, 실제 어댑터 이슈는 수요가 확인될 때 별도로 만든다. 2단계 PR20a가 `claude-code`·`claude-app`을 맡고, D4 노트는 `opencode`(A)·`claude-code`·`claude-app`에 PR20b가 `codex`·`opencode-tui`를 더한다(`docs/adapters/`). OpenCode TUI는 사람이 직접 켜는 화면판이며, PES가 서버로 돌리는 방식 A의 OpenCode와 다르다. 승인·reopen·정책·토큰·삭제·외부 export는 어떤 에이전트 도구에도 넣지 않는다.
 
 ### 2.3 여러 사람 — 역할·승인·초대
 
-- **정할 것**: owner/editor/reader에 approver를 둘지, editor가 승인할 수 있는지, 소유권 이전·초대·마지막 owner 보호, 같은 질문에 여러 사람이 답할 때의 규칙, 초대된 사람의 외부 AI 경로.
-- **선택지**: (A) 5단계처럼 owner만 승인, (B) **프로젝트 역할 `approver`를 추가하되 승인·reopen에 한정하고 owner는 항상 승인 가능, 정족수는 두지 않음**, (C) editor면 누구나 승인.
+- **정할 것**: **approver를 도입할지, 도입하면 위임 범위를 어디까지 할지(0010)**, editor가 승인할 수 있는지, 소유권 이전·초대·마지막 owner 보호, 같은 질문에 여러 사람이 답할 때의 규칙, 초대된 사람의 외부 AI 경로.
+- **선택지**: (A) 5단계처럼 **owner만 승인(approver 미도입)**, (B) **프로젝트 역할 `approver`를 도입하되 승인·reopen에 한정하고 owner는 항상 승인 가능, 정족수는 두지 않음**, (C) editor면 누구나 승인.
 - **판단 기준**: 연구 책임의 단일성, 감사, 최소 권한, 마지막 owner 보호, 중요 동작 step-up, 외부 에이전트 배제, 초대된 사람의 자료 경로.
-- **추천**: **B**. `approver`는 **`stage.approve`·`stage.reopen`에 한정한 권한 확장안**이며, `edition.complete`·`edition.reopen_completion`은 owner만 한다. API 6절 동작 표·capabilities·UI 권한 표를 함께 갱신하고, Go 재허용·토큰·삭제·멤버·판 시작은 owner에게 남긴다.
-  - **승인 주체**: owner 또는 허가된 approver 사람만 `stage.approve`·`stage.reopen`을 할 수 있고, `edition.complete`·`edition.reopen_completion`은 owner만 한다. `assurance=verified` 값이나 `human_id` 선언만으로 통과시키지 않고, 서버가 현재 멤버·권한·5분 내 재인증·대상 snapshot/rev를 검증한다. 에이전트 토큰·WebMCP는 승인할 수 없다.
-  - **소유권 이전**: DDL의 프로젝트당 owner 최대 1명, `projects.owner_user_id`, 과거 `project_policy_versions.changed_by_user_id`의 FK를 함께 설계한다. 원자적 이전, 과거 정책 작성자 보존, 이전 전후 FK·권한 시험을 M1에 넣는다. 이력을 새 owner로 덮어쓰지 않는다.
+- **추천**: **B(도입할 경우)**. **도입 여부와 위임 범위는 0010에 따라 M1에서 사용자 결정으로 확정**한다. 도입하면 `approver`는 **`stage.approve`·`stage.reopen`에 한정한 권한 확장**이며, `edition.complete`·`edition.reopen_completion`은 owner만 한다. API 6절 동작 표·capabilities·UI 권한 표를 함께 갱신하고, Go 재허용·토큰·삭제·멤버·판 시작은 owner에게 남긴다. 도입하지 않으면 5단계처럼 owner만 유지하고 역할 마이그레이션·권한 확장을 만들지 않는다.
+  - **승인 주체**: approver를 도입한 경우 owner 또는 허가된 approver 사람만 `stage.approve`·`stage.reopen`을 할 수 있고, 도입하지 않으면 owner만 한다. 어느 경우든 `edition.complete`·`edition.reopen_completion`은 owner만 한다. `assurance=verified` 값이나 `human_id` 선언만으로 통과시키지 않고, 서버가 현재 멤버·권한·5분 내 재인증·대상 snapshot/rev를 검증한다. 에이전트 토큰·WebMCP는 승인할 수 없다.
+  - **소유권 이전**: **5단계 WEB3이 구현하는 원자적 소유권 이전 계약을 재사용**한다. 프로젝트당 owner 최대 1명, `projects.owner_user_id`, 과거 `project_policy_versions.changed_by_user_id` 보존을 위한 FK 마이그레이션·검사·이전 전후 시험은 **WEB3에서 인계**받고, M1은 그 계약을 새로 설계하거나 처음 만들지 않는다. 이력을 새 owner로 덮어쓰지 않는다.
   - **질문 배정**: `questions.intended_actor_id` 재배정에 이력·rev·사건을 남긴다. 배정 뒤 옛 응답자 제출, 배정 변경 전 제출, 미배정·필수 질문, 서로 다른 사람의 동시 제출을 시험하고, 과거 답은 당시 질문/폼·실제 응답자에 보존한다. PR8·U2 계약과 연계한다.
   - **초대와 외부 AI**: 초대 수락 화면에 현재 Go 전송 허용 상태와 연결된 외부 에이전트를 보여 준다. editor가 자기 Claude 앱을 OAuth로 연결하면 프로젝트 자료가 그 사람 계정의 외부 AI로 간다. owner가 프로젝트별로 "멤버의 외부 에이전트 연결 허용"을 켜고 끌 수 있게 하며, 기본은 허용하지 않는다.
   - **초대 정책**: 초대는 owner만, 7일 1회, 기본 reader, 공개 링크 없음. 마지막 owner는 제거할 수 없고 소유권 이전은 owner의 step-up으로만 한다.
@@ -78,11 +78,13 @@
 | `prepared` | 작업·영수증 생성, 사람 승인 전 | `authorized` 또는 `blocked` |
 | `authorized` | 사람 step-up 승인 완료, 전송 전 | `sending` 또는 `blocked` |
 | `sending` | 전송 시도 중, 응답 미확정 | `partial`·`sent`·`failed`·`unknown` |
-| `partial` | 일부 목적지 객체 생성, 재개 지점 있음 | `sending`(재개)·`sent`·`failed` |
+| `partial` | 일부 목적지 객체 생성, 재개 지점 있음 | `sending`(재개)·`sent` |
 | `sent` | 전체 성공, 외부 ID 확정 | 종료 |
-| `failed` | 명확한 실패, 생성 없음 확인 | 종료(자동 재전송 없음) |
+| `failed` | 명확한 실패, **외부 객체 생성 없음 확인** | 종료(자동 재전송 없음) |
 | `unknown` | 응답 유실, 생성 여부 미확인 | 목적지 확인 뒤 `sent`·`partial`·`failed`, 확인 전 자동 재전송 금지 |
-| `blocked` | 권한 회수·정책으로 미전송 | 종료(사람 확인) |
+| `blocked` | 권한 회수·정책 또는 사람이 보내기 전 취소해 미전송 | 종료(사람 확인, 사유 기록) |
+
+- **취소·승인 증거**: `cancelled`를 별도 상태로 두지 않는다. 보내기 전 사람 취소는 `blocked`(사유 `cancelled_by_human`)로 끝내고, `sending` 중 취소 시도는 성공으로 바꾸지 않고 `unknown`으로 남겨 목적지 확인 뒤 `sent`·`partial`·`failed`로 종결한다. 이미 만들어진 외부 객체는 DB 롤백으로 지우지 않는다. 사람 승인은 actor·시각·대상 payload hash·목적지에 고정하고, 송신 직전 현재 권한·프로젝트·대상 버전을 다시 검사한다(2.5).
 
 ### 2.6 다중 worker 동시 채택
 
@@ -120,14 +122,14 @@
 
 ### 2.9 경계
 
-- 6단계는 **한 프로젝트의 연구 기록을 안전하게 넓히는 단계**다. 조직 단위 권한·SSO·SCIM, 공개 API·웹훅, 실시간 공동 편집, 모바일 앱·오프라인, 다중 테넌트 과금, Linear·Notion 왕복 동기화는 넣지 않는다. 프로젝트별 D1 분리는 **5단계 탈출 조건인 Free DB 500 MB 도달 또는 유료 전환 뒤 기준**에서 다시 판단하며, 현재 저장량이나 1단계 확정 한도가 아니다. 이들은 6단계 이후 운영 백로그에서 다시 판단한다.
+- 6단계는 **한 프로젝트의 연구 기록을 안전하게 넓히는 단계**다. 조직 단위 권한·SSO·SCIM, 공개 API·웹훅, 실시간 공동 편집, 모바일 앱·오프라인, 다중 테넌트 과금, Linear·Notion 왕복 동기화는 넣지 않는다. 프로젝트별 D1 분리는 **5단계 WEB10의 완료 조건이 아니라 후속 검토**다. 6단계는 5단계의 **350 MB 안전 정지·유료 전환 검토 신호와 500 MB 하드 캡**을 승계하고, 그 뒤의 추가 운영 확장(프로젝트별 D1 분리·다중 테넌트·조직 단위 격리 등)만 판단한다. 5단계의 안전 정지·하드 캡 계약을 6단계에서 뒤집거나 다른 일정으로 바꾸지 않는다.
 
 ## 3. 방식 A·B 차이
 
 | 항목 | A — PES 안 OpenCode | B 계열 — 2단계에서 붙인 Claude Code·Claude 앱·Codex CLI·OpenCode TUI + 6단계 후보 | 공통 |
 |---|---|---|---|
 | 다른 에이전트 | A는 내부 OpenCode/DeepSeek 하나 | 2단계 어댑터를 회귀하고, Gemini 등 추가 에이전트는 후보·계약 시험만 | 같은 API·자격 체계·오류·actor 규칙, 승인 불가 |
-| 여러 사람 | A run은 내부 에이전트로 기록 | B는 외부 에이전트로 기록, 사람 역할은 별도 | owner/approver/editor/reader, 사람만 승인, 초대 시 외부 AI 경로 표시 |
+| 여러 사람 | A run은 내부 에이전트로 기록 | B는 외부 에이전트로 기록, 사람 역할은 별도 | owner/editor/reader, approver는 M1 결정(0010), 사람만 승인, 초대 시 외부 AI 경로 표시 |
 | 동시 편집 | A가 제안한 버전도 같은 충돌 규칙 | B가 제안한 버전도 같음 | 새 버전+base_version, 409, 초안 보존, 자동 병합 없음 |
 | 내보내기 | A가 payload 초안을 만들 수 있지만 전송은 사람 | B도 같음, 앱은 복사·확인 경로 | 한 방향, 상관키·영수증, unknown, Go 정책 재사용 안 함 |
 | 다중 worker | A child worker들이 최소 권한으로 제안, 부모가 채택 | B 외부 worker들이 토큰으로 제안, 채택자는 하나 | 프로젝트당 에이전트 채택자 하나, 대상 충돌 409, 부모 상태 전파 |
@@ -144,14 +146,14 @@ A·B의 차이는 **실행 소유·연결·비용 집행**에만 두고, 업무 
 
 | # | 제목 | 범위 | 선행 | 완료 조건 |
 |---|---|---|---|---|
-| E1 | 외부 내보내기 영수증·명령·API | `export_jobs`·`export_attempts`, `export_jobs` 상태 표·전이(prepared/authorized/sending/partial/sent/failed/unknown/blocked), `POST P/exports`(미리보기·상태·재시도), project/요청자/정확한 버전·manifest/목적지 계정/payload hash/전송 전 상관키, 멱등, 202 영속 접수, sending 복구, 부분 생성 재개, 사람 step-up, Go dispatch 재사용 금지, DDL·`check_ddl.py` 갱신, PR2·3 백업 계약 준용 | PR4·10·14, WEB2·3·4·11 | 마이그레이션+D1 smoke, 상태 전이, 사람만 실행, 같은 키 다른 요청 거부, 0행·부분 실패, 중단·재시작 뒤 조회, unknown을 성공으로 표시하지 않음, 자격정보 비노출, 테스트, 공통(C15) |
+| E1 | 외부 내보내기 영수증·명령·API | `export_jobs`·`export_attempts`, `export_jobs` 상태 표·전이(prepared/authorized/sending/partial/sent/failed/unknown/blocked), `POST P/exports`(미리보기·상태·재시도), project/요청자/정확한 버전·manifest/목적지 계정/payload hash/전송 전 상관키, 멱등, 202 영속 접수, sending 복구, 부분 생성 재개, 사람 step-up, Go dispatch 재사용 금지, DDL·`check_ddl.py` 갱신, PR2·3 백업 계약 준용 | PR4·10·14, WEB2·3·4·11 | 마이그레이션+D1 smoke, 상태 전이(보내기 전 취소는 `blocked`, `sending` 중 취소 시도는 `unknown`), 사람만 실행, 같은 키 다른 요청 거부, 0행·부분 실패, 중단·재시작 뒤 조회, unknown을 성공으로 표시하지 않음, 자격정보 비노출, 테스트, 공통(C15) |
 | E2 | Linear·Notion 한 방향 어댑터·미리보기 | Linear=사람이 '할 일로'에서 고른 항목(제목+사람 요약, UI 결정 11·F12), Notion=선택 보고서 사본(동기화 안 함), 목적지 상태(미설정/미지원/활성), 포함/제외·민감 경고 미리보기, 외부 ID·URL, 재시도·확인, Go ON≠export 동의, 수신 동기화 없음, 보고서/비교 화면 진입(S4-U8 버전 선택) | E1, PR9, U4·U5, S4-U8, WEB4·11 | 가짜 서버 성공·중복·unknown·재시도, 허용 시 합성 payload 최소 실제 왕복(미허용은 미실시로 분리), 정확한 버전만, 연구 내용 자동 전송 0, WebMCP 불가, 테스트, 공통(C15) |
-| M1 | 역할·멤버·승인·초대 | `WEB3` 재사용(owner 1명·이전·마지막 owner·권한 매트릭스) + `approver` 역할 마이그레이션(`stage.approve`·`stage.reopen`만, `edition.complete`·`edition.reopen_completion`은 owner만), API 6절·capabilities·UI 권한 표 갱신, 질문 배정 이력·rev·사건, 초대 수락 화면의 외부 AI 경로와 owner 허용 설정, 과거 정책 FK, step-up·승인 감사, 6절 2번 승인 시 `docs/plan/decisions/`에 'API 결정 11 확장(owner+approver, 승인·reopen만)' 기록, 검토 순서는 승인 위임 계약 확정 → 소유권·배정 기록 → 화면·회귀, 독립 배포가 필요하면 근거와 함께 분할 | WEB2·3, PR4·10·14, PR8·U2 | owner 또는 허가된 approver 사람만(`stage.approve`·`stage.reopen`), `edition.complete`·`edition.reopen_completion`은 owner만, 서버가 멤버·권한·재인증·snapshot/rev 검증, editor 승인 불가, 외부 에이전트 승인 불가, ownerless 불가, 이전 전후 FK·권한 시험, 옛 응답자·동시 제출 시험, 테스트, 공통(C15) |
+| M1 | 역할·멤버·승인·초대 | `WEB3` 재사용(owner 1명·이전·마지막 owner·권한 매트릭스) + **0010에 따라 approver 도입 여부를 먼저 결정하고, 도입할 때만** 역할 마이그레이션(`stage.approve`·`stage.reopen`만, `edition.complete`·`edition.reopen_completion`은 owner만), API 6절·capabilities·UI 권한 표 갱신, 질문 배정 이력·rev·사건, 초대 수락 화면의 외부 AI 경로와 owner 허용 설정, **WEB3 소유권 이전 계약 재사용(과거 정책 FK·이전 전후 시험 포함)**, step-up·승인 감사, 6절 2번 승인 시 `docs/plan/decisions/`에 'API 결정 11 확장 여부' 기록, 검토 순서는 **approver 도입 결정 → 승인 위임 계약 확정 → 소유권·배정 기록 → 화면·회귀**, 독립 배포가 필요하면 근거와 함께 분할 | WEB2·3, PR4·10·14, PR8·U2 | **도입 시** owner 또는 허가된 approver 사람만(`stage.approve`·`stage.reopen`), **미도입 시 owner만**, 어느 경우든 `edition.complete`·`edition.reopen_completion`은 owner만, 서버가 멤버·권한·재인증·snapshot/rev 검증, editor 승인 불가, 외부 에이전트 승인 불가, ownerless 불가, WEB3 이전 계약의 FK·권한 시험 재사용, 옛 응답자·동시 제출 시험, 테스트, 공통(C15) |
 | M2 | 동시 편집·충돌 | `base_version_id`/rev, 409 충돌·초안/제안 보존, 새 버전, 충돌 화면, 승인·게시본 보호, 선택적 편집 표시, CRDT 없음 | M1, S4-PR25, S4-U11, PR4·14 | 두 사람 동시 편집 유실 0, 409 양쪽 버전 보존, 사람 대 worker·재접속·권한 회수 뒤 편집, 승인 스냅숏 불변, Windows/Mac, 테스트, 공통(C15) |
 | M3 | 다중 worker 제안·채택 | child 최소 권한 제안 통로, `run_targets`, `adoption_proposals`·run 관계 종류(`run_relations` 표 또는 열) 새 마이그레이션, DDL·`check_ddl.py`, SQLite/D1 시험, `POST .../adoptions`, 같은 대상 409·batch 전체 롤백, 부모 상태 전파·누적 예산, actor=부모·출처 별도, `parent_run_id` 관계 종류 구분, reviewer 별도 run, 인계 fence | PR1·2·4·5·7·9·10·13·21, WEB4·6·7·12 | 동시 제안 후 직렬·원자 채택, 다른 대상 batch 성공, 같은 대상 하나만·다른 하나 409, 부모 만료/인계 뒤 지연 제안 거부, 예산 초기화 없음, 유실·덮어쓰기 0, 테스트, 공통(C15) |
-| G3 | 다중 에이전트 교차 계약(2단계 어댑터 회귀) | 2단계 PR20b의 Claude Code·Claude 앱·Codex CLI·OpenCode TUI를 회귀하고, M3·E2·M1 교차 검증·앱 직접 연결·명시적 전달·A 회귀를 맡는다. Gemini 등 추가 에이전트는 후보·계약 시험만. PR21 테스트 묶음을 확장 | PR20b·21, M1·M3·E2 | 같은 DB 상태에서 같은 의미, 인계·중복·충돌·OFF 유실 0, 앱 actual actor=human·새 claim·기반 대조·중복 방지, 추가 에이전트는 미지원/후보로 정직 표시, 자동 테스트, 공통(C15) |
+| G3 | 다중 에이전트 교차 계약(2단계 어댑터 회귀) | 2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI를 회귀하고, M3·E2·M1 교차 검증·앱 직접 연결·명시적 전달·A 회귀를 맡는다. Gemini 등 추가 에이전트는 후보·계약 시험만. PR21 테스트 묶음을 확장 | PR20a·20b·21, M1·M3·E2 | 같은 DB 상태에서 같은 의미, 인계·중복·충돌·OFF 유실 0, 앱 actual actor=human·새 claim·기반 대조·중복 방지, 추가 에이전트는 미지원/후보로 정직 표시, 자동 테스트, 공통(C15) |
 | H1 | hc-team 운영 평가·규칙 갱신(문서 PR) | 지금까지 처리한 `ai/SEL-*` 이슈의 주기·테스트·리뷰 지적·사람 재작업·worktree 격리·공개 저장소 경계 평가, 적용/제외 규칙, 실패 시 일반 개발 전환 기록 | 시작: hc-team 스킬 버전·권한·CI 확인. 완료: 평가 보고서·규칙 갱신 PR 병합(2단계 PR20b 등 기존 이슈는 평가 대상 중 하나일 수 있음) | 평가 보고서와 규칙 갱신 PR 병합, main 직접 쓰기 0, 실자료 0, 측정·중단 기준 기록, 공통(C15) |
-| X2 | 6단계 통합·문서(hwpx 제외) | 전 기능 합성 종단, 새 표 포함 백업/복구·마이그레이션 전진 복구 시험(Worker 이전 버전 롤백과 DB 복구 구분), Windows/Mac, 권한·보안·비용, 내보내기 unknown 런북, 기존 화면 제거 결정, 사용 안내, 잔여 백로그 | E1·E2·M1~M3·G3·H1 | 5절 게이트 중 hwpx 제외 전부, 문서만 보고 재현, unknown을 DB 롤백으로 지우지 않는 절차, 공개 저장소 민감 자료 0, 공통(C15) |
+| X2 | 6단계 통합·문서(hwpx 제외) | 전 기능 합성 종단, 새 표 포함 백업/복구·마이그레이션 전진 복구 시험(Worker 이전 버전 배포·호환 창·백업에서 격리 복구·전진 마이그레이션 구분), 외부 전송·unknown 증거는 DB 롤백으로 지우지 않음, Windows/Mac, 권한·보안·비용, 내보내기 unknown 런북, 기존 화면 제거 결정, 사용 안내, 잔여 백로그 | E1·E2·M1~M3·G3·H1 | 5절 게이트 중 hwpx 제외 전부, 문서만 보고 재현, unknown을 DB 롤백으로 지우지 않는 절차, 공개 저장소 민감 자료 0, 공통(C15) |
 | X1 | hwpx 변환 최종 확인·릴리스 | 로컬 명령 래퍼(또는 B 한정 한계), `report.md`→`report-uri.md`→`report.hwpx`, 파생본·기반/변환기 버전·hash, 업로드 ready와 등록 구분, 합성+사용자 허용 사본, Windows 한글, 표·그림·각주, 실패 경로, 대체 없음, 최종 사용자 승인 | X2, PR9·16, WEB9, E1·E2·M1~M3·G3, H1 | 합성·실제 사본 변환, 한글에서 표·그림·각주 확인, 네 가지 증거 분리 기록, 실패 시 명시 오류·미등록, 영향받은 통합·보안·회귀 재통과, 한계 문서화, 사용자 승인, 공통(C15) |
 
 **공통(C15)**: 각 PR의 자동 성공·거부·충돌·부분 실패, 매 PR+main Windows·macOS, 화면은 Playwright·한글 IME/키보드·200%·접근성, 실제 홈 격리, 새 마이그레이션의 SQLite/D1 검사를 포함한다. G3·X2는 교차·통합 시험이며 개별 PR 검증을 대신하지 않는다.
@@ -162,14 +164,14 @@ A·B의 차이는 **실행 소유·연결·비용 집행**에만 두고, 업무 
 
 | 게이트 | 통과 조건 | 이슈 |
 |---|---|---|
-| 다른 에이전트 | 2단계 PR20b의 Claude Code·Claude 앱·Codex CLI·OpenCode TUI 회귀, actor/runtime 정확, 직접 상태 쓰기 0, 인계, M3·E2·M1 교차 검증, 추가 에이전트는 후보·미지원 정직 표시 | G3 |
-| 여러 사람 | owner/approver/editor/reader 권한 매트릭스, 마지막 owner·초대·이전, 승인 step-up·감사, owner 또는 허가된 approver 사람만, 초대 시 외부 AI 경로 표시 | M1 |
+| 다른 에이전트 | 2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI 회귀, actor/runtime 정확, 직접 상태 쓰기 0, 인계, M3·E2·M1 교차 검증, 추가 에이전트는 후보·미지원 정직 표시 | G3 |
+| 여러 사람 | owner/editor/reader 권한 매트릭스, approver는 0010 결정에 따라 도입 시에만 추가, 마지막 owner·초대·이전, 승인 step-up·감사, 도입 시 owner 또는 허가된 approver 사람만·미도입 시 owner만, 초대 시 외부 AI 경로 표시 | M1 |
 | 동시 편집 | 두 사람 동시 편집에서 유실 0, 409·양쪽 버전 보존·초안 보존, 승인·게시본 불변, 자동 병합 없음 | M2 |
 | 다중 worker | 프로젝트당 에이전트 채택자 하나, child 최소 권한 제안, 동시 제안 후 직렬 채택, 같은 대상 409, 부모 상태 전파, 인계 fence | M3 |
 | 내보내기 | Linear=사람이 '할 일로'에서 고른 항목(제목+사람 요약, UI 결정 11·F12), Notion=선택 보고서 사본, 목적지 상태·상관키·영수증·payload hash·외부 ID, 202 영속 접수, unknown 정직·자동 재전송 금지, 왕복 없음, 중복 0은 확인 가능한 조건부 | E1·E2 |
 | hc-team | 운영 평가 보고서와 규칙 갱신 PR, 테스트·CI·독립 리뷰 기록, 사람 병합, 실자료 0, 실패 시 일반 개발 전환 기록 | H1 |
 | hwpx | 합성+사용자 허용 사본, Windows 한글에서 표·그림·각주·쪽 나눔 확인, 네 가지 증거 분리, 실패 시 명시 오류·미등록, 조용한 대체 없음 | X1 |
-| 통합·문서 | hwpx 제외 전 기능 합성 종단, 새 표 백업/복구·마이그레이션 전진 복구 시험(Worker 이전 버전 롤백과 DB 복구 구분), Windows/Mac, 보안·권한·비용, unknown 런북, 사용 안내, Linear 260 확인 | X2 |
+| 통합·문서 | hwpx 제외 전 기능 합성 종단, 새 표 백업/복구·전진 복구 시험(Worker 이전 버전 배포·호환 창·백업 격리 복구 구분), 외부 전송·unknown 증거 보존, Windows/Mac, 보안·권한·비용, unknown 런북, 사용 안내, Linear 260 확인 | X2 |
 | 승인 | hwpx 최종 확인 뒤 사용자가 "6단계를 마쳐도 된다"고 승인 | X1 |
 
 ## 6. 사용자 결정이 필요한 것 (비용·되돌리기 어려운 일만)
@@ -177,7 +179,7 @@ A·B의 차이는 **실행 소유·연결·비용 집행**에만 두고, 업무 
 | # | 결정 | 선택지 | 추천과 이유 | 비용·되돌리기 |
 |---|---|---|---|---|
 | 1 | 외부 내보내기의 실제 계정·워크스페이스·보낼 범위·유료 비용 | Linear만 / **Linear=사람이 '할 일로'에서 고른 항목(제목+사람 요약, UI 결정 11·F12), Notion=선택 보고서 사본** / 연구 내용 전체 | **두 목적지 모두, 범위는 최소**. 실제 계정/워크스페이스와 보낼 버전·payload 범위, 유료 API 비용을 먼저 정한다. PES가 원본이고 한 방향만이며 연구 내용 자동 전송은 하지 않는다. 2단계의 실제 자료 사용 허용 기록에 Linear/Notion 목적지를 추가 동의로 묻는다 | 외부에 복사된 자료는 회수 보장이 없다. 계정·토큰 범위를 먼저 정해야 한다 |
-| 2 | 승인·reopen을 owner 외 누구에게 어떤 범위로 맡길지 | owner만 / **허가된 approver에게 승인·reopen만** / editor 누구나 | **승인·reopen에 한정한 approver**. 연구 책임 경계가 바뀌므로 역할 enum·마이그레이션·기본 UI는 구현 몫으로 두고, 위임 대상·범위만 정한다 | 권한 경계 변경·감사 기록. 나중에 정족수로 바꾸면 승인 이력 해석이 달라진다 |
+| 2 | approver 역할을 도입할지, 도입하면 승인·reopen을 owner 외 누구에게 어떤 범위로 맡길지 | **owner만(approver 미도입)** / **허가된 approver에게 승인·reopen만** / editor 누구나 | **0010에 따라 M1에서 도입 여부와 위임 범위를 함께 정한다.** 도입을 권고하되, 도입하지 않으면 owner만 유지하고 역할 enum·마이그레이션을 만들지 않는다. 도입 시 승인·reopen에 한정하고 `edition.complete`·`edition.reopen_completion`은 owner만 한다. 기본 UI는 구현 몫으로 둔다 | 권한 경계 변경·감사 기록. 나중에 정족수로 바꾸면 승인 이력 해석이 달라진다 |
 | 3 | 누구를 어느 프로젝트에 어떤 역할로 초대하고, 그 사람의 외부 AI 연결을 허용할지 | 초대 없음 / **owner 초대, 기본 reader, 외부 AI 연결 기본 불허** / 링크 공유 | **owner 초대만, 외부 AI 연결은 owner가 프로젝트별 허용**. 자료를 보는 사람이 늘고 그 사람 계정의 외부 AI로 갈 수 있어 되돌리기 어렵다 | 자료 노출·권한 회수. 초대 전에 프로젝트·역할·외부 AI 경로를 확인해야 한다 |
 | 4 | X1에 쓸 실제 보고서 사본과 허용 변환 경로 | 합성만 / **실제 사본 1개, 로컬 변환** / 외부 도구까지 | **실제 사본 1개를 사용자 허용 아래 로컬에서 변환**. 어느 사본을 어느 경로까지 허용할지 X1 전에 확인한다. 2단계의 실제 자료 사용 허용 기록에 hwpx 사본 목적지를 추가 동의로 묻는다 | 사본 노출·수동 확인 시간. 실제 사본은 저장소 밖에서만 다룬다 |
 
@@ -191,10 +193,10 @@ A·B의 차이는 **실행 소유·연결·비용 집행**에만 두고, 업무 
 |---|---|---|---|
 | 3단계 | `S3-W1` WebMCP 실험, `S3-R1` 자동 재개, `S3-T1` 결함·복원 결과 | WebMCP는 5단계 `WEB13` 재검토에 맡기고, 자동 재개는 운영 백로그로, `S3-T1`은 4단계 전 처리하거나 이월 | 조건부 결과. 자동 재개는 기본 수동·opt-in |
 | 4단계 | 활성 판과 draft 병행, 판 사이 병렬 작업, 프로젝트 간 재사용, 비교 화면의 외부 내보내기, 영구 삭제, 기존 화면 제거 | 외부 내보내기는 E2가 받고, **기존 화면 제거 여부는 X2에서 결정**한다. 나머지는 운영 백로그 | 기존 고정 HTML 보존 약속은 유지. 제거를 미루면 운영 백로그에 명시 |
-| 5단계 | 조직 단위 권한·SSO/SCIM, 여러 runner 동시 실행·부하 분산, 감사 로그 내보내기, 모바일 앱·오프라인, D1 500 MB(Free), WebMCP 재평가, 알림·비용 값 재검토 | 6단계 범위 밖. `WEB13` WebMCP 재검토와 3개월 뒤 값 재검토만 계속 본다 | **DB 500 MB는 5단계 탈출 조건(Free)**이며 확정 한도가 아니다. 유료 전환 뒤 기준은 5단계 9절을 따른다. 실제 잔여는 Linear 조회로 확인 |
+| 5단계 | 조직 단위 권한·SSO/SCIM, 여러 runner 동시 실행·부하 분산, 감사 로그 내보내기, 모바일 앱·오프라인, **D1 350 MB 안전 정지·유료 전환 검토 신호·500 MB 하드 캡**, WebMCP 재평가, 알림·비용 값 재검토 | 6단계 범위 밖. `WEB13` WebMCP 재검토와 3개월 뒤 값 재검토만 계속 본다 | **D1 350 MB 안전 정지·500 MB 하드 캡은 5단계 WEB10의 계약**이고, **프로젝트별 D1 분리는 5단계 완료 조건이 아니라 후속 검토**다. 6단계는 안전 정지·하드 캡을 승계한 뒤 추가 운영 확장만 다룬다. 유료 전환 뒤 기준은 5단계 9절을 따른다. 실제 잔여는 Linear 조회로 확인 |
 | 2~4단계 | legacy JSON 읽기 경로 제거(조건부 정리 PR), `project.json` 삭제 정책, 영구 삭제, 판 사이 병렬 작업, 프로젝트 간 재사용 | 운영 백로그 | 활성 판 하나 등 기존 불변 조건은 유예를 이유로 풀지 않는다 |
 
-- **6단계 이후**: 실시간 공동 편집(CRDT/OT), Linear·Notion 양방향 동기화, 조직 SSO/SCIM·approver 정족수, 공개 API·웹훅, 모바일 앱·오프라인, 다중 테넌트 과금, D1 500 MB(Free) 도달 또는 유료 전환 뒤 프로젝트별 DB, WebMCP 재평가, 감사 로그 내보내기, hwpx 양식 변형.
+- **6단계 이후**: 실시간 공동 편집(CRDT/OT), Linear·Notion 양방향 동기화, 조직 SSO/SCIM·approver 정족수, 공개 API·웹훅, 모바일 앱·오프라인, 다중 테넌트 과금, **5단계의 350 MB 안전 정지·500 MB 하드 캡을 넘어서는 추가 운영 확장(프로젝트별 D1 분리 등)**, WebMCP 재평가, 감사 로그 내보내기, hwpx 양식 변형.
 - **인계 문서**: `AGENTS.md`, `docs/adapters/adapter-contract.md`·Codex/OpenCode TUI 노트(2단계 PR20b), 내보내기 런북(unknown 포함), hwpx 한계·검증 기록, hc-team 운영 평가·규칙, `docs/plan/decisions/`의 역할·내보내기·worker 결정.
 - **운영**: 백업·복구·비용·보안·권한 감사를 5단계 런북에 따라 계속하고, 6단계에서 늘어난 외부 전송·초대·에이전트를 분기마다 점검한다.
 

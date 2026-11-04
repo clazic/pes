@@ -6,7 +6,7 @@
 - 이슈 수: **15개(WEB0~WEB14)**. `WEB2`·`WEB7`·`WEB9`·`WEB10`은 크므로 구현 중 독립 배포·검증이 가능할 때만 나눈다.
 - 경로 가정: WEB0 전에는 TypeScript 경로를 초안으로 쓴다. WEB0가 Python Workers를 고르면 `web/src` 대신 `web/python`에 같은 모듈 경계를 두고, 아래 파일명은 그대로 대응시킨다. 웹 앱은 `web/`, 마이그레이션은 `web/migrations/`, 웹 테스트는 `web/test/`, E2E는 `web/e2e/`에 둔다.
 - 공통 테스트: 로컬 `python -m pytest -q`; 웹 `npm --prefix web run test -- --run`; E2E `npm --prefix web run test:e2e`; 로컬 D1 `npm --prefix web run db:migrate:local`. `web/package.json`의 스크립트는 WEB1에서 만든다.
-- 마이그레이션 번호는 이슈 번호와 맞춘다(예: WEB4 → `0004_agent_tokens.sql`). 새 표가 없는 WEB3·WEB7·WEB11·WEB13·WEB14는 번호를 비우고, 기존 표·계약을 재사용한다.
+- 마이그레이션 번호는 이슈 번호와 맞춘다(예: WEB4 → `0004_agent_tokens.sql`). WEB3는 소유권 이력 마이그레이션 `0003_ownership.sql`을 둔다. 새 표가 없는 WEB7·WEB11·WEB13·WEB14는 번호를 비우고, 기존 표·계약을 재사용한다.
 - 공통 지킬 것: 서버가 모든 권한을 재검사한다. UI 숨김은 권한이 아니다. 승인·reopen·판 시작·정책·토큰·삭제는 사람 세션만 하고 에이전트 키·OAuth·WebMCP로 대행할 수 없다. 원본 위치는 프로젝트마다 하나이고 이중 쓰기·양방향 동기화를 하지 않는다. 새 표·열은 `web/migrations/`에 번호를 붙이고 `db_meta.schema_version`·`docs/plan/schemas/stage-1-ddl-draft.sql`·`check_ddl.py`를 함께 갱신한다. 미지원은 capabilities에 알리고 가짜 성공을 반환하지 않는다.
 
 ## WEB0 — 코어 언어 기술 시험
@@ -38,12 +38,12 @@
   - [ ] `web/package.json`에 `test`·`test:e2e`·`db:migrate:local`·`deploy:staging`·`check:deploy` 스크립트를 둔다.
   - [ ] `web/wrangler.toml`에 `env.staging`·`env.production`, D1 바인딩, R2 바인딩, Assets, `compatibility_date`를 둔다.
   - [ ] `web/src/worker.ts`(진입), `web/src/app.ts`(라우터), `web/src/routes/health.ts`, `web/src/config/capabilities.ts`, `web/src/config/flags.ts`(기능 플래그), `web/src/db/d1.ts`를 만든다.
-  - [ ] `web/migrations/0001_init.sql`에 `docs/plan/schemas/stage-1-ddl-draft.sql`의 54개 표를 넣고, `docs/plan/schemas/check_ddl.py`의 검사 항목을 로컬 SQLite와 D1 smoke에 함께 적용한다. 웹 측 검사는 `web/scripts/check-schema.mjs`로 둔다.
+  - [ ] `web/migrations/`에 **2~4단계 마이그레이션 체인**을 둔다. `0001_init.sql`은 1단계 54개 표를 넣고, S4-PR23/25의 `edition_carryovers`·`completed_snapshot_id`·workspace 설정·편집 허가 등 4단계 확장 표·열을 별도 번호로 적용하며, 기존 프로젝트의 `db_meta.schema_version`을 포함한다. `docs/plan/schemas/check_ddl.py`의 검사 항목을 로컬 SQLite와 D1 smoke에 함께 적용하고, 웹 측 검사는 `web/scripts/check-schema.mjs`로 둔다. 표 수 기준은 5단계 시작 시 DDL 기준으로 갱신한다.
   - [ ] `web/src/services/commands.ts`에 2단계 PR4 명령 서비스의 D1 구현 경계를 둔다. rev·멱등·0행 실패·뒤늦은 실패 전체 롤백·큰 정수 문자열·커서·공개 DTO를 같은 의미로 시험하고, D1 batch 원자성·deferred FK·부분 인덱스·JSON 함수 경계를 명시한다.
   - [ ] `.github/workflows/web-ci.yml`(매 PR+main, Windows+macOS)과 `web-deploy.yml`(main→staging, 태그→prod 수동 승인)을 만든다.
   - [ ] `GET /healthz`가 `SELECT 1`·R2 HEAD·`db_meta.schema_version`을 확인하게 한다.
-  - [ ] 25초 long poll 구현 선택(DO/짧은 폴+ETag/SSE)을 `docs/plan/decisions/0005-web-platform.md`에 적고, Free 요청·CPU·subrequest 한도를 계측한다.
-  - [ ] R2 버킷 활성화에 결제 수단이 필요한지 Free 계정에서 확인해 기록한다.
+  - [ ] 25초 long poll 구현 선택(DO/짧은 폴+ETag/SSE)을 `docs/plan/decisions/0005-web-platform.md`에 적고, Free 요청·CPU·subrequest 한도를 계측한다. DO를 고르면 요청·벽시계 실행량·저장 예산을 WEB12 계측에 넘긴다.
+  - [ ] R2 버킷 활성화에 결제 수단이 필요한지 Free 계정에서 확인해 기록하고, 필요하면 6절 사용자 결정으로 올린다. R2 무료 포함량 초과는 과금될 수 있으므로 $0 보장으로 쓰지 않는다.
 - **선행**: PR 1·2·4·13·14·18·U1, WEB0.
 - **완료 기준**
   - [ ] `npm --prefix web run test -- --run`
@@ -52,6 +52,7 @@
   - [ ] `python -m pytest -q`
   - [ ] staging에서 실제 D1로 읽기 화면이 뜨고, 이전 버전 롤백 1회·시크릿 스캔·100k 요청/일·10 ms CPU·subrequest 50·정적 자산 20,000개·Cron 5개 smoke가 통과한다.
   - [ ] D1 batch 원자성·0행 실패·deferred FK·부분 인덱스·JSON 함수 smoke가 로컬 SQLite와 D1에서 통과한다.
+  - [ ] 2~4단계 마이그레이션 체인(S4-PR23/25 확장 포함)과 기존 프로젝트 `schema_version` 적용이 로컬 SQLite·D1에서 통과한다.
   - [ ] 기능 플래그 on/off가 capabilities·라우트에 반영되고, 미지원 기능은 가짜 성공 없이 미지원으로 표시된다.
 - **지킬 것**: 공개 prod 전환은 WEB14 게이트 뒤에 한다. 유료 기능에 의존하지 않는다. 이중 쓰기·가짜 성공·`SELECT *` 전체 스캔을 넣지 않는다. 비밀은 Worker/GitHub Environment secret에만 둔다.
 
@@ -87,6 +88,7 @@
   - [ ] `web/src/services/members.ts`에 멤버 추가·역할 변경·제거·초대·철회·소유권 이전을 둔다.
   - [ ] `web/src/routes/members.ts`와 `web/src/views/settings/members.ts`를 만든다.
   - [ ] `projects.owner_user_id`와 `project_members`의 owner 행이 항상 일치하도록 소유권 이전을 한 tx로 만든다. `one_project_owner` 부분 UNIQUE를 유지한다.
+  - [ ] `web/migrations/0003_ownership.sql`(로컬 SQLite는 2단계 PR1 경로)에 과거 `project_policy_versions.changed_by_user_id`의 작성자·당시 소유자 증거를 보존하는 FK/소유권 이력 변경을 둔다. 옛 정책 작성자를 새 owner로 덮어쓰지 않는다. 1단계 DDL의 FK를 직접 고치지 않고 새 마이그레이션으로 해소한다.
   - [ ] `web/src/auth/permissions.ts`에 owner/editor/reader 권한 매트릭스를 두고, 승인·reopen·판 시작·정책·토큰·삭제·멤버 변경은 owner만 허용한다. 이 매트릭스를 WEB5 `web/src/services/grants.ts`의 MCP/OAuth scope 정책과 공유한다.
   - [ ] 초대는 이메일 1회용 7일, 역할 지정, 철회 가능. 수락 시 `users`·`auth_accounts`·`project_members`를 한 tx로 만든다.
   - [ ] 역할 변경·회원 제거 시 해당 사용자의 세션·OAuth 위임·에이전트 자격·예약 알림을 무효화하거나 재검사한다. 멤버 변경·초대·철회를 `auth_audit`·`events`에 남긴다.
@@ -97,7 +99,8 @@
   - [ ] `npm --prefix web run test -- --run test/members`
   - [ ] `npm --prefix web run test:e2e -- members.spec.ts`
   - [ ] 역할별 허용·거부 표 전 항목, 마지막 owner 제거 거부, owner 이전 원자성, editor 승인 불가, editor 답이 lease에 막히지 않음, MCP/OAuth scope 정책 일치, 멤버 변경 감사 기록이 통과한다.
-- **지킬 것**: UI 숨김으로 권한을 대신하지 않는다. owner 없는 프로젝트를 만들지 않는다. 에이전트 키로 멤버·역할을 바꾸지 못한다. 회원 제거 뒤 알림·OAuth가 남지 않는다.
+  - [ ] 초기 정책이 있는 합성 프로젝트에서 소유권 이전 전후 FK·권한·과거 정책 작성자/시각 불변이 통과하고, 이전 뒤 새 정책만 새 owner를 쓴다.
+- **지킬 것**: UI 숨김으로 권한을 대신하지 않는다. owner 없는 프로젝트를 만들지 않는다. 에이전트 키로 멤버·역할을 바꾸지 못한다. 회원 제거 뒤 알림·OAuth가 남지 않는다. 6단계 M1은 이 소유권 이전·이력 마이그레이션을 다시 구현하지 않고 WEB3를 재사용한다.
 
 ## WEB4 — 에이전트 키 운영
 
@@ -106,7 +109,7 @@
 - **목표**: 프로젝트 범위 에이전트 토큰의 발급·회수·교체·감사를 운영 가능한 형태로 만든다.
 - **할 일**
   - [ ] `web/migrations/0004_agent_tokens.sql`에 `agent_tokens`의 `label`·`token_prefix`·`last_used_at`·`last_used_ip`·`created_by_user_id`·`pepper_version`을 nullable로 추가한다.
-  - [ ] `web/src/auth/scopes.ts`에 API 6절 동작 전체 scope(`context:read`·`inputs:read`·`changes:read`·`version:read`·`run:claim`·`run:heartbeat`·`run:wait`·`run:complete`·`run:cancel`·`run:release`·`result:submit`·`question:ask`·`input:receipt`·`file:upload`·`file:read`)를 둔다.
+  - [ ] `web/src/auth/scopes.ts`에 `stage-5.md` 2.3의 **scope×명령×MCP 도구 표를 단일 명세로 링크**하고, 그 표의 전수 목록을 구현한다. 아래 축약 목록은 대체 목록이 아니다: `context:read`·`inputs:read`·`changes:read`·`version:read`·`run:claim`·`run:heartbeat`·`run:wait`·`run:complete`·`run:cancel`·`run:release`·`run:handoff`·`result:submit`·`question:ask`·`question:revise`·`answer:self`·`thread:write`·`thread:resolve`·`followup:propose`·`followup:apply`·`assumption:propose`·`decision:propose`·`reflection:write`·`objection:raise`·`edit:propose`·`input:receipt`·`file:upload`·`file:read`·`round:write`.
   - [ ] `web/src/services/tokens.ts`에 `pes_<prefix>_<base64url>` 생성, `HMAC-SHA256(pepper, token)` 저장, prefix 조회, 상수 시간 비교, 30일 만료, 회수, 24시간 교체, 긴급 회수, pepper 회전을 둔다.
   - [ ] `web/src/routes/tokens.ts`와 `web/src/views/settings/tokens.ts`를 만든다. 원문은 발급 응답에서 한 번만 보여 준다.
   - [ ] `web/src/middleware/rate-limit.ts`에 토큰별 60 req/min과 heartbeat·중단·상태 확인 별도 예산을 둔다.
@@ -118,28 +121,31 @@
   - [ ] `python -m pytest -q tests/test_tokens.py`
   - [ ] `npm --prefix web run test -- --run test/tokens`
   - [ ] 회수 즉시 401, lease 만료 뒤 `interrupted`, 원문이 DB·로그·에러·URL·프롬프트에 0건, scope별 허용·거부, 교체 중 무중단, 긴급 회수 겹침 없음이 통과한다.
+  - [ ] `stage-5.md` 2.3 표의 scope×명령×MCP 도구 전수에 대해 허용/거부 계약 시험이 통과하고, 승인·reopen·정책·토큰·삭제·멤버·외부 export scope가 존재하지 않는다.
 - **지킬 것**: 발급·회수는 owner 사람만 한다. 기기 단위 토큰을 만들지 않는다. 승인·reopen·정책·토큰·삭제 scope를 만들지 않는다. 토큰을 모델 프롬프트에 넣지 않는다.
 
 ## WEB5 — 원격 MCP·OAuth
 
-### [5단계] 원격 MCP·OAuth — Claude 앱·Claude Code 연결
+### [5단계] 원격 MCP·OAuth — Claude Code·Claude 앱·Codex CLI·OpenCode TUI 연결
 
-- **목표**: 공개 HTTPS의 `/mcp`와 OAuth 2.1로 방식 B가 같은 PES API에 붙게 한다.
+- **목표**: 공개 HTTPS의 `/mcp`와 OAuth 2.1로 방식 B 네 경로(Claude Code, Claude 앱, Codex CLI, OpenCode TUI)가 같은 PES API에 붙고, 기존 로컬 어댑터도 웹 인증·전송에서 회귀하지 않게 한다. Codex/TUI는 D0012에 따라 2단계 PR20a·20b에서 이미 지원하며, 5단계가 처음 지원하는 단계가 아니다.
 - **할 일**
   - [ ] `web/migrations/0005_oauth.sql`에 `oauth_clients`·`oauth_grants`·`oauth_access_jti`·`oauth_refresh_tokens`·`oauth_consents`를 만든다.
-  - [ ] `web/src/mcp/server.ts`와 `web/src/mcp/tools.ts`에 `pes_context`·`pes_claim`·`pes_submit`·`pes_ask`·`pes_wait`·`pes_complete`·heartbeat·release·cancel·입력/결과 영수증·`pes_projects`를 구현한다.
+  - [ ] `web/src/mcp/server.ts`와 `web/src/mcp/tools.ts`에 `stage-5.md` 2.3의 **MCP 도구 전수 표**를 구현한다. 최소 `pes_context`·`pes_claim`·`pes_submit`·`pes_ask`·`pes_wait`·`pes_complete`·heartbeat·release·cancel·입력/결과 영수증·`pes_projects`에 더해 질문 수정·자기 답·첨언/해결·후속·가정/결정/반영·반대·편집 제안·handoff 도구를 포함하고, 축약 목록으로 대체하지 않는다.
   - [ ] `web/src/oauth/provider.ts`에 OAuth 2.1 metadata·PKCE·resource/audience·정확한 redirect URI·state를 둔다. DCR은 rate limit·허용 목록·동의로 제한한다.
   - [ ] `web/src/routes/oauth.ts`, `web/src/views/oauth/consent.ts`, `web/src/views/settings/connected-apps.ts`를 만든다. 동의 화면에 수신자·프로젝트·자료 범위·동작·철회를 표시한다.
   - [ ] `web/src/services/grants.ts`에 scope = 동의 ∩ 현재 `project_members` ∩ 에이전트 제한 검사를 둔다. 동의 뒤 새 프로젝트로 자동 확장하지 않는다.
   - [ ] 액세스 토큰 `jti`를 매 요청 D1에서 검사해 연결 해제 즉시 401이 되게 한다. refresh 회전·재사용 거부를 넣는다.
-  - [ ] `pes_submit`은 run 결과 제출이고 사람 답 `submissions`와 분리한다. MCP는 사람 답 제출을 대행하지 않되 자기에게 온 질문 답은 허용한다.
-  - [ ] `docs/operations/mcp-connect.md`에 Claude 앱 커스텀 커넥터, Claude Code `claude mcp add --transport http`, Desktop/stdio·CLI 지원 수준과 한계를 적는다.
-- **선행**: WEB2·WEB3·WEB4, PR 13·14·20.
+  - [ ] Cloudflare OAuth Provider의 KV 의존을 확인하고, KV 읽기/쓰기/저장 사용량을 WEB12 계측에 연결한다. KV Free 한도가 미확인인 상태를 "포함량 준수"로 쓰지 않는다.
+  - [ ] `pes_submit`은 run 결과 제출이고 사람 답 `submissions`와 분리한다. MCP는 사람 답 제출을 대행하지 않되 자기에게 온 질문 답은 `pes_self_answer`로 허용한다.
+  - [ ] `docs/operations/mcp-connect.md`에 Claude 앱 커스텀 커넥터, Claude Code `claude mcp add --transport http`, Codex CLI·OpenCode TUI의 기존 MCP/HTTP bridge 재사용, Desktop/stdio·CLI 지원 수준과 한계를 적는다. 새 어댑터 이슈를 만들거나 Codex/TUI 첫 지원을 6단계로 되돌리지 않는다.
+- **선행**: WEB2·WEB3·WEB4, PR 13·14·20a·20b.
 - **완료 기준**
   - [ ] `npm --prefix web run test -- --run test/mcp test/oauth`
   - [ ] `npm --prefix web run test:e2e -- mcp.spec.ts`
   - [ ] 합성 프로젝트 1라운드 왕복, 도구 호출 10초 내 응답, Free 10 ms CPU·subrequest 50 측정, 승인·정책·토큰·사람 답 제출 도구 없음, wrong-project·중복 제출 거부, 연결 해제 401이 통과한다.
-  - [ ] Claude 앱 커넥터와 Claude Code HTTP MCP를 실제로 연결해 재접속·만료·옛 결과 거부를 확인하고, Desktop/stdio·CLI 지원 수준을 문서와 대조한다.
+  - [ ] `stage-5.md` 2.3 표의 MCP 도구 전수와 scope가 일치하고, `pes_self_answer`를 포함한 자기 질문 답 경로가 허용되며 승인류는 계속 거부된다.
+  - [ ] Claude 앱 커넥터, Claude Code HTTP MCP, Codex CLI·OpenCode TUI의 기존 bridge를 실제로 연결해 재접속·만료·회수·인계·옛 결과 거부를 확인하고, Desktop/stdio·CLI 지원 수준을 문서와 대조한다. 네 경로가 같은 actor·권한·오류 의미를 쓰는지 교차 시험한다.
 - **지킬 것**: OAuth 위임은 사람 세션이 아니다(`actor.kind=external_agent`, `on_behalf_of_user_id`). 승인·reopen·정책·토큰·삭제를 노출하지 않는다. 토큰을 모델에 넣지 않고, 연구 자료는 데이터로만 취급한다.
 
 ## WEB6 — runner 등록·연결
@@ -195,16 +201,16 @@
   - [ ] `web/src/services/email.ts`에 Resend(3,000통/월·100통/일), `web/src/services/push.ts`에 VAPID를 둔다.
   - [ ] `web/public/manifest.webmanifest`와 `web/public/sw.js`(또는 `web/src/sw.ts`)에 PWA·푸시 구독·`pushsubscriptionchange`를 넣는다.
   - [ ] `web/src/routes/push.ts`, `web/src/views/settings/notifications.ts`에 채널·조용한 시간·상세 제목 선택을 둔다.
-  - [ ] `web/src/services/notify-policy.ts`에 `waiting_human`과 승인 대기를 별도 사건으로, `dedupe_key=endpoint+event_seq+event_type`, 5분 묶음, 22:00~08:00 KST, 발송 직전 권한 재검사를 넣는다.
+  - [ ] `web/src/services/notify-policy.ts`에 `waiting_human`과 승인 대기를 별도 사건으로, **내부 outbox 중복 방지** `dedupe_key=endpoint+event_seq+event_type`, 5분 묶음, 22:00~08:00 KST, 발송 직전 권한 재검사를 넣는다. 내부 접수 중복 0과 외부 provider 도달/중복은 별도로 시험한다.
   - [ ] 기본 본문은 프로젝트명 없이 일반 문구+로그인 링크만. 로그인 뒤 정확한 버전 딥링크로 이동한다. 질문 문구·연구 내용·파일명은 넣지 않는다.
-  - [ ] `notification_deliveries`에 provider 영수증·unknown·재시도를 남기고, Queues 24시간 보존 안에 재시도를 끝낸다.
+  - [ ] `notification_deliveries`에 provider 영수증·unknown·재시도를 남기고, Queues 24시간 보존 안에 재시도를 끝낸다. provider 멱등 키·확인 가능한 영수증·unknown 재조회/재전송 조건을 정하고, 확인할 수 없으면 자동 재전송을 멈추거나 외부 중복 가능성을 명시한다. 24시간 경과를 무조건 unknown으로 바꾸지 않는다.
 - **선행**: WEB1·WEB2·WEB3, PR 14.
 - **완료 기준**
   - [ ] `python -m pytest -q tests/test_notifications.py`
   - [ ] `npm --prefix web run test -- --run test/notifications`
   - [ ] `npm --prefix web run test:e2e -- notifications.spec.ts`
-  - [ ] 적격 사건 enqueue·발송 시도, 같은 event 중복 1건, 로그인 뒤 정확한 버전 딥링크, iOS 홈화면 PWA 푸시, 미설치·거부 대안, 실패 UI·unknown, 발송 직전 권한 재검사, 복원·import 뒤 재발송 0이 통과한다.
-- **지킬 것**: 도착을 보장하지 않는다. SMS를 쓰지 않는다. 연구 내용·프로젝트명을 기본 본문에 넣지 않는다. 과거 사건을 새 알림으로 재발송하지 않는다.
+  - [ ] 적격 사건 enqueue·발송 시도, 내부 outbox 중복 0, provider 영수증·unknown 재조회/재전송 조건, 로그인 뒤 정확한 버전 딥링크, iOS 홈화면 PWA 푸시, 미설치·거부 대안, 실패 UI·unknown, 발송 직전 권한 재검사, 복원·import 뒤 재발송 0이 통과한다.
+- **지킬 것**: 도착·외부 정확히 1회를 보장하지 않는다. 내부 접수 중복 0과 외부 도달/중복을 같은 것으로 표시하지 않는다. SMS를 쓰지 않는다. 연구 내용·프로젝트명을 기본 본문에 넣지 않는다. 과거 사건을 새 알림으로 재발송하지 않는다.
 
 ## WEB9 — 로컬→웹 이전
 
@@ -213,20 +219,24 @@
 - **목표**: 프로젝트 하나를 동결·번들·검증·활성화하는 한 방향 이전을 만들고, 실패하면 로컬로 돌아가게 한다.
 - **할 일**
   - [ ] `web/migrations/0009_import.sql`에 `import_tokens`·`import_chunks`를 추가하고, 기존 `import_batches`·`legacy_mappings`를 재사용한다. 로컬 전용 `local_export_state`(project_id·exported_at·bundle_hash·state)는 로컬 SQLite 마이그레이션(2단계 PR1 경로)에 둔다.
+  - [ ] S4-PR23/25의 `edition_carryovers`·`completed_snapshot_id`·workspace 설정·편집 허가를 가진 합성 프로젝트의 이전·검증·복원·다른 프로젝트 무영향 사례를 만든다.
   - [ ] `web/src/routes/imports.ts`에 `POST /imports`·`POST /imports/{id}/complete`·`POST /imports/{id}/activate`를 만든다. `web/src/services/import.ts`와 `web/src/workflows/import.ts`가 청크·재개·검증을 맡는다.
-  - [ ] `scripts/pes.py`의 `export --bundle`·`import`를 확장하고, `cmd_export`·`cmd_import`·`CMDS`에 `web-import`를 추가한다. `scripts/bundle.py`에 manifest·sha256·int64 문자열 검사를 둔다. `skills/`의 `pes` 호출을 웹 API로 바꾸는 어댑터 경계를 둔다(2단계 PR15·16의 전송만 교체).
+  - [ ] `scripts/pes.py`의 `export --bundle`·`import`를 확장하고, `cmd_export`·`cmd_import`·`CMDS`에 `web-import`를 추가한다. `scripts/bundle.py`에 manifest·sha256·int64 문자열 검사를 두고, **2^53 초과 정수**(예: `9007199254740993`)와 인접 rev/fence가 export→import→복원에서 구분되는지 검사한다. `skills/`의 `pes` 호출을 웹 API로 바꾸는 어댑터 경계를 둔다(2단계 PR15·16의 전송만 교체).
   - [ ] `web/src/services/bundle.ts`가 R2 멀티파트 업로드·서명된 업로드 URL·sha256 검증·`blobs.state='ready'`·`version_files` 연결을 하게 한다.
   - [ ] `web/src/routes/files.ts`와 `web/src/services/files.ts`에 사람용 짧은 서명 URL·프로젝트 검사, Go/에이전트용 정책 프록시를 둔다.
   - [ ] 1시간 1회 `import_tokens`(owner 발급, step-up)로 CLI 업로드 인증. 에이전트 키로는 가져올 수 없게 한다.
   - [ ] `web/src/views/import/wizard.ts`와 `report.ts`에 동결·미리보기·검증 보고서·활성화·롤백을 둔다.
-  - [ ] 청크는 D1 바인딩 100·SQL 100KB·행 2MB·호출당 쿼리 50에 맞추고, Workflows 3,000 step/일을 넘으면 CI `wrangler d1 execute`/batch로 대체한다.
+  - [ ] 청크는 D1 바인딩 100·SQL 100KB·행 2MB·호출당 쿼리 50에 맞춘다. Workflows 3,000 step/일을 넘는 **실제 import**는 승인된 로컬·비공개 실행 주체로 옮기고, 공개 CI는 합성 검증만 한다. GitHub Actions를 쓰려면 실행 계정·runner·목적·보존/삭제·원문 로그/캐시/artifact 금지·권한을 별도 변경안으로 먼저 승인받은 뒤에만 쓴다.
 - **선행**: WEB1·WEB2·WEB3, PR 3·9·11·12·15·16·17.
 - **완료 기준**
   - [ ] `python -m pytest -q tests/test_bundle.py tests/test_import.py`
   - [ ] `npm --prefix web run test -- --run test/import`
   - [ ] `npm --prefix web run test:e2e -- import.spec.ts`
   - [ ] 2MB JSON·깨진 참조·이미지 합성 이전, 서명 업로드, 중단 후 재개, FK/순환·ID 충돌·중복 영수증, 부분 적재 비표시, 활성화 응답 유실 시 자동 해제 금지, 쓰기 전/후 롤백, 프로젝트 단위 복원, 활성화 뒤 로컬 쓰기 0건, 스킬 웹 API 경계가 통과한다.
-- **지킬 것**: 양방향 동기화·이중 쓰기를 하지 않는다. 옮기는 프로젝트만 동결한다. 실제 자료는 사용자 승인 1개만, 활성화는 WEB10·WEB11·WEB14 뒤에 한다. 실제 manifest·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않는다.
+  - [ ] **2^53 초과 정수**(`9007199254740993` 등)와 인접 rev/fence/event_seq가 export→import→복원 뒤에도 구분되고, 손실이 발견된 백업은 유효 복원본으로 채택하지 않는다.
+  - [ ] S4-PR23/25 확장 데이터(이월·완료·설정·편집 허가)를 가진 합성 프로젝트의 이전·복원이 다른 프로젝트에 영향을 주지 않는다.
+  - [ ] 이 이슈의 완료는 **합성 이전·복원**이다. 실제 업로드·활성화는 WEB10·WEB11·WEB14 뒤 사용자 허용을 받은 별도 실행이며, WEB9 완료 조건에 실제 cutover를 넣지 않는다.
+- **지킬 것**: 양방향 동기화·이중 쓰기를 하지 않는다. 옮기는 프로젝트만 동결한다. 실제 자료는 사용자 승인 1개만, 활성화는 WEB10·WEB11·WEB14 뒤에 한다. 실제 manifest·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않는다. 공개 CI는 합성 검증만 하고, 실제 import를 CI로 우회하지 않는다.
 
 ## WEB10 — 운영·백업·복구
 
@@ -235,7 +245,8 @@
 - **목표**: staging/prod 배포, 앞으로만 가는 마이그레이션, 야간 암호화 백업, 복구 훈련을 운영 가능하게 만든다.
 - **할 일**
   - [ ] `web/migrations/0010_ops.sql`에 `ops_backup_runs`·`ops_audit_log`·`ops_incidents`를 만든다.
-  - [ ] `.github/workflows/backup.yml`과 `ops/backup/export.sh`·`restore.sh`·`verify.sh`를 만든다. `wrangler d1 export --remote` → gzip → age → R2 업로드 순서로 하고, DB 경계+객체 hash manifest를 같은 묶음으로 만든다.
+  - [ ] `ops/backup/export.sh`·`restore.sh`·`verify.sh`를 만든다. **실제 운영 백업은 승인된 로컬·비공개 실행 주체**가 하고, `.github/workflows/backup.yml`은 합성 dry-run/CI 검증만 한다. Actions로 실제 자료를 처리하려면 실행 계정·runner·목적·보존/삭제·원문 로그/캐시/artifact 금지·권한을 별도 변경안으로 먼저 승인받는다.
+  - [ ] 백업 경로는 int64 정밀도 손실을 먼저 검증한다. **숫자로 변환되기 전에 보존하는 export 경로/도구 버전(또는 검증된 대체 경로)**을 채택한 뒤 gzip→age→R2 업로드 순서로 하고, 손실이 발견된 백업은 유효 복원본으로 채택하지 않는다. DB 경계+객체 hash manifest를 같은 묶음으로 만들고, hash 목록과 별도로 **참조 객체 바이트의 보존 위치·복사본·GC 수명주기**를 정한다.
   - [ ] `web/src/services/ops.ts`에 백업 나이·누락 객체·마지막 복원 훈련을, `web/src/routes/ops.ts`·`web/src/views/ops/status.ts`에 상태를 둔다.
   - [ ] `web/wrangler.toml`의 staging/prod를 분리하고, `web/migrations/README.md`에 expand/contract·구버전 앱/신스키마 호환 창을 적는다.
   - [ ] `ops/r2-lifecycle.json`에 `staging/` 30일·`quarantine/` 30일·백업 보존을 둔다. age 키는 백업 버킷과 분리해 오프라인/별도 시크릿에 보관한다.
@@ -247,8 +258,12 @@
   - [ ] `python -m pytest -q tests/test_ops.py`
   - [ ] `bash ops/backup/export.sh --dry-run`
   - [ ] `bash ops/backup/restore.sh --scratch`
-  - [ ] Time Travel 7일+야간 export로 RPO 24h·RTO 4h 훈련, 42개 백업 압축 크기 합+객체 ≤8GB, DB 350MB 분리·500MB 캡, 프로젝트 단위 복원, 키 별도 복구, 마이그레이션 롤백 1회, 구버전 앱/신스키마 호환 창, 런북 재현이 통과한다.
-- **지킬 것**: 실제 자료·백업·키를 공개 저장소·CI artifact에 넣지 않는다. 마이그레이션을 되돌리지 않고 새 마이그레이션으로 복구한다. export 중 요청 차단을 안내한다. 백업은 DB만이 아니라 객체 hash 목록을 포함한다.
+  - [ ] Time Travel 7일+야간 export로 RPO 24h·RTO 4h 훈련, 42개 백업 압축 크기 합+객체 ≤8GB, 프로젝트 단위 복원, 키 별도 복구, 마이그레이션 롤백 1회, 구버전 앱/신스키마 호환 창, 런북 재현이 통과한다.
+  - [ ] **2^53 초과 정수**와 인접 rev/fence/event_seq가 export→import→복원 뒤 구분되고, 손실된 백업은 유효 복원본으로 채택하지 않는다. 방식 선택 전에는 "정밀도 검사 예정"과 "무손실 복구 검증 완료"를 구분해 표시한다.
+  - [ ] 객체 1개 누락·삭제·손상과 키 분리 복구를 포함해 복원 시험이 통과하고, 보존/주기 축소가 RPO 24h·승인된 복구 조건을 깨지 않는다. 깨면 운영 변경·사용자 확인 대상으로 올린다.
+  - [ ] S4-PR23/25 확장 데이터(이월·완료·설정·편집 허가)를 가진 합성 프로젝트의 복원이 다른 프로젝트에 영향을 주지 않는다.
+  - [ ] DB 350MB는 **안전 정지/유료 전환 검토 신호**, 500MB는 하드 캡으로 둔다. 프로젝트별 D1 분리 자체는 후속 검토이며 이 이슈의 완료 조건이 아니다.
+- **지킬 것**: 실제 자료·백업·키를 공개 저장소·CI artifact에 넣지 않는다. 공개 CI는 합성 dry-run만 하고 실제 백업을 CI로 우회하지 않는다. 마이그레이션을 되돌리지 않고 새 마이그레이션으로 복구한다. export 중 요청 차단을 안내한다. 백업은 DB만이 아니라 객체 hash 목록과 참조 바이트 보존 계약을 포함한다. hash 목록만으로 객체 복원을 보장하지 않는다.
 
 ## WEB11 — 보안 강화·점검
 
@@ -263,24 +278,26 @@
   - [ ] `.github/workflows/security.yml`에 의존성 감사·시크릿 스캔을, `ops/security/asvs-checklist.md`에 ASVS L1 판본·범위·결과를 둔다. `docs/operations/runbook.md`에 시크릿 회전 절차·키 버전을 적는다.
   - [ ] `ops/cloudflare/free-security.md`에 Free WAF·rate limiting·Bot Fight Mode 범위를 확인해 적는다. Bot Management는 쓰지 않는다.
   - [ ] `web/test/security/*.test.ts`와 `web/e2e/security.spec.ts`를 만든다.
-- **선행**: WEB2·WEB4·WEB5·WEB8·WEB9.
+- **선행**: WEB2·WEB4·WEB5·WEB7·WEB8·WEB9·WEB10·WEB12(구현된 경로).
 - **완료 기준**
   - [ ] `npm --prefix web run test -- --run test/security`
   - [ ] `npm --prefix web run test:e2e -- security.spec.ts`
   - [ ] `python -m pytest -q`
   - [ ] ASVS L1 체크, 치명·높음 0, CSRF/XSS/클릭재킹/토큰 유출 시험, 공개 버킷 0, Go 프록시 우회 0, 다른 프로젝트 참조·system 위장·공유 기기 캐시 시험, 401/403 폭주 경보, 시크릿 회전 1회가 통과한다.
+  - [ ] WEB7 runner·WEB10 백업/복구·WEB12 한도 계측의 구현된 경로를 통합 입력으로 점검하고, 구현 전 경로를 보안 통과로 기록하지 않는다.
 - **지킬 것**: 유료 Bot Management·WAF를 전제로 하지 않는다. UI 숨김을 권한으로 쓰지 않는다. `assurance=verified`를 플래그만으로 만들지 않는다. 실제 키·자료를 로그·fixture에 넣지 않는다.
 
 ## WEB12 — 무료 한도·사용량 계기
 
 ### [5단계] 무료 한도·사용량 계기 — 80% 경보·90% 완화
 
-- **목표**: Workers·D1·R2·Queues·Workflows·메일 사용량을 계측하고, 무료 한도 안에서 완화·경보하게 한다.
+- **목표**: Workers·D1·R2·Queues·Workflows·KV·DO·메일 사용량을 계측하고, 무료 한도 안에서 완화·경보하게 한다. **Workers/D1의 Free 하드 캡과 R2의 무료 포함량+초과 과금은 다르게** 다룬다.
 - **할 일**
   - [ ] `web/migrations/0012_usage.sql`에 `usage_metrics`·`usage_limits`·`usage_reports`를 만든다.
-  - [ ] `web/src/services/usage.ts`가 Workers 요청·CPU 초과·D1 rows/저장·R2 작업/저장·Queues ops·Workflows step·Resend 사용량을 수집하게 한다.
+  - [ ] `web/src/services/usage.ts`가 Workers 요청·CPU 초과·D1 rows/저장·R2 작업/저장(무료 포함량과 초과 과금 구분)·Queues ops·Workflows step·KV 읽기/쓰기/저장·DO 요청/실행량/저장(채택 시)·Resend 사용량을 수집하게 한다.
   - [ ] `web/src/workers/usage-collector.ts`가 Cron/Queue로 일일 집계하고 `usage_reports`에 남긴다.
-  - [ ] `web/src/services/degrade.ts`에 80% 경보, 90%에서 폴링 간격 확대·비필수 알림/백업 연기·새 run 차단을 둔다.
+  - [ ] KV Free 한도(읽기/쓰기/저장)를 공식 문서와 계정에서 확인해 `usage_limits`에 넣고, 초과 위험 시 완화/차단한다. DO 채택 시 요청·벽시계 실행량·저장 한도도 같은 표에 넣는다.
+  - [ ] `web/src/services/degrade.ts`에 80% 경보, 90%에서 폴링 간격 확대·비필수 알림/백업 연기·새 run 차단을 둔다. **R2 업로드/백업/서명 URL 다운로드별 사용량 예약·제한**과 초과 위험 시 차단·운영 중지 절차를 넣는다. KV/DO를 채택하면 같은 완화 대상에 포함한다.
   - [ ] `web/src/services/budget.ts`에 A run·단계·프로젝트 누적 예약/정산, unknown 예약 유지, 2단계 상한 승계를 둔다.
   - [ ] `web/src/routes/ops/usage.ts`와 `web/src/views/ops/usage.ts`에 사용률·unknown·완화 상태를 표시한다.
   - [ ] `.github/workflows/usage-report.yml`과 `docs/operations/usage.md`를 만든다.
@@ -290,7 +307,9 @@
   - [ ] `python -m pytest -q tests/test_budget.py`
   - [ ] `npm --prefix web run test:e2e -- usage.spec.ts`
   - [ ] 월 1회 보고서, 100k/일·5M 읽기/일·10만 쓰기/일·5GB·10GB·10k ops/일·3,000 step/일 대비 사용률, 80/90% 동작, unknown을 0으로 표시하지 않음, A 상한 승계, 가짜 runner 순환 회피가 통과한다.
-- **지킬 것**: 유료 기능에 의존하지 않는다. "새 run 차단"을 한도 준수의 증명으로 표시하지 않는다. unknown 비용을 무료로 표시하지 않는다. 사용자 결정 없이 유료로 전환하지 않는다.
+  - [ ] R2는 무료 포함량 초과 시 과금될 수 있음을 표시하고, 업로드/백업/다운로드별 예약·제한·초과 위험 시 차단/운영 중지가 시험된다. "요금제 전환 승인 전까지 $0"를 보장하지 않으며, 실제 비용 노출 전 사용자 결정을 받는다.
+  - [ ] KV를 쓰는 OAuth provider와 DO를 쓰는 long poll을 채택한 경우 KV 읽기/쓰기/저장·DO 요청/실행량/저장 예산과 경보가 포함되고, 채택 전에는 포함량 준수로 표시하지 않는다.
+- **지킬 것**: 유료 기능에 의존하지 않는다. Workers/D1의 Free 하드 캡과 R2의 무료 포함량+초과 과금을 같은 것으로 표시하지 않는다. "새 run 차단"을 한도 준수의 증명으로 표시하지 않는다. unknown 비용을 무료로 표시하지 않는다. 사용자 결정 없이 유료로 전환하지 않는다.
 
 ## WEB13 — WebMCP 재검토
 
@@ -299,16 +318,16 @@
 - **목표**: 2026-11 기준 표준·브라우저·에이전트 지원을 다시 확인해 5단계 지원 여부를 결정한다.
 - **할 일**
   - [ ] `docs/plan/research/webmcp-2026-11.md`에 1차 출처·확인 날짜·미확인을 구분해 적는다.
-  - [ ] 3단계 W1(WebMCP 실험) 결과를 입력으로 읽고, 구현 성공을 5단계 지원 근거로 쓰지 않는다.
+  - [ ] S3-W1(WebMCP 실험) 결과를 입력으로 읽고, 구현 성공을 5단계 지원 근거로 쓰지 않는다.
   - [ ] `web/src/webmcp/detect.ts`에 `document.modelContext` 기능 감지, `web/src/webmcp/tools.ts`에 읽기·답 초안·첨언 도구만(도입 시) 둔다.
   - [ ] `web/src/config/capabilities.ts`에 `webmcp: "unsupported"|"experimental"`을 둔다.
   - [ ] `web/test/webmcp/*.test.ts`와 `web/e2e/webmcp.spec.ts`(도입 시)를 만든다.
-  - [ ] `docs/plan/decisions/0007-webmcp.md`에 채택·보류·실험 결정과 재검토 조건을 적는다.
+  - [ ] `docs/plan/decisions/`의 결정 색인에서 비어 있는 번호를 확인해 WebMCP 결정 파일을 만들고(기존 `0007`은 결함 처리라 재사용하지 않는다), 채택·보류·실험 결정과 재검토 조건을 적는다.
 - **선행**: WEB2·WEB11.
 - **완료 기준**
   - [ ] `npm --prefix web run test -- --run test/webmcp`
   - [ ] `npm --prefix web run test:e2e -- webmcp.spec.ts` (도입한 경우)
-  - [ ] 날짜 있는 결정 기록, 3단계 W1 입력, capabilities 표시, 승인류 미노출, browser_agent 감사, 서버 거부, REA `discover_webmcp_tools` 발견 점검이 확인된다.
+  - [ ] 날짜 있는 결정 기록, S3-W1 입력, capabilities 표시, 승인류 미노출, browser_agent 감사, 서버 거부, REA `discover_webmcp_tools` 발견 점검이 확인된다.
 - **지킬 것**: 승인·reopen·판 시작·정책·토큰·삭제를 노출하지 않는다. `toolautosubmit`을 쓰지 않는다. 브라우저 도구가 사람의 승인 증거가 되게 하지 않는다. 근거 없이 지원을 주장하지 않는다.
 
 ## WEB14 — 전환 통합 검증·문서
@@ -317,24 +336,27 @@
 
 - **목표**: Free 플랜에서 A/B, 이전·롤백, 알림, 한도, Windows/Mac, 문서를 한 번에 검증한다.
 - **할 일**
-  - [ ] `web/e2e/full.spec.ts`에 로그인→질문→답→승인→reopen→인쇄→이전→롤백 흐름을 둔다.
+  - [ ] `web/e2e/full.spec.ts`에 로그인→질문→답→승인→reopen→인쇄→이전→롤백에 더해 S3-U1~U6과 S4-U7~U12(판 이월·비교·갈림길·반대·직접 편집·기본 화면)의 웹 동등성 흐름을 둔다.
   - [ ] `tests/test_web_transition.py`와 `tests/fixtures/web/`에 합성 프로젝트·깨진 참조·2MB JSON·이미지 fixture를 둔다.
   - [ ] `docs/operations/runbook.md`·`user-guide.md`·`rollback.md`·`free-limits.md`를 완성한다.
   - [ ] `ops/drills/`에 복원·runner 오프라인·토큰 회수·Go OFF·알림 실패 훈련 스크립트를 둔다.
-  - [ ] `.github/workflows/web-ci.yml`에 Windows+macOS, Playwright, `pytest`를 매 PR+main으로 돌린다.
+  - [ ] `.github/workflows/web-ci.yml`에 Windows+macOS, Playwright, `pytest`를 매 PR+main으로 돌린다. **공개 CI는 합성 fixture만** 쓰고 실제 자료·백업·원문 로그를 넣지 않는다.
   - [ ] `web/playwright.config.ts`에 Windows Playwright 필수·스크린샷 기준선 없음·수동 IME/인쇄 체크리스트를 둔다.
-  - [ ] `docs/plan/decisions/0005-web-platform.md`에 Free 한도 측정값·비용 $0·탈출 조건을 최종 기록한다.
+  - [ ] `docs/plan/decisions/0005-web-platform.md`에 Free 포함량 측정값·R2 초과 과금 위험·탈출 조건을 최종 기록한다. R2는 $0 보장이 아니므로 실제 비용 노출 전 사용자 결정을 남긴다.
   - [ ] 승인 경계를 "실제 자료 업로드 전 / 운영 전환 전 / 무료 한도 초과로 유료 전환 전"으로 나누고, 완료 뒤 소급 승인으로 쓰지 않는다.
 - **선행**: WEB0~WEB13.
 - **완료 기준**
   - [ ] `python -m pytest -q`
   - [ ] `npm --prefix web run test -- --run`
   - [ ] `npm --prefix web run test:e2e`
-  - [ ] 5절 게이트 전부, Free 플랜만 사용, A/B 인계·경합·지연·OFF·예산·유실/중복, U2~U6 웹 동등성, Windows/Mac·수동 IME/인쇄, 실제 산출물 비공개가 통과한다.
-- **지킬 것**: 유료 기능에 의존하지 않는다. 실제 자료·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않는다. 승인 경계를 소급 적용하지 않는다. 로컬 모드 프로젝트를 깨지 않는다.
+  - [ ] 5절 게이트 전부를 **개발 완료(합성 종단)**와 **실제 전환 승인**으로 나눠 통과한다. Free 플랜만 사용하고, A/B(Claude Code·앱·Codex CLI·OpenCode TUI) 인계·경합·지연·OFF·예산·유실/중복을 확인한다.
+  - [ ] S3-U1~U6과 S4-U7~U12의 웹 동등성, 25~30초 갱신·탭 숨김·지수 백오프, 폼 버전·반영 증거·앵커·전달 manifest·인쇄 manifest를 확인한다. 제외 항목은 이유와 검증 시점을 적고 조용히 생략하지 않는다.
+  - [ ] Codex CLI·OpenCode TUI의 웹 재접속·회수·인계·Go 경계 회귀를 확인한다. 실제 업로드·활성화는 별도 사용자 허용 뒤 실행하고, 이 이슈의 완료를 실제 cutover 완료로 표시하지 않는다.
+  - [ ] Windows/Mac·수동 IME/인쇄, 실제 산출물 비공개, 공개 CI 합성 전용이 통과한다.
+- **지킬 것**: 유료 기능에 의존하지 않는다. R2 무료 포함량 초과 과금을 $0로 보장하지 않는다. 실제 자료·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않는다. 승인 경계를 소급 적용하지 않는다. 로컬 모드 프로젝트를 깨지 않는다.
 
 ## 등록 메모
 
 - 이슈 수: **15개(WEB0~WEB14)**. `WEB2`·`WEB7`·`WEB9`·`WEB10`은 크므로, 구현 중 **독립 배포·검증이 가능할 때만** 나눈다.
 - 모든 이슈는 이 문서의 **공통 규칙·경로 가정·테스트 명령**을 각 Linear 본문 첫머리에 함께 복사하고, 체크리스트와 완료 기준을 그대로 옮긴다. PR 본문에는 완료 기준의 테스트 명령을 붙인다.
-- 실제 자료를 쓰는 시험은 WEB9 활성화 직전 사용자 허용 1개로 제한하고, 그 전까지는 합성 fixture만 쓴다.
+- 실제 자료를 쓰는 시험은 WEB9 활성화 직전 사용자 허용 1개로 제한하고, 그 전까지는 합성 fixture만 쓴다. 공개 CI(GitHub Actions 포함)는 합성 검증만 하며, 실제 import·백업은 승인된 로컬·비공개 실행 주체로 옮긴다.

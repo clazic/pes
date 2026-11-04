@@ -3,7 +3,7 @@
 - 작성: 2026-11-05, OpenCode (`opencode-go/deepseek-v4.1-flash`)
 - Linear: SEL-25
 - 입력: [00-brief.md](00-brief.md), 확정 [stage-0.md](stage-0.md), 합의 [stage-1-db.md](stage-1-db.md)·[stage-1-api.md](stage-1-api.md)·[stage-1-ui.md](stage-1-ui.md)·[stage-1-runners.md](stage-1-runners.md), [DDL 초안](schemas/stage-1-ddl-draft.sql)
-- 상태: **Codex·Opus 검수 반영**
+- 상태: **Codex·Opus 검수와 Codex 최종 검수 반영 — 사용자 승인 대기** (2026-11-05)
 - 2026-11-05 사용자 결정: **방식 B의 Codex CLI·OpenCode TUI 어댑터를 2단계 PR20b로 앞당긴다.** Claude Code·Claude 앱 보장은 그대로다. PES가 서버로 돌리는 **방식 A의 OpenCode**와 사람이 직접 켜는 **OpenCode TUI**를 구분한다.
 - 전제: 2026-11-05 03:31 `main` 기준. SEL-11(`tests/`, `f6e9c37`)·SEL-16(`e015ff4`)·SEL-17(`82c6de5`)은 병합됐고, SEL-12~15·18·19는 hc-team worktree에서 진행 중이며 `AGENTS.md`·`spikes/`는 아직 없다. **0단계 게이트(S0 6절) 충족 전에는 PR1에 착수하지 않는다.**
 - 범위: 정적 HTML → 로컬 SQLite + API 서버. 새 작업 공간 디자인(3단계)과 새 소통 기능은 넣지 않는다. 이 문서는 계획만 바꾸며 코드는 고치지 않는다.
@@ -22,7 +22,7 @@
 
 ## 2. 주제와 결정
 
-stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다. 특히 전송 허용 기본 켜짐+프로젝트별 끄기, A는 DeepSeek 하나, B는 Claude Code·Claude 앱, 공개 CI, DB·객체 위치(`~/.pes/pes.db`·`~/.pes/objects/`), 전환 후 `project.json` 읽기 전용, 활성 판 하나, 2단계 22 PR은 고정이다. 아래는 2단계에서 새로 정하는 **순서·이전·경계**뿐이다.
+stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다. 특히 전송 허용 기본 켜짐+프로젝트별 끄기, A는 DeepSeek 하나, B 보장은 Claude Code·Claude 앱(Codex CLI·OpenCode TUI는 2단계 PR20b), 공개 CI, DB·객체 위치(`~/.pes/pes.db`·`~/.pes/objects/`), 전환 후 `project.json` 읽기 전용, 활성 판 하나, **2단계는 기존 22개 중 PR20을 20a·20b로 분할한 23개(결정 0012, `roadmap.md` 2절)**다. 아래는 2단계에서 새로 정하는 **순서·이전·경계**뿐이다.
 
 ### 2.1 작업 순서·의존 그래프·묶음
 
@@ -32,6 +32,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 - **추천**: **A(층별) + PR13에서 얇은 세로 절편**. 1단계 계약이 이미 층별로 합의됐고, 가장 큰 위험은 스키마·명령 서비스·이전이며, A/B는 API·화면 뒤에만 설 수 있다.
 - **PR13의 경계**: `context→claim→submit→complete`는 **한 run의 최소 경로**다. 질문·답·wait·재개가 있는 **한 라운드의 증명은 PR13+14를 함께** 본다. `complete`는 run 종료일 뿐 라운드 봉인·단계 승인이 아니다(`stage-1-api.md:21-23`).
 - **0단계 조건**: PR1~18은 S0 6절 게이트 충족 뒤에만 조건부로 진행한다. PR5의 TTL·heartbeat는 **설정으로만** 두고 확정하지 않으며, PR19·20a·20b·21·22는 SEL-18·19 결과 없이 착수하지 않는다(`stage-1-runners.md:110-112`).
+- **WEB0 조기 인계**: PR4·13의 언어 중립 계약 픽스처(`docs/plan/fixtures/api-v1/` 포함)가 나온 직후 **5단계 번호 WEB0**을 실행한다. **PR14 완료는 WEB0의 필수 전제가 아니다.** 결과는 `docs/plan/decisions/0006-web-core-language.md`에 기록하고, TS 이식이면 2~4단계 구현 언어를 다시 정한다. WEB0는 5단계 15개에 이미 포함되므로 **새 이슈를 더하지 않는다**(`roadmap.md` 3.1·3.2).
 - **의존 그래프**(번호는 순서가 아님, `stage-1-db.md:174`):
 
 ```text
@@ -156,7 +157,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 
 ## 4. 이 단계 구현 이슈 목록
 
-이슈 하나 = PR 하나. **기존 설계의 22개 PR 번호를 기준으로 하되, PR20만 20a·20b로 나눈다.** `stage-1-db.md:176-199`의 번호를 그대로 쓰고, 표·테스트별 이슈는 만들지 않는다(`stage-1-db.md:33`). Linear에는 `[2단계 PR n]` 제목으로 20a·20b를 포함해 만들고, SEL-18·19는 기존 이슈를 선행으로 연결한다. **2단계 이슈 수와 누적은 `roadmap.md` 2절 참고.** 모든 PR은 자기 테스트를 포함하며 21번까지 미루지 않는다.
+이슈 하나 = PR 하나. **기존 설계의 PR 번호(당시 22개)를 기준으로 하되, PR20만 20a·20b로 나눠 현재 23개다.** `stage-1-db.md:176-199`의 번호를 그대로 쓰고, 표·테스트별 이슈는 만들지 않는다(`stage-1-db.md:33`). Linear에는 `[2단계 PR n]` 제목으로 20a·20b를 포함해 만들고, SEL-18·19는 기존 이슈를 선행으로 연결한다. **2단계 이슈 수와 누적은 `roadmap.md` 2절 참고.** 모든 PR은 자기 테스트를 포함하며 21번까지 미루지 않는다.
 
 ### 4.1 0단계 의존 (2026-11-05 03:31 현재)
 
@@ -182,17 +183,17 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | 1 | 스키마 001 + SQLite 연결 | DDL 54표, FK, `db_meta`, 마이그레이션, 임시 홈 주입, 짧은 트랜잭션, 3.5절은 표만 | — | 임시 홈에서 DDL·대표 삽입·거부·rev 충돌 롤백 통과, 실제 `~/.pes` 미접촉, SQL 보장과 서비스 보장(상태 전이·6단계·fence·불변 버전) 구분, bootstrap 한 tx, SQLite 버전·JSON 함수 검사 | C2-1 |
 | 2 | D1 호환 smoke | 같은 마이그레이션, batch 원자성, deferred FK, 부분 인덱스, JSON 함수, 0행 실패, 동일 원자 명령의 성공/충돌/뒤늦은 실패 전체 롤백, 실행 제한 | 1 | 로컬 D1에서 대표 성공·실패 통과, SQLite와 차이 문서화, 운영 D1 미접촉. Node LTS·wrangler 버전 고정(개발 전용, 사용자 설치 요구 없음), CI는 마이그레이션·DB 어댑터 변경 PR과 main에서 필수 | C2-2 |
 | 3 | 새 형식 백업·export/import | DB+객체+manifest+sha256, `db_meta` 커서 무효화, 한 프로젝트 복원 격리, 파일은 불투명 복사(ready·고아 규칙은 PR9·12) | 1 | 한 프로젝트 복원이 다른 프로젝트·전역 설정을 바꾸지 않음, 손상·누락 보고, 복원 뒤 epoch. **완전한 복원 검증은 PR4·9·10 뒤 PR12와 통합** | C2-3 |
-| 4 | 변경 명령 서비스 | rev·control_rev·멱등·`mutation_commits`·`events` 같은 tx, 0행 실패, actor/via 확정, 권한, 인증·권한→영수증 재생→rev/lease 순서 | 1 | 같은 키 같은 요청 재생·다른 요청 거부, 0행/늦은 실패 전부 롤백, 모든 변경에 사건·영수증, 영수증 장기 보존, system/채택 actor 정합성, **언어 중립 JSON 계약 픽스처** | C2-4 |
+| 4 | 변경 명령 서비스 | rev·control_rev·멱등·`mutation_commits`·`events` 같은 tx, 0행 실패, actor/via 확정, 권한, **인증·권한·현재 정책·목적지 검사→영수증 재생→rev/lease** 순서, PR10 정책 검사기 주입 | 1 | 같은 키 같은 요청 재생·다른 요청 거부, 0행/늦은 실패 전부 롤백, 모든 변경에 사건·영수증, 영수증 장기 보존, system/채택 actor 정합성, **OFF 전 완료 요청을 OFF 후 같은 키로 재요청해도 금지된 결과·전송 경로 재생 0**, **언어 중립 JSON 계약 픽스처** | C2-4 |
 | 5 | run·lease·fence | claim=run 전이+lease 원자, heartbeat, wait 시 `waiting_human`+해제, 만료·인계·fence, 입력 영수증 | 4 | 가상 시계로 만료·옛 fence 거부·질문 대기 중 해제/재획득, TTL은 설정(기본 비확정), SEL-18·19 뒤 확정. seen/ignored와 증거 있는 applied, 인계 뒤 중복 반영 방지, 만료 lease 부활 금지, 대기·무진행·중단 유예 값의 확정 담당 | C2-5 |
-| 6 | 판·단계·라운드 명령 | 봉인·승인·reopen·stale·완료 해제·단계 이월(현행 `carry_over`, `scripts/pes.py:785`; 4단계 판 이월과 다름), 1판 흐름 보존, snapshot/manifest | 4,5,9 | 합성 6단계 흐름, reopen 뒤 stale·승인 유지, **reopen 뒤 실행 기반 무효화**, complete≠approve, snapshot/manifest, 1판 흐름과 4단계 판 기능 구분 | C2-6 |
+| 6 | 판·단계·라운드 명령 | 봉인·승인·reopen·stale·완료 해제, **단계 미완료 작업 이월(현행 `carry_over`, `scripts/pes.py:852-854`; 원 요청·대상·출처·버전 보존, 다음 R1 조회)과 조사 주제 파생을 분리**, 4단계 판 이월과 다름, 1판 흐름 보존, snapshot/manifest | 4,5,9 | 합성 6단계 흐름, reopen 뒤 stale·승인 유지, **reopen 뒤 실행 기반 무효화**, complete≠approve, snapshot/manifest, 1판 흐름과 4단계 판 기능 구분. **여러 단계의 남은 QA 지적·미완료 요청이 승인·이전 뒤에도 남고 다음 R1에 보이는 시험** | C2-6 |
 | 7 | 항목·버전·출처·연결 | objects/versions, artifacts, sources/versions, citations, relations, QA·verify·library, URL로 안 합침 | 4 | 버전 불변·현재 포인터, 각주 순서, 같은 URL 다른 자료, 옛 연결 유지, library 이전. 출처 확인 시점·짧은 발췌·위치·방법/판정, 못 읽은 자료 발췌 금지, library DB 내용과 참조 파일(PR9/11) 담당 | C2-7 |
 | 8 | 질문·답 | question_sets/members, questions/versions, submissions, answers/versions, `__other`는 질문 스레드 메시지로 보존, 자유 의견, `allow_comment_as_answer` | 4,6 | 폼/질문 버전 고정, 옛 답 보존·새 버전 재확인, 덧붙임만 응답 인정, 중복 제출 방지. 조건부 필수·명시적 미루기·기본값/추천 자동 답 금지·묶음 전체 원자성, `__other` 최소 thread와 U2 새 의견 기능 구분, 재개 준비 검사의 **주 담당**: 현재 질문/폼 버전·조건부 필수·의견 응답 허용·명시적 미루기·실행 상태·Go 정책·기한/한도·새 claim(실행 form 응답은 예외). PR5·PR14는 보조 | C2-8 |
 | 9 | 결과물·객체 저장 | blobs/version_files, staging→hash→ready, 고아·격리, 접근 검사, 보고서 정확한 버전 참조 | 1,4,7 | 경로·서명 URL을 ID로 안 씀, 손상 hash 거부, 다른 프로젝트 접근 차단, component 버전 고정. 채택·저장·공유·인쇄 버전 보존, 같은 바이트 중복 저장 방지, 역할 제안 출처·workspace ready 경계, Go 파일 읽기 프록시(PR10/19) | C2-9 |
-| 10 | 행위자·토큰·전송 정책 | actors, agent_tokens, project_policy_versions, outbound_dispatches, Go ON/OFF 경합 | 1,4 | 토큰 해시·범위·만료·회수, 사람만 정책 변경, OFF 뒤 prepared 차단·authorized 미송신만 차단, 감사. 기본 ON 표시·정책 손상 시 차단·합성도 우회 금지·재허용 후 자동 재시작 금지, 30일 토큰·매 요청 검사, OFF in-flight 취소/unknown·sent 이력·옛 lease 채택 차단, 소유자 세션·CSRF 귀속 | C2-10 |
-| 11 | legacy importer | `project.json`·library·feedback·snapshots·reports·out/shots·ask/rounds → staging, `import_batches`/`legacy_mappings`, 미지 필드 보고 | 1,6,7,8,9,10 + SEL-17 | 깨진/2MB fixture, 재실행 멱등, 기본값을 과거 결정처럼 안 만듦, 원본 hash 불변. 옛 승인 `legacy_unknown`·사용자 NULL·`legacy_unverified`, 그때 본 질문/폼·덧붙임/자유 의견·미처리 입력 매핑, 새 정책 기본값을 과거 동의로 기록하지 않음. 실제 manifest·경로·이전 보고서는 로컬에만, PR에는 합성·익명 결과만 | C2-11 |
+| 10 | 행위자·토큰·전송 정책 | actors, agent_tokens, project_policy_versions, outbound_dispatches, Go ON/OFF 경합, **PR4 재생 전에 호출되는 정책·목적지 검사기** | 1,4 | 토큰 해시·범위·만료·회수, 사람만 정책 변경, OFF 뒤 prepared 차단·authorized 미송신만 차단, 감사. 기본 ON 표시·정책 손상 시 차단·합성도 우회 금지·재허용 후 자동 재시작 금지, 30일 토큰·매 요청 검사, OFF in-flight 취소/unknown·sent 이력·옛 lease 채택 차단, 소유자 세션·CSRF 귀속. **OFF 전 완료 요청의 재생 차단을 PR4·13과 같은 시험으로 확인** | C2-10 |
+| 11 | legacy importer | `project.json`·library·feedback·snapshots·reports·out/shots·ask/rounds → staging, `import_batches`/`legacy_mappings`, **`carry_over`/`next_round_task` 원 요청·대상·출처·버전 보존**, 미지 필드 보고 | 1,6,7,8,9,10 + SEL-17 | 깨진/2MB fixture, 재실행 멱등, 기본값을 과거 결정처럼 안 만듦, 원본 hash 불변. 옛 승인 `legacy_unknown`·사용자 NULL·`legacy_unverified`, 그때 본 질문/폼·덧붙임/자유 의견·미처리 입력 매핑, **분석·집필 등 여러 단계의 미완료 요청이 이전 뒤에도 남음**, 새 정책 기본값을 과거 동의로 기록하지 않음. 실제 manifest·경로·이전 보고서는 로컬에만, PR에는 합성·익명 결과만 | C2-11 |
 | 12 | 이전 검증·되돌리기 | 합성 fixture 검증(개수·본문·ID·연결·hash·미처리 답·보고서), 쓰기 전/후 복구 | 3,9,11 | 사본→staging→검증→활성화, 원본 무변경, 쓰기 전 원본 재연결·후 프로젝트 단위 복구, 다른 프로젝트 무영향, 복원 손실 범위·커서 초기화. **실제 파일럿은 PR22로 분리**, 합성 실패를 실제 파일럿 실패로 보지 않음. 실제 manifest·경로·이전 보고서는 로컬에만, PR에는 합성·익명 결과만 | C2-12 |
-| 13 | API: 맥락·claim·submit·complete | context digest+manifest, claim 원자, submit 작은 묶음, wait 분리, complete≠승인, 오류·멱등 | 4,5,6,7,9,10 | OpenAPI/예제, rev 충돌 부분 저장 없음, long-poll이 tx를 잡지 않음, 토큰 범위, 403 policy. 10진 문자열·닫힌 명령/미지원 필드 거부·인증 뒤 replay·run 제한 자격·context 일관 읽기, **한 run 최소 경로**임을 명시, 언어 중립 JSON 계약 픽스처 | C2-13 |
-| 14 | API: 질문·답·변경분·오류 | 질문 게시/수정, submissions, changes cursor, approve/reopen 사람 전용, 오류 봉투 | 6,8,10,13 | 사람 세션과 에이전트 토큰 구분, 승인·reopen 에이전트 불가, cursor epoch 재동기화, 가짜 성공 없음. capabilities·inputs/long-poll·input-receipts·heartbeat/release·interrupt/cancel/handoff·202 조회의 PR13/14 귀속, 요청 제한·poll 간격·429, 커서·DTO·tx 갱신, 서버 답 초안 없음, **한 라운드 증명은 PR13+14**, 언어 중립 JSON 계약 픽스처 | C2-14 |
+| 13 | API: 맥락·claim·submit·complete | context digest+manifest, claim 원자, submit 작은 묶음, wait 분리, complete≠승인, 오류·멱등, **2단계 지원 HTTP 경로 대응표(4.2.1)** | 4,5,6,7,9,10 | OpenAPI/예제, rev 충돌 부분 저장 없음, long-poll이 tx를 잡지 않음, 토큰 범위, 403 policy. 10진 문자열·닫힌 명령/미지원 필드 거부·**재생 전 정책·목적지 검사**·run 제한 자격·context 일관 읽기, **한 run 최소 경로**임을 명시, 언어 중립 JSON 계약 픽스처. **A/B HTTP 왕복: run 시작→claim→wait→답→재개, 파일 ready·Go OFF 읽기 차단, 미래 명령 capabilities 미지원** | C2-13 |
+| 14 | API: 질문·답·변경분·오류 | 질문 게시/수정, submissions, changes cursor, approve/reopen 사람 전용, 오류 봉투, **2단계 지원 HTTP 경로 대응표(4.2.1)의 나머지** | 6,8,10,13 | 사람 세션과 에이전트 토큰 구분, 승인·reopen 에이전트 불가, cursor epoch 재동기화, 가짜 성공 없음. capabilities·inputs/long-poll·input-receipts·heartbeat/release·interrupt/cancel/**handoffs(단수 `/handoff` 아님)**·202 조회의 PR13/14 귀속, **canonical `POST P/claims`(R1의 `POST P/runs/{r}/claims` 아님)**, 요청 제한·poll 간격·429, 커서·DTO·tx 갱신, 서버 답 초안 없음, **한 라운드 증명은 PR13+14**, 언어 중립 JSON 계약 픽스처. **2단계 경로 누락 0, U5는 기존 run_start 재사용** | C2-14 |
 | 15 | CLI 쓰기 전환 | approve/reopen/mark/note/lock, serve/stop/home, 모든 쓰기 서비스 경유, `context/claim/submit/wait/complete` CLI | 4,5,6,7,8,9,10 | 기존 명령 의미 보존(합성), 직접 JSON 쓰기 0, 잠금 인계, `pes home`이 DB·객체를 안 옮김. **CMDS 32개 전수 배정(4.3)**, 질문·항목·snapshot 쓰기는 PR7·8·9 선행, 승인·권한 우회 동작 미승계 | C2-15 |
 | 16 | CLI 읽기·보고서·doctor | status/digest/show/list/pending/report/assemble/web/doctor, 미전환 프로젝트 읽기 전용 legacy, 보고서는 PR9 경계 | 7,9,15 | 정확한 버전·각주로 보고서 재생성, doctor 기본 진단/`--fix` 분리, 임시 홈만, 실제 홈 미접촉. `report/assemble/web`는 쓰기 포함, 경로 quoting·소유 프로세스 진단, `pes watch` 대체(입력 long-poll 또는 같은 출력 형식, PR20 연계), legacy 보존/제거 조건 | C2-16 |
 | 17 | 스킬 직접 편집 제거 | core+plan 파일럿→전체, 중립 워크플로·역할 명세·어댑터 노트, lint | 10,13,14,15,16 | `project.json`·sqlite 직접 쓰기 0(grep/lint), 연구 절차·독립 검토 유지, core+plan 합성 1회, Claude 전용 표기는 예외 위치. **문자열 0건이 아니라 업무 경로별 검증 명령 사용 확인**, 자식 제안 파일 허용·reviewer 독립 판단 유지, PR19 선행 계약 | C2-17 |
@@ -201,9 +202,35 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | 20a | 방식 B 어댑터 — Claude Code·Claude 앱 | Claude Code stdio MCP→로컬 HTTP, CLI 대안, `/pes:run`, Claude 앱 Desktop 확장 실제 시험, 명시적 전달/가져오기, 공통 MCP bridge·adapter 계약 | 5,10,13,14,17,18 + SEL-19 | Code로 합성 6단계, 앱 1단계 왕복·재접속, 복사≠제출, 중복 가져오기 방지, 실제 제출 actor 구분. 전달/대화 중 lease 없음·원 요청/기반 manifest 대조·hash≠인증·오프라인 제안 채택, 직접 인증 앱과 사람이 붙여 넣은 결과 구분, 재접속 context→새 입력→수신 확인→claim, 다른/오래된/중복 묶음·첨부 누락 거부, 지원 환경표, `pes watch` 대체 | C2-20a |
 | 20b | 방식 B 어댑터 — Codex CLI·OpenCode TUI | 20a의 MCP bridge·계약을 써서 Codex CLI·OpenCode TUI를 붙인다. D4 어댑터 노트에 `codex`·`opencode-tui`를 추가하고, **A의 OpenCode(PES 서버)와 OpenCode TUI(사람이 직접 켬)를 구분**한다. 토큰은 OS 키체인, `runtime=codex_cli|opencode_tui`, 모델·사용량 미상은 `unknown`, 승인·정책·토큰·삭제·export 도구 없음, Go 목적지 경로 시험 | 20a, 5,10,13,14,17,18 + SEL-19 | **Codex CLI와 OpenCode TUI 각각** 합성 1라운드+재개, actor/runtime 정확, 중복 제출·같은 키 다른 요청 거부, A 서버·프로세스 비간섭, Go 경로 차단/한계 표기, 노트만 보고 연결 재현 | C2-20b |
 | 21 | A·B 교차 계약 | 같은 결과 의미·양방향 인계·지연 응답·프로세스 종료·OFF·예산·중복/충돌 | 18,19,20a,20b | 같은 DB 상태에서 같은 문구·권한, 유실·중복 0, A→B·B→A 인계, 옛 fence 거부, 자동 테스트. seen/applied 중복 방지·사람 시작 인계·권한 응답 지연 거부·예산 인계 유지·unknown 예약 미해제, SQLite/D1 동일 성공·충돌·부분 실패, 유료 실측은 PR19/20a·20b·반복 계약은 가짜 런타임 | C2-21 |
-| 22 | 전환 통합 검증·문서 | Windows/Mac 설치·제거·복구, 백업/복원, 이전 runbook, 사용 안내, 실제 파일럿(사용자 허용) | 2,12,18,21 + SEL-18·19 | CI **매 PR 및 main** Windows/Mac, 복원 훈련, 실제 프로젝트 1개 파일럿(허용 시) 원본 보존, 문서만 보고 재현, 공개 저장소 민감 자료 0. PR2 통과·모든 필수 게이트 선행, 앱 설치/연결/명시적 전달·Codex/OpenCode TUI 노트·unknown 상태·CLI/홈/정책·복원 손실 범위 문서화, 실제 산출물은 로컬·공개는 합성 | C2-22 |
+| 22 | 전환 통합 검증·문서 | Windows/Mac 설치·제거·복구, 백업/복원, 이전 runbook, 사용 안내, 실제 파일럿(사용자 허용), **프로젝트별 실제 자료 사용 허용 기록(항목·자료 범위·목적지·기간·철회, 로컬 보관)** | 2,12,18,21 + SEL-18·19 | CI **매 PR 및 main** Windows/Mac, 복원 훈련, 실제 프로젝트 1개 파일럿(허용 시) 원본 보존, 문서만 보고 재현, 공개 저장소 민감 자료 0. PR2 통과·모든 필수 게이트 선행, 앱 설치/연결/명시적 전달·Codex/OpenCode TUI 노트·unknown 상태·CLI/홈/정책·복원 손실 범위 문서화, 실제 산출물은 로컬·공개는 합성. **PR22 미실시 시 T1이 최초 기록을 만들고, 기록이 있으면 새 목적지만 추가; 로컬 이전·B 전달·A Go 전달을 구분하고 기간 만료/철회 뒤 사용 차단; 허용 없으면 합성/미실시** | C2-22 |
 
-### 4.3 CLI 명령 32개 배정 (`scripts/pes.py:1701`)
+### 4.2.1 2단계 지원 HTTP 경로 대응 (닫힌 목록)
+
+| 경로 | 행위자 | 코어 담당 | 완료 시험 |
+|---|---|---|---|
+| `POST P/runs` | H | PR13 | run_start 등록, U5가 재사용 |
+| `POST P/claims` | E | PR13 | claim=run 전이+lease, 옛 fence 거부 |
+| `GET P/context`, `GET P/objects/{o}/versions/{v}` | E/H | PR13 | 정확한 버전·10진 문자열·일관 읽기 |
+| `POST P/runs/{r}/results` | E | PR13 | 묶음 제출·멱등 replay·rev 충돌 |
+| `POST P/runs/{r}/wait` | E | PR13 | `waiting_human`+lease 해제 |
+| `POST P/runs/{r}/complete` | E | PR13 | run 종료≠승인 |
+| `POST P/runs/{r}/heartbeat`·`/release`·`/interrupt`·`/cancel`·`/handoffs` | E/H | PR14 | 인계·중단·취소·반납, 단수 `/handoff` 없음 |
+| `GET P/operations/{id}`·`GET P/requests/{key}` | E/H | PR14 | 202 영속 접수·operation 조회, 재시작 뒤 조회 |
+| `GET P/runs/{r}/inputs?cursor=&wait_ms=`, `POST P/runs/{r}/input-receipts` | E | PR14 | long-poll·영수증, tx를 잡지 않음 |
+| `POST P/submissions` | H | PR14 | 묶음 답·의견, 당시 폼/질문 버전 |
+| `GET P/changes` | E/H | PR14 | 커서 epoch·tx 묶음 |
+| `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | E/H | **PR13** | 예약·업로드 완료·ready·hash·Go OFF 정책 검사 읽기 |
+| `POST P/stages/{s}/rounds`·`POST P/rounds/{r}/seal` | H/E | PR6·14 | 라운드 시작·봉인, 승인과 분리 |
+| `POST P/stages/{s}/approve`·`/reopen` | H | PR14 | 사람만, 에이전트 거부 |
+| `POST P/policies/opencode-go/revisions` | H | PR10·14 | 사람만, 정책 이력·재생 전 검사 |
+| `POST P/questions`·`/revisions` | E/H | PR14 | 질문 게시·수정, 답과 분리 |
+| 스레드·가정·결정·반영·export | 미래 | — | **capabilities 미지원**, 가짜 성공 없음 |
+
+- **2단계 필수 경로는 위 표가 닫힌 목록**이다. run 시작·wait·정확한 버전 읽기·라운드/정책 읽기와 **파일 HTTP(예약·업로드 완료·정책 검사 읽기)는 PR13**이 맡고, 파일 저장 코어는 PR9다. release·202 operation 조회도 PR14에 포함한다.
+- `/handoff`가 아니라 **`/handoffs`**, R1의 `POST P/runs/{r}/claims`가 아니라 **`POST P/claims`**를 쓴다. U5는 기존 `POST P/runs`를 재사용한다.
+- 파일 ready·Go OFF 읽기 차단을 포함한 A/B HTTP 왕복을 PR19·20a·20b 완료 조건과 PR21 교차 계약에서 확인한다.
+
+### 4.3 CLI 명령 32개 배정 (`scripts/pes.py:1768-1772`)
 
 | PR | 명령 | 선행·경계 |
 |---|---|---|
@@ -221,6 +248,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | D1 호환 | 로컬 D1에서 같은 마이그레이션과 대표 성공/실패 통과, 차이 문서화, 도구 버전 고정 | 2 |
 | 이전 | 합성 fixture 이전·검증·활성화·되돌리기 통과. 실제 파일럿은 PR22에서 사용자 허용 시 원본 보존 | 3·11·12·22 |
 | API | `context→claim→submit→wait→complete`가 합성 한 라운드를 통과. 승인·reopen은 사람만, 0행·충돌·부분 실패가 성공으로 보이지 않음 | 13·14 |
+| 코어 언어 | PR4·13 계약 픽스처 직후 WEB0(5단계 번호) 실행(PR14 완료는 필수 아님), `docs/plan/decisions/0006-web-core-language.md` 기록, TS 이식이면 2~4단계 언어 재검토. WEB0는 5단계 15개에 포함되어 새 이슈 없음 | WEB0 |
 | CLI·스킬 | 기존 명령 의미 보존, CMDS 32개 배정, `project.json`·DB 직접 쓰기 0, core+plan 합성 통과 | 15·16·17 |
 | 기존 화면 | 동등성 매트릭스와 Playwright 스모크가 Windows/Mac에서 통과. 새 디자인·이중 쓰기 없음, `pes watch` 답 알림 유지 | 18 |
 | 방식 A | 합성 1개 6단계, 대기·재개·중단·Go OFF 차단, 비용 상한 준수, 실제 자료 미사용 | 19 |
@@ -256,9 +284,9 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 - A/B 실행·PR 배분·SEL-18·19 확인: `docs/plan/stage-1-runners.md:19-51`, `:86-108`, `:110-112`
 - DDL 제약·JSON 함수: `docs/plan/schemas/stage-1-ddl-draft.sql:1-11`, `:70`, `:98`, `:149`
 - 0단계 7절·1단계 입력: `docs/plan/stage-0.md:69-92`, `:85-99`; 큰 단계: `docs/plan/00-brief.md:41-51`
-- 현행 홈·Python 3.9·홈 이동·포트: `scripts/pes.py:73-86`, `:1294-1360`, `:1403`, `:1118-1122`, `:1195`
-- 답 알림·CMDS: `scripts/pes.py:1189-1191`, `:1701`
-- 현행 정적 서버·답 수신: `scripts/serve.py:1-10`, `:111-152`, `:119-121`, `:146-152`
+- 현행 홈·Python 3.9·홈 이동·포트: `scripts/pes.py:73-86`(`CONFIG`·`pes_home`), `:1361-1430`(`cmd_home`), `:1469-1470`(Python 3.9 검사), `:1150`(`LEGACY_PORTS`), `:1262`(`HUB_PORTS`)
+- 답 알림·CMDS: `scripts/pes.py:1256-1258`(`cmd_watch`), `:1768-1772`(`CMDS` 정의)
+- 현행 정적 서버·답 수신: `scripts/serve.py:1-10`(모듈 설명), `:116-181`(`do_POST`), `:124-126`(Origin 검사), `:146-180`(답 레코드·원자 파일 쓰기·로그)
 - 스킬 직접 편집 예제: `skills/core/SKILL.md:62-84`
 - 테스트 격리: `tests/README.md`
 - 저장소 상태: 2026-11-05 03:31 `main` 기준 SEL-11(`tests/`)·SEL-16·SEL-17 병합, SEL-12~15·18·19 hc-team worktree 진행 중, `AGENTS.md`·`spikes/` 없음

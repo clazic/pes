@@ -41,12 +41,12 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 **할 일**
 
 - [ ] `docs/plan/schemas/stage-1-ddl-draft.sql`에 `export_jobs`·`export_attempts` 설계를 추가하고, 새 마이그레이션 `migrations/006_stage6_export.sql`을 만든다(번호는 2단계 PR1의 마지막 번호 다음).
-  - `export_jobs`: `id`, `project_id`, `client_request_id`, `request_hash`(64자), `requested_by_user_id`, `destination`(`linear`/`notion`), `destination_account_ref`, `destination_scope`, `source_kind`(`dev_issue`/`report_version`), `source_object_id`, `source_version_id`, `manifest_blob_id`, `payload_hash`(64자), `correlation_key`, `status`(`queued`/`sending`/`sent`/`partial`/`failed`/`unknown`/`cancelled`), `attempt_count`, `external_id?`, `external_url?`, `last_error_code?`, `created_at`, `updated_at`.
+  - `export_jobs`: `id`, `project_id`, `client_request_id`, `request_hash`(64자), `requested_by_user_id`, `destination`(`linear`/`notion`), `destination_account_ref`, `destination_scope`, `source_kind`(`selected_task`/`report_version`), `source_object_id`, `source_version_id`, `manifest_blob_id`, `payload_hash`(64자), `correlation_key`, `status`(`prepared`/`authorized`/`sending`/`partial`/`sent`/`failed`/`unknown`/`blocked`), `attempt_count`, `external_id?`, `external_url?`, `last_error_code?`, `created_at`, `updated_at`.
   - `export_attempts`: `id`, `project_id`, `job_id`, `attempt_no`, `state`(`prepared`/`sending`/`sent`/`partial`/`failed`/`unknown`), `request_hash`, `response_hash?`, `external_id?`, `external_url?`, `error_code?`, `started_at`, `ended_at`.
   - 제약: `UNIQUE(project_id, id)`, `UNIQUE(project_id, client_request_id)`, `UNIQUE(project_id, correlation_key)`, `UNIQUE(project_id, job_id, attempt_no)`, 프로젝트 복합 FK, 상태 CHECK, `source_version_id`·`manifest_blob_id` FK. `outbound_dispatches`를 재사용하지 않는다.
 - [ ] `docs/plan/schemas/check_ddl.py`에 `export_jobs`/`export_attempts` 양성 적재와 거부 사례를 추가한다: 같은 상관키 중복, 같은 키·다른 payload, 다른 프로젝트 버전 참조, 잘못된 상태 전이, 0행 갱신.
-- [ ] 2단계 PR4의 공통 명령 서비스(예: `scripts/command_service.py`)에 `preview_export()`, `create_export_job()`, `mark_export_sending()`, `record_export_attempt()`, `finish_export_job()`, `retry_export_job()`, `get_export_job()`을 추가한다.
-- [ ] `scripts/api.py`(2단계 PR13·14 라우터)에 `POST /api/v1/projects/{project_id}/exports/preview`, `POST .../exports`, `GET .../exports/{job_id}`, `POST .../exports/{job_id}/retry`, `POST .../exports/{job_id}/cancel`을 추가한다. 생성은 `202` 영속 접수와 `operation_id`를 반환한다.
+- [ ] 2단계 PR4의 공통 명령 서비스(예: `scripts/command_service.py`)에 `preview_export()`, `create_export_job()`, `authorize_export_job()`, `block_export_job()`, `mark_export_sending()`, `record_export_attempt()`, `finish_export_job()`, `retry_export_job()`, `get_export_job()`을 추가한다.
+- [ ] `scripts/api.py`(2단계 PR13·14 라우터)에 `POST /api/v1/projects/{project_id}/exports/preview`, `POST .../exports`, `POST .../exports/{job_id}/authorize`, `GET .../exports/{job_id}`, `POST .../exports/{job_id}/retry`를 추가한다. 생성은 `202` 영속 접수와 `operation_id`를 반환하고, `authorize`는 사람 step-up 뒤 `prepared→authorized`만 한다. 취소 상태는 두지 않고, 권한 회수·정책 차단은 `blocked`로 기록한다.
 - [ ] 생성·시도·사건·`mutation_commits` 영수증을 **같은 DB tx**에 쓰고, 네트워크 호출은 커밋 뒤에만 한다.
 - [ ] API `Idempotency-Key`와 외부 상관키 `correlation_key`를 구분한다. 같은 키·같은 요청은 원래 `export_job`·`operation_id`를 재생하고, 같은 키·다른 payload는 409다.
 - [ ] 사람 step-up(5단계 WEB2), **owner만 실행**, WebMCP·에이전트 토큰·OAuth 위임 거부를 서버에서 검사한다. approver에게 export 권한을 주지 않는다.
@@ -60,9 +60,10 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] `python3 -m pytest -q tests/test_stage6_export_d1.py` (2단계 PR2 D1 smoke 하네스)
 - [ ] `python3 -m pytest -q`
 - [ ] owner만 export를 만들 수 있고, approver·editor·에이전트·WebMCP는 403이다.
+- [ ] `prepared→authorized→sending→partial/sent/failed/unknown`, `prepared/authorized→blocked` 전이와 금지 전이 거부가 시험된다. 사람 승인 증거와 송신 직전 권한 재검사가 같은 계약에 남는다.
 - [ ] 같은 `Idempotency-Key`·같은 요청은 원래 `export_job`·`operation_id`를 재생하고, 같은 키·다른 payload는 409다. 다른 프로젝트 자원 참조가 403/404, 0행 CAS가 실패로 롤백된다.
 - [ ] `202` 응답 뒤 프로세스를 재시작해도 `export_jobs`/`export_attempts`가 조회되고 `sending` 복구가 동작한다.
-- [ ] `unknown`이 성공·`sent`로 표시된 경우가 0건이고, 자격정보가 DB·로그에 0건이다.
+- [ ] `unknown`이 성공·`sent`로 표시된 경우가 0건이고, 자격정보가 DB·로그에 0건이다. `partial`에서 `failed`로 종료하지 않고, 외부 객체가 남은 실패는 `partial`·이유·재개 지점을 유지하며 응답 유실·수동 재전송을 시험한다.
 
 **지킬 것**
 
@@ -75,14 +76,14 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 ## E2. [6단계] Linear·Notion 한 방향 어댑터·미리보기
 
-**목표**: Linear에는 PES 개발 할 일만, Notion에는 사람이 고른 보고서 버전 사본만 보내고, 미리보기·상관키·시도·unknown·부분 생성을 E1 영수증 위에서 구현한다.
+**목표**: Linear에는 사람이 '할 일로'에서 고른 항목만(제목+사람이 쓴 요약), Notion에는 사람이 고른 보고서 버전 사본만 보내고, 미리보기·상관키·시도·unknown·부분 생성을 E1 영수증 위에서 구현한다.
 
 **선행**: E1, PR9, U4·U5, S4-U8, WEB4·11.
 
 **할 일**
 
 - [ ] `scripts/exporters/base.py`에 `ExportAdapter` 프로토콜(`build_payload`, `send`, `classify_response`, `verify_external`)을 만든다.
-- [ ] `scripts/exporters/linear.py`에 `build_linear_payload()`·`send_linear()`를 만든다. payload는 **PES 개발 이슈 제목 + 사람이 쓴 요약**만이고, 연구 내용·질문·답·파일은 자동 포함하지 않는다.
+- [ ] `scripts/exporters/linear.py`에 `build_linear_payload()`·`send_linear()`를 만든다. payload는 **사람이 '할 일로'에서 고른 항목의 제목 + 사람이 쓴 요약**만이고, 연구 내용·질문·답·파일은 자동 포함하지 않는다.
 - [ ] `scripts/exporters/notion.py`에 `build_notion_payload()`·`send_notion()`을 만든다. `S4-U8` 버전 선택에서 고른 **정확한 보고서 버전 사본**만 보내고, Notion 편집을 PES로 되돌리는 동기화는 만들지 않는다.
 - [ ] `scripts/export_service.py`에 `build_export_preview()`, `dispatch_export_job()`, `classify_export_result()`, `verify_export_result()`를 추가한다. 목적지 상태 `미설정`/`미지원`/`활성`을 구분하고, 비활성 이유를 UI에 보여 준다.
 - [ ] E1의 명령 서비스와 역할을 나눈다: 상태·영수증 전이는 E1, 목적지 payload·호출·응답 분류는 E2가 맡고 같은 전이를 두 곳에서 구현하지 않는다.
@@ -98,13 +99,13 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] `python3 -m pytest -q tests/test_stage6_export_linear.py tests/test_stage6_export_notion.py`
 - [ ] `python3 -m pytest -q tests/test_stage6_export_preview.py`
 - [ ] `python3 -m pytest -q`
-- [ ] 가짜 서버에서 성공·중복·`unknown`·재시도·부분 생성이 모두 재현되고, `unknown`이 성공으로 표시되지 않는다.
-- [ ] 정확한 버전만 전송되고, 연구 내용 자동 전송이 0건이다. WebMCP·에이전트 토큰·OAuth 위임이 export를 실행하면 403이다.
+- [ ] 가짜 서버에서 성공·중복·`unknown`·재시도·부분 생성이 모두 재현되고, `unknown`이 성공으로 표시되지 않는다. 부분 생성 뒤 영구 실패·응답 유실·수동 재전송에서 외부 객체가 남은 실패를 `partial`로 유지한다.
+- [ ] 사람이 고른 항목/정확한 보고서 버전만 전송되고, 연구 내용 자동 전송이 0건이다. WebMCP·에이전트 토큰·OAuth 위임이 export를 실행하면 403이다.
 - [ ] 미리보기에서 목적지·포함 범위·민감 경고·비활성 이유가 보이고, 승인 뒤 payload/목적지가 바뀌면 다시 확인을 요구한다.
 
 **지킬 것**
 
-- Linear는 **PES 개발 할 일**만, Notion은 **사람이 고른 보고서 사본**만. 연구 할 일을 자동으로 Linear 이슈로 만들지 않는다.
+- Linear는 **사람이 '할 일로'에서 고른 항목**만(제목+사람 요약), Notion은 **사람이 고른 보고서 사본**만. 연구 할 일을 자동으로 Linear 이슈로 만들지 않는다.
 - 외부 완료 ≠ PES 적용·승인. 왕복 동기화·외부 편집 반영을 넣지 않는다.
 - `outbound_dispatches`를 재사용하지 않는다. Go 전송 기록과 export 영수증은 별개다.
 - 자격정보는 서버 secret/OS 키체인에만 둔다. 미리보기·에러·로그에 넣지 않는다.
@@ -113,20 +114,19 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 ## M1. [6단계] 역할·멤버·승인·초대
 
-**목표**: `approver`를 승인·reopen에 한정해 추가하고, owner 이전·마지막 owner 보호·질문 배정 이력·초대 시 외부 AI 경로를 서버 검증과 감사까지 일관되게 구현한다.
+**목표**: 결정 0010에 따라 approver 도입 여부·위임 범위를 먼저 정하고, 도입 시에만 승인·reopen 한정 역할을 추가한다. owner 이전·마지막 owner 보호·질문 배정 이력·초대 시 외부 AI 경로를 서버 검증과 감사까지 일관되게 구현하되, 과거 정책 작성자 보존·관련 FK·소유권 이전은 WEB3 계약을 재사용한다.
 
-**선행**: WEB2·3, PR4·10·14, PR8·U2.
+**선행**: WEB2·3, PR4·10·14, PR8·U2, 결정 0010.
 
 **할 일**
 
-- [ ] 새 마이그레이션 `migrations/007_stage6_roles.sql`에서 `project_members.role` CHECK를 `owner`/`approver`/`editor`/`reader`로 재작성한다. SQLite는 CHECK를 직접 바꿀 수 없으므로 **새 표 → 데이터 복사 → 교체 → `projects` owner FK·`one_project_owner` 인덱스 재생성** 순서로 한다. `projects`가 `project_members`를 참조하므로 FK를 끄지 않고 가능한 순서인지 먼저 시험하고, 불가능하면 `projects`도 같은 마이그레이션에서 재생성한다. D1에서도 같은 결과를 확인한다.
+- [ ] 결정 0010에 approver 도입 여부·도입 시 위임 범위를 기록한다. **도입을 택한 경우에만** 새 마이그레이션 `migrations/007_stage6_roles.sql`에서 `project_members.role` CHECK를 `owner`/`approver`/`editor`/`reader`로 재작성한다. owner만 유지하는 선택이면 역할 변경 없이 owner 승인·reopen 경계를 시험한다. SQLite는 CHECK를 직접 바꿀 수 없으므로 새 표→데이터 복사→교체 순서로 하고, `projects` owner FK·`one_project_owner`·과거 정책 작성자 FK·`ownership_transfers`는 **WEB3에서 완료한 소유권 이전 계약을 재사용**한다.
 - [ ] `projects`에 `allow_member_external_agents INTEGER NOT NULL DEFAULT 0 CHECK (... IN (0,1))`를 추가한다. 기본값은 **불허**다.
-- [ ] `project_policy_versions`의 `(project_id, changed_by_user_id) → projects(id, owner_user_id)` FK를 제거하고 `changed_by_user_id → users(id)`를 추가한다. 기존 `(changed_by, changed_by_user_id, changed_by_kind) → actors` FK는 유지한다. **과거 정책 작성자를 새 owner로 덮어쓰지 않고**, 현재 owner만 정책을 바꿀 수 있는 검사는 명령 서비스에서 한다. 이 표도 SQLite/D1에서 table rebuild로 FK를 교체한다.
-- [ ] `ownership_transfers`(id TEXT PRIMARY KEY, project_id, from_user_id, to_user_id, tx_id, created_at, UNIQUE(project_id, id))를 추가해 소유권 이전을 감사한다. `projects.owner_user_id`·`project_members`의 owner 행을 **한 tx**로 바꾸고, 이전 전후 FK·권한을 시험한다.
+- [ ] WEB3의 `ownership_transfers`·`projects.owner_user_id`·과거 `project_policy_versions.changed_by_user_id` FK 계약을 재사용해, owner 이전 뒤에도 과거 정책 행이 FK 오류 없이 남고 approver/멤버 정합성이 유지되는지 검증한다. M1에서 소유권 FK를 새로 만들지 않는다.
 - [ ] `question_assignments`(id TEXT PRIMARY KEY, project_id, question_id, from_actor_id?, to_actor_id, changed_by_user_id, tx_id, created_at, UNIQUE(project_id, id))를 추가하고, `objects.rev` 증가·`events` `question.assigned`·`mutation_commits` 영수증을 같은 tx에 남긴다.
-- [ ] `scripts/command_service.py`에 `approve_stage()`, `reopen_stage()`, `change_member_role()`, `transfer_project_owner()`, `assign_question()`, `set_member_external_ai()`를 추가한다.
-- [ ] `approve_stage()`/`reopen_stage()`는 owner 또는 `project_members.role='approver'`인 **사람**만 허용하고, 현재 멤버·5분 step-up·`snapshot_id`/rev를 서버에서 검증한다. `assurance=verified` 문자열만으로 통과시키지 않는다.
-- [ ] `scripts/api.py`의 `POST P/stages/{s}/approve`·`/reopen`·멤버·초대·질문 배정 경로에 위 검사를 연결하고, `/api/v1/capabilities`와 UI 권한 표에 `approver` 범위를 추가한다.
+- [ ] `scripts/command_service.py`에 `approve_stage()`, `reopen_stage()`, `change_member_role()`, `assign_question()`, `set_member_external_ai()`를 추가한다. `transfer_project_owner()`는 WEB3 계약을 호출·검증만 한다.
+- [ ] `approve_stage()`/`reopen_stage()`는 owner, 또는 **approver 도입 시** `project_members.role='approver'`인 **사람**만 허용하고, 현재 멤버·5분 step-up·`snapshot_id`/rev를 서버에서 검증한다. `assurance=verified` 문자열만으로 통과시키지 않는다.
+- [ ] `scripts/api.py`의 `POST P/stages/{s}/approve`·`/reopen`·멤버·초대·질문 배정 경로에 위 검사를 연결하고, `/api/v1/capabilities`와 UI 권한 표에 approver 도입 시에만 `approver` 범위를 추가한다.
 - [ ] `templates/settings-members.html`·`templates/invite-accept.html`을 추가한다. 초대는 owner만, 7일 1회, 기본 reader, 공개 링크 없음. 초대 수락 화면에 현재 Go 전송 허용과 연결된 외부 에이전트를 보여 주고, owner가 프로젝트별 멤버 외부 AI 연결을 켜고 끈다.
 - [ ] editor의 승인·reopen·정책·토큰·삭제·멤버·판 시작을 모두 403으로 만들고, approver도 승인·reopen 밖의 동작은 할 수 없게 한다.
 - [ ] 마지막 owner 제거·owner 없는 상태·owner 2명을 모두 거부한다.
@@ -138,15 +138,15 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] `python3 -m pytest -q tests/test_stage6_roles.py tests/test_stage6_owner_transfer.py tests/test_stage6_question_assignment.py`
 - [ ] `python3 -m pytest -q tests/test_stage6_invites.py`
 - [ ] `python3 -m pytest -q`
-- [ ] owner/approver/editor/reader 권한 매트릭스 전 항목이 통과하고, editor·에이전트·WebMCP 승인이 403이다.
-- [ ] owner 이전 전후 `project_policy_versions.changed_by_user_id`가 보존되고, 과거 정책 행이 FK 오류 없이 남는다.
+- [ ] approver 도입 시 owner/approver/editor/reader 권한 매트릭스 전 항목이 통과하고, editor·에이전트·WebMCP 승인이 403이다. owner만 유지 시 owner/editor/reader로 같은 승인·reopen 경계가 통과한다.
+- [ ] owner 이전 전후 `project_policy_versions.changed_by_user_id`가 보존되고, 과거 정책 행이 FK 오류 없이 남는다(WEB3 계약 재사용).
 - [ ] 초대 수락 화면에 외부 AI 경로가 보이고, 기본 불허에서 멤버 연결이 차단된다.
 - [ ] 배정 변경 전 제출·옛 응답자 제출·동시 제출이 각각 보존/거부되며, 과거 답은 당시 질문/폼·응답자에 남는다.
 
 **지킬 것**
 
 - owner는 항상 승인 가능하고, 프로젝트당 owner는 최대 1명이다. ownerless 상태를 만들지 않는다.
-- `approver`는 **승인·reopen만** 확장한다. 정족수·조직 역할·SSO/SCIM은 넣지 않는다.
+- `approver`는 **승인·reopen만** 확장한다. 도입 여부·위임 범위는 결정 0010 전 구현하지 않고, owner만 유지 선택도 같은 게이트로 시험한다. 정족수·조직 역할·SSO/SCIM은 넣지 않는다.
 - 승인은 사람의 직접 행위다. 에이전트 토큰·OAuth 위임·WebMCP·`human_id` 선언으로 대체하지 않는다.
 - 과거 정책 작성자·과거 답·과거 배정을 새 값으로 덮어쓰지 않는다. 삭제 대신 이력 보존.
 - 초대·외부 AI 연결은 자료 노출 경계다. 기본 불허, owner만 변경, 실제 계정 정보는 저장소에 넣지 않는다.
@@ -231,15 +231,15 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 ## G3. [6단계] 다중 에이전트 교차 계약(2단계 어댑터 회귀)
 
-**목표**: 2단계 PR20b에서 붙인 Codex CLI·OpenCode TUI·Claude Code·Claude 앱이 같은 DB 상태에서 같은 의미로 동작하는지 회귀하고, M1·M3·E2와 A 회귀까지 교차 검증한다. Gemini 등 추가 에이전트는 후보·계약 시험만 한다.
+**목표**: 2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI가 같은 DB 상태에서 같은 의미로 동작하는지 회귀하고, M1·M3·E2와 A 회귀까지 교차 검증한다. Gemini 등 추가 에이전트는 후보·계약 시험만 한다.
 
-**선행**: PR20b·21, M1·M3·E2.
+**선행**: PR20a·20b·21, M1·M3·E2.
 
 **할 일**
 
 - [ ] `tests/test_stage6_agent_cross.py`를 새로 만들고, PR21 교차 계약 하네스를 확장한다. 공통 하네스는 `tests/test_cross_contract.py`가 있으면 재사용하고 새로 만들지 않는다.
-- [ ] **2단계 PR20b의 네 에이전트**(Codex CLI·OpenCode TUI·Claude Code·Claude 앱)의 같은 명령·같은 오류·같은 actor 규칙을 표로 시험한다.
-- [ ] M3 다중 worker 채택, E2 내보내기, M1 승인·초대를 교차 시나리오에 넣는다: 에이전트가 제안하고 사람이 채택/승인, 다른 에이전트가 이어받기.
+- [ ] **2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI**의 같은 명령·같은 오류·같은 actor 규칙을 표로 시험한다.
+- [ ] M3 다중 worker 채택, E2 내보내기, M1 승인·초대를 교차 시나리오에 넣는다: child가 제안하고 **부모 run이 유효 lease/fence로 채택**한 뒤 사람이 단계 승인하고, 다른 에이전트가 이어받는다. Claude 앱 수동 가져오기만 사람 actor·새 claim 계약을 별도 시험한다.
 - [ ] Claude 앱 직접 연결·명시적 전달을 모두 시험한다. 앱이 붙여넣은 결과의 실제 제출자는 `human`이고, `claude_app(미검증)`은 출처로만 남긴다.
 - [ ] 인계·중복·충돌·OFF 유실 0건을 확인한다. 앱은 새 claim·기반 버전 대조·중복 방지를 거친다.
 - [ ] A(OpenCode/DeepSeek) 회귀를 포함해 A/B가 같은 버전 결과를 내는지 확인한다.
@@ -251,7 +251,7 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] `python3 -m pytest -q tests/test_stage6_agent_cross.py`
 - [ ] `python3 -m pytest -q`
 - [ ] 네 에이전트가 같은 합성 프로젝트에서 같은 명령 의미·오류 코드·actor 규칙을 보인다.
-- [ ] M3 제안→사람 채택, E2 미리보기→사람 전송, M1 승인→감사 흐름이 교차 시나리오에서 통과한다.
+- [ ] M3 child 제안→부모 run 유효 lease/fence 채택→사람 단계 승인, E2 미리보기→사람 전송, M1 승인→감사 흐름이 교차 시나리오에서 통과한다. Claude 앱 수동 가져오기만 사람 actor·새 claim을 별도로 시험한다.
 - [ ] 앱 직접 연결·명시적 전달 모두 실제 제출자와 출처가 정확하고, 중복 가져오기 0건이다.
 - [ ] 인계·OFF·경합·유실 시나리오에서 자동 재시도로 중복 실행되지 않는다.
 - [ ] 추가 에이전트는 미지원/후보로 정직하게 표시되고, 가짜 성공이 없다.
@@ -259,7 +259,7 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 **지킬 것**
 
 - G3는 교차·통합 시험이며 개별 PR의 자체 검증을 대신하지 않는다.
-- 2단계 PR20b의 어댑터를 다시 만들지 않는다. G3는 회귀·교차 검증만 한다.
+- 2단계 PR20a·20b의 어댑터를 다시 만들지 않는다. G3는 회귀·교차 검증만 한다.
 - 앱의 "연결됨"을 실제 생존·완료로 과장하지 않는다. 마지막 확인 시각과 미상을 구분한다.
 - 사람이 붙여넣은 결과를 에이전트 제출로 바꾸지 않는다. 실제 actor를 기록한다.
 - 새 어댑터도 승인·정책·토큰·삭제·외부 export 권한을 얻지 않는다.
@@ -277,7 +277,7 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] `docs/plan/reviews/hc-team-evaluation.md`를 새로 만든다. `ai/SEL-*` 이슈의 주기, 테스트·CI 통과, 독립 리뷰 지적, 사람 재작업, worktree 격리, 공개 저장소 자료 경계, 중단·전환 사례를 익명 요약으로 적는다.
 - [ ] `docs/agents/hc-team-operating.md`를 새로 만든다. 어떤 이슈를 hc-team에 맡기는지, 제외 경계(사람 자격·마이그레이션·외부 자격 변경·보안), 이슈 하나=PR 하나, 사람이 병합, gate 실패·범위 팽창·실자료 유입 시 중단과 일반 개발 전환, 실패 기록을 규칙으로 적는다.
 - [ ] `AGENTS.md`의 개발 규칙에 hc-team 운영 문서 링크와 "실제 자료·토큰은 저장소 밖" 경계를 추가한다.
-- [ ] `docs/plan/decisions/0006-hc-team-scope.md`에 적용 범위·제외·재검토 조건·상태를 기록한다.
+- [ ] H1 착수 시 `docs/plan/decisions/README.md` 색인에서 **미사용 번호**를 배정해 hc-team 적용 범위·제외·재검토 조건·상태를 기록하고 색인을 갱신한다. WEB0 예약 0006을 재사용하지 않는다.
 - [ ] 평가에 쓴 실제 PR 번호·로그·캡처는 저장소 밖에 두고, 문서에는 익명 요약·집계만 남긴다.
 - [ ] "PR 2개 성공"만을 종료 조건으로 쓰지 않는다. 중단·전환 사례와 사람 재작업을 함께 본다.
 
@@ -307,11 +307,11 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 **할 일**
 
 - [ ] `tests/test_stage6_integration.py`에 합성 프로젝트 종단 시나리오를 만든다: 초대→승인→동시 편집→다중 worker 제안·채택→Linear/Notion 미리보기·전송→unknown→재시도.
-- [ ] `tests/test_stage6_backup_export.py`에 `export_jobs`·`export_attempts`·`ownership_transfers`·`question_assignments`·`adoption_proposals`가 포함된 백업·복구·마이그레이션 되돌리기를 넣는다.
+- [ ] `tests/test_stage6_backup_export.py`에 `export_jobs`·`export_attempts`·`ownership_transfers`·`question_assignments`·`adoption_proposals`가 포함된 백업·복구·**마이그레이션 전진 복구**를 넣는다. Worker 이전 버전 롤백, 구버전 앱/신스키마 호환 창, 백업에서 격리 복구, 전진 마이그레이션을 구분하고 외부 전송·unknown 증거는 DB 롤백으로 지우지 않는다.
 - [ ] `docs/runbooks/export-unknown.md`를 새로 만든다. `unknown`을 DB 롤백으로 지우지 않고, 외부 ID 확인·사용자 재전송·중복 가능성·부분 생성 재개 절차를 적는다.
 - [ ] `docs/runbooks/stage6-operations.md`를 새로 만든다. 새 표 백업/복구, 권한·감사, 비용, Windows/Mac, 장애 훈련, 잔여 백로그를 적는다.
 - [ ] `README.md`와 `docs/agents/README.md`에 사용 안내를 추가한다: 초대·approver·충돌·다중 worker·내보내기·어댑터·hc-team. 실제 계정·자료 예시는 넣지 않는다.
-- [ ] 기존 화면 제거 여부를 결정하고, 제거를 미루면 운영 백로그에 명시한다. 기존 고정 HTML·ask 링크 보존 약속을 깨지 않는다.
+- [ ] 기존 화면 제거는 **전환 승인과 별도 사용자 확인**으로 결정한다. 최소 한 마이너 버전 보존·실제 사용 중단 확인 뒤 제거 여부를 묻고, 미승인 시 보존·운영 백로그로 남긴다. 기존 고정 HTML·ask 링크 보존 약속을 깨지 않는다.
 - [ ] `scripts/pes.py doctor`에 새 표·마이그레이션·외부 내보내기 설정·에이전트 토큰 존재 여부를 진단하는 항목을 추가한다(비밀값은 표시하지 않음).
 - [ ] Windows/Mac에서 설치·복구·알림·내보내기 안내를 재현한다.
 
@@ -323,7 +323,8 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] macOS/Linux: `review_home="$(mktemp -d)" && HOME="$review_home" PES_HOME="$review_home/pes-projects" python3 scripts/pes.py doctor`
 - [ ] Windows PowerShell: `$reviewHome = Join-Path $env:TEMP ("pes-review-" + [guid]::NewGuid())`; `New-Item -ItemType Directory -Path $reviewHome`; `$env:HOME = $reviewHome`; `$env:USERPROFILE = $reviewHome`; `$env:PES_HOME = Join-Path $reviewHome "pes-projects"`; `python scripts/pes.py doctor`
 - [ ] 5절 게이트 중 hwpx 제외 전부 통과하고, 문서만 보고 새 환경에서 재현할 수 있다.
-- [ ] 새 표가 백업·복구되고, unknown을 DB 롤백으로 지우지 않는 절차가 시험된다.
+- [ ] 새 표가 백업·복구되고, unknown을 DB 롤백으로 지우지 않는 절차가 시험된다. 마이그레이션 전진 복구·Worker 이전 버전 롤백·호환 창·격리 복구가 구분된다.
+- [ ] 기존 화면 제거는 별도 사용자 확인·최소 보존 기간·실제 사용 중단 확인을 거치고, 미승인 시 보존·백로그로 남는다.
 - [ ] 공개 저장소에 실제 자료·토큰·계정 식별자 0건, Windows/Mac 시험 기록이 있다.
 
 **지킬 것**
