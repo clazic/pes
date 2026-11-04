@@ -1,4 +1,5 @@
 """scripts/serve.py: 답 수신·거부·미처리 답 유지·상태 응답을 실제 서버 프로세스로 고정한다."""
+import builtins
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,10 @@ from conftest import GUARD, ROOT
 
 SERVE = ROOT / "scripts" / "serve.py"
 MAX_BODY = 256 * 1024
+HTTP_TIMEOUT = 30
+# 배리어는 HTTP 타임아웃보다 훨씬 짧게 둔다. 결함을 잠금으로 직렬화한 서버에서도
+# 첫 요청이 잠깐 기다린 뒤 정상 진행해 모든 요청이 끝나야 한다 (SEL-31 수정 대비).
+BARRIER_TIMEOUT = 3
 
 # 충돌 재현용: 서버 안에서만 시각을 고정하고 같은 후보 파일의 exists() 구간에
 # 배리어를 넣어, 경쟁이 우연에 기대지 않게 만든다 (제품 코드는 건드리지 않는다).
@@ -37,15 +42,27 @@ def _free_port():
         return sock.getsockname()[1]
 
 
-def _collision_injection(directory, name, count):
+def _collision_injection(directory, name, count, serialize=False):
     """serve.py 를 띄운 자식 프로세스에만 적용하는 테스트용 동기화 주입."""
+    serialized = """
+# 직렬화된(고친) 서버 양성 대조: 한 번에 한 요청만 처리하도록 잠금을 건다.
+import http.server as _race_http
+import threading as _race_lock_threading
+_race_http.HTTPServer.request_queue_size = 64
+_race_handler_lock = _race_lock_threading.Lock()
+_race_handle_one = _race_http.BaseHTTPRequestHandler.handle_one_request
+def _race_serialized(self):
+    with _race_handler_lock:
+        return _race_handle_one(self)
+_race_http.BaseHTTPRequestHandler.handle_one_request = _race_serialized
+""" if serialize else ""
     return '''
 # ---- SEL-13 test-only: deterministic same-second feedback filename race ----
 import os as _race_os
 import threading as _race_threading
 import time as _race_time
 from pathlib import Path as _RacePath
-
+%(serialized)s
 _race_time.strftime = lambda *_args, **_kwargs: %(ts)r
 _race_dir = %(directory)r
 _race_name = %(name)r
@@ -63,21 +80,22 @@ def _race_exists(self):
     if not candidate:
         return _race_original_exists(self)
     try:
-        _race_first.wait(timeout=30)
+        _race_first.wait(timeout=%(barrier)d)
         found = _race_original_exists(self)
-        _race_second.wait(timeout=30)
+        _race_second.wait(timeout=%(barrier)d)
         return found
     except _race_threading.BrokenBarrierError:
         return _race_original_exists(self)
 
 _RacePath.exists = _race_exists
-''' % {"ts": COLLISION_TS, "directory": str(directory), "name": name, "count": count}
+''' % {"serialized": serialized, "ts": COLLISION_TS, "directory": str(directory),
+       "name": name, "count": count, "barrier": BARRIER_TIMEOUT}
 
 
 class Server:
     """테스트가 띄운 serve.py 프로세스 하나. 이 프로세스만 종료한다."""
 
-    def __init__(self, root, workdir, collision=None):
+    def __init__(self, root, workdir, collision=None, serialize=False):
         self.root = Path(root).resolve()
         self.project = self.root / "synthetic"
         self.workdir = Path(workdir)
@@ -85,7 +103,7 @@ class Server:
         self.startup.mkdir(parents=True)
         script = GUARD
         if collision is not None:
-            script += _collision_injection(*collision)
+            script += _collision_injection(*collision, serialize=serialize)
         (self.startup / "sitecustomize.py").write_text(script, encoding="utf-8")
         self.log_path = self.workdir / "serve.log"
         self.port = None
@@ -168,7 +186,7 @@ class Server:
         request = urllib.request.Request(self.url(path), data=data, method=method,
                                          headers=headers or {})
         try:
-            with urllib.request.urlopen(request, timeout=15) as response:
+            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
                 return response.status, response.read()
         except urllib.error.HTTPError as error:
             return error.code, error.read()
@@ -219,6 +237,21 @@ def collision_server(isolated_home, tmp_path):
     directory = root / "synthetic" / "feedback"
     instance = Server(root, tmp_path / "collision",
                       collision=(str(directory), COLLISION_NAME, COLLISION_COUNT))
+    try:
+        instance.start()
+        yield instance
+    finally:
+        instance.stop()
+
+
+@pytest.fixture
+def serialized_collision_server(isolated_home, tmp_path):
+    """결함을 직렬화로 고친 서버를 흉내 낸 양성 대조용 서버."""
+    root = _make_home(isolated_home)
+    directory = root / "synthetic" / "feedback"
+    instance = Server(root, tmp_path / "serialized",
+                      collision=(str(directory), COLLISION_NAME, COLLISION_COUNT),
+                      serialize=True)
     try:
         instance.start()
         yield instance
@@ -381,19 +414,53 @@ def test_version_ping_and_whoami(server):
 @pytest.mark.parametrize("failure", ["timeout", "early_exit", "spawn_error"])
 def test_start_failure_terminates_child_and_closes_log(isolated_home, tmp_path, monkeypatch, failure):
     instance = Server(_make_home(isolated_home), tmp_path / "broken-start")
+    children = []
+    handles = []
+    real_popen = subprocess.Popen
+    real_open = builtins.open
+
+    def recording_popen(*args, **kwargs):
+        if failure == "spawn_error":
+            raise OSError("spawn failed")
+        proc = real_popen(*args, **kwargs)
+        children.append(proc)
+        return proc
+
+    def recording_open(file, *args, **kwargs):
+        handle = real_open(file, *args, **kwargs)
+        try:
+            is_log = os.fspath(file) == os.fspath(instance.log_path)
+        except TypeError:
+            is_log = False
+        if is_log:
+            handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(subprocess, "Popen", recording_popen)
+    monkeypatch.setattr(builtins, "open", recording_open)
     if failure == "timeout":
         monkeypatch.setattr(Server, "_wait_ready", lambda self: False)
     elif failure == "early_exit":
         monkeypatch.setattr(sys.modules[__name__], "SERVE", tmp_path / "missing-serve.py")
-    else:
-        def broken_popen(*args, **kwargs):
-            raise OSError("spawn failed")
-        monkeypatch.setattr(subprocess, "Popen", broken_popen)
 
-    with pytest.raises(RuntimeError):
-        instance.start()
-    assert instance.proc is None
-    assert instance._log is None
+    try:
+        with pytest.raises(RuntimeError):
+            instance.start()
+        # 참조를 비운 것뿐 아니라 실제 자식 종료·핸들 닫힘까지 확인한다.
+        assert len(children) == (0 if failure == "spawn_error" else 3)
+        assert all(proc.poll() is not None for proc in children)
+        assert len(handles) == 3
+        assert all(handle.closed for handle in handles)
+        assert instance.proc is None
+        assert instance._log is None
+    finally:
+        for proc in children:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+        for handle in handles:
+            if not handle.closed:
+                handle.close()
 
 
 def _submit_concurrently(server, count):
@@ -420,20 +487,17 @@ def _submit_concurrently(server, count):
     return responses, failures, [thread for thread in threads if thread.is_alive()]
 
 
-@pytest.mark.xfail(strict=True, raises=AnswerLoss, reason=(
-    "serve.py:140-145 파일 이름이 초 단위라 같은 초에 동시에 들어온 답이 "
-    "같은 파일을 덮어써 답이 유실된다 (테스트 전용 배리어로 재현을 고정)"))
-def test_simultaneous_submissions_do_not_lose_answers(collision_server):
-    responses, failures, alive = _submit_concurrently(collision_server, COLLISION_COUNT)
-
-    # 답 유실과 무관한 회귀(HTTP 500·스레드 오류·응답 누락)는 xfail 이 삼키지 않는다.
+def _assert_requests_ok(responses, failures, alive, count):
+    """전송·스레드·HTTP 응답은 xfail 범위 밖에서 단언한다."""
     assert not alive
     assert not failures, failures
-    assert len(responses) == COLLISION_COUNT, responses
+    assert len(responses) == count, responses
     assert all(status == 200 and isinstance(body, dict) and body.get("ok") is True
                for _, status, body in responses), responses
 
-    files = _answers(collision_server)
+
+def _answer_loss(files, count):
+    """답 파일 수와 저장된 답 내용이 기대와 다르면 설명을, 아니면 None 을 돌려준다."""
     texts = set()
     corrupt = []
     for path in files:
@@ -442,7 +506,36 @@ def test_simultaneous_submissions_do_not_lose_answers(collision_server):
         except (OSError, ValueError, KeyError) as error:
             # 같은 파일에 동시에 쓴 결과가 깨진 JSON 으로 남는 것도 이 결함의 일부다.
             corrupt.append(f"{path.name}: {error}")
-    expected = {f"동시 답 {index}" for index in range(COLLISION_COUNT)}
-    if len(files) != COLLISION_COUNT or texts != expected or corrupt:
-        raise AnswerLoss("같은 초 동시 제출로 답이 유실됨: 응답 %d개, 파일 %d개, 깨진 파일 %s"
-                         % (COLLISION_COUNT, len(files), corrupt or "없음"))
+    expected = {f"동시 답 {index}" for index in range(count)}
+    if len(files) != count or texts != expected or corrupt:
+        return "응답 %d개, 파일 %d개, 깨진 파일 %s" % (count, len(files), corrupt or "없음")
+    return None
+
+
+@pytest.mark.xfail(strict=True, raises=AnswerLoss, reason=(
+    "serve.py:140-145 파일 이름이 초 단위라 같은 초에 동시에 들어온 답이 "
+    "같은 파일을 덮어써 답이 유실된다 (테스트 전용 배리어로 재현을 고정)"))
+def test_simultaneous_submissions_do_not_lose_answers(collision_server):
+    responses, failures, alive = _submit_concurrently(collision_server, COLLISION_COUNT)
+
+    # 답 유실과 무관한 회귀(HTTP 500·스레드 오류·응답 누락)는 xfail 이 삼키지 않는다.
+    _assert_requests_ok(responses, failures, alive, COLLISION_COUNT)
+
+    loss = _answer_loss(_answers(collision_server), COLLISION_COUNT)
+    if loss is not None:
+        raise AnswerLoss("같은 초 동시 제출로 답이 유실됨: " + loss)
+
+
+def test_collision_check_passes_when_server_serializes(serialized_collision_server):
+    """결함을 잠금 등으로 직렬화해 고친 서버에서는 이 검사가 통과해야 한다.
+
+    배리어 대기(BARRIER_TIMEOUT)가 HTTP 타임아웃보다 짧아야 첫 요청이 멈춰 선 채
+    나머지 요청이 전송 오류로 끝나지 않는다. 여기서는 자식 서버를 단일 스레드로
+    바꿔 '직렬화된 서버'를 흉내 낸다 (제품 코드는 바꾸지 않는다).
+    """
+    responses, failures, alive = _submit_concurrently(serialized_collision_server,
+                                                      COLLISION_COUNT)
+    _assert_requests_ok(responses, failures, alive, COLLISION_COUNT)
+    files = _answers(serialized_collision_server)
+    assert _answer_loss(files, COLLISION_COUNT) is None
+    assert len({path.name for path in files}) == COLLISION_COUNT
