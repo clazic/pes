@@ -6,6 +6,7 @@ desktop.ini
 # Python
 __pycache__/
 *.pyc
+.venv/
 
 # 편집기
 .vscode/
