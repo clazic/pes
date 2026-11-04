@@ -21,8 +21,8 @@
 - `scripts/pes.py`는 항상 `PES_HOME=<임시>/home`으로 실행했다. `PES_HOME`이 설정되면 `pes.py`는
   `~/.pes/config.json`을 읽지 않는다(`scripts/pes.py:77-86`).
 - `scripts/serve.py`는 `trusted_origins`를 `Path.home()/.pes/config.json`에서 읽는다
-  (`scripts/serve.py:31-38`). 실제 홈을 읽지 않도록 **서버 프로세스의 `HOME`도 `<임시>/home`으로** 바꿨다.
-  실행 전후 실제 `~/.pes/config.json`의 atime이 바뀌지 않았다(참고 증거).
+  (`scripts/serve.py:31-38`). **서버 프로세스의 `HOME`도 `<임시>/home`으로** 바꿨다.
+  실제 `~/.pes`를 읽었는지는 별도 계측하지 않았다(미확인). 코드상 서버의 홈 경로는 임시 홈이다.
 - `claude -p`는 인증 때문에 실제 `HOME`을 그대로 썼다. `~/.claude` 설정 파일은 바꾸지 않았다.
   (Claude Code가 평소처럼 세션 기록을 `~/.claude` 아래에 남겼을 수는 있다.)
 
@@ -36,7 +36,8 @@
   `Edit(//<임시>/home/proj/**)` — 프로젝트 폴더 아래만.
 - 파일 도구 거부: `project.json`, `.pes-lock`의 Write/Edit(절대·상대 경로 규칙 모두).
 - `--add-dir`로 저장소 `scripts/`를 열지 않았다. 에이전트는 래퍼를 통해 PES를 실행하고,
-  래퍼가 저장소의 `scripts/pes.py`를 실행한다. 따라서 에이전트 도구 권한으로 제품 코드를 읽거나 쓸 수 없다.
+  래퍼가 저장소의 `scripts/pes.py`를 실행한다. 따라서 에이전트 도구 권한으로 제품 코드를 **쓸 수 없다**
+  (쓰기 거부는 permission probe에서 확인). 루트 밖 **읽기** 거부는 이번 탐침 항목에 넣지 않았다(미시험).
 - `--dangerously-skip-permissions`는 쓰지 않았다.
 - `--max-turns 30`은 2.1.317에서 정상 동작했다.
 
@@ -95,16 +96,18 @@
 
 ### 2.1 1라운드 (새 세션)
 
-- 호출: `command claude -p "<지시>" --model claude-sonnet-5-5 --max-turns 30 --output-format json`
-  (하네스는 `shutil.which("claude")`의 절대 경로로 실행해 셸 함수를 피했다.)
+- 호출: `claude -p "<지시>" --model claude-sonnet-5-5 --max-turns 30 --output-format json`
+  (하네스는 PATH에서 `claude`를 찾아 실행한다. `shutil.which`를 쓰지 않는다.)
+  - `--allowedTools "Bash(<임시>/bin/pes:*)" "Read(//<임시>/home/proj/**)" "Write(//<임시>/home/proj/**)" "Edit(//<임시>/home/proj/**)"`
+  - `--disallowedTools "Write(//<임시>/home/proj/project.json)" "Edit(//<임시>/home/proj/project.json)"` 등(0.2절)
 - 권한: 0.2절의 경로 한정 규칙. 환경: `PES_HOME=<임시>/home`, `PES_OWNER=agent-a`,
   작업 디렉터리 `<임시>/home/proj`.
 - 에이전트가 실제로 부른 PES CLI(순서대로):
   `lock` → `status` → `merge plan result-r1.json` → `render plan` → `ask-prep plan` → `ask ask/plan-start.json` → `status`
 - 결과: `result-r1.json` 생성, 기획 항목 id 1, `index.html`, `ask-plan-start.html` 생성.
   9턴, `duration_ms` 26.4초, `duration_api_ms` 25.5초, 비용 $0.2725, 권한 거부 0회.
-- `project.json` 해시는 바뀌었고, 래퍼가 기록한 `lock`·`merge`·`ask` 호출의 전후 해시와 일치했다.
-  래퍼 호출 사이의 해시 단절은 없었다.
+- `project.json` 해시는 r1에서 `merge` 호출에서만 바뀌었고(`lock`·`ask`는
+  `project_json_changed: false`), 래퍼 호출 사이의 해시 단절은 없었다.
 
 ### 2.2 사람 답 흉내와 `--resume`
 
@@ -219,7 +222,7 @@ HTTP 정본 + stdio MCP 브리지 방향과 맞는다.
 
 | 1단계 도구(안) | 이번 시험의 현행 대응 | 시사점 |
 |---|---|---|
-| `pes_context(project, stage, round, items?)` | `pes.py status`(텍스트), `pending`(경로 목록) | 상태·미처리 답·다음 할 일을 **구조화된 digest + 정확한 버전**으로 한 번에 줘야 한다. 지금은 에이전트가 `status`와 `pending`을 따로 부르고, `project.json`을 읽지 않도록 권한으로 막아야 했다. |
+| `pes_context(project, stage, round, items?)` | `pes.py status`(텍스트), `pending`(경로 목록) | 상태·미처리 답·다음 할 일을 **구조화된 digest + 정확한 버전**으로 한 번에 줘야 한다. 지금은 에이전트가 `status`와 `pending`을 따로 부르고, `project.json`을 직접 쓰지 않도록 권한으로 막아야 했다. |
 | `pes_claim(project, stage, items[])` → `run_id`+lease | `pes.py lock`(2시간 파일 잠금) | `run_id`·lease·fence가 없고 독립 heartbeat도 없다. 프로세스가 죽으면 2시간 뒤에야 풀리며 `--force`는 감사 흔적이 약하다. claim은 "run 전이 + lease 획득"을 원자적으로 해야 한다. |
 | `pes_submit(run_id, item_id, result, idempotency_key)` | `pes.py merge`(JSON 파일 병합) | `merge`는 임의 JSON을 받아 항목을 만들고, `rev`·`idempotency_key`·기준 버전 검사가 없다. 같은 결과를 두 번 제출하면 중복 항목이 생길 수 있다. 제출은 작은 원자 묶음 + 멱등 키 + expected rev가 필요하다. |
 | `pes_ask(run_id, questions[])` → `question_ids` | `ask-prep` + `ask`(질문 은행 복사, HTML 생성) | 질문 ID·버전·답 검증이 파일/HTML에 묶여 있다. PES 질문을 원본으로 두고, 실행 권한·폼 질문은 별도로 중계하는 1단계 결정이 타당하다. |
@@ -278,6 +281,13 @@ Claude 앱은 실행하지 않았다. 아래는 2026-11-05에 확인한 공개 �
 - MCP 서버를 만들지 않았고 CLI 래퍼로 시험했다. MCP 도구의 권한 UI·long-poll 동작은 **미확인**.
 - 답의 의미 반영(`settings` 저장)과 `/pes:run`·스킬 전체 준수는 검증하지 않았다(3절 3번).
 - 권한 한정은 Claude Code 도구 규칙 + 래퍼 검증이지 OS sandbox가 아니다(3절 6번).
+- 루트 밖 `Read`/`Glob`/`Grep` 거부는 permission probe 항목에 넣지 않았다(미시험).
+  이번에 실제로 확인한 것은 쓰기 거부와 Bash 래퍼 한정이다.
+- `--permission-mode`와 설정 원천을 고정하지 않았다. 실행자 `~/.claude` 설정에 넓은 allow 규칙이나
+  `defaultMode`가 있으면 경로 한정이 약해질 수 있다. 이번에는 permission probe가 먼저 실패하면
+  본 시험이 중단되게 했지만, 다른 환경에서의 재현성은 **미확인**이다.
+- `run_spike.py`는 시작할 때 **본 시험 로그만** 지우고 탐침 로그는 보존한다. 모든 원자료를
+  새로 만들려면 본 시험 뒤 `probe_continue.py`·`probe_lock_agent.py`를 다시 실행해야 한다.
 - Python 3.9 실행 호환성은 미검증이다(3절 7번).
 - 비용은 `claude -p` JSON의 `total_cost_usd` 합계다. 실제 청구와 다를 수 있다.
 
@@ -286,4 +296,4 @@ Claude 앱은 실행하지 않았다. 아래는 2026-11-05에 확인한 공개 �
 - 시험용 `serve.py`는 종료했고, 포트 54339에 리스너가 없음을 확인했다.
 - 각 `claude -p`는 호출이 끝나며 종료됐고, 시험용으로 남은 프로세스는 없다.
 - 임시 디렉터리는 지웠다. 저장소에는 자리표시로 정리한 로그만 남겼다.
-- 실제 `~/pes-projects`, `~/.pes`는 사용하지 않았다. 서버 `HOME`도 임시 홈으로 격리했다.
+- `PES_HOME`과 서버 `HOME`을 임시 홈으로 두었다. 실제 `~/.pes` 읽기 여부는 별도 계측하지 않았다(미확인).

@@ -38,6 +38,11 @@ Claude Code 터미널 에이전트가 PES와 파일·CLI·HTTP로 왕복하고, 
 - `--dangerously-skip-permissions`는 쓰지 않는다.
 - `--restricted` 모드는 호출당 캐시 생성이 크게 늘어(이 환경에서 약 $2/호출) 쓰지 않았다.
   대신 경로 한정 `--allowedTools`/`--disallowedTools`로 같은 목적을 달성했다.
+- `--permission-mode`와 설정 원천은 고정하지 않았다. 실행자 `~/.claude` 설정에 넓은 allow 규칙이나
+  `defaultMode`가 있으면 한정이 약해질 수 있다. 이 경우 permission probe가 먼저 실패해 본 시험이
+  중단되도록 했지만, 다른 환경에서의 재현성은 **미확인**이다.
+- 루트 밖 `Read`/`Glob`/`Grep` 거부는 이번 탐침에 넣지 않았다(미시험). 확인한 것은 쓰기 거부와
+  Bash 래퍼 한정이다.
 
 ## 실행
 
@@ -54,7 +59,8 @@ python3 docs/plan/spikes/mode-b/run_spike.py
 - `--continue`의 대화 연속성만 따로 보려면 `python3 docs/plan/spikes/mode-b/probe_continue.py`.
 - agent-b Claude 호출의 잠금 거부 동작만 따로 보려면
   `python3 docs/plan/spikes/mode-b/probe_lock_agent.py`.
-- `PES_HOME`은 항상 임시 디렉터리다. 실제 `~/pes-projects`, `~/.pes`는 읽거나 쓰지 않는다.
+- `PES_HOME`은 항상 임시 디렉터리다. 서버 `HOME`도 임시 홈으로 두어 실제 `~/pes-projects`,
+  `~/.pes`를 쓰지 않도록 한다. 실제 `~/.pes` 읽기 여부는 별도 계측하지 않았다(미확인).
 - `PES_OWNER`는 4~6번 호출이 `agent-a`, 잠금 시험이 `agent-b`다.
 
 ## 결과
@@ -66,6 +72,10 @@ python3 docs/plan/spikes/mode-b/run_spike.py
 - `logs/continue-probe.json`·`logs/continue-probe.log`: `--continue` 세션 연속성 탐침
 - `logs/lock-agent-probe.json`·`logs/lock-agent-probe.log`: agent-b 잠금 호출의 실제 exit·출력·소유자·해시
 - `logs/summary.json`: 검사 목록, 산출물, 잠금 CLI 결과, 최종 exit
+
+`run_spike.py`는 시작할 때 **본 시험 로그만** 지우고 `continue-probe.*`·`lock-agent-probe.*`는
+보존한다. 모든 원자료를 새로 만들려면 본 시험 뒤 `probe_continue.py`·`probe_lock_agent.py`를
+다시 실행한다.
 
 해석과 결론은 [`../mode-b-tui.md`](../mode-b-tui.md)에 적는다.
 

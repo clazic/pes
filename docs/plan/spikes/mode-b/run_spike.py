@@ -5,10 +5,12 @@
 Claude Code 비대화형(-p) 세션으로 공통 시나리오 한 라운드 + 재개 + 잠금을 시험한다.
 
 핵심 안전장치:
-- Claude Code 권한은 `--restricted` + cwd(프로젝트 폴더)로 묶는다. 파일 도구는 cwd 밖으로
-  나갈 수 없고, `project.json`/`.pes-lock` 직접 Write/Edit는 명시적으로 거부한다.
-- Bash는 `<임시>/bin/pes` 검증 래퍼만 허용한다. 래퍼는 허용 명령·시험 루트 안 경로만 실행하고
-  호출별 exit/stdout/stderr/project.json 전후 해시를 기록한다.
+- Claude Code 권한은 경로 한정 `--allowedTools`/`--disallowedTools`로 묶는다. Bash는
+  `<임시>/bin/pes` 검증 래퍼만, 파일 도구는 프로젝트 폴더 아래만 허용하고,
+  `project.json`/`.pes-lock` 직접 Write/Edit는 명시적으로 거부한다.
+  (`--restricted`는 프롬프트 캐시 비용이 크게 늘어 쓰지 않는다.)
+- 래퍼는 허용 명령·시험 루트 안 경로만 실행하고 호출별 exit/stdout/stderr/project.json
+  전후 해시를 기록한다.
 - 각 단계의 기대값을 검사하고, 하나라도 실패하면 비영(1)으로 끝난다. 실패한 선행 단계 뒤의
   유료 호출은 중단한다.
 - 서버·Claude 자식 프로세스는 finally에서 프로세스 그룹으로 회수하고 포트가 비었는지 확인한다.
@@ -213,9 +215,13 @@ def main():
 
     try:
         (temp / "logs").mkdir(parents=True, exist_ok=True)
-        for old in LOGS.glob("*"):
-            if old.is_file():
-                old.unlink()
+        # 본 시험이 만드는 로그만 지운다. 별도 탐침(continue/lock)의 원자료는 보존한다.
+        for name in ("run.log", "summary.json", "pes-calls.log",
+                     "permission-probe.json", "permission-probe.log",
+                     "claude-permission-probe.json"):
+            (LOGS / name).unlink(missing_ok=True)
+        for old in LOGS.glob("claude-r*.json"):
+            old.unlink(missing_ok=True)
         log.add("임시 디렉터리 생성: <임시> (PES_HOME=<임시>/home, 프로젝트=<임시>/home/proj)")
 
         env = os.environ.copy()
