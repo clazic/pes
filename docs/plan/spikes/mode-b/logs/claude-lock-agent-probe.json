@@ -1,0 +1,40 @@
+{
+ "name": "lock-agent-probe",
+ "exit": 0,
+ "timed_out": false,
+ "duration_ms": 8861,
+ "project_json_before": "d635e516f82a9d74",
+ "project_json_after": "d635e516f82a9d74",
+ "project_json_changed": false,
+ "pes_calls": [
+  {
+   "time": "2026-11-05T03:53:37",
+   "owner": "agent-b",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "lock",
+    "<임시>/home/proj"
+   ],
+   "exit": 3,
+   "stdout": "",
+   "stderr": "다른 세션이 사용 중: agent-a… (2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n",
+   "duration_ms": 51,
+   "project_json_before": "d635e516f82a9d74",
+   "project_json_after": "d635e516f82a9d74",
+   "project_json_changed": false
+  }
+ ],
+ "claude": {
+  "session_id": "<session-5>",
+  "num_turns": 2,
+  "duration_ms": 7613,
+  "duration_api_ms": 7127,
+  "total_cost_usd": 0.20316240000000002,
+  "is_error": false,
+  "subtype": "success",
+  "stop_reason": "end_turn",
+  "permission_denials": [],
+  "result": "**결과: 락 획득 실패.**\n\n- 종료 코드: `3`\n- 출력: `다른 세션이 사용 중: agent-a… (2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force`\n\nagent-a 세션이 이미 이 프로젝트의 락을 잡고 있어서 agent-b는 락을 얻지 못했습니다. 규칙에 따라 `--force`는 쓰지 않았고, 파일도 수정하지 않았습니다."
+ },
+ "stderr": ""
+}

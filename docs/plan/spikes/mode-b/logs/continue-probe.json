@@ -1,0 +1,49 @@
+{
+ "ok": true,
+ "checks": [
+  {
+   "name": "first_exit",
+   "status": "pass",
+   "detail": "exit=0"
+  },
+  {
+   "name": "second_exit",
+   "status": "pass",
+   "detail": "exit=0"
+  },
+  {
+   "name": "same_session",
+   "status": "pass",
+   "detail": "<session-6> / <session-6>"
+  },
+  {
+   "name": "word_recalled",
+   "status": "pass",
+   "detail": "'BANANA-7731'"
+  }
+ ],
+ "word": "BANANA-7731",
+ "first": {
+  "exit": 0,
+  "timed_out": false,
+  "stderr": "",
+  "session_id": "<session-6>",
+  "num_turns": 1,
+  "duration_ms": 4712,
+  "total_cost_usd": 0.0016174000000000002,
+  "is_error": false,
+  "result": "OK"
+ },
+ "second": {
+  "exit": 0,
+  "timed_out": false,
+  "stderr": "",
+  "session_id": "<session-6>",
+  "num_turns": 1,
+  "duration_ms": 5807,
+  "total_cost_usd": 0.0034368000000000003,
+  "is_error": false,
+  "result": "BANANA-7731"
+ },
+ "continued": true
+}

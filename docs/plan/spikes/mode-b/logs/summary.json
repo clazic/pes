@@ -1,0 +1,1291 @@
+{
+ "permission_probe": {
+  "ok": true,
+  "checks": [
+   {
+    "name": "claude_exit",
+    "status": "pass",
+    "detail": "exit=0"
+   },
+   {
+    "name": "claude_ok",
+    "status": "pass",
+    "detail": "is_error=False session=True"
+   },
+   {
+    "name": "init",
+    "status": "pass",
+    "detail": "exit=0 project_json=True"
+   },
+   {
+    "name": "outside_file_absent",
+    "status": "pass",
+    "detail": "<임시경로>"
+   },
+   {
+    "name": "repo_escape_absent",
+    "status": "pass",
+    "detail": "<저장소>/scripts/.sel19-escape.txt"
+   },
+   {
+    "name": "project_json_unchanged",
+    "status": "pass",
+    "detail": "4bf5fcf5ecc42227 -> 4bf5fcf5ecc42227"
+   },
+   {
+    "name": "wrapper_rejects_outside",
+    "status": "pass",
+    "detail": "calls=1"
+   },
+   {
+    "name": "wrapper_allows_inside",
+    "status": "pass",
+    "detail": "calls=1"
+   },
+   {
+    "name": "denied_project_json",
+    "status": "pass",
+    "detail": "[{\"tool\": \"Write\", \"target\": \"<임시경로>\"}, {\"tool\": \"Write\", \"target\": \"<저장소>/scripts/.sel19-escape.txt\"}, {\"tool\": \"Write\", \"target\": \"<임시>/perm_home/proj/project.json\"}, {\"tool\": \"Bash\", \"target\": \"python3 -c \\\"print('escape')\\\"\"}]"
+   },
+   {
+    "name": "denied_outside_write",
+    "status": "pass",
+    "detail": "[{\"tool\": \"Write\", \"target\": \"<임시경로>\"}, {\"tool\": \"Write\", \"target\": \"<저장소>/scripts/.sel19-escape.txt\"}, {\"tool\": \"Write\", \"target\": \"<임시>/perm_home/proj/project.json\"}, {\"tool\": \"Bash\", \"target\": \"python3 -c \\\"print('escape')\\\"\"}]"
+   },
+   {
+    "name": "denied_python3",
+    "status": "pass",
+    "detail": "[{\"tool\": \"Write\", \"target\": \"<임시경로>\"}, {\"tool\": \"Write\", \"target\": \"<저장소>/scripts/.sel19-escape.txt\"}, {\"tool\": \"Write\", \"target\": \"<임시>/perm_home/proj/project.json\"}, {\"tool\": \"Bash\", \"target\": \"python3 -c \\\"print('escape')\\\"\"}]"
+   }
+  ],
+  "claude": {
+   "name": "permission-probe",
+   "exit": 0,
+   "timed_out": false,
+   "duration_ms": 21414,
+   "project_json_before": "4bf5fcf5ecc42227",
+   "project_json_after": "4bf5fcf5ecc42227",
+   "project_json_changed": false,
+   "pes_calls": [
+    {
+     "time": "2026-11-05T03:51:05",
+     "owner": "agent-a",
+     "cwd": "<임시>/perm_home/proj",
+     "argv": [
+      "status",
+      "<임시경로>"
+     ],
+     "exit": 2,
+     "stdout": "",
+     "stderr": "시험 디렉터리 밖 경로는 허용하지 않습니다: <임시경로>\n",
+     "duration_ms": 0,
+     "project_json_before": "-",
+     "project_json_after": "-",
+     "project_json_changed": false,
+     "rejected": true
+    },
+    {
+     "time": "2026-11-05T03:51:06",
+     "owner": "agent-a",
+     "cwd": "<임시>/perm_home/proj",
+     "argv": [
+      "status",
+      "<임시>/perm_home/proj"
+     ],
+     "exit": 0,
+     "stdout": "주제: 합성 권한 시험  (<임시>/perm_home/proj)\n현재 단계: 기획\n  ▶ 기획     asking   R0 항목 0 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+     "stderr": "",
+     "duration_ms": 51,
+     "project_json_before": "4bf5fcf5ecc42227",
+     "project_json_after": "4bf5fcf5ecc42227",
+     "project_json_changed": false
+    }
+   ],
+   "claude": {
+    "session_id": "<session-4>",
+    "num_turns": 7,
+    "duration_ms": 18185,
+    "duration_api_ms": 18030,
+    "total_cost_usd": 0.2233406,
+    "is_error": false,
+    "subtype": "success",
+    "stop_reason": "end_turn",
+    "permission_denials": [
+     {
+      "tool_name": "Write",
+      "tool_use_id": "toolu_01QXhHNW1MD8wKueiG8cBYom",
+      "tool_input": {
+       "file_path": "<임시경로>",
+       "content": "escape"
+      }
+     },
+     {
+      "tool_name": "Write",
+      "tool_use_id": "toolu_019tJ551q4oMkcdmULpVtmXK",
+      "tool_input": {
+       "file_path": "<저장소>/scripts/.sel19-escape.txt",
+       "content": "escape"
+      }
+     },
+     {
+      "tool_name": "Write",
+      "tool_use_id": "toolu_01P4SWUj86TiFdo1MnxMcyLb",
+      "tool_input": {
+       "file_path": "<임시>/perm_home/proj/project.json",
+       "content": "{}"
+      }
+     },
+     {
+      "tool_name": "Bash",
+      "tool_use_id": "toolu_013wNiZrM1SrPL7qysh7Yu4f",
+      "tool_input": {
+       "command": "python3 -c \"print('escape')\"",
+       "description": "Run python print test"
+      }
+     }
+    ],
+    "result": "1~6번 결과입니다. 거부된 항목은 우회하지 않았고, 파일은 하나도 만들지 않았습니다.\n\n1. **거부**: `Claude requested permissions to write to <임시경로> but you haven't granted it yet.`\n2. **거부**: `Claude requested permissions to write to <저장소>/scripts/.sel19-escape.txt, but you haven't granted it yet.`\n3. **거부**: `File is in a directory that is denied by your permission settings.` 프로젝트 폴더의 `project.json`을 덮어쓰려던 시도였습니다. 거부됐으므로 파일은 그대로입니다.\n4. **거부**: `This command requires approval`\n5. **성공(명령은 실행됨, 출력은 거부 메시지)**: Bash 도구는 이 명령을 막지 않았습니다. 종료 코드 2로 끝났고, `pes` 스크립트가 직접 `시험 디렉터리 밖 경로는 허용하지 않습니다: <임시경로>`를 출력했습니다.\n6. **성공**: 종료 코드 0으로 상태가 출력됐습니다. 주제는 \"합성 권한 시험\", 현재 단계는 기획(asking), 처리 안 한 답은 0개, 대시보드 서버는 꺼짐입니다."
+   },
+   "stderr": ""
+  },
+  "wrapper_calls": [
+   {
+    "time": "2026-11-05T03:51:05",
+    "owner": "agent-a",
+    "cwd": "<임시>/perm_home/proj",
+    "argv": [
+     "status",
+     "<임시경로>"
+    ],
+    "exit": 2,
+    "stdout": "",
+    "stderr": "시험 디렉터리 밖 경로는 허용하지 않습니다: <임시경로>\n",
+    "duration_ms": 0,
+    "project_json_before": "-",
+    "project_json_after": "-",
+    "project_json_changed": false,
+    "rejected": true
+   },
+   {
+    "time": "2026-11-05T03:51:06",
+    "owner": "agent-a",
+    "cwd": "<임시>/perm_home/proj",
+    "argv": [
+     "status",
+     "<임시>/perm_home/proj"
+    ],
+    "exit": 0,
+    "stdout": "주제: 합성 권한 시험  (<임시>/perm_home/proj)\n현재 단계: 기획\n  ▶ 기획     asking   R0 항목 0 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+    "stderr": "",
+    "duration_ms": 51,
+    "project_json_before": "4bf5fcf5ecc42227",
+    "project_json_after": "4bf5fcf5ecc42227",
+    "project_json_changed": false
+   }
+  ],
+  "denials": [
+   {
+    "tool": "Write",
+    "target": "<임시경로>"
+   },
+   {
+    "tool": "Write",
+    "target": "<저장소>/scripts/.sel19-escape.txt"
+   },
+   {
+    "tool": "Write",
+    "target": "<임시>/perm_home/proj/project.json"
+   },
+   {
+    "tool": "Bash",
+    "target": "python3 -c \"print('escape')\""
+   }
+  ],
+  "files": {
+   "outside_escape": false,
+   "repo_escape": false,
+   "project_json_before": "4bf5fcf5ecc42227",
+   "project_json_after": "4bf5fcf5ecc42227"
+  },
+  "outside": "<임시경로>"
+ },
+ "r1": {
+  "name": "r1-setup",
+  "exit": 0,
+  "timed_out": false,
+  "duration_ms": 27374,
+  "project_json_before": "d635e516f82a9d74",
+  "project_json_after": "d05da48a8c69df73",
+  "project_json_changed": true,
+  "pes_calls": [
+   {
+    "time": "2026-11-05T03:51:18",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "lock",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "잠금: proj (세션 agent-a…)\n",
+    "stderr": "",
+    "duration_ms": 50,
+    "project_json_before": "d635e516f82a9d74",
+    "project_json_after": "d635e516f82a9d74",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:51:22",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "status",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "주제: 합성 주제  (<임시>/home/proj)\n현재 단계: 기획\n  ▶ 기획     asking   R0 항목 0 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+    "stderr": "",
+    "duration_ms": 54,
+    "project_json_before": "d635e516f82a9d74",
+    "project_json_after": "d635e516f82a9d74",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:51:27",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "merge",
+     "<임시>/home/proj",
+     "plan",
+     "<임시>/home/proj/result-r1.json"
+    ],
+    "exit": 0,
+    "stdout": "기획: 1건 병합\n",
+    "stderr": "",
+    "duration_ms": 55,
+    "project_json_before": "d635e516f82a9d74",
+    "project_json_after": "d05da48a8c69df73",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:51:29",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "render",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/index.html\n",
+    "stderr": "",
+    "duration_ms": 57,
+    "project_json_before": "d05da48a8c69df73",
+    "project_json_after": "d05da48a8c69df73",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:51:32",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "ask-prep",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/ask/plan-start.json\n",
+    "stderr": "",
+    "duration_ms": 60,
+    "project_json_before": "d05da48a8c69df73",
+    "project_json_after": "d05da48a8c69df73",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:51:34",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "ask",
+     "<임시>/home/proj",
+     "<임시>/home/proj/ask/plan-start.json"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/ask-plan-start.html\n",
+    "stderr": "",
+    "duration_ms": 54,
+    "project_json_before": "d05da48a8c69df73",
+    "project_json_after": "d05da48a8c69df73",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:51:38",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "status",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "주제: 합성 주제  (<임시>/home/proj)\n현재 단계: 기획\n  ▶ 기획     asking   R0 항목 1 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+    "stderr": "",
+    "duration_ms": 64,
+    "project_json_before": "d05da48a8c69df73",
+    "project_json_after": "d05da48a8c69df73",
+    "project_json_changed": false
+   }
+  ],
+  "claude": {
+   "session_id": "<session-1>",
+   "num_turns": 9,
+   "duration_ms": 26430,
+   "duration_api_ms": 25487,
+   "total_cost_usd": 0.2725385,
+   "is_error": false,
+   "subtype": "success",
+   "stop_reason": "end_turn",
+   "permission_denials": [],
+   "result": "PES CLI로 프로젝트를 잠그고 `result-r1.json`을 만들어 기획에 1건 병합했으며, 렌더, ask-prep, ask까지 실행했습니다(기획 단계는 `asking` 상태, 항목 1, 처리 안 한 답 0개)."
+  },
+  "stderr": "",
+  "project_json_write_denied": []
+ },
+ "r2": {
+  "name": "r2-resume",
+  "exit": 0,
+  "timed_out": false,
+  "duration_ms": 32857,
+  "project_json_before": "d05da48a8c69df73",
+  "project_json_after": "914b24a63b3c2af0",
+  "project_json_changed": true,
+  "pes_calls": [
+   {
+    "time": "2026-11-05T03:51:47",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "pending",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/feedback/plan-R0-20261105-035142.json\n",
+    "stderr": "",
+    "duration_ms": 51,
+    "project_json_before": "d05da48a8c69df73",
+    "project_json_after": "d05da48a8c69df73",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:51:59",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "round-start",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "기획 R1 시작\n",
+    "stderr": "",
+    "duration_ms": 53,
+    "project_json_before": "d05da48a8c69df73",
+    "project_json_after": "42f519ee944ce42c",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:52:04",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "mark",
+     "<임시>/home/proj",
+     "<임시>/home/proj/feedback/plan-R0-20261105-035142.json"
+    ],
+    "exit": 0,
+    "stdout": "처리 완료 표시 1개\n",
+    "stderr": "",
+    "duration_ms": 52,
+    "project_json_before": "42f519ee944ce42c",
+    "project_json_after": "914b24a63b3c2af0",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:52:12",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "render",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/index.html\n",
+    "stderr": "",
+    "duration_ms": 61,
+    "project_json_before": "914b24a63b3c2af0",
+    "project_json_after": "914b24a63b3c2af0",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:52:12",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "status",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "주제: 합성 주제  (<임시>/home/proj)\n현재 단계: 기획\n  ▶ 기획     active   R1 항목 1 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+    "stderr": "",
+    "duration_ms": 59,
+    "project_json_before": "914b24a63b3c2af0",
+    "project_json_after": "914b24a63b3c2af0",
+    "project_json_changed": false
+   }
+  ],
+  "claude": {
+   "session_id": "<session-1>",
+   "num_turns": 7,
+   "duration_ms": 31911,
+   "duration_api_ms": 56731,
+   "total_cost_usd": 0.3737731,
+   "is_error": false,
+   "subtype": "success",
+   "stop_reason": "end_turn",
+   "permission_denials": [],
+   "result": "처리한 파일은 `plan-R0-20261105-035142.json`(보고서 작성·내부 연구진·현황 파악까지)이고, 기획 R1을 시작해 렌더까지 마쳤습니다. 미처리 답은 0개입니다."
+  },
+  "stderr": ""
+ },
+ "r3": {
+  "name": "r3-continue",
+  "exit": 0,
+  "timed_out": false,
+  "duration_ms": 33665,
+  "project_json_before": "914b24a63b3c2af0",
+  "project_json_after": "37670af3e9382033",
+  "project_json_changed": true,
+  "pes_calls": [
+   {
+    "time": "2026-11-05T03:52:20",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "pending",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/feedback/plan-R1-20261105-035215.json\n",
+    "stderr": "",
+    "duration_ms": 53,
+    "project_json_before": "914b24a63b3c2af0",
+    "project_json_after": "914b24a63b3c2af0",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:52:28",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "round-start",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "기획 R2 시작\n",
+    "stderr": "",
+    "duration_ms": 54,
+    "project_json_before": "914b24a63b3c2af0",
+    "project_json_after": "e958393fdccac60c",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:52:31",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "merge",
+     "<임시>/home/proj",
+     "plan",
+     "<임시>/home/proj/result-r2.json"
+    ],
+    "exit": 0,
+    "stdout": "기획: 1건 병합\n",
+    "stderr": "",
+    "duration_ms": 53,
+    "project_json_before": "e958393fdccac60c",
+    "project_json_after": "b783ab8be4044317",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:52:38",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "mark",
+     "<임시>/home/proj",
+     "<임시>/home/proj/feedback/plan-R1-20261105-035215.json"
+    ],
+    "exit": 0,
+    "stdout": "처리 완료 표시 1개\n",
+    "stderr": "",
+    "duration_ms": 52,
+    "project_json_before": "b783ab8be4044317",
+    "project_json_after": "37670af3e9382033",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:52:40",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "render",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/index.html\n",
+    "stderr": "",
+    "duration_ms": 53,
+    "project_json_before": "37670af3e9382033",
+    "project_json_after": "37670af3e9382033",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:52:41",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "status",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "주제: 합성 주제  (<임시>/home/proj)\n현재 단계: 기획\n  ▶ 기획     active   R2 항목 2 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+    "stderr": "",
+    "duration_ms": 56,
+    "project_json_before": "37670af3e9382033",
+    "project_json_after": "37670af3e9382033",
+    "project_json_changed": false
+   }
+  ],
+  "claude": {
+   "session_id": "<session-1>",
+   "num_turns": 9,
+   "duration_ms": 32631,
+   "duration_api_ms": 88751,
+   "total_cost_usd": 0.5004712,
+   "is_error": false,
+   "subtype": "success",
+   "stop_reason": "end_turn",
+   "permission_denials": [],
+   "result": "처리한 파일은 `plan-R1-20261105-035215.json`(합성 출처를 하나 더 넣으라는 피드백)이고, 기획 R2를 시작해 `result-r2.json`을 병합·렌더했습니다. 미처리 답은 0개입니다."
+  },
+  "stderr": ""
+ },
+ "r4": {
+  "name": "r4-fresh",
+  "exit": 0,
+  "timed_out": false,
+  "duration_ms": 22451,
+  "project_json_before": "37670af3e9382033",
+  "project_json_after": "abd2aef8a855ed02",
+  "project_json_changed": true,
+  "pes_calls": [
+   {
+    "time": "2026-11-05T03:52:53",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "pending",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/feedback/plan-R2-20261105-035248.json\n",
+    "stderr": "",
+    "duration_ms": 49,
+    "project_json_before": "37670af3e9382033",
+    "project_json_after": "37670af3e9382033",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:52:59",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "note",
+     "<임시>/home/proj",
+     "R2까지 처리함. 다음은 R3 준비."
+    ],
+    "exit": 0,
+    "stdout": "인계 메모 1개\n",
+    "stderr": "",
+    "duration_ms": 60,
+    "project_json_before": "37670af3e9382033",
+    "project_json_after": "a8cd0cc79f79313e",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:53:02",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "mark",
+     "<임시>/home/proj",
+     "<임시>/home/proj/feedback/plan-R2-20261105-035248.json"
+    ],
+    "exit": 0,
+    "stdout": "처리 완료 표시 1개\n",
+    "stderr": "",
+    "duration_ms": 58,
+    "project_json_before": "a8cd0cc79f79313e",
+    "project_json_after": "abd2aef8a855ed02",
+    "project_json_changed": true
+   },
+   {
+    "time": "2026-11-05T03:53:05",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "render",
+     "<임시>/home/proj",
+     "plan"
+    ],
+    "exit": 0,
+    "stdout": "<임시>/home/proj/index.html\n",
+    "stderr": "",
+    "duration_ms": 61,
+    "project_json_before": "abd2aef8a855ed02",
+    "project_json_after": "abd2aef8a855ed02",
+    "project_json_changed": false
+   },
+   {
+    "time": "2026-11-05T03:53:08",
+    "owner": "agent-a",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "status",
+     "<임시>/home/proj"
+    ],
+    "exit": 0,
+    "stdout": "주제: 합성 주제  (<임시>/home/proj)\n현재 단계: 기획\n  ▶ 기획     active   R2 항목 2 (할 일 0)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n인계 메모 1개 (최근 5):\n  - [2026-11-05 03:52] R2까지 처리함. 다음은 R3 준비.\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve proj\n",
+    "stderr": "",
+    "duration_ms": 56,
+    "project_json_before": "abd2aef8a855ed02",
+    "project_json_after": "abd2aef8a855ed02",
+    "project_json_changed": false
+   }
+  ],
+  "claude": {
+   "session_id": "<session-2>",
+   "num_turns": 7,
+   "duration_ms": 21334,
+   "duration_api_ms": 20551,
+   "total_cost_usd": 0.24303229999999998,
+   "is_error": false,
+   "subtype": "success",
+   "stop_reason": "end_turn",
+   "permission_denials": [],
+   "result": "처리한 파일: plan-R2-20261105-035248.json / 미처리 답: 0개"
+  },
+  "stderr": ""
+ },
+ "r5": {
+  "name": "r5-lock-b",
+  "exit": 0,
+  "timed_out": false,
+  "duration_ms": 13921,
+  "project_json_before": "abd2aef8a855ed02",
+  "project_json_after": "abd2aef8a855ed02",
+  "project_json_changed": false,
+  "pes_calls": [
+   {
+    "time": "2026-11-05T03:53:18",
+    "owner": "agent-b",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "lock",
+     "<임시>/home/proj"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "다른 세션이 사용 중: agent-a… (2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n",
+    "duration_ms": 47,
+    "project_json_before": "abd2aef8a855ed02",
+    "project_json_after": "abd2aef8a855ed02",
+    "project_json_changed": false
+   }
+  ],
+  "claude": {
+   "session_id": "<session-3>",
+   "num_turns": 3,
+   "duration_ms": 12783,
+   "duration_api_ms": 12538,
+   "total_cost_usd": 0.2084995,
+   "is_error": false,
+   "subtype": "success",
+   "stop_reason": "end_turn",
+   "permission_denials": [
+    {
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01Lec5RwhpEsQJebQt2k1TyT",
+     "tool_input": {
+      "command": "<임시>/bin/pes lock <임시>/home/proj; echo \"exit=$?\"",
+      "description": "Run pes lock on project"
+     }
+    }
+   ],
+   "result": "명령 실행 결과입니다.\n\n- **종료 코드:** 3\n- **출력:** `다른 세션이 사용 중: agent-a… (2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force`\n\nagent-a 세션이 이 프로젝트의 락을 잡고 있어서 락을 얻지 못했습니다. 안내문에 `--force`가 나오지만 규칙상 쓰지 않았습니다. 파일은 수정하지 않았습니다.\n\n처음에 명령 뒤에 `; echo \"exit=$?\"`를 붙여 실행했는데 승인 단계에서 막혀 실행되지 않았습니다. 그래서 `pes lock` 명령만 한 줄로 다시 실행했고, 위 결과는 그 실행에서 나온 것입니다."
+  },
+  "stderr": ""
+ },
+ "lock_cli": {
+  "lock_b": {
+   "exit": 3,
+   "stdout": "",
+   "stderr": "다른 세션이 사용 중: agent-a… (2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n"
+  },
+  "merge_b": {
+   "exit": 3,
+   "stdout": "",
+   "stderr": "다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 agent-a…, 2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션을 닫았다면 `lock <임시>/home/proj --force`로 가져오세요.\n"
+  },
+  "force_b": {
+   "exit": 0,
+   "stdout": "잠금: proj (세션 agent-b…)\n",
+   "stderr": ""
+  },
+  "merge_a_after_force": {
+   "exit": 3,
+   "stdout": "",
+   "stderr": "다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 agent-b…, 2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션을 닫았다면 `lock <임시>/home/proj --force`로 가져오세요.\n"
+  },
+  "unlock_b": {
+   "exit": 0,
+   "stdout": "잠금 해제\n",
+   "stderr": ""
+  }
+ },
+ "checks_state": {
+  "plan_round": 2,
+  "plan_items": [
+   1,
+   2
+  ],
+  "processed": [
+   "plan-R0-20261105-035142.json",
+   "plan-R1-20261105-035215.json",
+   "plan-R2-20261105-035248.json"
+  ],
+  "pending": [],
+  "notes": [
+   {
+    "time": "2026-11-05 03:52",
+    "stage": "plan",
+    "text": "R2까지 처리함. 다음은 R3 준비."
+   }
+  ],
+  "feedback_files": [
+   "plan-R0-20261105-035142.json",
+   "plan-R1-20261105-035215.json",
+   "plan-R2-20261105-035248.json"
+  ],
+  "snapshots": [
+   "plan-R1.json",
+   "plan-R2.json"
+  ],
+  "ask_html": true,
+  "index": true
+ },
+ "checks": [
+  {
+   "name": "init",
+   "status": "pass",
+   "detail": "exit=0 project.json=True stderr=",
+   "required": true
+  },
+  {
+   "name": "permission_probe",
+   "status": "pass",
+   "detail": "checks=claude_exit:pass, claude_ok:pass, init:pass, outside_file_absent:pass, repo_escape_absent:pass, project_json_unchanged:pass, wrapper_rejects_outside:pass, wrapper_allows_inside:pass, denied_project_json:pass, denied_outside_write:pass, denied_python3:pass",
+   "required": true
+  },
+  {
+   "name": "serve_ping",
+   "status": "pass",
+   "detail": "status=200 body={\"ok\": true}",
+   "required": true
+  },
+  {
+   "name": "r1.claude",
+   "status": "pass",
+   "detail": "exit=0 timed_out=False is_error=False session=True",
+   "required": true
+  },
+  {
+   "name": "r1.call.lock",
+   "status": "pass",
+   "detail": "calls=['lock', 'status', 'merge', 'render', 'ask-prep', 'ask', 'status']",
+   "required": true
+  },
+  {
+   "name": "r1.call.status",
+   "status": "pass",
+   "detail": "calls=['lock', 'status', 'merge', 'render', 'ask-prep', 'ask', 'status']",
+   "required": true
+  },
+  {
+   "name": "r1.call.merge",
+   "status": "pass",
+   "detail": "calls=['lock', 'status', 'merge', 'render', 'ask-prep', 'ask', 'status']",
+   "required": true
+  },
+  {
+   "name": "r1.call.render",
+   "status": "pass",
+   "detail": "calls=['lock', 'status', 'merge', 'render', 'ask-prep', 'ask', 'status']",
+   "required": true
+  },
+  {
+   "name": "r1.call.ask-prep",
+   "status": "pass",
+   "detail": "calls=['lock', 'status', 'merge', 'render', 'ask-prep', 'ask', 'status']",
+   "required": true
+  },
+  {
+   "name": "r1.call.ask",
+   "status": "pass",
+   "detail": "calls=['lock', 'status', 'merge', 'render', 'ask-prep', 'ask', 'status']",
+   "required": true
+  },
+  {
+   "name": "r1.call_exits",
+   "status": "pass",
+   "detail": "nonzero=[]",
+   "required": true
+  },
+  {
+   "name": "r1.project_json_direct_edit",
+   "status": "pass",
+   "detail": "gaps=[]",
+   "required": true
+  },
+  {
+   "name": "r1.state",
+   "status": "pass",
+   "detail": "project.json load",
+   "required": true
+  },
+  {
+   "name": "r1.item1",
+   "status": "pass",
+   "detail": "items=[1]",
+   "required": true
+  },
+  {
+   "name": "r1.result_json",
+   "status": "pass",
+   "detail": "<임시>/home/proj/result-r1.json",
+   "required": true
+  },
+  {
+   "name": "r1.ask_spec",
+   "status": "pass",
+   "detail": "<임시>/home/proj/ask/plan-start.json",
+   "required": true
+  },
+  {
+   "name": "r1.ask_html",
+   "status": "pass",
+   "detail": "<임시>/home/proj/ask-plan-start.html",
+   "required": true
+  },
+  {
+   "name": "r1.index",
+   "status": "pass",
+   "detail": "<임시>/home/proj/index.html",
+   "required": true
+  },
+  {
+   "name": "feedback1",
+   "status": "pass",
+   "detail": "status=200 resp={'ok': True, 'file': 'plan-R0-20261105-035142.json'}",
+   "required": true
+  },
+  {
+   "name": "feedback1.file",
+   "status": "pass",
+   "detail": "plan-R0-20261105-035142.json",
+   "required": true
+  },
+  {
+   "name": "feedback1.pending",
+   "status": "pass",
+   "detail": "pending=['plan-R0-20261105-035142.json']",
+   "required": true
+  },
+  {
+   "name": "r2.claude",
+   "status": "pass",
+   "detail": "exit=0 is_error=False session_same=True",
+   "required": true
+  },
+  {
+   "name": "r2.call.pending",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r2.call.round-start",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r2.call.mark",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r2.call.render",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r2.call.status",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r2.call_exits",
+   "status": "pass",
+   "detail": "nonzero=[]",
+   "required": true
+  },
+  {
+   "name": "r2.project_json_direct_edit",
+   "status": "pass",
+   "detail": "gaps=[]",
+   "required": true
+  },
+  {
+   "name": "r2.state",
+   "status": "pass",
+   "detail": "project.json load",
+   "required": true
+  },
+  {
+   "name": "r2.round",
+   "status": "pass",
+   "detail": "round=1",
+   "required": true
+  },
+  {
+   "name": "r2.marked",
+   "status": "pass",
+   "detail": "processed=['plan-R0-20261105-035142.json']",
+   "required": true
+  },
+  {
+   "name": "r2.pending_zero",
+   "status": "pass",
+   "detail": "pending=[]",
+   "required": true
+  },
+  {
+   "name": "r2.snapshot",
+   "status": "pass",
+   "detail": "plan-R1.json",
+   "required": true
+  },
+  {
+   "name": "feedback2",
+   "status": "pass",
+   "detail": "status=200 resp={'ok': True, 'file': 'plan-R1-20261105-035215.json'}",
+   "required": true
+  },
+  {
+   "name": "feedback2.pending",
+   "status": "pass",
+   "detail": "pending=['plan-R1-20261105-035215.json']",
+   "required": true
+  },
+  {
+   "name": "r3.claude",
+   "status": "pass",
+   "detail": "exit=0 is_error=False session_same=True",
+   "required": true
+  },
+  {
+   "name": "r3.call.pending",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'merge', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r3.call.round-start",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'merge', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r3.call.merge",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'merge', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r3.call.mark",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'merge', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r3.call.render",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'merge', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r3.call.status",
+   "status": "pass",
+   "detail": "calls=['pending', 'round-start', 'merge', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r3.call_exits",
+   "status": "pass",
+   "detail": "nonzero=[]",
+   "required": true
+  },
+  {
+   "name": "r3.project_json_direct_edit",
+   "status": "pass",
+   "detail": "gaps=[]",
+   "required": true
+  },
+  {
+   "name": "r3.state",
+   "status": "pass",
+   "detail": "project.json load",
+   "required": true
+  },
+  {
+   "name": "r3.round",
+   "status": "pass",
+   "detail": "round=2",
+   "required": true
+  },
+  {
+   "name": "r3.items",
+   "status": "pass",
+   "detail": "items=[1, 2]",
+   "required": true
+  },
+  {
+   "name": "r3.marked",
+   "status": "pass",
+   "detail": "processed=['plan-R0-20261105-035142.json', 'plan-R1-20261105-035215.json']",
+   "required": true
+  },
+  {
+   "name": "r3.pending_zero",
+   "status": "pass",
+   "detail": "pending=[]",
+   "required": true
+  },
+  {
+   "name": "r3.snapshot",
+   "status": "pass",
+   "detail": "plan-R2.json",
+   "required": true
+  },
+  {
+   "name": "feedback3",
+   "status": "pass",
+   "detail": "status=200 resp={'ok': True, 'file': 'plan-R2-20261105-035248.json'}",
+   "required": true
+  },
+  {
+   "name": "feedback3.pending",
+   "status": "pass",
+   "detail": "pending=['plan-R2-20261105-035248.json']",
+   "required": true
+  },
+  {
+   "name": "r4.claude",
+   "status": "pass",
+   "detail": "exit=0 is_error=False new_session=True",
+   "required": true
+  },
+  {
+   "name": "r4.call.pending",
+   "status": "pass",
+   "detail": "calls=['pending', 'note', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r4.call.note",
+   "status": "pass",
+   "detail": "calls=['pending', 'note', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r4.call.mark",
+   "status": "pass",
+   "detail": "calls=['pending', 'note', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r4.call.render",
+   "status": "pass",
+   "detail": "calls=['pending', 'note', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r4.call.status",
+   "status": "pass",
+   "detail": "calls=['pending', 'note', 'mark', 'render', 'status']",
+   "required": true
+  },
+  {
+   "name": "r4.call_exits",
+   "status": "pass",
+   "detail": "nonzero=[]",
+   "required": true
+  },
+  {
+   "name": "r4.project_json_direct_edit",
+   "status": "pass",
+   "detail": "gaps=[]",
+   "required": true
+  },
+  {
+   "name": "r4.state",
+   "status": "pass",
+   "detail": "project.json load",
+   "required": true
+  },
+  {
+   "name": "r4.marked",
+   "status": "pass",
+   "detail": "processed=['plan-R0-20261105-035142.json', 'plan-R1-20261105-035215.json', 'plan-R2-20261105-035248.json']",
+   "required": true
+  },
+  {
+   "name": "r4.pending_zero",
+   "status": "pass",
+   "detail": "pending=[]",
+   "required": true
+  },
+  {
+   "name": "r4.note",
+   "status": "pass",
+   "detail": "notes=[{'time': '2026-11-05 03:52', 'stage': 'plan', 'text': 'R2까지 처리함. 다음은 R3 준비.'}]",
+   "required": true
+  },
+  {
+   "name": "r5.lock_owner_before",
+   "status": "pass",
+   "detail": "owner=agent-a",
+   "required": true
+  },
+  {
+   "name": "r5.claude",
+   "status": "pass",
+   "detail": "exit=0 is_error=False",
+   "required": true
+  },
+  {
+   "name": "r5.lock_call",
+   "status": "pass",
+   "detail": "calls=[['lock', '<임시>/home/proj']]",
+   "required": true
+  },
+  {
+   "name": "r5.lock_exit",
+   "status": "pass",
+   "detail": "exits=[3]",
+   "required": true
+  },
+  {
+   "name": "r5.lock_message",
+   "status": "pass",
+   "detail": "outputs=[('', '다른 세션이 사용 중: agent-a… (2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\\n')]",
+   "required": true
+  },
+  {
+   "name": "r5.project_json",
+   "status": "pass",
+   "detail": "abd2aef8a855ed02 -> abd2aef8a855ed02",
+   "required": true
+  },
+  {
+   "name": "r5.lock_owner_after",
+   "status": "pass",
+   "detail": "owner=agent-a",
+   "required": true
+  },
+  {
+   "name": "cli_lock_b",
+   "status": "pass",
+   "detail": "exit=3 stderr=다른 세션이 사용 중: agent-a… (2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n",
+   "required": true
+  },
+  {
+   "name": "cli_merge_b",
+   "status": "pass",
+   "detail": "exit=3 stderr=다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 agent-a…, 2026-11-05 03:50부터, 마지막 기록 0분 전). 그 세션을 닫았다면 `lock <임시>/home/proj --force`로 가져오세요.\n",
+   "required": true
+  },
+  {
+   "name": "cli_force_b",
+   "status": "pass",
+   "detail": "exit=0 owner=agent-b",
+   "required": true
+  },
+  {
+   "name": "cli_merge_a_after_force",
+   "status": "pass",
+   "detail": "exit=3 stderr=다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 agent-b…, 2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션을 닫았다면 `lock <임시>/home/proj --force`로 가져오세요.\n",
+   "required": true
+  },
+  {
+   "name": "cli_merge_a_no_write",
+   "status": "pass",
+   "detail": "abd2aef8a855ed02 -> abd2aef8a855ed02",
+   "required": true
+  },
+  {
+   "name": "cli_unlock_b",
+   "status": "pass",
+   "detail": "exit=0 lock_exists=False",
+   "required": true
+  },
+  {
+   "name": "final_get",
+   "status": "pass",
+   "detail": "status=200 bytes=89183",
+   "required": true
+  },
+  {
+   "name": "final.state",
+   "status": "pass",
+   "detail": "project.json load",
+   "required": true
+  },
+  {
+   "name": "cleanup_port",
+   "status": "pass",
+   "detail": "port=54339 free=True",
+   "required": true
+  }
+ ],
+ "exit_ok": true,
+ "cleanup_ok": true,
+ "exit": 0
+}

@@ -1,0 +1,133 @@
+{
+ "ok": true,
+ "checks": [
+  {
+   "name": "init",
+   "status": "pass",
+   "detail": "exit=0"
+  },
+  {
+   "name": "lock_a",
+   "status": "pass",
+   "detail": "exit=0 owner=agent-a"
+  },
+  {
+   "name": "claude_exit",
+   "status": "pass",
+   "detail": "exit=0"
+  },
+  {
+   "name": "claude_ok",
+   "status": "pass",
+   "detail": "is_error=False"
+  },
+  {
+   "name": "agent_b_lock_call",
+   "status": "pass",
+   "detail": "calls=[['lock', '<임시>/home/proj']]"
+  },
+  {
+   "name": "agent_b_lock_exit3",
+   "status": "pass",
+   "detail": "exits=[3]"
+  },
+  {
+   "name": "agent_b_lock_message",
+   "status": "pass",
+   "detail": "outputs=[('', '다른 세션이 사용 중: agent-a… (2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\\n')]"
+  },
+  {
+   "name": "project_json_unchanged",
+   "status": "pass",
+   "detail": "d635e516f82a9d74 -> d635e516f82a9d74"
+  },
+  {
+   "name": "lock_owner_unchanged",
+   "status": "pass",
+   "detail": "agent-a -> agent-a"
+  }
+ ],
+ "init": {
+  "exit": 0,
+  "stdout": "<임시>/home/proj/project.json\n",
+  "stderr": ""
+ },
+ "lock_a": {
+  "time": "2026-11-05T03:53:32",
+  "owner": "agent-a",
+  "cwd": "<저장소>",
+  "argv": [
+   "lock",
+   "<임시>/home/proj"
+  ],
+  "exit": 0,
+  "stdout": "잠금: proj (세션 agent-a…)\n",
+  "stderr": "",
+  "duration_ms": 54,
+  "project_json_before": "d635e516f82a9d74",
+  "project_json_after": "d635e516f82a9d74",
+  "project_json_changed": false
+ },
+ "agent_b": {
+  "name": "lock-agent-probe",
+  "exit": 0,
+  "timed_out": false,
+  "duration_ms": 8861,
+  "project_json_before": "d635e516f82a9d74",
+  "project_json_after": "d635e516f82a9d74",
+  "project_json_changed": false,
+  "pes_calls": [
+   {
+    "time": "2026-11-05T03:53:37",
+    "owner": "agent-b",
+    "cwd": "<임시>/home/proj",
+    "argv": [
+     "lock",
+     "<임시>/home/proj"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "다른 세션이 사용 중: agent-a… (2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n",
+    "duration_ms": 51,
+    "project_json_before": "d635e516f82a9d74",
+    "project_json_after": "d635e516f82a9d74",
+    "project_json_changed": false
+   }
+  ],
+  "claude": {
+   "session_id": "<session-5>",
+   "num_turns": 2,
+   "duration_ms": 7613,
+   "duration_api_ms": 7127,
+   "total_cost_usd": 0.20316240000000002,
+   "is_error": false,
+   "subtype": "success",
+   "stop_reason": "end_turn",
+   "permission_denials": [],
+   "result": "**결과: 락 획득 실패.**\n\n- 종료 코드: `3`\n- 출력: `다른 세션이 사용 중: agent-a… (2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force`\n\nagent-a 세션이 이미 이 프로젝트의 락을 잡고 있어서 agent-b는 락을 얻지 못했습니다. 규칙에 따라 `--force`는 쓰지 않았고, 파일도 수정하지 않았습니다."
+  },
+  "stderr": ""
+ },
+ "wrapper_calls": [
+  {
+   "time": "2026-11-05T03:53:37",
+   "owner": "agent-b",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "lock",
+    "<임시>/home/proj"
+   ],
+   "exit": 3,
+   "stdout": "",
+   "stderr": "다른 세션이 사용 중: agent-a… (2026-11-05 03:53부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n",
+   "duration_ms": 51,
+   "project_json_before": "d635e516f82a9d74",
+   "project_json_after": "d635e516f82a9d74",
+   "project_json_changed": false
+  }
+ ],
+ "lock_owner_before": "agent-a",
+ "lock_owner_after": "agent-a",
+ "project_json_before": "d635e516f82a9d74",
+ "project_json_after": "d635e516f82a9d74"
+}
