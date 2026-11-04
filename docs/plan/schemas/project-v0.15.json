@@ -68,7 +68,7 @@
         },
         "complete": {
           "type": "boolean",
-          "description": "마지막 publish 단계 승인 여부. approve가 true로 만들고(scripts/pes.py:455-458), reopen은 되돌리지 않는다(:496-514) — 알려진 결함 후보다."
+          "description": "마지막 publish 단계 승인 여부. approve가 true로 만들고(scripts/pes.py:460-462), reopen은 되돌리지 않는다(:496-514) — 알려진 결함 후보다."
         },
         "executive_summary": {
           "type": "string",
@@ -151,8 +151,11 @@
           "description": "원천 조사의 마지막 라운드. state.json의 round를 그대로 쓴다(scripts/pes.py:237)."
         },
         "topic": {
-          "type": "string",
-          "description": "원천 조사의 주제(scripts/pes.py:237)."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "원천 조사의 주제. import_library가 st.get('topic')를 그대로 쓰므로 원천 state.json에 topic이 없으면 null이 저장된다(scripts/pes.py:237)."
         },
         "settings": {
           "type": "object",
@@ -284,7 +287,7 @@
         },
         "stale": {
           "type": "boolean",
-          "description": "앞 단계가 다시 열려 '다시 확인 필요'가 된 상태. reopen이 뒤 단계에 true를 표시한다(scripts/pes.py:509-512)."
+          "description": "앞 단계가 다시 열려 '다시 확인 필요'가 된 상태. reopen이 뒤 단계를 돌며 true를 넣는다(scripts/pes.py:506-509)."
         },
         "reports": {
           "type": "array",
@@ -375,6 +378,14 @@
           "type": "string",
           "description": "이 항목이 답하려는 질문."
         },
+        "reuse": {
+          "type": "integer",
+          "description": "참고자료(library) 항목 id. 기획 topic이 기존 조사와 겹칠 때 skills/plan/SKILL.md:24,28이 기록하고, approve의 handoff_plan이 이 값을 읽어 조사 항목을 재사용한다(scripts/pes.py:481-489)."
+        },
+        "model": {
+          "type": "string",
+          "description": "그 항목을 조사한 모델 이름. skills/research/SKILL.md:33이 sonnet·opus 등으로 항목에 남기게 한다. merge는 이 필드를 복사하지 않으므로 스킬이 직접 쓰며, 허용 값 집합은 미확인이다."
+        },
         "status": {
           "enum": [
             "new",
@@ -411,14 +422,14 @@
         },
         "sources": {
           "type": "array",
-          "description": "출처 목록. merge는 일반 단계에서 URL 중복을 빼고 누적하고, write 단계·section 항목은 각주 번호를 지키려고 통째로 교체한다(scripts/pes.py:334-344).",
+          "description": "출처 목록. merge는 일반 단계에서 URL 중복을 빼고 기존 목록 뒤에 누적하고, write 단계·kind=section 항목은 각주 번호(=sources 순서)를 지키려고 제공된 목록으로 통째로 교체한다(scripts/pes.py:334-344).",
           "items": {
             "$ref": "#/$defs/source"
           }
         },
         "stats": {
           "type": "array",
-          "description": "수치 목록. merge가 name/label을 정규화한다(scripts/pes.py:345-346).",
+          "description": "수치 목록. merge는 입력에 stats가 있으면 기존 목록을 통째로 교체하고 name/label을 정규화한다(scripts/pes.py:345-346).",
           "items": {
             "$ref": "#/$defs/stat"
           }
@@ -450,7 +461,24 @@
           }
         },
         "verify": {
-          "description": "검증 단계의 판정 값. 기본값은 null(scripts/pes.py:176)이고, 실제 객체 형태는 스킬이 정한다 — 구조 미확인."
+          "description": "검증 결과. 기본값은 null(scripts/pes.py:176). pes:verifier가 {claims:[...]}를 돌려주고(agents/verifier.md:17-19), merge가 이 값을 그대로 복사한다(scripts/pes.py:331-333). claims 밖의 확장 형태는 미확인이다.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/verifyClaim"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
         },
         "links": {
           "type": "object",
@@ -908,6 +936,38 @@
         },
         "note": {
           "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyClaim": {
+      "title": "검증 주장",
+      "type": "object",
+      "description": "agents/verifier.md:17-19가 정한 verify.claims[] 항목. merge가 항목의 verify로 그대로 복사한다(scripts/pes.py:331-333).",
+      "properties": {
+        "claim": {
+          "type": "string",
+          "description": "검증한 주장."
+        },
+        "verdict": {
+          "enum": [
+            "supported",
+            "partial",
+            "unsupported"
+          ],
+          "description": "원문 대조 판정."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "원문 발췌(1~2문장)."
+        },
+        "source": {
+          "type": "string",
+          "description": "출처 URL."
+        },
+        "fix": {
+          "type": "string",
+          "description": "고칠 표현 제안(필요할 때)."
         }
       },
       "additionalProperties": true

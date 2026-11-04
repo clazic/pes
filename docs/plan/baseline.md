@@ -21,18 +21,18 @@
 | 1 | 6단계·라운드 | **보존** | 단계는 `plan→research→analyze→write→verify→publish` 고정(`scripts/pes.py:60-61`). 단계마다 `round`를 1씩 올리고 `status=active`, `current`를 그 단계로 바꾸며 `changes`를 비운다(`scripts/pes.py:290-306`). 이전 라운드의 변경점은 `history` 한 줄로 남긴다(`scripts/pes.py:293-299`). |
 | 2 | 시작 질문 | **보존** | `init`은 기획을 `asking`으로 시작한다(`scripts/pes.py:210`). `ask-prep`이 질문 은행을 `ask/<id>.json`으로 복사하고(`scripts/pes.py:243-253`), `ask`가 `ask-<id>.html`을 만들며, 단계가 `pending`이면 `asking`으로 바꾼다(`scripts/pes.py:264-279`). 절차는 스킬에도 있다(`skills/core/SKILL.md:116`). |
 | 3 | 질문별 답과 `__other` 덧붙임 | **보존** | 모든 질문(선택·글쓰기)에 `data-qo` "기타 · 덧붙일 말" 칸을 만든다(`templates/_questions.html:33-48`). 수집 시 `answers[q.id]`와 `answers[q.id + '__other']`를 함께 넣고, 사람이 읽는 문장에는 `(기타·덧붙임: …)`으로 붙인다(`templates/_questions.html:77-94`, 특히 `:87-91`). 질문 폼은 이 answers를 `POST` 본문에 싣고(`templates/ask.html:97-100`, `:115`), 대시보드의 AI 점검 답도 같은 모듈로 모은다(`templates/dashboard.html:710-715`, `:744-753`). |
-| 4 | 승인 | **보존** | 대시보드의 "이 단계 승인"은 `kind=approve`로 보낸다(`templates/dashboard.html:286-287`, `:761-770`, `:792-796`). CLI `approve`는 `status=approved`, `approved_at`, `history`를 남기고 `stale=false`로 만든 뒤 다음 단계로 넘긴다(`scripts/pes.py:442-468`). 기획 승인은 조사 항목을 자동 생성하고(`scripts/pes.py:470-494`), 마지막 단계 승인은 `complete=true`로 끝낸다(`scripts/pes.py:455-458`). |
+| 4 | 승인 | **보존** | 대시보드의 "이 단계 승인"은 `kind=approve`로 보낸다(`templates/dashboard.html:286-287`, `:761-770`, `:792-796`). CLI `approve`는 `status=approved`, `approved_at`, `history`를 남기고 `stale=false`로 만든 뒤 다음 단계로 넘긴다(`scripts/pes.py:442-468`). 기획 승인은 조사 항목을 자동 생성하고(`scripts/pes.py:470-494`), 마지막 단계 승인은 `complete=true`로 끝낸다(`scripts/pes.py:460-462`). |
 | 5 | 재개 | **보존** | 상태가 `project.json`에 남아 새 세션이 `status`로 이어갈 수 있다(`scripts/pes.py:521-548`). 처리 안 한 답은 `pending`으로 다시 찾는다(`scripts/pes.py:516-519`, `:550-554`). 인계 메모는 `note`로 쌓고 `status`가 최근 5개를 보여 준다(`scripts/pes.py:643-657`, `:534-539`). 별도 세션 복원 코드는 없고, 스킬이 이 상태를 읽어 이어 간다(`skills/core/SKILL.md:158-166`). |
 | 6 | reopen과 stale | **보존** | 대시보드의 "이 단계 다시 열기"는 `kind=reopen`으로 보낸다(`templates/dashboard.html:287`, `:772-789`). CLI `reopen`은 그 단계를 `active`로 되돌리고 `approved_at`·`review`를 지우며, 뒤 단계 중 `pending`이 아닌 것에 `stale=true`를 표시한다(`scripts/pes.py:496-514`). 대시보드와 `status`가 `stale`을 "다시 확인 필요"로 보여 준다(`templates/dashboard.html:463`, `scripts/pes.py:532-533`). |
-| 7 | 출처 연결 | **보존** | 항목은 `sources`(출처 목록)와 `links`(단계·항목 추적선)를 가진다(`scripts/pes.py:173-178`). `merge`는 출처 URL 중복을 제거해 누적하고(`scripts/pes.py:338-344`), `links`도 중복 없이 합친다(`scripts/pes.py:353-357`). 원문 확인 기준은 `browser·kosis·law·vworld`다(`scripts/pes.py:64`). 단계 보고서는 출처를 번호로 묶고 항목마다 "근거 출처"와 확인/미확인을 찍으며, 없으면 "근거 없음 ⚠"을 남긴다(`scripts/pes.py:709-728`, `:751-759`, `:820-827`). |
+| 7 | 출처 연결 | **보존** | 항목은 `sources`(출처 목록)와 `links`(단계·항목 추적선)를 가진다(`scripts/pes.py:173-178`). `merge`는 일반 단계에서 출처 URL 중복을 제거해 기존 목록 뒤에 누적하지만(`scripts/pes.py:338-344`), write 단계이거나 항목 `kind`가 `section`이면 각주 번호(=`sources` 순서)를 지키기 위해 제공된 `sources`로 통째로 교체한다(`scripts/pes.py:334-337`). `stats`는 입력에 `stats`가 있으면 기존 목록을 통째로 교체한다(`scripts/pes.py:345-346`). `links`는 중복 없이 합친다(`scripts/pes.py:353-357`). 원문 확인 기준은 `browser·kosis·law·vworld`다(`scripts/pes.py:64`). 단계 보고서는 출처를 번호로 묶고 항목마다 "근거 출처"와 확인/미확인을 찍으며, 없으면 "근거 없음 ⚠"을 남긴다(`scripts/pes.py:709-728`, `:751-759`, `:820-827`). |
 | 8 | 단계 보고서 | **보존** | `report`는 `reports/<stage>/report.md`와 `report.html`을 만들고, `eli5.json`이 있으면 `eli5.html`도 만든다(`scripts/pes.py:830-852`). 폴더의 `md·html·docx·hwpx·pdf·pptx`를 `stages.<stage>.reports`에 등록한다(`scripts/pes.py:853-863`). 형식 기본값은 `md, html, eli5`이고 기획 답 `settings.stage_reports`로 바꾼다(`scripts/pes.py:660-663`, `skills/core/SKILL.md:140`). |
 | 9 | 최종 보고서 | **보존** | `assemble`이 집필 단계 `section` 항목을 순서대로 모아 각주 번호를 정리하고 `out/report.md`·`out/sources.json`을 쓴다(`scripts/pes.py:870-908`). `web`은 `out/report.md`(+`appendix.md`, `sources.json`, `cover.json`)로 `out/report.html`을 만든다(`scripts/pes.py:913-935`). 산출·공유 단계의 형식별 내보내기는 스킬이 맡는다(`skills/publish/SKILL.md:14-23`). |
 | 10 | 서버 포트 | **의도적 변경** | PES 홈마다 포트 하나, `8760-8764` 중 빈 포트를 쓴다(`scripts/pes.py:1081-1083`, `:1195`, `scripts/serve.py:29`). stage-0.md 2절 1번이 보존 대상에서 뺐다(`docs/plan/stage-0.md:20`). |
 | 11 | HTML 파일 배치 | **의도적 변경** | 대시보드는 프로젝트 폴더의 `index.html`, 질문 폼은 `ask-<id>.html`, 목록은 홈의 `index.html`이다(`scripts/pes.py:277`, `:412-440`, `:1264-1270`). 서버는 그 파일을 정적 서빙하고, `index.html`이 없으면 최신 `ask-*.html`로 보낸다(`scripts/serve.py:100-109`). 보존 대상 아님(`docs/plan/stage-0.md:20`). |
 | 12 | 파일 시각 알림 | **의도적 변경** | `/version`이 `index.html`·`ask-*.html`의 mtime 최댓값을 돌려주고(`scripts/serve.py:93-97`), 열린 화면이 이를 주기적으로 비교해 새로고침/알림을 띄운다(`templates/ask.html:130-141`, `templates/dashboard.html:827`). 보존 대상 아님(`docs/plan/stage-0.md:20`). |
-| 13 | 같은 라운드 스냅샷 덮어쓰기 | **결함 후보** | `render`는 `snapshots/<stage>-R<round>.json`을 그대로 덮어쓴다(`scripts/pes.py:400-408`). 같은 라운드에서 다시 렌더하면 이전 스냅샷이 사라진다. stage-0.md 5절이 SEL-31에서 고칠 결함으로 지목한다(`docs/plan/stage-0.md:24`). |
-| 14 | 동시 답 수신 | **결함 후보** | `POST /feedback`은 `feedback/<stage>-R<round>-<초>.json` 이름이 있으면 `-2`, `-3`을 붙이지만, 존재 확인과 쓰기 사이에 잠금이 없다(`scripts/serve.py:140-149`). 같은 초에 두 요청이 들어오면 같은 이름을 고를 수 있다. stage-0.md 5절이 SEL-31 범위로 지목한다(`docs/plan/stage-0.md:24`). |
-| 15 | reopen 후 `complete` | **결함 후보** | 마지막 단계 승인은 `complete=true`로 끝내지만(`scripts/pes.py:455-458`), `reopen`은 `complete`를 되돌리지 않는다(`scripts/pes.py:496-514`). 그래서 마지막 단계를 다시 열어도 `status`는 "전체 완료"로 보인다(`scripts/pes.py:525`). stage-0.md 5절이 SEL-31 범위로 지목한다(`docs/plan/stage-0.md:24`). |
+| 13 | 같은 라운드 스냅샷 덮어쓰기 | **결함 후보** | `render`는 `snapshots/<stage>-R<round>.json`을 그대로 덮어쓴다(`scripts/pes.py:400-408`). 같은 라운드에서 다시 렌더하면 이전 스냅샷이 사라진다. stage-0.md 2절 5번이 SEL-31에서 고칠 결함으로 지목한다(`docs/plan/stage-0.md:24`). |
+| 14 | 동시 답 수신 | **결함 후보** | `POST /feedback`은 `feedback/<stage>-R<round>-<초>.json` 이름이 있으면 `-2`, `-3`을 붙이지만, 존재 확인과 쓰기 사이에 잠금이 없다(`scripts/serve.py:140-149`). 같은 초에 두 요청이 들어오면 같은 이름을 고를 수 있다. stage-0.md 2절 5번이 SEL-31 범위로 지목한다(`docs/plan/stage-0.md:24`). |
+| 15 | reopen 후 `complete` | **결함 후보** | 마지막 단계 승인은 `complete=true`로 끝내지만(`scripts/pes.py:460-462`), `reopen`은 `complete`를 되돌리지 않는다(`scripts/pes.py:496-514`). 그래서 마지막 단계를 다시 열어도 `status`는 "전체 완료"로 보인다(`scripts/pes.py:525`). stage-0.md 2절 5번이 SEL-31 범위로 지목한다(`docs/plan/stage-0.md:24`). |
 | 16 | `"pes": 1` 필드 | **결함 후보** | `init`이 `{"pes": 1, ...}`를 쓰지만(`scripts/pes.py:206`), 저장소 코드에서 이 값을 읽는 곳이 없다. 동작 영향은 없고 2단계 스키마 정리 대상이다. stage-0.md 2절 10번이 이 사실을 기록하라고 한다(`docs/plan/stage-0.md:29`). |
 | 17 | 스킬의 `project.json` 직접 편집 | **결함 후보** | CLI에 없는 변경은 스킬이 Python으로 `project.json`을 직접 읽고 쓴다(`skills/core/SKILL.md:62-73`). 이 경로는 `save()`의 잠금 검사·`library.json` 분리·임시 파일 교체를 지나지 않는다(`scripts/pes.py:147-159`와 대조). 원칙 0("에이전트는 상태를 직접 쓰지 않는다")과 어긋나며, 2단계에서 없앤다(`docs/plan/stage-0.md:12-14`). |
 | 18 | `resume` 답의 상태 복원 | **미확인** | `resume`은 질문 은행(`questions/resume.json:2-3`)과 `POST` kind 목록(`scripts/serve.py:23`), 화면 라벨(`templates/dashboard.html:585`)에만 있다. 전용 상태 전이 코드가 없어, 실제 재개 시 스킬이 답을 어떻게 반영하는지는 저장소 코드만으로 확인할 수 없다. |
@@ -40,6 +40,7 @@
 | 20 | docx·hwpx·pdf·pptx 보고서 생성 | **미확인** | `report`는 이미 있는 파일을 등록만 하고(`scripts/pes.py:853-863`), 변환은 외부 스킬에 맡긴다(`skills/core/SKILL.md:146-148`, `skills/publish/SKILL.md:16-21`). 저장소 안에 변환 코드가 없어 실제 생성·성공 여부는 미확인이다. |
 | 21 | Windows에서의 동작 | **미확인** | 코드에 Windows 분기가 있다(`scripts/pes.py:1047-1050`, `:1373-1378`). 이번 기준선 확인은 macOS에서만 했고 Windows 실기 확인 기록은 저장소에 없다. |
 | 22 | 깨진·큰 `project.json` 읽기 | **미확인** | `load()`는 `json.loads` 예외를 잡지 않고(`scripts/pes.py:96-115`), 깨진 파일·2MB급 파일의 실제 동작을 확인하는 테스트가 없다(저장소에 테스트 없음, `docs/plan/00-brief.md:11`). SEL-12 읽기 시험 범위다(`docs/plan/stage-0.md:23`). |
+| 23 | 최종 보고서 부록 파일 이름 | **결함 후보** | 산출·공유 스킬은 부록 출처를 `out/appendix-sources.md`로 쓰라고 지시하지만(`skills/publish/SKILL.md:22`), `web`은 `out/appendix.md`만 읽어 본문에 붙인다(`scripts/pes.py:921-922`). 따라서 스킬이 만든 `appendix-sources.md`는 최종 웹 보고서에 들어가지 않는다. `appendix.md`를 만드는 경로는 확인되지 않았다 — U6. |
 
 ### 보존하지 않는 것 — 구현 메모
 
@@ -61,7 +62,7 @@
 | `ask-prep` | `ask/<id>.json` 복사(없을 때만) | `scripts/pes.py:243-253` |
 | `ask` | `ask-<id>.html` 생성, 단계가 `pending`이면 `asking`으로 | `scripts/pes.py:264-279` |
 | `round-start` | `round+1`, `status=active`, `current`, `changes=[]`, 이전 라운드 `history` 한 줄 | `scripts/pes.py:290-306` |
-| `merge` | 항목 생성·필드 갱신, 출처·수치·스크린샷·충돌·links 누적, `suggestions`, `depth`·`updated_round`·`status` | `scripts/pes.py:315-367` |
+| `merge` | 항목 생성·필드 갱신. 일반 단계 출처는 URL 중복 제거 후 기존 목록 뒤에 누적, write 단계·`kind=section` 출처는 제공 순서 그대로 교체. `stats`는 제공 시 교체. 스크린샷·충돌·links는 중복 없이 누적. `suggestions`, `depth`·`updated_round`·`status` 갱신 | `scripts/pes.py:315-367` |
 | `render` | `snapshots/<stage>-R<n>.json`(같은 이름 덮어씀), `index.html` | `scripts/pes.py:400-410`, `:412-440` |
 | `approve` | `status=approved`, `approved_at`, `history`, `stale=false`, `current`, `complete`, 기획→조사 항목 생성 | `scripts/pes.py:442-494` |
 | `reopen` | 그 단계 `active`, `approved_at=null`, `review=null`, `stale=false`, 뒤 단계 `stale=true`, `current` | `scripts/pes.py:496-514` |
@@ -100,7 +101,7 @@
 ### 3.4 그 밖의 쓰기
 
 - 사람이 편집기로 `project.json`·`library.json`을 직접 고치는 경로는 코드로 막을 수 없다. `load()`가 빠진 단계 필드를 채우는 것이 유일한 보정이다(`scripts/pes.py:96-115`).
-- `serve.py`는 프로젝트 파일을 읽기만 하고, 유일한 쓰기가 위 `POST /feedback`이다(`scripts/serve.py:14-19`).
+- `serve.py`는 `do_GET`에서 프로젝트 파일을 읽고(`scripts/serve.py:89-109`), 프로젝트 폴더에 쓰는 것은 `do_POST`의 `POST /feedback` 하나다(`:111-152`).
 
 ## 4. 프로젝트 폴더 보존 파일 목록
 
@@ -127,7 +128,8 @@
 | `out/report.md`, `out/sources.json` | `assemble`(`scripts/pes.py:870-908`) | 재생성 가능. `project.json`의 집필 항목에서 다시 만든다 | — |
 | `out/report.html` | `web`(`scripts/pes.py:913-935`) | 재생성 가능 | — |
 | `out/cover.json` | 스킬이 작성(`skills/publish/SKILL.md:19`) | **원본**. 표지 정보(연구진·기관·발주처)는 손으로 정한 값 | 2 |
-| `out/appendix.md` | 스킬이 작성(`skills/publish/SKILL.md:22`) | **원본**. 부록 원고 | 2 |
+| `out/appendix.md` | `web`이 읽어 본문에 붙인다(`scripts/pes.py:921-922`). 작성 경로는 미확인 — 스킬은 `out/appendix-sources.md`를 지시한다(`skills/publish/SKILL.md:22`) | **원본으로 취급**. 만들어진 경우 손 저작물이고 CLI 재생성 경로가 없다. 작성 경로 자체가 미확인(U6) | 2 |
+| `out/appendix-sources.md` | 스킬이 작성(`skills/publish/SKILL.md:22`) | **원본**. 부록 출처 원고. 다만 `web`은 이 이름을 읽지 않아 최종 보고서에 들어가지 않는다(`scripts/pes.py:921-922`) — 결함 후보 23 | 2 |
 | `out/report.hwpx`, `.docx`, `.pdf`, `.pptx`, `out/slides.pptx`, `out/report-uri.md` | 외부 스킬(`skills/publish/SKILL.md:16-22`) | **원본**(최종 산출물·변환 사본) | 1 |
 | `index.html` | `build_index`(`scripts/pes.py:412-440`) | 재생성 가능. `project.json`에서 다시 만든다 | — |
 | `.pes-lock` | `lock`/`write_lock`(`scripts/pes.py:131-145`) | 휘발. 다시 만들 수 있다 | — |
@@ -136,7 +138,7 @@
 
 홈(PES 홈) 수준의 `index.html`·`.pes-hub`·`.pes-hub-server`·`.pes-hub.out`은 프로젝트 폴더 밖이고 모두 재생성 가능하다(`scripts/pes.py:1125`, `:1264-1270`).
 
-**최소 백업 세트**: `project.json`, `library.json`, `feedback/`, `ask/`, `snapshots/`, `rounds/`, `shots/`, `reports/`의 손 저작물(`eli5.json`, 변환물), `out/`의 손 저작물·최종 산출물(`cover.json`, `appendix.md`, `report.hwpx` 등). 나머지(`index.html`, `ask-*.html`, `report.md/html`, `out/report.md/html`, 잠금·tmp)는 상태에서 다시 만들 수 있다.
+**최소 백업 세트**: `project.json`, `library.json`, `feedback/`, `ask/`, `snapshots/`, `rounds/`, `shots/`, `reports/`의 손 저작물(`eli5.json`, 변환물), `out/`의 손 저작물·최종 산출물(`cover.json`, `appendix.md`, `appendix-sources.md`, `report.hwpx` 등). 나머지(`index.html`, `ask-*.html`, `report.md/html`, `out/report.md/html`, 잠금·tmp)는 상태에서 다시 만들 수 있다.
 
 ## 5. 미확인 목록
 
@@ -149,6 +151,7 @@
 | U3 | docx·hwpx·pdf·pptx 단계 보고서가 실제로 생성되는가 | 변환은 외부 스킬 의존, 저장소에 코드 없음(`skills/core/SKILL.md:146-148`) | 도구 설치 환경에서 합성 보고서 1건 변환 |
 | U4 | Windows에서 잠금·파일명·포트·경로가 같은가 | 이번 확인은 macOS만. 코드에 Windows 분기만 있음(`scripts/pes.py:1047-1050`, `:1373-1378`) | Windows 실기에서 같은 합성 시나리오 |
 | U5 | 깨진·2MB급 `project.json`에서 `load()`가 내는 실제 오류·종료 코드 | 예외 처리 없음(`scripts/pes.py:96-115`), 테스트 없음 | SEL-12 읽기 시험에서 재현 |
+| U6 | `out/appendix.md`를 실제로 만드는 경로 | `web`은 읽기만 하고(`scripts/pes.py:921-922`), 스킬은 `out/appendix-sources.md`를 지시한다(`skills/publish/SKILL.md:22`). 저장소 코드·스킬에서 `appendix.md` 작성 지시를 찾지 못했다 | 스킬·문서 전체에서 작성 경로를 확인하고, 이름을 하나로 맞출지 정한다 |
 
 ## 6. 확인 방법 (합성 자료)
 
@@ -156,4 +159,7 @@
 - 합성 프로젝트 생성: `PES_HOME=<임시>/home python3 scripts/pes.py init <임시>/home/synthetic-proj --topic "합성 주제"`.
 - 상태 전이 확인: `round-start plan` → 합성 결과 JSON `merge plan` → `render plan` → `approve plan` → `report plan` → `note`. `project.json`·`snapshots/plan-R1.json`·`reports/plan/*`가 생기는 것을 확인했다.
 - `library.json` 분리 확인: 합성 `state.json`·`shots/`를 가진 폴더를 만들어 `init --import`로 가져왔다. `project.json`에는 `library` 키가 없고 `library.json`에 항목·출처·스크린샷 경로가 들어가는 것을 확인했다.
+- `library.topic` null 확인: `topic`이 없는 합성 `state.json`을 `init --import`로 가져와 `library.json`의 `topic`이 `null`로 저장되는 것을 확인했다(`scripts/pes.py:237`).
+- 출처·수치 병합 차이 확인: research에서 같은 항목을 두 번 `merge`해 일반 출처는 기존 목록 뒤에 URL 중복 없이 누적되고 `stats`는 새 목록으로 교체되는 것을, write에서는 `sources`가 제공 순서 그대로 교체되는 것을 확인했다(`scripts/pes.py:334-346`).
+- `verify.claims` 확인: `agents/verifier.md:17-19` 형식의 `verify.claims[]`를 합성 결과에 넣어 `merge`가 그대로 복사하는지와 스키마가 받아들이는지 확인했다.
 - 확인용 임시 폴더는 작업 끝에 지웠다. 이 문서의 파일:줄 번호는 기준 커밋 `b109177`의 것이다.
