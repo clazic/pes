@@ -46,9 +46,7 @@ def _collision_injection(directory, name, count, serialize=False):
     """serve.py 를 띄운 자식 프로세스에만 적용하는 테스트용 동기화 주입."""
     serialized = """
 # 직렬화된(고친) 서버 양성 대조: 한 번에 한 요청만 처리하도록 잠금을 건다.
-import http.server as _race_http
 import threading as _race_lock_threading
-_race_http.HTTPServer.request_queue_size = 64
 _race_handler_lock = _race_lock_threading.Lock()
 _race_handle_one = _race_http.BaseHTTPRequestHandler.handle_one_request
 def _race_serialized(self):
@@ -58,10 +56,15 @@ _race_http.BaseHTTPRequestHandler.handle_one_request = _race_serialized
 """ if serialize else ""
     return '''
 # ---- SEL-13 test-only: deterministic same-second feedback filename race ----
+import http.server as _race_http
 import os as _race_os
 import threading as _race_threading
 import time as _race_time
 from pathlib import Path as _RacePath
+# 동시 연결 12개가 기본 listen 대기열(3.14 이하 5, 3.15는 128)에 걸려
+# 전송 오류로 끝나지 않게 두 서버 모두 대기열을 넉넉히 잡는다. 재현 대상
+# 결함(같은 초 파일명 충돌)과 무관한 전송 계층 설정이다.
+_race_http.HTTPServer.request_queue_size = 64
 %(serialized)s
 _race_time.strftime = lambda *_args, **_kwargs: %(ts)r
 _race_dir = %(directory)r
@@ -102,6 +105,14 @@ class Server:
         self.startup = self.workdir / "serve-startup"
         self.startup.mkdir(parents=True)
         script = GUARD
+        if sys.platform == "darwin":
+            # macOS 15+ GitHub runners: reverse DNS for loopback can take more
+            # than 30s (actions/runner-images#12162). HTTPServer.server_bind()
+            # calls socket.getfqdn() before it starts listening, so the server
+            # is alive but unreachable until that returns. serve.py never uses
+            # server_name; keep the test server responsive on those runners.
+            script += ("\nimport socket as _serve_socket\n"
+                       "_serve_socket.getfqdn = lambda name='': name\n")
         if collision is not None:
             script += _collision_injection(*collision, serialize=serialize)
         (self.startup / "sitecustomize.py").write_text(script, encoding="utf-8")
@@ -125,7 +136,9 @@ class Server:
                     stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT, env=env)
                 if self._wait_ready():
                     return self
-                errors.append(f"port {self.port}: readiness timeout\n{self.log_text()}")
+                state = "child running" if self.proc.poll() is None \
+                    else f"child exited {self.proc.returncode}"
+                errors.append(f"port {self.port}: readiness timeout ({state})\n{self.log_text()}")
             except OSError as error:
                 errors.append(f"port {self.port}: {error}\n{self.log_text()}")
             self.stop()
