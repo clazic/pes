@@ -61,7 +61,8 @@ def test_same_owner_refresh_keeps_since(cli, synthetic_project, monkeypatch):
 
     data = _lock(project)
     data["since"] = "2026-01-01 00:00"
-    data["at"] = time.time() - 1000
+    old_at = time.time() - (2 * 3600 - 300)  # 아직 살아 있는 잠금이되 갱신 전 시각
+    data["at"] = old_at
     _lock_path(project).write_text(json.dumps(data), encoding="utf-8")
 
     code, out, err = cli("lock", project)
@@ -69,7 +70,7 @@ def test_same_owner_refresh_keeps_since(cli, synthetic_project, monkeypatch):
     refreshed = _lock(project)
     assert refreshed["owner"] == "alice-session"
     assert refreshed["since"] == "2026-01-01 00:00"
-    assert time.time() - refreshed["at"] < 60
+    assert refreshed["at"] > old_at
 
 
 def test_expired_lock_can_be_taken_over(cli, synthetic_project, monkeypatch):
@@ -121,19 +122,36 @@ def test_force_lock_and_unlock_handoff(cli, synthetic_project, monkeypatch):
     assert _lock(project)["owner"] == "alice-session"
 
 
-def test_lock_info_live_boundary(pes, synthetic_project):
+def test_lock_info_live_boundary(pes, synthetic_project, monkeypatch):
+    class FrozenTime:
+        def __init__(self, value):
+            self.value = value
+
+        def time(self):
+            return self.value
+
+        def strftime(self, fmt, *args):
+            return time.strftime(fmt, *args)
+
+    fixed = 2_000_000_000
+    monkeypatch.setattr(pes, "time", FrozenTime(fixed))
     project = synthetic_project("legacy")
     pes.write_lock(project, "alice-session")
     info = pes.lock_info(project)
     assert info["owner"] == "alice-session"
+    assert info["age"] == 0
     assert info["live"] is True
     assert pes.LOCK_TTL == 2 * 3600
 
     data = _lock(project)
-    data["at"] = time.time() - (pes.LOCK_TTL - 5)
+    data["at"] = fixed - (pes.LOCK_TTL - 1)
     _lock_path(project).write_text(json.dumps(data), encoding="utf-8")
     assert pes.lock_info(project)["live"] is True
 
-    data["at"] = time.time() - (pes.LOCK_TTL + 5)
+    data["at"] = fixed - pes.LOCK_TTL
+    _lock_path(project).write_text(json.dumps(data), encoding="utf-8")
+    assert pes.lock_info(project)["live"] is False
+
+    data["at"] = fixed - (pes.LOCK_TTL + 1)
     _lock_path(project).write_text(json.dumps(data), encoding="utf-8")
     assert pes.lock_info(project)["live"] is False

@@ -18,6 +18,18 @@ from conftest import GUARD, ROOT
 SERVE = ROOT / "scripts" / "serve.py"
 MAX_BODY = 256 * 1024
 
+# 충돌 재현용: 서버 안에서만 시각을 고정하고 같은 후보 파일의 exists() 구간에
+# 배리어를 넣어, 경쟁이 우연에 기대지 않게 만든다 (제품 코드는 건드리지 않는다).
+COLLISION_STAGE = "plan"
+COLLISION_ROUND = 1
+COLLISION_TS = "20260101-000000"
+COLLISION_COUNT = 12
+COLLISION_NAME = f"{COLLISION_STAGE}-R{COLLISION_ROUND}-{COLLISION_TS}.json"
+
+
+class AnswerLoss(AssertionError):
+    """같은 초 동시 제출로 답 파일이 덮어써져 사라진 경우 (SEL-31에서 고칠 결함)."""
+
 
 def _free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -25,62 +37,117 @@ def _free_port():
         return sock.getsockname()[1]
 
 
+def _collision_injection(directory, name, count):
+    """serve.py 를 띄운 자식 프로세스에만 적용하는 테스트용 동기화 주입."""
+    return '''
+# ---- SEL-13 test-only: deterministic same-second feedback filename race ----
+import os as _race_os
+import threading as _race_threading
+import time as _race_time
+from pathlib import Path as _RacePath
+
+_race_time.strftime = lambda *_args, **_kwargs: %(ts)r
+_race_dir = %(directory)r
+_race_name = %(name)r
+_race_count = %(count)d
+_race_first = _race_threading.Barrier(_race_count)
+_race_second = _race_threading.Barrier(_race_count)
+_race_original_exists = _RacePath.exists
+
+def _race_exists(self):
+    try:
+        candidate = (self.name == _race_name and
+                     _race_os.path.normcase(str(self.parent)) == _race_os.path.normcase(_race_dir))
+    except Exception:
+        candidate = False
+    if not candidate:
+        return _race_original_exists(self)
+    try:
+        _race_first.wait(timeout=30)
+        found = _race_original_exists(self)
+        _race_second.wait(timeout=30)
+        return found
+    except _race_threading.BrokenBarrierError:
+        return _race_original_exists(self)
+
+_RacePath.exists = _race_exists
+''' % {"ts": COLLISION_TS, "directory": str(directory), "name": name, "count": count}
+
+
 class Server:
     """테스트가 띄운 serve.py 프로세스 하나. 이 프로세스만 종료한다."""
 
-    def __init__(self, root, workdir):
+    def __init__(self, root, workdir, collision=None):
         self.root = Path(root).resolve()
         self.project = self.root / "synthetic"
         self.workdir = Path(workdir)
         self.startup = self.workdir / "serve-startup"
-        self.startup.mkdir()
-        (self.startup / "sitecustomize.py").write_text(GUARD, encoding="utf-8")
+        self.startup.mkdir(parents=True)
+        script = GUARD
+        if collision is not None:
+            script += _collision_injection(*collision)
+        (self.startup / "sitecustomize.py").write_text(script, encoding="utf-8")
         self.log_path = self.workdir / "serve.log"
         self.port = None
         self.proc = None
         self._log = None
 
     def start(self):
-        if self.port is None:
+        errors = []
+        for _ in range(3):
             self.port = _free_port()
-        env = os.environ.copy()
-        # 실제 홈 접근을 막는 감사 훅을 서버 프로세스에도 적용한다.
-        env["PYTHONPATH"] = str(self.startup)
-        env["PYTHONIOENCODING"] = "utf-8"
-        self._log = open(self.log_path, "ab")
-        self.proc = subprocess.Popen(
-            [sys.executable, str(SERVE), str(self.root), str(self.port)],
-            stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT, env=env)
+            self._log = open(self.log_path, "ab")
+            try:
+                env = os.environ.copy()
+                # 실제 홈 접근을 막는 감사 훅을 서버 프로세스에도 적용한다.
+                env["PYTHONPATH"] = str(self.startup)
+                env["PYTHONIOENCODING"] = "utf-8"
+                self.proc = subprocess.Popen(
+                    [sys.executable, str(SERVE), str(self.root), str(self.port)],
+                    stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT, env=env)
+                if self._wait_ready():
+                    return self
+                errors.append(f"port {self.port}: readiness timeout\n{self.log_text()}")
+            except OSError as error:
+                errors.append(f"port {self.port}: {error}\n{self.log_text()}")
+            self.stop()
+        raise RuntimeError("serve.py did not start after 3 attempts:\n" + "\n".join(errors))
+
+    def _wait_ready(self):
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
-                raise RuntimeError("serve.py exited early:\n" + self.log_text())
+                return False
             try:
-                with urllib.request.urlopen(
-                        f"http://127.0.0.1:{self.port}/ping", timeout=0.5) as response:
-                    if response.status == 200:
-                        return self
-            except (OSError, urllib.error.URLError):
+                with urllib.request.urlopen(self.url("/whoami"), timeout=0.5) as response:
+                    info = json.loads(response.read().decode("utf-8"))
+                # 포트를 다른 PES 홈의 서버가 선점했으면 준비된 것으로 보지 않는다.
+                if info.get("root") == str(self.root) and info.get("single") is True:
+                    return True
+            except (OSError, urllib.error.URLError, ValueError):
                 pass
             time.sleep(0.05)
-        raise RuntimeError("serve.py did not become ready:\n" + self.log_text())
+        return False
 
     def restart(self):
         self.stop()
+        self.port = None
         return self.start()
 
     def stop(self):
         proc, self.proc = self.proc, None
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=10)
-        if self._log is not None:
-            self._log.close()
-            self._log = None
+        try:
+            if proc is not None and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=10)
+        finally:
+            if self._log is not None:
+                self._log.close()
+                self._log = None
 
     def log_text(self):
         try:
@@ -123,8 +190,7 @@ class Server:
             return status, body
 
 
-@pytest.fixture
-def server(isolated_home, tmp_path):
+def _make_home(isolated_home):
     root = isolated_home / "pes-projects"
     root.mkdir()
     project = root / "synthetic"
@@ -134,9 +200,27 @@ def server(isolated_home, tmp_path):
     (project / "index.html").write_text("<html>synthetic</html>", encoding="utf-8")
     (project / "ask-plan.html").write_text("<html>ask</html>", encoding="utf-8")
     (root / "index.html").write_text("<html>home</html>", encoding="utf-8")
-    instance = Server(root, tmp_path)
-    instance.start()
+    return root
+
+
+@pytest.fixture
+def server(isolated_home, tmp_path):
+    instance = Server(_make_home(isolated_home), tmp_path)
     try:
+        instance.start()
+        yield instance
+    finally:
+        instance.stop()
+
+
+@pytest.fixture
+def collision_server(isolated_home, tmp_path):
+    root = _make_home(isolated_home)
+    directory = root / "synthetic" / "feedback"
+    instance = Server(root, tmp_path / "collision",
+                      collision=(str(directory), COLLISION_NAME, COLLISION_COUNT))
+    try:
+        instance.start()
         yield instance
     finally:
         instance.stop()
@@ -294,36 +378,71 @@ def test_version_ping_and_whoami(server):
     assert body == {"v": old + 20}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "serve.py:140-145 파일 이름이 초 단위라 같은 초에 동시에 들어온 답이 "
-    "같은 파일을 덮어써 답이 유실된다"))
-def test_simultaneous_submissions_do_not_overwrite_each_other(server):
-    count = 12
+@pytest.mark.parametrize("failure", ["timeout", "early_exit", "spawn_error"])
+def test_start_failure_terminates_child_and_closes_log(isolated_home, tmp_path, monkeypatch, failure):
+    instance = Server(_make_home(isolated_home), tmp_path / "broken-start")
+    if failure == "timeout":
+        monkeypatch.setattr(Server, "_wait_ready", lambda self: False)
+    elif failure == "early_exit":
+        monkeypatch.setattr(sys.modules[__name__], "SERVE", tmp_path / "missing-serve.py")
+    else:
+        def broken_popen(*args, **kwargs):
+            raise OSError("spawn failed")
+        monkeypatch.setattr(subprocess, "Popen", broken_popen)
+
+    with pytest.raises(RuntimeError):
+        instance.start()
+    assert instance.proc is None
+    assert instance._log is None
+
+
+def _submit_concurrently(server, count):
     responses = []
     failures = []
-    barrier = threading.Barrier(count)
+    ready = threading.Barrier(count)
 
     def submit(index):
         try:
-            barrier.wait(timeout=10)
-            status, body = _feedback(server, {"stage": "plan", "round": 1, "kind": "feedback",
+            ready.wait(timeout=20)
+            status, body = _feedback(server, {"stage": COLLISION_STAGE,
+                                              "round": COLLISION_ROUND,
+                                              "kind": "feedback",
                                               "text": f"동시 답 {index}"})
-            responses.append((status, body))
+            responses.append((index, status, body))
         except Exception as error:  # pragma: no cover - 실패 진단용
             failures.append(error)
 
-    # 같은 초 안에 들어가도록 초 경계 직후에 맞춰 보낸다.
-    now = time.time()
-    time.sleep(max(0.0, (int(now) + 1) - now + 0.02))
     threads = [threading.Thread(target=submit, args=(index,)) for index in range(count)]
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=30)
+        thread.join(timeout=40)
+    return responses, failures, [thread for thread in threads if thread.is_alive()]
 
-    assert not failures
-    assert len(responses) == count
-    assert all(status == 200 and body["ok"] for status, body in responses)
-    files = _answers(server)
-    assert len(files) == count
-    assert len({path.name for path in files}) == count
+
+@pytest.mark.xfail(strict=True, raises=AnswerLoss, reason=(
+    "serve.py:140-145 파일 이름이 초 단위라 같은 초에 동시에 들어온 답이 "
+    "같은 파일을 덮어써 답이 유실된다 (테스트 전용 배리어로 재현을 고정)"))
+def test_simultaneous_submissions_do_not_lose_answers(collision_server):
+    responses, failures, alive = _submit_concurrently(collision_server, COLLISION_COUNT)
+
+    # 답 유실과 무관한 회귀(HTTP 500·스레드 오류·응답 누락)는 xfail 이 삼키지 않는다.
+    assert not alive
+    assert not failures, failures
+    assert len(responses) == COLLISION_COUNT, responses
+    assert all(status == 200 and isinstance(body, dict) and body.get("ok") is True
+               for _, status, body in responses), responses
+
+    files = _answers(collision_server)
+    texts = set()
+    corrupt = []
+    for path in files:
+        try:
+            texts.add(json.loads(path.read_text(encoding="utf-8"))["text"])
+        except (OSError, ValueError, KeyError) as error:
+            # 같은 파일에 동시에 쓴 결과가 깨진 JSON 으로 남는 것도 이 결함의 일부다.
+            corrupt.append(f"{path.name}: {error}")
+    expected = {f"동시 답 {index}" for index in range(COLLISION_COUNT)}
+    if len(files) != COLLISION_COUNT or texts != expected or corrupt:
+        raise AnswerLoss("같은 초 동시 제출로 답이 유실됨: 응답 %d개, 파일 %d개, 깨진 파일 %s"
+                         % (COLLISION_COUNT, len(files), corrupt or "없음"))
