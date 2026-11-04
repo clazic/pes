@@ -1,9 +1,21 @@
 # PES 테스트
 
+Python 3.9 이상이 필요하다.
+
 ## 실행
+
+macOS / Linux (POSIX):
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest -q
 ```
 
 ## 격리
