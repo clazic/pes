@@ -29,11 +29,8 @@ jobs:
           - "3.13"
 
     env:
-      PYTHONUNBUFFERED: "1"
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
-      # Per-file steps have a 3 minute limit; dump all thread stacks first.
-      PES_CI_DUMP_AFTER: "150"
 
     steps:
       - name: Check out repository
@@ -47,87 +44,6 @@ jobs:
       - name: Install development dependencies
         run: python -m pip install -r requirements-dev.txt
 
-      - name: Test tests/test_project_basic.py
-        timeout-minutes: 3
-        if: always()
-        run: python .github/ci_pytest.py tests/test_project_basic.py
-
-      - name: Show faulthandler dump (tests/test_project_basic.py)
-        if: always()
-        shell: python
-        run: |
-          import os, sys
-          path = os.path.join(os.environ.get("RUNNER_TEMP") or "/tmp", "pytest-wedge.log")
-          try:
-              with open(path, encoding="utf-8", errors="replace") as log:
-                  sys.stdout.write(log.read())
-          except OSError:
-              print("no diagnostic log at " + path)
-
-      - name: Test tests/test_state.py
-        timeout-minutes: 3
-        if: always()
-        run: python .github/ci_pytest.py tests/test_state.py
-
-      - name: Show faulthandler dump (tests/test_state.py)
-        if: always()
-        shell: python
-        run: |
-          import os, sys
-          path = os.path.join(os.environ.get("RUNNER_TEMP") or "/tmp", "pytest-wedge.log")
-          try:
-              with open(path, encoding="utf-8", errors="replace") as log:
-                  sys.stdout.write(log.read())
-          except OSError:
-              print("no diagnostic log at " + path)
-
-      - name: Test tests/test_serve.py
-        timeout-minutes: 3
-        if: always()
-        run: python .github/ci_pytest.py -x --tb=long tests/test_serve.py
-
-      - name: Show faulthandler dump (tests/test_serve.py)
-        if: always()
-        shell: python
-        run: |
-          import os, sys
-          path = os.path.join(os.environ.get("RUNNER_TEMP") or "/tmp", "pytest-wedge.log")
-          try:
-              with open(path, encoding="utf-8", errors="replace") as log:
-                  sys.stdout.write(log.read())
-          except OSError:
-              print("no diagnostic log at " + path)
-
-      - name: Test tests/test_lock.py
-        timeout-minutes: 3
-        if: always()
-        run: python .github/ci_pytest.py tests/test_lock.py
-
-      - name: Show faulthandler dump (tests/test_lock.py)
-        if: always()
-        shell: python
-        run: |
-          import os, sys
-          path = os.path.join(os.environ.get("RUNNER_TEMP") or "/tmp", "pytest-wedge.log")
-          try:
-              with open(path, encoding="utf-8", errors="replace") as log:
-                  sys.stdout.write(log.read())
-          except OSError:
-              print("no diagnostic log at " + path)
-
-      - name: Test tests/test_questions.py
-        timeout-minutes: 3
-        if: always()
-        run: python .github/ci_pytest.py tests/test_questions.py
-
-      - name: Show faulthandler dump (tests/test_questions.py)
-        if: always()
-        shell: python
-        run: |
-          import os, sys
-          path = os.path.join(os.environ.get("RUNNER_TEMP") or "/tmp", "pytest-wedge.log")
-          try:
-              with open(path, encoding="utf-8", errors="replace") as log:
-                  sys.stdout.write(log.read())
-          except OSError:
-              print("no diagnostic log at " + path)
+      - name: Run tests
+        timeout-minutes: 8
+        run: python -m pytest -q -p no:cacheprovider
