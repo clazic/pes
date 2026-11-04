@@ -93,7 +93,7 @@ def scrub(text: str, base: Path | None = None) -> str:
             text = text.replace(candidate, "<TMP>")
     # macOS 는 임시 폴더 경로가 두 형태로 나온다. 둘 다 잡는다.
     # 패턴을 런타임에 조립해 소스·바이트코드에 경로 문자열이 그대로 남지 않게 한다.
-    tmp_pat = "(?:/private)?" + "".join(["/var", "/folders/"]) + r"[^\s\"']*"
+    tmp_pat = "(?:/private)?" + "".join(["/var", "/folders/"]) + r"[^\s\"'\\]*"
     text = re.sub(tmp_pat, "<TMP>", text)
     # 공개 저장소에 로컬 홈 경로를 남기지 않는다.
     home_pat = "".join(["/", "Users", "/"]) + r"[^\s\"']+"
