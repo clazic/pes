@@ -105,6 +105,14 @@ class Server:
         self.startup = self.workdir / "serve-startup"
         self.startup.mkdir(parents=True)
         script = GUARD
+        if sys.platform == "darwin":
+            # macOS 15+ GitHub runners: reverse DNS for loopback can take more
+            # than 30s (actions/runner-images#12162). HTTPServer.server_bind()
+            # calls socket.getfqdn() before it starts listening, so the server
+            # is alive but unreachable until that returns. serve.py never uses
+            # server_name; keep the test server responsive on those runners.
+            script += ("\nimport socket as _serve_socket\n"
+                       "_serve_socket.getfqdn = lambda name='': name\n")
         if collision is not None:
             script += _collision_injection(*collision, serialize=serialize)
         (self.startup / "sitecustomize.py").write_text(script, encoding="utf-8")
@@ -128,7 +136,9 @@ class Server:
                     stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT, env=env)
                 if self._wait_ready():
                     return self
-                errors.append(f"port {self.port}: readiness timeout\n{self.log_text()}")
+                state = "child running" if self.proc.poll() is None \
+                    else f"child exited {self.proc.returncode}"
+                errors.append(f"port {self.port}: readiness timeout ({state})\n{self.log_text()}")
             except OSError as error:
                 errors.append(f"port {self.port}: {error}\n{self.log_text()}")
             self.stop()

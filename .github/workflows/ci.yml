@@ -30,6 +30,8 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
       # Per-file steps have a 3 minute limit; dump all thread stacks first.
       PES_CI_DUMP_AFTER: "150"
 
@@ -82,7 +84,7 @@ jobs:
       - name: Test tests/test_serve.py
         timeout-minutes: 3
         if: always()
-        run: python .github/ci_pytest.py tests/test_serve.py
+        run: python .github/ci_pytest.py -x --tb=long tests/test_serve.py
 
       - name: Show faulthandler dump (tests/test_serve.py)
         if: always()
