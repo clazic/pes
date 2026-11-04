@@ -1,0 +1,2576 @@
+{
+ "started": "2026-11-05 03:28:49",
+ "opencode_version": "2.2.5",
+ "results": [
+  {
+   "iteration": 1,
+   "steps": {
+    "init": {
+     "code": 0,
+     "ms": 47,
+     "out": "<TMP>/run-1/proj/project.json"
+    },
+    "server_start": {
+     "ms": 324,
+     "version": "2.2.5",
+     "pid": 79072
+    },
+    "info_model": {
+     "ms": 1059,
+     "info": {
+      "version": "2.2.5",
+      "pid": 79072,
+      "n_urls": 1,
+      "capabilities": {
+       "persistentPty": true
+      }
+     },
+     "model_count": 66,
+     "target_found": true,
+     "target": "DeepSeek V4.1 Flash",
+     "target_status": "active",
+     "target_cost": [
+      {
+       "input": 0.15,
+       "output": 0.6,
+       "cache": {
+        "read": 0.003,
+        "write": 0
+       }
+      }
+     ]
+    },
+    "usage": {
+     "ok": true,
+     "ms": 599,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "scenario": {
+     "ok": true,
+     "round_start": {
+      "code": 0,
+      "ms": 96,
+      "out": "기획 R1 시작"
+     },
+     "session_ms": {
+      "session_id": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+      "ms": 9
+     },
+     "session_id": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+     "session_env": {
+      "ok": true,
+      "ms": 0
+     },
+     "agent": {
+      "idle_outcome": "succeeded",
+      "text": "RESULT-WRITTEN I'll run the status command first, then write the result file based on its output.",
+      "n_assistant_text": 2,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 11290,
+        "output": 389,
+        "reasoning": 14,
+        "cache": {
+         "read": 26368,
+         "write": 0
+        }
+       }
+      },
+      "prompt_ms": 7114,
+      "permission_polls": 36,
+      "permission_errors": []
+     },
+     "permissions": [
+      {
+       "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+       "action": "shell",
+       "resources": [
+        "printf '%s\\n' \"$PES_HOME\" > env-home.txt",
+        "printf '%s\\n' \"${PES_PROJECT:-}\" > env-project.txt",
+        "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-1/proj"
+       ],
+       "id": "per_1a7d236e1001wC0q42QpcWVEiT",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+       "action": "edit",
+       "resources": [
+        "<TMP>/run-1/proj/result.json"
+       ],
+       "id": "per_1a7d23fdf00166sm8RpUbUbyAT",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+       "action": "shell",
+       "resources": [
+        "printf '%s\\n' \"$PES_HOME\" > env-home-after-restart.txt",
+        "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-1/proj"
+       ],
+       "id": "per_1a7d271ee001dIvhFl2pA245v6",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+       "action": "edit",
+       "resources": [
+        "<TMP>/run-1/proj/plan-result.md"
+       ],
+       "id": "per_1a7d2853c001qHyGLeQBi3vwEp",
+       "decision": "once",
+       "ok": true
+      }
+     ],
+     "tools": [
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-1/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+      }
+     ],
+     "env_check": {
+      "home": "<TMP>/run-1",
+      "home_ok": true,
+      "project": "",
+      "project_removed": true
+     },
+     "terminal_seen": true,
+     "events": {
+      "connected": true,
+      "error": null,
+      "count": 40,
+      "type_count": 22,
+      "first_event_ms": 51,
+      "execution_started_ms": 51,
+      "execution_end_ms": 7092,
+      "types": {
+       "session.inbox.enqueued": 1,
+       "session.execution.started": 1,
+       "session.instructions.updated": 1,
+       "session.inbox.delivered": 1,
+       "session.step.started": 3,
+       "session.text.started": 2,
+       "session.text.delta": 3,
+       "session.tool.input.started": 2,
+       "session.tool.input.ended": 2,
+       "session.tool.called": 2,
+       "session.text.ended": 2,
+       "session.step.streamed": 3,
+       "permission.asked": 2,
+       "permission.replied": 2,
+       "session.tool.progress": 1,
+       "session.tool.success": 2,
+       "session.step.ended": 3,
+       "session.usage.updated": 3,
+       "session.reasoning.started": 1,
+       "session.reasoning.delta": 1,
+       "session.reasoning.ended": 1,
+       "session.execution.succeeded": 1
+      }
+     },
+     "agent_summary": "현재 단계=기획, 라운드=1",
+     "agent_result": {
+      "exists": true,
+      "valid": true,
+      "text": "{\"id\": \"plan-agent-1\", \"title\": \"합성 기획 항목\", \"summary\": \"현재 단계=기획, 라운드=1\", \"confidence\": \"medium\"}"
+     },
+     "merge": {
+      "code": 0,
+      "ms": 88,
+      "out": "기획: 1건 병합"
+     },
+     "render": {
+      "code": 0,
+      "ms": 47,
+      "out": "<TMP>/run-1/proj/index.html"
+     },
+     "ask_prep": {
+      "code": 0,
+      "ms": 46,
+      "out": "<TMP>/run-1/proj/ask/plan-start.json"
+     },
+     "ask": {
+      "code": 0,
+      "ms": 45,
+      "out": "<TMP>/run-1/proj/ask-plan-start.html"
+     },
+     "ask_html": true,
+     "index_html": true,
+     "feedback": {
+      "http": 200,
+      "body": {
+       "ok": true,
+       "file": "plan-R1-20261105-032859.json"
+      },
+      "ms": 2
+     },
+     "pending": {
+      "code": 0,
+      "ms": 77,
+      "count": 1,
+      "paths": [
+       "plan-R1-20261105-032859.json"
+      ]
+     },
+     "mark": {
+      "code": 0,
+      "ms": 48,
+      "out": "처리 완료 표시 1개"
+     },
+     "pending_after_mark": 0,
+     "server_stop_before_resume": {
+      "port": 64151,
+      "port_free": true
+     },
+     "restart_ms": 315,
+     "restart_port": 64151,
+     "recovered": true,
+     "resume": {
+      "idle_outcome": "succeeded",
+      "text": "RESUME-OK I'll run the status command and read the relevant files. RESULT-WRITTEN I'll run the status command first, then write the result file based on its output.",
+      "n_assistant_text": 4,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 17965,
+        "output": 1037,
+        "reasoning": 83,
+        "cache": {
+         "read": 91136,
+         "write": 0
+        }
+       }
+      },
+      "prompt_ms": 10670
+     },
+     "resume_tools": [
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"content\": \"이전 결과: 현재 단계=기획, 라운드=1\\n사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험)\\n처리 안 한 답: 0\\n\", \"path\": \"<TMP>/run-1/proj/plan-result.m…"
+      },
+      {
+       "name": "read",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-1/proj/feedback/plan-R1-20261105-032859.json\"}"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
+      },
+      {
+       "name": "read",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-1/proj/result.json\"}"
+      },
+      {
+       "name": "glob",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"pattern\": \"feedback/*.json\", \"path\": \"<TMP>/run-1/proj\"}"
+      },
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-1/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+      }
+     ],
+     "post_restart_env": {
+      "home": "<TMP>/run-1",
+      "home_ok": true
+     },
+     "plan_result": "이전 결과: 현재 단계=기획, 라운드=1 사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험) 처리 안 한 답: 0",
+     "resume_ok": true
+    },
+    "event_stream": {
+     "ok": true,
+     "connected": true,
+     "error": null,
+     "terminal_seen": true,
+     "event_count": 40,
+     "type_count": 22,
+     "first_event_ms": 51,
+     "execution_started_ms": 51,
+     "execution_end_ms": 7092,
+     "types": {
+      "session.inbox.enqueued": 1,
+      "session.execution.started": 1,
+      "session.instructions.updated": 1,
+      "session.inbox.delivered": 1,
+      "session.step.started": 3,
+      "session.text.started": 2,
+      "session.text.delta": 3,
+      "session.tool.input.started": 2,
+      "session.tool.input.ended": 2,
+      "session.tool.called": 2,
+      "session.text.ended": 2,
+      "session.step.streamed": 3,
+      "permission.asked": 2,
+      "permission.replied": 2,
+      "session.tool.progress": 1,
+      "session.tool.success": 2,
+      "session.step.ended": 3,
+      "session.usage.updated": 3,
+      "session.reasoning.started": 1,
+      "session.reasoning.delta": 1,
+      "session.reasoning.ended": 1,
+      "session.execution.succeeded": 1
+     }
+    },
+    "interrupt_resume": {
+     "ok": true,
+     "session_ms": {
+      "session_id": "ses_e582d743dffeg6iE4ICfG5YORX",
+      "ms": 6
+     },
+     "session_id": "ses_e582d743dffeg6iE4ICfG5YORX",
+     "session_env": {
+      "ok": true,
+      "ms": 1
+     },
+     "interrupt": {
+      "ok": true,
+      "ms": 4,
+      "response": {
+       "interrupted": true
+      },
+      "idle_outcome": "interrupted",
+      "settle_ms": 14
+     },
+     "sleep_shell": {
+      "found": true,
+      "entries": [
+       {
+        "id": "sh_1a7d29576001n4aUop6621i2oU",
+        "status": "running",
+        "command": "sleep 45 ; echo slow > slow.txt",
+        "cwd": "<TMP>/run-1/proj",
+        "shell": "/bin/zsh",
+        "file": "<HOME>",
+        "pid": 79409,
+        "metadata": {
+         "sessionID": "ses_e582d743dffeg6iE4ICfG5YORX"
+        },
+        "time": {
+         "started": 1793816958326
+        }
+       }
+      ],
+      "ms": 2483
+     },
+     "permissions_interrupt": [
+      {
+       "sessionID": "ses_e582d743dffeg6iE4ICfG5YORX",
+       "action": "shell",
+       "resources": [
+        "sleep 45",
+        "echo slow > slow.txt"
+       ],
+       "id": "per_1a7d2956c0012JMUkX83SLjf3b",
+       "decision": "once",
+       "ok": true
+      }
+     ],
+     "sleep_after": [],
+     "sleep_gone": true,
+     "resume": {
+      "idle_outcome": "succeeded",
+      "text": "RESUME-OK",
+      "n_assistant_text": 1,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 12086,
+        "output": 70,
+        "reasoning": 91,
+        "cache": {
+         "read": 11648,
+         "write": 0
+        }
+       }
+      }
+     },
+     "resume_ok": true,
+     "server_stop_before_restart": {
+      "port": 64151,
+      "port_free": true
+     },
+     "restart_ms": 313,
+     "restart_port": 64151,
+     "recovered": true,
+     "after_restart": {
+      "idle_outcome": "succeeded",
+      "text": "AFTER-RESTART RESUME-OK",
+      "n_assistant_text": 2,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 13585,
+        "output": 77,
+        "reasoning": 91,
+        "cache": {
+         "read": 23424,
+         "write": 0
+        }
+       }
+      }
+     },
+     "after_restart_ok": true
+    },
+    "permission": {
+     "ok": true,
+     "approval": {
+      "ok": true,
+      "session_id": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+      "once_shell": 2,
+      "once_edit": 2,
+      "shell_executed": true,
+      "edit_executed": true,
+      "agent_result_valid": true,
+      "replies": [
+       {
+        "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+        "action": "shell",
+        "resources": [
+         "printf '%s\\n' \"$PES_HOME\" > env-home.txt",
+         "printf '%s\\n' \"${PES_PROJECT:-}\" > env-project.txt",
+         "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-1/proj"
+        ],
+        "id": "per_1a7d236e1001wC0q42QpcWVEiT",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+        "action": "edit",
+        "resources": [
+         "<TMP>/run-1/proj/result.json"
+        ],
+        "id": "per_1a7d23fdf00166sm8RpUbUbyAT",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+        "action": "shell",
+        "resources": [
+         "printf '%s\\n' \"$PES_HOME\" > env-home-after-restart.txt",
+         "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-1/proj"
+        ],
+        "id": "per_1a7d271ee001dIvhFl2pA245v6",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582dd4a1ffeJblRJwaE84xmXX",
+        "action": "edit",
+        "resources": [
+         "<TMP>/run-1/proj/plan-result.md"
+        ],
+        "id": "per_1a7d2853c001qHyGLeQBi3vwEp",
+        "decision": "once",
+        "ok": true
+       }
+      ],
+      "tools": [
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-1/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+       },
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"content\": \"이전 결과: 현재 단계=기획, 라운드=1\\n사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험)\\n처리 안 한 답: 0\\n\", \"path\": \"<TMP>/run-1/proj/plan-result.m…"
+       },
+       {
+        "name": "read",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-1/proj/feedback/plan-R1-20261105-032859.json\"}"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
+       },
+       {
+        "name": "read",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-1/proj/result.json\"}"
+       },
+       {
+        "name": "glob",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"pattern\": \"feedback/*.json\", \"path\": \"<TMP>/run-1/proj\"}"
+       },
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-1/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+       }
+      ]
+     },
+     "deny": {
+      "ok": true,
+      "attempts": 1,
+      "permissions": [
+       {
+        "sessionID": "ses_e582d1d06ffecPyR5RvD38NGLE",
+        "action": "shell",
+        "resources": [
+         "rm -f keep.txt"
+        ],
+        "id": "per_1a7d2f581001ZkWtXA4zogfw69",
+        "decision": "reject",
+        "ok": true
+       }
+      ],
+      "agents": [
+       {
+        "idle_outcome": "succeeded",
+        "text": "`rm -f keep.txt` 실행을 시도했지만, 셸 도구가 권한 정책으로 호출을 거부했습니다(`permission.rejected: SEL-18 spike`). 파일은 삭제되지 않았습니다. 그래서 DONE이라고 답할 수 없습니다 — 명령이 실제로 실행되지 않았기 때문입니다. 필요하시면 직접 실행하시거나, 이 환경에서 삭제가 허용되도록 설정을 확인해 주세요.",
+        "n_assistant_text": 1,
+        "cost": {
+         "cost": 0,
+         "tokens": {
+          "input": 4540,
+          "output": 151,
+          "reasoning": 445,
+          "cache": {
+           "read": 19456,
+           "write": 0
+          }
+         }
+        }
+       }
+      ],
+      "session_ms": {
+       "session_id": "ses_e582d1d06ffecPyR5RvD38NGLE",
+       "ms": 6
+      },
+      "session_id": "ses_e582d1d06ffecPyR5RvD38NGLE",
+      "session_env": {
+       "ok": true,
+       "ms": 2
+      },
+      "tools": [
+       {
+        "name": "shell",
+        "status": "error",
+        "executed": false,
+        "input": "{\"command\": \"rm -f keep.txt\"}"
+       }
+      ],
+      "keep_intact": true,
+      "reject_target": [
+       {
+        "sessionID": "ses_e582d1d06ffecPyR5RvD38NGLE",
+        "action": "shell",
+        "resources": [
+         "rm -f keep.txt"
+        ],
+        "id": "per_1a7d2f581001ZkWtXA4zogfw69",
+        "decision": "reject",
+        "ok": true
+       }
+      ],
+      "reject_ok": true
+     }
+    },
+    "usage_2": {
+     "ok": true,
+     "ms": 626,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "usage_3": {
+     "ok": true,
+     "ms": 273,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "server_stop": {
+     "port": 64151,
+     "port_free": true
+    }
+   },
+   "sessions": [
+    "ses_e582dd4a1ffeJblRJwaE84xmXX",
+    "ses_e582d743dffeg6iE4ICfG5YORX",
+    "ses_e582d1d06ffecPyR5RvD38NGLE"
+   ],
+   "cleanup": {
+    "tried": [
+     "ses_e582dd4a1ffeJblRJwaE84xmXX",
+     "ses_e582d743dffeg6iE4ICfG5YORX",
+     "ses_e582d1d06ffecPyR5RvD38NGLE"
+    ],
+    "deleted": [
+     "ses_e582dd4a1ffeJblRJwaE84xmXX",
+     "ses_e582d743dffeg6iE4ICfG5YORX",
+     "ses_e582d1d06ffecPyR5RvD38NGLE"
+    ],
+    "failed": [],
+    "still_present": [],
+    "leftover_ids": []
+   }
+  },
+  {
+   "iteration": 2,
+   "steps": {
+    "init": {
+     "code": 0,
+     "ms": 56,
+     "out": "<TMP>/run-2/proj/project.json"
+    },
+    "server_start": {
+     "ms": 314,
+     "version": "2.2.5",
+     "pid": 79797
+    },
+    "info_model": {
+     "ms": 1021,
+     "info": {
+      "version": "2.2.5",
+      "pid": 79797,
+      "n_urls": 1,
+      "capabilities": {
+       "persistentPty": true
+      }
+     },
+     "model_count": 66,
+     "target_found": true,
+     "target": "DeepSeek V4.1 Flash",
+     "target_status": "active",
+     "target_cost": [
+      {
+       "input": 0.15,
+       "output": 0.6,
+       "cache": {
+        "read": 0.003,
+        "write": 0
+       }
+      }
+     ]
+    },
+    "usage": {
+     "ok": true,
+     "ms": 612,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "scenario": {
+     "ok": true,
+     "round_start": {
+      "code": 0,
+      "ms": 94,
+      "out": "기획 R1 시작"
+     },
+     "session_ms": {
+      "session_id": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+      "ms": 16
+     },
+     "session_id": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+     "session_env": {
+      "ok": true,
+      "ms": 0
+     },
+     "agent": {
+      "idle_outcome": "succeeded",
+      "text": "RESULT-WRITTEN I'll run the status command and inspect the output.",
+      "n_assistant_text": 2,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 5259,
+        "output": 382,
+        "reasoning": 13,
+        "cache": {
+         "read": 32384,
+         "write": 0
+        }
+       }
+      },
+      "prompt_ms": 7142,
+      "permission_polls": 36,
+      "permission_errors": []
+     },
+     "permissions": [
+      {
+       "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+       "action": "shell",
+       "resources": [
+        "printf '%s\\n' \"$PES_HOME\" > env-home.txt",
+        "printf '%s\\n' \"${PES_PROJECT:-}\" > env-project.txt",
+        "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-2/proj"
+       ],
+       "id": "per_1a7d326ab001BTLn7eGdPIc3Vf",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+       "action": "edit",
+       "resources": [
+        "<TMP>/run-2/proj/result.json"
+       ],
+       "id": "per_1a7d32fd3001mhEkooh3tHz6tt",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+       "action": "shell",
+       "resources": [
+        "printf '%s\\n' \"$PES_HOME\" > env-home-after-restart.txt",
+        "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-2/proj"
+       ],
+       "id": "per_1a7d35deb001p5fEs1by7lRG5X",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+       "action": "shell",
+       "resources": [
+        "ls -la feedback/ 2>/dev/null"
+       ],
+       "id": "per_1a7d36904001uq95ap1kWAt3Ei",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+       "action": "edit",
+       "resources": [
+        "<TMP>/run-2/proj/plan-result.md"
+       ],
+       "id": "per_1a7d3818e001mfNlrFaStJ92G2",
+       "decision": "once",
+       "ok": true
+      }
+     ],
+     "tools": [
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-2/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+      }
+     ],
+     "env_check": {
+      "home": "<TMP>/run-2",
+      "home_ok": true,
+      "project": "",
+      "project_removed": true
+     },
+     "terminal_seen": true,
+     "events": {
+      "connected": true,
+      "error": null,
+      "count": 39,
+      "type_count": 22,
+      "first_event_ms": 49,
+      "execution_started_ms": 49,
+      "execution_end_ms": 6875,
+      "types": {
+       "session.inbox.enqueued": 1,
+       "session.execution.started": 1,
+       "session.instructions.updated": 1,
+       "session.inbox.delivered": 1,
+       "session.step.started": 3,
+       "session.text.started": 2,
+       "session.text.delta": 2,
+       "session.tool.input.started": 2,
+       "session.tool.input.ended": 2,
+       "session.tool.called": 2,
+       "session.text.ended": 2,
+       "session.step.streamed": 3,
+       "permission.asked": 2,
+       "permission.replied": 2,
+       "session.tool.progress": 1,
+       "session.tool.success": 2,
+       "session.step.ended": 3,
+       "session.usage.updated": 3,
+       "session.reasoning.started": 1,
+       "session.reasoning.delta": 1,
+       "session.reasoning.ended": 1,
+       "session.execution.succeeded": 1
+      }
+     },
+     "agent_summary": "현재 단계=기획, 라운드=1",
+     "agent_result": {
+      "exists": true,
+      "valid": true,
+      "text": "{\"id\": \"plan-agent-1\", \"title\": \"합성 기획 항목\", \"summary\": \"현재 단계=기획, 라운드=1\", \"confidence\": \"medium\"}"
+     },
+     "merge": {
+      "code": 0,
+      "ms": 86,
+      "out": "기획: 1건 병합"
+     },
+     "render": {
+      "code": 0,
+      "ms": 50,
+      "out": "<TMP>/run-2/proj/index.html"
+     },
+     "ask_prep": {
+      "code": 0,
+      "ms": 45,
+      "out": "<TMP>/run-2/proj/ask/plan-start.json"
+     },
+     "ask": {
+      "code": 0,
+      "ms": 51,
+      "out": "<TMP>/run-2/proj/ask-plan-start.html"
+     },
+     "ask_html": true,
+     "index_html": true,
+     "feedback": {
+      "http": 200,
+      "body": {
+       "ok": true,
+       "file": "plan-R1-20261105-033000.json"
+      },
+      "ms": 2
+     },
+     "pending": {
+      "code": 0,
+      "ms": 80,
+      "count": 1,
+      "paths": [
+       "plan-R1-20261105-033000.json"
+      ]
+     },
+     "mark": {
+      "code": 0,
+      "ms": 46,
+      "out": "처리 완료 표시 1개"
+     },
+     "pending_after_mark": 0,
+     "server_stop_before_resume": {
+      "port": 64785,
+      "port_free": true
+     },
+     "restart_ms": 309,
+     "restart_port": 64785,
+     "recovered": true,
+     "resume": {
+      "idle_outcome": "succeeded",
+      "text": "RESUME-OK RESULT-WRITTEN I'll run the status command and inspect the output.",
+      "n_assistant_text": 3,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 12209,
+        "output": 1049,
+        "reasoning": 181,
+        "cache": {
+         "read": 134016,
+         "write": 0
+        }
+       }
+      },
+      "prompt_ms": 14502
+     },
+     "resume_tools": [
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"content\": \"이전 결과: 현재 단계=기획, 라운드=1\\n사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험)\\n처리 안 한 답: 0개\\n\", \"path\": \"<TMP>/run-2/proj/plan-result.…"
+      },
+      {
+       "name": "read",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-2/proj/feedback/plan-R1-20261105-033000.json\"}"
+      },
+      {
+       "name": "read",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-2/proj/result.json\"}"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"ls -la feedback/ 2>/dev/null\", \"workdir\": \"<TMP>/run-2/proj\"}"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
+      },
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-2/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+      }
+     ],
+     "post_restart_env": {
+      "home": "<TMP>/run-2",
+      "home_ok": true
+     },
+     "plan_result": "이전 결과: 현재 단계=기획, 라운드=1 사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험) 처리 안 한 답: 0개",
+     "resume_ok": true
+    },
+    "event_stream": {
+     "ok": true,
+     "connected": true,
+     "error": null,
+     "terminal_seen": true,
+     "event_count": 39,
+     "type_count": 22,
+     "first_event_ms": 49,
+     "execution_started_ms": 49,
+     "execution_end_ms": 6875,
+     "types": {
+      "session.inbox.enqueued": 1,
+      "session.execution.started": 1,
+      "session.instructions.updated": 1,
+      "session.inbox.delivered": 1,
+      "session.step.started": 3,
+      "session.text.started": 2,
+      "session.text.delta": 2,
+      "session.tool.input.started": 2,
+      "session.tool.input.ended": 2,
+      "session.tool.called": 2,
+      "session.text.ended": 2,
+      "session.step.streamed": 3,
+      "permission.asked": 2,
+      "permission.replied": 2,
+      "session.tool.progress": 1,
+      "session.tool.success": 2,
+      "session.step.ended": 3,
+      "session.usage.updated": 3,
+      "session.reasoning.started": 1,
+      "session.reasoning.delta": 1,
+      "session.reasoning.ended": 1,
+      "session.execution.succeeded": 1
+     }
+    },
+    "interrupt_resume": {
+     "ok": true,
+     "session_ms": {
+      "session_id": "ses_e582c7677ffer5eXj8UTP1JOi1",
+      "ms": 7
+     },
+     "session_id": "ses_e582c7677ffer5eXj8UTP1JOi1",
+     "session_env": {
+      "ok": true,
+      "ms": 1
+     },
+     "interrupt": {
+      "ok": true,
+      "ms": 1,
+      "response": {
+       "interrupted": true
+      },
+      "idle_outcome": "interrupted",
+      "settle_ms": 5
+     },
+     "sleep_shell": {
+      "found": true,
+      "entries": [
+       {
+        "id": "sh_1a7d39269002OxqnOSKDFvri7g",
+        "status": "running",
+        "command": "sleep 45 ; echo slow > slow.txt",
+        "cwd": "<TMP>/run-2/proj",
+        "shell": "/bin/zsh",
+        "file": "<HOME>",
+        "pid": 80074,
+        "metadata": {
+         "sessionID": "ses_e582c7677ffer5eXj8UTP1JOi1"
+        },
+        "time": {
+         "started": 1793817023082
+        }
+       }
+      ],
+      "ms": 2282
+     },
+     "permissions_interrupt": [
+      {
+       "sessionID": "ses_e582c7677ffer5eXj8UTP1JOi1",
+       "action": "shell",
+       "resources": [
+        "sleep 45",
+        "echo slow > slow.txt"
+       ],
+       "id": "per_1a7d391ac001L8x7B6wj4hrkoe",
+       "decision": "once",
+       "ok": true
+      }
+     ],
+     "sleep_after": [],
+     "sleep_gone": true,
+     "resume": {
+      "idle_outcome": "succeeded",
+      "text": "RESUME-OK",
+      "n_assistant_text": 1,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 12086,
+        "output": 70,
+        "reasoning": 59,
+        "cache": {
+         "read": 11648,
+         "write": 0
+        }
+       }
+      }
+     },
+     "resume_ok": true,
+     "server_stop_before_restart": {
+      "port": 64785,
+      "port_free": true
+     },
+     "restart_ms": 312,
+     "restart_port": 64785,
+     "recovered": true,
+     "after_restart": {
+      "idle_outcome": "succeeded",
+      "text": "AFTER-RESTART RESUME-OK",
+      "n_assistant_text": 2,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 13585,
+        "output": 77,
+        "reasoning": 59,
+        "cache": {
+         "read": 23424,
+         "write": 0
+        }
+       }
+      }
+     },
+     "after_restart_ok": true
+    },
+    "permission": {
+     "ok": true,
+     "approval": {
+      "ok": true,
+      "session_id": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+      "once_shell": 3,
+      "once_edit": 2,
+      "shell_executed": true,
+      "edit_executed": true,
+      "agent_result_valid": true,
+      "replies": [
+       {
+        "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+        "action": "shell",
+        "resources": [
+         "printf '%s\\n' \"$PES_HOME\" > env-home.txt",
+         "printf '%s\\n' \"${PES_PROJECT:-}\" > env-project.txt",
+         "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-2/proj"
+        ],
+        "id": "per_1a7d326ab001BTLn7eGdPIc3Vf",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+        "action": "edit",
+        "resources": [
+         "<TMP>/run-2/proj/result.json"
+        ],
+        "id": "per_1a7d32fd3001mhEkooh3tHz6tt",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+        "action": "shell",
+        "resources": [
+         "printf '%s\\n' \"$PES_HOME\" > env-home-after-restart.txt",
+         "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-2/proj"
+        ],
+        "id": "per_1a7d35deb001p5fEs1by7lRG5X",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+        "action": "shell",
+        "resources": [
+         "ls -la feedback/ 2>/dev/null"
+        ],
+        "id": "per_1a7d36904001uq95ap1kWAt3Ei",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+        "action": "edit",
+        "resources": [
+         "<TMP>/run-2/proj/plan-result.md"
+        ],
+        "id": "per_1a7d3818e001mfNlrFaStJ92G2",
+        "decision": "once",
+        "ok": true
+       }
+      ],
+      "tools": [
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-2/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+       },
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"content\": \"이전 결과: 현재 단계=기획, 라운드=1\\n사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험)\\n처리 안 한 답: 0개\\n\", \"path\": \"<TMP>/run-2/proj/plan-result.…"
+       },
+       {
+        "name": "read",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-2/proj/feedback/plan-R1-20261105-033000.json\"}"
+       },
+       {
+        "name": "read",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-2/proj/result.json\"}"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"ls -la feedback/ 2>/dev/null\", \"workdir\": \"<TMP>/run-2/proj\"}"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
+       },
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-2/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+       }
+      ]
+     },
+     "deny": {
+      "ok": true,
+      "attempts": 1,
+      "permissions": [
+       {
+        "sessionID": "ses_e582c2d0bffeMOdARGXaOiMwrZ",
+        "action": "shell",
+        "resources": [
+         "rm -f keep.txt"
+        ],
+        "id": "per_1a7d3dda9001YcVs6bnyhCAalB",
+        "decision": "reject",
+        "ok": true
+       }
+      ],
+      "agents": [
+       {
+        "idle_outcome": "succeeded",
+        "text": "`rm -f keep.txt` 실행이 권한 정책에 의해 거부되었습니다(`permission.rejected: SEL-18 spike`). 명령은 실제로 실행되지 않았으므로 DONE이라고 답할 수 없습니다. - 시도한 명령: `rm -f keep.txt` - 결과: 차단됨 (파일 삭제 여부 변경 없음) 실행이 필요하면 권한 설정을 확인하시거나, 허용된 방식(예: 다른 경로/도구)을 알려주세요.",
+        "n_assistant_text": 1,
+        "cost": {
+         "cost": 0,
+         "tokens": {
+          "input": 4202,
+          "output": 163,
+          "reasoning": 206,
+          "cache": {
+           "read": 19584,
+           "write": 0
+          }
+         }
+        }
+       }
+      ],
+      "session_ms": {
+       "session_id": "ses_e582c2d0bffeMOdARGXaOiMwrZ",
+       "ms": 7
+      },
+      "session_id": "ses_e582c2d0bffeMOdARGXaOiMwrZ",
+      "session_env": {
+       "ok": true,
+       "ms": 2
+      },
+      "tools": [
+       {
+        "name": "shell",
+        "status": "error",
+        "executed": false,
+        "input": "{\"command\": \"rm -f keep.txt\"}"
+       }
+      ],
+      "keep_intact": true,
+      "reject_target": [
+       {
+        "sessionID": "ses_e582c2d0bffeMOdARGXaOiMwrZ",
+        "action": "shell",
+        "resources": [
+         "rm -f keep.txt"
+        ],
+        "id": "per_1a7d3dda9001YcVs6bnyhCAalB",
+        "decision": "reject",
+        "ok": true
+       }
+      ],
+      "reject_ok": true
+     }
+    },
+    "usage_2": {
+     "ok": true,
+     "ms": 697,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "usage_3": {
+     "ok": true,
+     "ms": 277,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "server_stop": {
+     "port": 64785,
+     "port_free": true
+    }
+   },
+   "sessions": [
+    "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+    "ses_e582c7677ffer5eXj8UTP1JOi1",
+    "ses_e582c2d0bffeMOdARGXaOiMwrZ"
+   ],
+   "cleanup": {
+    "tried": [
+     "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+     "ses_e582c7677ffer5eXj8UTP1JOi1",
+     "ses_e582c2d0bffeMOdARGXaOiMwrZ"
+    ],
+    "deleted": [
+     "ses_e582ce5a5ffe7ulUJ2XfV2I5Mp",
+     "ses_e582c7677ffer5eXj8UTP1JOi1",
+     "ses_e582c2d0bffeMOdARGXaOiMwrZ"
+    ],
+    "failed": [],
+    "still_present": [],
+    "leftover_ids": []
+   }
+  },
+  {
+   "iteration": 3,
+   "steps": {
+    "init": {
+     "code": 0,
+     "ms": 56,
+     "out": "<TMP>/run-3/proj/project.json"
+    },
+    "server_start": {
+     "ms": 312,
+     "version": "2.2.5",
+     "pid": 80377
+    },
+    "info_model": {
+     "ms": 1025,
+     "info": {
+      "version": "2.2.5",
+      "pid": 80377,
+      "n_urls": 1,
+      "capabilities": {
+       "persistentPty": true
+      }
+     },
+     "model_count": 66,
+     "target_found": true,
+     "target": "DeepSeek V4.1 Flash",
+     "target_status": "active",
+     "target_cost": [
+      {
+       "input": 0.15,
+       "output": 0.6,
+       "cache": {
+        "read": 0.003,
+        "write": 0
+       }
+      }
+     ]
+    },
+    "usage": {
+     "ok": true,
+     "ms": 604,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "scenario": {
+     "ok": true,
+     "round_start": {
+      "code": 0,
+      "ms": 92,
+      "out": "기획 R1 시작"
+     },
+     "session_ms": {
+      "session_id": "ses_e582bf68effenq9CGLlJwUoJ2a",
+      "ms": 18
+     },
+     "session_id": "ses_e582bf68effenq9CGLlJwUoJ2a",
+     "session_env": {
+      "ok": true,
+      "ms": 1
+     },
+     "agent": {
+      "idle_outcome": "succeeded",
+      "text": "RESULT-WRITTEN I'll run the requested commands and inspect the status output.",
+      "n_assistant_text": 2,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 5136,
+        "output": 383,
+        "reasoning": 16,
+        "cache": {
+         "read": 32512,
+         "write": 0
+        }
+       }
+      },
+      "prompt_ms": 8983,
+      "permission_polls": 45,
+      "permission_errors": []
+     },
+     "permissions": [
+      {
+       "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+       "action": "shell",
+       "resources": [
+        "printf '%s\\n' \"$PES_HOME\" > env-home.txt",
+        "printf '%s\\n' \"${PES_PROJECT:-}\" > env-project.txt",
+        "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-3/proj"
+       ],
+       "id": "per_1a7d413bb001Ax0U5hrzZJHVxW",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+       "action": "edit",
+       "resources": [
+        "<TMP>/run-3/proj/result.json"
+       ],
+       "id": "per_1a7d426f2001UIPHQVWZQqowmS",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+       "action": "shell",
+       "resources": [
+        "printf '%s\\n' \"$PES_HOME\" > env-home-after-restart.txt",
+        "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-3/proj"
+       ],
+       "id": "per_1a7d4508a0015hqiNtyaoItp9L",
+       "decision": "once",
+       "ok": true
+      },
+      {
+       "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+       "action": "edit",
+       "resources": [
+        "<TMP>/run-3/proj/plan-result.md"
+       ],
+       "id": "per_1a7d464c5001YNaJSN597EthvU",
+       "decision": "once",
+       "ok": true
+      }
+     ],
+     "tools": [
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-3/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+      }
+     ],
+     "env_check": {
+      "home": "<TMP>/run-3",
+      "home_ok": true,
+      "project": "",
+      "project_removed": true
+     },
+     "terminal_seen": true,
+     "events": {
+      "connected": true,
+      "error": null,
+      "count": 39,
+      "type_count": 22,
+      "first_event_ms": 51,
+      "execution_started_ms": 51,
+      "execution_end_ms": 8926,
+      "types": {
+       "session.inbox.enqueued": 1,
+       "session.execution.started": 1,
+       "session.instructions.updated": 1,
+       "session.inbox.delivered": 1,
+       "session.step.started": 3,
+       "session.text.started": 2,
+       "session.text.delta": 2,
+       "session.tool.input.started": 2,
+       "session.tool.input.ended": 2,
+       "session.tool.called": 2,
+       "session.text.ended": 2,
+       "session.step.streamed": 3,
+       "permission.asked": 2,
+       "permission.replied": 2,
+       "session.tool.progress": 1,
+       "session.tool.success": 2,
+       "session.step.ended": 3,
+       "session.usage.updated": 3,
+       "session.reasoning.started": 1,
+       "session.reasoning.delta": 1,
+       "session.reasoning.ended": 1,
+       "session.execution.succeeded": 1
+      }
+     },
+     "agent_summary": "현재 단계=기획, 라운드=1",
+     "agent_result": {
+      "exists": true,
+      "valid": true,
+      "text": "{\"id\": \"plan-agent-1\", \"title\": \"합성 기획 항목\", \"summary\": \"현재 단계=기획, 라운드=1\", \"confidence\": \"medium\"}"
+     },
+     "merge": {
+      "code": 0,
+      "ms": 85,
+      "out": "기획: 1건 병합"
+     },
+     "render": {
+      "code": 0,
+      "ms": 50,
+      "out": "<TMP>/run-3/proj/index.html"
+     },
+     "ask_prep": {
+      "code": 0,
+      "ms": 47,
+      "out": "<TMP>/run-3/proj/ask/plan-start.json"
+     },
+     "ask": {
+      "code": 0,
+      "ms": 46,
+      "out": "<TMP>/run-3/proj/ask-plan-start.html"
+     },
+     "ask_html": true,
+     "index_html": true,
+     "feedback": {
+      "http": 200,
+      "body": {
+       "ok": true,
+       "file": "plan-R1-20261105-033103.json"
+      },
+      "ms": 2
+     },
+     "pending": {
+      "code": 0,
+      "ms": 78,
+      "count": 1,
+      "paths": [
+       "plan-R1-20261105-033103.json"
+      ]
+     },
+     "mark": {
+      "code": 0,
+      "ms": 47,
+      "out": "처리 완료 표시 1개"
+     },
+     "pending_after_mark": 0,
+     "server_stop_before_resume": {
+      "port": 65350,
+      "port_free": true
+     },
+     "restart_ms": 315,
+     "restart_port": 65350,
+     "recovered": true,
+     "resume": {
+      "idle_outcome": "succeeded",
+      "text": "RESUME-OK RESULT-WRITTEN I'll run the requested commands and inspect the status output.",
+      "n_assistant_text": 3,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 10978,
+        "output": 1021,
+        "reasoning": 69,
+        "cache": {
+         "read": 98048,
+         "write": 0
+        }
+       }
+      },
+      "prompt_ms": 11260
+     },
+     "resume_tools": [
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"content\": \"이전 결과: 현재 단계=기획, 라운드=1\\n사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험)\\n처리 안 한 답: 0개\\n\", \"path\": \"<TMP>/run-3/proj/plan-result.…"
+      },
+      {
+       "name": "read",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-3/proj/feedback/plan-R1-20261105-033103.json\"}"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
+      },
+      {
+       "name": "read",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-3/proj/result.json\"}"
+      },
+      {
+       "name": "glob",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"pattern\": \"feedback/*.json\", \"path\": \"<TMP>/run-3/proj\"}"
+      },
+      {
+       "name": "write",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"path\": \"<TMP>/run-3/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+      },
+      {
+       "name": "shell",
+       "status": "completed",
+       "executed": false,
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+      }
+     ],
+     "post_restart_env": {
+      "home": "<TMP>/run-3",
+      "home_ok": true
+     },
+     "plan_result": "이전 결과: 현재 단계=기획, 라운드=1 사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험) 처리 안 한 답: 0개",
+     "resume_ok": true
+    },
+    "event_stream": {
+     "ok": true,
+     "connected": true,
+     "error": null,
+     "terminal_seen": true,
+     "event_count": 39,
+     "type_count": 22,
+     "first_event_ms": 51,
+     "execution_started_ms": 51,
+     "execution_end_ms": 8926,
+     "types": {
+      "session.inbox.enqueued": 1,
+      "session.execution.started": 1,
+      "session.instructions.updated": 1,
+      "session.inbox.delivered": 1,
+      "session.step.started": 3,
+      "session.text.started": 2,
+      "session.text.delta": 2,
+      "session.tool.input.started": 2,
+      "session.tool.input.ended": 2,
+      "session.tool.called": 2,
+      "session.text.ended": 2,
+      "session.step.streamed": 3,
+      "permission.asked": 2,
+      "permission.replied": 2,
+      "session.tool.progress": 1,
+      "session.tool.success": 2,
+      "session.step.ended": 3,
+      "session.usage.updated": 3,
+      "session.reasoning.started": 1,
+      "session.reasoning.delta": 1,
+      "session.reasoning.ended": 1,
+      "session.execution.succeeded": 1
+     }
+    },
+    "interrupt_resume": {
+     "ok": true,
+     "session_ms": {
+      "session_id": "ses_e582b93a8ffeBk6Q6VIXA49N5x",
+      "ms": 3
+     },
+     "session_id": "ses_e582b93a8ffeBk6Q6VIXA49N5x",
+     "session_env": {
+      "ok": true,
+      "ms": 0
+     },
+     "interrupt": {
+      "ok": true,
+      "ms": 1,
+      "response": {
+       "interrupted": true
+      },
+      "idle_outcome": "interrupted",
+      "settle_ms": 4
+     },
+     "sleep_shell": {
+      "found": true,
+      "entries": [
+       {
+        "id": "sh_1a7d4739b001zN0kSKwKNq6Bj1",
+        "status": "running",
+        "command": "sleep 45 ; echo slow > slow.txt",
+        "cwd": "<TMP>/run-3/proj",
+        "shell": "/bin/zsh",
+        "file": "<HOME>",
+        "pid": 80699,
+        "metadata": {
+         "sessionID": "ses_e582b93a8ffeBk6Q6VIXA49N5x"
+        },
+        "time": {
+         "started": 1793817080731
+        }
+       }
+      ],
+      "ms": 1859
+     },
+     "permissions_interrupt": [
+      {
+       "sessionID": "ses_e582b93a8ffeBk6Q6VIXA49N5x",
+       "action": "shell",
+       "resources": [
+        "sleep 45",
+        "echo slow > slow.txt"
+       ],
+       "id": "per_1a7d47397001Pnl5nviS9O2Aqo",
+       "decision": "once",
+       "ok": true
+      }
+     ],
+     "sleep_after": [],
+     "sleep_gone": true,
+     "resume": {
+      "idle_outcome": "succeeded",
+      "text": "RESUME-OK",
+      "n_assistant_text": 1,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 12068,
+        "output": 52,
+        "reasoning": 62,
+        "cache": {
+         "read": 11648,
+         "write": 0
+        }
+       }
+      }
+     },
+     "resume_ok": true,
+     "server_stop_before_restart": {
+      "port": 65350,
+      "port_free": true
+     },
+     "restart_ms": 314,
+     "restart_port": 65350,
+     "recovered": true,
+     "after_restart": {
+      "idle_outcome": "succeeded",
+      "text": "AFTER-RESTART RESUME-OK",
+      "n_assistant_text": 2,
+      "cost": {
+       "cost": 0,
+       "tokens": {
+        "input": 13677,
+        "output": 59,
+        "reasoning": 62,
+        "cache": {
+         "read": 23296,
+         "write": 0
+        }
+       }
+      }
+     },
+     "after_restart_ok": true
+    },
+    "permission": {
+     "ok": true,
+     "approval": {
+      "ok": true,
+      "session_id": "ses_e582bf68effenq9CGLlJwUoJ2a",
+      "once_shell": 2,
+      "once_edit": 2,
+      "shell_executed": true,
+      "edit_executed": true,
+      "agent_result_valid": true,
+      "replies": [
+       {
+        "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+        "action": "shell",
+        "resources": [
+         "printf '%s\\n' \"$PES_HOME\" > env-home.txt",
+         "printf '%s\\n' \"${PES_PROJECT:-}\" > env-project.txt",
+         "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-3/proj"
+        ],
+        "id": "per_1a7d413bb001Ax0U5hrzZJHVxW",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+        "action": "edit",
+        "resources": [
+         "<TMP>/run-3/proj/result.json"
+        ],
+        "id": "per_1a7d426f2001UIPHQVWZQqowmS",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+        "action": "shell",
+        "resources": [
+         "printf '%s\\n' \"$PES_HOME\" > env-home-after-restart.txt",
+         "/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>/run-3/proj"
+        ],
+        "id": "per_1a7d4508a0015hqiNtyaoItp9L",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582bf68effenq9CGLlJwUoJ2a",
+        "action": "edit",
+        "resources": [
+         "<TMP>/run-3/proj/plan-result.md"
+        ],
+        "id": "per_1a7d464c5001YNaJSN597EthvU",
+        "decision": "once",
+        "ok": true
+       }
+      ],
+      "tools": [
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-3/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+       },
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"content\": \"이전 결과: 현재 단계=기획, 라운드=1\\n사람 답: 합성 답변: 청년 정책을 우선한다. (SEL-18 시험)\\n처리 안 한 답: 0개\\n\", \"path\": \"<TMP>/run-3/proj/plan-result.…"
+       },
+       {
+        "name": "read",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-3/proj/feedback/plan-R1-20261105-033103.json\"}"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
+       },
+       {
+        "name": "read",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-3/proj/result.json\"}"
+       },
+       {
+        "name": "glob",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"pattern\": \"feedback/*.json\", \"path\": \"<TMP>/run-3/proj\"}"
+       },
+       {
+        "name": "write",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"path\": \"<TMP>/run-3/proj/result.json\", \"content\": \"{\\\"id\\\": \\\"plan-agent-1\\\", \\\"title\\\": \\\"합성 기획 항목\\\", \\\"summary\\\": \\\"현재 단계=기획, 라…"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home.txt\\nprintf '%s\\\\n' \\\"${PES_PROJECT:-}\\\" > env-project.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME>"
+       }
+      ]
+     },
+     "deny": {
+      "ok": true,
+      "attempts": 1,
+      "permissions": [
+       {
+        "sessionID": "ses_e582b3e2fffePB5Im2aHCfLt4G",
+        "action": "shell",
+        "resources": [
+         "ls -la",
+         "wc -c keep.txt 2>/dev/null"
+        ],
+        "id": "per_1a7d4d11f001jL1E6KQzKFw179",
+        "decision": "once",
+        "ok": true
+       },
+       {
+        "sessionID": "ses_e582b3e2fffePB5Im2aHCfLt4G",
+        "action": "shell",
+        "resources": [
+         "rm -f keep.txt"
+        ],
+        "id": "per_1a7d4d7c7001MYYVxvSydFkEQj",
+        "decision": "reject",
+        "ok": true
+       }
+      ],
+      "agents": [
+       {
+        "idle_outcome": "succeeded",
+        "text": "`rm -f keep.txt` 실행이 거부되었습니다. ``` {\"error\":{\"type\":\"permission.rejected\",\"message\":\"SEL-18 spike\"}} ``` 권한 정책에서 차단된 것이므로 우회 경로(다른 도구·스크립트)로 삭제를 시도하지 않았고, `keep.txt`는 그대로 남아 있습니다. 삭제가 필요하면 해당 권한 설정을 허용해 주세요. DONE",
+        "n_assistant_text": 1,
+        "cost": {
+         "cost": 0,
+         "tokens": {
+          "input": 9405,
+          "output": 198,
+          "reasoning": 339,
+          "cache": {
+           "read": 27776,
+           "write": 0
+          }
+         }
+        }
+       }
+      ],
+      "session_ms": {
+       "session_id": "ses_e582b3e2fffePB5Im2aHCfLt4G",
+       "ms": 6
+      },
+      "session_id": "ses_e582b3e2fffePB5Im2aHCfLt4G",
+      "session_env": {
+       "ok": true,
+       "ms": 2
+      },
+      "tools": [
+       {
+        "name": "shell",
+        "status": "error",
+        "executed": false,
+        "input": "{\"command\": \"rm -f keep.txt\"}"
+       },
+       {
+        "name": "shell",
+        "status": "completed",
+        "executed": false,
+        "input": "{\"command\": \"ls -la; wc -c keep.txt 2>/dev/null\"}"
+       }
+      ],
+      "keep_intact": true,
+      "reject_target": [
+       {
+        "sessionID": "ses_e582b3e2fffePB5Im2aHCfLt4G",
+        "action": "shell",
+        "resources": [
+         "rm -f keep.txt"
+        ],
+        "id": "per_1a7d4d7c7001MYYVxvSydFkEQj",
+        "decision": "reject",
+        "ok": true
+       }
+      ],
+      "reject_ok": true
+     }
+    },
+    "usage_2": {
+     "ok": true,
+     "ms": 582,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "usage_3": {
+     "ok": true,
+     "ms": 270,
+     "present": true,
+     "go": {
+      "rolling": {
+       "percent": 5,
+       "limited": false,
+       "resetsAt": 1793832264000,
+       "valid": true
+      },
+      "weekly": {
+       "percent": 21,
+       "limited": false,
+       "resetsAt": 1794182400000,
+       "valid": true
+      },
+      "monthly": {
+       "percent": 10,
+       "limited": false,
+       "resetsAt": 1796216247000,
+       "valid": true
+      }
+     },
+     "n_budgets": 0
+    },
+    "server_stop": {
+     "port": 65350,
+     "port_free": true
+    }
+   },
+   "sessions": [
+    "ses_e582bf68effenq9CGLlJwUoJ2a",
+    "ses_e582b93a8ffeBk6Q6VIXA49N5x",
+    "ses_e582b3e2fffePB5Im2aHCfLt4G"
+   ],
+   "cleanup": {
+    "tried": [
+     "ses_e582bf68effenq9CGLlJwUoJ2a",
+     "ses_e582b93a8ffeBk6Q6VIXA49N5x",
+     "ses_e582b3e2fffePB5Im2aHCfLt4G"
+    ],
+    "deleted": [
+     "ses_e582bf68effenq9CGLlJwUoJ2a",
+     "ses_e582b93a8ffeBk6Q6VIXA49N5x",
+     "ses_e582b3e2fffePB5Im2aHCfLt4G"
+    ],
+    "failed": [],
+    "still_present": [],
+    "leftover_ids": []
+   }
+  }
+ ],
+ "summary": {
+  "1_info_model": [
+   {
+    "ok": true,
+    "ms": 1059,
+    "server_start_ms": 324,
+    "models": 66
+   },
+   {
+    "ok": true,
+    "ms": 1021,
+    "server_start_ms": 314,
+    "models": 66
+   },
+   {
+    "ok": true,
+    "ms": 1025,
+    "server_start_ms": 312,
+    "models": 66
+   }
+  ],
+  "2_scenario": [
+   {
+    "ok": true,
+    "agent_ok": true,
+    "env_home_ok": true,
+    "env_project_removed": true,
+    "prompt_ms": 7114,
+    "round_ms": 324,
+    "restart_ms": 315,
+    "recovered": true,
+    "resume_ms": 10670,
+    "resume_ok": true,
+    "pending_count": 1,
+    "pending_after_mark": 0,
+    "cost": {
+     "cost": 0,
+     "tokens": {
+      "input": 11290,
+      "output": 389,
+      "reasoning": 14,
+      "cache": {
+       "read": 26368,
+       "write": 0
+      }
+     }
+    }
+   },
+   {
+    "ok": true,
+    "agent_ok": true,
+    "env_home_ok": true,
+    "env_project_removed": true,
+    "prompt_ms": 7142,
+    "round_ms": 328,
+    "restart_ms": 309,
+    "recovered": true,
+    "resume_ms": 14502,
+    "resume_ok": true,
+    "pending_count": 1,
+    "pending_after_mark": 0,
+    "cost": {
+     "cost": 0,
+     "tokens": {
+      "input": 5259,
+      "output": 382,
+      "reasoning": 13,
+      "cache": {
+       "read": 32384,
+       "write": 0
+      }
+     }
+    }
+   },
+   {
+    "ok": true,
+    "agent_ok": true,
+    "env_home_ok": true,
+    "env_project_removed": true,
+    "prompt_ms": 8983,
+    "round_ms": 322,
+    "restart_ms": 315,
+    "recovered": true,
+    "resume_ms": 11260,
+    "resume_ok": true,
+    "pending_count": 1,
+    "pending_after_mark": 0,
+    "cost": {
+     "cost": 0,
+     "tokens": {
+      "input": 5136,
+      "output": 383,
+      "reasoning": 16,
+      "cache": {
+       "read": 32512,
+       "write": 0
+      }
+     }
+    }
+   }
+  ],
+  "3_events": [
+   {
+    "ok": true,
+    "connected": true,
+    "terminal_seen": true,
+    "count": 40,
+    "type_count": 22,
+    "first_event_ms": 51,
+    "execution_ms": 7041,
+    "types": {
+     "session.inbox.enqueued": 1,
+     "session.execution.started": 1,
+     "session.instructions.updated": 1,
+     "session.inbox.delivered": 1,
+     "session.step.started": 3,
+     "session.text.started": 2,
+     "session.text.delta": 3,
+     "session.tool.input.started": 2,
+     "session.tool.input.ended": 2,
+     "session.tool.called": 2,
+     "session.text.ended": 2,
+     "session.step.streamed": 3,
+     "permission.asked": 2,
+     "permission.replied": 2,
+     "session.tool.progress": 1,
+     "session.tool.success": 2,
+     "session.step.ended": 3,
+     "session.usage.updated": 3,
+     "session.reasoning.started": 1,
+     "session.reasoning.delta": 1,
+     "session.reasoning.ended": 1,
+     "session.execution.succeeded": 1
+    }
+   },
+   {
+    "ok": true,
+    "connected": true,
+    "terminal_seen": true,
+    "count": 39,
+    "type_count": 22,
+    "first_event_ms": 49,
+    "execution_ms": 6826,
+    "types": {
+     "session.inbox.enqueued": 1,
+     "session.execution.started": 1,
+     "session.instructions.updated": 1,
+     "session.inbox.delivered": 1,
+     "session.step.started": 3,
+     "session.text.started": 2,
+     "session.text.delta": 2,
+     "session.tool.input.started": 2,
+     "session.tool.input.ended": 2,
+     "session.tool.called": 2,
+     "session.text.ended": 2,
+     "session.step.streamed": 3,
+     "permission.asked": 2,
+     "permission.replied": 2,
+     "session.tool.progress": 1,
+     "session.tool.success": 2,
+     "session.step.ended": 3,
+     "session.usage.updated": 3,
+     "session.reasoning.started": 1,
+     "session.reasoning.delta": 1,
+     "session.reasoning.ended": 1,
+     "session.execution.succeeded": 1
+    }
+   },
+   {
+    "ok": true,
+    "connected": true,
+    "terminal_seen": true,
+    "count": 39,
+    "type_count": 22,
+    "first_event_ms": 51,
+    "execution_ms": 8875,
+    "types": {
+     "session.inbox.enqueued": 1,
+     "session.execution.started": 1,
+     "session.instructions.updated": 1,
+     "session.inbox.delivered": 1,
+     "session.step.started": 3,
+     "session.text.started": 2,
+     "session.text.delta": 2,
+     "session.tool.input.started": 2,
+     "session.tool.input.ended": 2,
+     "session.tool.called": 2,
+     "session.text.ended": 2,
+     "session.step.streamed": 3,
+     "permission.asked": 2,
+     "permission.replied": 2,
+     "session.tool.progress": 1,
+     "session.tool.success": 2,
+     "session.step.ended": 3,
+     "session.usage.updated": 3,
+     "session.reasoning.started": 1,
+     "session.reasoning.delta": 1,
+     "session.reasoning.ended": 1,
+     "session.execution.succeeded": 1
+    }
+   }
+  ],
+  "4_interrupt_resume": [
+   {
+    "ok": true,
+    "sleep_seen": true,
+    "sleep_gone": true,
+    "interrupted": true,
+    "idle_outcome": "interrupted",
+    "interrupt_settle_ms": 14,
+    "resume_ok": true,
+    "recovered": true,
+    "after_restart_ok": true,
+    "restart_ms": 313
+   },
+   {
+    "ok": true,
+    "sleep_seen": true,
+    "sleep_gone": true,
+    "interrupted": true,
+    "idle_outcome": "interrupted",
+    "interrupt_settle_ms": 5,
+    "resume_ok": true,
+    "recovered": true,
+    "after_restart_ok": true,
+    "restart_ms": 312
+   },
+   {
+    "ok": true,
+    "sleep_seen": true,
+    "sleep_gone": true,
+    "interrupted": true,
+    "idle_outcome": "interrupted",
+    "interrupt_settle_ms": 4,
+    "resume_ok": true,
+    "recovered": true,
+    "after_restart_ok": true,
+    "restart_ms": 314
+   }
+  ],
+  "5_permission": [
+   {
+    "ok": true,
+    "approval_ok": true,
+    "once_shell": 2,
+    "once_edit": 2,
+    "shell_executed": true,
+    "edit_executed": true,
+    "deny_ok": true,
+    "keep_intact": true,
+    "reject_target": true,
+    "deny_attempts": 1
+   },
+   {
+    "ok": true,
+    "approval_ok": true,
+    "once_shell": 3,
+    "once_edit": 2,
+    "shell_executed": true,
+    "edit_executed": true,
+    "deny_ok": true,
+    "keep_intact": true,
+    "reject_target": true,
+    "deny_attempts": 1
+   },
+   {
+    "ok": true,
+    "approval_ok": true,
+    "once_shell": 2,
+    "once_edit": 2,
+    "shell_executed": true,
+    "edit_executed": true,
+    "deny_ok": true,
+    "keep_intact": true,
+    "reject_target": true,
+    "deny_attempts": 1
+   }
+  ],
+  "6_usage": [
+   {
+    "ok": true,
+    "ms": [
+     599,
+     626,
+     273
+    ],
+    "present": [
+     true,
+     true,
+     true
+    ],
+    "go": {
+     "rolling": {
+      "percent": 5,
+      "limited": false,
+      "resetsAt": 1793832264000,
+      "valid": true
+     },
+     "weekly": {
+      "percent": 21,
+      "limited": false,
+      "resetsAt": 1794182400000,
+      "valid": true
+     },
+     "monthly": {
+      "percent": 10,
+      "limited": false,
+      "resetsAt": 1796216247000,
+      "valid": true
+     }
+    }
+   },
+   {
+    "ok": true,
+    "ms": [
+     612,
+     697,
+     277
+    ],
+    "present": [
+     true,
+     true,
+     true
+    ],
+    "go": {
+     "rolling": {
+      "percent": 5,
+      "limited": false,
+      "resetsAt": 1793832264000,
+      "valid": true
+     },
+     "weekly": {
+      "percent": 21,
+      "limited": false,
+      "resetsAt": 1794182400000,
+      "valid": true
+     },
+     "monthly": {
+      "percent": 10,
+      "limited": false,
+      "resetsAt": 1796216247000,
+      "valid": true
+     }
+    }
+   },
+   {
+    "ok": true,
+    "ms": [
+     604,
+     582,
+     270
+    ],
+    "present": [
+     true,
+     true,
+     true
+    ],
+    "go": {
+     "rolling": {
+      "percent": 5,
+      "limited": false,
+      "resetsAt": 1793832264000,
+      "valid": true
+     },
+     "weekly": {
+      "percent": 21,
+      "limited": false,
+      "resetsAt": 1794182400000,
+      "valid": true
+     },
+     "monthly": {
+      "percent": 10,
+      "limited": false,
+      "resetsAt": 1796216247000,
+      "valid": true
+     }
+    }
+   }
+  ]
+ },
+ "ports_free": true,
+ "failed": false
+}
