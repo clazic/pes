@@ -1,0 +1,2067 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>PES 작업 공간 정적 시안</title>
+<style>
+  :root {
+    --bg: #f3f6f8;
+    --surface: #ffffff;
+    --surface-soft: #f8fafb;
+    --ink: #17202a;
+    --muted: #5b6773;
+    --line: #d8e0e6;
+    --line-strong: #b9c7d2;
+    --accent: #1f5f8b;
+    --accent-dark: #184d70;
+    --accent-soft: #e8f1f7;
+    --green: #1f7a4d;
+    --green-soft: #e6f4ec;
+    --red: #a33a3a;
+    --red-soft: #fbeaea;
+    --amber: #8a5a00;
+    --amber-soft: #fff4d6;
+    --paper: #fffefb;
+    --shadow: 0 1px 2px rgba(23, 32, 42, 0.05);
+    --radius: 10px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    background: var(--bg);
+  }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .skip-link {
+    position: absolute;
+    left: 12px;
+    top: -48px;
+    z-index: 100;
+    padding: 8px 12px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .skip-link:focus {
+    top: 12px;
+  }
+
+  .page {
+    width: min(100%, 1600px);
+    margin: 0 auto;
+    padding: 18px 18px 28px;
+  }
+
+  .app-header {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    padding: 16px 18px 12px;
+  }
+
+  .topline,
+  .project-row,
+  .section-head,
+  .card-head,
+  .panel-head,
+  .question-top,
+  .question-footer,
+  .annotation-head,
+  .annotation-actions,
+  .print-toolbar,
+  .paper-head,
+  .paper-foot {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .topline {
+    align-items: center;
+    flex-wrap: wrap;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--ink);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
+  .brand-text {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: var(--muted);
+    background: var(--surface-soft);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .layout-mode {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .layout-mode::after {
+    content: "3영역 (1440px 이상)";
+    color: var(--accent);
+  }
+
+  .project-row {
+    align-items: center;
+    padding: 14px 0 10px;
+  }
+
+  .project-heading {
+    min-width: 0;
+  }
+
+  .project-heading h1 {
+    margin: 0;
+    font-size: 21px;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+  }
+
+  .edition {
+    display: inline-flex;
+    margin-left: 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 5px;
+    padding: 1px 6px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    vertical-align: 2px;
+  }
+
+  .project-meta {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .header-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+
+  .status-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0;
+    border-top: 1px solid var(--line);
+    padding-top: 9px;
+  }
+
+  .status-item {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 0 13px;
+    border-left: 1px solid var(--line);
+    font-size: 12px;
+  }
+
+  .status-item:first-child {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .status-label {
+    color: var(--muted);
+  }
+
+  .status-value {
+    font-weight: 700;
+  }
+
+  .status-on {
+    color: var(--green);
+  }
+
+  main {
+    margin-top: 16px;
+  }
+
+  .synthetic-note {
+    margin-bottom: 14px;
+    border: 1px solid #c9dce8;
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    background: #f3f9fc;
+    padding: 10px 13px;
+    color: #315266;
+    font-size: 12px;
+  }
+
+  .synthetic-note strong {
+    color: var(--accent-dark);
+  }
+
+  .card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .layout-guide,
+  .go-legend {
+    padding: 15px 16px 16px;
+    margin-bottom: 14px;
+  }
+
+  .section-head {
+    align-items: flex-end;
+    margin-bottom: 12px;
+  }
+
+  .section-head h2,
+  .panel-head h2,
+  .print-toolbar h2 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  .section-head p,
+  .print-toolbar p {
+    max-width: 680px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .guide-grid,
+  .go-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .guide-item,
+  .go-state {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    padding: 11px 12px;
+  }
+
+  .guide-label {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+  }
+
+  .guide-item h3 {
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .guide-item p,
+  .go-state p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .wire {
+    display: grid;
+    gap: 3px;
+    height: 56px;
+    margin-top: 7px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #ffffff;
+    padding: 4px;
+  }
+
+  .wire span {
+    min-height: 0;
+    border-radius: 3px;
+  }
+
+  .wire-nav {
+    background: #c9d8e4;
+  }
+
+  .wire-main {
+    background: #e8f1f7;
+  }
+
+  .wire-side {
+    background: #f3e7c8;
+  }
+
+  .wire-3 {
+    grid-template-columns: 18% minmax(0, 1fr) 28%;
+  }
+
+  .wire-2 {
+    grid-template-columns: minmax(0, 1fr) 30%;
+    grid-template-areas:
+      "nav nav"
+      "main side";
+  }
+
+  .wire-2 .wire-nav {
+    grid-area: nav;
+  }
+
+  .wire-2 .wire-main {
+    grid-area: main;
+  }
+
+  .wire-2 .wire-side {
+    grid-area: side;
+  }
+
+  .wire-1 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .go-state {
+    border-left-width: 4px;
+  }
+
+  .go-on {
+    border-left-color: var(--green);
+  }
+
+  .go-blocked {
+    border-left-color: var(--red);
+  }
+
+  .go-changing {
+    border-left-color: var(--amber);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    border: 1px solid;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .chip .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: 0 0 auto;
+  }
+
+  .chip-on {
+    border-color: #bfe0cd;
+    background: var(--green-soft);
+    color: var(--green);
+  }
+
+  .chip-blocked {
+    border-color: #ecc7c7;
+    background: var(--red-soft);
+    color: var(--red);
+  }
+
+  .chip-changing {
+    border-color: #ecd9a4;
+    background: var(--amber-soft);
+    color: var(--amber);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+  }
+
+  .btn:hover {
+    background: #f2f7fa;
+  }
+
+  .btn-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #ffffff;
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-dark);
+  }
+
+  .btn-quiet {
+    background: transparent;
+  }
+
+  .btn-small {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  kbd {
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-soft);
+    padding: 0 4px;
+    font-family: inherit;
+    font-size: 10px;
+  }
+
+  .tab-input {
+    display: none;
+  }
+
+  .mobile-tabs {
+    display: none;
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr) 380px;
+    grid-template-areas:
+      "nav result question"
+      "nav record question";
+    gap: 14px;
+    align-items: start;
+  }
+
+  .side-nav,
+  .panel {
+    min-width: 0;
+  }
+
+  .side-nav {
+    grid-area: nav;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    padding: 12px;
+  }
+
+  .nav-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .nav-current {
+    color: var(--accent);
+  }
+
+  .nav-list {
+    display: block;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 7px;
+    padding: 8px 8px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .nav-item + .nav-item {
+    margin-top: 2px;
+  }
+
+  .nav-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #c8d2db;
+    flex: 0 0 auto;
+  }
+
+  .nav-done .nav-dot {
+    background: var(--green);
+  }
+
+  .nav-active {
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    font-weight: 800;
+  }
+
+  .nav-active .nav-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(31, 95, 139, 0.12);
+  }
+
+  .nav-state {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+
+  .nav-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 10px;
+    border-top: 1px solid var(--line);
+    padding-top: 9px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .nav-link {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .result-panel,
+  .question-panel,
+  .record-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .result-panel {
+    grid-area: result;
+  }
+
+  .question-panel {
+    grid-area: question;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #eef3f6;
+    box-shadow: var(--shadow);
+    padding: 13px;
+  }
+
+  .record-panel {
+    grid-area: record;
+  }
+
+  .panel-head {
+    align-items: flex-start;
+  }
+
+  .eyebrow {
+    margin: 0 0 3px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  .result-card {
+    padding: 17px 18px 16px;
+  }
+
+  .card-head {
+    align-items: flex-start;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .card-head h2 {
+    margin: 0;
+    font-size: 19px;
+    line-height: 1.35;
+    letter-spacing: -0.02em;
+  }
+
+  .meta-line {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-soft);
+    padding: 2px 8px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .badge-important {
+    border-color: #c7ddeb;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+  }
+
+  .badge-required {
+    border-color: #ecd9a4;
+    background: var(--amber-soft);
+    color: #7a5200;
+  }
+
+  .badge-recheck {
+    border-color: #ecc7c7;
+    background: var(--red-soft);
+    color: #8a2f2f;
+  }
+
+  .badge-adopted,
+  .badge-exact {
+    border-color: #bfe0cd;
+    background: var(--green-soft);
+    color: var(--green);
+  }
+
+  .badge-moved,
+  .badge-ambiguous {
+    border-color: #ecd9a4;
+    background: var(--amber-soft);
+    color: #7a5200;
+  }
+
+  .badge-lost {
+    border-color: #ecc7c7;
+    background: var(--red-soft);
+    color: #8a2f2f;
+  }
+
+  .anchor-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+  }
+
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 9px;
+    margin: 13px 0 15px;
+  }
+
+  .metric-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 3px;
+    min-height: 82px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    padding: 10px 11px;
+  }
+
+  .metric-label {
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+
+  .metric-card strong {
+    font-size: 20px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .metric-note {
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+
+  .result-body p {
+    margin: 0 0 12px;
+    line-height: 1.78;
+  }
+
+  .result-body p:last-child {
+    margin-bottom: 0;
+  }
+
+  .selection {
+    background: #fff1b8;
+    border-bottom: 2px solid #d9a600;
+    padding: 1px 2px;
+  }
+
+  .selection-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    margin: 6px 0 5px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 8px;
+    background: #f8fbfd;
+    padding: 8px 10px;
+  }
+
+  .toolbar-label {
+    margin-right: 3px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+  }
+
+  .toolbar-note {
+    margin: 0 0 14px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .annotation-card {
+    border-left: 4px solid var(--accent);
+    padding: 13px 15px;
+  }
+
+  .annotation-head {
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .annotation-no {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 800;
+    flex: 0 0 auto;
+  }
+
+  .annotation-head strong {
+    display: block;
+    font-size: 13px;
+  }
+
+  .annotation-card p {
+    margin: 8px 0;
+    color: #35414c;
+    font-size: 12.5px;
+  }
+
+  .annotation-actions {
+    justify-content: flex-start;
+    gap: 12px;
+  }
+
+  .link-button {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--accent);
+    font-size: 11.5px;
+    font-weight: 800;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .question-panel > .panel-head {
+    padding: 1px 2px 0;
+  }
+
+  .question-stack {
+    display: grid;
+    gap: 11px;
+  }
+
+  .question-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 12px;
+  }
+
+  .question-top {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .question-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .question-id {
+    margin: 8px 0 4px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+
+  .question-card h3 {
+    margin: 0 0 5px;
+    font-size: 14px;
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+  }
+
+  .question-help {
+    margin: 0 0 10px;
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+
+  .options {
+    margin: 0 0 10px;
+    border: 0;
+    padding: 0;
+  }
+
+  .field-label {
+    display: block;
+    margin: 0 0 5px;
+    color: #3d4a55;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .options label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 4px 0;
+    color: #35414c;
+    font-size: 12.5px;
+  }
+
+  input[type="radio"],
+  input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+
+  .question-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+
+  .hint {
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 54px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #ffffff;
+    padding: 8px 9px;
+    color: var(--ink);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  textarea::placeholder {
+    color: #8a969f;
+  }
+
+  .check-line {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 8px 0 10px;
+    color: #35414c;
+    font-size: 12px;
+  }
+
+  .question-footer {
+    justify-content: flex-start;
+    gap: 7px;
+    margin-top: auto;
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+  }
+
+  .batch-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    padding: 9px 10px;
+  }
+
+  .state-note {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.55;
+  }
+
+  .question-note {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 7px;
+    background: #f8fbfd;
+    padding: 9px 10px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  .question-note strong {
+    color: var(--accent-dark);
+  }
+
+  .table-card {
+    padding: 13px 14px 12px;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  .data-table {
+    width: 100%;
+    min-width: 540px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 12px;
+  }
+
+  .data-table caption {
+    padding: 0 0 8px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .data-table th,
+  .data-table td {
+    border-bottom: 1px solid var(--line);
+    padding: 7px 7px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .data-table thead th {
+    border-top: 1px solid var(--line);
+    background: #f1f5f8;
+    color: #3d4a55;
+    font-size: 10.5px;
+    font-weight: 800;
+  }
+
+  .data-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .data-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .state-text {
+    font-weight: 800;
+  }
+
+  .state-applied {
+    color: var(--green);
+  }
+
+  .state-partial {
+    color: var(--amber);
+  }
+
+  .state-deferred {
+    color: var(--muted);
+  }
+
+  .table-note {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.55;
+  }
+
+  .print-section {
+    margin-top: 18px;
+  }
+
+  .print-toolbar {
+    align-items: flex-end;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    padding: 13px 15px;
+  }
+
+  .print-note {
+    max-width: 520px;
+    color: var(--muted);
+    font-size: 11.5px;
+    text-align: right;
+  }
+
+  .print-scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 9px 12px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .print-scope label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  .paper {
+    width: min(100%, 760px);
+    min-height: 940px;
+    margin: 0 auto;
+    border: 1px solid #cfc7b8;
+    background: var(--paper);
+    box-shadow: 0 4px 18px rgba(23, 32, 42, 0.08);
+    padding: 30px 34px;
+    color: #24211d;
+  }
+
+  .paper-head,
+  .paper-foot {
+    align-items: center;
+    color: #6b6255;
+    font-size: 10px;
+  }
+
+  .paper-head {
+    border-bottom: 1px solid #b9b09f;
+    padding-bottom: 8px;
+  }
+
+  .paper h3 {
+    margin: 20px 0 5px;
+    font-size: 22px;
+    line-height: 1.35;
+    letter-spacing: -0.02em;
+  }
+
+  .paper h4 {
+    margin: 18px 0 5px;
+    font-size: 13.5px;
+  }
+
+  .paper p {
+    margin: 0 0 9px;
+    font-size: 11.5px;
+    line-height: 1.8;
+  }
+
+  .paper-meta {
+    color: #6b6255;
+    font-size: 10px !important;
+  }
+
+  .paper-table {
+    width: 100%;
+    margin: 8px 0 15px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 10.5px;
+  }
+
+  .paper-table caption {
+    display: table-caption;
+    margin-bottom: 5px;
+    text-align: left;
+    color: #3d4a55;
+    font-size: 10.5px;
+    font-weight: 800;
+  }
+
+  .paper-table th,
+  .paper-table td {
+    border: 1px solid #c9c2b4;
+    padding: 5px 6px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .paper-table th {
+    background: #f3efe6;
+    font-weight: 800;
+  }
+
+  .paper-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .paper-foot {
+    margin-top: 24px;
+    border-top: 1px solid #b9b09f;
+    padding-top: 8px;
+  }
+
+  .site-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+
+  @media (min-width: 1280px) and (max-width: 1439px) {
+    .layout-mode::after {
+      content: "2영역 (1280–1439px)";
+    }
+
+    .workspace {
+      grid-template-columns: minmax(0, 1fr) 360px;
+      grid-template-areas:
+        "nav nav"
+        "result question"
+        "record question";
+    }
+
+    .side-nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 9px 10px;
+    }
+
+    .nav-head,
+    .nav-foot {
+      display: none;
+    }
+
+    .nav-list {
+      display: flex;
+      gap: 4px;
+      margin: 0;
+      padding: 0;
+    }
+
+    .nav-item {
+      white-space: nowrap;
+      padding: 6px 8px;
+    }
+
+    .nav-item + .nav-item {
+      margin-top: 0;
+    }
+  }
+
+  @media (max-width: 1279px) {
+    .layout-mode::after {
+      content: "한 열 (1280px 미만)";
+    }
+
+    .mobile-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 4px;
+      box-shadow: var(--shadow);
+    }
+
+    .mobile-tabs label {
+      flex: 1 1 0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      margin-left: 3px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-dark);
+      font-size: 10px;
+    }
+
+    .tab-input {
+      display: block;
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    #tab-question:checked ~ .mobile-tabs label[for="tab-question"],
+    #tab-result:checked ~ .mobile-tabs label[for="tab-result"],
+    #tab-record:checked ~ .mobile-tabs label[for="tab-record"] {
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    #tab-question:checked ~ .mobile-tabs label[for="tab-question"] .tab-count,
+    #tab-result:checked ~ .mobile-tabs label[for="tab-result"] .tab-count,
+    #tab-record:checked ~ .mobile-tabs label[for="tab-record"] .tab-count {
+      background: #ffffff;
+      color: var(--accent-dark);
+    }
+
+    #tab-question:focus-visible ~ .mobile-tabs label[for="tab-question"],
+    #tab-result:focus-visible ~ .mobile-tabs label[for="tab-result"],
+    #tab-record:focus-visible ~ .mobile-tabs label[for="tab-record"] {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .workspace {
+      display: block;
+    }
+
+    .side-nav {
+      display: none;
+    }
+
+    .workspace .panel {
+      display: none;
+    }
+
+    #tab-question:checked ~ .workspace #panel-question,
+    #tab-result:checked ~ .workspace #panel-result,
+    #tab-record:checked ~ .workspace #panel-record {
+      display: flex;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .page {
+      padding: 12px 12px 22px;
+    }
+
+    .project-row,
+    .section-head,
+    .print-toolbar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .header-tools {
+      justify-content: flex-start;
+    }
+
+    .guide-grid,
+    .go-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .print-note {
+      text-align: left;
+    }
+
+    .paper {
+      padding: 22px 20px;
+      min-height: 0;
+    }
+  }
+
+  @media (max-width: 900px) and (pointer: coarse) {
+    .selection-toolbar,
+    .question-top .link-button,
+    .annotation-actions {
+      display: none;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .metric-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .metric-card {
+      min-height: 66px;
+    }
+
+    .status-item {
+      padding: 0 9px;
+    }
+
+    .project-heading h1 {
+      font-size: 18px;
+    }
+
+    .card-head,
+    .panel-head {
+      flex-direction: column;
+    }
+
+    .question-footer .btn {
+      flex: 1 1 auto;
+    }
+  }
+
+  @media print {
+    @page {
+      size: A4;
+      margin: 18mm;
+    }
+
+    body {
+      background: #ffffff;
+      color: #000000;
+      font-size: 11pt;
+    }
+
+    .skip-link,
+    .app-header,
+    .synthetic-note,
+    .layout-guide,
+    .go-legend,
+    .mobile-tabs,
+    .tab-input,
+    .workspace,
+    .print-toolbar,
+    .site-footer {
+      display: none !important;
+    }
+
+    .page {
+      width: auto;
+      padding: 0;
+    }
+
+    main {
+      margin: 0;
+    }
+
+    .print-section {
+      margin: 0;
+    }
+
+    .paper {
+      width: auto;
+      min-height: 0;
+      margin: 0;
+      border: 0;
+      box-shadow: none;
+      padding: 0;
+      background: #ffffff;
+    }
+
+    .paper h3 {
+      font-size: 18pt;
+    }
+
+    .paper h4 {
+      font-size: 11pt;
+    }
+
+    .paper p {
+      font-size: 10.5pt;
+    }
+
+    .paper-table {
+      font-size: 9pt;
+    }
+
+    .paper-table caption {
+      font-size: 9pt;
+    }
+
+    .paper-head,
+    .paper-foot,
+    .paper-meta {
+      font-size: 8pt !important;
+    }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#workspace">본문으로</a>
+<div class="page">
+  <header class="app-header">
+    <div class="topline">
+      <div class="brand">
+        <span class="brand-mark">PES</span>
+        <span class="brand-text">작업 공간</span>
+        <span class="tag">합성 시안</span>
+      </div>
+      <div class="layout-mode" aria-label="현재 배치">현재 배치: </div>
+    </div>
+
+    <div class="project-row">
+      <div class="project-heading">
+        <h1>지역 돌봄 인력 수급 개선 연구 <span class="edition">2판</span></h1>
+        <p class="project-meta">분석·종합 · R2 · 실행 담당 A · DeepSeek · 소유자 김연구 · 편집자 박검토</p>
+      </div>
+      <div class="header-tools">
+        <span class="chip chip-on"><span class="dot"></span>Go 전송 켜짐</span>
+        <button class="btn btn-quiet" type="button">전송 내역</button>
+        <button class="btn btn-quiet" type="button" title="소유자 사람만">전송 끄기</button>
+        <button class="btn btn-quiet" type="button">결정 기록</button>
+        <button class="btn btn-quiet" type="button">명령 찾기 <kbd>Ctrl K</kbd></button>
+        <a class="btn btn-quiet" href="#print-preview">인쇄 미리보기</a>
+      </div>
+    </div>
+
+    <div class="status-strip" aria-label="상태 구분">
+      <div class="status-item"><span class="status-label">전송 허용</span><span class="status-value status-on">켜짐</span></div>
+      <div class="status-item"><span class="status-label">실행</span><span class="status-value">사람 답 대기</span></div>
+      <div class="status-item"><span class="status-label">답 제출</span><span class="status-value">2 / 5</span></div>
+      <div class="status-item"><span class="status-label">단계 승인</span><span class="status-value">미승인</span></div>
+      <div class="status-item"><span class="status-label">반영 완료</span><span class="status-value">3건</span></div>
+      <div class="status-item"><span class="status-label">갱신</span><span class="status-value">커서 3초 · 초안 보존</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="synthetic-note" aria-label="자료 안내">
+      <strong>합성 예시</strong> 실제 연구 자료가 아닙니다. 공개 저장소용 정적 시안이며 외부 라이브러리·네트워크를 쓰지 않습니다. 프로젝트·사람·수치·인용은 모두 가상입니다.
+    </section>
+
+    <section class="card layout-guide" aria-labelledby="layout-title">
+      <div class="section-head">
+        <h2 id="layout-title">2절 배치 확인</h2>
+        <p>브라우저 폭에 따라 작업대가 바뀝니다. 아래 세 규칙을 같은 화면에서 함께 표시했습니다.</p>
+      </div>
+      <div class="guide-grid">
+        <article class="guide-item">
+          <span class="guide-label">1440px 이상</span>
+          <h3>3영역</h3>
+          <p>탐색 220px + 결과 글 + 질문 380px. 질문이 열려 있으면 질문이 기본입니다.</p>
+          <div class="wire wire-3" aria-hidden="true"><span class="wire-nav"></span><span class="wire-main"></span><span class="wire-side"></span></div>
+        </article>
+        <article class="guide-item">
+          <span class="guide-label">1280–1439px</span>
+          <h3>2영역</h3>
+          <p>탐색을 아이콘 줄로 접고 결과 글과 질문을 나란히 둡니다.</p>
+          <div class="wire wire-2" aria-hidden="true"><span class="wire-nav"></span><span class="wire-main"></span><span class="wire-side"></span></div>
+        </article>
+        <article class="guide-item">
+          <span class="guide-label">1280px 미만</span>
+          <h3>한 열</h3>
+          <p>탭으로 전환하며 열린 질문이 기본입니다. 기록은 별도 탭에서 봅니다.</p>
+          <div class="wire wire-1" aria-hidden="true"><span class="wire-nav"></span><span class="wire-main"></span><span class="wire-side"></span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="card go-legend" aria-labelledby="go-title">
+      <div class="section-head">
+        <h2 id="go-title">Go 전송 칩 상태</h2>
+        <p>칩은 항상 표시하고 상태마다 뜻을 분리합니다. B 계열은 Go로 보내지 않지만 Go 목적지로 가는 전송은 A·B 공통으로 검사합니다. 끄기는 소유자 사람만 할 수 있고, 이미 나간 자료는 회수되지 않으며, 재허용 뒤 자동 재시작하지 않습니다.</p>
+      </div>
+      <div class="go-grid">
+        <div class="go-state go-on">
+          <span class="chip chip-on"><span class="dot"></span>켜짐</span>
+          <p>현재 정책이 허용합니다. 전송 내역과 회수 보장이 없다는 한계를 함께 봅니다.</p>
+        </div>
+        <div class="go-state go-blocked">
+          <span class="chip chip-blocked"><span class="dot"></span>차단 중</span>
+          <p>정책이 없거나 손상됐거나 OFF입니다. 새 전송은 거부되고 prepared는 차단됩니다.</p>
+        </div>
+        <div class="go-state go-changing">
+          <span class="chip chip-changing"><span class="dot"></span>변경 중</span>
+          <p>정책 변경 확정 전입니다. 진행 중 전송은 취소 시도와 unknown을 표시하고, 재허용 뒤 자동 재시작하지 않습니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card command-note" aria-labelledby="command-title">
+      <div class="section-head">
+        <h2 id="command-title">명령 메뉴 · AI 전환</h2>
+        <p>Ctrl/Cmd+K 하나의 동작 목록이 명령·맥락 메뉴·단축키를 만듭니다. AI 전환은 명시적 모드 버튼이고, Tab은 IME 조합 밖의 보조입니다. 검색 결과가 없다고 AI로 자동 전송하지 않습니다.</p>
+      </div>
+      <div class="anchor-legend" aria-label="명령 예시">
+        <span class="badge">단계로 가기</span>
+        <span class="badge">질문 찾기</span>
+        <span class="badge">첨언 달기</span>
+        <span class="badge">프롬프트로 복사</span>
+        <span class="badge">이것 인쇄</span>
+        <span class="badge badge-important">AI 모드 (명시적)</span>
+      </div>
+    </section>
+
+    <input class="tab-input" type="radio" name="mobile-tab" id="tab-question" checked>
+    <input class="tab-input" type="radio" name="mobile-tab" id="tab-result">
+    <input class="tab-input" type="radio" name="mobile-tab" id="tab-record">
+
+    <div class="mobile-tabs" aria-label="작업 공간 보기">
+      <label for="tab-question">질문 <span class="tab-count">2</span></label>
+      <label for="tab-result">결과</label>
+      <label for="tab-record">기록</label>
+    </div>
+
+    <div class="workspace" id="workspace">
+      <nav class="side-nav" aria-label="단계와 라운드">
+        <div class="nav-head"><span>단계·라운드</span><span class="nav-current">현재</span></div>
+        <ol class="nav-list">
+          <li class="nav-item nav-done" tabindex="0"><span class="nav-dot"></span><span class="nav-text">기획</span><span class="nav-state">승인</span></li>
+          <li class="nav-item nav-done" tabindex="0"><span class="nav-dot"></span><span class="nav-text">조사</span><span class="nav-state">R1·R2</span></li>
+          <li class="nav-item nav-active" aria-current="step" tabindex="0"><span class="nav-dot"></span><span class="nav-text">분석·종합</span><span class="nav-state">R2</span></li>
+          <li class="nav-item" tabindex="0"><span class="nav-dot"></span><span class="nav-text">집필</span><span class="nav-state">대기</span></li>
+          <li class="nav-item" tabindex="0"><span class="nav-dot"></span><span class="nav-text">검토</span><span class="nav-state">대기</span></li>
+          <li class="nav-item" tabindex="0"><span class="nav-dot"></span><span class="nav-text">산출</span><span class="nav-state">대기</span></li>
+        </ol>
+        <div class="nav-foot"><span>과거 라운드 보기</span><span class="nav-link">R1 · R2</span></div>
+      </nav>
+
+      <section class="result-panel panel" id="panel-result" aria-labelledby="result-title">
+        <article class="card result-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">결과 글 · 분석·종합 R2</p>
+              <h2 id="result-title">지역 돌봄 인력 수급의 구조적 원인</h2>
+              <p class="meta-line">채택본 v7 · PES 내부 AI · DeepSeek · 14:05 · 기반 v6</p>
+            </div>
+            <span class="badge badge-adopted">채택본</span>
+          </div>
+
+          <div class="metric-grid" aria-label="이번 라운드 요약">
+            <div class="metric-card">
+              <span class="metric-label">답할 질문</span>
+              <strong>2 / 5</strong>
+              <span class="metric-note">필수 1 · 선택 1</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">미제출 초안</span>
+              <strong>2</strong>
+              <span class="metric-note">같은 탭 새로고침 포함 브라우저 저장 · 서버 초안 없음</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">반영 완료</span>
+              <strong>3</strong>
+              <span class="metric-note">적용 2 · 부분 1</span>
+            </div>
+          </div>
+
+          <div class="result-body">
+            <p>지역 돌봄 인력 부족은 단일한 임금 효과로 설명되지 않았다. 2판 R2에서는 지방 중소도시의 채용·이탈 경로를 나누어 살펴보았다.</p>
+            <p><mark class="selection">지방 중소도시의 돌봄 인력 부족은 임금 격차보다 업무 강도와 이동 거리에서 더 크게 나타났다.</mark> 이 차이는 장기요양 수급자 밀도가 높고 돌봄 시설 간 거리가 먼 지역에서 두드러졌다.</p>
+
+            <div class="selection-toolbar" role="toolbar" aria-label="선택한 문장 도구">
+              <span class="toolbar-label">선택한 문장</span>
+              <button class="btn btn-small" type="button">첨언</button>
+              <button class="btn btn-small" type="button">AI에게 묻기</button>
+              <button class="btn btn-small" type="button">할 일로</button>
+              <button class="btn btn-small" type="button">프롬프트로 복사</button>
+            </div>
+            <p class="toolbar-note">AI에게 묻기는 PES에 질문을 접수합니다(접수됨 · 외부 수신 대기 · 3분). 프롬프트 복사는 포함·제외 미리보기 뒤 수동 전달이며, 복사만으로 실행·제출로 표시하지 않습니다. 미제출 초안은 “미제출 초안”으로 표시하고 로컬 경로·토큰은 넣지 않습니다. 할 일로는 PES 다음 라운드 할 일이 기본이고 Linear는 초안·복사만 합니다.</p>
+
+            <p>다만 이동 거리 지표는 시군구 단위로만 확인되어, 읍면동 단위의 실제 통행 시간을 반영하지 못했다. 이 한계는 3.2절과 부록 B에 기록했다.</p>
+          </div>
+        </article>
+
+        <article class="card annotation-card" aria-label="선택한 문장의 첨언">
+          <div class="annotation-head">
+            <span class="annotation-no">1</span>
+            <div>
+              <strong>첨언 · 박검토</strong>
+              <p class="meta-line">14:12 · 열림 · 결과 v7에 연결</p>
+            </div>
+          </div>
+          <p>이동 거리 근거를 3.1절에 추가해 주세요. 통계 출처는 가상의 2025년 지역별 돌봄 실태조사이고, 표본은 가상의 12개 시군입니다.</p>
+          <div class="annotation-actions">
+            <button class="link-button" type="button">답글</button>
+            <button class="link-button" type="button">해결</button>
+            <button class="link-button" type="button">다음 라운드로</button>
+          </div>
+          <div class="anchor-legend" aria-label="첨언 앵커 상태">
+            <span class="badge badge-exact">exact · 인용문 일치</span>
+            <span class="badge badge-moved">moved · 위치 이동</span>
+            <span class="badge badge-ambiguous">ambiguous · 후보 선택</span>
+            <span class="badge badge-lost">lost · 원문 없음</span>
+          </div>
+          <p class="table-note">ambiguous는 후보를 자동 선택하지 않고, lost도 인용문·스레드를 보존합니다. 다시 붙이기는 원래 앵커를 고치지 않고 새 판정으로 남깁니다.</p>
+        </article>
+      </section>
+
+      <aside class="question-panel panel" id="panel-question" aria-labelledby="question-title">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">질문 작업면</p>
+            <h2 id="question-title">답할 질문 2 / 전체 5</h2>
+          </div>
+          <span class="badge badge-required">필수 1</span>
+        </div>
+
+        <div class="question-stack">
+          <article class="question-card" aria-labelledby="q12-title">
+            <div class="question-top">
+              <div class="question-tags">
+                <span class="badge badge-important">중요</span>
+                <span class="badge badge-required">필수</span>
+                <span class="badge badge-recheck">재확인 필요</span>
+              </div>
+              <button class="link-button" type="button">고치기</button>
+            </div>
+            <p class="question-id">Q-12 · 배정 김연구 · 기한 11-07</p>
+            <h3 id="q12-title">지역 돌봄 인력 부족의 가장 큰 원인은 무엇이라고 보십니까?</h3>
+            <p class="question-help">문구가 R2에서 바뀌어 이전 답을 자동 승계하지 않습니다. <a href="#q12-opinion">옛 답 보기</a> 후 새 문구를 확인하고 다시 답해 주세요.</p>
+
+            <fieldset class="options">
+              <legend class="field-label">선택지</legend>
+              <label><input type="radio" name="q12"> 임금·처우</label>
+              <label><input type="radio" name="q12"> 업무 강도</label>
+              <label><input type="radio" name="q12"> 지역 인구 감소와 이동 거리</label>
+              <label><input type="radio" name="q12"> 기타</label>
+            </fieldset>
+
+            <div class="question-actions">
+              <button class="btn btn-small" type="button">기본값 채택</button>
+              <span class="hint">기본값: 업무 강도 · 채택 전에는 답 아님</span>
+            </div>
+
+            <label class="field-label" for="q12-opinion">질문별 의견</label>
+            <textarea id="q12-opinion" rows="2" placeholder="답과 별도로 남길 의견"></textarea>
+
+            <div class="question-footer">
+              <button class="btn btn-quiet" type="button">이 질문만 저장</button>
+              <button class="btn btn-quiet" type="button">나중에</button>
+            </div>
+          </article>
+
+          <article class="question-card" aria-labelledby="q13-title">
+            <div class="question-top">
+              <div class="question-tags">
+                <span class="badge">보통</span>
+                <span class="badge">선택</span>
+              </div>
+              <button class="link-button" type="button">고치기</button>
+            </div>
+            <p class="question-id">Q-13 · 배정 김연구 · 기한 11-07</p>
+            <h3 id="q13-title">추가로 확인할 지표가 있습니까?</h3>
+            <p class="question-help">기본값이 없습니다. 의견만으로 응답하려면 아래를 선택하세요.</p>
+
+            <label class="field-label" for="q13-opinion">질문별 의견</label>
+            <textarea id="q13-opinion" rows="3">지역별 장기요양 수급자 수를 함께 보면 좋겠습니다. 이동 거리는 시군구 평균보다 읍면동 중앙값이 더 적절합니다.</textarea>
+            <label class="check-line"><input type="checkbox" checked> 의견으로 응답 인정</label>
+
+            <div class="question-actions">
+              <button class="btn btn-small" type="button" disabled>기본값 없음</button>
+              <span class="hint">추천값을 미리 답으로 채우지 않음</span>
+            </div>
+
+            <div class="question-footer">
+              <button class="btn btn-quiet" type="button">이 질문만 저장</button>
+              <button class="btn btn-quiet" type="button">나중에</button>
+            </div>
+          </article>
+        </div>
+
+        <div class="batch-bar">
+          <button class="btn btn-primary" type="button">답 검토 후 보내기</button>
+          <span class="hint">묶음 제출 · 당시 폼/질문 버전으로 검증 · 충돌 시 부분 접수 없음</span>
+        </div>
+        <p class="state-note">타임아웃은 “접수 확인 중”이며 같은 키로 확인합니다. rev 충돌·0행·부분 실패는 성공 표시하지 않고 초안을 유지합니다. 과거 승인과 stale은 함께 표시합니다.</p>
+
+        <div class="question-note">
+          <strong>고치기</strong>는 새 질문 버전, 더하기·빼기·순서는 새 폼입니다. 옛 답은 그때 본 질문 버전에 보존하고, 새 버전에는 “재확인 필요”를 표시합니다.
+        </div>
+      </aside>
+
+      <section class="record-panel panel" id="panel-record" aria-labelledby="record-title">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">가정·반영 내역</p>
+            <h2 id="record-title">이번 라운드의 판단과 적용</h2>
+          </div>
+          <span class="badge">적용 2 · 부분 1 · 유예 1</span>
+        </div>
+
+        <article class="card table-card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <caption>가정과 결정</caption>
+              <colgroup>
+                <col style="width: 9%">
+                <col style="width: 39%">
+                <col style="width: 12%">
+                <col style="width: 14%">
+                <col style="width: 26%">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">번호</th>
+                  <th scope="col">가정</th>
+                  <th scope="col">판단</th>
+                  <th scope="col">판단자</th>
+                  <th scope="col">근거 버전</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="num">A-3</td>
+                  <td>돌봄 인력 부족은 수도권보다 지방 중소도시에서 크다.</td>
+                  <td><span class="state-text state-applied">확인</span></td>
+                  <td>김연구</td>
+                  <td>R2 결과 v4</td>
+                </tr>
+                <tr>
+                  <td class="num">A-4</td>
+                  <td>2027년 예산은 동결된다.</td>
+                  <td><span class="state-text state-partial">고침</span></td>
+                  <td>박검토</td>
+                  <td>R1 결과 v2</td>
+                </tr>
+                <tr>
+                  <td class="num">A-5</td>
+                  <td>민간 위탁 비율은 60%다.</td>
+                  <td><span class="state-text state-deferred">기각</span></td>
+                  <td>김연구</td>
+                  <td>출처 v3</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="table-note">가정의 판단과 결정은 별개입니다. 확인·고침·기각은 판단자와 근거 버전을 남기고, 새 판으로 복사해도 현행성을 자동 확인하지 않습니다.</p>
+        </article>
+
+        <article class="card table-card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <caption>결정 기록</caption>
+              <colgroup>
+                <col style="width: 9%">
+                <col style="width: 43%">
+                <col style="width: 12%">
+                <col style="width: 12%">
+                <col style="width: 24%">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">번호</th>
+                  <th scope="col">결정</th>
+                  <th scope="col">범위</th>
+                  <th scope="col">상태</th>
+                  <th scope="col">결정자</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="num">D-3</td>
+                  <td>분석 단위는 시군구로 하고, 가능한 지표만 읍면동 중앙값을 병기한다.</td>
+                  <td>프로젝트</td>
+                  <td><span class="state-text state-applied">채택</span></td>
+                  <td>김연구</td>
+                </tr>
+                <tr>
+                  <td class="num">D-4</td>
+                  <td>2판에서는 해외 사례를 부록으로 분리한다.</td>
+                  <td>2판</td>
+                  <td><span class="state-text state-partial">대체</span></td>
+                  <td>박검토</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="table-note">프로젝트/판 범위를 나누고, 대체는 새 결정 + supersedes로 잇습니다. 새 판에는 프로젝트 결정을 참조하고 판 결정은 당시 버전을 고정해 복사합니다.</p>
+        </article>
+
+        <article class="card table-card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <caption>반영 내역</caption>
+              <colgroup>
+                <col style="width: 10%">
+                <col style="width: 34%">
+                <col style="width: 13%">
+                <col style="width: 16%">
+                <col style="width: 27%">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">번호</th>
+                  <th scope="col">항목</th>
+                  <th scope="col">처리</th>
+                  <th scope="col">결과 버전</th>
+                  <th scope="col">적용 증거</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="num">R2-1</td>
+                  <td>표본 편향 지적을 3.2절에 반영</td>
+                  <td><span class="state-text state-applied">적용</span></td>
+                  <td>결과 v7</td>
+                  <td>tx 4f2a · 3.2절 수정</td>
+                </tr>
+                <tr>
+                  <td class="num">R2-2</td>
+                  <td>비용 추계를 보수적으로 조정</td>
+                  <td><span class="state-text state-partial">부분</span></td>
+                  <td>결과 v7</td>
+                  <td>tx 4f2b · 2개 시나리오만</td>
+                </tr>
+                <tr>
+                  <td class="num">R2-3</td>
+                  <td>해외 사례를 부록에 추가</td>
+                  <td><span class="state-text state-deferred">유예</span></td>
+                  <td>없음</td>
+                  <td>다음 라운드 할 일</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="table-note">미제출과 0건을 구분합니다. applied는 실제 결과 버전 또는 적용된 후속 조치 증거와 같은 tx에서만 표시하고, 해결 버튼만으로 적용 완료로 표시하지 않습니다.</p>
+        </article>
+      </section>
+    </div>
+
+    <section class="print-section" id="print-preview" aria-labelledby="print-title">
+      <div class="print-toolbar">
+        <div>
+          <p class="eyebrow">인쇄 미리보기</p>
+          <h2 id="print-title">A4 · 출력 시점 고정</h2>
+        </div>
+        <p class="print-note">브라우저 인쇄(Ctrl/Cmd+P)에서 A4로 확인합니다. 이 시안은 정적이며 실제 인쇄 버튼을 제공하지 않습니다. 출력 시점의 저장 버전과 사건 경계를 고정하고 미제출 초안은 제외합니다.</p>
+      </div>
+      <div class="print-scope" aria-label="인쇄 범위">
+        <label><input type="radio" name="print-scope" checked> 현재 라운드</label>
+        <label><input type="radio" name="print-scope"> 현재 단계</label>
+        <label><input type="radio" name="print-scope"> 현재 판 6단계</label>
+        <label><input type="radio" name="print-scope"> 모든 판 (고급 · 포함 판·분량 확인)</label>
+        <span class="hint">봉인·승인본은 스냅숏, 열린 라운드는 출력 시점 고정 · 판별 manifest</span>
+      </div>
+
+      <div class="paper" role="document" aria-label="인쇄 미리보기 종이">
+        <div class="paper-head">
+          <span>PES · 지역 돌봄 인력 수급 개선 연구 · 2판</span>
+          <span>분석·종합 R2</span>
+        </div>
+
+        <h3>지역 돌봄 인력 수급의 구조적 원인</h3>
+        <p class="paper-meta">출력 시점 고정 · 저장 버전 v7 · manifest 9f2c… · 2026-11-05 14:30 KST</p>
+
+        <p>지역 돌봄 인력 부족은 단일한 임금 효과로 설명되지 않았다. 2판 R2에서는 지방 중소도시의 채용·이탈 경로를 나누어 살펴보았다.</p>
+        <p>지방 중소도시의 돌봄 인력 부족은 임금 격차보다 업무 강도와 이동 거리에서 더 크게 나타났다. 이 차이는 장기요양 수급자 밀도가 높고 돌봄 시설 간 거리가 먼 지역에서 두드러졌다.</p>
+
+        <h4>3.1 이동 거리와 업무 강도</h4>
+        <p>이동 거리 지표는 시군구 단위로만 확인되어 읍면동 단위의 실제 통행 시간을 반영하지 못했다. 이 한계는 3.2절과 부록 B에 기록했다.</p>
+
+        <table class="paper-table">
+          <caption>가상 지표 예시</caption>
+          <thead>
+            <tr>
+              <th scope="col">구분</th>
+              <th scope="col">지방 중소도시</th>
+              <th scope="col">수도권</th>
+              <th scope="col">차이</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>평균 이동 거리(km)</td>
+              <td class="num">18.4</td>
+              <td class="num">9.7</td>
+              <td class="num">+8.7</td>
+            </tr>
+            <tr>
+              <td>월평균 이탈률(%)</td>
+              <td class="num">12.6</td>
+              <td class="num">8.1</td>
+              <td class="num">+4.5</td>
+            </tr>
+            <tr>
+              <td>1인당 담당 수급자(명)</td>
+              <td class="num">27.3</td>
+              <td class="num">21.8</td>
+              <td class="num">+5.5</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h4>가정·반영 내역</h4>
+        <table class="paper-table">
+          <thead>
+            <tr>
+              <th scope="col">번호</th>
+              <th scope="col">항목</th>
+              <th scope="col">처리</th>
+              <th scope="col">증거</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>R2-1</td>
+              <td>표본 편향 지적 반영</td>
+              <td>적용</td>
+              <td>tx 4f2a · 결과 v7</td>
+            </tr>
+            <tr>
+              <td>R2-2</td>
+              <td>비용 추계 보수화</td>
+              <td>부분</td>
+              <td>tx 4f2b · 결과 v7</td>
+            </tr>
+            <tr>
+              <td>R2-3</td>
+              <td>해외 사례 추가</td>
+              <td>유예</td>
+              <td>다음 라운드 할 일</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="paper-foot">
+          <span>미제출 초안 제외 · 열린 라운드는 출력 시점 경계로 고정</span>
+          <span>1 / 3</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>1단계 화면 설계 · U1 착수 전 정적 시안</span>
+    <span>기존 대시보드·ask 링크 병행 · 내보낸 고정 HTML 보존</span>
+    <span>B는 등록 run·입력 영수증·채택 상태만 표시 · 생존 과장 없음</span>
+    <span>Linear 실제 연동 없음(6단계) · 연구 내용 자동 전송 없음</span>
+    <span>200% 확대·키보드·IME 수동 점검 · 색에만 의존하지 않음</span>
+    <span>합성 자료만 사용 · 실제 ~/pes-projects·~/.pes/ 미열람</span>
+  </footer>
+</div>
+</body>
+</html>

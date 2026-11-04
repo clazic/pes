@@ -29,12 +29,16 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_policy_01J9Z3K7QN",
-        "policy": {
-          "id": "pol_01J9Z3K7Q2",
-          "policy_rev": "6",
-          "allow_opencode_go": false,
-          "changed_by_user_id": "usr_01J9Z3K7QQ"
+        "data": {
+          "policy": {
+            "id": "pol_01J9Z3K7Q2",
+            "policy_rev": "6",
+            "allow_opencode_go": false,
+            "changed_by_user_id": "usr_01J9Z3K7QQ"
+          }
+        },
+        "meta": {
+          "request_id": "req_policy_01J9Z3K7QN"
         }
       }
     }

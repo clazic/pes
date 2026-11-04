@@ -16,40 +16,44 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_cap_01J9Z3K7QN",
-        "server": "pes-local",
-        "api_version": "v1",
-        "capabilities": {
-          "operations": {
-            "context.get": {
-              "supported": true
+        "data": {
+          "server": "pes-local",
+          "api_version": "v1",
+          "capabilities": {
+            "operations": {
+              "context.get": {
+                "supported": true
+              },
+              "runs.create": {
+                "supported": true
+              },
+              "results.submit": {
+                "supported": true
+              },
+              "exports.create": {
+                "supported": false
+              },
+              "webmcp": {
+                "supported": false
+              }
             },
-            "runs.create": {
-              "supported": true
+            "limits": {
+              "long_poll_max_ms": 25000,
+              "request_body_max_bytes": 262144,
+              "results_per_submit": 20,
+              "list_max_items": 100,
+              "agent_requests_per_minute": 60
             },
-            "results.submit": {
-              "supported": true
-            },
-            "exports.create": {
-              "supported": false
-            },
-            "webmcp": {
-              "supported": false
-            }
-          },
-          "limits": {
-            "long_poll_max_ms": 25000,
-            "request_body_max_bytes": 262144,
-            "results_per_submit": 20,
-            "list_max_items": 100,
-            "agent_requests_per_minute": 60
-          },
-          "error_codes": [
-            "rev_conflict",
-            "lease_lost",
-            "policy_blocked",
-            "cursor_invalid"
-          ]
+            "error_codes": [
+              "rev_conflict",
+              "lease_lost",
+              "policy_blocked",
+              "cursor_invalid"
+            ]
+          }
+        },
+        "meta": {
+          "request_id": "req_cap_01J9Z3K7QN"
         }
       }
     }

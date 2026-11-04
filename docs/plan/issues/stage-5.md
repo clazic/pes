@@ -15,7 +15,7 @@
 
 - **목표**: 2단계 Python 코어를 무료 Workers에서 실행할 방법을 정하고, 같은 계약을 어느 구현이 지키는지 증거로 남긴다.
 - **할 일**
-  - [ ] `web/spike/python-worker/`에 Python Workers + D1 바인딩 최소 앱, `web/spike/ts-worker/`에 TypeScript 명령 서비스 골격, `web/spike/py-server/`에 비교용 로컬 Python 서버를 둔다.
+  - [ ] `web/spike/python-worker/`에 Python Workers + D1 바인딩 최소 앱, `web/spike/ts-worker/`에 TypeScript 명령 서비스 골격, `web/spike/py-server/`에 비교용 로컬 Python 서버를 둔다. `web/spike/package.json`에 계약 시험 스크립트를 둔다(WEB1의 `web/package.json`과 분리).
   - [ ] 2단계 PR4·13의 계약 fixture를 `tests/contracts/v1/*.json`으로 고정하고, `result.submit`·`stage.approve`·`Idempotency-Key`·`rev` 0행 실패·int64 10진 문자열·오류 봉투를 두 구현에 같은 입력으로 돌린다.
   - [ ] `web/wrangler.toml`의 `compatibility_date`·`compatibility_flags`를 고정하고, Free 계정에서 Python Workers 포함 여부를 먼저 확인한다.
   - [ ] `web/src/db/d1.ts`(또는 `web/python/db/d1.py`)의 공통 어댑터 경계를 정하고, `db.batch()` 원자성·0행 실패·deferred FK·부분 인덱스·JSON 함수를 확인한다.
@@ -24,9 +24,9 @@
 - **선행**: 2단계 코어 계약(PR 4·13).
 - **완료 기준**
   - [ ] `python -m pytest -q`
-  - [ ] `npm --prefix web run test -- --run test/contracts`
+  - [ ] `npm --prefix web/spike run test -- --run test/contracts`
   - [ ] Free 계정에서 후보 구현의 CPU 10 ms·메모리 128 MB·subrequest 50 측정표가 있다.
-  - [ ] 결정 기록과 2단계 통지가 있다. 후보 (c)를 고르면 WEB1의 플랫폼 전제를 재검토한다.
+  - [ ] 결정 기록과 2단계 통지가 있다. 후보 (c)를 고르면 WEB1의 플랫폼 전제를 재검토하고, 후보 (b) TS 이식이면 2~4단계 구현 언어 재정과 WEB1 입력을 기록한다.
 - **지킬 것**: 유료 계정을 쓰지 않는다. 실제 자료를 올리지 않는다. D1/SQLite 합의를 다시 열지 않는다. 계약을 구현에 맞춰 바꾸지 않는다.
 
 ## WEB1 — 웹 실행 골격·배포
@@ -37,9 +37,9 @@
 - **할 일**
   - [ ] `web/package.json`에 `test`·`test:e2e`·`db:migrate:local`·`deploy:staging`·`check:deploy` 스크립트를 둔다.
   - [ ] `web/wrangler.toml`에 `env.staging`·`env.production`, D1 바인딩, R2 바인딩, Assets, `compatibility_date`를 둔다.
-  - [ ] `web/src/worker.ts`(진입), `web/src/app.ts`(라우터), `web/src/routes/health.ts`, `web/src/config/capabilities.ts`, `web/src/db/d1.ts`를 만든다.
+  - [ ] `web/src/worker.ts`(진입), `web/src/app.ts`(라우터), `web/src/routes/health.ts`, `web/src/config/capabilities.ts`, `web/src/config/flags.ts`(기능 플래그), `web/src/db/d1.ts`를 만든다.
   - [ ] `web/migrations/0001_init.sql`에 `docs/plan/schemas/stage-1-ddl-draft.sql`의 54개 표를 넣고, `docs/plan/schemas/check_ddl.py`의 검사 항목을 로컬 SQLite와 D1 smoke에 함께 적용한다. 웹 측 검사는 `web/scripts/check-schema.mjs`로 둔다.
-  - [ ] `web/src/services/commands.ts`에 2단계 PR4 명령 서비스의 D1 구현 경계를 둔다. rev·멱등·0행 실패·뒤늦은 실패 전체 롤백·큰 정수 문자열·커서·공개 DTO를 같은 의미로 시험한다.
+  - [ ] `web/src/services/commands.ts`에 2단계 PR4 명령 서비스의 D1 구현 경계를 둔다. rev·멱등·0행 실패·뒤늦은 실패 전체 롤백·큰 정수 문자열·커서·공개 DTO를 같은 의미로 시험하고, D1 batch 원자성·deferred FK·부분 인덱스·JSON 함수 경계를 명시한다.
   - [ ] `.github/workflows/web-ci.yml`(매 PR+main, Windows+macOS)과 `web-deploy.yml`(main→staging, 태그→prod 수동 승인)을 만든다.
   - [ ] `GET /healthz`가 `SELECT 1`·R2 HEAD·`db_meta.schema_version`을 확인하게 한다.
   - [ ] 25초 long poll 구현 선택(DO/짧은 폴+ETag/SSE)을 `docs/plan/decisions/0005-web-platform.md`에 적고, Free 요청·CPU·subrequest 한도를 계측한다.
@@ -50,7 +50,9 @@
   - [ ] `npm --prefix web run db:migrate:local`
   - [ ] `npm --prefix web run check:deploy`
   - [ ] `python -m pytest -q`
-  - [ ] staging에서 실제 D1로 읽기 화면이 뜨고, 이전 버전 롤백 1회·시크릿 스캔·100k 요청/일·10 ms CPU·subrequest 50 smoke가 통과한다.
+  - [ ] staging에서 실제 D1로 읽기 화면이 뜨고, 이전 버전 롤백 1회·시크릿 스캔·100k 요청/일·10 ms CPU·subrequest 50·정적 자산 20,000개·Cron 5개 smoke가 통과한다.
+  - [ ] D1 batch 원자성·0행 실패·deferred FK·부분 인덱스·JSON 함수 smoke가 로컬 SQLite와 D1에서 통과한다.
+  - [ ] 기능 플래그 on/off가 capabilities·라우트에 반영되고, 미지원 기능은 가짜 성공 없이 미지원으로 표시된다.
 - **지킬 것**: 공개 prod 전환은 WEB14 게이트 뒤에 한다. 유료 기능에 의존하지 않는다. 이중 쓰기·가짜 성공·`SELECT *` 전체 스캔을 넣지 않는다. 비밀은 Worker/GitHub Environment secret에만 둔다.
 
 ## WEB2 — 사람 로그인·세션
@@ -60,8 +62,9 @@
 - **목표**: D1 기반 사람 인증과 `__Host-` 세션, 브라우저 step-up, 기기 승인을 붙인다.
 - **할 일**
   - [ ] `web/migrations/0002_auth.sql`에 `auth_accounts`·`auth_sessions`·`auth_passkeys`·`email_verifications`·`project_invites`·`device_tokens`·`recovery_codes`·`auth_audit`를 만든다.
+  - [ ] Better Auth 버전을 고정하고 D1 어댑터·추가 인증 표·PES `users` 매핑을 실제로 검증한다.
   - [ ] `web/src/services/auth.ts`·`sessions.ts`·`passkeys.ts`·`invites.ts`·`device-flow.ts`를 만든다. PES `users`를 정본으로 두고 `users.auth_subject`에 `provider:subject`를 매핑한다.
-  - [ ] `web/src/routes/auth.ts`에 `/login`·`/auth/magic-link`·`/auth/passkey/*`·`/auth/device/*`·`/logout`을 만든다. `web/src/views/auth/*`에 로그인·초대 수락·복구 화면을 둔다.
+  - [ ] `web/src/routes/auth.ts`에 `/login`·`/auth/magic-link`·`/auth/passkey/*`·`/auth/device/*`·`/logout`을 만든다. `web/src/views/auth/*`에 로그인·초대 수락·복구 화면을 두고, `web/src/views/settings/security.ts`에 기기 목록·모든 기기 로그아웃을 둔다.
   - [ ] `web/src/middleware/session.ts`에 `__Host-pes_session`(HttpOnly·Secure·SameSite=Lax·Path=/)와 절대 14일·유휴 7일 회전을 넣는다.
   - [ ] `web/src/middleware/stepup.ts`에 `requireStepUp(action, targetRev)`를 둔다. 승인·reopen·판 시작·정책·토큰·삭제·데이터 내보내기는 5분 내 브라우저 재인증과 snapshot/rev 확인을 요구한다.
   - [ ] `scripts/pes.py`에 `cmd_login`과 `CMDS["login"]`을 추가하고, `scripts/credentials.py`로 Windows Credential Manager/macOS Keychain에 기기 토큰을 저장한다. `main()`의 인자 처리도 맞춘다.
@@ -72,7 +75,7 @@
   - [ ] `python -m pytest -q tests/test_login.py tests/test_stepup.py`
   - [ ] `npm --prefix web run test -- --run test/auth`
   - [ ] `npm --prefix web run test:e2e -- auth.spec.ts`
-  - [ ] 로그인·만료·고정·회전·재인증·복구 코드 1회·CLI 기기 회수 즉시 401이 통과한다. 다른 프로젝트 접근은 거부되고, step-up은 기기 토큰으로 대행할 수 없다.
+  - [ ] 로그인·만료·고정·회전·재인증·복구 코드 1회·CLI 기기 회수 즉시 401·기기 목록·모든 기기 로그아웃이 통과한다. 다른 프로젝트 접근은 거부되고, step-up은 기기 토큰으로 대행할 수 없다.
 - **지킬 것**: 승인류는 사람만 한다. 에이전트·MCP·기기 토큰이 step-up을 대신하지 못한다. 이메일 존재 여부를 노출하지 않는다. 실제 메일 주소·실자료를 fixture에 넣지 않는다.
 
 ## WEB3 — 멤버·초대·역할
@@ -84,16 +87,16 @@
   - [ ] `web/src/services/members.ts`에 멤버 추가·역할 변경·제거·초대·철회·소유권 이전을 둔다.
   - [ ] `web/src/routes/members.ts`와 `web/src/views/settings/members.ts`를 만든다.
   - [ ] `projects.owner_user_id`와 `project_members`의 owner 행이 항상 일치하도록 소유권 이전을 한 tx로 만든다. `one_project_owner` 부분 UNIQUE를 유지한다.
-  - [ ] `web/src/auth/permissions.ts`에 owner/editor/reader 권한 매트릭스를 두고, 승인·reopen·판 시작·정책·토큰·삭제·멤버 변경은 owner만 허용한다.
+  - [ ] `web/src/auth/permissions.ts`에 owner/editor/reader 권한 매트릭스를 두고, 승인·reopen·판 시작·정책·토큰·삭제·멤버 변경은 owner만 허용한다. 이 매트릭스를 WEB5 `web/src/services/grants.ts`의 MCP/OAuth scope 정책과 공유한다.
   - [ ] 초대는 이메일 1회용 7일, 역할 지정, 철회 가능. 수락 시 `users`·`auth_accounts`·`project_members`를 한 tx로 만든다.
-  - [ ] 역할 변경·회원 제거 시 해당 사용자의 세션·OAuth 위임·에이전트 자격·예약 알림을 무효화하거나 재검사한다.
+  - [ ] 역할 변경·회원 제거 시 해당 사용자의 세션·OAuth 위임·에이전트 자격·예약 알림을 무효화하거나 재검사한다. 멤버 변경·초대·철회를 `auth_audit`·`events`에 남긴다.
   - [ ] `web/src/services/notifications.ts`의 발송 직전 권한 재검사 훅과 연결한다.
 - **선행**: WEB2, PR 10.
 - **완료 기준**
   - [ ] `python -m pytest -q tests/test_members.py`
   - [ ] `npm --prefix web run test -- --run test/members`
   - [ ] `npm --prefix web run test:e2e -- members.spec.ts`
-  - [ ] 역할별 허용·거부 표 전 항목, 마지막 owner 제거 거부, owner 이전 원자성, editor 승인 불가, editor 답이 lease에 막히지 않음이 통과한다.
+  - [ ] 역할별 허용·거부 표 전 항목, 마지막 owner 제거 거부, owner 이전 원자성, editor 승인 불가, editor 답이 lease에 막히지 않음, MCP/OAuth scope 정책 일치, 멤버 변경 감사 기록이 통과한다.
 - **지킬 것**: UI 숨김으로 권한을 대신하지 않는다. owner 없는 프로젝트를 만들지 않는다. 에이전트 키로 멤버·역할을 바꾸지 못한다. 회원 제거 뒤 알림·OAuth가 남지 않는다.
 
 ## WEB4 — 에이전트 키 운영
@@ -130,13 +133,13 @@
   - [ ] `web/src/services/grants.ts`에 scope = 동의 ∩ 현재 `project_members` ∩ 에이전트 제한 검사를 둔다. 동의 뒤 새 프로젝트로 자동 확장하지 않는다.
   - [ ] 액세스 토큰 `jti`를 매 요청 D1에서 검사해 연결 해제 즉시 401이 되게 한다. refresh 회전·재사용 거부를 넣는다.
   - [ ] `pes_submit`은 run 결과 제출이고 사람 답 `submissions`와 분리한다. MCP는 사람 답 제출을 대행하지 않되 자기에게 온 질문 답은 허용한다.
-  - [ ] `docs/operations/mcp-connect.md`에 Claude 앱 커스텀 커넥터와 Claude Code `claude mcp add --transport http` 절차를 적는다.
+  - [ ] `docs/operations/mcp-connect.md`에 Claude 앱 커스텀 커넥터, Claude Code `claude mcp add --transport http`, Desktop/stdio·CLI 지원 수준과 한계를 적는다.
 - **선행**: WEB2·WEB3·WEB4, PR 13·14·20.
 - **완료 기준**
   - [ ] `npm --prefix web run test -- --run test/mcp test/oauth`
   - [ ] `npm --prefix web run test:e2e -- mcp.spec.ts`
   - [ ] 합성 프로젝트 1라운드 왕복, 도구 호출 10초 내 응답, Free 10 ms CPU·subrequest 50 측정, 승인·정책·토큰·사람 답 제출 도구 없음, wrong-project·중복 제출 거부, 연결 해제 401이 통과한다.
-  - [ ] Claude 앱 커넥터와 Claude Code HTTP MCP를 실제로 연결해 재접속·만료·옛 결과 거부를 확인한다.
+  - [ ] Claude 앱 커넥터와 Claude Code HTTP MCP를 실제로 연결해 재접속·만료·옛 결과 거부를 확인하고, Desktop/stdio·CLI 지원 수준을 문서와 대조한다.
 - **지킬 것**: OAuth 위임은 사람 세션이 아니다(`actor.kind=external_agent`, `on_behalf_of_user_id`). 승인·reopen·정책·토큰·삭제를 노출하지 않는다. 토큰을 모델에 넣지 않고, 연구 자료는 데이터로만 취급한다.
 
 ## WEB6 — runner 등록·연결
@@ -146,8 +149,9 @@
 - **목표**: `pes runner`가 밖으로 연결해 일을 찾고 원자적으로 claim하는 경로를 만든다.
 - **할 일**
   - [ ] `web/migrations/0006_runner.sql`에 `runner_devices`(`project_id`·`runner_id`·`label`·`last_seen_at`·`revoked_at`)를 만든다.
-  - [ ] `web/src/routes/runner.ts`에 `GET /api/v1/projects/{id}/runs/available`(순수 조회, 최대 25초 대기)과 `POST /claims`(원자 쓰기), heartbeat·wait·complete를 둔다.
-  - [ ] `scripts/pes.py`에 `cmd_runner`와 `CMDS["runner"]`를 추가하고, `scripts/runner/__init__.py`·`scripts/runner/daemon.py`에 데몬·신호 처리·백오프·키체인 읽기를 둔다.
+  - [ ] `web/src/routes/runner.ts`에 `POST /api/v1/runner/register`, `GET /api/v1/projects/{id}/runs/available`(순수 조회, 최대 25초 대기), `POST /claims`(원자 쓰기), heartbeat·wait·complete를 둔다.
+  - [ ] `web/src/views/runner/devices.ts`에 등록된 runner 기기 목록·마지막 확인·회수를 표시한다.
+  - [ ] `scripts/pes.py`에 `cmd_runner`와 `CMDS["runner"]`를 추가하고, `scripts/runner/__init__.py`·`scripts/runner/daemon.py`에 데몬·신호 처리·백오프·키체인 읽기를 둔다. `scripts/runner/logging.py`에 로그 회전·비밀 제거를 둔다.
   - [ ] `web/src/services/leases.ts`에서 PR5의 claim·lease·fence를 재사용하고, 프로젝트당 실행 담당 하나·두 번째 runner 거부·사람 인계를 시험한다.
   - [ ] `web/src/views/runner/status.ts`에 마지막 확인 시각과 "확인 없음 ≠ 꺼짐 확정"을 표시한다.
   - [ ] 폴링 기본 25~30초, 탭·runner 유휴 시 중지, 지수 백오프를 넣는다. 3초 기본값을 쓰지 않는다.
@@ -156,7 +160,7 @@
   - [ ] `python -m pytest -q tests/test_runner.py tests/test_lease.py`
   - [ ] `npm --prefix web run test -- --run test/runner`
   - [ ] `npm --prefix web run test:e2e -- runner.spec.ts`
-  - [ ] 절전·단절·재접속, 인바운드 포트 0, 두 runner 경합 거부, 회수 뒤 claim 중단, 1 runner 하루 요청이 100k/일의 5% 이하가 통과한다.
+  - [ ] 절전·단절·재접속, 등록·기기 목록·회수, 인바운드 포트 0, 두 runner 경합 거부, 회수 뒤 claim 중단, 로그 회전, 1 runner 하루 요청이 100k/일의 5% 이하가 통과한다.
 - **지킬 것**: 웹은 runner로 접속하지 않는다. runner는 loopback의 전용 opencode에만 접속한다. 자동 failover하지 않는다. claim은 run 전이+lease 획득의 원자 변경이다.
 
 ## WEB7 — runner의 OpenCode supervisor
@@ -192,14 +196,14 @@
   - [ ] `web/public/manifest.webmanifest`와 `web/public/sw.js`(또는 `web/src/sw.ts`)에 PWA·푸시 구독·`pushsubscriptionchange`를 넣는다.
   - [ ] `web/src/routes/push.ts`, `web/src/views/settings/notifications.ts`에 채널·조용한 시간·상세 제목 선택을 둔다.
   - [ ] `web/src/services/notify-policy.ts`에 `waiting_human`과 승인 대기를 별도 사건으로, `dedupe_key=endpoint+event_seq+event_type`, 5분 묶음, 22:00~08:00 KST, 발송 직전 권한 재검사를 넣는다.
-  - [ ] 기본 본문은 프로젝트명 없이 일반 문구+로그인 링크만. 질문 문구·연구 내용·파일명은 넣지 않는다.
+  - [ ] 기본 본문은 프로젝트명 없이 일반 문구+로그인 링크만. 로그인 뒤 정확한 버전 딥링크로 이동한다. 질문 문구·연구 내용·파일명은 넣지 않는다.
   - [ ] `notification_deliveries`에 provider 영수증·unknown·재시도를 남기고, Queues 24시간 보존 안에 재시도를 끝낸다.
 - **선행**: WEB1·WEB2·WEB3, PR 14.
 - **완료 기준**
   - [ ] `python -m pytest -q tests/test_notifications.py`
   - [ ] `npm --prefix web run test -- --run test/notifications`
   - [ ] `npm --prefix web run test:e2e -- notifications.spec.ts`
-  - [ ] 적격 사건 enqueue·발송 시도, 같은 event 중복 1건, iOS 홈화면 PWA 푸시, 미설치·거부 대안, 실패 UI·unknown, 발송 직전 권한 재검사, 복원·import 뒤 재발송 0이 통과한다.
+  - [ ] 적격 사건 enqueue·발송 시도, 같은 event 중복 1건, 로그인 뒤 정확한 버전 딥링크, iOS 홈화면 PWA 푸시, 미설치·거부 대안, 실패 UI·unknown, 발송 직전 권한 재검사, 복원·import 뒤 재발송 0이 통과한다.
 - **지킬 것**: 도착을 보장하지 않는다. SMS를 쓰지 않는다. 연구 내용·프로젝트명을 기본 본문에 넣지 않는다. 과거 사건을 새 알림으로 재발송하지 않는다.
 
 ## WEB9 — 로컬→웹 이전
@@ -208,10 +212,10 @@
 
 - **목표**: 프로젝트 하나를 동결·번들·검증·활성화하는 한 방향 이전을 만들고, 실패하면 로컬로 돌아가게 한다.
 - **할 일**
-  - [ ] `web/migrations/0009_import.sql`에 `import_tokens`·`import_chunks`를 추가하고, 기존 `import_batches`·`legacy_mappings`를 재사용한다. 로컬 전용 `local_export_state`(project_id·exported_at·bundle_hash·state)를 둔다.
+  - [ ] `web/migrations/0009_import.sql`에 `import_tokens`·`import_chunks`를 추가하고, 기존 `import_batches`·`legacy_mappings`를 재사용한다. 로컬 전용 `local_export_state`(project_id·exported_at·bundle_hash·state)는 로컬 SQLite 마이그레이션(2단계 PR1 경로)에 둔다.
   - [ ] `web/src/routes/imports.ts`에 `POST /imports`·`POST /imports/{id}/complete`·`POST /imports/{id}/activate`를 만든다. `web/src/services/import.ts`와 `web/src/workflows/import.ts`가 청크·재개·검증을 맡는다.
-  - [ ] `scripts/pes.py`의 `export --bundle`·`import`를 확장하고, `cmd_export`·`cmd_import`·`CMDS`에 `web-import`를 추가한다. `scripts/bundle.py`에 manifest·sha256·int64 문자열 검사를 둔다.
-  - [ ] `web/src/services/bundle.ts`가 R2 멀티파트 업로드·sha256 검증·`blobs.state='ready'`·`version_files` 연결을 하게 한다.
+  - [ ] `scripts/pes.py`의 `export --bundle`·`import`를 확장하고, `cmd_export`·`cmd_import`·`CMDS`에 `web-import`를 추가한다. `scripts/bundle.py`에 manifest·sha256·int64 문자열 검사를 둔다. `skills/`의 `pes` 호출을 웹 API로 바꾸는 어댑터 경계를 둔다(2단계 PR15·16의 전송만 교체).
+  - [ ] `web/src/services/bundle.ts`가 R2 멀티파트 업로드·서명된 업로드 URL·sha256 검증·`blobs.state='ready'`·`version_files` 연결을 하게 한다.
   - [ ] `web/src/routes/files.ts`와 `web/src/services/files.ts`에 사람용 짧은 서명 URL·프로젝트 검사, Go/에이전트용 정책 프록시를 둔다.
   - [ ] 1시간 1회 `import_tokens`(owner 발급, step-up)로 CLI 업로드 인증. 에이전트 키로는 가져올 수 없게 한다.
   - [ ] `web/src/views/import/wizard.ts`와 `report.ts`에 동결·미리보기·검증 보고서·활성화·롤백을 둔다.
@@ -221,7 +225,7 @@
   - [ ] `python -m pytest -q tests/test_bundle.py tests/test_import.py`
   - [ ] `npm --prefix web run test -- --run test/import`
   - [ ] `npm --prefix web run test:e2e -- import.spec.ts`
-  - [ ] 2MB JSON·깨진 참조·이미지 합성 이전, 중단 후 재개, FK/순환·ID 충돌·중복 영수증, 부분 적재 비표시, 활성화 응답 유실 시 자동 해제 금지, 쓰기 전/후 롤백, 프로젝트 단위 복원, 활성화 뒤 로컬 쓰기 0건이 통과한다.
+  - [ ] 2MB JSON·깨진 참조·이미지 합성 이전, 서명 업로드, 중단 후 재개, FK/순환·ID 충돌·중복 영수증, 부분 적재 비표시, 활성화 응답 유실 시 자동 해제 금지, 쓰기 전/후 롤백, 프로젝트 단위 복원, 활성화 뒤 로컬 쓰기 0건, 스킬 웹 API 경계가 통과한다.
 - **지킬 것**: 양방향 동기화·이중 쓰기를 하지 않는다. 옮기는 프로젝트만 동결한다. 실제 자료는 사용자 승인 1개만, 활성화는 WEB10·WEB11·WEB14 뒤에 한다. 실제 manifest·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않는다.
 
 ## WEB10 — 운영·백업·복구
@@ -243,7 +247,7 @@
   - [ ] `python -m pytest -q tests/test_ops.py`
   - [ ] `bash ops/backup/export.sh --dry-run`
   - [ ] `bash ops/backup/restore.sh --scratch`
-  - [ ] Time Travel 7일+야간 export로 RPO 24h·RTO 4h 훈련, 42개 백업 압축 크기 합+객체 ≤8GB, DB 350MB 분리·500MB 캡, 프로젝트 단위 복원, 키 별도 복구, 마이그레이션 롤백 1회, 런북 재현이 통과한다.
+  - [ ] Time Travel 7일+야간 export로 RPO 24h·RTO 4h 훈련, 42개 백업 압축 크기 합+객체 ≤8GB, DB 350MB 분리·500MB 캡, 프로젝트 단위 복원, 키 별도 복구, 마이그레이션 롤백 1회, 구버전 앱/신스키마 호환 창, 런북 재현이 통과한다.
 - **지킬 것**: 실제 자료·백업·키를 공개 저장소·CI artifact에 넣지 않는다. 마이그레이션을 되돌리지 않고 새 마이그레이션으로 복구한다. export 중 요청 차단을 안내한다. 백업은 DB만이 아니라 객체 hash 목록을 포함한다.
 
 ## WEB11 — 보안 강화·점검
@@ -256,7 +260,7 @@
   - [ ] `web/src/services/validation.ts`와 `web/src/views/markdown.ts`에 입력 스키마·Markdown 안전 렌더·위험 URL 차단을 둔다.
   - [ ] `web/src/services/files.ts`에 MIME·크기·`quarantined` 격리·사람용 서명 URL·Go 정책 프록시를 넣는다.
   - [ ] `web/src/middleware/rate-limit.ts`에 로그인·매직링크·토큰·일반 API 예산을 둔다.
-  - [ ] `.github/workflows/security.yml`에 의존성 감사·시크릿 스캔을, `ops/security/asvs-checklist.md`에 ASVS L1 판본·범위·결과를 둔다.
+  - [ ] `.github/workflows/security.yml`에 의존성 감사·시크릿 스캔을, `ops/security/asvs-checklist.md`에 ASVS L1 판본·범위·결과를 둔다. `docs/operations/runbook.md`에 시크릿 회전 절차·키 버전을 적는다.
   - [ ] `ops/cloudflare/free-security.md`에 Free WAF·rate limiting·Bot Fight Mode 범위를 확인해 적는다. Bot Management는 쓰지 않는다.
   - [ ] `web/test/security/*.test.ts`와 `web/e2e/security.spec.ts`를 만든다.
 - **선행**: WEB2·WEB4·WEB5·WEB8·WEB9.
@@ -264,7 +268,7 @@
   - [ ] `npm --prefix web run test -- --run test/security`
   - [ ] `npm --prefix web run test:e2e -- security.spec.ts`
   - [ ] `python -m pytest -q`
-  - [ ] ASVS L1 체크, 치명·높음 0, CSRF/XSS/클릭재킹/토큰 유출 시험, 공개 버킷 0, Go 프록시 우회 0, 다른 프로젝트 참조·system 위장·공유 기기 캐시 시험, 401/403 폭주 경보가 통과한다.
+  - [ ] ASVS L1 체크, 치명·높음 0, CSRF/XSS/클릭재킹/토큰 유출 시험, 공개 버킷 0, Go 프록시 우회 0, 다른 프로젝트 참조·system 위장·공유 기기 캐시 시험, 401/403 폭주 경보, 시크릿 회전 1회가 통과한다.
 - **지킬 것**: 유료 Bot Management·WAF를 전제로 하지 않는다. UI 숨김을 권한으로 쓰지 않는다. `assurance=verified`를 플래그만으로 만들지 않는다. 실제 키·자료를 로그·fixture에 넣지 않는다.
 
 ## WEB12 — 무료 한도·사용량 계기
@@ -304,7 +308,7 @@
 - **완료 기준**
   - [ ] `npm --prefix web run test -- --run test/webmcp`
   - [ ] `npm --prefix web run test:e2e -- webmcp.spec.ts` (도입한 경우)
-  - [ ] 날짜 있는 결정 기록, 3단계 W1 입력, capabilities 표시, 승인류 미노출, browser_agent 감사, 서버 거부가 확인된다.
+  - [ ] 날짜 있는 결정 기록, 3단계 W1 입력, capabilities 표시, 승인류 미노출, browser_agent 감사, 서버 거부, REA `discover_webmcp_tools` 발견 점검이 확인된다.
 - **지킬 것**: 승인·reopen·판 시작·정책·토큰·삭제를 노출하지 않는다. `toolautosubmit`을 쓰지 않는다. 브라우저 도구가 사람의 승인 증거가 되게 하지 않는다. 근거 없이 지원을 주장하지 않는다.
 
 ## WEB14 — 전환 통합 검증·문서

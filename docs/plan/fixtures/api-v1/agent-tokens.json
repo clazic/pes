@@ -33,18 +33,22 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_token_01J9Z3K7QN",
-        "token": {
-          "id": "tok_01J9Z3K7Q2",
-          "prefix": "pes_syn",
-          "token": "pes_syn_<SYNTHETIC_ONE_TIME_VALUE>",
-          "scopes": [
-            "context:read",
-            "run:claim",
-            "result:submit"
-          ],
-          "expires_at": 1764903600000,
-          "shown_once": true
+        "data": {
+          "token": {
+            "id": "tok_01J9Z3K7Q2",
+            "prefix": "pes_syn",
+            "token": "pes_syn_<SYNTHETIC_ONE_TIME_VALUE>",
+            "scopes": [
+              "context:read",
+              "run:claim",
+              "result:submit"
+            ],
+            "expires_at": 1764903600000,
+            "shown_once": true
+          }
+        },
+        "meta": {
+          "request_id": "req_token_01J9Z3K7QN"
         }
       }
     }

@@ -29,12 +29,16 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_upload_01J9Z3K7QN",
-        "upload": {
-          "id": "upl_01J9Z3K7QG",
-          "state": "staging",
-          "put_url": "/api/v1/uploads/upl_01J9Z3K7QG",
-          "expires_at": 1762312300000
+        "data": {
+          "upload": {
+            "id": "upl_01J9Z3K7QG",
+            "state": "staging",
+            "put_url": "/api/v1/uploads/upl_01J9Z3K7QG",
+            "expires_at": 1762312300000
+          }
+        },
+        "meta": {
+          "request_id": "req_upload_01J9Z3K7QN"
         }
       }
     }

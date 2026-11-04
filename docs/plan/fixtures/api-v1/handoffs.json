@@ -31,15 +31,19 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_handoff_01J9Z3K7QN",
-        "parent_run_id": "run_01J9Z3K7Q6",
-        "new_run_id": "run_01J9Z3K7QT",
-        "status": "queued",
-        "lease": {
-          "released": true,
-          "fence": "3"
+        "data": {
+          "parent_run_id": "run_01J9Z3K7Q6",
+          "new_run_id": "run_01J9Z3K7QT",
+          "status": "queued",
+          "lease": {
+            "released": true,
+            "fence": "3"
+          },
+          "pending_input_count": 1
         },
-        "pending_input_count": 1
+        "meta": {
+          "request_id": "req_handoff_01J9Z3K7QN"
+        }
       }
     }
   },

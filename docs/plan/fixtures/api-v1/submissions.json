@@ -37,19 +37,23 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_sub_01J9Z3K7QN",
-        "submission": {
-          "id": "sub_01J9Z3K7QE",
-          "received_at": 1762312000000,
-          "state": "accepted"
+        "data": {
+          "submission": {
+            "id": "sub_01J9Z3K7QE",
+            "received_at": 1762312000000,
+            "state": "accepted"
+          },
+          "answers": [
+            {
+              "question_id": "qst_01J9Z3K7QB",
+              "answer_version_id": "ansv_01J9Z3K7Q2",
+              "state": "submitted"
+            }
+          ]
         },
-        "answers": [
-          {
-            "question_id": "qst_01J9Z3K7QB",
-            "answer_version_id": "ansv_01J9Z3K7Q2",
-            "state": "submitted"
-          }
-        ]
+        "meta": {
+          "request_id": "req_sub_01J9Z3K7QN"
+        }
       }
     }
   },

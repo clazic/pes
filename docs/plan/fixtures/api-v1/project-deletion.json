@@ -28,14 +28,18 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_delete_01J9Z3K7QN",
-        "deletion": {
-          "project_id": "prj_01J9Z3K7Q2",
-          "state": "requested",
-          "purge_after": 1764903600000,
-          "recoverable_until": 1762496400000
+        "data": {
+          "deletion": {
+            "project_id": "prj_01J9Z3K7Q2",
+            "state": "requested",
+            "purge_after": 1764903600000,
+            "recoverable_until": 1762496400000
+          },
+          "requested_by_user_id": "usr_01J9Z3K7QQ"
         },
-        "requested_by_user_id": "usr_01J9Z3K7QQ"
+        "meta": {
+          "request_id": "req_delete_01J9Z3K7QN"
+        }
       }
     }
   },

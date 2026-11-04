@@ -31,12 +31,16 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_dec_01J9Z3K7QN",
-        "decision": {
-          "id": "dec_01J9Z3K7Q2",
-          "version_id": "decv_01J9Z3K7Q2",
-          "state": "proposed",
-          "scope": "edition"
+        "data": {
+          "decision": {
+            "id": "dec_01J9Z3K7Q2",
+            "version_id": "decv_01J9Z3K7Q2",
+            "state": "proposed",
+            "scope": "edition"
+          }
+        },
+        "meta": {
+          "request_id": "req_dec_01J9Z3K7QN"
         }
       }
     }

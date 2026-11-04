@@ -4,8 +4,8 @@
 - 부모: SEL-27, 근거: [stage-4.md](../stage-4.md) 4절·5절, [stage-1-db.md](../stage-1-db.md)·[stage-1-api.md](../stage-1-api.md)·[stage-1-ui.md](../stage-1-ui.md)·[stage-1-runners.md](../stage-1-runners.md), [DDL](../schemas/stage-1-ddl-draft.sql)
 - 상태: **초안 — 사용자 승인 전.** Linear에 만들지 않았다.
 - 규칙: 이슈 하나 = PR 하나. 모든 쓰기는 2단계의 검증된 명령 서비스(`scripts/pes_core/commands.py`)를 지나고, 화면·CLI·MCP가 DB를 직접 쓰지 않는다. 실제 `~/pes-projects`·`~/.pes/`는 읽지 않고 합성 fixture만 쓴다.
-- 경로 전제: 2·3단계에서 파일명이 달라졌으면 같은 역할의 모듈로 매핑한다. 아래 함수·표 이름은 계약 이름으로 유지한다. 신규 화면은 3단계 U1의 `scripts/pes_web/workspace.py`·`templates/workspace/`·`static/workspace/`를 확장한다. W1·R1은 4단계 필수 전제가 아니고, T1은 채택했을 때만 U12 게이트 입력으로 쓴다.
-- 공통 테스트: 각 PR은 `python3 -m pytest tests/test_stage4_<이슈>.py -q`와 전체 `python3 -m pytest -q`를 통과한다. Windows는 `python -m pytest ... -q`. 브라우저가 있는 PR은 3단계 Playwright 하네스로 `npx playwright test tests/e2e/stage4_<이슈>.spec.ts`를 실행하고, Windows CI에서 브라우저가 없으면 실패로 처리한다. 매 PR/main Windows+macOS를 유지한다.
+- 경로 전제: 2·3단계에서 파일명이 달라졌으면 같은 역할의 모듈로 매핑한다. 아래 함수·표 이름은 계약 이름으로 유지한다. 신규 화면은 3단계 U1의 `scripts/serve.py`(서버 렌더·API 라우트)·`templates/workspace/`·`static/workspace/` 경계를 확장하고, 3단계에서 화면 모듈이 `scripts/pes_web/workspace.py`로 분리됐다면 그 모듈을 쓴다. W1·R1은 4단계 필수 전제가 아니고, T1은 채택했을 때만 U12 게이트 입력으로 쓴다.
+- 공통 테스트: 각 PR은 `python3 -m pytest tests/test_stage4_<이슈>.py -q`와 전체 `python3 -m pytest -q`를 통과한다. Windows는 `python -m pytest ... -q`. 브라우저가 있는 PR은 3단계 Playwright 하네스로 `npx playwright test tests/e2e/stage4_<이슈>.spec.ts`를 실행하고, Windows CI에서 브라우저가 없으면 실패로 처리한다. 매 PR/main Windows+macOS를 유지한다. A·B의 같은 의미·같은 버전 결과는 PR 21의 교차 계약 하네스를 확장해 **각 PR에서** 시험하고 마지막에 몰아 하지 않는다.
 - 공통 지킬 것: 실제 자료·키·기관명을 fixture·로그·스크린샷·PR에 넣지 않는다. 승인·reopen·판 시작·직접 편집 권한은 서버가 검사하고 UI 체크만으로 통과시키지 않는다. 실패한 변경은 부분 저장 없이 전체 롤백하고, 성공은 서버 영수증 뒤에만 표시한다. 새 표는 PR 23의 `edition_carryovers` 하나만, 새 열은 `editions.completed_snapshot_id`·`projects.settings_json`(PR 23)와 `run_targets.direct_edit_*`(PR 25)만 만든다(부족하면 별도 DB 설계로 회송).
 
 ## 1. [4단계] PR 23 — 판 완료·이월 기록
@@ -21,11 +21,11 @@
   - [ ] `scripts/pes.py`에 `cmd_edition_complete`, `cmd_edition_reopen`, `cmd_edition_start`, `cmd_carryover_preview`, `cmd_carryover_apply`를 추가하고 `CMDS`·`main`에 등록한다. `scripts/pes_api/v1.py`에 `POST /api/v1/projects/{id}/editions/{e}/complete`, `/reopen-completion`, `POST /api/v1/projects/{id}/editions`, `GET .../carryover/preview`, `POST .../carryover/apply`를 추가한다.
   - [ ] 완료 시 `editions.status='completed'`, `completed_snapshot_id`(`snapshots.scope='edition'`, 같은 판), `projects.active_edition_id` 해제, `events`·영수증을 한 tx로 쓴다. 해제는 후속 판이 없을 때만 포인터를 풀고 승인·stale·현재 단계 포인터를 보존한다. `archived`는 미종결 run·lease가 없을 때만 허용하고 완료로 가장하지 않는다.
   - [ ] `scripts/pes_core/editions.py`에 `archive_project()`·`reopen_project()`를 구현한다. `projects.status='archived'`는 미종결 run·lease가 없을 때만 허용하고, 미완료 보관은 `completed_snapshot_id`를 만들지 않는다. `reopen_project()`는 소유자만. CLI `cmd_project_archive`·`cmd_project_reopen`, API `POST .../projects/{id}/archive`·`/reopen`을 추가한다.
-  - [ ] `docs/plan/decisions/`에 새 표·열 결정(문제·선택지·채택·이유·영향·재검토 조건)을 남기고, `docs/plan/schemas/check_ddl.py`와 `stage-1-db.md` 3.2를 갱신한다.
+  - [ ] `docs/plan/decisions/`에 새 표·열 결정(문제·선택지·채택·이유·영향·재검토 조건)을 남기고, `docs/plan/schemas/check_ddl.py`와 `stage-1-db.md` 3.2·3.5를 갱신한다.
 - **선행 이슈**: PR 1(스키마·SQLite), PR 2(D1 smoke), PR 4(명령 서비스), PR 6(판·단계·라운드), PR 7(항목·버전·출처), PR 9(결과물·객체), PR 10(actor·정책), PR 14(API), U3·U4.
 - **완료 기준**:
   - [ ] `python3 -m pytest tests/test_stage4_editions.py tests/test_stage4_carryover.py -q` 통과.
-  - [ ] 미종결 run·stale·필수 응답이 있으면 완료가 거부되고 부분 저장이 없다. 정상 완료는 스냅숏·event·영수증이 한 tx에 남는다.
+  - [ ] 미종결 run·stale·필수 응답·실행 차단 상태가 있으면 완료가 거부되고 부분 저장이 없다. 정상 완료는 스냅숏·event·영수증이 한 tx에 남는다.
   - [ ] 유지/수정/제외가 모두 기록되고, `exclude` 대상 NULL·중복 적용·미리보기 뒤 변경·롤백이 시험된다. `components`·`citations`·`version_files`·`next_round_task` 이월이 확인된다.
   - [ ] legacy `legacy_unverified` 승인 1판을 현재 소유자가 완료→2판 시작하는 합성 fixture가 통과한다. 미완료 보관은 완료 스냅숏을 만들지 않고, 보관 뒤 다시 열기가 소유자만 동작한다.
   - [ ] 새 마이그레이션의 D1 smoke와 export/import(PR 3) 복원 시험이 통과한다. `python3 -m pytest -q` 전체 통과.
@@ -105,7 +105,7 @@
 - **목표 한 줄**: 같은 판에서 방향 2~3개를 제안 결정으로 만들고, 근거·가정·위험·비용을 비교해 소유자가 하나를 원자적으로 채택한다.
 - **할 일**:
   - [ ] `scripts/pes_core/directions.py`(신규)에 `propose_directions()`, `adopt_direction()`, `_validate_bundle()`, `_revoke_others()`, `_create_next_round_task()`, `_budget_check()`를 구현한다. 묶음은 별도 표가 아니라 `mutation_commits.action='direction.propose'`의 `id`와 `result_json`(`bundle_id`, `base_version_id`, `candidate_version_ids`) + `events.payload`로 표현한다.
-  - [ ] 후보는 `decisions`·`decision_versions(scope='edition', state='proposed')`, 근거는 `version_relations`·`sources`·`source_versions`, 가정은 `assumptions`·`assumption_versions`, 토론은 `threads`·`messages`로 저장한다. 채택은 `adopted` 결정+이유, 나머지는 `revoked`+이유를 한 tx로 쓴다.
+  - [ ] 후보는 `decisions(scope='edition')`·`decision_versions(state='proposed')`, 근거는 `version_relations`·`sources`·`source_versions`, 가정은 `assumptions`·`assumption_versions`, 토론은 `threads`·`messages`로 저장한다. 채택은 `adopted` 결정+이유, 나머지는 `revoked`+이유를 한 tx로 쓴다.
   - [ ] `scripts/pes_api/v1.py`에 `POST /api/v1/projects/{id}/directions`, `POST .../directions/{bundle}/adopt`, `GET .../directions/{bundle}`을 추가한다. `scripts/pes.py`에 `cmd_direction_propose`, `cmd_direction_adopt`를 추가한다.
   - [ ] `scripts/pes_web/workspace.py`·`templates/workspace/directions.html`(신규)·`static/workspace/directions.js`(신규)에 2~3개 카드, 고정 틀(방향명·의도·핵심 주장 3~5·정확한 출처 버전·가정·위험·비용/기간·포기 항목), 채택/철회를 만든다.
   - [ ] A는 이미 사람이 시작한 run 안에서는 새 run 없이 제안하고, 새 유료 run은 실행 동작·현재 정책·예약 예산 검사를 거친다. B는 프롬프트 복사·외부 제안을 같은 `proposed` 결정으로 가져온다. `skills/*/SKILL.md`의 중립 워크플로에 방향 제안 절차를 넣는다.
@@ -114,7 +114,7 @@
 - **완료 기준**:
   - [ ] `python3 -m pytest tests/test_stage4_directions.py -q` 통과. `npx playwright test tests/e2e/stage4_directions.spec.ts` 통과.
   - [ ] 묶음 ID·기반 버전·후보 목록이 기록되고, 하나 채택/나머지 철회가 원자적이며, 중복 클릭·후보 변경·부분 실패가 전체 거부된다.
-  - [ ] 근거 부족 시 생성하지 않고, 예산·Go OFF·B 수동 가져오기·다음 할 일 연결이 확인된다. `python3 -m pytest -q` 전체 통과.
+  - [ ] 차이를 설명할 근거조차 없을 때만 생성하지 않고(미검증 가정·확인할 근거를 표시한 대안은 허용), 예산·Go OFF·B 수동 가져오기·다음 할 일 연결이 확인된다. `python3 -m pytest -q` 전체 통과.
 - **지킬 것**: 자동 판 생성·자동 run·자동 채택 금지. 방향은 완성 원고가 아니라 1쪽 이내 맛보기. 새 표를 만들지 않고 기존 결정·사건·영수증으로 묶음을 표현한다. AI가 채택하지 않는다.
 
 ## 7. [4단계] U10 — AI 반대 의견
@@ -161,6 +161,6 @@
 - **선행 이슈**: U1~U4, U6, PR 18, PR 21, U5. T1은 채택했을 때만 게이트 입력으로 쓴다.
 - **완료 기준**:
   - [ ] `python3 -m pytest tests/test_stage4_workspace_switch.py tests/test_stage4_legacy_links.py -q` 통과. `npx playwright test tests/e2e/stage4_switch.spec.ts` 통과.
-  - [ ] 게이트 체크리스트(읽기·답·승인·reopen·인쇄·딥링크, Windows/Mac, 미제출 답·초안 보존)가 통과하고, opt-in→기본 전환·롤백이 동작한다.
+  - [ ] 게이트 체크리스트(읽기·답·승인·reopen·인쇄·딥링크, Windows/Mac, 미제출 답·초안 보존)가 통과하고, opt-in→기본 전환·롤백이 동작한다. 기존 화면 유지 기간(최소 한 마이너 버전)이 릴리스 문서에 적힌다.
   - [ ] `/legacy`는 같은 새 DB/API 위의 화면 복귀이고 데이터 되돌리기가 아님. 기존 ask 링크·고정 HTML·미전환 legacy 안내가 유지되고, 이중 쓰기가 없다. 세 상태가 같은 의미로 보인다. `python3 -m pytest -q` 전체 통과.
-- **지킬 것**: `--legacy`를 데이터 복원으로 설명하지 않는다. 기존 화면을 4단계에 삭제하지 않는다. 실제 프로젝트 1개 확인을 숨은 필수 조건으로 만들지 않는다(T1 조건부). 고정 HTML 보존 약속을 해제하지 않는다. 두 화면이 같은 DB/API를 쓰고 이중 쓰기는 하지 않는다.
+- **지킬 것**: `--legacy`를 데이터 복원으로 설명하지 않는다. 기존 화면은 4단계에 삭제하지 않고 최소 한 마이너 버전 유지한다(제거는 6단계 별도 결정). 실제 프로젝트 1개 확인을 숨은 필수 조건으로 만들지 않는다(T1 조건부). 고정 HTML 보존 약속을 해제하지 않는다. 두 화면이 같은 DB/API를 쓰고 이중 쓰기는 하지 않는다.

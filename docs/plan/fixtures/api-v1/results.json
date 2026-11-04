@@ -48,16 +48,20 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_res_01J9Z3K7QN",
-        "object_versions": [
-          {
-            "object_id": "obj_01J9Z3K7Q9",
-            "version_id": "ver_01J9Z3K7QZ",
-            "version_no": "4"
-          }
-        ],
-        "mutation_id": "mut_01J9Z3K7QU",
-        "event_seq": "43"
+        "data": {
+          "object_versions": [
+            {
+              "object_id": "obj_01J9Z3K7Q9",
+              "version_id": "ver_01J9Z3K7QZ",
+              "version_no": "4"
+            }
+          ],
+          "mutation_id": "mut_01J9Z3K7QU",
+          "event_seq": "43"
+        },
+        "meta": {
+          "request_id": "req_res_01J9Z3K7QN"
+        }
       }
     }
   },
@@ -167,17 +171,21 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_res_01J9Z3K7QN",
-        "object_versions": [
-          {
-            "object_id": "obj_01J9Z3K7Q9",
-            "version_id": "ver_01J9Z3K7QZ",
-            "version_no": "4"
-          }
-        ],
-        "mutation_id": "mut_01J9Z3K7QU",
-        "event_seq": "43",
-        "replayed": true
+        "data": {
+          "object_versions": [
+            {
+              "object_id": "obj_01J9Z3K7Q9",
+              "version_id": "ver_01J9Z3K7QZ",
+              "version_no": "4"
+            }
+          ],
+          "mutation_id": "mut_01J9Z3K7QU",
+          "event_seq": "43",
+          "replayed": true
+        },
+        "meta": {
+          "request_id": "req_res_01J9Z3K7QN"
+        }
       }
     }
   }

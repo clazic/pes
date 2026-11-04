@@ -28,12 +28,16 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_cancel_01J9Z3K7QN",
-        "operation_id": "op_01J9Z3K7QS",
-        "run_id": "run_01J9Z3K7Q6",
-        "state": "cancel_requested",
-        "db_adoption_blocked": true,
-        "external_cancel_state": "pending"
+        "data": {
+          "operation_id": "op_01J9Z3K7QS",
+          "run_id": "run_01J9Z3K7Q6",
+          "state": "cancel_requested",
+          "db_adoption_blocked": true,
+          "external_cancel_state": "pending"
+        },
+        "meta": {
+          "request_id": "req_cancel_01J9Z3K7QN"
+        }
       }
     }
   },

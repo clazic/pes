@@ -31,20 +31,24 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_wait_01J9Z3K7QN",
-        "run": {
-          "id": "run_01J9Z3K7Q6",
-          "status": "waiting_human"
+        "data": {
+          "run": {
+            "id": "run_01J9Z3K7Q6",
+            "status": "waiting_human"
+          },
+          "lease": {
+            "released": true,
+            "fence": "3"
+          },
+          "waiting": {
+            "since": 1762311660000,
+            "question_ids": [
+              "qst_01J9Z3K7QB"
+            ]
+          }
         },
-        "lease": {
-          "released": true,
-          "fence": "3"
-        },
-        "waiting": {
-          "since": 1762311660000,
-          "question_ids": [
-            "qst_01J9Z3K7QB"
-          ]
+        "meta": {
+          "request_id": "req_wait_01J9Z3K7QN"
         }
       }
     }

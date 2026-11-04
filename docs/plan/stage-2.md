@@ -4,6 +4,7 @@
 - Linear: SEL-25
 - 입력: [00-brief.md](00-brief.md), 확정 [stage-0.md](stage-0.md), 합의 [stage-1-db.md](stage-1-db.md)·[stage-1-api.md](stage-1-api.md)·[stage-1-ui.md](stage-1-ui.md)·[stage-1-runners.md](stage-1-runners.md), [DDL 초안](schemas/stage-1-ddl-draft.sql)
 - 상태: **Codex·Opus 검수 반영**
+- 2026-11-05 사용자 결정: **방식 B의 Codex CLI·OpenCode TUI 어댑터를 2단계 PR20b로 앞당긴다.** Claude Code·Claude 앱 보장은 그대로다. PES가 서버로 돌리는 **방식 A의 OpenCode**와 사람이 직접 켜는 **OpenCode TUI**를 구분한다.
 - 전제: 2026-11-05 03:31 `main` 기준. SEL-11(`tests/`, `f6e9c37`)·SEL-16(`e015ff4`)·SEL-17(`82c6de5`)은 병합됐고, SEL-12~15·18·19는 hc-team worktree에서 진행 중이며 `AGENTS.md`·`spikes/`는 아직 없다. **0단계 게이트(S0 6절) 충족 전에는 PR1에 착수하지 않는다.**
 - 범위: 정적 HTML → 로컬 SQLite + API 서버. 새 작업 공간 디자인(3단계)과 새 소통 기능은 넣지 않는다. 이 문서는 계획만 바꾸며 코드는 고치지 않는다.
 
@@ -14,7 +15,7 @@
 1. 합성 프로젝트가 DB에서 6단계·라운드·질문/답·승인·reopen·보고서까지 v0.15.6과 같은 의미로 돈다.
 2. 기존 프로젝트는 **사본 → staging DB → 검증 → 프로젝트별 활성화**로 옮길 수 있고, 원본과 새 쓰기 전후의 되돌리기 절차가 있다.
 3. CLI·스킬·화면·방식 A·B가 같은 명령 서비스와 같은 API를 쓰며, 에이전트가 `project.json`이나 DB를 직접 쓰지 않는다.
-4. **A와 Claude Code는 합성 1개를 6단계까지, Claude 앱은 1단계 왕복·재접속**을 시험한다. 셋 다 같은 DB·API 의미를 쓴다.
+4. **A와 Claude Code는 합성 1개를 6단계까지, Claude 앱은 1단계 왕복·재접속, Codex CLI·OpenCode TUI는 각각 합성 1라운드+재개**를 시험한다. 모두 같은 DB·API 의미를 쓴다.
 5. 실제 프로젝트 이전은 사용자가 허용한 범위에서만 하고, 공개 저장소·테스트·로그에 실제 자료를 넣지 않는다.
 
 하지 않는 것: 새 화면 설계(3단계), 실제 다중 사용자·로그인(5단계), 운영 D1/R2(5단계), 외부 내보내기(6단계), 자동 재개(3단계 옵션), `project.json` 삭제.
@@ -25,12 +26,12 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 
 ### 2.1 작업 순서·의존 그래프·묶음
 
-- **정할 것**: 22개 PR을 어떤 순서와 묶음으로 내고, 무엇을 병렬로 돌릴지.
+- **정할 것**: 2단계 PR(20a·20b 분할 포함)을 어떤 순서와 묶음으로 내고, 무엇을 병렬로 돌릴지.
 - **선택지**: (A) DB→명령→API→CLI·화면→A/B의 층별 순서, (B) 한 프로젝트를 일찍 끝까지 세로로 자르는 순서, (C) A/B 어댑터를 먼저.
 - **판단 기준**: 위험을 일찍 없애는가, PR마다 테스트가 가능한가, 이중 쓰기 없이 갈 수 있는가, 0단계 게이트 뒤에 진행 가능한가, 사용자 피드백을 언제 받는가.
 - **추천**: **A(층별) + PR13에서 얇은 세로 절편**. 1단계 계약이 이미 층별로 합의됐고, 가장 큰 위험은 스키마·명령 서비스·이전이며, A/B는 API·화면 뒤에만 설 수 있다.
 - **PR13의 경계**: `context→claim→submit→complete`는 **한 run의 최소 경로**다. 질문·답·wait·재개가 있는 **한 라운드의 증명은 PR13+14를 함께** 본다. `complete`는 run 종료일 뿐 라운드 봉인·단계 승인이 아니다(`stage-1-api.md:21-23`).
-- **0단계 조건**: PR1~18은 S0 6절 게이트 충족 뒤에만 조건부로 진행한다. PR5의 TTL·heartbeat는 **설정으로만** 두고 확정하지 않으며, PR19·20·21·22는 SEL-18·19 결과 없이 착수하지 않는다(`stage-1-runners.md:110-112`).
+- **0단계 조건**: PR1~18은 S0 6절 게이트 충족 뒤에만 조건부로 진행한다. PR5의 TTL·heartbeat는 **설정으로만** 두고 확정하지 않으며, PR19·20a·20b·21·22는 SEL-18·19 결과 없이 착수하지 않는다(`stage-1-runners.md:110-112`).
 - **의존 그래프**(번호는 순서가 아님, `stage-1-db.md:174`):
 
 ```text
@@ -48,12 +49,13 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 10+13+14+15+16 → 17
 8+10+13+14+15+16 → 18
 5+10+13+14+17+18 (+SEL-18) → 19
-5+10+13+14+17+18 (+SEL-19) → 20
-18+19+20 → 21
+5+10+13+14+17+18 (+SEL-19) → 20a
+20a → 20b
+18+19+20a+20b → 21
 2+12+18+21 (+SEL-18·19) → 22
 ```
 
-- **병렬 묶음**: B0 `PR1` → B1 `PR2·3·4` → B2 `PR5·7·10` → B3 `PR9` → B4 `PR6` → B5 `PR8·13` → B6 `PR11·14·15` → B7 `PR12·16` → B8 `PR17·18` → B9 `PR19·20` → B10 `PR21` → B11 `PR22`. 같은 묶음 안은 서로 독립이며, 묶음 사이만 선행을 지킨다.
+- **병렬 묶음**: B0 `PR1` → B1 `PR2·3·4` → B2 `PR5·7·10` → B3 `PR9` → B4 `PR6` → B5 `PR8·13` → B6 `PR11·14·15` → B7 `PR12·16` → B8 `PR17·18` → B9 `PR19·20a` → B10 `PR20b` → B11 `PR21` → B12 `PR22`. 같은 묶음 안은 서로 독립이며, 묶음 사이만 선행을 지킨다. 20a와 20b는 각각 독립 검증하지만, 공통 MCP bridge·계약은 20a가 먼저 만든다.
 - **추가 선행**: 9→6(스냅숏/manifest가 `blobs` FK), 7·8·9→15(질문·항목·snapshot 쓰기), 17→19(중립 workflow·역할), 2→22(D1 smoke). 이 때문에 PR6·15·19·22의 선행과 묶음을 위와 같이 고친다.
 
 ### 2.2 기존 프로젝트 옮기기
@@ -91,7 +93,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 - **선택지**: (A) 일정 기간 이중 쓰기, (B) 전체 프로젝트 동시 hard cutover, (C) **프로젝트별 전환 + 미전환 프로젝트는 읽기 전용 legacy 경로**.
 - **판단 기준**: 원본이 하나인가, 프로젝트별로 되돌릴 수 있는가, 옛 화면·CLI가 갑자기 끊기지 않는가.
 - **추천**: **C**. 활성화된 프로젝트는 JSON 읽기 전용이고 새 쓰기는 DB에만 간다. 미전환 프로젝트는 새 코드가 `project.json`을 **읽기만** 해 `status`·`list`·기존 화면을 제공하고, 쓰기는 이전 안내로 막는다.
-- **legacy 제거**: 새 기한을 두지 않는다. **미전환 프로젝트 0 확인·대체 경로(읽기·답·승인·reopen·인쇄·딥링크) 검증 뒤** 제거한다. legacy JSON 읽기 경로 제거와 DB/API 기반 기존 화면 보존은 다른 일이며, 기존 화면을 3단계에 없애는 뜻으로 쓰지 않는다(`stage-1-ui.md:47,109`).
+- **legacy 제거**: 새 기한을 두지 않는다. **미전환 프로젝트 0 확인·대체 경로(읽기·답·승인·reopen·인쇄·딥링크) 검증 뒤** 제거한다. 제거는 조건 충족 뒤 **별도 정리 PR 1개**(로드맵 예비분)로 한다. legacy JSON 읽기 경로 제거와 DB/API 기반 기존 화면 보존은 다른 일이며, 기존 화면을 3단계에 없애는 뜻으로 쓰지 않는다(`stage-1-ui.md:47,109`).
 - **배포·버전**: 사용자 플러그인은 이 저장소 폴더에서 설치된다(`pes-local`, directory). **2단계 PR은 플러그인 버전을 올리지 않고, 새 DB 경로는 PR22 전까지 개발 플래그 뒤에 둔다.** 새 버전(예: 0.16.0) 배포는 PR22 통과·사용자 승인 뒤 한 번 한다. 배포 안내에는 이전 전까지 진행 중인 실제 프로젝트의 쓰기가 막힌다는 점(2.5 C)을 먼저 알리고, 그 전에 v0.15.x로 끝낼 수 있게 한다.
 
 ### 2.6 Python·SQLite 하한
@@ -116,7 +118,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 - **정할 것**: 한 라운드만 볼지, 합성 프로젝트 6단계 전체를 볼지, 실제 프로젝트로 볼지.
 - **선택지**: (A) 한 라운드, (B) **합성 프로젝트 1개 6단계 전체**, (C) 실제 프로젝트 1개.
 - **판단 기준**: 뼈대·API·lease·정책·화면이 모두 증명되는가, 비용·시간이 통제되는가, 실제 자료가 나가지 않는가.
-- **추천**: **B**. A는 합성 1개를 6단계, DeepSeek 하나, worker+reviewer, 자식 최대 5, 대기·재개·중단·Go OFF 차단 포함. B(Claude Code)는 같은 6단계를 MCP로, Claude 앱은 Desktop 로컬 확장으로 **1단계 왕복 + 재접속**을 시험하고 안 되면 명시적 전달로 같은 의미를 확인한다. 자식 최대 5는 native 병렬을 런타임에서 검증한 뒤 지원한다(`stage-1-runners.md:57`). 실제 자료·실키·기관 자료는 쓰지 않는다. 6단계 범위의 근거는 S0 7-2·DB PR19다(`stage-0.md:88`, `stage-1-db.md:196`).
+- **추천**: **B**. A는 합성 1개를 6단계, DeepSeek 하나, worker+reviewer, 자식 최대 5, 대기·재개·중단·Go OFF 차단 포함. B(Claude Code)는 같은 6단계를 MCP로, Claude 앱은 Desktop 로컬 확장으로 **1단계 왕복 + 재접속**을 시험하고 안 되면 명시적 전달로 같은 의미를 확인한다. **Codex CLI와 OpenCode TUI는 각각 합성 1라운드+재개**를 시험한다. OpenCode TUI는 사람이 직접 켜는 화면판이며, PES가 서버로 돌리는 방식 A의 OpenCode와 다르다. 자식 최대 5는 native 병렬을 런타임에서 검증한 뒤 지원한다(`stage-1-runners.md:57`). 실제 자료·실키·기관 자료는 쓰지 않는다. 6단계 범위의 근거는 S0 7-2·DB PR19다(`stage-0.md:88`, `stage-1-db.md:196`).
 
 ### 2.9 로컬 API 서버 형태
 
@@ -138,14 +140,14 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 
 ## 3. 방식 A·B 차이
 
-| 항목 | A (PES 안 OpenCode + DeepSeek) | B (Claude Code·Claude 앱) |
+| 항목 | A (PES 안 OpenCode + DeepSeek) | B (Claude Code·Claude 앱·Codex CLI·OpenCode TUI) |
 |---|---|---|
-| 첫 실행 | 합성 1개 6단계, worker+reviewer, DeepSeek 하나 | Code는 같은 6단계, 앱은 1단계 왕복·재접속 |
-| 연결 | PES가 opencode 서버 HTTP(2.2.5 고정)를 제어 | Code는 stdio MCP→로컬 PES HTTP, 앱은 Desktop 확장/명시적 전달 |
+| 첫 실행 | 합성 1개 6단계, worker+reviewer, DeepSeek 하나 | Code는 같은 6단계, 앱은 1단계 왕복·재접속, Codex·OpenCode TUI는 각각 1라운드+재개 |
+| 연결 | PES가 opencode 서버 HTTP(2.2.5 고정)를 제어 | Code는 stdio MCP→로컬 PES HTTP, 앱은 Desktop 확장/명시적 전달, Codex·TUI는 MCP/HTTP |
 | lease·heartbeat | 어댑터가 진행을 관측해 heartbeat | 도구 호출·진행에 묶음, 앱에 지속 heartbeat 요구 안 함 |
 | 질문 | PES 질문이 원본, OpenCode form/permission은 실행 입력 | PES 질문이 원본, 외부 앱 질문은 실행 입력 |
 | Go 전송 | 실제 반출마다 정책 검사, OFF면 차단 | 일반 Claude 전송은 대상 아님, Go 목적지 전송만 공통 검사 |
-| 스킬 | 중립 스킬 + opencode 어댑터 노트 | 중립 스킬 + claude-code/claude-app 어댑터 노트 |
+| 스킬 | 중립 스킬 + opencode(A) 어댑터 노트 | 중립 스킬 + claude-code/claude-app/codex/opencode-tui 어댑터 노트 |
 | 비용 | PES가 run·단계·프로젝트 누적 예약·집행(설정) | PES는 작업량·채택·기한만, 외부 비용은 집행 불가 |
 | 실패·되돌리기 | 옛 세션 채택 차단, PES 고정본으로 새 세션 | 복사≠제출, 오프라인 제안→사람이 새 claim으로 채택 |
 | 화면 | 실행 상태·대기·중단·권한 질문 표시 | 등록된 run·영수증·채택 상태만 표시, 생존 과장 금지 |
@@ -154,7 +156,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 
 ## 4. 이 단계 구현 이슈 목록
 
-이슈 하나 = PR 하나. **기존 설계의 22개 PR 번호에 귀속하며 추가 세분 이슈를 만들지 않는다.** `stage-1-db.md:176-199`의 22개 번호를 그대로 쓰고, 표·테스트별 이슈는 만들지 않는다(`stage-1-db.md:33`). Linear에는 `[2단계 PR n]` 제목으로 22개만 만들고, SEL-18·19는 기존 이슈를 선행으로 연결한다. 예산의 "계획 11"은 SEL-20~26 등 계획·검수 이슈를 포함한 **예상 배분**이며, SEL-21~24를 중복 가산하지 않는다. 실제 등록 때 기존 이슈와 260 한도를 확인한다. 모든 PR은 자기 테스트를 포함하며 21번까지 미루지 않는다.
+이슈 하나 = PR 하나. **기존 설계의 22개 PR 번호를 기준으로 하되, PR20만 20a·20b로 나눈다.** `stage-1-db.md:176-199`의 번호를 그대로 쓰고, 표·테스트별 이슈는 만들지 않는다(`stage-1-db.md:33`). Linear에는 `[2단계 PR n]` 제목으로 20a·20b를 포함해 만들고, SEL-18·19는 기존 이슈를 선행으로 연결한다. **2단계 이슈 수와 누적은 `roadmap.md` 2절 참고.** 모든 PR은 자기 테스트를 포함하며 21번까지 미루지 않는다.
 
 ### 4.1 0단계 의존 (2026-11-05 03:31 현재)
 
@@ -182,9 +184,9 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | 3 | 새 형식 백업·export/import | DB+객체+manifest+sha256, `db_meta` 커서 무효화, 한 프로젝트 복원 격리, 파일은 불투명 복사(ready·고아 규칙은 PR9·12) | 1 | 한 프로젝트 복원이 다른 프로젝트·전역 설정을 바꾸지 않음, 손상·누락 보고, 복원 뒤 epoch. **완전한 복원 검증은 PR4·9·10 뒤 PR12와 통합** | C2-3 |
 | 4 | 변경 명령 서비스 | rev·control_rev·멱등·`mutation_commits`·`events` 같은 tx, 0행 실패, actor/via 확정, 권한, 인증·권한→영수증 재생→rev/lease 순서 | 1 | 같은 키 같은 요청 재생·다른 요청 거부, 0행/늦은 실패 전부 롤백, 모든 변경에 사건·영수증, 영수증 장기 보존, system/채택 actor 정합성, **언어 중립 JSON 계약 픽스처** | C2-4 |
 | 5 | run·lease·fence | claim=run 전이+lease 원자, heartbeat, wait 시 `waiting_human`+해제, 만료·인계·fence, 입력 영수증 | 4 | 가상 시계로 만료·옛 fence 거부·질문 대기 중 해제/재획득, TTL은 설정(기본 비확정), SEL-18·19 뒤 확정. seen/ignored와 증거 있는 applied, 인계 뒤 중복 반영 방지, 만료 lease 부활 금지, 대기·무진행·중단 유예 값의 확정 담당 | C2-5 |
-| 6 | 판·단계·라운드 명령 | 봉인·승인·reopen·stale·완료 해제·carry_over, 1판 흐름 보존, snapshot/manifest | 4,5,9 | 합성 6단계 흐름, reopen 뒤 stale·승인 유지, **reopen 뒤 실행 기반 무효화**, complete≠approve, snapshot/manifest, 1판 흐름과 4단계 판 기능 구분 | C2-6 |
+| 6 | 판·단계·라운드 명령 | 봉인·승인·reopen·stale·완료 해제·단계 이월(현행 `carry_over`, `scripts/pes.py:785`; 4단계 판 이월과 다름), 1판 흐름 보존, snapshot/manifest | 4,5,9 | 합성 6단계 흐름, reopen 뒤 stale·승인 유지, **reopen 뒤 실행 기반 무효화**, complete≠approve, snapshot/manifest, 1판 흐름과 4단계 판 기능 구분 | C2-6 |
 | 7 | 항목·버전·출처·연결 | objects/versions, artifacts, sources/versions, citations, relations, QA·verify·library, URL로 안 합침 | 4 | 버전 불변·현재 포인터, 각주 순서, 같은 URL 다른 자료, 옛 연결 유지, library 이전. 출처 확인 시점·짧은 발췌·위치·방법/판정, 못 읽은 자료 발췌 금지, library DB 내용과 참조 파일(PR9/11) 담당 | C2-7 |
-| 8 | 질문·답 | question_sets/members, questions/versions, submissions, answers/versions, `__other`는 질문 스레드 메시지로 보존, 자유 의견, `allow_comment_as_answer` | 4,6 | 폼/질문 버전 고정, 옛 답 보존·새 버전 재확인, 덧붙임만 응답 인정, 중복 제출 방지. 조건부 필수·명시적 미루기·기본값/추천 자동 답 금지·묶음 전체 원자성, `__other` 최소 thread와 U2 새 의견 기능 구분, 재개 준비는 PR5/14와 공동 | C2-8 |
+| 8 | 질문·답 | question_sets/members, questions/versions, submissions, answers/versions, `__other`는 질문 스레드 메시지로 보존, 자유 의견, `allow_comment_as_answer` | 4,6 | 폼/질문 버전 고정, 옛 답 보존·새 버전 재확인, 덧붙임만 응답 인정, 중복 제출 방지. 조건부 필수·명시적 미루기·기본값/추천 자동 답 금지·묶음 전체 원자성, `__other` 최소 thread와 U2 새 의견 기능 구분, 재개 준비 검사의 **주 담당**: 현재 질문/폼 버전·조건부 필수·의견 응답 허용·명시적 미루기·실행 상태·Go 정책·기한/한도·새 claim(실행 form 응답은 예외). PR5·PR14는 보조 | C2-8 |
 | 9 | 결과물·객체 저장 | blobs/version_files, staging→hash→ready, 고아·격리, 접근 검사, 보고서 정확한 버전 참조 | 1,4,7 | 경로·서명 URL을 ID로 안 씀, 손상 hash 거부, 다른 프로젝트 접근 차단, component 버전 고정. 채택·저장·공유·인쇄 버전 보존, 같은 바이트 중복 저장 방지, 역할 제안 출처·workspace ready 경계, Go 파일 읽기 프록시(PR10/19) | C2-9 |
 | 10 | 행위자·토큰·전송 정책 | actors, agent_tokens, project_policy_versions, outbound_dispatches, Go ON/OFF 경합 | 1,4 | 토큰 해시·범위·만료·회수, 사람만 정책 변경, OFF 뒤 prepared 차단·authorized 미송신만 차단, 감사. 기본 ON 표시·정책 손상 시 차단·합성도 우회 금지·재허용 후 자동 재시작 금지, 30일 토큰·매 요청 검사, OFF in-flight 취소/unknown·sent 이력·옛 lease 채택 차단, 소유자 세션·CSRF 귀속 | C2-10 |
 | 11 | legacy importer | `project.json`·library·feedback·snapshots·reports·out/shots·ask/rounds → staging, `import_batches`/`legacy_mappings`, 미지 필드 보고 | 1,6,7,8,9,10 + SEL-17 | 깨진/2MB fixture, 재실행 멱등, 기본값을 과거 결정처럼 안 만듦, 원본 hash 불변. 옛 승인 `legacy_unknown`·사용자 NULL·`legacy_unverified`, 그때 본 질문/폼·덧붙임/자유 의견·미처리 입력 매핑, 새 정책 기본값을 과거 동의로 기록하지 않음. 실제 manifest·경로·이전 보고서는 로컬에만, PR에는 합성·익명 결과만 | C2-11 |
@@ -196,9 +198,10 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | 17 | 스킬 직접 편집 제거 | core+plan 파일럿→전체, 중립 워크플로·역할 명세·어댑터 노트, lint | 10,13,14,15,16 | `project.json`·sqlite 직접 쓰기 0(grep/lint), 연구 절차·독립 검토 유지, core+plan 합성 1회, Claude 전용 표기는 예외 위치. **문자열 0건이 아니라 업무 경로별 검증 명령 사용 확인**, 자식 제안 파일 허용·reviewer 독립 판단 유지, PR19 선행 계약 | C2-17 |
 | 18 | 로컬 화면 DB/API 전환 | 기존 hub/dashboard/ask/report/print/deep link를 같은 URL로, 읽기+답·승인·reopen+Go 스위치, 미전환 프로젝트는 legacy 읽기 전용, 새 디자인 없음 | 8,10,13,14,15,16 | 동등성 매트릭스 통과, `__other`·show_if·필수·추천·원격 답·버전 갱신·인쇄, Playwright Windows CI 필수, 이중 쓰기 0. 입력 중 갱신·충돌·타임아웃·커서 무효에도 초안 보존, 당시 set/버전 ask 링크, 안전한 Markdown/외부 인용, 소유자 세션·CSRF, 서버 영수증 뒤 성공, 최소 run/대기/중단·권한 입력·Go in-flight/unknown 표시, 수동 IME·NVDA·인쇄 담당 | C2-18 |
 | 19 | 방식 A 어댑터 | OpenCode 2.2.5 고정, 전용 프로필/프로세스, run당 세션, workspace, 권한 중계, Go 훅, 폴백 없음, 6단계·4역할, 이벤트 | 5,10,13,14,17,18 + SEL-18 | 합성 1개 6단계, wait/resume/interrupt, Go OFF 실제 차단, 비용 상한, 실제 자료 미사용, 프로세스 회수 Windows/Mac. 최초 claim 주체 단일화·첫 유료 호출 전 정책/예산/claim, 명세 사본/hash·바이너리 대조, 프로세스 소유 증거·동시 상한·대기 중 휴면/종료·세션 계보, workspace 접근 통제·자식 모델/Go 훅·중단 재처리·재시작, 부모만 채택·자식 waiting_human 전파·reviewer 별도 run·누적 예산/unknown | C2-19 |
-| 20 | 방식 B 어댑터 | Claude Code stdio MCP→로컬 HTTP, CLI 대안, `/pes:run`, Claude 앱 Desktop 확장 실제 시험, 명시적 전달/가져오기 | 5,10,13,14,17,18 + SEL-19 | Code로 합성 6단계, 앱 1단계 왕복·재접속, 복사≠제출, 중복 가져오기 방지, 실제 제출 actor 구분. 전달/대화 중 lease 없음·원 요청/기반 manifest 대조·hash≠인증·오프라인 제안 채택, 직접 인증 앱과 사람이 붙여 넣은 결과 구분, 재접속 context→새 입력→수신 확인→claim, 다른/오래된/중복 묶음·첨부 누락 거부, 지원 환경표, `pes watch` 대체 | C2-20 |
-| 21 | A·B 교차 계약 | 같은 결과 의미·양방향 인계·지연 응답·프로세스 종료·OFF·예산·중복/충돌 | 18,19,20 | 같은 DB 상태에서 같은 문구·권한, 유실·중복 0, A→B·B→A 인계, 옛 fence 거부, 자동 테스트. seen/applied 중복 방지·사람 시작 인계·권한 응답 지연 거부·예산 인계 유지·unknown 예약 미해제, SQLite/D1 동일 성공·충돌·부분 실패, 유료 실측은 PR19/20·반복 계약은 가짜 런타임 | C2-21 |
-| 22 | 전환 통합 검증·문서 | Windows/Mac 설치·제거·복구, 백업/복원, 이전 runbook, 사용 안내, 실제 파일럿(사용자 허용) | 2,12,18,21 + SEL-18·19 | CI **매 PR 및 main** Windows/Mac, 복원 훈련, 실제 프로젝트 1개 파일럿(허용 시) 원본 보존, 문서만 보고 재현, 공개 저장소 민감 자료 0. PR2 통과·모든 필수 게이트 선행, 앱 설치/연결/명시적 전달·unknown 상태·CLI/홈/정책·복원 손실 범위 문서화, 실제 산출물은 로컬·공개는 합성 | C2-22 |
+| 20a | 방식 B 어댑터 — Claude Code·Claude 앱 | Claude Code stdio MCP→로컬 HTTP, CLI 대안, `/pes:run`, Claude 앱 Desktop 확장 실제 시험, 명시적 전달/가져오기, 공통 MCP bridge·adapter 계약 | 5,10,13,14,17,18 + SEL-19 | Code로 합성 6단계, 앱 1단계 왕복·재접속, 복사≠제출, 중복 가져오기 방지, 실제 제출 actor 구분. 전달/대화 중 lease 없음·원 요청/기반 manifest 대조·hash≠인증·오프라인 제안 채택, 직접 인증 앱과 사람이 붙여 넣은 결과 구분, 재접속 context→새 입력→수신 확인→claim, 다른/오래된/중복 묶음·첨부 누락 거부, 지원 환경표, `pes watch` 대체 | C2-20a |
+| 20b | 방식 B 어댑터 — Codex CLI·OpenCode TUI | 20a의 MCP bridge·계약을 써서 Codex CLI·OpenCode TUI를 붙인다. D4 어댑터 노트에 `codex`·`opencode-tui`를 추가하고, **A의 OpenCode(PES 서버)와 OpenCode TUI(사람이 직접 켬)를 구분**한다. 토큰은 OS 키체인, `runtime=codex_cli|opencode_tui`, 모델·사용량 미상은 `unknown`, 승인·정책·토큰·삭제·export 도구 없음, Go 목적지 경로 시험 | 20a, 5,10,13,14,17,18 + SEL-19 | **Codex CLI와 OpenCode TUI 각각** 합성 1라운드+재개, actor/runtime 정확, 중복 제출·같은 키 다른 요청 거부, A 서버·프로세스 비간섭, Go 경로 차단/한계 표기, 노트만 보고 연결 재현 | C2-20b |
+| 21 | A·B 교차 계약 | 같은 결과 의미·양방향 인계·지연 응답·프로세스 종료·OFF·예산·중복/충돌 | 18,19,20a,20b | 같은 DB 상태에서 같은 문구·권한, 유실·중복 0, A→B·B→A 인계, 옛 fence 거부, 자동 테스트. seen/applied 중복 방지·사람 시작 인계·권한 응답 지연 거부·예산 인계 유지·unknown 예약 미해제, SQLite/D1 동일 성공·충돌·부분 실패, 유료 실측은 PR19/20a·20b·반복 계약은 가짜 런타임 | C2-21 |
+| 22 | 전환 통합 검증·문서 | Windows/Mac 설치·제거·복구, 백업/복원, 이전 runbook, 사용 안내, 실제 파일럿(사용자 허용) | 2,12,18,21 + SEL-18·19 | CI **매 PR 및 main** Windows/Mac, 복원 훈련, 실제 프로젝트 1개 파일럿(허용 시) 원본 보존, 문서만 보고 재현, 공개 저장소 민감 자료 0. PR2 통과·모든 필수 게이트 선행, 앱 설치/연결/명시적 전달·Codex/OpenCode TUI 노트·unknown 상태·CLI/홈/정책·복원 손실 범위 문서화, 실제 산출물은 로컬·공개는 합성 | C2-22 |
 
 ### 4.3 CLI 명령 32개 배정 (`scripts/pes.py:1701`)
 
@@ -221,7 +224,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | CLI·스킬 | 기존 명령 의미 보존, CMDS 32개 배정, `project.json`·DB 직접 쓰기 0, core+plan 합성 통과 | 15·16·17 |
 | 기존 화면 | 동등성 매트릭스와 Playwright 스모크가 Windows/Mac에서 통과. 새 디자인·이중 쓰기 없음, `pes watch` 답 알림 유지 | 18 |
 | 방식 A | 합성 1개 6단계, 대기·재개·중단·Go OFF 차단, 비용 상한 준수, 실제 자료 미사용 | 19 |
-| 방식 B | Claude Code 같은 6단계, Claude 앱 1단계 왕복·재접속, 복사≠제출, 중복 방지 | 20 |
+| 방식 B | Claude Code 같은 6단계, Claude 앱 1단계 왕복·재접속, Codex CLI·OpenCode TUI 각각 1라운드+재개, 복사≠제출, 중복 방지 | 20a·20b |
 | 교차 | A↔B 인계·지연 응답·프로세스 종료·OFF·중복/충돌에서 유실·중복 0 | 21 |
 | 삭제 정책 | 논리 보관/고아 정리/프로젝트 영구 삭제 구분, 소유자·확인·백업 범위 문서화 | 22 |
 | 배포·버전 | 2단계 PR은 플러그인 버전을 올리지 않고 새 DB 경로는 개발 플래그 뒤. 0.16.0 배포는 PR22 통과·사용자 승인 뒤 | 22 |
@@ -232,7 +235,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 
 | # | 결정 | 선택지 | 추천과 이유 | 비용·되돌리기 |
 |---|---|---|---|---|
-| 1 | 실제 프로젝트 이전 범위 | 허용 slug·사본 시험/활성화 범위·복원 시점 뒤 손실 수용 | **허용 slug 1개씩, 원본 보존, PR22 실제 접근 직전 확인** | 새 쓰기 뒤 옛 JSON 복귀는 무손실 보장 없음 |
+| 1 | 실제 프로젝트 이전 범위 | 허용 slug·사본 시험/활성화 범위·복원 시점 뒤 손실 수용 | **허용 slug 1개씩, 원본 보존, PR22 실제 접근 직전 확인**. PR22가 프로젝트별 '실제 자료 사용 허용 기록'(로드맵 정의)을 처음 만든다 | 새 쓰기 뒤 옛 JSON 복귀는 무손실 보장 없음 |
 | 2 | A 비용 상한 값 | 금액/구독 허용량/토큰·턴·시간/run·단계·프로젝트 누적 | **SEL-18 측정 뒤 R 7절의 기존 확인 그대로** 추천해 확인한다. 측정 전 SEL-18 시험 상한도 같은 자리에서 정한다. `유료 재시도 0`은 제안값이며, B 외부 비용은 PES가 집행할 수 없음을 표시한다 | 유료 호출 비용. PR19 전에 결정 |
 
 ## 7. 다음 단계로 넘기는 것
@@ -241,9 +244,9 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 - **3단계 선택 실험**: WebMCP는 **3단계 선택 실험 1 PR**(읽기·초안·첨언/답글만, 승인류 금지). 자동 재개는 **3단계 옵션**으로 넘긴다.
 - **4단계**: 판 유지/수정/제외 화면, 판·라운드 비교, 갈림길 맛보기, AI 반대 의견, 직접 편집·제안 모드.
 - **5단계**: 로그인·역할·권한, 원격 MCP, **운영 D1/R2**, 알림, 원격 runner.
-- **6단계**: Linear 등 외부 내보내기, 여러 에이전트·여러 사람, hc-team.
+- **6단계**: Linear 등 외부 내보내기, 여러 사람·여러 worker, hc-team, 그 밖의 에이전트(Gemini 등 후보). Codex CLI·OpenCode TUI는 2단계 PR20b에서 끝낸다.
 - **2단계 잔여**: `project.json` 삭제 정책, legacy 읽기 경로 제거, 전체 프로젝트 이전. D1 운영은 5단계, 자동 재개는 3단계 옵션, WebMCP는 3단계 선택 실험 1 PR로 목적지가 이미 있다. **비용 자동 집행은 PR19/21의 필수 계약**이므로 잔여로 넘기지 않는다. **OneDrive 동기화는 이미 금지**이므로 미결로 남기지 않는다.
-- **3단계 입력**: 동등성 매트릭스, 읽기 모델·변경 커서, 이전 보고서(`import_batches`·`legacy_mappings`), SEL-18·19 측정값, `docs/plan/decisions/`의 TTL·비용 결정.
+- **3단계 입력**: 동등성 매트릭스, 읽기 모델·변경 커서, 이전 보고서(`import_batches`·`legacy_mappings`), SEL-18·19 측정값, `docs/plan/decisions/`의 TTL·비용 결정. UI:114의 작업 공간 읽기 묶음·딥링크·권한별 가능 동작은 3단계 U1이 맡고 PR13·14가 기반이다.
 
 ## 근거
 

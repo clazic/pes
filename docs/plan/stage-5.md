@@ -19,7 +19,7 @@ PES를 **공개 HTTPS 웹**으로 옮긴다. 사람은 어느 기기에서든 �
 - 질문·승인·실패·백업 이상이 메일과 휴대폰 푸시로 오고, 알림에는 연구 내용이 실리지 않는다.
 - 야간 백업과 월 1회 복구 훈련이 돌고, **Cloudflare 사용료가 무료 한도 안**에 있다(도메인 비용은 별도).
 
-**하지 않는 것**: 6단계의 여러 에이전트·여러 사람 조직 기능, 외부(Linear·Notion) 내보내기, 4단계의 판 비교·갈림길, 3단계의 새 작업 공간 디자인. 웹 이전은 **같은 화면·같은 명령을 공개 HTTPS에서 안전하게 쓰는 일**이지 새 제품을 만드는 일이 아니다.
+**하지 않는 것**: 6단계의 여러 에이전트·여러 사람 조직 기능, 외부(Linear·Notion) 내보내기, **4단계 기능은 새로 만들지 않음(웹 동등성·성능은 WEB14에서 확인)**, 3단계의 새 작업 공간 디자인. 웹 이전은 **같은 화면·같은 명령을 공개 HTTPS에서 안전하게 쓰는 일**이지 새 제품을 만드는 일이 아니다.
 
 **원칙**: stage-0의 원칙 0(에이전트는 상태를 직접 쓰지 않는다)과 stage-1-db 2절의 결정(한 프로젝트의 쓰기 원본은 하나, 실행 중 DB 동기화 금지)을 그대로 지킨다. 웹 전환은 이 원칙의 예외가 아니다.
 
@@ -114,10 +114,10 @@ PES를 **공개 HTTPS 웹**으로 옮긴다. 사람은 어느 기기에서든 �
 - **판단 기준**: 사용자는 소유자 1명 + 소수 편집자, 역할이 이미 DB(`project_members`, `stage-1-ddl-draft.sql:57-64`)에 있음, 브라우저·API·MCP가 같은 사용자 정체성을 써야 함, 계정 복구 가능성, 월 비용, 공개 HTTPS 공격면.
 - **추천**: **② 자체 로그인**. Better Auth를 D1에 붙이고, 이메일 매직링크를 기본으로 하되 첫 로그인 뒤 **패스키 등록을 권장**한다. PES의 `users`가 정본이고, 인증 라이브러리의 사용자 표는 PES `users`에 매핑해 세션·계정·패스키를 맡긴다(`users.auth_subject`에 `provider:subject`를 저장, `stage-1-ddl-draft.sql:12-18`). **채택 버전을 고정하고 D1 어댑터·추가 인증 표·사용자 매핑을 실제로 검증**한다. 세션 표만 떼어 검토하는 것으로 축소하지 않는다. Clerk/Auth0는 월 비용과 개인정보 위탁이 늘고 소수 사용자에게 과하다.
 - **Access의 역할**: 기본 경로가 아니다. **`/ops` 관리자 경로의 선택적 바깥 문**으로만 쓴다. Access를 인증에, PES `project_members`를 인가에 쓰는 조합은 가능하지만, "권한 원본이 반드시 둘"이라고 단정하지 않는다. 켜지 않아도 PES 로그인이 모든 권한을 검사한다.
-- **역할**: `owner`는 승인·reopen·판 시작·Go 정책·토큰·멤버·삭제·데이터 내보내기. `editor`는 답·의견·첨언·초안·질문 추가까지. `reader`는 읽기만. **editor의 승인은 허용하지 않는다** — `stage-1-api.md:42`가 5단계로 미룬 결정이며, 연구 책임의 단일성을 위해 owner만 승인한다. 여러 승인자가 필요하면 6단계에서 `approver` 역할을 추가한다.
+- **역할**: `owner`는 `stage.approve`·`stage.reopen`·`edition.start`·`edition.complete`·`edition.reopen_completion`·Go 정책·토큰·멤버·삭제·데이터 내보내기. `editor`는 답·의견·첨언·초안·질문 추가까지. `reader`는 읽기만. **editor의 승인은 허용하지 않는다** — `stage-1-api.md:42`가 5단계로 미룬 결정이며, 연구 책임의 단일성을 위해 owner만 승인한다. 6단계에서 `approver`를 추가해도 `stage.approve`·`stage.reopen`만이고, `edition.complete`·`edition.reopen_completion`은 owner만 한다.
 - **화면**: 로그인·초대 수락·멤버·보안(세션·패스키·복구 코드)·토큰·연결된 앱·알림 설정을 설정 영역에 둔다. 프로젝트 작업 화면은 3단계 U1을 그대로 쓰고, 5단계는 설정과 로그인 화면만 새로 만든다.
 - **세션**: 쿠키 이름 `__Host-pes_session`, `HttpOnly; Secure; SameSite=Lax; Path=/`. 절대 14일·유휴 7일, 로그인·권한 변경 시 회전. 기기 목록과 "모든 기기 로그아웃" 제공. 기기·세션 표는 **새 마이그레이션(담당 WEB2)** 이다.
-- **재인증(step-up)**: 승인·reopen·판 시작·정책 변경·토큰 발급/회수·삭제·데이터 내보내기는 최근 재인증을 요구한다. **step-up은 브라우저에서 프로젝트·동작·snapshot/rev를 보여 주고, 그 요청에 한정해 확정**한다. 기기 토큰이나 step-up 토큰을 에이전트가 받아 승인 명령을 대행할 수 없다. 5분은 **운영 초기값**이며 7절에서 재검토한다. 이는 "사람만"(`stage-1-api.md:25`)을 강화하는 것이지 바꾸는 것이 아니다.
+- **재인증(step-up)**: `stage.approve`·`stage.reopen`·`edition.start`·`edition.complete`·`edition.reopen_completion`·정책 변경·토큰 발급/회수·삭제·데이터 내보내기는 최근 재인증을 요구한다. **step-up은 브라우저에서 프로젝트·동작·snapshot/rev를 보여 주고, 그 요청에 한정해 확정**한다. 기기 토큰이나 step-up 토큰을 에이전트가 받아 승인 명령을 대행할 수 없다. 5분은 **운영 초기값**이며 7절에서 재검토한다. 이는 "사람만"(`stage-1-api.md:25`)을 강화하는 것이지 바꾸는 것이 아니다.
 - **복구 자격**: 로그인·step-up·복구를 한 표로 정한다.
 
 | 상황 | 허용 자격 | 요구·회수 |
@@ -138,7 +138,34 @@ PES를 **공개 HTTPS 웹**으로 옮긴다. 사람은 어느 기기에서든 �
 - **선택지**: ① 프로젝트 범위 토큰만 ② 기기(machine) 범위 토큰 ③ OAuth client credentials.
 - **판단 기준**: 최소 권한, 회수 즉시성, runner가 여러 프로젝트를 맡을 때의 편의, 유출 시 피해 범위, 감사 가능성.
 - **추천**: **① 프로젝트 범위 토큰만**. stage-1-db 13의 결정을 그대로 운영으로 옮긴다(`stage-1-db.md:30`). 형식은 `pes_<prefix>_<32바이트 base64url>`, 원문은 발급 응답에서 **한 번만** 보여 주고 DB에는 `HMAC-SHA256(pepper, token)`만 저장한다(`agent_tokens.token_hash`, `stage-1-ddl-draft.sql:66-77`).
-- **scope**: API 6절의 동작 **전부**에 대응시킨다. `context:read`, `inputs:read`, `changes:read`, `version:read`, `run:claim`, `run:heartbeat`, `run:wait`, `run:complete`, `run:cancel`, `run:release`, `result:submit`, `question:ask`, `input:receipt`, `file:upload`, `file:read`. 승인·reopen·정책·토큰·삭제·멤버 범위는 **존재하지 않게** 한다. 각 scope는 실제 actor·run에 귀속되고, 발급 시 고른 scope 밖의 명령은 403이다.
+- **scope ↔ 명령 ↔ MCP 도구**: API 6절의 E 허용 동작과 3·4단계가 추가한 에이전트 명령을 아래 표로 맞춘다. `—`는 MCP 미노출(HTTP/CLI만)이다. 승인·reopen·정책·토큰·삭제·멤버·외부 export scope는 **존재하지 않게** 한다. 각 scope는 실제 actor·run에 귀속되고, 발급 시 고른 scope 밖의 명령은 403이다.
+
+| API 6절 E 동작·3·4단계 명령 | scope | MCP 도구 |
+|---|---|---|
+| capability·프로젝트 목록 | `context:read` | `pes_capabilities`·`pes_projects` |
+| 맥락·버전 읽기 | `context:read`·`version:read` | `pes_context`·`pes_version` |
+| 입력 조회(long-poll) | `inputs:read` | `pes_inputs` |
+| 변경분 | `changes:read` | `pes_changes` |
+| claim | `run:claim` | `pes_claim` |
+| heartbeat | `run:heartbeat` | `pes_heartbeat` |
+| wait | `run:wait` | `pes_wait` |
+| complete | `run:complete` | `pes_complete` |
+| 중단·취소 | `run:cancel` | `pes_cancel` |
+| 반납 | `run:release` | `pes_release` |
+| 인계 | `run:handoff` | `pes_handoff` |
+| 결과 제출 | `result:submit` | `pes_submit` |
+| 질문 게시·수정 | `question:ask`·`question:revise` | `pes_ask`·`pes_question_revise` |
+| 자기 질문 답 | `answer:self` | `pes_self_answer` |
+| 첨언·답글 | `thread:write` | `pes_thread`·`pes_reply` |
+| 후속 제안 | `followup:propose` | `pes_followup` |
+| 첨언 해결·후속 적용 | `thread:resolve`·`followup:apply` | `pes_thread_resolve`·`pes_followup_apply`(reopen 적용은 H만) |
+| 가정·결정·반영 제안 | `assumption:propose`·`decision:propose`·`reflection:write` | `pes_assumption`·`pes_decision`·`pes_reflection` |
+| 반대 의견 | `objection:raise` | `pes_objection` |
+| 편집 제안 | `edit:propose` | `pes_edit_proposal` |
+| 파일 | `file:upload`·`file:read` | `pes_upload`·`pes_file` |
+| 입력 영수증 | `input:receipt` | `pes_receipt` |
+| 라운드 시작·봉인 | `round:write` | `pes_round_start`·`pes_round_seal` |
+
 - **pepper**: `token_hash`에 pepper 버전을 함께 저장하고, 회전 시 새 버전으로 재해시하거나 제한된 이중 허용 창을 둔다. 회전 중에도 회수는 즉시다.
 - **수명·교체**: 30일 만료, 회수 즉시 다음 요청부터 401. **교체는 새 키 발급 + 24시간 겹침 + 옛 키 자동 회수**이고, **긴급 회수는 겹침 없이 즉시 전부 폐기**다. 둘을 같은 동작으로 취급하지 않는다. 마지막 사용 시각·마지막 사용 IP·발급자·범위를 UI에 보여 준다. `agent_tokens`에 `label`, `token_prefix`, `last_used_at`, `last_used_ip`, `created_by_user_id`를 **nullable ADD COLUMN**으로 보강한다(파괴적 변경 없음, 새 마이그레이션 담당 WEB4).
 - **보관**: runner는 프로젝트별 키를 OS 키체인(Windows Credential Manager, macOS Keychain)에 저장하고 `~/.pes/credentials` 평문 저장을 금지한다. 키는 프롬프트·로그·URL·에러 메시지에 넣지 않는다. MCP 도구가 모델 대신 헤더에 주입한다(`stage-1-api.md:49`).
@@ -148,6 +175,7 @@ PES를 **공개 HTTPS 웹**으로 옮긴다. 사람은 어느 기기에서든 �
 
 ### 2.4 방식 A가 웹에서 도는 위치
 
+- **용어**: runner = 사용자 컴퓨터의 로컬 실행기. 1단계 runners의 "원격 runner"는 웹에서 본 같은 것이다.
 - **정할 것**: opencode 프로세스와 PES supervisor가 어디서 도는가, 웹과 로컬이 어느 방향으로 연결되는가, 절전·오프라인·다중 기기를 어떻게 다루는가.
 - **선택지**: ① Cloudflare Workers/Containers 안에서 opencode 실행 ② **로컬 runner가 밖으로 연결** ③ 상시 VPS runner ④ Cloudflare Tunnel로 로컬 opencode를 공개.
 - **판단 기준**: 인바운드 포트 없음, 노트북 절전·재접속, 연구 자료가 있는 위치, 비용, 같은 API 재사용, 장애 복구, stage-1-runners A3(전용 프로필·프로젝트당 하나) 유지.
@@ -165,11 +193,11 @@ PES를 **공개 HTTPS 웹**으로 옮긴다. 사람은 어느 기기에서든 �
 - **선택지**: ① 원격 MCP(Claude 커스텀 커넥터) ② 붙여넣기 묶음만 ③ 둘 다.
 - **판단 기준**: Claude 앱 지원 범위, OAuth 필요 여부, 도구 호출 시간 제한, 승인 권한 분리, 오프라인·재접속, 사용자 설정 부담.
 - **추천**: **③ 둘 다**. 원격 MCP를 추가하되 붙여넣기 전달을 없애지 않는다. `stage-1-runners.md:39`의 B2가 5단계로 넘긴 "원격 커넥터"를 여기서 실행한다.
-- **경로·도구**: Worker에 `/mcp`(Streamable HTTP)를 두고 실제 노출 목록을 빠짐없이 싣는다: `pes_context`, `pes_claim`, `pes_submit`, `pes_ask`, `pes_wait`, `pes_complete`, heartbeat, release, cancel, 입력·결과 영수증 조회, `pes_projects`(`stage-1-api.md:94`). Claude 앱은 **Customize → Connectors → Add custom connector**에 URL을 넣고 OAuth로 승인한다(Pro/Max 전용이 아니며 실제 지원 환경은 WEB5 종단 시험으로 확인). Claude Code는 `claude mcp add --transport http pes https://…/mcp --header "Authorization: Bearer …"`로 같은 엔드포인트를 쓴다. Desktop/stdio·CLI·명시적 전달은 지원 수준을 문서화하고, 회수·수신 영수증·옛 결과 거부를 원격에서도 시험한다.
+- **경로·도구**: Worker에 `/mcp`(Streamable HTTP)를 둔다. 노출 도구는 **2.3의 `scope ↔ MCP 도구` 표가 단일 목록**이며, `pes_context`·`pes_capabilities`·`pes_projects` 같은 읽기 도구와 claim·wait·submit·ask·영수증·첨언·후속·가정/결정/반영 제안·반대·편집 제안 도구를 포함한다. **WebMCP 목록은 이 표와 별개**이며 3단계 W1·5단계 WEB13에서 따로 정한다. Claude 앱은 **Customize → Connectors → Add custom connector**에 URL을 넣고 OAuth로 승인한다(Pro/Max 전용이 아니며 실제 지원 환경은 WEB5 종단 시험으로 확인). Claude Code는 `claude mcp add --transport http pes https://…/mcp --header "Authorization: Bearer …"`로 같은 엔드포인트를 쓴다. Desktop/stdio·CLI·명시적 전달은 지원 수준을 문서화하고, 회수·수신 영수증·옛 결과 거부를 원격에서도 시험한다.
 - **인증**: 원격 MCP는 **OAuth 2.1 + PKCE**를 쓴다. resource/issuer/audience·metadata discovery·정확한 redirect URI를 검증하고, 동적 클라이언트 등록(DCR)은 선택으로 두되 rate limit·허용 목록·사용자 동의로 제한한다. Cloudflare Workers OAuth Provider를 쓰되 **KV 의존**을 확인하고, **액세스 토큰 `jti`를 매 요청 D1에서 검사하는 것은 PES가 보강**한다. 1시간 액세스 + 30일 리프레시, refresh 회전·재사용 거부. UI에서 "연결된 앱"으로 회수한다. **OAuth 위임은 사람 세션이 아니다**: `actor.kind=external_agent`, `on_behalf_of_user_id`로 기록하고, 승인·reopen·정책·토큰·삭제는 할 수 없다.
 - **범위**: **동의 범위 ∩ 현재 `project_members` ∩ 에이전트 제한**을 매 호출 검사한다. 동의 후 새로 가입한 프로젝트로 자동 확장하지 않고, "사용자의 모든 프로젝트"를 기본으로 주지 않는다. 복수 프로젝트 선택·범위 변경·회수를 제공한다.
 - **대기·크기**: 업무 `wait` 전이와 입력 조회 long-poll을 구분한다. 커넥터의 `wait_ms` 최대 10초는 **capabilities로 공지하는 구현값**이지 외부 서비스의 보장값이 아니다. 25초 롱폴은 runner·CLI 전용이다. **긴 대기를 Worker에서 어떻게 구현할지(DO·짧은 폴+ETag·SSE)는 미확인**이며 2.4·WEB1에서 정한다. 결과는 바이트 중간에서 자르지 않고 **digest·정확한 manifest·페이지 커서 또는 명시적 크기 오류**를 반환한다. 크기·transport 때문에 승인·사람 답·결과 제출의 의미를 바꾸지 않는다.
-- **권한**: **MCP와 WebMCP의 허용 목록은 별개다.** `pes_submit`은 run 결과 제출이고 사람 답 `submissions`와 다른 명령이다. MCP는 사람 답 제출을 대신하지 않지만, **에이전트가 자기에게 온 질문에 답하는 공통 권한은 유지**한다. 답 초안은 저장 위치·지원 여부를 정하고, 사람→AI 질문도 실제 작성 actor를 기록한다.
+- **권한**: **MCP와 WebMCP의 허용 목록은 별개다.** `pes_submit`은 run 결과 제출이고 사람 답 `submissions`와 다른 명령이다. MCP는 사람 답 제출을 대신하지 않지만, **에이전트가 자기에게 온 질문에 답하는 공통 권한은 유지**한다. **답 초안은 브라우저 저장소만 쓰고 서버 초안 API는 두지 않는다**(`stage-1-api.md` 3절). 사람→AI 질문도 실제 작성 actor를 기록한다.
 - **실패·재접속**: 앱에는 지속 heartbeat를 요구하지 않는다(B4). 재접속 첫 절차는 context → 새 입력 → **수신 확인** → claim. "연결됨"은 마지막 확인 시각일 뿐이다.
 - **붙여넣기**: 계속 제공한다. 복사만으로 실행·제출 완료로 표시하지 않고, 가져온 결과는 사람이 새 claim으로 채택한다(B3). 원격 MCP가 막히는 환경의 보장 경로다.
 
@@ -226,7 +254,7 @@ PES를 **공개 HTTPS 웹**으로 옮긴다. 사람은 어느 기기에서든 �
 - **추천**: **① Free만**. 2026-11-05 기준 Workers Free·D1 Free·R2 무료 구간으로 설계한다. Cloudflare 사용료는 **$0/월**이고, 도메인만 별도다.
 - **예상(산식·가정)**: Cloudflare Workers $0 + D1 $0(무료 한도 내) + R2 $0(10 GB·작업 한도 내) + Queues/Workflows $0 + 메일 $0(Resend 무료 3,000통/월, 하루 100통) + 도메인 ~$1/월 = **약 $1/월**. 2.1.2의 하루 사용량(요청 4,400·D1 읽기 1.3만 행·쓰기 1,000행·저장 500 MB·R2 7 GB)을 전제로 한 추정이며 보장값이 아니다. **3초 커서 폴링을 기본으로 쓰면 요청이 10배 이상 늘어 $0가 깨질 수 있다.**
 - **한도 집행**: 무료 한도는 **청구 상한이 아니라 하드 캡**이다. 100k/일을 넘으면 1027, D1 일일 한도를 넘으면 쿼리 오류, 저장이 차면 쓰기가 막힌다. WEB12에서 요청·CPU 초과·D1 rows/저장·R2 작업/저장·Queues ops·Workflows step을 계측하고 **80%에서 경보, 90%에서 완화**(폴링 간격 확대, 비필수 알림·백업 연기, 새 run 생성 차단)한다. "새 run 차단"은 D1·R2·요청 사용을 멈추지 않으므로 **한도 준수의 증명이 아니다**를 UI에 표시한다. 모르는 값은 0으로 표시하지 않는다(`stage-1-runners.md:65`).
-- **A 실행 상한**: run·단계·프로젝트 누적 상한은 **2단계 6절 2번 결정값을 그대로 승계**한다. 값이 비어 있으면 보수적 기본값을 적용하고, unknown 비용은 예약을 자동 해제하지 않는다(`stage-1-runners.md:62-66`). WEB12는 이 값을 새로 묻지 않고 집행·표시만 맡는다.
+- **A 실행 상한**: run·단계·프로젝트 누적 상한은 **2단계 6절 2번 결정값을 그대로 승계**한다. **값이 없으면 A 유료 실행을 하지 않고**, unknown 비용은 예약을 자동 해제하지 않는다(`stage-1-runners.md:62-66`). WEB12는 이 값을 새로 묻지 않고 집행·표시만 맡는다.
 - **사용자 결정**: 도메인은 6절로 올린다. **80% 경보·90% 완화는 2.9와 WEB12의 기본값**으로 두고 사용자 결정으로 묻지 않는다. **유료 계정·결제 주체·월 예산은 9절의 전환 신호가 나올 때 묻는다.**
 
 ### 2.10 WebMCP 재검토
@@ -288,7 +316,7 @@ Go 기본 ON은 **다른 공급자·공개 배포에 대한 동의가 아니다*
 | # | 제목 | 범위 | 선행 | 완료 조건 |
 |---|---|---|---|---|
 | WEB0 | 코어 언어 기술 시험 | **번호는 5단계, 실행은 2단계 PR4·13의 언어 중립 계약 픽스처 직후.** 2단계 Python 코어를 웹에서 실행할 방식 비교: (a) Python Workers (b) TS 이식 + 언어 중립 JSON 계약 시험(골든 파일) 두 구현 (c) Workers 아닌 Python 서버. 결과를 `docs/plan/decisions/`에 기록 | **2단계 PR4·13의 계약 픽스처 직후**(5단계 착수 전) | **무료 계정에서 Python Workers 포함 여부를 먼저 확인**. 같은 명령·오류·멱등·정수 문자열 계약 시험을 후보 구현에 통과. **요청당 CPU 10 ms·메모리 128 MB·subrequest 50** 안에서 도는지 p95 측정. 지연·콜드스타트·비용 $0 측정. 2단계 PR4·13에 픽스처 사용 통지. **결과가 TS 이식이면 2~4단계 구현 언어를 다시 정하고 WEB1에 입력**. 결과가 (c)면 WEB1 플랫폼 전제 재검토 |
-| WEB1 | 웹 실행 골격·배포 | **무료 플랜** Worker 앱(서버 렌더 + ES 모듈), Workers Assets, staging/prod, D1/R2 바인딩, 마이그레이션 실행, GitHub Actions, 시크릿, 헬스체크, 기능 플래그, **업무 명령의 D1 어댑터/API 배치 범위 명시** | PR 1·2·4·13·14·18·U1, WEB0 | staging에서 실제 D1로 읽기 화면. **100k 요청/일·10 ms CPU·subrequest 50·Cron 5개·정적 자산 20,000개** 한도 안에서 smoke. D1 batch 원자성·0행 실패·deferred FK·부분 인덱스. 공통 명령 서비스의 D1 구현: rev/멱등/0행·뒤늦은 실패 전체 롤백, 큰 정수 문자열, 공개 DTO·커서 동일 의미, 이중 submit·순수 조회/tx 분리 시험. main→staging 자동·태그→prod 수동, 이전 버전 롤백 1회, 시크릿 스캔. **long poll 구현(DO/짧은 폴+ETag/SSE) 선택과 한도 계측**, **R2 활성화에 결제 수단이 필요한지 확인**. **공개 prod 전환은 WEB14 게이트** |
+| WEB1 | 웹 실행 골격·배포 | **무료 플랜** Worker 앱(서버 렌더 + ES 모듈), Workers Assets, staging/prod, D1/R2 바인딩, 마이그레이션 실행, GitHub Actions, 시크릿, 헬스체크, 기능 플래그, **업무 명령의 D1 어댑터/API 배치 범위 명시**, **S4-PR23의 `edition_carryovers`·`completed_snapshot_id` 마이그레이션** | PR 1·2·4·13·14·18·U1, WEB0 | staging에서 실제 D1로 읽기 화면. **100k 요청/일·10 ms CPU·subrequest 50·Cron 5개·정적 자산 20,000개** 한도 안에서 smoke. D1 batch 원자성·0행 실패·deferred FK·부분 인덱스. 공통 명령 서비스의 D1 구현: rev/멱등/0행·뒤늦은 실패 전체 롤백, 큰 정수 문자열, 공개 DTO·커서 동일 의미, 이중 submit·순수 조회/tx 분리 시험. main→staging 자동·태그→prod 수동, 이전 버전 롤백 1회, 시크릿 스캔. **long poll 구현(DO/짧은 폴+ETag/SSE) 선택과 한도 계측**, **R2 활성화에 결제 수단이 필요한지 확인**. **공개 prod 전환은 WEB14 게이트** |
 | WEB2 | 사람 로그인·세션 | Better Auth 버전 고정·D1 어댑터·추가 인증 표·`users` 매핑, 매직링크·패스키, `__Host-` 세션, 브라우저 step-up, 기기 목록, 전체 로그아웃, 복구 자격·복구 코드, CLI 기기 승인(device flow), 로그인 감사. 새 마이그레이션(담당 WEB2) | WEB1, PR 4 | **로그인·세션 검증 경로의 p95 CPU가 10 ms 이하**인지 측정. 넘으면 세션을 경량 HMAC 쿠키 + D1 1행으로 줄이고, 그래도 넘으면 9절 신호. 로그인·만료·고정·회전·재인증 시험. 기존 owner 매핑·인증 식별자 변경·다른 프로젝트 접근 거부. 승인류는 5분 내 브라우저 재인증 없으면 403. step-up이 snapshot/rev에 묶이고 기기 토큰으로 대행 불가. 재인증 중 미제출 답 보존. 복구 코드 1회 사용·재사용 거부. CLI 기기 토큰 회수 즉시 401 |
 | WEB3 | 멤버·초대·역할 | `project_members` UI/API, owner/editor/reader, 7일 1회 초대, 역할 변경·제거, 권한 매트릭스, 감사, MCP/OAuth scope 정책 | WEB2, PR 10 | 역할별 허용·거부 표 전 항목 자동 시험. **프로젝트 owner 최대 1명·`projects.owner_user_id`와 membership 일치·원자적 소유권 이전**. 마지막 owner 제거 불가. 역할/회원 제거가 세션·OAuth 위임·에이전트 자격·예약 알림에 반영. editor가 승인·reopen·정책·토큰·삭제 불가, editor 답이 agent lease에 막히지 않음 |
 | WEB4 | 에이전트 키 운영 | 발급·1회 표시·HMAC 해시·**API 6절 동작 전체 scope**·30일·회수·24시간 교체·긴급 회수·pepper 버전/회전·마지막 사용/IP·토큰별 rate limit·감사·CLI/UI, `agent_tokens` nullable 보강. 새 마이그레이션(담당 WEB4) | WEB2·WEB3, PR 10 | 회수 즉시 401, 진행 run은 lease 만료 뒤 `interrupted`. 원문이 DB·로그·에러·URL·프롬프트에 0건. scope별 허용/거부·인증 후 replay. 교체 중 무중단, 긴급 회수는 겹침 없음. TTL 뒤 상태 변경도 명령·사건. 키로 승인 불가 |
@@ -296,12 +324,12 @@ Go 기본 ON은 **다른 공급자·공개 배포에 대한 동의가 아니다*
 | WEB6 | runner 등록·연결 (A) | `pes runner` 데몬, 아웃바운드, 등록·기기 목록, **일 조회(순수)·claim(원자) 분리**, heartbeat/wait/complete, 오프라인 표시, 프로젝트 담당 하나, OS 키체인, 로그. 새 마이그레이션(담당 WEB6) | WEB4, PR 5·19 | **기본 폴링 25–30초, 3초 기본값 금지**(1단계 UI 결정 14의 웹 조정, 로컬 모드·U1 커서 갱신 계약은 그대로), 탭·runner 유휴 시 중지·백오프. 1 runner 하루 요청 수를 계측해 100k/일의 5% 이하. 절전·단절·재접속(수신 확인 포함) 시험. 인바운드 포트 0. 등록은 허용하되 **프로젝트 실행 담당 하나**로 동시 claim 거부·사람 인계. 두 runner 경합·회수·옛 fence 제출 거부. 가상 시계 + 실제 Windows/Mac |
 | WEB7 | runner의 opencode supervisor | 전용 프로필·프로세스·workspace, **매 반출 요청 서버 허가**, interrupt, crash 복구, usage 보고, 로그 회전, 서명된 업데이트·무결성, Windows/macOS, DeepSeek 하나·폴백 없음·부모만 채택·자식 대기 전파·reviewer·세션 계보 | WEB6, PR 19·21, WEB12 예산 값 | 클라우드 queued run을 로컬에서 **6단계 각 단계 최소 1라운드** 완주. 강제 종료(Windows는 해당 시험) 뒤 재개·중복 없음. OFF 즉시 모든 경로 차단·in-flight unknown. 부모 대기 전파·자식 결과 부모만 채택. interrupt/cancel/인계 202가 재시작 뒤 재처리·조회. 사용량 기록. 서명키 회전·검증 실패 처리 |
 | WEB8 | 알림 | 알림 표·outbox, Resend 메일(3,000통/월·100통/일), VAPID Web Push, PWA 매니페스트·서비스 워커, 환경설정, 조용한 시간, 중복 제거, 딥링크, 발송 영수증·unknown·재시도, **승인 대기 별도 사건**, 기본 일반 문구. 새 마이그레이션(담당 WEB8) | WEB1·WEB2·WEB3, PR 14 | **Queues Free 10,000 ops/일·보존 24시간** 안에서 재시도 종료. 적격 사건 enqueue·발송 시도 목표 충족(도착 보장 아님). 같은 event 중복 1건. iOS 홈화면 PWA 푸시, 미설치·거부 대안. 실패 UI·재시도. 본문에 연구 내용·프로젝트명 없음(상세는 선택). 발송 직전 권한 재검사. 로그인 메일 포함 무료량. 복원·import 뒤 과거 사건 재발송 0 |
-| WEB9 | 로컬→웹 이전 | 번들 업로드(멀티파트·서명), 1시간 1회 import 토큰, R2 staging, Workflows 청크(D1 한도 기반), hash 검증, 재개, 검증 보고서, 활성화, 로컬 읽기 전용 표시(새 마이그레이션 담당 WEB9), CLI·스킬의 웹 API 전환, 되돌리기 | WEB1·WEB2·WEB3, PR 3·9·11·12·15·16·17 | **Free의 Workflows 3,000 step/일·호출당 쿼리 50** 안에서 2MB 합성 이전 완주. step이 모자라면 CI의 `wrangler d1 execute`/batch로 대체. 합성(2MB JSON·깨진 참조·이미지) 이전 뒤 보고서 재생성 의미 동등. int64 10진 문자열. 중단 후 재개, 청크 재실행·FK/순환·ID 충돌·사건 번호/커서 재발급·중복 영수증. 부분 적재 비표시. 활성화 응답 유실 시 자동 해제 금지·이중 원본 차단. 쓰기 전/후 롤백 구분, 프로젝트 단위 복원. 활성화 뒤 로컬 쓰기 0건, 다른 프로젝트 무영향. 실제 프로젝트는 사용자 승인 후 1개, **활성화는 WEB10·WEB11·WEB14 뒤** |
+| WEB9 | 로컬→웹 이전 | 번들 업로드(멀티파트·서명), 1시간 1회 import 토큰, R2 staging, Workflows 청크(D1 한도 기반), hash 검증, 재개, 검증 보고서, 활성화, 로컬 읽기 전용 표시(새 마이그레이션 담당 WEB9), **S4-PR23의 `edition_carryovers`·`completed_snapshot_id` 이전·검증**, CLI·스킬의 웹 API 전환, 되돌리기 | WEB1·WEB2·WEB3, PR 3·9·11·12·15·16·17 | **Free의 Workflows 3,000 step/일·호출당 쿼리 50** 안에서 2MB 합성 이전 완주. step이 모자라면 CI의 `wrangler d1 execute`/batch로 대체. 합성(2MB JSON·깨진 참조·이미지) 이전 뒤 보고서 재생성 의미 동등. int64 10진 문자열. 중단 후 재개, 청크 재실행·FK/순환·ID 충돌·사건 번호/커서 재발급·중복 영수증. 부분 적재 비표시. 활성화 응답 유실 시 자동 해제 금지·이중 원본 차단. 쓰기 전/후 롤백 구분, 프로젝트 단위 복원. 활성화 뒤 로컬 쓰기 0건, 다른 프로젝트 무영향. 실제 프로젝트는 사용자 승인 후 1개, **활성화는 WEB10·WEB11·WEB14 뒤** |
 | WEB10 | 운영·백업·복구 | prod/staging, expand/contract 마이그레이션, 야간 D1 export→R2(age), **DB 경계+객체 hash 목록**, 보존, R2 수명주기, 키 별도 복구, 복구 훈련, 모니터링·경보, 런북, GitHub Actions 실행 주체 | WEB1 | **Time Travel 7일(Free)·R2 10 GB 공유** 안에서 RPO 24h·RTO 4h 훈련. **D1 350 MB에서 프로젝트/묶음별 분리, 500 MB 하드 캡** 확인. **42개 백업 압축 크기 + 객체 ≤ 8 GB** 확인, 넘으면 보존 축소. export 1회의 rows read를 실측해 5M/일 예산에 포함. 백업 누락·누락 객체 경보. 마이그레이션 롤백 절차 1회. 같은 복원 경계로 프로젝트 단위 복원, 다른 프로젝트 무영향. 키·새 계정 복구, 커서/lease/세션/토큰/예산/알림 처리. 구버전 앱/신스키마 호환 창. 런북만 보고 재현 |
 | WEB11 | 보안 강화·점검 | CSP·HSTS·CSRF·Origin·rate limit·WAF, 쿠키, step-up, 파일 격리·형식 검사, 시크릿 회전, 의존성 감사, OWASP ASVS L1(판본·범위 명시), **Free에서 쓸 수 있는 플랫폼 방어 범위 확인(Bot Management 제외)** | WEB2·WEB4·WEB5·WEB8·WEB9 | 치명·높음 0(평가 근거 포함). CSRF·XSS·클릭재킹·토큰 유출 시험. **Go 파일 프록시 우회 0**, 공개 버킷 0. 다른 프로젝트 참조·system 위장·서명 URL 우회·공유 기기 민감 캐시 시험. 401/403 폭주 경보. WEB3·WEB6/7·WEB10·WEB12 계약도 종합 점검 |
 | WEB12 | 무료 한도·사용량 계기 | Workers 요청·CPU 초과, D1 rows/저장, R2 작업/저장, Queues ops, Workflows step, 메일 사용량 수집, 월 보고서, **80% 경보·90% 완화**, A 누적 예약/정산 분리, unknown 표시, 관리자 화면 | WEB1·WEB8, WEB6/7 계약 또는 가짜 runner | 월 1회 보고서. **100k/일·5M 읽기/일·10만 쓰기/일·5 GB·10 GB·10k ops/일·3,000 step/일** 대비 사용률 표시. 90%에서 폴링·알림·백업·새 run 완화. **"새 run 차단"이 한도 준수의 증명이 아님을 표시**. unknown을 0으로 표시하지 않음. A 상한은 2단계 값 승계, 없으면 유료 실행 안 함. 가짜 runner로 순환 회피 |
 | WEB13 | WebMCP 재검토 | 2026-11 기준 표준·브라우저·에이전트 지원 재조사, **3단계 W1 결과 입력**, 노출 목록 재확인, 조건 충족 시 읽기·초안 도구만 실험, 결정 기록 | WEB2·WEB11 | 근거 날짜가 있는 결정 기록. 직접 확인과 미확인 구분. 도입 시 REA 도구 발견 점검·브라우저 폼 초안·제한 browser_actor·서버 거부·미지원 capability 시험. 미도입 시 capabilities에 미지원 |
-| WEB14 | 전환 통합 검증·문서 | **Free 플랜** A/B 클라우드 종단, Windows/Mac, 이전·롤백, 알림, 무료 한도, 사용자 안내·운영 문서, 장애 훈련, **A↔B 인계·경합·지연·OFF·예산·유실/중복**, **U2~U6 웹 동등성**(폼 버전·반영 증거·앵커·전달 manifest·인쇄 manifest) | WEB0~WEB13 | 5절 게이트 전부 통과. **무료 플랜에서만 시험하고 유료 기능에 의존하지 않음**. CI는 매 PR + main, Windows+macOS, 수동 IME/인쇄 시험. **승인은 "실제 자료 업로드 전/운영 전환 전/무료 한도 초과로 유료 전환 전" 경계**로 나누고 완료 뒤 소급 승인으로 쓰지 않음. 실제 이전 산출물·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않음 |
+| WEB14 | 전환 통합 검증·문서 | **Free 플랜** A/B 클라우드 종단, Windows/Mac, 이전·롤백, 알림, 무료 한도, 사용자 안내·운영 문서, 장애 훈련, **A↔B 인계·경합·지연·OFF·예산·유실/중복**, **U1~U6·S4-U7~U12 웹 동등성**(폼 버전·반영 증거·앵커·전달 manifest·인쇄 manifest), **U1 갱신 주기(25~30초·탭 숨김 중지·백오프)** | WEB0~WEB13 | 5절 게이트 전부 통과. **무료 플랜에서만 시험하고 유료 기능에 의존하지 않음**. CI는 매 PR + main, Windows+macOS, 수동 IME/인쇄 시험. **U1~U6·S4-U7~U12의 웹 동등성과 U1 갱신 주기를 시험하고, 제외 항목은 이유와 검증 시점을 적는다.** **승인은 "실제 자료 업로드 전/운영 전환 전/무료 한도 초과로 유료 전환 전" 경계**로 나누고 완료 뒤 소급 승인으로 쓰지 않음. 실제 이전 산출물·경로·수신자·백업·로그를 공개 저장소·CI artifact에 넣지 않음 |
 
 PR 크기: WEB2·WEB7·WEB9·WEB10은 크다. 기존 구현 재사용과 새 변경을 구분해 단일 목적·외부 계약을 명시하고, **독립 배포물이 생길 때만** 이슈를 분할한다.
 
@@ -333,7 +361,7 @@ PR 크기: WEB2·WEB7·WEB9·WEB10은 크다. 기존 구현 재사용과 새 변
 | 1 | 연구 자료의 D1/R2 적재 위치·관할, 기관 자료 반출 규정 | 국내 보관 / 해외 Cloudflare / 프로젝트별 로컬 | **아시아 태평양 위치 힌트, 기관 규정 확인, 걸리면 로컬 유지** | SQLite/D1/R2는 1단계 합의 승계다. 실제 연구 자료가 해외 클라우드에 올라가는 것은 Go 전송 허용과 다른 동의이고, 올린 뒤엔 되돌리기 어렵다. **유료 계정·결제 주체는 여기서 묻지 않는다(9절).** |
 | 2 | 도메인·DNS 관리 주체(메일 발신 하위 도메인 포함) | 새로 구매 / 보유 도메인 하위 | **보유 도메인의 `pes.<도메인>`, 관리 주체 명시** | 메일 발신·패스키 RP·OAuth redirect·쿠키·백업 문서가 모두 도메인에 묶인다. 나중에 바꾸면 재로그인·재설정 |
 | 3 | 실제 프로젝트 웹 이전 범위 | 합성만 / 실제 1개 / 전체 | **실제 1개를 동결 후 시범 이전** | 웹 첫 쓰기 뒤에는 로컬로 무손실 복귀가 보장되지 않는다(`stage-1-db.md:132`). 구체적 slug·범위·복구 절차가 검토 가능한 시점(WEB9 활성화 직전)에 허용받는다 |
-| 4 | 백업 보존 기간·위치(교차 계정 여부)·암호키 보관 | Time Travel만 / +R2 야간 / +교차 계정 | **+R2 야간(일 30·월 12), 가능하면 교차 계정, 키는 별도 보관** | 보존을 줄이면 이미 지난 자료를 되살릴 수 없다. **Free R2 10 GB를 객체와 백업이 나누므로 42개 백업 + 객체 ≤ 8 GB**를 확인하고, 넘으면 보존을 줄인다. 대상 계정·포함 자료·복구/정리 조건·비용 산식을 함께 정한다 |
+| 4 | 백업 보존 기간·위치(교차 계정 여부)·암호키 보관 | Time Travel만 / +R2 야간 / +교차 계정 | **+R2 야간(일 30·월 12), 가능하면 교차 계정, 키는 별도 보관** | 보존을 줄이면 이미 지난 자료를 되살릴 수 없다. **Free R2 10 GB를 객체와 백업이 나누므로 42개 백업 + 객체 ≤ 8 GB**를 확인하고, 넘으면 보존을 줄인다. 대상 계정·포함 자료·복구/정리 조건·비용 산식을 함께 정한다. **2단계의 실제 자료 사용 허용 기록에 "웹 D1/R2" 목적지를 추가 동의로 묻는다.** |
 
 **Cloudflare 유료 계정 개설·결제 주체·월 예산은 지금 결정하지 않는다.** 9절의 전환 신호가 나올 때 그 시점의 한도·비용과 함께 묻는다.
 
@@ -343,7 +371,8 @@ PR 크기: WEB2·WEB7·WEB9·WEB10은 크다. 기존 구현 재사용과 새 변
 
 ## 7. 다음 단계로 넘기는 것
 
-- **6단계(넓히기)**: 여러 사람·여러 에이전트. 조직 단위 권한, SSO, 여러 runner의 동시 실행·부하 분산, 외부(Linear·Notion) 내보내기 영수증, 모바일 앱·오프라인, 감사 로그 내보내기, 사용량 기반 과금. **`approver` 역할 신설·D1 500MB(Free) 도달 시 프로젝트별 DB 분리·WebMCP 재평가는 확정 기능이 아니라 "후속 검토 입력"** 이다.
+- **6단계가 받는 것**: 여러 사람·여러 에이전트, `approver` 역할, 외부(Linear·Notion) 내보내기 영수증, `hwpx`, WebMCP 재검토 입력. `approver`·D1 500MB(Free) 도달 시 프로젝트별 DB 분리·WebMCP 재평가는 확정 기능이 아니라 **후속 검토 입력**이다.
+- **운영 백로그**: 조직 단위 권한·SSO, 여러 runner의 동시 실행·부하 분산, 감사 로그 내보내기, 모바일 앱·오프라인, 사용량 기반 과금. 6단계 범위 밖이며 필요해질 때 따로 판단한다.
 - **값의 구분**: 토큰 30일 등 **기존 합의값은 승계**한다. 세션 14일/7일, step-up 5분, RPO 24h/RTO 4h, 알림 조용한 시간은 **5단계의 새 운영 초기값**이며 실제 사용 3개월 뒤 측정으로 조정한다.
 - **탈출 조건**: 무료 한도 상시 초과(9절), D1 DB 500 MB 도달, 쓰기 경합으로 승인 5초 초과, Cloudflare의 SQLite 호환 변경 중 하나가 관측되면 `docs/plan/decisions/0005-web-platform.md`에 따라 Vercel+Turso 이전 또는 유료 전환을 재검토한다.
 - **문서**: `docs/plan/decisions/0005-web-platform.md`, 5단계 운영 런북, 사용자 안내(로그인·초대·키·runner·커넥터·이전·복구). 실제 이전 기록은 공개 저장소가 아닌 승인된 비공개 위치에 둔다.

@@ -47,16 +47,20 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_q_01J9Z3K7QN",
-        "question": {
-          "id": "qst_01J9Z3K7QB",
-          "version_id": "qvr_01J9Z3K7QC",
-          "version_no": "1",
-          "state": "open",
-          "asked_by_actor_id": "act_01J9Z3K7Q7",
-          "intended_actor_id": "act_01J9Z3K7Q8"
+        "data": {
+          "question": {
+            "id": "qst_01J9Z3K7QB",
+            "version_id": "qvr_01J9Z3K7QC",
+            "version_no": "1",
+            "state": "open",
+            "asked_by_actor_id": "act_01J9Z3K7Q7",
+            "intended_actor_id": "act_01J9Z3K7Q8"
+          },
+          "question_set_id": "qset_01J9Z3K7QD"
         },
-        "question_set_id": "qset_01J9Z3K7QD"
+        "meta": {
+          "request_id": "req_q_01J9Z3K7QN"
+        }
       }
     }
   },

@@ -24,7 +24,11 @@
     "response": {
       "status": 201,
       "headers": { "Content-Type": "application/json" },
-      "body": { "format_version": "1.0", "request_id": "req_..." }
+      "body": {
+        "format_version": "1.0",
+        "data": {},
+        "meta": { "request_id": "req_..." }
+      }
     }
   },
   "error": {
@@ -48,7 +52,14 @@
   },
   "replay": {
     "request": { "headers": { "Idempotency-Key": "idem_..." }, "body": {} },
-    "response": { "status": 201, "body": { "format_version": "1.0", "replayed": true } }
+    "response": {
+      "status": 201,
+      "body": {
+        "format_version": "1.0",
+        "data": { "replayed": true },
+        "meta": { "request_id": "req_..." }
+      }
+    }
   }
 }
 ```
@@ -56,12 +67,13 @@
 - `replay`는 결과 제출처럼 멱등 키를 쓰는 동작에만 둔다. 같은 키·같은 요청은 원래 응답을 재생하고 `replayed: true`를 붙인다.
 - `request.query`는 GET의 쿼리, `request.path_params`는 경로 변수다. 해당 없는 항목은 생략한다.
 - `response.headers`는 계약에 영향을 주는 헤더만 적는다. 실제 전송 헤더 전체 목록이 아니다.
-- `files-content.json`의 정상 응답은 JSON 본문이 아니라 파일 바이트다. 픽스처는 `body_base64`로 표현하고, `format_version`은 `X-PES-Format-Version` 헤더에 둔다.
+- `files-content.json`의 정상 응답은 실제 HTTP에서 파일 바이트다. 이 JSON 묶음에서는 언어 중립 시험을 위해 `data.content_base64`에 바이트를 담고, `data`에 `media_type`·`sha256`·`size_bytes`를 함께 둔다.
 - `uploads-put.json`의 요청 본문도 바이트이므로 `body_base64`를 쓴다.
 
 ## 2. 봉투·값 규칙
 
 1. 모든 JSON 요청·응답 본문 맨 위에 `"format_version": "1.0"`을 둔다. DB·workflow 버전과 별개다.
+   - 성공 응답은 `{ "format_version": "1.0", "data": {...}, "meta": { "request_id": "req_..." } }` 모양이다. 실제 업무 payload는 `data`에, 요청 ID는 `meta`에 둔다.
 2. 요청의 모르는 필드는 거부한다. 응답의 선택 필드 추가는 허용한다. 모르는 정책·상태를 허용으로 해석하지 않는다.
 3. `rev`, `control_rev`, `fence`, `event_seq`, `version_no`, `round_no`, `edition_no` 같은 번호는 **정규화한 10진 문자열**이다. 문자열 사전식 비교나 JavaScript `Number` 변환을 하지 않는다.
 4. 오류 봉투는 다음 모양을 따른다.
@@ -138,3 +150,14 @@
 - 계약을 바꾸면 이 파일을 먼저 고치고, 서로 다른 언어의 구현이 같은 파일로 같은 결과를 내는지 시험한다.
 - 한 파일 안의 `normal`·`error`·`replay`는 서로 독립된 사례다. 오류 사례의 요청을 정상 응답과 섞어 쓰지 않는다.
 - 픽스처에 실제 프로젝트 ID·경로·토큰·기관 자료를 넣지 않는다. 새 사례도 합성 자료로만 만든다.
+- `python3 docs/plan/fixtures/check_fixtures.py`로 문법·봉투·오류·번호 문자열·6절 경로/이름을 검사한다.
+
+## 6. 검사 후 고친 것 (2026-11-05)
+
+`docs/plan/fixtures/check_fixtures.py`를 만들어 실행했다. 첫 검사에서 38개 파일 모두 성공 봉투가 `data`·`meta`가 아니어서 실패했고, 다음을 고쳤다.
+
+- 38개 JSON의 정상 응답을 `{format_version, data, meta}`로 통일했다. 기존 최상위 payload는 `data`로, `request_id`는 `meta.request_id`로 옮겼다. `results.json`의 `replay.response`도 같게 고쳤다.
+- `files-content.json`의 정상 응답을 바이트 `body_base64`에서 JSON 봉투로 바꾸고, `data.content_base64`·`media_type`·`sha256`·`size_bytes`를 두었다.
+- 검사기에서 `wait`·`complete`의 6절 경로 조각을 표기(`/wait`, `/complete`)에 맞췄다. 예제 파일의 경로 자체는 바꾸지 않았다.
+- 수정한 예제 파일은 38개 JSON 전부다. README와 검사기 외의 코드·계획서는 고치지 않았다.
+- 최종 검사 결과: `python3 docs/plan/fixtures/check_fixtures.py` → `검사 통과 38/38`.

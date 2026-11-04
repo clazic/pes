@@ -2,7 +2,7 @@
 
 - 입력: [stage-2.md](../stage-2.md)(Codex·Opus 검수 반영), [stage-1-db.md](../stage-1-db.md)·[stage-1-api.md](../stage-1-api.md)·[stage-1-ui.md](../stage-1-ui.md)·[stage-1-runners.md](../stage-1-runners.md), [stage-1-ddl-draft.sql](../schemas/stage-1-ddl-draft.sql)
 - 상태: **초안 — Linear 등록 전**. 이 문서는 원고이며 Linear에 이슈를 만들지 않았다.
-- 규칙: **이슈 하나 = PR 하나.** 22개 PR 번호(`stage-1-db.md:176-199`)를 그대로 쓰고 하위 이슈를 만들지 않는다. 각 PR은 자기 테스트를 포함한다.
+- 규칙: **이슈 하나 = PR 하나.** `stage-1-db.md:176-199`의 PR 번호를 기준으로 하되 **PR20만 20a(Claude Code·앱)·20b(Codex CLI·OpenCode TUI)로 나눈다.** 2단계는 23개이며, 누적은 `roadmap.md` 2절 참고. 하위 이슈를 만들지 않고 각 PR은 자기 테스트를 포함한다.
 - 테스트 명령: macOS/Linux `python3 -m pytest -q <파일>` · Windows `python -m pytest -q <파일>`. 전체는 `python3 -m pytest -q`.
 - 공통 금지: 실제 `~/pes-projects`·`~/.pes/` 접근, 실키·기관 자료·실제 프로젝트 내용, `project.json`·DB 직접 쓰기(스킬·CLI 모두), 이 단계에서 플러그인 버전 올리기. 테스트는 `tests/conftest.py`의 `isolated_home`·`cli`·`synthetic_project`를 쓴다.
 
@@ -11,7 +11,7 @@
 - **목표**: 검증한 DDL 54표를 SQLite 마이그레이션으로 만들고, 임시 홈에서 안전하게 열고 닫는 DB 기반을 만든다.
 - **할 일**:
   - [ ] `scripts/pes_core/__init__.py`·`paths.py`·`db.py`·`ids.py`·`clock.py`를 만든다.
-  - [ ] `paths.py`: `pes_dir()`=`~/.pes`, `db_path()`=`~/.pes/pes.db`, `objects_dir()`=`~/.pes/objects`; `HOME`/`USERPROFILE` 기준, `PES_HOME`은 프로젝트 폴더만.
+  - [ ] `paths.py`: `pes_dir()`=`~/.pes`, `db_path()`=`~/.pes/pes.db`, `objects_dir()`=`~/.pes/objects`; `HOME`/`USERPROFILE` 기준. `PES_HOME`은 프로젝트 위치(루트)만 바꾸고 DB·객체 경로는 바꾸지 않는다.
   - [ ] `scripts/pes_core/migrations/001_initial.sql`: `docs/plan/schemas/stage-1-ddl-draft.sql`를 옮기고 `db_meta` 초기 행(`schema_version=1`, `database_instance_id`, `cursor_epoch=1`)을 넣는다. 트리거·FTS·ATTACH 없음.
   - [ ] `db.connect(path)`: `PRAGMA foreign_keys=ON`, `busy_timeout`, 짧은 트랜잭션, `WAL`은 로컬 한정. `db.migrate(conn)`은 `db_meta`를 읽고 001을 한 tx로 적용한다.
   - [ ] `ids.new_id(kind)`는 `uuid4().hex` 등 외부 의존 없는 ID. `clock.SystemClock`·`FakeClock`.
@@ -97,7 +97,7 @@
   - [ ] `scripts/pes_core/editions.py`: `create_edition`, `start_round`, `seal_round`, `approve_stage`, `reopen_stage`, `release_completion`, `carry_over`, `snapshot`.
   - [ ] `snapshots`·`round_contents`·`approvals`·`stages.stale_since_event_seq`·`rounds.state`를 서비스가 검증.
   - [ ] reopen 뒤 실행 기반 무효화(`base_control_rev`·`run_targets`), `complete_run`≠`approve_stage`, 승인 snapshot/manifest.
-  - [ ] carry_over를 `stages.carry_over`/항목에서 다음 단계 R1으로 옮긴다. 4단계 판 비교·이월 마법사는 만들지 않는다.
+  - [ ] carry_over를 `stages.settings_json`의 임시 JSON이 아니라 기획 `artifacts`(kind='topic')의 정확한 버전에서 조사 `artifacts`(kind='topic')를 만들고 `origin_version_id`·`version_relations`로 연결해 다음 단계 R1에 넣는다. 4단계 판 비교·이월 마법사는 만들지 않는다.
   - [ ] `tests/test_editions_stages.py`: 합성 6단계, reopen 뒤 stale·승인 유지, 승인 snapshot, complete≠approve.
 - **선행**: PR 4·5·9.
 - **완료 기준**:
@@ -206,7 +206,7 @@
 
 - **목표**: 한 run의 최소 경로 `context→claim→submit→complete`를 HTTP/JSON 계약으로 만든다.
 - **할 일**:
-  - [ ] `scripts/pes_core/api.py`: `ApiApp`, 라우트 `GET /api/v1/capabilities`, `GET /api/v1/projects/{id}/context`, `POST /api/v1/projects/{id}/claims`, `POST /api/v1/runs/{r}/results`, `POST /api/v1/runs/{r}/complete`.
+  - [ ] `scripts/pes_core/api.py`: `ApiApp`, 라우트 `GET /api/v1/capabilities`, `GET /api/v1/projects/{id}/context`, `POST /api/v1/projects/{id}/claims`, `POST /api/v1/projects/{id}/runs/{r}/results`, `POST /api/v1/projects/{id}/runs/{r}/complete`.
   - [ ] `scripts/serve.py`: `/api/v1`를 정적 서빙보다 먼저, loopback·Origin·소유자 세션·CSRF, Bearer 토큰.
   - [ ] 봉투 `format_version:"1.0"`, 오류 코드, `Idempotency-Key`, 10진 문자열 rev/fence/event_seq, 모르는 필드 거부.
   - [ ] context digest+manifest, claim=run 전이+lease 원자, submit 작은 묶음, long-poll이 tx를 잡지 않음, `complete`≠승인.
@@ -222,8 +222,8 @@
 
 - **목표**: 질문 게시·수정, 답 제출, 변경분 커서, 사람 전용 승인·reopen, 오류 봉투를 완성한다.
 - **할 일**:
-  - [ ] `scripts/pes_core/api.py`에 `POST /questions`, `POST /questions/{q}/revisions`, `POST /submissions`, `GET /changes?cursor=`, `POST /stages/{s}/approve`, `POST /stages/{s}/reopen`.
-  - [ ] capabilities, `GET /runs/{r}/inputs?wait_ms=`, `POST /runs/{r}/input-receipts`, `heartbeat`·`release`·`interrupt`·`cancel`·`handoff`, 202 operation 조회.
+  - [ ] `scripts/pes_core/api.py`에 `P = /api/v1/projects/{id}` 기준으로 `POST P/questions`, `POST P/questions/{q}/revisions`, `POST P/submissions`, `GET P/changes?cursor=`, `POST P/stages/{s}/approve`, `POST P/stages/{s}/reopen`을 추가한다.
+  - [ ] capabilities, `GET P/runs/{r}/inputs?wait_ms=`, `POST P/runs/{r}/input-receipts`, `P/runs/{r}/heartbeat`·`/release`·`/interrupt`·`/cancel`·`/handoff`, 202 operation 조회.
   - [ ] 사람 세션과 에이전트 토큰 구분; 승인·reopen은 소유자 사람만. 커서 epoch 재동기화, 공개 tx 단위, 숨긴 사건 스캔.
   - [ ] 요청 제한·poll 최소 간격·429 Retry-After, 서버 답 초안 없음, 가짜 성공 없음.
   - [ ] `tests/test_api_questions.py`: 사람/에이전트 구분, 승인 거부, 커서 무효, long-poll, 202 조회.
@@ -239,13 +239,13 @@
 - **목표**: 기존 쓰기 명령을 모두 명령 서비스로 바꾸고, `context/claim/submit/wait/complete` CLI를 붙인다.
 - **할 일**:
   - [ ] `scripts/pes.py`가 `scripts/pes_core`를 import하도록 `sys.path`를 명시하고, `cmd_init`, `cmd_ask_prep`, `cmd_ask`, `cmd_round_start`, `cmd_merge`, `cmd_render`, `cmd_approve`, `cmd_reopen`, `cmd_mark`, `cmd_chat`, `cmd_note`, `cmd_qa_brief`, `cmd_qa`, `cmd_remote`, `cmd_serve`, `cmd_stop`, `cmd_home`, `cmd_lock`, `cmd_unlock`을 서비스 경유로 바꾼다.
-  - [ ] `cmd_context`, `cmd_claim`, `cmd_submit`, `cmd_wait`, `cmd_complete` 추가; `CMDS` 32개 배정표(`stage-2.md` 4.3) 전수.
+  - [ ] `cmd_context`, `cmd_claim`, `cmd_submit`, `cmd_wait`, `cmd_complete` 추가; 기존 `CMDS` 32개 배정표(`stage-2.md` 4.3) 전수 + 신규 5개를 등록한다.
   - [ ] `cmd_home`: 프로젝트 폴더만 이동, DB·객체는 `~/.pes`에 그대로 출력. `cmd_lock`/`unlock`은 DB lease와 정합.
   - [ ] `tests/test_cli_write.py`: 기존 명령 의미 보존(합성), 직접 JSON 쓰기 0, 잠금 인계, `home` DB 미이동.
 - **선행**: PR 4·5·6·7·8·9·10.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_cli_write.py` 통과.
-  - [ ] `CMDS` 32개 중 쓰기 19개가 모두 서비스 경유; 승인·권한 우회 동작 미승계.
+  - [ ] 기존 `CMDS` 32개(쓰기 19·읽기 13) 중 쓰기 19개와 신규 5개가 모두 서비스 경유; 승인·권한 우회 동작 미승계.
   - [ ] `pes home`이 DB·객체를 옮기지 않음, 실제 홈 미접촉.
 - **지킬 것**: `project.json` 직접 쓰기 0. 플러그인 버전 올리지 않음. legacy 읽기는 PR16 경계.
 
@@ -254,7 +254,7 @@
 - **목표**: 읽기·보고서·진단을 DB에서 다시 만들고, 미전환 프로젝트는 읽기 전용 legacy로 제공한다.
 - **할 일**:
   - [ ] `scripts/pes.py`: `cmd_status`, `cmd_pending`, `cmd_digest`, `cmd_show`, `cmd_list`, `cmd_hub`, `cmd_open`, `cmd_which`, `cmd_doctor`, `cmd_watch`, `cmd_assemble`, `cmd_report`, `cmd_web`을 DB/서비스로.
-  - [ ] `cmd_report`는 `scripts/pes_core/files.py`·`content.py` 경계로 정확한 버전·각주 등록; `assemble`/`web`도 같은 버전.
+  - [ ] `cmd_report`는 `scripts/pes_core/files.py`·`content.py` 경계로 정확한 버전·각주를 참조; `assemble`/`web`도 같은 버전.
   - [ ] `cmd_doctor`: 기본 진단과 `--fix` 분리, 임시 HOME만, 소유 프로세스·포트·경로 quoting. `cmd_watch`는 같은 출력 형식 또는 입력 long-poll.
   - [ ] 미전환 프로젝트: `project.json` 읽기 전용 `status`/`list`/기존 화면, 쓰기는 이전 안내.
   - [ ] `tests/test_cli_read.py`: 보고서 재생성, doctor 격리, legacy 읽기, `watch` 형식.
@@ -285,7 +285,7 @@
 
 - **목표**: 기존 화면을 같은 URL·같은 동작으로 DB/API에 연결하고, 새 디자인은 넣지 않는다.
 - **할 일**:
-  - [ ] `scripts/pes.py`: `load`, `brief`, `build_index`, `build_hub`, `fill`을 DB 읽기 모델로 바꾸고 `templates/dashboard.html`·`ask.html`·`_questions.html`·`hub.html`·`stage-report.html`·`final-report.html`·`eli5.html`의 데이터 키를 맞춘다.
+  - [ ] `scripts/pes.py`: `load`, `brief`, `build_index`, `build_hub`를 DB 읽기 모델로 바꾸고, `fill`은 템플릿 렌더러로 유지한다. `templates/dashboard.html`·`ask.html`·`_questions.html`·`hub.html`·`stage-report.html`·`final-report.html`·`eli5.html`의 데이터 키를 맞춘다.
   - [ ] `scripts/serve.py`: `/api/v1` 라우팅, `/version`을 DB 커서 기반으로, `POST /<slug>/feedback`을 `CommandService` 제출로. loopback·Origin·소유자 세션·CSRF.
   - [ ] 동등성: 홈 목록, 대시보드 전체 보기·단계 탭·AI 점검·타임라인·항목×라운드·승인·보고서, `__other`·`show_if`·필수·추천, 원격 답, approve/reopen, 단계·최종·eli5, 인쇄, `ask-*` 딥링크, `pes watch`.
   - [ ] 입력 중 갱신·충돌·타임아웃·커서 무효에도 초안 보존; 안전한 Markdown/외부 인용; 서버 영수증 뒤 성공 표시; Go in-flight/unknown·run 상태 최소 표시.
@@ -313,31 +313,48 @@
   - [ ] 프로세스 회수 Windows/Mac, 옛 세션 채택 차단, 자식 waiting_human 전파.
 - **지킬 것**: 사용자 OpenCode 서버에 붙지 않음. 모델 폴백·자동 B 전환 없음. 이미 나간 자료 회수 보장 없음.
 
-## PR 20 — [2단계] 방식 B 어댑터
+## PR 20a — [2단계] 방식 B 어댑터 — Claude Code·Claude 앱
 
-- **목표**: Claude Code MCP·CLI와 Claude 앱 Desktop/명시적 전달이 같은 PES API로 작업하게 한다.
+- **목표**: Claude Code MCP·CLI와 Claude 앱 Desktop/명시적 전달이 같은 PES API로 작업하게 하고, 20b가 쓸 공통 MCP bridge·adapter 계약을 만든다.
 - **할 일**:
   - [ ] `scripts/pes_core/mcp_server.py`: stdio MCP→로컬 PES HTTP, 도구 `pes_context/claim/submit/ask/wait/complete`+heartbeat·release·cancel·영수증.
   - [ ] `scripts/pes_core/adapters/claude_code.py`: `/pes:run` 진입점, CLI 대안, 토큰 주입, 같은 오류·멱등.
   - [ ] `scripts/pes_core/adapters/claude_app.py`: Desktop 로컬 확장 실제 설치·도구 왕복·종료/재접속, 안 되면 명시적 전달(묶음 복사→가져오기).
   - [ ] 전달 묶음: 프로젝트·판·단계·라운드·기반 버전·요청 ID·manifest hash(인증 증명 아님); 복사 중 lease 없음; 중복 가져오기 방지; 사람이 붙여 넣은 결과는 human actor.
-  - [ ] `docs/adapters/claude-code.md`·`claude-app.md`, `tests/test_adapter_b.py`, SEL-19 기록.
+  - [ ] `docs/adapters/adapter-contract.md`(공통)와 `claude-code.md`·`claude-app.md`, `tests/test_adapter_b_claude.py`, SEL-19 기록.
 - **선행**: PR 5·10·13·14·17·18 + SEL-19.
 - **완료 기준**:
-  - [ ] `python3 -m pytest -q tests/test_adapter_b.py` 통과.
+  - [ ] `python3 -m pytest -q tests/test_adapter_b_claude.py` 통과.
   - [ ] Code로 합성 6단계, 앱 1단계 왕복·재접속, 복사≠제출, 중복 가져오기 0.
   - [ ] 실제 제출 actor 구분, 다른/오래된/중복 묶음·첨부 누락 거부.
 - **지킬 것**: 앱 지속 heartbeat 가정 없음. "연결됨"을 과장하지 않음. 붙여넣기 결과를 실행·승인으로 표시하지 않는다.
+
+## PR 20b — [2단계] 방식 B 어댑터 — Codex CLI·OpenCode TUI
+
+- **목표**: 20a의 공통 MCP bridge·계약으로 Codex CLI와 OpenCode TUI를 붙이고, 각각 합성 1라운드+재개를 통과한다. **PES가 서버로 돌리는 방식 A의 OpenCode**와 **사람이 직접 켜는 OpenCode TUI**를 구분한다.
+- **할 일**:
+  - [ ] `docs/adapters/adapter-contract.md`를 재사용하고, D4 어댑터 노트에 `docs/adapters/codex.md`·`opencode-tui.md`를 추가한다. 진입 명령, MCP/HTTP 경로, 토큰 보관(OS 키체인), 권한, 세션·재개, 모델/사용량, 알려진 한계, 고정 버전을 적는다.
+  - [ ] `scripts/pes_core/adapters/codex_cli.py`: `runtime=codex_cli`, `runs.mode=B`, `actors.kind=external_agent`, 모델 미상은 `unknown`; `docs/adapters` 노트와 같은 계약.
+  - [ ] `scripts/pes_core/adapters/opencode_tui.py`: `runtime=opencode_tui`, 사람이 직접 켜는 세션·재개, A의 서버·프로세스·supervisor를 재사용하거나 중단하지 않음.
+  - [ ] Go 목적지로 보내는 맥락·요약·파일·재시도·child 경로를 시험하고, 막을 수 없는 경로는 "Go OFF 보장"으로 쓰지 않는다. 승인·reopen·정책·토큰·삭제·export 도구는 넣지 않는다.
+  - [ ] Codex CLI·OpenCode TUI 각각 합성 1라운드+재개, Codex↔OpenCode TUI 인계, 중복 제출·같은 키 다른 요청·버전 오류. `tests/test_adapter_b_codex.py`·`test_adapter_b_opencode_tui.py`.
+- **선행**: PR 20a, 5·10·13·14·17·18 + SEL-19.
+- **완료 기준**:
+  - [ ] `python3 -m pytest -q tests/test_adapter_b_codex.py tests/test_adapter_b_opencode_tui.py` 통과.
+  - [ ] **Codex CLI와 OpenCode TUI 각각** 합성 1라운드+재개, actor/runtime 정확, 모델·사용량 미상은 `unknown`.
+  - [ ] 중복 제출·같은 키 다른 요청 거부, A 서버·프로세스 비간섭, Go 경로 차단/한계 표기.
+  - [ ] 노트만 보고 새 환경에서 연결 절차를 재현할 수 있다.
+- **지킬 것**: Codex·OpenCode TUI 전용 업무 의미·오류를 만들지 않는다. OpenCode TUI는 방식 A의 OpenCode가 아니다. 승인·reopen·정책·토큰·삭제·외부 export 불가.
 
 ## PR 21 — [2단계] A·B 교차 계약
 
 - **목표**: A와 B가 같은 DB 상태에서 같은 의미·권한·오류를 내고, 인계·중복·충돌에서 유실이 없음을 자동 시험한다.
 - **할 일**:
-  - [ ] `tests/test_cross_contract.py`: 가짜 A/B 런타임으로 같은 프로젝트·같은 결과, A→B·B→A 인계, 지연 응답, 프로세스 종료, Go OFF, 예산, 중복/충돌.
+  - [ ] `tests/test_cross_contract.py`: 가짜 A/B 런타임으로 같은 프로젝트·같은 결과, A→B·B→A 인계, 지연 응답, 프로세스 종료, Go OFF, 예산, 중복/충돌. **B는 Claude Code·Claude 앱·Codex CLI·OpenCode TUI를 포함**한다.
   - [ ] `tests/fixtures/contracts/cross/*.json`: seen/applied 중복, 사람 시작 인계, 권한 응답 지연 거부, 예산 인계 유지, unknown 예약 미해제.
-  - [ ] SQLite/D1 같은 성공·충돌·부분 실패; 유료 실측은 PR19/20, 반복 계약은 가짜 런타임.
+  - [ ] SQLite/D1 같은 성공·충돌·부분 실패; 유료 실측은 PR19/20a·20b, 반복 계약은 가짜 런타임.
   - [ ] `docs/plan/decisions/0003-cross-contract.md`: 공통 의미·차이·재검토 조건.
-- **선행**: PR 18·19·20.
+- **선행**: PR 18·19·20a·20b.
 - **완료 기준**:
   - [ ] `python3 -m pytest -q tests/test_cross_contract.py` 통과.
   - [ ] 같은 DB 상태에서 같은 문구·권한, 유실·중복 0, 옛 fence 거부.
@@ -348,7 +365,7 @@
 
 - **목표**: Windows/Mac 설치·복구·백업·이전 runbook을 검증하고, 사용자 허용 시 실제 프로젝트 1개 파일럿을 한다.
 - **할 일**:
-  - [ ] `docs/guides/stage-2.md`: 설치·업그레이드·다운그레이드, DB·객체 위치, `pes home`, 백업/복원, legacy 읽기, 삭제 정책, 알려진 한계.
+  - [ ] `docs/guides/stage-2.md`: 설치·업그레이드·다운그레이드, DB·객체 위치, `pes home`, 백업/복원, legacy 읽기, 삭제 정책, **Codex CLI·OpenCode TUI 연결·재개·A OpenCode와의 구분**, 알려진 한계.
   - [ ] `docs/plan/decisions/0004-stage-2-release.md`: 0.16.0 배포 조건, 새 DB 경로 개발 플래그 해제, 되돌리기·손실 범위.
   - [ ] `tests/test_transition_docs.py`: 문서 링크·명령·경로 검사; CI 매 PR·main Windows/Mac, Playwright, D1 smoke.
   - [ ] 실제 파일럿: 사용자 허용 slug 1개, 사본/백업, A 실행 없이 답·승인·reopen·인쇄·기존 화면, 원본 보존. 실제 manifest·경로·보고서는 로컬에만.

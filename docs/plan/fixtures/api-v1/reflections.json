@@ -35,12 +35,16 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_ref_01J9Z3K7QN",
-        "reflection": {
-          "id": "ref_01J9Z3K7Q2",
-          "target_round_id": "rnd_01J9Z3K7Q5",
-          "applied_count": 1,
-          "partial_count": 0
+        "data": {
+          "reflection": {
+            "id": "ref_01J9Z3K7Q2",
+            "target_round_id": "rnd_01J9Z3K7Q5",
+            "applied_count": 1,
+            "partial_count": 0
+          }
+        },
+        "meta": {
+          "request_id": "req_ref_01J9Z3K7QN"
         }
       }
     }

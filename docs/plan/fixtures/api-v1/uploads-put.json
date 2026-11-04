@@ -22,11 +22,15 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_put_01J9Z3K7QN",
-        "upload_id": "upl_01J9Z3K7QG",
-        "state": "uploaded",
-        "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-        "size_bytes": 12345
+        "data": {
+          "upload_id": "upl_01J9Z3K7QG",
+          "state": "uploaded",
+          "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+          "size_bytes": 12345
+        },
+        "meta": {
+          "request_id": "req_put_01J9Z3K7QN"
+        }
       }
     }
   },

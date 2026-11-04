@@ -49,15 +49,19 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_qrev_01J9Z3K7QN",
-        "question": {
-          "id": "qst_01J9Z3K7QB",
-          "version_id": "qvr_01J9Z3K7QZ",
-          "version_no": "2",
-          "state": "open"
+        "data": {
+          "question": {
+            "id": "qst_01J9Z3K7QB",
+            "version_id": "qvr_01J9Z3K7QZ",
+            "version_no": "2",
+            "state": "open"
+          },
+          "recheck_required": true,
+          "previous_answers_preserved": true
         },
-        "recheck_required": true,
-        "previous_answers_preserved": true
+        "meta": {
+          "request_id": "req_qrev_01J9Z3K7QN"
+        }
       }
     }
   },

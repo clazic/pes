@@ -38,16 +38,20 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_thread_01J9Z3K7QN",
-        "thread": {
-          "id": "thr_01J9Z3K7QH",
-          "state": "open",
-          "anchor_id": "anc_01J9Z3K7Q2",
-          "anchor_status": "exact"
+        "data": {
+          "thread": {
+            "id": "thr_01J9Z3K7QH",
+            "state": "open",
+            "anchor_id": "anc_01J9Z3K7Q2",
+            "anchor_status": "exact"
+          },
+          "message": {
+            "id": "msg_01J9Z3K7Q2",
+            "version_no": "1"
+          }
         },
-        "message": {
-          "id": "msg_01J9Z3K7Q2",
-          "version_no": "1"
+        "meta": {
+          "request_id": "req_thread_01J9Z3K7QN"
         }
       }
     }

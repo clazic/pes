@@ -34,13 +34,17 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_receipt_01J9Z3K7QN",
-        "accepted": [
-          {
-            "input_version_id": "ver_01J9Z3K7QA",
-            "state": "seen"
-          }
-        ]
+        "data": {
+          "accepted": [
+            {
+              "input_version_id": "ver_01J9Z3K7QA",
+              "state": "seen"
+            }
+          ]
+        },
+        "meta": {
+          "request_id": "req_receipt_01J9Z3K7QN"
+        }
       }
     }
   },

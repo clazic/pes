@@ -30,12 +30,16 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_round_01J9Z3K7QN",
-        "round": {
-          "id": "rnd_01J9Z3K7Q5",
-          "round_no": "2",
-          "state": "open",
-          "stage_id": "stg_01J9Z3K7Q4"
+        "data": {
+          "round": {
+            "id": "rnd_01J9Z3K7Q5",
+            "round_no": "2",
+            "state": "open",
+            "stage_id": "stg_01J9Z3K7Q4"
+          }
+        },
+        "meta": {
+          "request_id": "req_round_01J9Z3K7QN"
         }
       }
     }

@@ -22,37 +22,41 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_ver_01J9Z3K7QN",
-        "object": {
-          "id": "obj_01J9Z3K7Q9",
-          "kind": "artifact",
-          "display_no": "12",
-          "current_version_id": "ver_01J9Z3K7QA",
-          "rev": "7"
+        "data": {
+          "object": {
+            "id": "obj_01J9Z3K7Q9",
+            "kind": "artifact",
+            "display_no": "12",
+            "current_version_id": "ver_01J9Z3K7QA",
+            "rev": "7"
+          },
+          "version": {
+            "id": "ver_01J9Z3K7QA",
+            "version_no": "3",
+            "based_on_version_id": "ver_01J9Z3K7Q0",
+            "content_hash": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+            "created_at": 1762311600000,
+            "actor_id": "act_01J9Z3K7Q7",
+            "run_id": "run_01J9Z3K7Q6"
+          },
+          "artifact": {
+            "kind": "chapter",
+            "title": "2장 합성 정책 분석",
+            "body_md": "## 2. 합성 정책 분석\n\n이 문단은 계약 시험용 합성 자료입니다.",
+            "status": "draft"
+          },
+          "files": [
+            {
+              "blob_id": "blb_01J9Z3K7QF",
+              "role": "figure",
+              "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+              "size_bytes": 12345
+            }
+          ]
         },
-        "version": {
-          "id": "ver_01J9Z3K7QA",
-          "version_no": "3",
-          "based_on_version_id": "ver_01J9Z3K7Q0",
-          "content_hash": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
-          "created_at": 1762311600000,
-          "actor_id": "act_01J9Z3K7Q7",
-          "run_id": "run_01J9Z3K7Q6"
-        },
-        "artifact": {
-          "kind": "chapter",
-          "title": "2장 합성 정책 분석",
-          "body_md": "## 2. 합성 정책 분석\n\n이 문단은 계약 시험용 합성 자료입니다.",
-          "status": "draft"
-        },
-        "files": [
-          {
-            "blob_id": "blb_01J9Z3K7QF",
-            "role": "figure",
-            "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-            "size_bytes": 12345
-          }
-        ]
+        "meta": {
+          "request_id": "req_ver_01J9Z3K7QN"
+        }
       }
     }
   },

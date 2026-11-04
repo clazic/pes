@@ -23,40 +23,44 @@
       },
       "body": {
         "format_version": "1.0",
-        "request_id": "req_ctx_01J9Z3K7QN",
-        "project": {
-          "id": "prj_01J9Z3K7Q2",
-          "slug": "synthetic-policy-study",
-          "status": "active",
-          "control_rev": "12"
+        "data": {
+          "project": {
+            "id": "prj_01J9Z3K7Q2",
+            "slug": "synthetic-policy-study",
+            "status": "active",
+            "control_rev": "12"
+          },
+          "edition": {
+            "id": "edt_01J9Z3K7Q3",
+            "edition_no": "2",
+            "status": "active"
+          },
+          "stage": {
+            "id": "stg_01J9Z3K7Q4",
+            "key": "research",
+            "ordinal": 2,
+            "status": "active"
+          },
+          "round": {
+            "id": "rnd_01J9Z3K7Q5",
+            "round_no": "2",
+            "state": "open"
+          },
+          "policy": {
+            "allow_opencode_go": true,
+            "policy_rev": "5"
+          },
+          "digest": "sha256:7f1c2a9d4e5b6a7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+          "manifest": {
+            "object_count": 12,
+            "version_count": 34,
+            "through_event_seq": "42"
+          },
+          "next_cursor": "cur_01J9Z3K7QK"
         },
-        "edition": {
-          "id": "edt_01J9Z3K7Q3",
-          "edition_no": "2",
-          "status": "active"
-        },
-        "stage": {
-          "id": "stg_01J9Z3K7Q4",
-          "key": "research",
-          "ordinal": 2,
-          "status": "active"
-        },
-        "round": {
-          "id": "rnd_01J9Z3K7Q5",
-          "round_no": "2",
-          "state": "open"
-        },
-        "policy": {
-          "allow_opencode_go": true,
-          "policy_rev": "5"
-        },
-        "digest": "sha256:7f1c2a9d4e5b6a7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
-        "manifest": {
-          "object_count": 12,
-          "version_count": 34,
-          "through_event_seq": "42"
-        },
-        "next_cursor": "cur_01J9Z3K7QK"
+        "meta": {
+          "request_id": "req_ctx_01J9Z3K7QN"
+        }
       }
     }
   },

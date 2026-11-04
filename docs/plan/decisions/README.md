@@ -39,3 +39,16 @@
 
 | 번호 | 결정 | 파일 | 상태 | 날짜 |
 |---|---|---|---|---|
+| 0001 | OpenCode Go에 비공개 연구 자료 전송 허용 | [0001-opencode-go-transfer.md](0001-opencode-go-transfer.md) | 채택 | 2026-11-04 |
+| 0002 | 방식 A는 연구 6단계 전체를 DeepSeek 하나로 통일 | [0002-mode-a-deepseek.md](0002-mode-a-deepseek.md) | 채택 | 2026-11-04 |
+| 0003 | 방식 B 보장 에이전트는 Claude Code와 Claude 앱 | [0003-mode-b-agents.md](0003-mode-b-agents.md) | 채택 | 2026-11-04 |
+| 0004 | CI는 매 PR과 main에서 Windows·macOS로 돌린다 | [0004-ci-every-pr.md](0004-ci-every-pr.md) | 채택 | 2026-11-04 |
+| 0005 | 5단계 웹은 지금은 Cloudflare 무료 요금제로 설계 | [0005-web-platform.md](0005-web-platform.md) | 채택 | 2026-11-05 |
+| 0007 | 결함은 SEL-12·13에서 재현하고 SEL-31에서 고친다 | [0007-defect-handling.md](0007-defect-handling.md) | 채택 | 2026-11-04 |
+| 0008 | 저장소 공개 유지 | [0008-public-repository.md](0008-public-repository.md) | 채택 | 2026-11-05 |
+| 0009 | 1단계 DB·API·화면·실행 구조 설계 승인 | [0009-stage-1-design-approval.md](0009-stage-1-design-approval.md) | 채택 | 2026-11-05 |
+| 0010 | approver 역할은 6단계에서 결정 | [0010-approver-role-stage6.md](0010-approver-role-stage6.md) | 채택 | 2026-11-05 |
+| 0011 | Linear 내보내기 범위는 1단계 UI 결정 11을 유지 | [0011-linear-scope.md](0011-linear-scope.md) | 채택 | 2026-11-05 |
+| 0012 | 방식 B의 Codex CLI·OpenCode TUI 어댑터를 2단계로 앞당김 | [0012-mode-b-codex-opencode-tui-stage2.md](0012-mode-b-codex-opencode-tui-stage2.md) | 채택 | 2026-11-05 |
+
+**0006**은 `docs/plan/spikes/web0-plan.md`가 WEB0 코어 언어 결정 파일(`0006-web-core-language.md`)로 예약해 아직 비어 있다. **0005**는 `stage-5.md`가 가리키는 `0005-web-platform.md` 이름을 맞춘 것이다. 번호는 배정 순서이며 날짜 순서와 다를 수 있다.

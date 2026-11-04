@@ -33,16 +33,20 @@ stage-0 7절과 1단계 설계서의 합의 결정은 **다시 정하지 않는�
 
 | 정할 것 | 선택지 | 판단 기준 | 추천과 이유 |
 |---|---|---|---|
-| 완료 시점·주체 (4단계 제안) | 여섯 단계 승인 즉시 자동 완료 / 소유자 사람의 "이 판 마침" / 프로젝트 보관 시 완료 | 승인≠완료, 실수 방지, 사후 수정 가능, 감사 | **소유자 사람의 명시적 완료.** 대상 판에 **미종결 run(queued·running·waiting_human) 없음**, 여섯 단계의 **현재** 승인, **stale 없음**, 미처리 필수 응답 없음(명시적 deferred는 사유 확인), 실행 차단 상태 없음이 조건이다. 서버가 명령 시점에 다시 검사하고, 완료는 `editions.status='completed'`·`completed_snapshot_id`·`projects.active_edition_id` 해제·event·영수증을 **한 tx**로 쓴다. 종료된 과거 run은 지우지 않는다. |
-| 완료 해제 (4단계 제안) | 불가 / 새 판 전까지 소유자만 / 언제든 | 과거 스냅숏 보존, 새 판과의 충돌 | **새 판이 생기기 전까지 소유자만.** 해제는 완료 스냅숏을 지우지 않고 `completed_snapshot_id` 포인터만 해제하며, 후속 판이 있으면 거부한다. 후속 판이 없으면 `projects.active_edition_id`를 그 판으로 되돌린다. 단계 승인·stale·현재 단계 포인터는 **보존**하고, 이후 편집은 PR 6 규칙(현재 승인 포인터 해제·뒤 단계 stale)을 따른다. 해제도 새 event·새 영수증이다. |
+| 완료 시점·주체 (4단계 제안) | 여섯 단계 승인 즉시 자동 완료 / 소유자 사람의 "이 판 마침" / 프로젝트 보관 시 완료 | 승인≠완료, 실수 방지, 사후 수정 가능, 감사 | **소유자 사람의 명시적 완료.** 대상 판에 **미종결 run(queued·running·waiting_human) 없음**, 여섯 단계의 **현재** 승인, **stale 없음**, 미처리 필수 응답 없음(명시적 deferred는 사유 확인), 실행 차단 상태 없음이 조건이다. 서버가 명령 시점에 다시 검사하고, 완료는 **`active→completed` 상태 전이**로 `editions.status='completed'`·`completed_snapshot_id`·`projects.active_edition_id` 해제·event·영수증을 **한 tx**로 쓴다. 종료된 과거 run은 지우지 않는다. |
+| 완료 해제 (4단계 제안) | 불가 / 새 판 전까지 소유자만 / 언제든 | 과거 스냅숏 보존, 새 판과의 충돌 | **새 판이 생기기 전까지 소유자만.** 해제는 **`completed→active` 상태 전이**로 완료 스냅숏을 지우지 않고 `completed_snapshot_id` 포인터만 해제하며, 후속 판이 있으면 거부한다. 후속 판이 없으면 `projects.active_edition_id`를 그 판으로 되돌린다. 단계 승인·stale·현재 단계 포인터는 **보존**하고, 이후 편집은 PR 6 규칙(현재 승인 포인터 해제·뒤 단계 stale)을 따른다. 해제도 새 event·새 영수증이다. |
 | 다음 판 준비 | 활성 판과 draft 병행 / 완료·보관 뒤에만 / 자동 생성 | 활성 판 하나, lease 범위, 실수 방지 | **완료·보관 뒤에만, 소유자 사람이 시작.** draft 병행은 6단계의 미합의 제안으로 남긴다. |
-| 멈추기·보관 | 완료=프로젝트 archived / 완료는 판만, 프로젝트는 active / 삭제 | "이어 가거나 멈춘다"의 의미, 복구 | **완료는 판만, 프로젝트는 active 유지.** `archived`는 완료·미완료 판 모두에 쓸 수 있으나, **미종결 run·lease가 없을 때만** 보관하고, 미완료 보관은 완료로 가장하지 않고 `completed_snapshot_id`를 만들지 않는다. 미완료 보관판에서 다음 판을 시작하면 기준 고정본을 **마지막 봉인 라운드 → 마지막 승인 단계 → 이월 미리보기 시점의 as-of manifest** 순서로 정하고, 어느 것을 썼는지 `edition_carryovers`에 남긴다. |
-| 기획부터 다시 | 이월 결과를 승인으로 인정 / 새 판은 plan pending, 이월은 참고 / 이전 승인 복사 | 승인≠이월, 재검토 보장 | **새 판의 첫 단계는 plan이고, 이월 결과를 승인으로 인정하지 않는다.** "기획 유지"를 골라도 plan 승인은 새로 받는다. 이월된 결정·가정·결과물은 입력이고, 여섯 단계 승인은 새로 받는다. |
+| 멈추기·보관 | 완료=프로젝트 archived / 완료는 판만, 프로젝트는 active / 삭제 | "이어 가거나 멈춘다"의 의미, 복구 | **완료는 판만, 프로젝트는 active 유지.** `archived`는 완료·미완료 판 모두에 쓸 수 있으나, **미종결 run·lease가 없을 때만** 보관하고, 미완료 보관은 완료로 가장하지 않고 `completed_snapshot_id`를 만들지 않는다. 미완료 보관판에서 다음 판을 시작하면 기준 고정본을 **마지막 봉인 라운드 → 마지막 승인 단계 → 판 이월 미리보기 시점의 as-of manifest** 순서로 정하고, 어느 것을 썼는지 `edition_carryovers`에 남긴다. |
+| 기획부터 다시 | 판 이월 결과를 승인으로 인정 / 새 판은 plan pending, 판 이월은 참고 / 이전 승인 복사 | 승인≠이월, 재검토 보장 | **새 판의 첫 단계는 plan이고, 판 이월 결과를 승인으로 인정하지 않는다.** "기획 유지"를 골라도 plan 승인은 새로 받는다. 판 이월된 결정·가정·결과물은 입력이고, 여섯 단계 승인은 새로 받는다. |
 | 옛 프로젝트의 1판 완료 (Z2) | 이전 승인을 완료로 인정 / 현재 소유자의 명시적 완료 / 완료 불가 | 이전 기록 보존, 실제 사용자, 감사 | **현재 소유자의 명시적 완료.** 2단계에서 이전된 프로젝트의 `legacy_unverified` 승인은 "옛 기록의 승인"으로 인정하되, 완료는 지금 소유자가 새 human actor로 눌러야 한다. 가짜 사람을 만들지 않고, 합성 legacy fixture로 1판 완료→2판 시작을 시험한다. |
+
+**상태 전이**: 완료는 `active→completed`, 해제는 `completed→active`(후속 판이 없을 때)다. "활성 판 하나"는 **최대 하나**(부분 UNIQUE, [SQL:159](schemas/stage-1-ddl-draft.sql#L159))이므로 완료 뒤 새 판 시작 전 **0개 구간을 허용**하고, 그동안 `edition.start`만 가능하다.
 
 ### 2.2 새 판으로 넘기기 — 유지·수정·제외
 
 **이미 정해진 것:** 판 범위 결정·가정은 원본 버전을 고정해 새 판에 복사하고 유지/수정/제외를 기록하며, 프로젝트 공통 결정은 참조하되 새 판 기준 스냅숏에 당시 버전을 고정한다. 전송 정책은 판 복사로 바뀌지 않는다([stage-1-db.md:23](stage-1-db.md#L23)). 답은 그때 본 질문 버전에 묶고 새 버전에 자동 승계하지 않는다([stage-1-db.md:24](stage-1-db.md#L24)). 결과물의 재사용은 새 판의 새 객체 + `artifacts.origin_version_id`이며, 결정·후속·가정·출처의 실제 계보는 아래 표를 따른다([stage-1-db.md:76](stage-1-db.md#L76)).
+
+이 절의 이월은 **판 이월(`edition_carryovers`)** 이다. 2단계 PR6의 **단계 이월**(현행 `carry_over`)과 이름을 바꾸지 않고 구분해 쓴다. 명령은 `edition.carryover.preview`·`edition.carryover.apply`다.
 
 **계보는 종류마다 실제 열이 다르다.** 모든 객체에 같은 `origin_version_id`가 있다고 가정하지 않는다.
 
@@ -136,7 +140,7 @@ PR 24는 위 실제 열과 `edition_carryovers`를 함께 조회하고, 없는 �
 | 항목 | A — PES 안 OpenCode | B — Claude Code·Claude 앱 | 공통 |
 |---|---|---|---|
 | 판 시작·완료 | PES 화면/명령이 실행. 그래도 소유자 사람 세션만 | 같은 API를 사람 세션이 호출. 에이전트 토큰은 불가 | 활성 판 하나, 사람만, 완료 스냅숏·event |
-| 이월 | run이 이월 초안·미리보기를 만들 수 있지만 적용은 사람 | 외부 에이전트가 제안·복사하고 사람이 적용 | 같은 `carryover` 명령, 원본 버전 고정, 유지/수정/제외 기록 |
+| 판 이월 | run이 판 이월 초안·미리보기를 만들 수 있지만 적용은 사람 | 외부 에이전트가 제안·복사하고 사람이 적용 | 같은 `edition.carryover.*` 명령, 원본 버전 고정, 유지/수정/제외 기록 |
 | 비교 | run이 diff 요약·반대 의견을 만들 수 있음 | diff를 읽고 review·의견을 제출 | 읽기 전용, 같은 사건 경계·실제 계보, 잠정 표시 |
 | 갈림길 | 예산 안에서 PES가 방향 2~3개 생성 | 외부에서 만들고 `proposed` 결정으로 제출하거나 프롬프트 복사 | 묶음 ID·기반 버전·후보 목록, 자동 채택·자동 판 생성 없음, 사람이 채택 |
 | 반대 의견 | 작업 AI도 즉시 제기, 필요할 때 reviewer 별도 run | 외부 reviewer가 같은 형식으로 제출. 모델 주장은 미검증 출처 | 정확한 출처 버전, 확인 필요, override 결정, 자기 점검/독립 검토 구분 |
@@ -154,9 +158,9 @@ A·B 모두 새 판·이월·비교·방향·반대·직접 편집의 **의미�
 
 | 번호 | 제목 | 범위 | 선행 | 완료 조건 |
 |---|---|---|---|---|
-| PR 23 | 판 완료·이월 기록 (PR 6 확장) | PR 6의 판 시작·완료·해제 계약을 재사용하고 **4단계 완료 정책·이월 기록만 확장**. 신규 `edition_carryovers`, `editions.completed_snapshot_id`; `carryover.preview`는 순수 조회, `carryover.apply`는 항목 묶음 원자 적용; 완료 검사·대상 rev·멱등·영수증; 결과물/출처/후속 연결 규칙; 정책 복사 없음; 프로젝트 결정 참조·고정; 새 마이그레이션·D1 smoke·export/import | PR 4·6·7·9·10·14, U3·U4 | 미종결 run 없음·여섯 단계 현재 승인·stale 없음·필수 응답 없음·서버 재검사·한 tx; 유지/수정/제외 전부 기록, 제외 대상 NULL, 중복 적용 거부, 미리보기 뒤 변경·롤백; legacy 1판 완료 fixture; export/import; 테스트 |
-| PR 24 | 판 비교·이력 읽기 API | `GET .../editions/{e}/compare?with=&scope=`, `.../history`, `.../carryovers`; 판·라운드 경로, 구조화 diff+상세 diff, 하나의 `as-of` 사건 경계, 실제 계보 열+이월 기록 조회, event allowlist+project·actor·run_targets·Go 정책 검사, 페이지 나눔 | PR 23·14 | 판/라운드·열린 라운드 비교, 계보 없는 유사 매칭 금지, epoch 변경 재조회, 잠정 표시, 합성 2판(객체 200·버전 2,000·긴 본문 20) 첫 페이지 2초·추가 페이지 1초 목표, 테스트 |
-| PR 25 | 직접 편집·제안 명령 | `artifact.revise` 직접/제안, `edit_permission.grant/revoke`, 요청 `base_version_id`↔저장 `based_on_version_id` 매핑, 409 충돌, actor·run·객체·범위·회수 검사(`run_targets`만으로 허용 증거 삼지 않음), 승인·게시본 보호, stale, 원문 덮어쓰기 없음, U4의 수락·거절 재사용 | PR 4·6·7·9·13·14, U4 | 명령·오류 예제, 충돌·재기반, 새 버전·tx, 승인 후 stale, AI opt-in·회수, 멱등·부분 실패, 테스트 |
+| PR 23 | 판 완료·판 이월 기록 (PR 6 확장) | PR 6의 판 시작·완료·해제 계약을 재사용하고 **4단계 완료 정책·판 이월(`edition_carryovers`) 기록만 확장**. 신규 `edition_carryovers`, `editions.completed_snapshot_id`; `edition.carryover.preview`는 순수 조회, `edition.carryover.apply`는 항목 묶음 원자 적용; 완료 검사·대상 rev·멱등·영수증; 결과물/출처/후속 연결 규칙; 정책 복사 없음; 프로젝트 결정 참조·고정; 새 마이그레이션·D1 smoke·export/import | PR 4·6·7·9·10·14, U3·U4 | 미종결 run 없음·여섯 단계 현재 승인·stale 없음·필수 응답 없음·서버 재검사·한 tx; 유지/수정/제외 전부 기록, 제외 대상 NULL, 중복 적용 거부, 미리보기 뒤 변경·롤백; legacy 1판 완료 fixture; export/import; 테스트 |
+| PR 24 | 판 비교·이력 읽기 API | `GET .../editions/{e}/compare?with=&scope=`, `.../history`, `.../carryovers`; 판·라운드 경로, 구조화 diff+상세 diff, 하나의 `as-of` 사건 경계, 실제 계보 열+판 이월 기록 조회, event allowlist+project·actor·run_targets·Go 정책 검사, 페이지 나눔 | PR 23·14 | 판/라운드·열린 라운드 비교, 계보 없는 유사 매칭 금지, epoch 변경 재조회, 잠정 표시, 합성 2판(객체 200·버전 2,000·긴 본문 20) 첫 페이지 2초·추가 페이지 1초 목표, 테스트 |
+| PR 25 | 직접 편집·제안 명령 | `artifact.revise` 직접/제안, `edit_permission.grant/revoke`, **AI 편집 허가 저장(새 표 또는 `run_targets` 확장, 새 마이그레이션), DDL·`check_ddl.py`**, 요청 `base_version_id`↔저장 `based_on_version_id` 매핑, 409 충돌, actor·run·객체·범위·회수 검사(`run_targets`만으로 허용 증거 삼지 않음), 승인·게시본 보호, stale, 원문 덮어쓰기 없음, U4의 수락·거절 재사용 | PR 4·6·7·9·13·14, U4 | 명령·오류 예제, 충돌·재기반, 새 버전·tx, 승인 후 stale, AI opt-in·회수, **허가 만료·감사**, 멱등·부분 실패, 테스트 |
 | U7 | 판 완료·이월 마법사 | 완료/해제, 항목별 유지·수정·제외, 종류·단계 일괄 선택, 원본 버전 고정 미리보기, 전부/빈 판, 이유, 가정 `needs_review`, 프로젝트 결정 고정 표시; **Z1 2판 기획 시작 질문 세트(`purpose=stage_start`, "무엇을 빼고·바꾸고·더할지")**, 에이전트 context의 이월 manifest+"이월=참고, 승인 아님", PR 17 중립 워크플로의 2판 기획 절차; B02·B03 연결; 제외 NULL·중복·롤백 | PR 23, PR 17, U1, U3, U4 | 합성 프로젝트 2판, 모든 선택 기록, 자동 승인 없음, A/B 2판 기획 한 라운드, Windows/Mac, 제외 NULL·중복 적용·미리보기 뒤 변경·롤백, components·citations·files·next_round_task |
 | U8 | 판 비교·이력 화면 | 판/라운드 선택, 구조화 diff, 상세 diff, 이월 제외와 삭제 구분, 승인·상태, 타임라인, 딥링크; 열린 판·열린 라운드, 교차 판 계보, 작성자·채택자·근거·변경 이유, 보관 객체 링크, U6 인쇄 회귀 | PR 24, U7, U1 | 1↔2판·R1↔R2 비교, 열린 판·라운드 잠정, 끊긴 링크 없음(보관 객체·원 버전 포함), 작성자·채택자·이유, 인쇄 회귀 |
 | U9 | 갈림길 맛보기 | `proposed` 결정 2~3개, 고정 틀, **묶음 ID·기반 버전·후보 버전 목록**, 하나 채택/나머지 철회 원자 서비스·조회·API·워크플로·MCP 어댑터·시험까지 소유; U4 다음 할 일; 예산·Go OFF·B 수동 가져오기; PR 19·20 재구현 금지 | U3, U4, PR 10·14·19·20 | 묶음 기록, 채택 결정+다음 할 일, 근거 부족 시 생성 안 함, 중복·충돌·예산·Go OFF, A/B |
@@ -175,8 +179,8 @@ A·B 모두 새 판·이월·비교·방향·반대·직접 편집의 **의미�
 | `edition.complete` | 소유자 사람 | 판 rev·미종결 run 없음·stale 없음·필수 응답 없음 | `Idempotency-Key` | `open_run`, `stage_stale`, `required_response` | 불가 | 가능 | 금지 |
 | `edition.reopen_completion` | 소유자 사람 | 완료 tx/rev·후속 판 없음 | 필요 | `edition_has_successor` | 불가 | 가능 | 금지 |
 | `edition.start` | 소유자 사람 | 활성 판 없음 | 필요 | `active_edition_exists` | 불가 | 가능 | 금지 |
-| `carryover.preview` | 읽기 권한 | 기준 판/버전 rev | 순수 조회 | `basis_changed` | 가능(읽기) | 가능 | 금지 |
-| `carryover.apply` | 소유자 사람 | 기준 rev·대상 rev | 필요 | `basis_changed`, `duplicate`, `partial` | 불가 | 가능 | 금지 |
+| `edition.carryover.preview` | 읽기 권한 | 기준 판/버전 rev | 순수 조회 | `basis_changed` | 가능(읽기) | 가능 | 금지 |
+| `edition.carryover.apply` | 소유자 사람 | 기준 rev·대상 rev | 필요 | `basis_changed`, `duplicate`, `partial` | 불가 | 가능 | 금지 |
 | `direction.adopt` | 소유자 사람 | 묶음 ID·기반 버전·후보 버전 목록 | 필요 | `bundle_changed`, `candidate_withdrawn` | 불가 | 가능 | 금지 |
 | `objection.raise` | 작업 AI·사람 | 대상 버전 | 필요 | `stale_target` | 가능 | 가능 | 금지 |
 | `objection.confirm`·`override` | 소유자 사람 | 반대·대상 결과·출처 버전 | 필요 | `version_changed` | 불가 | 가능 | 금지 |
@@ -184,7 +188,7 @@ A·B 모두 새 판·이월·비교·방향·반대·직접 편집의 **의미�
 | `artifact.revise` | 사람 편집자, AI는 opt-in | 기준 버전·run·객체 | 필요 | `base_conflict`, `not_permitted` | AI 가능 | 가능 | 금지 |
 | `proposal.accept`·`reject` | 소유자 사람 | 제안 버전·기반 버전 | 필요 | `basis_changed`, `already_resolved` | 불가 | 가능 | 금지 |
 
-4단계 신규는 **9개**(PR 3 + U 6)다. **4단계까지 계획 62개**(0단계 11 + 계획 11 + 2단계 22 + 3단계 9 + 4단계 9)에 **기존 10개**를 더해 약 **72개(예상)** 로, Linear 한도 260 안이다. 5·6단계와 결함 여유는 별도다. 실제 잔여량은 Linear 조회로 확인하기 전에는 단정하지 않는다. 표·테이블별 하위 이슈는 만들지 않는다([stage-1-db.md:33](stage-1-db.md#L33)).
+4단계 신규는 **9개**(PR 3 + U 6)다. 누적은 **`roadmap.md` 2절 참고**. 실제 잔여량은 Linear 조회로 확인하기 전에는 단정하지 않는다. 표·테이블별 하위 이슈는 만들지 않는다([stage-1-db.md:33](stage-1-db.md#L33)).
 
 ## 5. 완료 기준
 
@@ -206,8 +210,8 @@ A·B 모두 새 판·이월·비교·방향·반대·직접 편집의 **의미�
 
 ## 7. 다음 단계로 넘기는 것
 
-- **5단계(웹)**: 로그인·프로젝트 역할(owner/editor/reader), 판 시작·완료 권한의 웹 이전, D1/R2에 PR 23의 새 표·열 반영, 원격 MCP·알림, 판 비교 읽기 모델의 웹 성능·캐시, 기본 화면 전환의 웹 배포·롤백. 로컬 소유자 권한은 4단계부터 유지하고, 5단계는 웹 역할을 더한다.
-- **6단계(넓히기)**: 여러 사람·여러 에이전트, 활성 판과 draft 병행(미합의 제안), 판 사이 병렬 작업, 프로젝트 간 재사용, 비교 화면에서 외부(Linear·Notion) 내보내기, 영구 삭제, hwpx(전체 개발 맨 마지막).
+- **5단계(웹)**: 판 비교는 5단계에서 새로 만들지 않고 **WEB14에서 웹 동등성·성능만 확인**한다. `edition.*` 권한은 **WEB2·WEB3**, 새 표·열(`edition_carryovers`·`completed_snapshot_id`)은 **WEB1·WEB9 마이그레이션**에 반영한다. 원격 MCP·알림, 기본 화면 전환의 웹 배포·롤백은 5단계가 맡는다. 로컬 소유자 권한은 4단계부터 유지하고, 5단계는 웹 역할을 더한다.
+- **6단계(넓히기)**: 여러 사람·여러 에이전트, 활성 판과 draft 병행(미합의 제안), 비교 화면에서 외부(Linear·Notion) 내보내기, hwpx(전체 개발 맨 마지막). **판 사이 병렬 작업·프로젝트 간 재사용·영구 삭제는 운영 백로그**로 넘긴다.
 - **1단계 산출물 갱신**: PR 23에서 [stage-1-db.md](stage-1-db.md) 3.2·3.5, [DDL 초안](schemas/stage-1-ddl-draft.sql), `check_ddl.py`에 `edition_carryovers`·`completed_snapshot_id`를 반영하고 결정 기록을 남긴다. 54개 표 기준도 갱신한다([stage-1-db.md:169](stage-1-db.md#L169)).
 - **2·3단계 의존**: 4절 표가 단일 기준이다. PR 23은 PR 4·6·7·9·10·14와 U3·U4, PR 24는 PR 23·14, PR 25는 PR 4·6·7·9·13·14와 U4를 선행으로 한다. U7은 PR 23·17·U1·U3·U4, U8은 PR 24·U7·U1, U9는 U3·U4·PR 10·14·19·20, U10은 U3·U4·PR 5·6·10·14·19·20, U11은 PR 25·U1·U4, U12는 U1~U4·U6·PR 18·21·U5를 선행으로 한다. U4의 `edit_text`·첨언 흐름을 4단계가 다시 만들지 않는다([stage-1-ui.md:89](stage-1-ui.md#L89)).
 - **조건부**: W1·R1은 4단계 필수 전제가 아니다. T1은 채택 시에만 U12 게이트 입력으로 쓰고, 실제 자료는 T1의 허용 범위 안에서만 쓴다.
