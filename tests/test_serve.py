@@ -512,9 +512,6 @@ def _answer_loss(files, count):
     return None
 
 
-@pytest.mark.xfail(strict=True, raises=AnswerLoss, reason=(
-    "serve.py:140-145 파일 이름이 초 단위라 같은 초에 동시에 들어온 답이 "
-    "같은 파일을 덮어써 답이 유실된다 (테스트 전용 배리어로 재현을 고정)"))
 def test_simultaneous_submissions_do_not_lose_answers(collision_server):
     responses, failures, alive = _submit_concurrently(collision_server, COLLISION_COUNT)
 

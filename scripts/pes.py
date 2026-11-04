@@ -405,7 +405,10 @@ def cmd_render(args):
     if st["round"] > 0:
         snap = {"stage": s, "round": st["round"], "time": now(), "state": st}
         (d / "snapshots").mkdir(exist_ok=True)
-        (d / "snapshots" / f"{s}-R{st['round']}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+        target = d / "snapshots" / f"{s}-R{st['round']}.json"
+        # 같은 라운드에서 다시 렌더해도 그 라운드의 첫 스냅샷을 덮어쓰지 않는다 (자료 손실 방지).
+        if not target.exists():
+            target.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
     print(build_index(d, p))
 
 
@@ -502,6 +505,8 @@ def cmd_reopen(args):
     p["stages"][s]["review"] = None
     p["stages"][s]["history"].append(f"다시 열기 {now()}")
     p["current"] = s
+    # 마지막 단계까지 승인한 프로젝트를 다시 열면 전체 완료 표시도 푼다 (승인 오처리 방지).
+    p["complete"] = False
     marked = []
     for k in KEYS[KEYS.index(s) + 1:]:
         if p["stages"][k]["status"] != "pending":

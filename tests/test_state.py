@@ -300,7 +300,6 @@ def test_reopen_marks_later_stages_stale(cli, tmp_path):
     assert data["stages"]["publish"]["stale"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="SEL-12 결함 후보 ①: 완료된 프로젝트를 reopen 해도 complete 가 풀리지 않는다")
 def test_reopen_complete_project_clears_complete(cli, tmp_path):
     project = _init(cli, tmp_path)
     for stage in STAGES:
@@ -330,7 +329,6 @@ def test_resubmitting_same_merge_does_not_raise_depth(cli, tmp_path):
     assert item["depth"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="SEL-12 결함 후보 ③: 같은 라운드에 render 하면 스냅샷을 덮어쓴다")
 def test_render_same_round_does_not_overwrite_snapshot(cli, tmp_path):
     project = _init(cli, tmp_path)
     cli("round-start", project, "plan")
