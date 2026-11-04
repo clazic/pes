@@ -17,13 +17,35 @@ GUARD = '''
 import os
 from pathlib import Path
 import sys
-_forbidden = [os.path.normcase(os.path.abspath(os.path.join(os.environ.get("PES_TEST_REAL_HOME", str(Path.home())), p))) for p in (".pes", "pes-projects")]
+import threading
+
+class PESHomeAccessViolation(BaseException):
+    """A test attempted to access protected PES data."""
+
+_original_home = os.environ.get("PES_TEST_REAL_HOME", str(Path.home()))
+_check_state = threading.local()
 def _check(path):
-    if not os.environ.get("PES_TEST_GUARD") or not isinstance(path, (str, bytes, os.PathLike)):
+    if (not os.environ.get("PES_TEST_GUARD") or
+            not isinstance(path, (str, bytes, os.PathLike)) or
+            getattr(_check_state, "active", False)):
         return
-    p = os.path.normcase(os.path.abspath(os.fsdecode(path)))
-    if any(p == root or p.startswith(root + os.sep) for root in _forbidden):
-        raise AssertionError("Access to real PES home forbidden: " + p)
+    # realpath itself uses lstat on some platforms. Suppress only the guard's
+    # recursive checks while it resolves paths, then restore them even on error.
+    _check_state.active = True
+    try:
+        homes = (_original_home, os.environ.get("PES_TEST_REAL_HOME", _original_home))
+        roots = [os.path.join(home, name) for home in homes for name in (".pes", "pes-projects")]
+        paths = (os.path.abspath(os.fsdecode(path)), os.path.realpath(os.fsdecode(path)))
+        forbidden = [candidate for root in roots for candidate in
+                     (os.path.abspath(root), os.path.realpath(root))]
+        for candidate in paths:
+            candidate = os.path.normcase(candidate)
+            for root in forbidden:
+                root = os.path.normcase(root)
+                if candidate == root or candidate.startswith(root + os.sep):
+                    raise PESHomeAccessViolation("Access to real PES home forbidden: " + candidate)
+    finally:
+        _check_state.active = False
 def _audit(event, args):
     if event == "open" or event in ("os.listdir", "os.scandir", "os.remove", "os.rmdir", "os.mkdir", "os.chdir"):
         if args: _check(args[0])
@@ -43,7 +65,9 @@ for _name in ("stat", "lstat"):
         return _original(self, *args, **kwargs)
     setattr(Path, _name, _guarded)
 '''
-exec(GUARD, {})
+_guard_namespace = {}
+exec(GUARD, _guard_namespace)
+PESHomeAccessViolation = _guard_namespace["PESHomeAccessViolation"]
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +102,9 @@ def cli(isolated_home, tmp_path):
         env["PYTHONPATH"] = str(startup)
         env["PYTHONIOENCODING"] = "utf-8"
         result = subprocess.run([sys.executable, str(SCRIPT)] + list(map(str, args)), env=env,
-                                capture_output=True, text=True, encoding="utf-8")
+                                capture_output=True, text=True, encoding="utf-8", timeout=60)
+        if "PESHomeAccessViolation" in result.stderr:
+            pytest.fail("CLI attempted to access protected PES data: " + result.stderr)
         return result.returncode, result.stdout, result.stderr
     return run
 

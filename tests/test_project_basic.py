@@ -18,9 +18,9 @@ def test_isolated_home(pes, isolated_home, monkeypatch):
 
 
 def test_guard_rejects_real_home(monkeypatch):
-    from conftest import REAL_HOME
+    from conftest import PESHomeAccessViolation, REAL_HOME
     for folder in (".pes", "pes-projects"):
-        with pytest.raises(AssertionError, match="real PES home"):
+        with pytest.raises(PESHomeAccessViolation, match="real PES home"):
             (REAL_HOME / folder / "project.json").exists()
 
 
@@ -147,3 +147,47 @@ def test_main_passes_multiple_arguments_unchanged(pes, monkeypatch):
     pes.main(argv)
     assert argv == ["init", "경로 공백", "--topic", "합성 주제"]
     assert received == [["경로 공백", "--topic", "합성 주제"]]
+
+
+def test_guard_exception_escapes_product_exception_handler(pes, tmp_path, monkeypatch):
+    from conftest import PESHomeAccessViolation
+    fake_home = tmp_path / "fake real home"
+    config = fake_home / ".pes" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"home": "synthetic"}', encoding="utf-8")
+    monkeypatch.setenv("PES_TEST_REAL_HOME", str(fake_home))
+    monkeypatch.delenv("PES_HOME")
+    monkeypatch.setattr(pes, "CONFIG", config)
+    with pytest.raises(PESHomeAccessViolation, match="real PES home"):
+        pes.pes_home()
+
+
+@pytest.mark.parametrize("folder", [".pes", "pes-projects"])
+@pytest.mark.parametrize("operation", ["read", "write"])
+def test_guard_blocks_symlink_aliases(tmp_path, monkeypatch, folder, operation):
+    from conftest import PESHomeAccessViolation
+    fake_home = tmp_path / "fake real home"
+    protected = fake_home / folder
+    protected.mkdir(parents=True)
+    (protected / "existing.json").write_text("synthetic", encoding="utf-8")
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(protected, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating directory symlinks is unavailable")
+    monkeypatch.setenv("PES_TEST_REAL_HOME", str(fake_home))
+    with pytest.raises(PESHomeAccessViolation, match="real PES home"):
+        if operation == "read":
+            (alias / "existing.json").read_text(encoding="utf-8")
+        else:
+            (alias / "new.json").write_text("synthetic", encoding="utf-8")
+
+
+def test_cli_helper_fails_on_guard_violation(cli, tmp_path, monkeypatch):
+    fake_home = tmp_path / "fake real home"
+    (fake_home / ".pes").mkdir(parents=True)
+    monkeypatch.setenv("PES_TEST_REAL_HOME", str(fake_home))
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    with pytest.raises(pytest.fail.Exception, match="CLI attempted to access protected PES data"):
+        cli("remote")
