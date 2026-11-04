@@ -110,7 +110,7 @@
   }
  ],
  "claude": {
-  "session_id": "d6040652-f0ba-48c8-9910-b87edc749ac8",
+  "session_id": "<session-1>",
   "num_turns": 9,
   "duration_ms": 32631,
   "duration_api_ms": 88751,

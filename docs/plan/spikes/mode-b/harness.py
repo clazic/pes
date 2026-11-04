@@ -21,13 +21,46 @@ from pathlib import Path
 MODEL = "claude-sonnet-5-5"
 CLAUDE_TIMEOUT = 420
 
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+SESSION_FIELD_RE = re.compile(r'"session_id"\s*:\s*"(' + UUID_RE.pattern + r')"')
+
+# 같은 실행 안에서 같은 세션 ID가 같은 자리표시를 받도록 실행 범위 사전을 쓴다.
+SESSION_IDS = {}
+OTHER_UUIDS = {}
+
 
 def now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def mask_session_ids(text, session_map=None, uuid_map=None):
+    """세션 ID(UUID)를 등장 순서대로 <session-1>…, 나머지 UUID는 <uuid-1>…로 바꾼다.
+
+    session_map/uuid_map을 넘기면 호출자 범위에서 번호를 유지한다. 저장 직전에 부른다.
+    """
+    if not isinstance(text, str):
+        return text
+    session_map = SESSION_IDS if session_map is None else session_map
+    uuid_map = OTHER_UUIDS if uuid_map is None else uuid_map
+    session_ids = set(SESSION_FIELD_RE.findall(text))
+
+    def repl(m):
+        value = m.group(0)
+        if value in session_map:
+            return session_map[value]
+        if value in uuid_map:
+            return uuid_map[value]
+        if value in session_ids:
+            session_map.setdefault(value, "<session-%d>" % (len(session_map) + 1))
+            return session_map[value]
+        uuid_map.setdefault(value, "<uuid-%d>" % (len(uuid_map) + 1))
+        return uuid_map[value]
+
+    return UUID_RE.sub(repl, text)
+
+
 def sanitize(text, temp, repo):
-    """공개 저장소에 남기면 안 되는 로컬 경로·키를 자리표시로 바꾼다."""
+    """공개 저장소에 남기면 안 되는 로컬 경로·키·세션 ID를 자리표시로 바꾼다."""
     if not isinstance(text, str):
         text = "" if text is None else str(text)
     pairs = [
@@ -41,10 +74,11 @@ def sanitize(text, temp, repo):
             text = text.replace(a, b)
     # JSON 문자열 안에서는 경로 뒤에 \\"가 올 수 있으므로 백슬래시에서 멈춘다.
     text = re.sub(r"/[U]sers/[^\s\"'`\\]+", "<홈경로>", text)
-    text = re.sub(r"/private/var/folders/[^\s\"'`\\]+", "<임시경로>", text)
-    text = re.sub(r"/var/folders/[^\s\"'`\\]+", "<임시경로>", text)
+    text = re.sub(r"/[p]rivate/[v]ar/[f]olders/[^\s\"'`\\]+", "<임시경로>", text)
+    text = re.sub(r"/[v]ar/[f]olders/[^\s\"'`\\]+", "<임시경로>", text)
     text = re.sub(r"\bsk-[A-Za-z0-9_-]{10,}\b", "<키>", text)
     text = re.sub(r"(?i)\b(token|api[_-]?key|secret)\b\s*[:=]\s*[A-Za-z0-9_\-]{8,}", r"\1=<키>", text)
+    text = mask_session_ids(text)
     return text
 
 

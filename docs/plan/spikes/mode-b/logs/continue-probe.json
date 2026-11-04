@@ -14,7 +14,7 @@
   {
    "name": "same_session",
    "status": "pass",
-   "detail": "1e4d9fbf-8213-4499-8902-ab5aba3ed582 / 1e4d9fbf-8213-4499-8902-ab5aba3ed582"
+   "detail": "<session-6> / <session-6>"
   },
   {
    "name": "word_recalled",
@@ -27,7 +27,7 @@
   "exit": 0,
   "timed_out": false,
   "stderr": "",
-  "session_id": "1e4d9fbf-8213-4499-8902-ab5aba3ed582",
+  "session_id": "<session-6>",
   "num_turns": 1,
   "duration_ms": 4712,
   "total_cost_usd": 0.0016174000000000002,
@@ -38,7 +38,7 @@
   "exit": 0,
   "timed_out": false,
   "stderr": "",
-  "session_id": "1e4d9fbf-8213-4499-8902-ab5aba3ed582",
+  "session_id": "<session-6>",
   "num_turns": 1,
   "duration_ms": 5807,
   "total_cost_usd": 0.0034368000000000003,
