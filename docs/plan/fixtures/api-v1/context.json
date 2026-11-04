@@ -1,0 +1,97 @@
+{
+  "operation": "context.get",
+  "method": "GET",
+  "path": "/api/v1/projects/{project_id}/context",
+  "auth": "agent_token",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "query": {
+        "include": "manifest"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_ctx_01J9Z3K7QN",
+        "project": {
+          "id": "prj_01J9Z3K7Q2",
+          "slug": "synthetic-policy-study",
+          "status": "active",
+          "control_rev": "12"
+        },
+        "edition": {
+          "id": "edt_01J9Z3K7Q3",
+          "edition_no": "2",
+          "status": "active"
+        },
+        "stage": {
+          "id": "stg_01J9Z3K7Q4",
+          "key": "research",
+          "ordinal": 2,
+          "status": "active"
+        },
+        "round": {
+          "id": "rnd_01J9Z3K7Q5",
+          "round_no": "2",
+          "state": "open"
+        },
+        "policy": {
+          "allow_opencode_go": true,
+          "policy_rev": "5"
+        },
+        "digest": "sha256:7f1c2a9d4e5b6a7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+        "manifest": {
+          "object_count": 12,
+          "version_count": 34,
+          "through_event_seq": "42"
+        },
+        "next_cursor": "cur_01J9Z3K7QK"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_missing_01J9Z3K7Q2"
+      },
+      "query": {
+        "include": "manifest"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 404,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_ctx_err_01J9Z3K7QN",
+        "error": {
+          "code": "project_not_found",
+          "message": "프로젝트를 찾을 수 없습니다.",
+          "retryable": false,
+          "target": "$.path.project_id",
+          "details": {
+            "project_id": "prj_missing_01J9Z3K7Q2"
+          },
+          "next_action": "check_project_id"
+        }
+      }
+    }
+  }
+}

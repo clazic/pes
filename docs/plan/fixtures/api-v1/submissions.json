@@ -1,0 +1,105 @@
+{
+  "operation": "submissions.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/submissions",
+  "auth": "human",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_sub_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "set_id": "qset_01J9Z3K7QD",
+        "answers": [
+          {
+            "question_id": "qst_01J9Z3K7QB",
+            "question_version_id": "qvr_01J9Z3K7QC",
+            "value": "A",
+            "comment": "합성 의견입니다."
+          }
+        ],
+        "submitted_via": "web",
+        "client_request_id": "subreq_01J9Z3K7Q2"
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_sub_01J9Z3K7QN",
+        "submission": {
+          "id": "sub_01J9Z3K7QE",
+          "received_at": 1762312000000,
+          "state": "accepted"
+        },
+        "answers": [
+          {
+            "question_id": "qst_01J9Z3K7QB",
+            "answer_version_id": "ansv_01J9Z3K7Q2",
+            "state": "submitted"
+          }
+        ]
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "set_id": "qset_01J9Z3K7QD",
+        "answers": [
+          {
+            "question_id": "qst_01J9Z3K7QB",
+            "question_version_id": "qvr_stale_01J9Z3K7Q2",
+            "value": "A",
+            "comment": "오래된 질문 버전에 대한 합성 답"
+          }
+        ],
+        "submitted_via": "web",
+        "client_request_id": "subreq_stale_01J9Z3K7Q2"
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_sub_err_01J9Z3K7QN",
+        "error": {
+          "code": "question_version_changed",
+          "message": "답변 대상 질문 버전이 바뀌었습니다. 새 버전을 확인해 주세요.",
+          "retryable": false,
+          "target": "$.body.answers[0].question_version_id",
+          "details": {
+            "expected": "qvr_stale_01J9Z3K7Q2",
+            "current": "qvr_01J9Z3K7QC",
+            "question_id": "qst_01J9Z3K7QB"
+          },
+          "next_action": "reread_question"
+        }
+      }
+    }
+  }
+}

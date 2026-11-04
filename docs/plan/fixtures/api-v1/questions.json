@@ -1,0 +1,120 @@
+{
+  "operation": "questions.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/questions",
+  "auth": "agent_or_human",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_q_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "stage_id": "stg_01J9Z3K7Q4",
+        "round_id": "rnd_01J9Z3K7Q5",
+        "direction": "agent_to_human",
+        "purpose": "review",
+        "question": {
+          "text": "2장의 정책 대안을 A/B로 나눌까요?",
+          "type": "single_choice",
+          "importance": "high",
+          "required": true,
+          "default_value": "A",
+          "options": [
+            {
+              "value": "A",
+              "label": "현행 유지"
+            },
+            {
+              "value": "B",
+              "label": "대안 확대"
+            }
+          ],
+          "show_if": null
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_q_01J9Z3K7QN",
+        "question": {
+          "id": "qst_01J9Z3K7QB",
+          "version_id": "qvr_01J9Z3K7QC",
+          "version_no": "1",
+          "state": "open",
+          "asked_by_actor_id": "act_01J9Z3K7Q7",
+          "intended_actor_id": "act_01J9Z3K7Q8"
+        },
+        "question_set_id": "qset_01J9Z3K7QD"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "stage_id": "stg_01J9Z3K7Q4",
+        "round_id": "rnd_01J9Z3K7Q5",
+        "direction": "agent_to_human",
+        "purpose": "review",
+        "question": {
+          "text": "선택지 값이 중복된 합성 질문",
+          "type": "single_choice",
+          "importance": "high",
+          "required": true,
+          "default_value": "A",
+          "options": [
+            {
+              "value": "A",
+              "label": "첫 번째"
+            },
+            {
+              "value": "A",
+              "label": "두 번째"
+            }
+          ]
+        }
+      }
+    },
+    "response": {
+      "status": 422,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_q_err_01J9Z3K7QN",
+        "error": {
+          "code": "validation_failed",
+          "message": "요청 형식이 올바르지 않습니다.",
+          "retryable": false,
+          "target": "$.body.question.options[1].value",
+          "details": {
+            "reason": "duplicate_value",
+            "value": "A"
+          },
+          "next_action": "fix_request"
+        }
+      }
+    }
+  }
+}

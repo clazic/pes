@@ -1,0 +1,87 @@
+{
+  "operation": "followups.apply",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/followups/{followup_id}/apply",
+  "auth": "human_or_permitted_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "followup_id": "fup_01J9Z3K7QJ"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_apply_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_version_id": "ver_01J9Z3K7QA",
+        "expected_rev": "7"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_apply_01J9Z3K7QN",
+        "followup": {
+          "id": "fup_01J9Z3K7QJ",
+          "state": "applied",
+          "applied_tx_id": "tx_01J9Z3K7Q2",
+          "result_version_id": "ver_01J9Z3K7QZ"
+        },
+        "thread": {
+          "id": "thr_01J9Z3K7QH",
+          "state": "resolved"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "followup_id": "fup_01J9Z3K7QJ"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_version_id": "ver_stale_01J9Z3K7Q2",
+        "expected_rev": "6"
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_apply_err_01J9Z3K7QN",
+        "error": {
+          "code": "basis_changed",
+          "message": "후속 조치의 기반 버전이 바뀌었습니다.",
+          "retryable": false,
+          "target": "$.body.base_version_id",
+          "details": {
+            "expected": "ver_stale_01J9Z3K7Q2",
+            "current": "ver_01J9Z3K7QA",
+            "current_rev": "7"
+          },
+          "next_action": "reread_followup"
+        }
+      }
+    }
+  }
+}

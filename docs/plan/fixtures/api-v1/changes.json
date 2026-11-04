@@ -1,0 +1,81 @@
+{
+  "operation": "changes.list",
+  "method": "GET",
+  "path": "/api/v1/projects/{project_id}/changes",
+  "auth": "human_or_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "query": {
+        "cursor": "cur_01J9Z3K7QK",
+        "limit": 100
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_changes_01J9Z3K7QN",
+        "events": [
+          {
+            "event_seq": "43",
+            "type": "result.submitted",
+            "object_id": "obj_01J9Z3K7Q9",
+            "before_version_id": "ver_01J9Z3K7QA",
+            "after_version_id": "ver_01J9Z3K7QZ",
+            "at": 1762312005000
+          }
+        ],
+        "next_cursor": "cur_01J9Z3K7QZ",
+        "has_more": false,
+        "epoch": "2"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "query": {
+        "cursor": "cur_epoch1_01J9Z3K7Q2",
+        "limit": 100
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 410,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_changes_err_01J9Z3K7QN",
+        "error": {
+          "code": "cursor_expired",
+          "message": "변경분 커서가 만료되었습니다. 전체 읽기 모델을 다시 받아야 합니다.",
+          "retryable": false,
+          "target": "$.query.cursor",
+          "details": {
+            "database_instance_id": "db_01J9Z3K7Q2",
+            "cursor_epoch": "1",
+            "current_epoch": "2"
+          },
+          "next_action": "resync"
+        }
+      }
+    }
+  }
+}

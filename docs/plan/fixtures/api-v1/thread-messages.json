@@ -1,0 +1,80 @@
+{
+  "operation": "threads.messages.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/threads/{thread_id}/messages",
+  "auth": "human_or_agent_or_browser",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "thread_id": "thr_01J9Z3K7QH"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_msg_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "body_md": "첨언에 대한 합성 답글입니다.",
+        "reply_to": "msg_01J9Z3K7Q2"
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_msg_01J9Z3K7QN",
+        "thread_id": "thr_01J9Z3K7QH",
+        "message": {
+          "id": "msg_01J9Z3K7QZ",
+          "version_no": "2",
+          "author_actor_id": "act_01J9Z3K7Q7"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "thread_id": "thr_01J9Z3K7QH"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "body_md": "닫힌 스레드에 남기는 합성 답글입니다.",
+        "reply_to": null
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_msg_err_01J9Z3K7QN",
+        "error": {
+          "code": "thread_closed",
+          "message": "닫힌 스레드에는 답글을 남길 수 없습니다.",
+          "retryable": false,
+          "target": "$.path.thread_id",
+          "details": {
+            "thread_id": "thr_01J9Z3K7QH",
+            "state": "archived"
+          },
+          "next_action": "open_new_thread"
+        }
+      }
+    }
+  }
+}

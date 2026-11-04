@@ -1,0 +1,104 @@
+{
+  "operation": "threads.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/threads",
+  "auth": "human_or_agent_or_browser",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_BROWSER_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_thread_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "target_object_id": "obj_01J9Z3K7Q9",
+        "target_version_id": "ver_01J9Z3K7QA",
+        "context_kind": "annotation",
+        "anchor": {
+          "exact_quote": "정책 대안은 두 가지다.",
+          "prefix": "2장 합성 정책 분석에서 ",
+          "suffix": " 첫 번째는 현행 유지다.",
+          "start_cp": 120,
+          "end_cp": 132
+        },
+        "initial_message": {
+          "body_md": "이 문장의 근거를 더 설명해 주세요."
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_thread_01J9Z3K7QN",
+        "thread": {
+          "id": "thr_01J9Z3K7QH",
+          "state": "open",
+          "anchor_id": "anc_01J9Z3K7Q2",
+          "anchor_status": "exact"
+        },
+        "message": {
+          "id": "msg_01J9Z3K7Q2",
+          "version_no": "1"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_BROWSER_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "target_object_id": "obj_01J9Z3K7Q9",
+        "target_version_id": "ver_01J9Z3K7QA",
+        "context_kind": "annotation",
+        "anchor": {
+          "exact_quote": "이 문장은 합성 본문에 없다.",
+          "prefix": "",
+          "suffix": "",
+          "start_cp": 200,
+          "end_cp": 214
+        },
+        "initial_message": {
+          "body_md": "찾을 수 없는 인용의 합성 첨언"
+        }
+      }
+    },
+    "response": {
+      "status": 422,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_thread_err_01J9Z3K7QN",
+        "error": {
+          "code": "validation_failed",
+          "message": "앵커 인용문을 대상 버전에서 찾을 수 없습니다.",
+          "retryable": false,
+          "target": "$.body.anchor.exact_quote",
+          "details": {
+            "reason": "quote_not_found",
+            "target_version_id": "ver_01J9Z3K7QA"
+          },
+          "next_action": "choose_exact_quote"
+        }
+      }
+    }
+  }
+}

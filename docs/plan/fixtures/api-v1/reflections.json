@@ -1,0 +1,94 @@
+{
+  "operation": "reflections.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/reflections",
+  "auth": "human_or_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_ref_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "target_round_id": "rnd_01J9Z3K7Q5",
+        "entries": [
+          {
+            "source_version_id": "ver_01J9Z3K7QA",
+            "disposition": "applied",
+            "rationale": "본문에 반영했다.",
+            "result_version_id": "ver_01J9Z3K7QZ",
+            "evidence_tx_id": "tx_01J9Z3K7Q2"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_ref_01J9Z3K7QN",
+        "reflection": {
+          "id": "ref_01J9Z3K7Q2",
+          "target_round_id": "rnd_01J9Z3K7Q5",
+          "applied_count": 1,
+          "partial_count": 0
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "target_round_id": "rnd_01J9Z3K7Q5",
+        "entries": [
+          {
+            "source_version_id": "ver_01J9Z3K7QA",
+            "disposition": "applied",
+            "rationale": "증거 없이 적용으로 표시하는 합성 사례",
+            "result_version_id": null,
+            "evidence_tx_id": null
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 422,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_ref_err_01J9Z3K7QN",
+        "error": {
+          "code": "evidence_required",
+          "message": "적용 증거(결과 버전 또는 적용 tx)가 없습니다.",
+          "retryable": false,
+          "target": "$.body.entries[0].result_version_id",
+          "details": {
+            "disposition": "applied",
+            "required": "result_version_id or evidence_tx_id"
+          },
+          "next_action": "add_evidence"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "operation": "uploads.complete",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/uploads/{upload_id}/complete",
+  "auth": "human_or_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "upload_id": "upl_01J9Z3K7QG"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_upload_complete_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+        "size_bytes": 12345
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_upload_complete_01J9Z3K7QN",
+        "blob": {
+          "id": "blb_01J9Z3K7QF",
+          "state": "ready",
+          "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+          "size_bytes": 12345
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "upload_id": "upl_01J9Z3K7QG"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+        "size_bytes": 12345
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_upload_complete_err_01J9Z3K7QN",
+        "error": {
+          "code": "not_ready",
+          "message": "업로드가 아직 완료되지 않았습니다.",
+          "retryable": true,
+          "target": "$.path.upload_id",
+          "details": {
+            "upload_id": "upl_01J9Z3K7QG",
+            "state": "staging",
+            "retry_after_ms": 1000
+          },
+          "next_action": "retry_after_ready"
+        }
+      }
+    }
+  }
+}

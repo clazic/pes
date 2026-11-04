@@ -1,0 +1,87 @@
+{
+  "operation": "runs.handoff",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/runs/{run_id}/handoffs",
+  "auth": "human_or_current_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_handoff_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "target_mode": "B",
+        "target_actor_id": "act_01J9Z3K7Q8",
+        "reason": "A 실행을 B로 인계",
+        "include_pending_inputs": true
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_handoff_01J9Z3K7QN",
+        "parent_run_id": "run_01J9Z3K7Q6",
+        "new_run_id": "run_01J9Z3K7QT",
+        "status": "queued",
+        "lease": {
+          "released": true,
+          "fence": "3"
+        },
+        "pending_input_count": 1
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "target_mode": "B",
+        "target_actor_id": "act_01J9Z3K7Q8",
+        "reason": "현재 담당이 아닌 에이전트의 인계 시도",
+        "include_pending_inputs": true
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_handoff_err_01J9Z3K7QN",
+        "error": {
+          "code": "forbidden",
+          "message": "현재 실행 담당 또는 소유자 사람만 인계할 수 있습니다.",
+          "retryable": false,
+          "target": "$.path.run_id",
+          "details": {
+            "allowed": "current_lease_holder_or_owner",
+            "actor_id": "act_01J9Z3K7Q7"
+          },
+          "next_action": "use_current_holder"
+        }
+      }
+    }
+  }
+}

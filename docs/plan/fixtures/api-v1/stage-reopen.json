@@ -1,0 +1,84 @@
+{
+  "operation": "stages.reopen",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/stages/{stage_id}/reopen",
+  "auth": "human_owner",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "stage_id": "stg_01J9Z3K7Q4"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_reopen_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "reason": "2장 근거를 다시 확인합니다.",
+        "expected_stage_rev": "4"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_reopen_01J9Z3K7QN",
+        "stage": {
+          "id": "stg_01J9Z3K7Q4",
+          "status": "active",
+          "current_round_id": "rnd_01J9Z3K7Q5"
+        },
+        "reopened": {
+          "prior_approval_id": "apr_01J9Z3K7Q2",
+          "stale_after_stage_ordinal": 2
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "stage_id": "stg_01J9Z3K7Q4"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "reason": "에이전트의 reopen 시도",
+        "expected_stage_rev": "4"
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_reopen_err_01J9Z3K7QN",
+        "error": {
+          "code": "human_required",
+          "message": "이 동작은 소유자 사람 세션만 할 수 있습니다.",
+          "retryable": false,
+          "target": "$.headers.Authorization",
+          "details": {
+            "actor_kind": "external_agent",
+            "required": "human_owner"
+          },
+          "next_action": "use_owner_session"
+        }
+      }
+    }
+  }
+}

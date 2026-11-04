@@ -1,0 +1,84 @@
+{
+  "operation": "rounds.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/stages/{stage_id}/rounds",
+  "auth": "human_or_permitted_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "stage_id": "stg_01J9Z3K7Q4"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_round_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_stage_rev": "3",
+        "purpose": "review",
+        "question_set_id": "qset_01J9Z3K7QD"
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_round_01J9Z3K7QN",
+        "round": {
+          "id": "rnd_01J9Z3K7Q5",
+          "round_no": "2",
+          "state": "open",
+          "stage_id": "stg_01J9Z3K7Q4"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "stage_id": "stg_01J9Z3K7Q4"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_stage_rev": "2",
+        "purpose": "review",
+        "question_set_id": "qset_01J9Z3K7QD"
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_round_err_01J9Z3K7QN",
+        "error": {
+          "code": "stage_not_active",
+          "message": "단계가 활성 상태가 아닙니다.",
+          "retryable": false,
+          "target": "$.path.stage_id",
+          "details": {
+            "stage_id": "stg_01J9Z3K7Q4",
+            "stage_status": "approved"
+          },
+          "next_action": "reread_stage"
+        }
+      }
+    }
+  }
+}

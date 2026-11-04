@@ -1,0 +1,93 @@
+{
+  "operation": "agent_tokens.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/agent-tokens",
+  "auth": "human_owner",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_token_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "label": "synthetic-runner",
+        "scopes": [
+          "context:read",
+          "run:claim",
+          "result:submit"
+        ],
+        "expires_in_days": 30
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_token_01J9Z3K7QN",
+        "token": {
+          "id": "tok_01J9Z3K7Q2",
+          "prefix": "pes_syn",
+          "token": "pes_syn_<SYNTHETIC_ONE_TIME_VALUE>",
+          "scopes": [
+            "context:read",
+            "run:claim",
+            "result:submit"
+          ],
+          "expires_at": 1764903600000,
+          "shown_once": true
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_BROWSER_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "label": "browser-agent-token-attempt",
+        "scopes": [
+          "context:read"
+        ],
+        "expires_in_days": 30
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_token_err_01J9Z3K7QN",
+        "error": {
+          "code": "owner_required",
+          "message": "에이전트 토큰은 프로젝트 소유자 사람만 발급할 수 있습니다.",
+          "retryable": false,
+          "target": "$.headers.Authorization",
+          "details": {
+            "required": "owner_human",
+            "actor_kind": "browser_agent"
+          },
+          "next_action": "use_owner_session"
+        }
+      }
+    }
+  }
+}

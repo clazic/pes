@@ -1,0 +1,79 @@
+{
+  "operation": "runs.interrupt",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/runs/{run_id}/interrupt",
+  "auth": "human_or_agent_self",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_interrupt_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "reason": "사용자 요청으로 중단",
+        "mode": "graceful"
+      }
+    },
+    "response": {
+      "status": 202,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_int_01J9Z3K7QN",
+        "operation_id": "op_01J9Z3K7QR",
+        "run_id": "run_01J9Z3K7Q6",
+        "state": "pending",
+        "accepted": true
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7QX"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "reason": "다른 실행 중단 시도",
+        "mode": "graceful"
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_int_err_01J9Z3K7QN",
+        "error": {
+          "code": "forbidden",
+          "message": "이 자격으로는 요청한 실행을 중단할 수 없습니다.",
+          "retryable": false,
+          "target": "$.path.run_id",
+          "details": {
+            "allowed": "own_run_or_owner",
+            "actor_kind": "external_agent"
+          },
+          "next_action": "use_owner_session"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "operation": "runs.claim",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/claims",
+  "auth": "agent_token",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_claim_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "run_id": "run_01J9Z3K7Q6",
+        "expected_control_rev": "12",
+        "lease_ttl_ms": 120000
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_claim_01J9Z3K7QN",
+        "run": {
+          "id": "run_01J9Z3K7Q6",
+          "status": "running",
+          "base_control_rev": "12"
+        },
+        "lease": {
+          "lease_id": "lea_01J9Z3K7QP",
+          "fence": "3",
+          "expires_at": 1762311720000
+        },
+        "context_cursor": "cur_01J9Z3K7QK"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_claim_busy_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "run_id": "run_01J9Z3K7Q6",
+        "expected_control_rev": "12",
+        "lease_ttl_ms": 120000
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_claim_err_01J9Z3K7QN",
+        "error": {
+          "code": "lease_held",
+          "message": "다른 실행이 프로젝트 실행 담당(lease)을 가지고 있습니다.",
+          "retryable": true,
+          "target": "$.body.run_id",
+          "details": {
+            "holder_run_id": "run_01J9Z3K7QX",
+            "expires_at": 1762311720000,
+            "retry_after_ms": 15000
+          },
+          "next_action": "retry_after_lease"
+        }
+      }
+    }
+  }
+}

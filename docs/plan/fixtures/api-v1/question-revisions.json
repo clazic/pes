@@ -1,0 +1,115 @@
+{
+  "operation": "questions.revise",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/questions/{question_id}/revisions",
+  "auth": "human_or_permitted_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "question_id": "qst_01J9Z3K7QB"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_qrev_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_version_id": "qvr_01J9Z3K7QC",
+        "question": {
+          "text": "2장의 정책 대안을 A/B/C로 나눌까요?",
+          "type": "single_choice",
+          "importance": "medium",
+          "required": false,
+          "default_value": null,
+          "options": [
+            {
+              "value": "A",
+              "label": "현행 유지"
+            },
+            {
+              "value": "B",
+              "label": "대안 확대"
+            },
+            {
+              "value": "C",
+              "label": "추가 검토"
+            }
+          ]
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_qrev_01J9Z3K7QN",
+        "question": {
+          "id": "qst_01J9Z3K7QB",
+          "version_id": "qvr_01J9Z3K7QZ",
+          "version_no": "2",
+          "state": "open"
+        },
+        "recheck_required": true,
+        "previous_answers_preserved": true
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "question_id": "qst_01J9Z3K7QB"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_version_id": "qvr_stale_01J9Z3K7Q2",
+        "question": {
+          "text": "오래된 기반 버전으로 수정 시도",
+          "type": "single_choice",
+          "importance": "medium",
+          "required": false,
+          "options": [
+            {
+              "value": "A",
+              "label": "현행 유지"
+            }
+          ]
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_qrev_err_01J9Z3K7QN",
+        "error": {
+          "code": "rev_conflict",
+          "message": "질문 버전이 이미 바뀌었습니다.",
+          "retryable": false,
+          "target": "$.body.base_version_id",
+          "details": {
+            "expected": "qvr_stale_01J9Z3K7Q2",
+            "current": "qvr_01J9Z3K7QC"
+          },
+          "next_action": "reread_question"
+        }
+      }
+    }
+  }
+}

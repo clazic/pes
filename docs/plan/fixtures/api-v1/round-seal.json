@@ -1,0 +1,83 @@
+{
+  "operation": "rounds.seal",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/rounds/{round_id}/seal",
+  "auth": "human_or_permitted_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "round_id": "rnd_01J9Z3K7Q5"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_seal_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "expected_round_rev": "4",
+        "snapshot_scope": "round"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_seal_01J9Z3K7QN",
+        "round": {
+          "id": "rnd_01J9Z3K7Q5",
+          "state": "sealed",
+          "sealed_snapshot_id": "snp_01J9Z3K7Q2",
+          "through_event_seq": "50"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "round_id": "rnd_01J9Z3K7Q5"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "expected_round_rev": "4",
+        "snapshot_scope": "round"
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_seal_err_01J9Z3K7QN",
+        "error": {
+          "code": "already_sealed",
+          "message": "라운드가 이미 봉인되었습니다.",
+          "retryable": false,
+          "target": "$.path.round_id",
+          "details": {
+            "round_id": "rnd_01J9Z3K7Q5",
+            "state": "sealed",
+            "snapshot_id": "snp_01J9Z3K7Q2"
+          },
+          "next_action": "reread_round"
+        }
+      }
+    }
+  }
+}

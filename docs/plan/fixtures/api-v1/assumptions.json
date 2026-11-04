@@ -1,0 +1,83 @@
+{
+  "operation": "assumptions.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/assumptions",
+  "auth": "human_or_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_asm_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "statement": "정책 대상은 광역시 거주자로 한정한다.",
+        "state": "proposed",
+        "rationale": "합성 배경 자료의 범위를 따른다.",
+        "scope": "edition"
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_asm_01J9Z3K7QN",
+        "assumption": {
+          "id": "asm_01J9Z3K7Q2",
+          "version_id": "asmv_01J9Z3K7Q2",
+          "state": "proposed",
+          "needs_review": true,
+          "assessed_by_actor_id": null
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "statement": "",
+        "state": "proposed",
+        "rationale": "빈 가정 문장 합성 사례",
+        "scope": "edition"
+      }
+    },
+    "response": {
+      "status": 422,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_asm_err_01J9Z3K7QN",
+        "error": {
+          "code": "validation_failed",
+          "message": "가정 문장이 비어 있습니다.",
+          "retryable": false,
+          "target": "$.body.statement",
+          "details": {
+            "reason": "empty",
+            "min_length": 1
+          },
+          "next_action": "fix_request"
+        }
+      }
+    }
+  }
+}

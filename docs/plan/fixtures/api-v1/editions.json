@@ -1,0 +1,84 @@
+{
+  "operation": "editions.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/editions",
+  "auth": "human_owner",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_edition_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_edition_id": "edt_01J9Z3K7Q3",
+        "edition_no": "3",
+        "title": "합성 3판",
+        "carryover_mode": "selective"
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_edition_01J9Z3K7QN",
+        "edition": {
+          "id": "edt_01J9Z3K7QZ",
+          "edition_no": "3",
+          "status": "draft",
+          "parent_edition_id": "edt_01J9Z3K7Q3"
+        },
+        "active_edition_id": "edt_01J9Z3K7Q3"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "base_edition_id": "edt_01J9Z3K7Q3",
+        "edition_no": "3",
+        "title": "활성 판이 남아 있는 상태의 합성 3판",
+        "carryover_mode": "selective"
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_edition_err_01J9Z3K7QN",
+        "error": {
+          "code": "active_edition_exists",
+          "message": "이미 활성 판이 있어 새 판을 시작할 수 없습니다.",
+          "retryable": false,
+          "target": "$.path.project_id",
+          "details": {
+            "active_edition_id": "edt_01J9Z3K7Q3"
+          },
+          "next_action": "complete_active_edition_first"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "operation": "runs.input_receipts",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/runs/{run_id}/input-receipts",
+  "auth": "agent_token",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_receipt_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "lease_id": "lea_01J9Z3K7QP",
+        "fence": "3",
+        "receipts": [
+          {
+            "input_version_id": "ver_01J9Z3K7QA",
+            "state": "seen"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_receipt_01J9Z3K7QN",
+        "accepted": [
+          {
+            "input_version_id": "ver_01J9Z3K7QA",
+            "state": "seen"
+          }
+        ]
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "lease_id": "lea_01J9Z3K7QP",
+        "fence": "3",
+        "receipts": [
+          {
+            "input_version_id": "ver_not_visible_01J9Z3K7Q2",
+            "state": "seen"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_receipt_err_01J9Z3K7QN",
+        "error": {
+          "code": "input_not_visible",
+          "message": "이 실행에 보이지 않는 입력입니다.",
+          "retryable": false,
+          "target": "$.body.receipts[0].input_version_id",
+          "details": {
+            "run_id": "run_01J9Z3K7Q6",
+            "reason": "not_in_run_targets"
+          },
+          "next_action": "check_run_targets"
+        }
+      }
+    }
+  }
+}

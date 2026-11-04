@@ -1,0 +1,79 @@
+{
+  "operation": "runs.cancel",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/runs/{run_id}/cancel",
+  "auth": "human_or_agent_self",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_cancel_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "reason": "중복 실행 정리",
+        "confirm": true
+      }
+    },
+    "response": {
+      "status": 202,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_cancel_01J9Z3K7QN",
+        "operation_id": "op_01J9Z3K7QS",
+        "run_id": "run_01J9Z3K7Q6",
+        "state": "cancel_requested",
+        "db_adoption_blocked": true,
+        "external_cancel_state": "pending"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "reason": "이미 성공한 실행 취소 시도",
+        "confirm": true
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_cancel_err_01J9Z3K7QN",
+        "error": {
+          "code": "run_terminal",
+          "message": "이미 끝난 실행은 취소할 수 없습니다.",
+          "retryable": false,
+          "target": "$.path.run_id",
+          "details": {
+            "run_id": "run_01J9Z3K7Q6",
+            "status": "succeeded"
+          },
+          "next_action": "create_new_run"
+        }
+      }
+    }
+  }
+}

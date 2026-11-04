@@ -1,0 +1,61 @@
+{
+  "operation": "files.content",
+  "method": "GET",
+  "path": "/api/v1/projects/{project_id}/files/{blob_id}/content",
+  "auth": "human_or_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "blob_id": "blb_01J9Z3K7QF"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "Content-Disposition": "inline; filename=\"synthetic-figure.png\"",
+        "X-PES-Format-Version": "1.0"
+      },
+      "body_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z1ioAAAAASUVORK5CYII="
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "blob_id": "blb_01J9Z3K7QF"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_file_err_01J9Z3K7QN",
+        "error": {
+          "code": "policy_blocked",
+          "message": "OpenCode Go 전송이 꺼져 있어 에이전트의 파일 읽기를 차단했습니다.",
+          "retryable": false,
+          "target": "$.path.blob_id",
+          "details": {
+            "policy": "opencode_go",
+            "allow": false,
+            "blob_id": "blb_01J9Z3K7QF"
+          },
+          "next_action": "owner_enable_policy"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "operation": "threads.resolutions.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/threads/{thread_id}/resolutions",
+  "auth": "human_or_permitted_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "thread_id": "thr_01J9Z3K7QH"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_resolution_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "resolution": "edit_text",
+        "reason": "문장을 보강합니다.",
+        "followup": {
+          "kind": "edit_text",
+          "target_version_id": "ver_01J9Z3K7QA"
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_resolution_01J9Z3K7QN",
+        "thread": {
+          "id": "thr_01J9Z3K7QH",
+          "state": "resolved"
+        },
+        "followup": {
+          "id": "fup_01J9Z3K7QJ",
+          "state": "proposed"
+        },
+        "applied": false,
+        "note": "해결됨과 반영됨은 다릅니다."
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "thread_id": "thr_01J9Z3K7QH"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "resolution": "edit_text",
+        "reason": "이미 해결된 스레드의 합성 재요청",
+        "followup": {
+          "kind": "edit_text",
+          "target_version_id": "ver_01J9Z3K7QA"
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_resolution_err_01J9Z3K7QN",
+        "error": {
+          "code": "already_resolved",
+          "message": "이미 처리된 스레드입니다.",
+          "retryable": false,
+          "target": "$.path.thread_id",
+          "details": {
+            "thread_id": "thr_01J9Z3K7QH",
+            "state": "resolved",
+            "resolution_id": "res_01J9Z3K7Q2"
+          },
+          "next_action": "reread_thread"
+        }
+      }
+    }
+  }
+}

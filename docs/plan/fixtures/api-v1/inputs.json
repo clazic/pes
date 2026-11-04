@@ -1,0 +1,81 @@
+{
+  "operation": "runs.inputs",
+  "method": "GET",
+  "path": "/api/v1/projects/{project_id}/runs/{run_id}/inputs",
+  "auth": "agent_token",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "query": {
+        "cursor": "cur_01J9Z3K7QK",
+        "wait_ms": 25000
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_inputs_01J9Z3K7QN",
+        "inputs": [
+          {
+            "input_version_id": "ver_01J9Z3K7QA",
+            "kind": "answer",
+            "question_id": "qst_01J9Z3K7QB",
+            "available_at": 1762312000000,
+            "state": "new"
+          }
+        ],
+        "next_cursor": "cur_01J9Z3K7QZ",
+        "has_more": false,
+        "epoch": "2"
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "run_id": "run_01J9Z3K7Q6"
+      },
+      "query": {
+        "cursor": "cur_stale_01J9Z3K7Q2",
+        "wait_ms": 25000
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json"
+      }
+    },
+    "response": {
+      "status": 400,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_inputs_err_01J9Z3K7QN",
+        "error": {
+          "code": "cursor_invalid",
+          "message": "입력 커서가 유효하지 않습니다. 처음부터 다시 읽어야 합니다.",
+          "retryable": false,
+          "target": "$.query.cursor",
+          "details": {
+            "reason": "epoch_changed",
+            "current_epoch": "2"
+          },
+          "next_action": "reread_context"
+        }
+      }
+    }
+  }
+}

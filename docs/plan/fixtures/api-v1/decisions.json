@@ -1,0 +1,86 @@
+{
+  "operation": "decisions.create",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/decisions",
+  "auth": "human_or_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_dec_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "scope": "edition",
+        "statement": "2판은 정책 대안 B를 중심으로 구성한다.",
+        "state": "proposed",
+        "supersedes": null,
+        "rationale": "1판 검토 결과를 반영한다."
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_dec_01J9Z3K7QN",
+        "decision": {
+          "id": "dec_01J9Z3K7Q2",
+          "version_id": "decv_01J9Z3K7Q2",
+          "state": "proposed",
+          "scope": "edition"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "scope": "edition",
+        "statement": "이미 폐기된 결정을 대체하는 합성 결정",
+        "state": "proposed",
+        "supersedes": "dec_revoked_01J9Z3K7Q2",
+        "rationale": "대체 대상 충돌 합성 사례"
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_dec_err_01J9Z3K7QN",
+        "error": {
+          "code": "supersedes_conflict",
+          "message": "대체 대상 결정이 현재 결정과 맞지 않습니다.",
+          "retryable": false,
+          "target": "$.body.supersedes",
+          "details": {
+            "target_state": "revoked",
+            "current_decision_id": "dec_01J9Z3K7Q2"
+          },
+          "next_action": "reread_decisions"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "operation": "policies.opencode_go.revise",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/policies/opencode-go/revisions",
+  "auth": "human_owner",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_policy_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "allow_opencode_go": false,
+        "reason": "합성 정책 전환 시험",
+        "expected_policy_rev": "5"
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_policy_01J9Z3K7QN",
+        "policy": {
+          "id": "pol_01J9Z3K7Q2",
+          "policy_rev": "6",
+          "allow_opencode_go": false,
+          "changed_by_user_id": "usr_01J9Z3K7QQ"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2"
+      },
+      "headers": {
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "allow_opencode_go": true,
+        "reason": "에이전트의 정책 변경 시도",
+        "expected_policy_rev": "5"
+      }
+    },
+    "response": {
+      "status": 403,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_policy_err_01J9Z3K7QN",
+        "error": {
+          "code": "owner_required",
+          "message": "전송 허용 정책은 프로젝트 소유자 사람만 바꿀 수 있습니다.",
+          "retryable": false,
+          "target": "$.headers.Authorization",
+          "details": {
+            "required": "owner_human",
+            "actor_kind": "external_agent"
+          },
+          "next_action": "use_owner_session"
+        }
+      }
+    }
+  }
+}
