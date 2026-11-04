@@ -1,0 +1,22 @@
+{
+ "word": "BANANA-7731",
+ "first": {
+  "exit": 0,
+  "stderr": "",
+  "session_id": "75adc41a-bbc2-45d1-8fed-3fe4778c3464",
+  "num_turns": 1,
+  "duration_ms": 4061,
+  "total_cost_usd": 0.08955980000000001,
+  "result": "OK"
+ },
+ "second": {
+  "exit": 0,
+  "stderr": "",
+  "session_id": "75adc41a-bbc2-45d1-8fed-3fe4778c3464",
+  "num_turns": 1,
+  "duration_ms": 1903,
+  "total_cost_usd": 0.17261750000000003,
+  "result": "BANANA-7731"
+ },
+ "continued": true
+}

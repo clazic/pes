@@ -1,0 +1,92 @@
+{
+ "name": "r2-resume",
+ "exit": 0,
+ "duration_ms": 18658,
+ "project_json_before": "d05da48a8c69df73",
+ "project_json_after": "e71656c88d51bfd1",
+ "project_json_changed": true,
+ "pes_calls": [
+  {
+   "time": "2026-11-05T03:04:56",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "pending",
+    "<임시>/home/proj"
+   ]
+  },
+  {
+   "time": "2026-11-05T03:05:02",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "round-start",
+    "<임시>/home/proj",
+    "plan"
+   ]
+  },
+  {
+   "time": "2026-11-05T03:05:06",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "mark",
+    "<임시>/home/proj",
+    "<임시>/home/proj/feedback/plan-R0-20261105-030453.json"
+   ]
+  },
+  {
+   "time": "2026-11-05T03:05:09",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "render",
+    "<임시>/home/proj",
+    "plan"
+   ]
+  },
+  {
+   "time": "2026-11-05T03:05:09",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "status",
+    "<임시>/home/proj"
+   ]
+  }
+ ],
+ "pes_write_calls": [
+  {
+   "time": "2026-11-05T03:05:02",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "round-start",
+    "<임시>/home/proj",
+    "plan"
+   ]
+  },
+  {
+   "time": "2026-11-05T03:05:06",
+   "owner": "agent-a",
+   "cwd": "<임시>/home/proj",
+   "argv": [
+    "mark",
+    "<임시>/home/proj",
+    "<임시>/home/proj/feedback/plan-R0-20261105-030453.json"
+   ]
+  }
+ ],
+ "direct_project_json_edit_suspected": false,
+ "claude": {
+  "session_id": "72cb8e0b-0cd4-491c-8799-b215192412b0",
+  "num_turns": 7,
+  "duration_ms": 17688,
+  "total_cost_usd": 0.3662496,
+  "is_error": false,
+  "subtype": "success",
+  "permission_denials": [],
+  "result": "처리한 파일은 `plan-R0-20261105-030453.json` 하나이고, 미처리 답은 0개입니다. 이 답으로 기획 R1을 시작했고, 처리 완료 표시와 `render`까지 마쳤습니다."
+ },
+ "stderr": ""
+}

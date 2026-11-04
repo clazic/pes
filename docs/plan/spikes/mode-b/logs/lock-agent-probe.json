@@ -1,0 +1,38 @@
+{
+ "init": {
+  "exit": 0,
+  "claude": {
+   "session_id": null,
+   "num_turns": null,
+   "duration_ms": null,
+   "total_cost_usd": null,
+   "is_error": null,
+   "permission_denials": null,
+   "result": null
+  }
+ },
+ "lock_a": {
+  "exit": 0,
+  "claude": {
+   "session_id": null,
+   "num_turns": null,
+   "duration_ms": null,
+   "total_cost_usd": null,
+   "is_error": null,
+   "permission_denials": null,
+   "result": null
+  }
+ },
+ "agent_b": {
+  "exit": 0,
+  "claude": {
+   "session_id": "ac41bc65-7b2c-46b5-b8a6-1bd41faf22b1",
+   "num_turns": 2,
+   "duration_ms": 4573,
+   "total_cost_usd": 0.2044315,
+   "is_error": false,
+   "permission_denials": [],
+   "result": "**실패했습니다.** 락을 획득하지 못했습니다.\n\n- 종료 코드: 3\n- 출력 메시지(원문):\n  ```\n  다른 세션이 사용 중: agent-a… (2026-11-05 03:07부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force\n  ```\n\nagent-a 세션이 이미 이 프로젝트를 잠그고 있고, 마지막 기록이 0분 전이라 아직 활성 상태로 보입니다. 지시대로 `--force`는 쓰지 않았고, 파일도 수정하지 않았습니다."
+  }
+ }
+}

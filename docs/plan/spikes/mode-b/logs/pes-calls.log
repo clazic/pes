@@ -1,0 +1,29 @@
+{"time": "2026-11-05T03:04:33", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["lock", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:04:36", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["status", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:04:41", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["merge", "<임시>/home/proj", "plan", "<임시>/home/proj/result-r1.json"]}
+{"time": "2026-11-05T03:04:44", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["render", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:04:46", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["ask-prep", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:04:49", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["ask", "<임시>/home/proj", "<임시>/home/proj/ask/plan-start.json"]}
+{"time": "2026-11-05T03:04:50", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["status", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:04:53", "owner": "agent-a", "cwd": "<저장소>", "argv": ["pending", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:04:56", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["pending", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:05:02", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["round-start", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:05:06", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["mark", "<임시>/home/proj", "<임시>/home/proj/feedback/plan-R0-20261105-030453.json"]}
+{"time": "2026-11-05T03:05:09", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["render", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:05:09", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["status", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:05:15", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["pending", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:05:21", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["round-start", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:05:25", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["merge", "<임시>/home/proj", "plan", "<임시>/home/proj/result-r2.json"]}
+{"time": "2026-11-05T03:05:28", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["mark", "<임시>/home/proj", "<임시>/home/proj/feedback/plan-R1-20261105-030512.json"]}
+{"time": "2026-11-05T03:05:31", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["render", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:05:31", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["status", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:05:45", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["pending", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:05:54", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["note", "<임시>/home/proj", "R2까지 처리함. 다음은 R3 준비."]}
+{"time": "2026-11-05T03:05:55", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["mark", "<임시>/home/proj", "<임시>/home/proj/feedback/plan-R2-20261105-030533.json"]}
+{"time": "2026-11-05T03:05:59", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["render", "<임시>/home/proj", "plan"]}
+{"time": "2026-11-05T03:05:59", "owner": "agent-a", "cwd": "<임시>/home/proj", "argv": ["status", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:06:23", "owner": "agent-b", "cwd": "<저장소>", "argv": ["lock", "<임시>/home/proj"]}
+{"time": "2026-11-05T03:06:23", "owner": "agent-b", "cwd": "<저장소>", "argv": ["merge", "<임시>/home/proj", "plan", "<임시>/lock-probe.json"]}
+{"time": "2026-11-05T03:06:24", "owner": "agent-b", "cwd": "<저장소>", "argv": ["lock", "<임시>/home/proj", "--force"]}
+{"time": "2026-11-05T03:06:24", "owner": "agent-a", "cwd": "<저장소>", "argv": ["merge", "<임시>/home/proj", "plan", "<임시>/lock-probe.json"]}
+{"time": "2026-11-05T03:06:24", "owner": "agent-b", "cwd": "<저장소>", "argv": ["unlock", "<임시>/home/proj"]}
