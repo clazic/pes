@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
@@ -38,4 +42,4 @@ jobs:
 
       - name: Run tests
         timeout-minutes: 8
-        run: python -m pytest -v -o faulthandler_timeout=120 -p no:cacheprovider
+        run: python -m pytest -q -o faulthandler_timeout=120 -p no:cacheprovider
