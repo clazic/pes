@@ -15,7 +15,11 @@ __pycache__/
 # 혹시 플러그인 폴더 안에서 만든 프로젝트·키
 pes-projects/
 *.pem
+*.key
+*.p12
 .env
+.env.*
+secrets*.json
 
 # 큰 대화 기록(로컬에만 보관)
 docs/archive/**/*.jsonl
