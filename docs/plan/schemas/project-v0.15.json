@@ -1,0 +1,976 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/clazic/pes/blob/b109177/docs/plan/schemas/project-v0.15.json",
+  "title": "PES project.json / library.json — v0.15.6 (b109177)",
+  "description": "PES v0.15.6(기준 커밋 b109177)의 project.json과 library.json 구조를 기술한 스키마다. 검증기 구현이 아니라 현행 구조 문서다. scripts/pes.py의 init(:186-217), load(:96-115), save(:147-159), new_stage(:167-171), blank_item(:173-179)과 합성 프로젝트(임시 PES_HOME)로 확인했다. project.json과 library.json 중 하나의 문서를 기술하며, 알려진 필드만 적고 모르는 필드는 additionalProperties: true로 막지 않는다. 중요: 최상위 \"pes\": 1은 scripts/pes.py:206의 init에서 쓰기만 하고, 저장소의 어떤 코드도 이 값을 읽지 않는다(2단계 정리 대상). load()는 stages의 빠진 필드와 processed·notes를 채우고, library.json이 있으면 project.json의 library로 올린다(:111-113). save()는 library를 library.json으로 분리하고(:150-156), project.json.tmp에 쓴 뒤 교체한다(:156-159).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/project"
+    },
+    {
+      "$ref": "#/$defs/library"
+    }
+  ],
+  "$defs": {
+    "project": {
+      "title": "project.json",
+      "type": "object",
+      "description": "프로젝트 하나의 단일 진실 원천. init이 만들고, 모든 CLI 쓰기는 save()를 지난다(scripts/pes.py:147-159). 다만 스킬은 이 파일을 직접 편집하기도 한다(skills/core/SKILL.md:62-73).",
+      "required": [
+        "pes",
+        "topic",
+        "slug",
+        "created",
+        "current",
+        "settings",
+        "stages"
+      ],
+      "properties": {
+        "pes": {
+          "const": 1,
+          "description": "스키마 판 번호처럼 보이는 필드. scripts/pes.py:206의 init이 1을 쓰기만 하고, 저장소 코드에서 읽는 곳이 없다. 동작에 쓰이지 않는 write-only 필드다."
+        },
+        "topic": {
+          "type": "string",
+          "description": "프로젝트 주제. init의 --topic 값(scripts/pes.py:206)."
+        },
+        "slug": {
+          "type": "string",
+          "description": "프로젝트 이름. --slug가 없으면 폴더 이름(scripts/pes.py:206). 서버 경로 /<slug>/ 로도 쓰인다(scripts/serve.py:40-47)."
+        },
+        "created": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "만든 날짜 YYYY-MM-DD(scripts/pes.py:206)."
+        },
+        "current": {
+          "enum": [
+            "plan",
+            "research",
+            "analyze",
+            "write",
+            "verify",
+            "publish"
+          ],
+          "description": "지금 진행 중인 단계 키. 단계 목록은 scripts/pes.py:60-61."
+        },
+        "settings": {
+          "type": "object",
+          "description": "프로젝트 전체 설정과 기획 시작 질문 답. 기획 답은 여기에도 저장하고(스킬 절차, skills/core/SKILL.md:117), 보고서 형식은 settings.stage_reports에 둔다(scripts/pes.py:660-663).",
+          "additionalProperties": true
+        },
+        "processed": {
+          "type": "array",
+          "description": "처리 완료로 표시한 답 파일 이름 목록. cmd_mark가 파일 이름만 넣고(scripts/pes.py:556-565), pending_files가 이 목록을 빼고 센다(:516-519).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "마지막 publish 단계 승인 여부. approve가 true로 만들고(scripts/pes.py:460-462), reopen은 되돌리지 않는다(:496-514) — 알려진 결함 후보다."
+        },
+        "executive_summary": {
+          "type": "string",
+          "description": "최종 보고서 요약. assemble이 out/report.md 앞에 넣는다(scripts/pes.py:876-878)."
+        },
+        "conclusion": {
+          "type": "string",
+          "description": "최종 보고서 결론. assemble이 원고 뒤에 넣는다(scripts/pes.py:899-900)."
+        },
+        "notes": {
+          "type": "array",
+          "description": "인계 메모. cmd_note가 추가하고(scripts/pes.py:643-657), status가 최근 5개를 보여 준다(:534-539).",
+          "items": {
+            "$ref": "#/$defs/note"
+          }
+        },
+        "stages": {
+          "type": "object",
+          "description": "6단계 상태. init이 모두 만들고(scripts/pes.py:209), load()가 빠진 단계·필드를 new_stage() 기본값으로 채운다(:99-107).",
+          "required": [
+            "plan",
+            "research",
+            "analyze",
+            "write",
+            "verify",
+            "publish"
+          ],
+          "properties": {
+            "plan": {
+              "$ref": "#/$defs/stage"
+            },
+            "research": {
+              "$ref": "#/$defs/stage"
+            },
+            "analyze": {
+              "$ref": "#/$defs/stage"
+            },
+            "write": {
+              "$ref": "#/$defs/stage"
+            },
+            "verify": {
+              "$ref": "#/$defs/stage"
+            },
+            "publish": {
+              "$ref": "#/$defs/stage"
+            }
+          },
+          "additionalProperties": false
+        },
+        "library": {
+          "$ref": "#/$defs/library",
+          "description": "예전에 project.json 안에 있던 참고자료. save()는 이 키를 파일에서 빼고 library.json으로 따로 쓴다(scripts/pes.py:150-156). load()는 library.json이 있으면 이 자리로 올린다(:111-113). 따라서 정상 저장된 project.json에는 이 키가 없다."
+        }
+      },
+      "additionalProperties": true
+    },
+    "library": {
+      "title": "library.json",
+      "type": "object",
+      "description": "기존 조사(research-loop)를 --import로 가져온 참고자료. import_library가 만들고(scripts/pes.py:219-240), save()가 project.json에서 분리해 쓴다(:150-156).",
+      "required": [
+        "source",
+        "imported",
+        "items"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "가져온 원천 폴더 경로(scripts/pes.py:237)."
+        },
+        "imported": {
+          "type": "string",
+          "description": "가져온 시각. now() 형식 YYYY-MM-DD HH:MM(scripts/pes.py:181-182, :237)."
+        },
+        "round": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "원천 조사의 마지막 라운드. state.json의 round를 그대로 쓴다(scripts/pes.py:237)."
+        },
+        "topic": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "원천 조사의 주제. import_library가 st.get('topic')를 그대로 쓰므로 원천 state.json에 topic이 없으면 null이 저장된다(scripts/pes.py:237)."
+        },
+        "settings": {
+          "type": "object",
+          "description": "원천 조사의 설정을 그대로 옮긴다(scripts/pes.py:238).",
+          "additionalProperties": true
+        },
+        "items": {
+          "type": "array",
+          "description": "가져온 조사 항목. status=removed는 빼고, shots 경로 앞에 library/를 붙인다(scripts/pes.py:230-236). 항목 구조는 단계 항목과 같지만 일부 필드가 빠질 수 있어 status를 필수로 두지 않는다.",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "suggestions": {
+          "type": "array",
+          "description": "원천 조사의 남은 질문·제안을 그대로 옮긴다(scripts/pes.py:239).",
+          "items": {}
+        },
+        "warnings": {
+          "type": "array",
+          "description": "원천 조사의 경고를 그대로 옮긴다(scripts/pes.py:239). 현행 코드는 값을 쓰지 않고 통과시키므로 항목 형태는 미확인이다.",
+          "items": {}
+        }
+      },
+      "additionalProperties": true
+    },
+    "stage": {
+      "title": "stages.<stage>",
+      "type": "object",
+      "description": "단계 하나의 상태. new_stage()가 기본값을 만들고(scripts/pes.py:167-171), round-start·merge·approve·reopen·report·qa가 바꾼다. load()는 빠진 필드를 new_stage() 값으로 채운다(:99-107).",
+      "required": [
+        "status",
+        "round",
+        "settings",
+        "items",
+        "review",
+        "suggestions",
+        "warnings",
+        "changes",
+        "history",
+        "summary",
+        "approved_at",
+        "stale",
+        "reports"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "asking",
+            "active",
+            "approved"
+          ],
+          "description": "pending(아직 시작 전), asking(시작 질문 중), active(라운드 진행), approved(승인됨). init은 plan만 asking으로 시작한다(scripts/pes.py:210)."
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "완료했거나 진행 중인 라운드 번호. round-start마다 1씩 오른다(scripts/pes.py:300)."
+        },
+        "settings": {
+          "type": "object",
+          "description": "그 단계의 시작 질문 답. 스킬이 answers를 여기에 저장한다(skills/core/SKILL.md:117). 코드가 직접 쓰는 경로는 없다 — 미확인 항목.",
+          "additionalProperties": true
+        },
+        "items": {
+          "type": "array",
+          "description": "그 단계의 항목. merge가 만들고 갱신한다(scripts/pes.py:315-367).",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/item"
+              },
+              {
+                "required": [
+                  "status"
+                ]
+              }
+            ]
+          }
+        },
+        "review": {
+          "description": "라운드 AI 점검. 스킬이 작성하고(skills/core/SKILL.md:168-186), 대시보드가 현재 라운드와 같을 때만 보여 준다(templates/dashboard.html:436-441).",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/review"
+            }
+          ]
+        },
+        "suggestions": {
+          "type": "array",
+          "description": "남은 질문·제안. merge가 open_questions를 '[#id] 질문' 문자열로 넣는다(scripts/pes.py:358-359).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "description": "경고 목록. new_stage가 빈 배열로 만들지만(scripts/pes.py:169), 현행 코드가 값을 쓰는 곳은 확인되지 않았다.",
+          "items": {}
+        },
+        "changes": {
+          "type": "array",
+          "description": "이번 라운드의 변경점 3~5줄. 스킬이 '짧은 라벨: 내용' 형식으로 채우고(skills/core/SKILL.md:118), round-start가 비운다(scripts/pes.py:302).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "history": {
+          "type": "array",
+          "description": "라운드·승인·다시 열기 이력 한 줄들. round-start(scripts/pes.py:293-299), approve(:450), reopen(:503)이 추가한다.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "description": "단계 보고서 첫 장 요약. 스킬이 5~8줄로 채운다(skills/core/SKILL.md:142)."
+        },
+        "approved_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "승인 시각. approve가 now()로 넣고(scripts/pes.py:447), reopen이 null로 되돌린다(:500)."
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "앞 단계가 다시 열려 '다시 확인 필요'가 된 상태. reopen이 뒤 단계를 돌며 true를 넣는다(scripts/pes.py:506-509)."
+        },
+        "reports": {
+          "type": "array",
+          "description": "만들어진 단계 보고서 등록 목록. report가 reports/<stage>/ 폴더를 훑어 채운다(scripts/pes.py:853-858).",
+          "items": {
+            "$ref": "#/$defs/report"
+          }
+        },
+        "reports_built": {
+          "type": "string",
+          "description": "보고서 등록을 마지막으로 갱신한 시각. report가 쓴다(scripts/pes.py:859)."
+        },
+        "qa": {
+          "type": "array",
+          "description": "독립 검토(QC/QA) 결과. cmd_qa가 라운드별로 하나씩 넣고 같은 라운드는 교체한다(scripts/pes.py:1001).",
+          "items": {
+            "$ref": "#/$defs/qa"
+          }
+        },
+        "review_log": {
+          "type": "array",
+          "description": "qa를 기록할 때 그때의 자체 점검(review)을 라운드와 함께 남긴다(scripts/pes.py:1002-1003).",
+          "items": {
+            "$ref": "#/$defs/review"
+          }
+        },
+        "carry_over": {
+          "type": "array",
+          "description": "승인했지만 끝내지 못한 일을 다음 단계로 넘긴 목록. 스킬이 {item, title, request, from}으로 채우고(skills/core/SKILL.md:133), 단계 보고서가 「남은 일」로 싣는다(scripts/pes.py:785-788).",
+          "items": {
+            "type": "object",
+            "required": [
+              "item",
+              "request"
+            ],
+            "properties": {
+              "item": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              },
+              "request": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "item": {
+      "title": "항목",
+      "type": "object",
+      "description": "단계 안의 일 단위. blank_item()이 기본값을 만들고(scripts/pes.py:173-179), merge가 결과를 반영한다(:315-367). kind·status 값 목록은 스킬 스키마(skills/core/SKILL.md:75-84)에 있다.",
+      "required": [
+        "id",
+        "title"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "단계 안에서 유일한 번호. merge는 없으면 max+1을 준다(scripts/pes.py:324-328)."
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "항목 종류. 현행 값: rq(연구 질문), chapter(목차), topic(조사 항목), issue(쟁점), table(비교표), insight(시사점), section(원고), claim(주장), output(산출물). 표시 이름은 scripts/pes.py:654-656.",
+          "examples": [
+            "rq",
+            "chapter",
+            "topic",
+            "issue",
+            "table",
+            "insight",
+            "section",
+            "claim",
+            "output"
+          ]
+        },
+        "question": {
+          "type": "string",
+          "description": "이 항목이 답하려는 질문."
+        },
+        "reuse": {
+          "type": "integer",
+          "description": "참고자료(library) 항목 id. 기획 topic이 기존 조사와 겹칠 때 skills/plan/SKILL.md:24,28이 기록하고, approve의 handoff_plan이 이 값을 읽어 조사 항목을 재사용한다(scripts/pes.py:481-489)."
+        },
+        "model": {
+          "type": "string",
+          "description": "그 항목을 조사한 모델 이름. skills/research/SKILL.md:33이 sonnet·opus 등으로 항목에 남기게 한다. merge는 이 필드를 복사하지 않으므로 스킬이 직접 쓰며, 허용 값 집합은 미확인이다."
+        },
+        "status": {
+          "enum": [
+            "new",
+            "deepen",
+            "revise",
+            "browser",
+            "done",
+            "removed",
+            "failed"
+          ],
+          "description": "new·deepen·revise·browser는 할 일, done은 완료, removed는 목록에서 감춤, failed는 실패. 할 일 판정은 scripts/pes.py:529, templates/dashboard.html:424."
+        },
+        "request": {
+          "type": "string",
+          "description": "사용자가 그 항목에 붙인 수정·심화 지시."
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "merge로 결과가 반영된 횟수. merge가 1씩 올린다(scripts/pes.py:361)."
+        },
+        "updated_round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "마지막으로 갱신된 라운드. merge가 현재 라운드를 넣는다(scripts/pes.py:362)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "항목 요약(마크다운)."
+        },
+        "details": {
+          "type": "string",
+          "description": "항목 본문(마크다운). 집필 단계에서는 각주 [^k]가 sources의 k번째를 가리킨다(scripts/pes.py:335-337)."
+        },
+        "sources": {
+          "type": "array",
+          "description": "출처 목록. merge는 일반 단계에서 URL 중복을 빼고 기존 목록 뒤에 누적하고, write 단계·kind=section 항목은 각주 번호(=sources 순서)를 지키려고 제공된 목록으로 통째로 교체한다(scripts/pes.py:334-344).",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "stats": {
+          "type": "array",
+          "description": "수치 목록. merge는 입력에 stats가 있으면 기존 목록을 통째로 교체하고 name/label을 정규화한다(scripts/pes.py:345-346).",
+          "items": {
+            "$ref": "#/$defs/stat"
+          }
+        },
+        "shots": {
+          "type": "array",
+          "description": "스크린샷·차트 경로. 프로젝트 폴더 기준 상대 경로.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "enum": [
+            "",
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "신뢰도."
+        },
+        "conflicts": {
+          "type": "array",
+          "description": "출처·항목 사이 충돌. 문자열 또는 객체를 담는다.",
+          "items": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "verify": {
+          "description": "검증 결과. 기본값은 null(scripts/pes.py:176). pes:verifier가 {claims:[...]}를 돌려주고(agents/verifier.md:17-19), merge가 이 값을 그대로 복사한다(scripts/pes.py:331-333). claims 밖의 확장 형태는 미확인이다.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/verifyClaim"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        },
+        "links": {
+          "type": "object",
+          "description": "근거·추적선. 키는 단계 키 또는 'library', 값은 항목 id 배열이다. merge가 중복 없이 합친다(scripts/pes.py:353-357).",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "user_links": {
+          "type": "array",
+          "description": "사용자가 준 링크·파일. digest가 상태와 메모를 보여 준다(scripts/pes.py:612-614), 대시보드 표시 templates/dashboard.html:536.",
+          "items": {
+            "$ref": "#/$defs/userLink"
+          }
+        },
+        "verdict": {
+          "type": "string",
+          "description": "판정(검증 단계 등). merge가 복사한다(scripts/pes.py:331)."
+        },
+        "order": {
+          "type": "integer",
+          "description": "정렬 순서. assemble·stage_md가 order를 먼저 보고 없으면 id를 쓴다(scripts/pes.py:733, :874)."
+        },
+        "path": {
+          "type": "string",
+          "description": "산출물 항목이 가리키는 파일 경로(예: out/report.hwpx). skills/publish/SKILL.md:23."
+        }
+      },
+      "additionalProperties": true
+    },
+    "review": {
+      "title": "AI 점검(review)",
+      "type": "object",
+      "description": "라운드마다 AI가 쓰는 점검 질문 묶음. 스킬 형식은 skills/core/SKILL.md:168-186.",
+      "required": [
+        "questions"
+      ],
+      "properties": {
+        "round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "이 점검이 만들어진 라운드. 현재 라운드와 같아야 대시보드에 표시된다(templates/dashboard.html:436)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "점검 한 줄 요약."
+        },
+        "questions": {
+          "type": "array",
+          "description": "점검 질문 3~8개.",
+          "items": {
+            "$ref": "#/$defs/question"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "question": {
+      "title": "질문",
+      "type": "object",
+      "description": "시작 질문 명세(questions/<stage>.json, ask/<id>.json)와 AI 점검 질문에 공통으로 쓰이는 모양. 렌더는 templates/_questions.html:33-57.",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "질문 id. 답에서는 이 id와 id__other를 키로 쓴다(templates/_questions.html:87-88)."
+        },
+        "label": {
+          "type": "string",
+          "description": "화면에 보이는 질문 문구."
+        },
+        "help": {
+          "type": "string",
+          "description": "질문 아래 도움말."
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "입력 칸 안내문."
+        },
+        "type": {
+          "enum": [
+            "single",
+            "multi",
+            "text",
+            "textarea"
+          ],
+          "description": "single=라디오, multi=체크박스, text=한 줄, textarea=여러 줄. templates/_questions.html:37-47."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "필수 여부. 비면 전송을 막는다(templates/_questions.html:86)."
+        },
+        "default": {
+          "description": "입력 칸 기본값. templates/_questions.html:37-38."
+        },
+        "other": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "기타·덧붙일 말 칸의 안내문. 문자열이면 그 문구를 placeholder로 쓴다(templates/_questions.html:35-36)."
+        },
+        "options": {
+          "type": "array",
+          "description": "선택지. recommended가 있으면 미리 선택된다(templates/_questions.html:41-46).",
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "gap": {
+          "$ref": "#/$defs/gap",
+          "description": "AI 점검 질문이 가리키는 부족한 점."
+        },
+        "show_if": {
+          "type": "object",
+          "description": "조건부 표시. id 질문의 답이 in 배열에 들 때만 보인다(templates/_questions.html:66-75).",
+          "required": [
+            "id",
+            "in"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "in": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "option": {
+      "title": "선택지",
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string",
+          "description": "선택지 아래 짧은 설명."
+        },
+        "recommended": {
+          "type": "boolean",
+          "description": "추천 표시와 미리 선택."
+        }
+      },
+      "additionalProperties": true
+    },
+    "gap": {
+      "title": "점검 gap",
+      "type": "object",
+      "description": "AI 점검이 찾은 부족한 점의 종류와 위치. skills/core/SKILL.md:172-180.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "conflict",
+            "weak",
+            "blank",
+            "stale",
+            "decide",
+            "scope"
+          ],
+          "description": "충돌·근거 부족·빈칸·오래된 자료·결정 필요·범위 이탈."
+        },
+        "item": {
+          "type": "integer",
+          "description": "관련 항목 번호."
+        },
+        "detail": {
+          "type": "string",
+          "description": "구체적인 근거 한 줄."
+        }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "title": "출처",
+      "type": "object",
+      "description": "항목의 근거 출처. 원문 확인 기준 method는 browser·kosis·law·vworld다(scripts/pes.py:64).",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string",
+          "description": "얻은 방법. search·fetch·browser·kosis·law·vworld 등.",
+          "examples": [
+            "search",
+            "fetch",
+            "browser",
+            "kosis",
+            "law",
+            "vworld"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "description": "자료 기준일·작성일."
+        },
+        "note": {
+          "type": "string"
+        },
+        "orgId": {
+          "type": "string",
+          "description": "통계 원표 기관 id(KOSIS 등)."
+        },
+        "tblId": {
+          "type": "string",
+          "description": "통계 원표 id."
+        }
+      },
+      "additionalProperties": true
+    },
+    "stat": {
+      "title": "수치",
+      "type": "object",
+      "description": "항목이 인용하는 수치. merge가 name/label을 맞춘다(scripts/pes.py:345-346).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "unit": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string",
+          "description": "기준 시점·기간."
+        },
+        "method": {
+          "type": "string",
+          "description": "출처 방법(예: kosis)."
+        },
+        "orgId": {
+          "type": "string"
+        },
+        "tblId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "report": {
+      "title": "단계 보고서 등록",
+      "type": "object",
+      "description": "reports/<stage>/ 폴더의 파일 하나. report가 확장자로 형식을 정해 등록한다(scripts/pes.py:853-858).",
+      "required": [
+        "format",
+        "path"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "description": "md·html·eli5·docx·hwpx·pdf·pptx 등. 확장자에서 뽑는다(scripts/pes.py:854-856)."
+        },
+        "label": {
+          "type": "string",
+          "description": "화면에 보이는 형식 이름(scripts/pes.py:657-659)."
+        },
+        "path": {
+          "type": "string",
+          "description": "프로젝트 폴더 기준 상대 경로."
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "파일 크기."
+        },
+        "round": {
+          "type": "integer",
+          "description": "등록할 때의 단계 라운드."
+        }
+      },
+      "additionalProperties": true
+    },
+    "note": {
+      "title": "인계 메모",
+      "type": "object",
+      "description": "cmd_note가 추가하는 메모(scripts/pes.py:643-657).",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "time": {
+          "type": "string",
+          "description": "now() 형식 YYYY-MM-DD HH:MM."
+        },
+        "stage": {
+          "type": "string",
+          "description": "메모를 남길 때의 current 단계."
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "userLink": {
+      "title": "사용자 제공 링크",
+      "type": "object",
+      "description": "사용자가 준 링크·파일. 조사 단계 절차가 항목 user_links에 넣는다(skills/core/SKILL.md:200, skills/research/SKILL.md:21-25).",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "memo": {
+          "type": "string"
+        },
+        "added": {
+          "type": "string",
+          "description": "추가한 날짜(skills/research/SKILL.md:22)."
+        },
+        "status": {
+          "enum": [
+            "todo",
+            "done",
+            "failed"
+          ],
+          "description": "확인 전·확인함·열지 못함(templates/dashboard.html:536)."
+        }
+      },
+      "additionalProperties": true
+    },
+    "qa": {
+      "title": "독립 검토 결과",
+      "type": "object",
+      "description": "pes:reviewer가 rounds/<stage>-R<n>/qa.json에 쓰고 cmd_qa가 stages.<stage>.qa에 기록한다(scripts/pes.py:989-1012). 단계 보고서가 이 값으로 검토 기록 표를 만든다(:789-819).",
+      "properties": {
+        "round": {
+          "type": "integer",
+          "description": "검토한 라운드."
+        },
+        "recorded": {
+          "type": "string",
+          "description": "기록 시각(scripts/pes.py:999)."
+        },
+        "verdict": {
+          "type": "string",
+          "description": "판정(예: pass/fail)."
+        },
+        "summary": {
+          "type": "string"
+        },
+        "qc": {
+          "type": "array",
+          "description": "QC 지적 목록.",
+          "items": {
+            "$ref": "#/$defs/qaFinding"
+          }
+        },
+        "qa": {
+          "type": "array",
+          "description": "QA 지적 목록.",
+          "items": {
+            "$ref": "#/$defs/qaFinding"
+          }
+        },
+        "spot_checks": {
+          "type": "array",
+          "description": "표본 대조 3~5건.",
+          "items": {
+            "$ref": "#/$defs/spotCheck"
+          }
+        },
+        "missed_by_self_review": {
+          "type": "array",
+          "description": "자체 점검이 놓친 것.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_gaps": {
+          "type": "array",
+          "description": "근거가 부족한 문장. {item, statement, needed} 형태로 쓰인다(scripts/pes.py:818-819).",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "qaFinding": {
+      "title": "QC/QA 지적",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "item": {
+          "type": "integer"
+        },
+        "severity": {
+          "type": "string",
+          "description": "high·medium·low 등. high는 승인 전에 확인한다(scripts/pes.py:1005-1010)."
+        },
+        "finding": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "recommendation": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "spotCheck": {
+      "title": "표본 대조",
+      "type": "object",
+      "properties": {
+        "item": {
+          "type": "integer"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "match",
+            "differ",
+            "unreachable"
+          ],
+          "description": "일치·다름·열람 불가(templates/dashboard.html:455)."
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyClaim": {
+      "title": "검증 주장",
+      "type": "object",
+      "description": "agents/verifier.md:17-19가 정한 verify.claims[] 항목. merge가 항목의 verify로 그대로 복사한다(scripts/pes.py:331-333).",
+      "properties": {
+        "claim": {
+          "type": "string",
+          "description": "검증한 주장."
+        },
+        "verdict": {
+          "enum": [
+            "supported",
+            "partial",
+            "unsupported"
+          ],
+          "description": "원문 대조 판정."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "원문 발췌(1~2문장)."
+        },
+        "source": {
+          "type": "string",
+          "description": "출처 URL."
+        },
+        "fix": {
+          "type": "string",
+          "description": "고칠 표현 제안(필요할 때)."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
