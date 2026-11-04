@@ -397,6 +397,49 @@ def load_feedback(d: Path, processed):
     return out
 
 
+def _write_snapshot(path: Path, snap: dict) -> bool:
+    """스냅샷 파일을 원자적으로 새로 만든다. 이미 있으면 False 를 돌려준다."""
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(str(path), flags, 0o666)
+    except FileExistsError:
+        return False
+    try:
+        blob = json.dumps(snap, ensure_ascii=False).encode("utf-8")
+        while blob:
+            blob = blob[os.write(fd, blob):]
+    except BaseException:
+        os.close(fd)
+        fd = None
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return True
+
+
+def _snapshot_versions(base: Path):
+    """(번호, 경로) — 기본 파일이 1번, 같은 라운드의 추가 판은 하위 폴더의 2.json, 3.json…"""
+    out = [(1, base)] if base.exists() else []
+    round_dir = base.with_suffix("")
+    if round_dir.is_dir():
+        for f in round_dir.glob("*.json"):
+            if f.is_file() and f.stem.isdigit():
+                out.append((int(f.stem), f))
+    return sorted(out)
+
+
+def _snapshot_state(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("state")
+    except Exception:
+        return None
+
+
 def cmd_render(args):
     d = pdir(args[0])
     p = load(d)
@@ -404,19 +447,41 @@ def cmd_render(args):
     st = p["stages"][s]
     if st["round"] > 0:
         snap = {"stage": s, "round": st["round"], "time": now(), "state": st}
-        (d / "snapshots").mkdir(exist_ok=True)
-        (d / "snapshots" / f"{s}-R{st['round']}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+        snap_dir = d / "snapshots"
+        snap_dir.mkdir(exist_ok=True)
+        base = snap_dir / f"{s}-R{st['round']}.json"
+        _write_snapshot(base, snap)
+        versions = _snapshot_versions(base)
+        # 같은 라운드에서 상태가 바뀌면 첫 스냅샷을 덮어쓰지 않고 하위 폴더에 새 판으로 남긴다.
+        if _snapshot_state(versions[-1][1]) != st:
+            round_dir = base.with_suffix("")
+            round_dir.mkdir(exist_ok=True)
+            k = versions[-1][0] + 1 if versions else 1
+            while not _write_snapshot(round_dir / f"{k}.json", snap):
+                k += 1
     print(build_index(d, p))
 
 
 def build_index(d: Path, p: dict) -> Path:
-    snaps = []
-    for f in (d / "snapshots").glob("*-R*.json") if (d / "snapshots").exists() else []:
-        try:
-            x = json.loads(f.read_text(encoding="utf-8"))
-            snaps.append({"stage": x["stage"], "round": x["round"], "time": x.get("time"), "state": slim(x["state"])})
-        except Exception:
-            pass
+    snap_dir = d / "snapshots"
+    latest = {}
+    if snap_dir.exists():
+        candidates = [(f, 1) for f in snap_dir.glob("*-R*.json") if f.is_file()]
+        for sub in snap_dir.iterdir():
+            if sub.is_dir():
+                for f in sub.glob("*.json"):
+                    if f.is_file() and f.stem.isdigit():
+                        candidates.append((f, int(f.stem)))
+        for f, version in candidates:
+            try:
+                x = json.loads(f.read_text(encoding="utf-8"))
+                entry = {"stage": x["stage"], "round": x["round"], "time": x.get("time"), "state": slim(x["state"])}
+            except Exception:
+                continue
+            key = (entry["stage"], entry["round"])
+            if key not in latest or version > latest[key][0]:
+                latest[key] = (version, entry)
+    snaps = [entry for _, entry in latest.values()]
     snaps.sort(key=lambda x: (KEYS.index(x["stage"]) if x["stage"] in KEYS else 9, x["round"]))
     asks = sorted(x.name for x in d.glob("ask-*.html"))
     outs = sorted(str(x.relative_to(d)) for x in (d / "out").glob("*") if x.is_file()) if (d / "out").exists() else []
@@ -502,6 +567,8 @@ def cmd_reopen(args):
     p["stages"][s]["review"] = None
     p["stages"][s]["history"].append(f"다시 열기 {now()}")
     p["current"] = s
+    # 마지막 단계까지 승인한 프로젝트를 다시 열면 전체 완료 표시도 푼다 (승인 오처리 방지).
+    p["complete"] = False
     marked = []
     for k in KEYS[KEYS.index(s) + 1:]:
         if p["stages"][k]["status"] != "pending":

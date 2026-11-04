@@ -12,8 +12,10 @@
  - 다른 출처(Origin)의 POST 는 거부한다.
 """
 import json
+import os
 import re
 import sys
+import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +24,9 @@ from urllib.parse import unquote, urlsplit
 MAX_BODY = 256 * 1024
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
+# feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
+# 프로세스 사이(서버 두 개, pes.py 동시 쓰기)에는 걸리지 않는다.
+FEEDBACK_LOG_LOCK = threading.Lock()
 
 
 def main():
@@ -138,17 +143,41 @@ def main():
             fb_dir = d / "feedback"
             fb_dir.mkdir(exist_ok=True)
             ts = time.strftime("%Y%m%d-%H%M%S")
-            fp = fb_dir / f"{stage}-R{rnd}-{ts}.json"
-            k = 1
-            while fp.exists():
-                k += 1
-                fp = fb_dir / f"{stage}-R{rnd}-{ts}-{k}.json"
             rec = {"stage": stage, "round": rnd, "time": ts, "kind": kind, "text": text, "answers": answers,
                    "spec": str(data.get("spec", ""))[:80], "via": "html" if origin in allowed else "remote",
                    "origin": origin, "who": self.headers.get("Tailscale-User-Login") or ""}
-            fp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
-            with (d / "feedback.log").open("a", encoding="utf-8") as f:
-                f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
+            # 이름 예약과 파일 생성 사이에 틈이 없도록 O_CREAT|O_EXCL 로 원자적으로 만든다.
+            # 같은 초에 동시에 들어온 답도 각자 다른 파일을 얻어 덮어쓰이지 않는다.
+            k = 1
+            while True:
+                suffix = "" if k == 1 else f"-{k}"
+                fp = fb_dir / f"{stage}-R{rnd}-{ts}{suffix}.json"
+                try:
+                    # Windows 에서도 텍스트 모드 변환이 겹치지 않도록 바이너리로 연다.
+                    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+                    fd = os.open(str(fp), flags, 0o666)
+                    break
+                except FileExistsError:
+                    k += 1
+            try:
+                # fdopen 의 줄바꿈 변환을 거치지 않고 utf-8 바이트를 그대로 쓴다.
+                blob = json.dumps(rec, ensure_ascii=False, indent=1).encode("utf-8")
+                while blob:
+                    blob = blob[os.write(fd, blob):]
+            except BaseException:
+                os.close(fd)
+                fd = None
+                try:
+                    fp.unlink()
+                except OSError:
+                    pass
+                raise
+            finally:
+                if fd is not None:
+                    os.close(fd)
+            with FEEDBACK_LOG_LOCK:
+                with (d / "feedback.log").open("a", encoding="utf-8") as f:
+                    f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
             return self._json(200, {"ok": True, "file": fp.name})
 
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
