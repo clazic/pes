@@ -75,7 +75,8 @@ def ms(t0: float) -> int:
 
 
 def short(text, n=300) -> str:
-    text = " ".join(str(text).split())
+    # 자르기 전에 정제한다. 잘린 뒤에는 경로 전체가 남지 않아 치환이 실패할 수 있다.
+    text = " ".join(scrub(str(text)).split())
     return text[:n] + ("…" if len(text) > n else "")
 
 
@@ -90,9 +91,11 @@ def scrub(text: str, base: Path | None = None) -> str:
     if base is not None:
         for candidate in sorted({str(base), str(base.resolve())}, key=len, reverse=True):
             text = text.replace(candidate, "<TMP>")
-    text = re.sub(r"/private?/var/folders/[^\s\"']+", "<TMP>", text)
-    # 공개 저장소에 로컬 홈 경로를 남기지 않는다.
+    # macOS 는 임시 폴더 경로가 두 형태로 나온다. 둘 다 잡는다.
     # 패턴을 런타임에 조립해 소스·바이트코드에 경로 문자열이 그대로 남지 않게 한다.
+    tmp_pat = "(?:/private)?" + "".join(["/var", "/folders/"]) + r"[^\s\"']*"
+    text = re.sub(tmp_pat, "<TMP>", text)
+    # 공개 저장소에 로컬 홈 경로를 남기지 않는다.
     home_pat = "".join(["/", "Users", "/"]) + r"[^\s\"']+"
     text = re.sub(home_pat, "<HOME>", text)
     return text
@@ -165,7 +168,9 @@ class EventStream(threading.Thread):
                 f"http://{self.host}:{self.port}/api/event",
                 headers={"Authorization": self.auth, "Accept": "text/event-stream"},
             )
-            resp = urllib.request.urlopen(req, timeout=30)
+            # timeout 을 두지 않는다. 읽기는 stop() 의 close 로만 풀고,
+            # 연결이 끊기면 재접속하지 않고 error 로 끝난다(문서 '한계' 참고).
+            resp = urllib.request.urlopen(req)
             self._resp = resp
             if getattr(resp, "status", 200) != 200:
                 self.error = f"HTTP {resp.status}"
@@ -823,9 +828,10 @@ class Spike:
         resp = PermissionResponder(api, "allow", sid)
         resp.start()
         shell_seen = {"found": False, "entries": [], "ms": None}
+        prompt_epoch = now_ms()
         try:
             api.post(f"/api/session/{sid}/prompt", {"text": text})
-            # sleep 셸이 실제로 떠 있는지 /api/shell 로 확인한다.
+            # sleep 셸이 실제로 떠 있는지 /api/shell 로 확인한다. 대상 세션 것만 본다.
             deadline = time.monotonic() + 25
             while time.monotonic() < deadline:
                 try:
@@ -833,7 +839,8 @@ class Spike:
                 except Exception:
                     shells = []
                 running = [s for s in shells if s.get("status") == "running"
-                           and "sleep" in str(s.get("command") or "")]
+                           and "sleep" in str(s.get("command") or "")
+                           and (s.get("metadata") or {}).get("sessionID") == sid]
                 if running:
                     shell_seen = {"found": True, "entries": running, "ms": ms(t0)}
                     break
@@ -845,7 +852,7 @@ class Spike:
                 out["interrupt"] = {"ok": True, "ms": ms(t_int), "response": ir}
             except Exception as exc:
                 out["interrupt"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-            idle, wait_ms = self.wait_idle(api, sid, now_ms() - 90000, timeout=60)
+            idle, wait_ms = self.wait_idle(api, sid, prompt_epoch - 1, timeout=60)
             out["interrupt"]["idle_outcome"] = idle.get("outcome")
             out["interrupt"]["settle_ms"] = wait_ms
         finally:
@@ -862,12 +869,14 @@ class Spike:
                 shells_after = api.get("/api/shell").get("data") or []
             except Exception:
                 shells_after = []
-            sleeper = [s for s in shells_after if "sleep" in str(s.get("command") or "")]
+            sleeper = [s for s in shells_after if "sleep" in str(s.get("command") or "")
+                       and (s.get("metadata") or {}).get("sessionID") == sid]
             if not any(s.get("status") == "running" for s in sleeper):
                 gone = True
                 break
             time.sleep(0.25)
-        out["sleep_after"] = [s for s in shells_after if "sleep" in str(s.get("command") or "")]
+        out["sleep_after"] = [s for s in shells_after if "sleep" in str(s.get("command") or "")
+                              and (s.get("metadata") or {}).get("sessionID") == sid]
         out["sleep_gone"] = gone
 
         # 같은 세션 이어 쓰기
@@ -1063,6 +1072,7 @@ class Spike:
         resp = PermissionResponder(api, decision, sid, reject_if=reject_if)
         resp.start()
         t0 = time.monotonic()
+        after = 0
         try:
             r = api.post(f"/api/session/{sid}/prompt", {"text": text})
             user = (r.get("data") or {})
@@ -1075,16 +1085,19 @@ class Spike:
                 except Exception as exc:
                     msgs = [{"error": f"{type(exc).__name__}: {exc}"}]
                 print(f"[debug] idle timeout sid={sid} polls={resp.polls} "
-                      f"requests={json.dumps(resp.requests, ensure_ascii=False)} "
-                      f"replies={json.dumps(resp.replies, ensure_ascii=False)} "
+                      f"requests={scrub(json.dumps(resp.requests, ensure_ascii=False), self.base)} "
+                      f"replies={scrub(json.dumps(resp.replies, ensure_ascii=False), self.base)} "
                       f"errors={resp.errors[-3:]}", file=sys.stderr)
-                print(f"[debug] messages={json.dumps(msgs[:4], ensure_ascii=False)[:1500]}", file=sys.stderr)
+                print(f"[debug] messages={scrub(json.dumps(msgs[:4], ensure_ascii=False)[:1500], self.base)}",
+                      file=sys.stderr)
                 raise
             latency = ms(t0)
         finally:
             time.sleep(0.2)
             resp.stop()
-        msgs = self.api_get_messages(api, sid)
+        # 이번 프롬프트(after) 이후의 assistant 텍스트만 판정에 쓴다.
+        msgs = [m for m in self.api_get_messages(api, sid)
+                if int((m.get("time") or {}).get("created") or 0) >= after]
         texts = []
         for m in msgs:
             if m.get("type") == "assistant":

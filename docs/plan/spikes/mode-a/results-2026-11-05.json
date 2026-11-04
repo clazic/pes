@@ -293,7 +293,7 @@
        "name": "shell",
        "status": "completed",
        "executed": false,
-       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status /var/folders/2_/ymwzxd8s75x…"
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
       },
       {
        "name": "read",
@@ -546,7 +546,7 @@
         "name": "shell",
         "status": "completed",
         "executed": false,
-        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status /var/folders/2_/ymwzxd8s75x…"
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
        },
        {
         "name": "read",
@@ -1032,7 +1032,7 @@
        "name": "shell",
        "status": "completed",
        "executed": false,
-       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status /var/folders/2_/ymwzxd8s75x…"
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
       },
       {
        "name": "write",
@@ -1295,7 +1295,7 @@
         "name": "shell",
         "status": "completed",
         "executed": false,
-        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status /var/folders/2_/ymwzxd8s75x…"
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
        },
        {
         "name": "write",
@@ -1747,7 +1747,7 @@
        "name": "shell",
        "status": "completed",
        "executed": false,
-       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status /var/folders/2_/ymwzxd8s75x…"
+       "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
       },
       {
        "name": "read",
@@ -2000,7 +2000,7 @@
         "name": "shell",
         "status": "completed",
         "executed": false,
-        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status /var/folders/2_/ymwzxd8s75x…"
+        "input": "{\"command\": \"printf '%s\\\\n' \\\"$PES_HOME\\\" > env-home-after-restart.txt\\n/opt/homebrew/opt/python@3.15/bin/python3.15 <HOME> status <TMP>"
        },
        {
         "name": "read",
