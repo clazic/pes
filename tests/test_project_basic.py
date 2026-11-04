@@ -191,3 +191,51 @@ def test_cli_helper_fails_on_guard_violation(cli, tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(fake_home))
     with pytest.raises(pytest.fail.Exception, match="CLI attempted to access protected PES data"):
         cli("remote")
+
+
+@pytest.mark.parametrize("folder", [".pes", "pes-projects"])
+def test_guard_never_probes_protected_paths(tmp_path, monkeypatch, folder):
+    import os
+    from conftest import PESHomeAccessViolation, _guard_namespace
+
+    fake_home = tmp_path / "fake home"
+    protected = fake_home / folder
+    protected.mkdir(parents=True)
+    (protected / "existing.json").write_text("synthetic", encoding="utf-8")
+    safe = tmp_path / "safe.txt"
+    safe.write_text("safe", encoding="utf-8")
+    alias = tmp_path / "linked directory"
+    try:
+        alias.symlink_to(protected, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating directory symlinks is unavailable")
+
+    monkeypatch.setenv("PES_TEST_REAL_HOME", str(fake_home))
+    observed = []
+    original_lstat = _guard_namespace["_lstat"]
+    original_readlink = _guard_namespace["_readlink"]
+
+    def record_lstat(path, *args, **kwargs):
+        observed.append(("lstat", os.path.normcase(os.path.abspath(path))))
+        return original_lstat(path, *args, **kwargs)
+
+    def record_readlink(path, *args, **kwargs):
+        observed.append(("readlink", os.path.normcase(os.path.abspath(path))))
+        return original_readlink(path, *args, **kwargs)
+
+    monkeypatch.setitem(_guard_namespace, "_lstat", record_lstat)
+    monkeypatch.setitem(_guard_namespace, "_readlink", record_readlink)
+    assert safe.read_text(encoding="utf-8") == "safe"
+    with pytest.raises(PESHomeAccessViolation):
+        (protected / "existing.json").read_text(encoding="utf-8")
+    with pytest.raises(PESHomeAccessViolation):
+        (alias / "existing.json").read_text(encoding="utf-8")
+    with pytest.raises(PESHomeAccessViolation):
+        (alias / "missing.json").write_text("synthetic", encoding="utf-8")
+
+    protected_path = os.path.normcase(os.path.abspath(protected))
+    assert observed
+    assert any(kind == "readlink" and path == os.path.normcase(os.path.abspath(alias))
+               for kind, path in observed)
+    assert not [entry for entry in observed
+                if entry[1] == protected_path or entry[1].startswith(protected_path + os.sep)]

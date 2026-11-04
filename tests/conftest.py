@@ -18,32 +18,79 @@ import os
 from pathlib import Path
 import sys
 import threading
+import stat
 
 class PESHomeAccessViolation(BaseException):
     """A test attempted to access protected PES data."""
 
 _original_home = os.environ.get("PES_TEST_REAL_HOME", str(Path.home()))
+# Resolve only the home itself; never resolve either protected directory.
+_real_home = os.path.realpath(_original_home)
+_lstat = os.lstat
+_readlink = os.readlink
 _check_state = threading.local()
+def _roots(home, resolved_home):
+    return tuple(os.path.normcase(os.path.join(base, name))
+                 for base in (os.path.abspath(home), resolved_home)
+                 for name in (".pes", "pes-projects"))
+_original_roots = _roots(_original_home, _real_home)
+_extra_roots = {}
+
+def _reject(path, roots):
+    normalized = os.path.normcase(os.path.normpath(path))
+    for root in roots:
+        if normalized == root or normalized.startswith(root + os.sep):
+            raise PESHomeAccessViolation("Access to real PES home forbidden: " + normalized)
+
+def _resolve(path, roots):
+    # Resolve one component at a time, rejecting a protected component before
+    # its lstat or readlink. Nonexistent suffixes are handled the same way.
+    path = os.path.abspath(path)
+    _reject(path, roots)
+    links = 0
+    while True:
+        drive, tail = os.path.splitdrive(path)
+        current = drive + os.sep
+        components = [part for part in tail.replace(os.altsep or os.sep, os.sep).split(os.sep) if part]
+        for index, part in enumerate(components):
+            current = os.path.join(current, part)
+            _reject(current, roots)
+            try:
+                info = _lstat(current)
+            except OSError:
+                continue
+            reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            if stat.S_ISLNK(info.st_mode) or reparse:
+                try:
+                    target = _readlink(current)
+                except OSError:
+                    # An opaque reparse point could hide a protected target.
+                    raise PESHomeAccessViolation("Cannot safely resolve reparse point: " + current)
+                links += 1
+                if links > 40:
+                    raise OSError("Too many symbolic links")
+                if not os.path.isabs(target):
+                    target = os.path.join(os.path.dirname(current), target)
+                path = os.path.abspath(os.path.join(target, *components[index + 1:]))
+                _reject(path, roots)
+                break
+        else:
+            return current
+
 def _check(path):
     if (not os.environ.get("PES_TEST_GUARD") or
             not isinstance(path, (str, bytes, os.PathLike)) or
             getattr(_check_state, "active", False)):
         return
-    # realpath itself uses lstat on some platforms. Suppress only the guard's
-    # recursive checks while it resolves paths, then restore them even on error.
     _check_state.active = True
     try:
-        homes = (_original_home, os.environ.get("PES_TEST_REAL_HOME", _original_home))
-        roots = [os.path.join(home, name) for home in homes for name in (".pes", "pes-projects")]
-        paths = (os.path.abspath(os.fsdecode(path)), os.path.realpath(os.fsdecode(path)))
-        forbidden = [candidate for root in roots for candidate in
-                     (os.path.abspath(root), os.path.realpath(root))]
-        for candidate in paths:
-            candidate = os.path.normcase(candidate)
-            for root in forbidden:
-                root = os.path.normcase(root)
-                if candidate == root or candidate.startswith(root + os.sep):
-                    raise PESHomeAccessViolation("Access to real PES home forbidden: " + candidate)
+        home = os.environ.get("PES_TEST_REAL_HOME", _original_home)
+        if home != _original_home and home not in _extra_roots:
+            # Fake homes used by tests are resolved under the original guard.
+            resolved_home = _resolve(home, _original_roots)
+            _extra_roots[home] = _roots(home, resolved_home)
+        roots = _original_roots + _extra_roots.get(home, ())
+        _resolve(os.fsdecode(path), roots)
     finally:
         _check_state.active = False
 def _audit(event, args):
