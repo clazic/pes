@@ -347,6 +347,37 @@ def test_render_same_round_does_not_overwrite_snapshot(cli, tmp_path):
     assert snapshot.read_bytes() == first
 
 
+def test_render_same_round_keeps_later_states_in_version_folder(cli, tmp_path):
+    project = _init(cli, tmp_path)
+    cli("round-start", project, "plan")
+    _merge(cli, tmp_path, project, "plan", [{"id": 1, "title": "항목", "summary": "처음 요약"}],
+           name="version-initial")
+    code, out, err = cli("render", project, "plan")
+    assert code == 0, (out, err)
+
+    _merge(cli, tmp_path, project, "plan", [{"id": 1, "title": "항목", "summary": "중간 요약"}],
+           name="version-middle")
+    code, out, err = cli("render", project, "plan")
+    assert code == 0, (out, err)
+
+    base = project / "snapshots" / "plan-R1.json"
+    assert "처음 요약" in base.read_text(encoding="utf-8")
+    versions = sorted((project / "snapshots" / "plan-R1").glob("*.json"))
+    assert versions, "같은 라운드의 바뀐 상태가 하위 폴더 스냅샷에 남아야 한다"
+    states = [json.loads(path.read_text(encoding="utf-8"))["state"] for path in versions]
+    assert any(state["items"][0]["summary"] == "중간 요약" for state in states)
+
+    # 다음 라운드로 넘어가도 중간 상태가 하위 폴더에 그대로 남는다.
+    cli("round-start", project, "plan")
+    _merge(cli, tmp_path, project, "plan", [{"id": 1, "title": "항목", "summary": "마지막 요약"}],
+           name="version-last")
+    code, out, err = cli("render", project, "plan")
+    assert code == 0, (out, err)
+    states = [json.loads(path.read_text(encoding="utf-8"))["state"]
+              for path in sorted((project / "snapshots" / "plan-R1").glob("*.json"))]
+    assert any(state["items"][0]["summary"] == "중간 요약" for state in states)
+
+
 # ---------- 보고서 ----------
 
 def test_stage_report_generates_markdown_html_and_registers_files(cli, tmp_path):

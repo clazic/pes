@@ -24,7 +24,8 @@ from urllib.parse import unquote, urlsplit
 MAX_BODY = 256 * 1024
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
-# feedback.log 한 줄이 여러 요청 스레드 사이에서 섞이지 않게 한다 (Windows 포함).
+# feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
+# 프로세스 사이(서버 두 개, pes.py 동시 쓰기)에는 걸리지 않는다.
 FEEDBACK_LOG_LOCK = threading.Lock()
 
 
@@ -152,19 +153,28 @@ def main():
                 suffix = "" if k == 1 else f"-{k}"
                 fp = fb_dir / f"{stage}-R{rnd}-{ts}{suffix}.json"
                 try:
-                    fd = os.open(str(fp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+                    # Windows 에서도 텍스트 모드 변환이 겹치지 않도록 바이너리로 연다.
+                    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+                    fd = os.open(str(fp), flags, 0o666)
                     break
                 except FileExistsError:
                     k += 1
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(rec, ensure_ascii=False, indent=1))
+                # fdopen 의 줄바꿈 변환을 거치지 않고 utf-8 바이트를 그대로 쓴다.
+                blob = json.dumps(rec, ensure_ascii=False, indent=1).encode("utf-8")
+                while blob:
+                    blob = blob[os.write(fd, blob):]
             except BaseException:
+                os.close(fd)
+                fd = None
                 try:
                     fp.unlink()
                 except OSError:
                     pass
                 raise
+            finally:
+                if fd is not None:
+                    os.close(fd)
             with FEEDBACK_LOG_LOCK:
                 with (d / "feedback.log").open("a", encoding="utf-8") as f:
                     f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
