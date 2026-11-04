@@ -4,6 +4,7 @@ The tests drive the real CLI through subprocesses.  They only use synthetic
 projects created under pytest's temporary directories.
 """
 import json
+from pathlib import Path
 import shutil
 
 import pytest
@@ -273,6 +274,16 @@ def test_reopen_marks_later_stages_stale(cli, tmp_path):
     _approve(cli, project, "research")
     _approve(cli, project, "analyze")
 
+    def add_review_state(p):
+        research = p["stages"]["research"]
+        research["review"] = {"round": 1, "questions": [{"id": "합성-점검"}]}
+        research["stale"] = True
+
+    _edit_project(project, add_review_state)
+    before = _project_json(project)["stages"]["research"]
+    assert before["review"] is not None
+    assert before["stale"] is True
+
     code, out, err = cli("reopen", project, "research")
     assert code == 0, (out, err)
     assert "조사 다시 열림" in out
@@ -373,21 +384,21 @@ def test_stage_report_generates_markdown_html_and_registers_files(cli, tmp_path)
     data = _project_json(project)["stages"]["plan"]
     assert data["reports_built"]
     formats = {entry["format"]: entry for entry in data["reports"]}
-    assert formats["md"]["path"] == "reports/plan/report.md"
-    assert formats["html"]["path"] == "reports/plan/report.html"
+    assert Path(formats["md"]["path"]) == Path("reports") / "plan" / "report.md"
+    assert Path(formats["html"]["path"]) == Path("reports") / "plan" / "report.html"
 
 
 def test_assemble_orders_sections_and_numbers_footnotes(cli, tmp_path):
     project = _init(cli, tmp_path)
     cli("round-start", project, "write")
     _merge(cli, tmp_path, project, "write", [
-        {"id": 2, "order": 2, "kind": "section", "title": "둘째 장",
+        {"id": 10, "order": 2, "kind": "section", "title": "둘째 장",
          "details": "둘째 본문.[^1] 셋째 출처.[^2]",
          "sources": [
              {"url": "https://example.test/a", "title": "출처 A", "method": "browser"},
              {"url": "https://example.test/c", "title": "출처 C"},
          ]},
-        {"id": 1, "order": 1, "kind": "section", "title": "첫째 장",
+        {"id": 20, "order": 1, "kind": "section", "title": "첫째 장",
          "details": "첫째 본문.[^1] 둘째 출처.[^2]",
          "sources": [
              {"url": "https://example.test/a", "title": "출처 A", "method": "browser"},
@@ -462,6 +473,8 @@ def test_restore_copy_reloads_and_regenerates_outputs(cli, tmp_path):
 
     restored = tmp_path / "복원 위치" / "사본 프로젝트"
     shutil.copytree(project, restored)
+    shutil.rmtree(project)
+    assert not project.exists()
     assert (restored / "project.json").exists()
 
     code, out, err = cli("status", restored)
