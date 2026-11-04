@@ -13,7 +13,7 @@ REAL_HOME = Path.home()
 
 # Loaded both here and by sitecustomize in the CLI subprocess. Audit hooks cover
 # file opens and mutations; Path.stat/lstat additionally cover existence checks.
-GUARD = '''
+GUARD = r'''
 import os
 from pathlib import Path
 import sys
@@ -29,15 +29,35 @@ _real_home = os.path.realpath(_original_home)
 _lstat = os.lstat
 _readlink = os.readlink
 _check_state = threading.local()
+def _strip_namespace(path):
+    # os.readlink() on Windows returns NT namespace paths: the extended-length
+    # prefix before a drive path, or the UNC form of it. Strip the prefix the
+    # way ntpath.realpath() does, so comparisons see the ordinary path. POSIX
+    # paths may legitimately contain backslash characters.
+    if os.name != "nt":
+        return path
+    for prefix in ("\\\\?\\", "\\??\\"):
+        if not path.startswith(prefix):
+            continue
+        rest = path[len(prefix):]
+        if rest[:4].upper() == "UNC\\":
+            return "\\\\" + rest[4:]
+        if len(rest) >= 3 and rest[1:3] == ":\\":
+            return rest
+        # Volume GUID and other namespace paths cannot be stripped safely.
+        return path
+    return path
+def _normalize(path):
+    return os.path.normcase(os.path.normpath(_strip_namespace(path)))
 def _roots(home, resolved_home):
-    return tuple(os.path.normcase(os.path.join(base, name))
+    return tuple(_normalize(os.path.join(base, name))
                  for base in (os.path.abspath(home), resolved_home)
                  for name in (".pes", "pes-projects"))
 _original_roots = _roots(_original_home, _real_home)
 _extra_roots = {}
 
 def _reject(path, roots):
-    normalized = os.path.normcase(os.path.normpath(path))
+    normalized = _normalize(path)
     for root in roots:
         if normalized == root or normalized.startswith(root + os.sep):
             raise PESHomeAccessViolation("Access to real PES home forbidden: " + normalized)
@@ -62,7 +82,7 @@ def _resolve(path, roots):
             reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
             if stat.S_ISLNK(info.st_mode) or reparse:
                 try:
-                    target = _readlink(current)
+                    target = _strip_namespace(_readlink(current))
                 except OSError:
                     # An opaque reparse point could hide a protected target.
                     raise PESHomeAccessViolation("Cannot safely resolve reparse point: " + current)
