@@ -3,7 +3,7 @@
 - 작성: 2026-11-04, Claude 종합. Linear: SEL-21
 - 입력: [stage-1-db-codex.md](discussion/stage-1-db-codex.md), [stage-1-db-opencode.md](discussion/stage-1-db-opencode.md), Claude 추천안 [stage-1-db-claude-recs.md](discussion/stage-1-db-claude-recs.md), Codex 검수 [stage-1-db-codex-review.md](discussion/stage-1-db-codex-review.md), 확정 [stage-0.md](stage-0.md)
 - 진행 규칙(사용자 지시 2026-11-04): Claude 확인 → Codex 검수 → **합의안으로 진행**. 사용자가 이미 정한 stage-0 7절은 다시 정하지 않는다.
-- 상태: **합의안(Claude·Codex) — 최종 대조 보완 반영, DDL 초안 실행 통과.** Codex 최종 대조: [stage-1-db-final-check.md](discussion/stage-1-db-final-check.md)
+- 상태: **확정 — 사용자 승인 2026-11-05.** **합의안(Claude·Codex) — 최종 대조 보완 반영, DDL 초안 실행 통과.** Codex 최종 대조: [stage-1-db-final-check.md](discussion/stage-1-db-final-check.md)
 
 ## 1. 목표
 

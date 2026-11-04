@@ -2,7 +2,7 @@
 
 - 작성: 2026-11-04, Claude 종합. Linear: SEL-23
 - 입력: [stage-1-ui-codex.md](discussion/stage-1-ui-codex.md), [stage-1-ui-opencode.md](discussion/stage-1-ui-opencode.md), Claude 추천안 [stage-1-ui-claude-recs.md](discussion/stage-1-ui-claude-recs.md), Codex 검수 [stage-1-ui-codex-review.md](discussion/stage-1-ui-codex-review.md)(A 13·B 12·C 9 = 34행: 동의 15·보완 19·반대 0), Codex 최종 대조 [stage-1-ui-final-check.md](discussion/stage-1-ui-final-check.md), 합의 [stage-1-db.md](stage-1-db.md)·[stage-1-api.md](stage-1-api.md)
-- 상태: **합의안(Claude·Codex)** — 최종 대조 지적 14건 반영(11절)
+- 상태: **확정 — 사용자 승인 2026-11-05.** **합의안(Claude·Codex)** — 최종 대조 지적 14건 반영(11절)
 - 범위: **새 작업 공간은 3단계 구현 목표.** 2단계 PR 18은 기존 화면을 DB/API로 바꾸기만(새 디자인 없음).
 
 ## 1. 목표

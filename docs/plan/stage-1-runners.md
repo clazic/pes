@@ -2,7 +2,7 @@
 
 - 작성: 2026-11-04, Claude 종합. Linear: SEL-24
 - 입력: [stage-1-runners-codex.md](discussion/stage-1-runners-codex.md), [stage-1-runners-opencode.md](discussion/stage-1-runners-opencode.md), Claude 추천안 [stage-1-runners-claude-recs.md](discussion/stage-1-runners-claude-recs.md), Codex 검수 [stage-1-runners-codex-review.md](discussion/stage-1-runners-codex-review.md)(동의 11·수정 17·반대 0), 합의 [stage-1-db.md](stage-1-db.md)·[stage-1-api.md](stage-1-api.md)
-- 상태: **합의안(Claude·Codex)** — Codex 최종 대조 [stage-1-runners-final-check.md](discussion/stage-1-runners-final-check.md) 지적 6건 반영. **비용 상한 값은 사용자 확인 필요**(7절).
+- 상태: **확정 — 사용자 승인 2026-11-05.** **합의안(Claude·Codex)** — Codex 최종 대조 [stage-1-runners-final-check.md](discussion/stage-1-runners-final-check.md) 지적 6건 반영. **비용 상한 값은 사용자 확인 필요**(7절).
 
 ## 1. 목표
 
