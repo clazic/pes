@@ -13,11 +13,13 @@
 | `scripts/` | `pes.py`(상태 CLI), `serve.py`(로컬 서버), 설치 스크립트 |
 | `templates/` | 대시보드·질문 폼·보고서 HTML 템플릿 |
 | `questions/` | 단계별 시작 질문 은행 |
-| `docs/plan/` | 계획 문서. 읽는 순서: `00-brief.md` → `stage-N.md` (`decisions/` 결정 기록, `discussion/` 논의안) |
+| `docs/plan/` | 계획 문서. 읽는 순서: `00-brief.md` → `stage-0.md` → `stage-1-db.md`·`stage-1-api.md`·`stage-1-ui.md`·`stage-1-runners.md` (이후 `stage-N*.md`; `decisions/` 결정 기록, `discussion/` 논의안) |
 | `docs/archive/` | 더 이상 쓰지 않는 자료(예: 카드 재설계 시안) |
 | `tests/` | `pytest` 회귀 테스트와 합성 fixture |
 
 ## 검사
+
+Python 3.9 이상이 필요하다.
 
 macOS / Linux:
 
@@ -25,7 +27,15 @@ macOS / Linux:
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
 ```
 
-Windows(PowerShell)는 [tests/README.md](tests/README.md)의 명령을 따른다. 테스트 격리 원리와 한계도 [tests/README.md](tests/README.md)를 본다.
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest -q
+```
+
+테스트 격리 원리와 한계는 [tests/README.md](tests/README.md)를 본다.
 
 ## 금지
 
@@ -46,10 +56,24 @@ Windows(PowerShell)는 [tests/README.md](tests/README.md)의 명령을 따른다
 
 ## 결함 기록
 
-진단은 기존 `python3 scripts/pes.py doctor`를 먼저 쓴다. 단, 개발 중에는 실제 홈을 건드리지 않도록 `PES_HOME`을 임시 폴더로 두고 실행한다.
+진단은 기존 `python3 scripts/pes.py doctor`를 먼저 쓴다. `doctor`는 `~/.pes/config.json`과 `~/.claude/settings.json`도 읽으므로 `PES_HOME`만 바꿔서는 부족하다. 개발 중에는 `HOME`(Windows는 `USERPROFILE`)과 `PES_HOME`을 함께 임시 폴더로 두고 실행한다.
+
+macOS / Linux:
 
 ```sh
-PES_HOME="$(mktemp -d)" python3 scripts/pes.py doctor
+review_home="$(mktemp -d)"
+HOME="$review_home" PES_HOME="$review_home/pes-projects" python3 scripts/pes.py doctor
+```
+
+Windows (PowerShell):
+
+```powershell
+$reviewHome = Join-Path $env:TEMP ("pes-doctor-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $reviewHome | Out-Null
+$env:HOME = $reviewHome
+$env:USERPROFILE = $reviewHome
+$env:PES_HOME = Join-Path $reviewHome "pes-projects"
+python scripts/pes.py doctor
 ```
 
 확인된 결함은 [docs/plan/defects.md](docs/plan/defects.md)에 **버전 · OS · 명령 · 기대 결과 · 실제 결과 · 합성 재현 자료 · 심각도 · 처리 단계** 형식으로 적는다. 재현하지 못한 추정은 결함으로 적지 않는다.

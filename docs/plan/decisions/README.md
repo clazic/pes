@@ -1,6 +1,6 @@
 # 결정 기록
 
-설계·개발 결정을 한 건씩 남긴다. 논의안(`docs/plan/discussion/`)과 합의된 계획(`docs/plan/stage-N.md`)은 배경이고, 여기에는 **채택한 결정**만 적는다.
+설계·개발 결정을 한 건씩 남긴다. 논의안(`docs/plan/discussion/`)과 합의된 계획(`docs/plan/00-brief.md` → `stage-0.md` → `stage-1-{db,api,ui,runners}.md`, 이후 `stage-N*.md`)은 배경이고, 여기에는 **채택한 결정**만 적는다.
 
 ## 양식
 

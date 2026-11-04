@@ -2,10 +2,24 @@
 
 테스트나 실제 사용에서 **재현한** 결함만 적는다. 추정·의심은 적지 않는다. 재현 자료는 합성 fixture로 만들고, 실키·기관 자료·실제 프로젝트 내용은 넣지 않는다(저장소 공개).
 
-진단은 `python3 scripts/pes.py doctor`를 먼저 쓴다. 개발 중에는 실제 홈을 건드리지 않도록 `PES_HOME`을 임시 폴더로 둔다.
+진단은 `python3 scripts/pes.py doctor`를 먼저 쓴다. `doctor`는 `~/.pes/config.json`과 `~/.claude/settings.json`도 읽으므로 `PES_HOME`만 바꿔서는 부족하다. 개발 중에는 `HOME`(Windows는 `USERPROFILE`)과 `PES_HOME`을 함께 임시 폴더로 두고 실행한다.
+
+macOS / Linux:
 
 ```sh
-PES_HOME="$(mktemp -d)" python3 scripts/pes.py doctor
+review_home="$(mktemp -d)"
+HOME="$review_home" PES_HOME="$review_home/pes-projects" python3 scripts/pes.py doctor
+```
+
+Windows (PowerShell):
+
+```powershell
+$reviewHome = Join-Path $env:TEMP ("pes-doctor-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $reviewHome | Out-Null
+$env:HOME = $reviewHome
+$env:USERPROFILE = $reviewHome
+$env:PES_HOME = Join-Path $reviewHome "pes-projects"
+python scripts/pes.py doctor
 ```
 
 ## 양식
