@@ -23,6 +23,10 @@ HTTP_TIMEOUT = 30
 # 첫 요청이 잠깐 기다린 뒤 정상 진행해 모든 요청이 끝나야 한다 (SEL-31 수정 대비).
 BARRIER_TIMEOUT = 3
 
+# SEL-33: 역DNS가 느린 환경을 흉내 내는 시간과, 기동~첫 HTTP 응답 허용 시간(초).
+SLOW_FQDN_SECONDS = 60
+STARTUP_LIMIT = 10
+
 # 충돌 재현용: 서버 안에서만 시각을 고정하고 같은 후보 파일의 exists() 구간에
 # 배리어를 넣어, 경쟁이 우연에 기대지 않게 만든다 (제품 코드는 건드리지 않는다).
 COLLISION_STAGE = "plan"
@@ -95,24 +99,32 @@ _RacePath.exists = _race_exists
        "name": name, "count": count, "barrier": BARRIER_TIMEOUT}
 
 
+def _slow_fqdn_injection(delay):
+    """serve.py 를 띄운 자식 프로세스에만 적용하는 느린 역DNS 흉내 (SEL-33)."""
+    return '''
+# ---- SEL-33 test-only: slow reverse DNS (socket.getfqdn) ----
+import socket as _slow_dns_socket
+import time as _slow_dns_time
+_slow_dns_getfqdn = _slow_dns_socket.getfqdn
+def _slow_dns_lookup(name=''):
+    _slow_dns_time.sleep(%(delay)r)
+    return _slow_dns_getfqdn(name)
+_slow_dns_socket.getfqdn = _slow_dns_lookup
+''' % {"delay": delay}
+
+
 class Server:
     """테스트가 띄운 serve.py 프로세스 하나. 이 프로세스만 종료한다."""
 
-    def __init__(self, root, workdir, collision=None, serialize=False):
+    def __init__(self, root, workdir, collision=None, serialize=False, slow_fqdn=None):
         self.root = Path(root).resolve()
         self.project = self.root / "synthetic"
         self.workdir = Path(workdir)
         self.startup = self.workdir / "serve-startup"
         self.startup.mkdir(parents=True)
         script = GUARD
-        if sys.platform == "darwin":
-            # macOS 15+ GitHub runners: reverse DNS for loopback can take more
-            # than 30s (actions/runner-images#12162). HTTPServer.server_bind()
-            # calls socket.getfqdn() before it starts listening, so the server
-            # is alive but unreachable until that returns. serve.py never uses
-            # server_name; keep the test server responsive on those runners.
-            script += ("\nimport socket as _serve_socket\n"
-                       "_serve_socket.getfqdn = lambda name='': name\n")
+        if slow_fqdn is not None:
+            script += _slow_fqdn_injection(slow_fqdn)
         if collision is not None:
             script += _collision_injection(*collision, serialize=serialize)
         (self.startup / "sitecustomize.py").write_text(script, encoding="utf-8")
@@ -422,6 +434,21 @@ def test_version_ping_and_whoami(server):
     status, body = server.get_json("/version")
     assert status == 200
     assert body == {"v": old + 20}
+
+
+def test_startup_does_not_wait_for_slow_reverse_dns(isolated_home, tmp_path):
+    """역DNS(getfqdn)가 느려도 기동부터 첫 HTTP 응답까지 짧아야 한다 (SEL-33)."""
+    instance = Server(_make_home(isolated_home), tmp_path / "slow-dns",
+                      slow_fqdn=SLOW_FQDN_SECONDS)
+    started = time.monotonic()
+    try:
+        instance.start()
+        status, body = instance.get_json("/ping")
+    finally:
+        instance.stop()
+    elapsed = time.monotonic() - started
+    assert (status, body) == (200, {"ok": True})
+    assert elapsed < STARTUP_LIMIT, f"첫 응답까지 {elapsed:.1f}s (역DNS 대기 의심)"
 
 
 @pytest.mark.parametrize("failure", ["timeout", "early_exit", "spawn_error"])

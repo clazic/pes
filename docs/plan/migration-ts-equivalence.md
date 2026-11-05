@@ -23,7 +23,7 @@
 | 0.15 구성 | 역할 | TS 대응(PR) | 비고 |
 |---|---|---|---|
 | `scripts/pes.py` | 프로젝트 상태 CLI 32개, `project.json` 단일 원본 | `scripts/pes.ts`† + `scripts/pes_core/*.ts`(PR13~16, PR26) | 명령 이름은 유지 후보. 신규 5개(`context`·`claim`·`submit`·`wait`·`complete`)는 PR15. |
-| `scripts/serve.py` | PES 홈 정적 서버 + `POST …/feedback` | `scripts/serve.ts`† + `api.ts`(PR13·14·18·26) | 포트·URL·Origin 검사 유지. `/feedback`은 새 제출 서비스의 호환 어댑터 후보. |
+| `scripts/serve.py` | PES 홈 정적 서버 + `POST …/feedback` | `scripts/serve.ts`† + `api.ts`(PR13·14·18·26) | 포트·URL·Origin 검사 유지. `/feedback`은 새 제출 서비스의 호환 어댑터 후보. TS 서버도 기동 시 역DNS(호스트 이름 조회)를 하지 않는다(SEL-33). |
 | `scripts/setup.py` | 설치·업그레이드·API 키 화면·완료 표시 | `scripts/setup.ts`†(PR26) | 외부 도구 설치 명령은 그대로 외부 경계. |
 | `scripts/install.sh`·`install.ps1` | 6단계 한 줄 설치 | 같은 셸/PowerShell + TS 호출(PR26) | 설치 스크립트 자체는 TS로 다시 쓰지 않는다. |
 | `scripts/bootstrap.sh`·`bootstrap.ps1` | Git·Python·Node 확인/설치 | 같은 셸/PowerShell(PR26) | Python은 0.15 이전 동안에만 필요. Node/Bun 확인으로 바뀐다. |

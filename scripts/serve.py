@@ -14,6 +14,7 @@
 import json
 import os
 import re
+import socketserver
 import sys
 import threading
 import time
@@ -27,6 +28,22 @@ SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 # feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
 # 프로세스 사이(서버 두 개, pes.py 동시 쓰기)에는 걸리지 않는다.
 FEEDBACK_LOG_LOCK = threading.Lock()
+
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    """역DNS(getfqdn) 조회 없이 bind 하는 로컬 서버 (SEL-33).
+
+    HTTPServer.server_bind() 는 socket.getfqdn() 으로 server_name 을 정하는데,
+    일부 macOS 러너에서 이 역DNS가 30초 넘게 걸려 서버가 기동하지 못한다
+    (actions/runner-images#12162). serve.py 는 server_name 을 쓰지 않으므로
+    host 주소를 그대로 쓴다.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
 
 def main():
@@ -180,7 +197,7 @@ def main():
                     f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
             return self._json(200, {"ok": True, "file": fp.name})
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+    srv = LocalHTTPServer(("127.0.0.1", port), H)
     print(f"serving {root} at http://127.0.0.1:{port}/", flush=True)
     srv.serve_forever()
 
