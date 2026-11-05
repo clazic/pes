@@ -1,0 +1,13 @@
+name = "pes-web0-spike"
+main = "worker/index.ts"
+compatibility_date = "2026-11-05"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pes-web0-spike"
+database_id = "00000000-0000-4000-8000-000000000000"
+
+[vars]
+FAKE_GO_URL = "http://127.0.0.1:9/disabled"

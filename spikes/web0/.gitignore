@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+out/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store

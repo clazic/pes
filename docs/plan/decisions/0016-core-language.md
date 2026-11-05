@@ -2,7 +2,7 @@
 
 - 날짜: 2026-11-05
 - 담당: 2단계 PR1·PR26, 5단계 WEB0
-- 상태: **TypeScript 단일 언어는 확정. 런타임(Node/Bun/Deno)과 테스트 러너만 짧은 시험 후 확정.** 언어 선택은 다시 묻지 않는다.
+- 상태: **TypeScript 단일 언어는 확정. 런타임은 Node 26 + `node:test` + `tsc`를 잠정 추천(2026-11-05 WEB0 로컬 시험). 2단계 PR1에서 최종 확정.** 언어 선택은 다시 묻지 않는다.
 
 ## 문제
 
@@ -50,6 +50,30 @@
 - 2단계에 **PR26(0.15 Python → TypeScript 이전·단일 코드베이스)** 을 둔다. 0.16.0은 새 언어 단일 코드베이스를 목표로 한다. 단계 나눔이 더 안전하다고 판명되면 이유와 함께 다시 제안한다.
 - 5단계 WEB0는 언어 중립 JSON 픽스처를 TS로 통과시키고, Cloudflare/Vercel/VPS에서 같은 코드가 도는지 확인한다. "Python Workers 되나" 질문은 없어진다.
 - `decisions/0016`이 0013의 모델·A 실행 구조와 충돌하지 않는다. A는 여전히 Go API를 직접 호출한다.
+
+## WEB0 런타임·테스트 러너 시험 (2026-11-05)
+
+`spikes/web0/`에서 같은 TypeScript 코어(A 한 라운드: 모델 호출 3·결과 제출 2·질문/답 1·wait/resume/complete·신규 53행)를 로컬에서 실행했다. 계정·배포·유료 호출은 하지 않았다.
+
+| 런타임 | 버전 | 같은 코어 실행 | 벽시계(중앙값) | 프로세스 CPU | RSS | 비고 |
+|---|---|---:|---:|---:|---:|---|
+| Node | 26.13.0 | 통과 | 625.59 ms | 24.68 ms | 63.32 MB | `node:sqlite` 내장, `node:test` 91개 통과 |
+| Bun | 1.4.4 | 통과 | 660.36 ms | 30.00 ms | 28.53 MB | npm devDependency 바이너리, 1회 실행 |
+| Deno | 2.9.6 | 통과 | 682.36 ms | 80.00 ms | 50.88 MB | npm devDependency 바이너리, 1회 실행 |
+
+- 세 런타임 모두 `node:sqlite`가 동작했고 같은 신규 53행을 썼다. 값은 로컬 스파이크이며 플랫폼 판정이 아니다.
+- 계약 시험: 38/38 fixture parse/validate, 7개 필수 경로 normal/error/replay 실행, SQLite·로컬 D1 계약 16 pass + 1 info, 미지원 SQL 0.
+- 테스트 러너는 **`node:test`**를 채택했다. Node 26이 TypeScript를 타입 제거로 바로 실행하므로 별도 트랜스파일러·러너 없이 `node --test`가 돌고, 91개 테스트가 통과했다. `tsc --noEmit`은 `typescript`로 돌린다.
+- Bun/Deno는 **실행 가능성만 확인**했고, 각자의 테스트 러너로 전체 계약을 다시 돌리지는 않았다. Workers·Vercel·VPS 모두 Node/TS 경로가 있으므로, 런타임을 둘로 늘릴 근거가 이번 시험에서는 나오지 않았다.
+- 로컬 D1은 deferred FK 누락을 `internal error; reference=…`로 반환했고, 원시 INTEGER를 JS `number`로 읽으면 2^53+1이 손실됐다. `CAST(... AS TEXT)`로 읽어야 한다. `node:sqlite`는 같은 값을 원시로 읽으면 `ERR_OUT_OF_RANGE`를 던졌고, `lastInsertRowid`가 2^53을 넘는 쓰기는 `setReadBigInts(true)`로 흡수했다.
+- A HWPX 최소 변환기는 순수 TS + fflate로 Node와 로컬 workerd에서 **같은 3,061 B·같은 sha256**을 만들었고, esbuild 브라우저 번들도 통과했다. 한글에서 실제 열기·서식 충실도는 사용자 확인이 필요하다.
+
+### 잠정 추천
+
+**Node 26 계열 + `node:test` + `tsc --noEmit`.** 이유: `node:sqlite`가 내장이라 로컬·VPS에서 DB 드라이버가 필요 없고, Workers/Vercel/VPS가 모두 Node/TS 실행 경로를 가지며, 테스트 러너가 추가 의존성 없이 TypeScript를 실행한다. Bun은 로컬 보조 런타임 후보로만 두고, Deno는 이번 시험에서 채택 근거가 약하다.
+
+- 확정 시점: 2단계 PR1. WEB0는 잠정 추천이며 제품 코드의 런타임을 확정하지 않는다.
+- 재검토 조건: Node가 타입 제거·`node:sqlite`를 깨거나, Workers/Vercel의 Node 호환 계층이 계약을 못 지킬 때, Bun/Deno가 로컬 CLI·테스트에서 Node보다 확실히 나을 때.
 
 ## 재검토 조건
 

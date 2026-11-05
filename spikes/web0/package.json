@@ -1,0 +1,25 @@
+{
+  "name": "pes-web0-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WEB0 spike: minimal TypeScript core, contract checks, local platform proxies. Not product code.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:d1": "node ts-core/d1-contract-run.ts",
+    "typecheck": "tsc --noEmit",
+    "measure": "node ts-core/measure.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "bun": "1.4.4",
+    "deno": "2.9.6",
+    "esbuild": "0.28.2",
+    "fflate": "0.8.3",
+    "typescript": "7.0.2",
+    "wrangler": "4.157.0"
+  }
+}
