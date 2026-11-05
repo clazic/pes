@@ -42,11 +42,29 @@ function count(db: Db, table: string): bigint {
 
 function assert_rolls_back(db: Db, action: () => void, pattern?: RegExp): void {
   const before = state_signature(db);
+  const epoch_before = db.get<{ cursor_epoch: bigint }>(
+    "SELECT cursor_epoch FROM db_meta WHERE id = 1",
+  )?.cursor_epoch;
+  let marker_applied = false;
+  const failing_action = () =>
+    tx(db, () => {
+      // A successful write before the violating statement: the full signature
+      // below must show that this write was rolled back too, not just that the
+      // single failing statement had no effect.
+      db.run("UPDATE db_meta SET cursor_epoch = cursor_epoch + 1 WHERE id = 1");
+      const epoch_during = db.get<{ cursor_epoch: bigint }>(
+        "SELECT cursor_epoch FROM db_meta WHERE id = 1",
+      )?.cursor_epoch;
+      marker_applied = epoch_before !== undefined && epoch_during === epoch_before + 1n;
+      action();
+    });
+
   if (pattern === undefined) {
-    assert.throws(() => tx(db, action));
+    assert.throws(failing_action);
   } else {
-    assert.throws(() => tx(db, action), pattern);
+    assert.throws(failing_action, pattern);
   }
+  assert.equal(marker_applied, true, "the successful write before the violation must execute");
   assert.equal(state_signature(db), before);
 }
 
@@ -400,6 +418,7 @@ test("nested transactions and async callbacks are rejected without leaving rows"
 
     assert.throws(
       () =>
+        // @ts-expect-error Runtime defense: a sync function can still return a thenable.
         tx(fixture.db, () => {
           fixture.db.run("UPDATE db_meta SET cursor_epoch = 44 WHERE id = 1");
           return Promise.resolve(1);
@@ -412,6 +431,71 @@ test("nested transactions and async callbacks are rejected without leaving rows"
       fixture.db.get<{ cursor_epoch: bigint }>("SELECT cursor_epoch FROM db_meta WHERE id = 1"),
     );
     assert.equal(value?.cursor_epoch, 1n);
+  } finally {
+    close(fixture);
+  }
+});
+
+test("async callbacks are rejected before BEGIN and cannot write after an await", async () => {
+  const fixture = setup();
+  try {
+    const before = state_signature(fixture.db);
+    let begin_calls = 0;
+    const wrapped = new Proxy(fixture.db, {
+      get(target, property) {
+        if (property === "exec") {
+          return (sql: string) => {
+            if (sql === "BEGIN IMMEDIATE") begin_calls += 1;
+            target.exec(sql);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    assert.throws(
+      () =>
+        // @ts-expect-error Native async callbacks are rejected by the type contract.
+        tx(wrapped, async () => {
+          fixture.db.run("UPDATE db_meta SET cursor_epoch = 20 WHERE id = 1");
+          await Promise.resolve();
+          fixture.db.run("UPDATE db_meta SET cursor_epoch = 30 WHERE id = 1");
+        }),
+      /must be synchronous/,
+    );
+
+    // The rejection happens before the transaction starts, so the callback body
+    // never runs; give any hypothetical continuation a chance to run anyway.
+    assert.equal(begin_calls, 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(state_signature(fixture.db), before);
+    assert.equal(
+      fixture.db.get<{ cursor_epoch: bigint }>("SELECT cursor_epoch FROM db_meta WHERE id = 1")
+        ?.cursor_epoch,
+      1n,
+    );
+
+    // A sync callback that returns a rejected thenable must not leave an
+    // unhandled rejection behind after the rollback.
+    assert.throws(
+      () =>
+        // @ts-expect-error Runtime defense: a sync function can still return a thenable.
+        tx(fixture.db, () => {
+          fixture.db.run("UPDATE db_meta SET cursor_epoch = 50 WHERE id = 1");
+          return Promise.reject(new Error("late rejection"));
+        }),
+      /must be synchronous/,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(state_signature(fixture.db), before);
+
+    // The connection is still usable and not stuck in a transaction.
+    assert.equal(
+      tx(fixture.db, () => fixture.db.get<{ cursor_epoch: bigint }>("SELECT cursor_epoch FROM db_meta WHERE id = 1"))
+        ?.cursor_epoch,
+      1n,
+    );
   } finally {
     close(fixture);
   }

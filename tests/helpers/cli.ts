@@ -1,7 +1,7 @@
 // Minimal child-process helper. Every child runs with the caller-provided
 // environment only, so tests cannot fall back to the real user's home.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export interface ChildResult {
   status: number | null;
@@ -33,4 +33,43 @@ export function run_node(
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
   };
+}
+
+/** Async sibling of run_node for tests that need genuinely concurrent children. */
+export function run_node_async(
+  env: Record<string, string | undefined>,
+  args: string[],
+  options: NodeRunOptions = {},
+): Promise<ChildResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      env,
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`child process timed out after ${options.timeout_ms ?? 30_000}ms`));
+    }, options.timeout_ms ?? 30_000);
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, stdout, stderr });
+    });
+  });
 }

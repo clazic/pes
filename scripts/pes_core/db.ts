@@ -178,23 +178,46 @@ function is_thenable(value: unknown): boolean {
   return typeof (value as { then?: unknown }).then === "function";
 }
 
+function is_native_async_function(fn: unknown): boolean {
+  if (typeof fn !== "function") return false;
+  const constructor = (fn as { constructor?: { name?: string } }).constructor;
+  return (
+    constructor?.name === "AsyncFunction" ||
+    Object.prototype.toString.call(fn) === "[object AsyncFunction]"
+  );
+}
+
+function ignore_thenable_rejection(value: unknown): void {
+  // The callback has already run, so its writes are rolled back. Attach a
+  // rejection handler so an async continuation cannot surface as an unhandled
+  // rejection after tx() reports the contract violation.
+  void Promise.resolve(value).catch(() => undefined);
+}
+
 /**
- * Short synchronous transaction. Nested calls are rejected; a callback that
- * returns a Promise is rolled back and reported as an error.
+ * Short synchronous transaction. Nested calls are rejected. A native async
+ * callback is rejected before BEGIN, and a synchronous callback that still
+ * returns a thenable is rolled back and reported as an error. The parameter
+ * type turns Promise-like return values into `never`, so these cases also fail
+ * at compile time.
  */
-export function tx<T>(db: Db, fn: () => T): T {
+export function tx<T>(db: Db, fn: () => T extends PromiseLike<unknown> ? never : T): T {
   if (active_transactions.has(db)) {
     throw new Error("nested tx() is not allowed");
+  }
+  if (is_native_async_function(fn)) {
+    throw new Error("tx() callback must be synchronous; async functions are not allowed");
   }
   db.exec("BEGIN IMMEDIATE");
   active_transactions.add(db);
   try {
-    const result = fn();
+    const result: unknown = fn();
     if (is_thenable(result)) {
+      ignore_thenable_rejection(result);
       throw new Error("tx() callback must be synchronous; it returned a Promise");
     }
     db.exec("COMMIT");
-    return result;
+    return result as T;
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -273,23 +296,25 @@ function has_db_meta(db: Db): boolean {
 }
 
 /**
- * Apply numbered migrations in order. A fresh database gets its db_meta row in
- * the same transaction. An already-current database is left untouched; a
- * database from a newer schema is refused.
+ * Apply numbered migrations in order. All schema checks and the application
+ * itself run under one BEGIN IMMEDIATE, so a concurrent initializer either sees
+ * a completed schema (and reports `applied: false`) or waits for the lock. A
+ * fresh database gets its db_meta row in the same transaction. An already-
+ * current database is left untouched; a database from a newer schema is refused.
  */
 export function migrate(db: Db, options: MigrateOptions = {}): MigrateResult {
   const migrations = ordered_migrations(options.migrations ?? load_migrations());
   const newest = migrations[migrations.length - 1];
   const newest_version = BigInt(newest.version);
 
-  if (!has_db_meta(db)) {
-    const existing_tables = db.all<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-    );
-    if (existing_tables.length > 0) {
-      throw new Error("database has tables but no db_meta; refusing to apply migrations");
-    }
-    return tx(db, () => {
+  return tx<MigrateResult>(db, () => {
+    if (!has_db_meta(db)) {
+      const existing_tables = db.all<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      );
+      if (existing_tables.length > 0) {
+        throw new Error("database has tables but no db_meta; refusing to apply migrations");
+      }
       for (const migration of migrations) {
         db.exec(migration.sql);
       }
@@ -297,26 +322,24 @@ export function migrate(db: Db, options: MigrateOptions = {}): MigrateResult {
         "INSERT INTO db_meta (id, schema_version, database_instance_id, cursor_epoch) VALUES (1, ?, ?, 1)",
       ).run(newest_version, new_id());
       return { applied: true, schema_version: newest_version };
-    });
-  }
+    }
 
-  const meta = db.get<MetaRow>(
-    "SELECT schema_version, database_instance_id, cursor_epoch FROM db_meta WHERE id = 1",
-  );
-  if (meta === undefined) {
-    throw new Error("db_meta exists but has no row with id = 1");
-  }
-  if (meta.schema_version > newest_version) {
-    throw new Error(
-      `database schema_version ${String(meta.schema_version)} is newer than the newest known migration ${String(newest_version)}`,
+    const meta = db.get<MetaRow>(
+      "SELECT schema_version, database_instance_id, cursor_epoch FROM db_meta WHERE id = 1",
     );
-  }
-  if (meta.schema_version === newest_version) {
-    return { applied: false, schema_version: meta.schema_version };
-  }
+    if (meta === undefined) {
+      throw new Error("db_meta exists but has no row with id = 1");
+    }
+    if (meta.schema_version > newest_version) {
+      throw new Error(
+        `database schema_version ${String(meta.schema_version)} is newer than the newest known migration ${String(newest_version)}`,
+      );
+    }
+    if (meta.schema_version === newest_version) {
+      return { applied: false, schema_version: meta.schema_version };
+    }
 
-  const current_version = meta.schema_version;
-  return tx(db, () => {
+    const current_version = meta.schema_version;
     for (const migration of migrations) {
       if (BigInt(migration.version) > current_version) {
         db.exec(migration.sql);

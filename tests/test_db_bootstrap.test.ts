@@ -7,7 +7,7 @@ import {
   STAGE_KEYS,
 } from "../scripts/pes_core/bootstrap.ts";
 import { FakeClock } from "../scripts/pes_core/clock.ts";
-import { connect, migrate } from "../scripts/pes_core/db.ts";
+import { connect, migrate, type Db, type SqlValue } from "../scripts/pes_core/db.ts";
 import { new_id } from "../scripts/pes_core/ids.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
 import { isolated_home, type IsolatedHome } from "./helpers/isolated_home.ts";
@@ -19,6 +19,26 @@ function open_migrated(home: IsolatedHome) {
   const db = connect(db_path(home.env));
   migrate(db);
   return db;
+}
+
+/** Counts real SQL writes so a failure test can prove writes happened first. */
+function count_runs(db: Db): { db: Db; run_calls(): number } {
+  let calls = 0;
+  return {
+    db: {
+      path: db.path,
+      exec: (sql) => db.exec(sql),
+      prepare: (sql) => db.prepare(sql),
+      run: (sql, ...params) => {
+        calls += 1;
+        return db.run(sql, ...params);
+      },
+      get: <T>(sql: string, ...params: SqlValue[]) => db.get<T>(sql, ...params),
+      all: <T>(sql: string, ...params: SqlValue[]) => db.all<T>(sql, ...params),
+      close: () => db.close(),
+    },
+    run_calls: () => calls,
+  };
 }
 
 test("bootstrap creates owner, initial policy, edition, six stages, counters, and pointers", () => {
@@ -190,39 +210,71 @@ test("a failing bootstrap row rolls back every earlier row", () => {
   }
 });
 
-test("a failure injected mid-bootstrap leaves zero business rows", () => {
+test("a failure injected mid-bootstrap after real writes leaves zero business rows", () => {
   const home = isolated_home();
-  const db = open_migrated(home);
+  const real = open_migrated(home);
+  const counted = count_runs(real);
   const clock = new FakeClock(START_MS);
+  const before = state_signature(real);
   try {
     let calls = 0;
+    let runs_at_failure = 0;
+    let projects_at_failure = 0n;
+    let stages_at_failure = 0n;
     const failing_ids = (): string => {
       calls += 1;
-      if (calls === 6) throw new Error("injected new_id failure");
+      if (calls === 10) {
+        // Six ids are allocated before the first INSERT, then stages call
+        // new_id once each. Failing on the fourth stage id means the first
+        // three stages (and every earlier row) were really written already.
+        runs_at_failure = counted.run_calls();
+        projects_at_failure =
+          real.get<{ count: bigint }>("SELECT count(*) AS count FROM projects")?.count ?? 0n;
+        stages_at_failure =
+          real.get<{ count: bigint }>("SELECT count(*) AS count FROM stages")?.count ?? 0n;
+        throw new Error("injected new_id failure");
+      }
       return new_id();
     };
 
     assert.throws(
       () =>
         bootstrap_project(
-          db,
+          counted.db,
           { slug: "synthetic-gamma", topic: "합성 주입 연구", owner_display_name: "합성 사용자" },
           { clock, new_id: failing_ids },
         ),
       /injected new_id failure/,
     );
 
-    const counts = table_counts(db);
+    assert.ok(runs_at_failure > 0, "the injected failure must happen after real SQL writes");
+    assert.equal(projects_at_failure, 1n);
+    assert.equal(stages_at_failure, 3n);
+    assert.equal(state_signature(real), before);
+
+    const counts = table_counts(real);
     for (const [table, rows] of Object.entries(counts)) {
       if (table === "db_meta") continue;
       assert.equal(rows, 0n, `${table} must stay empty after rollback`);
     }
     assert.equal(
-      db.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count,
+      real.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count,
       1n,
     );
+
+    // Rollback leaves a usable database: a clean bootstrap now succeeds.
+    const retry = bootstrap_project(
+      real,
+      { slug: "synthetic-gamma-retry", topic: "합성 재시도 연구", owner_display_name: "합성 사용자" },
+      { clock, new_id },
+    );
+    assert.equal(
+      real.get<{ count: bigint }>("SELECT count(*) AS count FROM stages WHERE project_id = ?", retry.project_id)
+        ?.count,
+      6n,
+    );
   } finally {
-    db.close();
+    real.close();
     home.cleanup();
   }
 });

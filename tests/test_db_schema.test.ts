@@ -9,8 +9,12 @@ import {
   migrate,
   sqlite_version_at_least,
   SQLITE_MIN_VERSION,
+  type Db,
+  type MigrateResult,
+  type SqlValue,
 } from "../scripts/pes_core/db.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
+import { run_node_async } from "./helpers/cli.ts";
 import { isolated_home, type IsolatedHome } from "./helpers/isolated_home.ts";
 
 const DDL_PATH = fileURLToPath(
@@ -125,6 +129,104 @@ test("migrate is idempotent and keeps the database instance id", () => {
     );
   } finally {
     db.close();
+    home.cleanup();
+  }
+});
+
+test("migrate checks schema state under the write lock when another connection wins first", () => {
+  const home = isolated_home();
+  const path = db_path(home.env);
+  const a = connect(path);
+  const b = connect(path);
+  try {
+    const events: string[] = [];
+    let raced = false;
+    let winner: MigrateResult | undefined;
+    const wrapped: Db = {
+      path: a.path,
+      exec: (sql) => {
+        if (sql === "BEGIN IMMEDIATE") {
+          events.push("begin");
+          if (!raced) {
+            raced = true;
+            // Simulate another process completing initialization after A
+            // decided to migrate but before A acquired the write lock. The
+            // old code checked db_meta before this point and misdiagnosed the
+            // now-initialized database; the fixed code rechecks under the lock.
+            winner = migrate(b);
+          }
+        }
+        a.exec(sql);
+      },
+      prepare: (sql) => a.prepare(sql),
+      run: (sql, ...params) => a.run(sql, ...params),
+      get: <T>(sql: string, ...params: SqlValue[]) => {
+        if (sql.includes("'db_meta'")) events.push("has-db-meta");
+        if (sql.includes("FROM db_meta")) events.push("read-meta");
+        return a.get<T>(sql, ...params);
+      },
+      all: <T>(sql: string, ...params: SqlValue[]) => a.all<T>(sql, ...params),
+      close: () => a.close(),
+    };
+
+    const result = migrate(wrapped);
+    assert.deepEqual(winner, { applied: true, schema_version: 1n });
+    assert.deepEqual(result, { applied: false, schema_version: 1n });
+    assert.deepEqual(events, ["begin", "has-db-meta", "read-meta"]);
+    assert.equal(
+      a.get<{ count: bigint }>(
+        "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      )?.count,
+      61n,
+    );
+    assert.equal(a.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count, 1n);
+  } finally {
+    a.close();
+    b.close();
+    home.cleanup();
+  }
+});
+
+test("two child processes migrating the same database apply exactly once", async () => {
+  const home = isolated_home();
+  try {
+    const child = fileURLToPath(new URL("./helpers/migrate_child.ts", import.meta.url));
+    const runs = await Promise.all([
+      run_node_async(home.env, [child]),
+      run_node_async(home.env, [child]),
+    ]);
+    for (const run of runs) {
+      assert.equal(run.status, 0, run.stderr);
+    }
+    const results = runs.map((run) => {
+      const line = run.stdout.trim().split(/\r?\n/).at(-1);
+      assert.ok(line, `child must print a JSON result: ${run.stdout}`);
+      return JSON.parse(line) as { applied: boolean; schema_version: string; error?: string };
+    });
+    for (const result of results) {
+      assert.equal(result.error, undefined);
+      assert.equal(result.schema_version, "1");
+    }
+    assert.deepEqual(results.map((result) => result.applied).sort(), [false, true]);
+
+    const db = connect(db_path(home.env));
+    try {
+      assert.equal(
+        db.get<{ count: bigint }>(
+          "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        )?.count,
+        61n,
+      );
+      assert.equal(db.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count, 1n);
+      assert.equal(
+        db.get<{ schema_version: bigint }>("SELECT schema_version FROM db_meta WHERE id = 1")
+          ?.schema_version,
+        1n,
+      );
+    } finally {
+      db.close();
+    }
+  } finally {
     home.cleanup();
   }
 });
