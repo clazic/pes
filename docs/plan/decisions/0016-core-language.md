@@ -2,7 +2,7 @@
 
 - 날짜: 2026-11-05
 - 담당: 2단계 PR1·PR26, 5단계 WEB0
-- 상태: **TypeScript 단일 언어는 확정. 런타임은 Node 26 + `node:test` + `tsc`를 잠정 추천(2026-11-05 WEB0 로컬 시험). 2단계 PR1에서 최종 확정.** 언어 선택은 다시 묻지 않는다.
+- 상태: **TypeScript 단일 언어 확정. Node 26 + `node:test` + `tsc --noEmit` 확정(2026-11-05, PR1).** 언어 선택은 다시 묻지 않는다.
 
 ## 문제
 
@@ -68,11 +68,19 @@
 - 로컬 D1은 deferred FK 누락을 `internal error; reference=…`로 반환했고, 원시 INTEGER를 JS `number`로 읽으면 2^53+1이 손실됐다. `CAST(... AS TEXT)`로 읽어야 한다. `node:sqlite`는 같은 값을 원시로 읽으면 `ERR_OUT_OF_RANGE`를 던졌고, `lastInsertRowid`가 2^53을 넘는 쓰기는 `setReadBigInts(true)`로 흡수했다.
 - A HWPX 최소 변환기는 순수 TS + fflate로 Node와 로컬 workerd에서 **같은 3,061 B·같은 sha256**을 만들었고, esbuild 브라우저 번들도 통과했다. 한글에서 실제 열기·서식 충실도는 사용자 확인이 필요하다.
 
-### 잠정 추천
+### PR1 확정 (2026-11-05)
 
-**Node 26 계열 + `node:test` + `tsc --noEmit`.** 이유: `node:sqlite`가 내장이라 로컬·VPS에서 DB 드라이버가 필요 없고, Workers/Vercel/VPS가 모두 Node/TS 실행 경로를 가지며, 테스트 러너가 추가 의존성 없이 TypeScript를 실행한다. Bun은 로컬 보조 런타임 후보로만 두고, Deno는 이번 시험에서 채택 근거가 약하다.
+**Node 26 계열 + `node:test` + `tsc --noEmit`.** WEB0의 잠정 추천을 2단계 PR1이 이대로 확정했다. 이유: `node:sqlite`가 내장이라 로컬·VPS에서 DB 드라이버가 필요 없고, Workers/Vercel/VPS가 모두 Node/TS 실행 경로를 가지며, 테스트 러너가 추가 의존성 없이 TypeScript를 실행한다. Bun은 로컬 보조 런타임 후보로만 두고, Deno는 이번 시험에서 채택 근거가 약하다.
 
-- 확정 시점: 2단계 PR1. WEB0는 잠정 추천이며 제품 코드의 런타임을 확정하지 않는다.
+| 항목 | 확정 | 근거 |
+|---|---|---|
+| 런타임 | Node **>=26** (`engines`) | WEB0 로컬 시험(Node 26.13.0), `node:sqlite` 내장 |
+| 테스트 러너 | `node:test`, `node --test "tests/**/*.test.ts"` | 추가 러너 의존성 없음, 따옴표로 Node 자체 glob 사용(Windows 셸 글롭 비의존) |
+| 타입 검사 | `tsc --noEmit`(typescript 7.0.2, @types/node 26.6.6) | WEB0와 같은 버전 |
+| SQLite | **>=3.38.0**, 연결 시 실제 `sqlite_version()`·JSON 함수 검사 | [stage-2-db-guarantees.md](../stage-2-db-guarantees.md) 5절 |
+| CI | 이 PR CI에서 `windows-latest`·`macos-latest` 실행(Node 26, `npm ci` → typecheck → test) | `.github/workflows/ci.yml` |
+| 이름 | 함수는 `snake_case`(`pes_dir`·`db_path`·`connect`·`migrate`·`new_id`), 클래스는 `PascalCase`(`SystemClock`·`FakeClock`) | Agent notes 이름 유지 |
+
 - 재검토 조건: Node가 타입 제거·`node:sqlite`를 깨거나, Workers/Vercel의 Node 호환 계층이 계약을 못 지킬 때, Bun/Deno가 로컬 CLI·테스트에서 Node보다 확실히 나을 때.
 
 ## 재검토 조건

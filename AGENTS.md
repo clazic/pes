@@ -19,7 +19,25 @@
 
 ## 검사
 
-Python 3.9 이상이 필요하다.
+Python 3.9 이상과 Node 26 이상이 필요하다.
+
+TypeScript 코어·시험(Node 26, `node:sqlite`):
+
+macOS / Linux:
+
+```sh
+npm ci && npm test && npm run typecheck
+```
+
+Windows (PowerShell):
+
+```powershell
+npm ci
+npm test
+npm run typecheck
+```
+
+Python 0.15 테스트(PR26 이전):
 
 macOS / Linux:
 
