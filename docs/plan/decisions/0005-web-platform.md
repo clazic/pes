@@ -47,6 +47,25 @@
 - Oracle Always Free 회수, Hetzner 가격 인상, Vercel Hobby 약관 변경.
 - `stage-5.md` 9절의 유료 전환 신호가 날 때.
 
+## WEB0 로컬 시험 결과 (2026-11-05)
+
+`spikes/web0/`에서 같은 TS 코어로 A 한 라운드를 후보별 로컬 대리에서 실행했다. 계정·배포·유료 호출은 하지 않았다. 값은 **판정 아님 — 스모크/대리값**이다.
+
+| 후보(로컬 대리) | 3회 벽시계 중앙값 | 프로세스 CPU 중앙값 | RSS 중앙값 | 라운드당 INSERT/쓰기 문 | subrequest | 10회 연속 오류 |
+|---|---:|---:|---:|---:|---:|---:|
+| CF: `wrangler dev --local` + 로컬 D1 | 667.89 ms | 70.00 ms | 511.52 MB | 55 / 77 | 3 | 0 |
+| VC: Vercel형 Node 핸들러 + 로컬 SQLite | 638.14 ms | 40.00 ms | 102.55 MB | 55 / 77 | 3 | 0 |
+| VPS: Node 26 + `node:sqlite` | 633.14 ms | 33.70 ms | 53.19 MB | 55 / 77 | 3 | 0 |
+
+- **계약**: 38/38 fixture parse/validate, 7개 필수 경로 normal/error/replay 실행, SQLite·로컬 D1 계약 13 pass + 1 info, 미지원 SQL 0, 61표. CF D1에서 deferred FK 누락 거부가 `internal error; reference=…`로 반환되고 원시 INTEGER `number` 읽기가 정밀도를 잃는 것을 확인했다(어댑터는 `CAST AS TEXT` 사용).
+- **런타임**: Node 26.13.0·Bun 1.4.4·Deno 2.9.6이 같은 코어 A 라운드를 실행했다(0016).
+- **CF CPU 10 ms/호출, Vercel Active CPU, DO/WebSocket, R2/Blob, 실제 요청·과금은 측정하지 않았다.** `wrangler dev` 로컬 CPU는 요청당 CPU가 아니고, 프로세스 RSS는 Worker 128 MB 한도와 비교할 수 없다.
+- **계정·카드·비용**: Cloudflare/Vercel/Oracle/Hetzner 계정을 만들지 않았다. 카드 필요 여부, Turso/Blob 한도, Oracle 지역·할당, Hetzner 월 총액은 **사용자 결정 필요**다.
+- **시간 상자 밖**: 8시간 soak, 7일 VPS soak, 4주 운영 일지, WebSocket/SSE 8시간, 월 30일 실제 투영은 미측정이다.
+- A의 HWPX 서버측 변환 경로는 이 이슈의 만든 것 목록에 없어 실행하지 않았고, 후속 WEB0 항목으로 남긴다.
+
+**이 결과로 플랫폼을 확정하지 않는다.** 로컬 시험은 G1·G2·G3의 로컬 부분만 확인했고, G4~G8은 계정·카드·비용·시간 상자 때문에 미측정이다. 유료 후보를 1순위로 올리지 않는다.
+
 ## 상태
 
-**채택 — 후보 3군 WEB0 비교, 기본 후보 Cloudflare** (2026-11-05)
+**채택 — 후보 3군 WEB0 로컬 시험 완료. 최종 플랫폼 판정은 계정·카드·비용 사용자 결정 뒤 보류** (2026-11-05). 기본 후보 Cloudflare는 유지하되, 이는 최종 선택이 아니다.
