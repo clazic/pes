@@ -13,7 +13,7 @@
 |---|---|---|---|
 | 계정·지역 | 없음(로컬 `wrangler dev`만) | 없음(로컬 Node 함수 핸들러) | 없음(로컬 Node) |
 | 런타임·버전 | Node 26.13.0 / wrangler 4.157.0 / 로컬 D1 | Node 26.13.0 / Bun 1.4.4·Deno 2.9.6 보조 | Node 26.13.0 / `node:sqlite` |
-| TS 코어 hash | `6e01e236…`(커밋 전 작업 트리, 세 후보 동일) | 같음 | 같음 |
+| TS 코어 hash | `ce81ec7a…`(커밋 전 작업 트리, 세 후보 동일) | 같음 | 같음 |
 | fixture hash | `02a4111b…`(38개) | 같음 | 같음 |
 | 가짜 Go endpoint(마스킹) | `http://127.0.0.1:<ephemeral>/inference/v1/chat/completions` | 같음 | 같음 |
 | 측정일·담당 | 2026-11-05, WEB0 worker | 같음 | 같음 |
@@ -149,9 +149,9 @@
 
 | 후보 | 1회 | 2회 | 3회 | 중앙값 | 판정 | 비고 |
 |---|---|---|---|---|---|---|
-| CF | 669.46 ms | 667.55 ms | 667.89 ms | **667.89 ms** | 미판정(로컬 대리) | 벽시계. CPU는 wrangler+workerd 프로세스 대리 70 ms. subrequest 3, INSERT 55, 10/10 연속 오류 0 |
-| VC | 639.75 ms | 636.26 ms | 638.14 ms | **638.14 ms** | 미판정(로컬 대리) | 벽시계. CPU는 함수 서버 프로세스 대리 40 ms. subrequest 3, INSERT 55, 10/10 오류 0 |
-| VPS | 633.14 ms | 635.80 ms | 627.18 ms | **633.14 ms** | 미판정(로컬 대리) | 벽시계. CPU는 Node 프로세스 34 ms(가짜 Go 포함). subrequest 3, INSERT 55, 10/10 오류 0 |
+| CF | 698.49 ms | 697.25 ms | 692.44 ms | **697.25 ms** | 미판정(로컬 대리) | 벽시계. CPU는 wrangler+workerd 프로세스 대리 100 ms. subrequest 3, 신규 53행·변경 79행, 10/10 오류 0 |
+| VC | 635.06 ms | 644.94 ms | 638.97 ms | **638.97 ms** | 미판정(로컬 대리) | 벽시계. CPU는 함수 서버 프로세스 대리 40 ms. subrequest 3, 신규 53행·변경 79행, 10/10 오류 0 |
+| VPS | 635.22 ms | 634.59 ms | 629.82 ms | **634.59 ms** | 미판정(로컬 대리) | 벽시계. CPU는 Node 프로세스 37 ms(가짜 Go 포함). subrequest 3, 신규 53행·변경 79행, 10/10 오류 0 |
 
 ### ② TS 같은 코드 재사용
 
@@ -165,9 +165,9 @@
 
 | 후보 | 코어 commit | 계약 38/38 | adapter LOC | 런타임·버전 | 판정 | 비고 |
 |---|---|---|---|---|---|---|
-| CF | `6e01e236…` | 38/38 + D1 13 pass | 125줄(`db.ts` D1 + `worker/index.ts`) | Node 26.13.0 / wrangler 4.157.0 | 로컬 통과(배포 미측정) | 같은 업무 로직, 업무 분기 0. 7경로 normal/error/replay 실행 |
-| VC | 같음 | 38/38 + SQLite 13 pass | 206줄(`db.ts` + `sqlite-adapter.ts` + `vc-handler.ts`) | Node 26.13.0 | 로컬 통과(배포 미측정) | Vercel형 Node 핸들러로 실행. Turso 자체는 미측정 |
-| VPS | 같음 | 38/38 + SQLite 13 pass | 58줄(`sqlite-adapter.ts`, 공통 `Db` 인터페이스 별도) | Node 26.13.0 / Bun 1.4.4 / Deno 2.9.6 | 로컬 통과 | 세 런타임 모두 같은 A 라운드 55 INSERT |
+| CF | `ce81ec7a…` | 38/38 + D1 16 pass | 125줄(`db.ts` D1 + `worker/index.ts`) | Node 26.13.0 / wrangler 4.157.0 | 로컬 통과(배포 미측정) | 같은 업무 로직, 업무 분기 0. 7경로 normal/error/replay 실행 |
+| VC | 같음 | 38/38 + SQLite 16 pass | 206줄(`db.ts` + `sqlite-adapter.ts` + `vc-handler.ts`) | Node 26.13.0 | 로컬 통과(배포 미측정) | Vercel형 Node 핸들러로 실행. Turso 자체는 미측정 |
+| VPS | 같음 | 38/38 + SQLite 16 pass | 58줄(`sqlite-adapter.ts`, 공통 `Db` 인터페이스 별도) | Node 26.13.0 / Bun 1.4.4 / Deno 2.9.6 | 로컬 통과 | 세 런타임 모두 같은 A 라운드 신규 53행 |
 
 ### ③ SQLite 계약 유지
 
@@ -181,9 +181,9 @@
 
 | 후보 | 61표 | 제약·0행·롤백 | 10진 왕복 | 미지원 SQL 수 | 판정 | 비고 |
 |---|---|---|---|---|---|---|
-| CF | 61/61 | 13 pass(1 info) | `CAST AS TEXT` 정확 | 0 | 로컬 통과 / 원격 미측정 | deferred FK 누락 거부가 `internal error; reference=…`로 반환됨(거부는 됨). 원시 INTEGER `number` 읽기는 정밀도 손실 |
-| VC | 61/61 | 13 pass(1 info) | `CAST AS TEXT` 정확 | 0 | 로컬 통과 / Turso 미측정 | 로컬 SQLite를 Turso/libSQL 대리로 사용. Turso 클라이언트·계정은 시험하지 않음 |
-| VPS | 61/61 | 13 pass(1 info) | `CAST AS TEXT` 정확 | 0 | 로컬 통과 | `node:sqlite`. 원시 2^53+1 읽기는 `ERR_OUT_OF_RANGE` |
+| CF | 61/61 | 16 pass(1 info) | `CAST AS TEXT` 정확 | 0 | 로컬 통과 / 원격 미측정 | deferred FK 누락 거부가 `internal error; reference=…`로 반환됨(거부는 됨). 원시 INTEGER `number` 읽기는 정밀도 손실 |
+| VC | 61/61 | 16 pass(1 info) | `CAST AS TEXT` 정확 | 0 | 로컬 통과 / Turso 미측정 | 로컬 SQLite를 Turso/libSQL 대리로 사용. Turso 클라이언트·계정은 시험하지 않음 |
+| VPS | 61/61 | 16 pass(1 info) | `CAST AS TEXT` 정확 | 0 | 로컬 통과 | `node:sqlite`. 원시 2^53+1 읽기는 `ERR_OUT_OF_RANGE` |
 
 ### ④ 월 사용량 대비 여유
 
@@ -199,9 +199,9 @@
 
 | 후보 | 요청/step % | CPU % | D1/Turso 저장 % | R2/Blob % | 30일 투영 | 판정 | 비고 |
 |---|---|---|---|---|---|---|---|
-| CF | subrequest 3/50(6%)/라운드 | 미측정 | 미측정 | 미측정 | 30라운드/월 선형: subrequest 90, INSERT 1,650 | **미판정** | 8시간/일·페이지·API 부하 미측정. 실제 계정 한도 아님 |
+| CF | subrequest 3/50(6%)/라운드 | 미측정 | 미측정 | 미측정 | 30라운드/월 선형: subrequest 90, 신규 1,590행·변경 2,370행(쓰기 문 2,790) | **미판정** | 8시간/일·페이지·API 부하 미측정. 실제 계정 한도 아님 |
 | VC | subrequest 3/라운드 | 로컬 40 ms/라운드(계측 아님) | 미측정(Turso) | 미측정(Blob) | 30라운드/월: Active CPU 약 1.2 CPU-s(4 CPU-h의 <1%, 선형 계산) | **미판정** | Vercel Active CPU 계측 아님. Turso/Blob 한도 미확인 |
-| VPS | subrequest 3/라운드 | 로컬 25~41 ms/라운드(2 OCPU 대비 <1% 계산) | 미측정(파일 크기) | 해당 없음(로컬 디스크) | 30라운드/월 CPU 약 1초(벽시계 약 19초) | **미판정** | 7일 soak·디스크·네트워크 미측정 |
+| VPS | subrequest 3/라운드 | 로컬 29~38 ms/라운드(2 OCPU 대비 <1% 계산) | 미측정(파일 크기) | 해당 없음(로컬 디스크) | 30라운드/월 CPU 약 1.2초(벽시계 약 19초) | **미판정** | 7일 soak·디스크·네트워크 미측정 |
 
 ### ⑤ 카드 등록
 
@@ -269,6 +269,21 @@
 | VC | Hobby 300초·4 CPU-h/월·2 GB | Turso·Blob **미확인** | 별도 | **미확인** | 미확인 | **사용자 결정 필요** | Turso/Blob 카드·한도·지역 미확인 |
 | VPS | Oracle Always Free 1,500 OCPU-h+9,000 GB-h/월 | SQLite 파일·로컬 디스크 | 별도 | Oracle 0 USD(조건부), Hetzner **미확인** | 미확인 | **사용자 결정 필요** | 지역·할당·카드·월 총액(IPv4·백업·트래픽·세금) 미확인 |
 
+### ⑨ A HWPX 경로(최소 실행 가능성)
+
+합성 `report.md`(제목·문단 2개·표 1개)를 순수 TypeScript + fflate로 `report.hwpx`로 변환했다. 네이티브 바이너리·외부 변환기·사용자 PC는 쓰지 않는다.
+
+| 경로 | 결과 | 벽시계(ms) | CPU(ms) | RSS(MB) | 결과 크기 | 비고 |
+|---|---|---:|---:|---:|---:|---|
+| Node 26(VPS/VC 대리) | 통과 | 1.21 | 4.22 | 53.49 | 3,061 B | 기준 sha256 |
+| `wrangler dev` 로컬 workerd(CF 대리) | 통과 | 2.39 | 0.00(표본 하한) | 572.52 | 3,061 B | Node와 **동일 sha256** |
+| 브라우저 번들(esbuild `platform=browser`) | 통과 | — | — | — | 26,625 B 번들 | `node:`/DOM API 없음 |
+
+- 구조 검증: `mimetype` 첫 항목·무압축, `version.xml`, `META-INF/container.xml`, `Contents/content.hpf`, `Contents/header.xml`, `Contents/section0.xml`, `hp:tbl`/`hp:tr`/`hp:tc`.
+- **사용자 확인 필요(한글에서 열기)**: 한글 프로그램 실제 열기·서식 충실도는 확인할 수 없다.
+- 한계: `hwpx-uri` 대비 출력 차이·호환성은 비교하지 않았다. 최소 골격 시험이며 제품 경로는 6단계 X1에서 확정한다.
+- 생성 파일은 `spikes/web0/out/hwpx/report.hwpx`(gitignore)에만 두고 커밋하지 않는다.
+
 ## 4. 공통 실행 절차
 
 1. **준비**: 같은 fixture hash, 같은 TS 코어 commit, 같은 가짜 Go endpoint, 같은 모델 ID(`opencode-go/deepseek-v4.1-flash`)를 기록한다. 후보별 계정·지역·런타임 버전을 적는다.
@@ -314,9 +329,9 @@
 
 | 후보 | G1 TS | G2 SQLite | G3 A 라운드 | G4 월 여유 | G5 카드 | G6 상시 통로 | G7 운영 | G8 비용 | 판정 | 탈락 사유 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| CF | 로컬 통과(38/38) | 로컬 통과(61표·13 pass) | 로컬 3/3+10/10 | 미측정(계정·8시간·30일) | **사용자 결정 필요** | 미측정(시간 상자 밖) | 미측정(4주) | **사용자 결정 필요** | **보류** | 없음(로컬) |
+| CF | 로컬 통과(38/38) | 로컬 통과(61표·16 pass) | 로컬 3/3+10/10 | 미측정(계정·8시간·30일) | **사용자 결정 필요** | 미측정(시간 상자 밖) | 미측정(4주) | **사용자 결정 필요** | **보류** | 없음(로컬) |
 | VC | 로컬 통과(38/38) | 로컬 SQLite 통과 / Turso 미측정 | 로컬 3/3+10/10 | 미측정(Active CPU 계측 아님) | **사용자 결정 필요** | 미측정(문서상 300초) | 미측정(4주) | **사용자 결정 필요** | **보류** | 없음(로컬) |
-| VPS | 로컬 통과(38/38) | 로컬 통과(61표·13 pass) | 로컬 3/3+10/10 | 미측정(7일 soak) | **사용자 결정 필요** | 미측정(시간 상자 밖) | 미측정(4주) | **사용자 결정 필요** | **보류** | 없음(로컬) |
+| VPS | 로컬 통과(38/38) | 로컬 통과(61표·16 pass) | 로컬 3/3+10/10 | 미측정(7일 soak) | **사용자 결정 필요** | 미측정(시간 상자 밖) | 미측정(4주) | **사용자 결정 필요** | **보류** | 없음(로컬) |
 
 - 이 표의 "통과"는 **로컬 스파이크/대리값**이다. G4~G8은 계정·카드·비용·시간 상자 때문에 측정하지 않았으므로 **통과로 쓰지 않는다**.
 - 로컬 시험에서 탈락한 후보는 없다. 그러나 이것은 최종 판정이 아니다. **최종 플랫폼은 계정·카드·비용 사용자 결정 뒤에 정한다.** 유료 후보를 1순위로 올리지 않는다.

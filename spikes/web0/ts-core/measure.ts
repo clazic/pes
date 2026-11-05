@@ -10,12 +10,16 @@ import { SqliteDb } from "./sqlite-adapter.ts";
 import { runRound, type RunStats } from "./scenario.ts";
 import { startFakeGo, type FakeGoServer } from "./fake-go.ts";
 import { runContractSuite, type ContractResult } from "./contract-suite.ts";
-import { measureTree, snapshotTree } from "./process-stats.ts";
-import { applyDdl, findD1Sqlite, freePort, startWranglerDev, WEB0_ROOT } from "./wrangler.ts";
+import { killTree, measureTree, snapshotTree } from "./process-stats.ts";
+import { applyDdl, cleanupDir, findD1Sqlite, freePort, startWranglerDev, WEB0_ROOT } from "./wrangler.ts";
+import { buildHwpxFromMarkdown } from "./hwpx.ts";
+import { build as esbuild } from "esbuild";
 
 const DDL_PATH = fileURLToPath(new URL("../../../docs/plan/schemas/stage-1-ddl-draft.sql", import.meta.url));
 const FIXTURE_DIR = fileURLToPath(new URL("../../../docs/plan/fixtures/api-v1/", import.meta.url));
-const OUT_DIR = fileURLToPath(new URL("./out/", import.meta.url));
+const OUT_DIR = fileURLToPath(new URL("../out/", import.meta.url));
+const HWPX_REPORT_PATH = fileURLToPath(new URL("../fixtures/report.md", import.meta.url));
+const HWPX_SOURCE_PATH = fileURLToPath(new URL("./hwpx.ts", import.meta.url));
 const CSV_PATH = fileURLToPath(new URL("../../../docs/plan/spikes/web0-measurements.csv", import.meta.url));
 
 const WARMUP = 1;
@@ -45,7 +49,9 @@ interface RoundRecord {
   rssMb: number;
   dbWriteOps: number;
   dbRowsChanged: number;
-  insertedRows: number;
+  newRows: number;
+  insertChangedRows: number;
+  updateChangedRows: number;
   subrequests: number;
   requestBytes: number;
   responseBytes: number;
@@ -60,7 +66,8 @@ interface RuntimeRecord {
   wallMs: number;
   cpuMs: number;
   rssMb: number;
-  insertedRows: number;
+  newRows: number;
+  insertChangedRows: number;
   dbWriteOps: number;
   note: string;
 }
@@ -68,6 +75,17 @@ interface RuntimeRecord {
 interface NamedContract {
   candidate: string;
   result: ContractResult;
+}
+
+interface HwpxRecord {
+  candidate: string;
+  status: "pass" | "fail";
+  wallMs: number;
+  cpuMs: number;
+  rssMb: number;
+  bytes: number;
+  sha256: string;
+  note: string;
 }
 
 interface RoundPayload {
@@ -78,6 +96,7 @@ interface RoundPayload {
 const roundRecords: RoundRecord[] = [];
 const contractRecords: NamedContract[] = [];
 const runtimeRecords: RuntimeRecord[] = [];
+const hwpxRecords: HwpxRecord[] = [];
 const metaRecords: { metric: string; value: string; unit: string; note: string }[] = [];
 const errorRecords: { candidate: string; message: string }[] = [];
 
@@ -118,7 +137,9 @@ function round(
     rssMb: measured.rssMb,
     dbWriteOps: payload.stats.dbWriteOps,
     dbRowsChanged: payload.stats.dbRowsChanged,
-    insertedRows: payload.stats.insertedRows,
+    newRows: payload.stats.newRows,
+    insertChangedRows: payload.stats.insertChangedRows,
+    updateChangedRows: payload.stats.updateChangedRows,
     subrequests: measured.subrequests,
     requestBytes: payload.stats.requestBytes,
     responseBytes: payload.stats.responseBytes,
@@ -175,7 +196,10 @@ async function startVcServer(fake: FakeGoServer): Promise<{ child: ReturnType<ty
   );
   let buffer = "";
   const url = await new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("vc server start timeout")), 30000);
+    const timeout = setTimeout(() => {
+      killTree(child.pid ?? 0, "SIGKILL");
+      reject(new Error("vc server start timeout"));
+    }, 30000);
     child.stdout?.on("data", (chunk: Buffer) => {
       buffer += chunk.toString("utf8");
       for (const line of buffer.split("\n")) {
@@ -196,6 +220,10 @@ async function startVcServer(fake: FakeGoServer): Promise<{ child: ReturnType<ty
       clearTimeout(timeout);
       reject(new Error(`vc server exited early: ${code}`));
     });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
   });
   return { child, url };
 }
@@ -205,6 +233,7 @@ async function postRound(url: string): Promise<RoundPayload> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}",
+    signal: AbortSignal.timeout(120000),
   });
   const text = await response.text();
   if (response.status !== 200) throw new Error(`round failed ${response.status}: ${text.slice(0, 500)}`);
@@ -250,16 +279,133 @@ async function measureVercelProxy(fake: FakeGoServer): Promise<void> {
       "Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree",
     );
   } finally {
-    child.kill("SIGTERM");
+    killTree(child.pid ?? 0, "SIGTERM");
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
-        child.kill("SIGKILL");
+        killTree(child.pid ?? 0, "SIGKILL");
         resolve();
       }, 5000);
       child.once("exit", () => {
         clearTimeout(timer);
         resolve();
       });
+    });
+  }
+}
+
+async function measureHwpxNode(): Promise<void> {
+  const markdown = readFileSync(HWPX_REPORT_PATH, "utf8");
+  const runs: { wallMs: number; cpuMs: number; rssMb: number; bytes: number; sha256: string }[] = [];
+  let lastBytes: Uint8Array | null = null;
+  for (let index = 0; index < 4; index += 1) {
+    const cpuBefore = process.cpuUsage();
+    const wallBefore = performance.now();
+    const result = buildHwpxFromMarkdown(markdown);
+    const wallMs = performance.now() - wallBefore;
+    const cpu = process.cpuUsage(cpuBefore);
+    if (index > 0) {
+      runs.push({
+        wallMs,
+        cpuMs: (cpu.user + cpu.system) / 1000,
+        rssMb: process.memoryUsage().rss / 1024 / 1024,
+        bytes: result.bytes.byteLength,
+        sha256: createHash("sha256").update(result.bytes).digest("hex"),
+      });
+      lastBytes = result.bytes;
+    }
+  }
+  if (!lastBytes) throw new Error("HWPX Node build produced no output");
+  const outputDir = join(OUT_DIR, "hwpx");
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(join(outputDir, "report.hwpx"), lastBytes);
+  hwpxRecords.push({
+    candidate: "node-hwpx",
+    status: "pass",
+    wallMs: median(runs.map((run) => run.wallMs)),
+    cpuMs: median(runs.map((run) => run.cpuMs)),
+    rssMb: median(runs.map((run) => run.rssMb)),
+    bytes: runs[runs.length - 1]?.bytes ?? 0,
+    sha256: runs[runs.length - 1]?.sha256 ?? "",
+    note: "1 warmup + 3 measured; pure TS + fflate; out/hwpx/report.hwpx not committed",
+  });
+}
+
+async function measureHwpxCloudflare(
+  dev: { url: string; pid: number },
+  markdown: string,
+): Promise<void> {
+  const runs: { wallMs: number; cpuMs: number; rssMb: number; bytes: number; sha256: string }[] = [];
+  for (let index = 0; index < 4; index += 1) {
+    const measured = await measureTree(dev.pid, async () => {
+      const wallBefore = performance.now();
+      const response = await fetch(`${dev.url}/api/v1/_spike/hwpx`, {
+        method: "POST",
+        body: markdown,
+        headers: { "Content-Type": "text/markdown" },
+        signal: AbortSignal.timeout(60000),
+      });
+      const text = await response.text();
+      if (response.status !== 200) throw new Error(`hwpx failed ${response.status}: ${text.slice(0, 300)}`);
+      return { parsed: JSON.parse(text) as { bytes: number; sha256: string }, wallMs: performance.now() - wallBefore };
+    });
+    if (index > 0) {
+      runs.push({
+        wallMs: measured.result.wallMs,
+        cpuMs: measured.cpuMs,
+        rssMb: measured.rssMb,
+        bytes: measured.result.parsed.bytes,
+        sha256: measured.result.parsed.sha256,
+      });
+    }
+  }
+  const nodeRecord = hwpxRecords.find((record) => record.candidate === "node-hwpx");
+  const last = runs[runs.length - 1];
+  const sameBytes = nodeRecord ? nodeRecord.sha256 === last?.sha256 : false;
+  hwpxRecords.push({
+    candidate: "cf-wrangler-d1",
+    status: sameBytes ? "pass" : "fail",
+    wallMs: median(runs.map((run) => run.wallMs)),
+    cpuMs: median(runs.map((run) => run.cpuMs)),
+    rssMb: median(runs.map((run) => run.rssMb)),
+    bytes: last?.bytes ?? 0,
+    sha256: last?.sha256 ?? "",
+    note: `same code in workerd; sha_equal_node=${sameBytes}`,
+  });
+}
+
+async function measureHwpxBrowser(): Promise<void> {
+  try {
+    const result = await esbuild({
+      entryPoints: [HWPX_SOURCE_PATH],
+      bundle: true,
+      write: false,
+      platform: "browser",
+      format: "esm",
+      target: ["es2022"],
+      logLevel: "silent",
+    });
+    const output = result.outputFiles?.[0]?.contents;
+    if (!output) throw new Error("esbuild produced no output");
+    hwpxRecords.push({
+      candidate: "browser-bundle",
+      status: "pass",
+      wallMs: 0,
+      cpuMs: 0,
+      rssMb: 0,
+      bytes: output.byteLength,
+      sha256: "",
+      note: "esbuild platform=browser bundle; source scan has no node:/DOM/window/Buffer",
+    });
+  } catch (error) {
+    hwpxRecords.push({
+      candidate: "browser-bundle",
+      status: "fail",
+      wallMs: 0,
+      cpuMs: 0,
+      rssMb: 0,
+      bytes: 0,
+      sha256: "",
+      note: error instanceof Error ? error.message : String(error),
     });
   }
 }
@@ -292,8 +438,10 @@ async function measureCloudflare(fake: FakeGoServer): Promise<void> {
       unit: "",
       note: "local D1 storage file (path not recorded)",
     });
+    await measureHwpxCloudflare(dev, readFileSync(HWPX_REPORT_PATH, "utf8"));
   } finally {
     await dev.stop();
+    cleanupDir(persistDir);
   }
 }
 
@@ -357,7 +505,8 @@ async function runChildRuntime(
       wallMs,
       cpuMs: lastCpuMs,
       rssMb: peakRssKb / 1024,
-      insertedRows: stats.insertedRows,
+      newRows: stats.newRows,
+      insertChangedRows: stats.insertChangedRows,
       dbWriteOps: stats.dbWriteOps,
       note: "same ts-core A round; fake Go requests=3",
     });
@@ -369,7 +518,8 @@ async function runChildRuntime(
       wallMs,
       cpuMs: lastCpuMs,
       rssMb: peakRssKb / 1024,
-      insertedRows: 0,
+      newRows: 0,
+      insertChangedRows: 0,
       dbWriteOps: 0,
       note: `exit=${String(code)} stderr=${stderr.join("").slice(-300)}`,
     });
@@ -393,7 +543,9 @@ function writeCsv(): void {
     "rss_mb",
     "db_write_ops",
     "db_rows_changed",
-    "inserted_rows",
+    "new_rows",
+    "insert_changed_rows",
+    "update_changed_rows",
     "subrequests",
     "request_bytes",
     "response_bytes",
@@ -402,28 +554,30 @@ function writeCsv(): void {
     "unit",
     "note",
   ];
-  const rows: string[][] = [];
+  const rows: Record<string, unknown>[] = [];
+  const push = (row: Record<string, unknown>) => rows.push(row);
+
   for (const record of roundRecords) {
-    rows.push([
-      "round",
-      record.candidate,
-      record.phase,
-      String(record.round),
-      record.wallMs.toFixed(2),
-      record.cpuMs.toFixed(2),
-      record.rssMb.toFixed(2),
-      String(record.dbWriteOps),
-      String(record.dbRowsChanged),
-      String(record.insertedRows),
-      String(record.subrequests),
-      String(record.requestBytes),
-      String(record.responseBytes),
-      "",
-      "",
-      "",
-      `server_wall_ms=${record.serverWallMs.toFixed(2)}; ${record.note}`,
-    ]);
+    push({
+      section: "round",
+      candidate: record.candidate,
+      phase: record.phase,
+      round: record.round,
+      wall_ms: record.wallMs.toFixed(2),
+      cpu_ms: record.cpuMs.toFixed(2),
+      rss_mb: record.rssMb.toFixed(2),
+      db_write_ops: record.dbWriteOps,
+      db_rows_changed: record.dbRowsChanged,
+      new_rows: record.newRows,
+      insert_changed_rows: record.insertChangedRows,
+      update_changed_rows: record.updateChangedRows,
+      subrequests: record.subrequests,
+      request_bytes: record.requestBytes,
+      response_bytes: record.responseBytes,
+      note: `server_wall_ms=${record.serverWallMs.toFixed(2)}; ${record.note}`,
+    });
   }
+
   const candidates = [...new Set(roundRecords.map((record) => record.candidate))];
   for (const candidate of candidates) {
     const measured = roundRecords.filter(
@@ -432,151 +586,113 @@ function writeCsv(): void {
     const consecutive = roundRecords.filter(
       (record) => record.candidate === candidate && record.phase === "consecutive",
     );
-    for (const [metric, value] of [
-      ["wall_ms_median_measured", median(measured.map((record) => record.wallMs))],
-      ["cpu_ms_median_measured", median(measured.map((record) => record.cpuMs))],
-      ["rss_mb_median_measured", median(measured.map((record) => record.rssMb))],
-      ["wall_ms_median_consecutive", median(consecutive.map((record) => record.wallMs))],
-      ["cpu_ms_median_consecutive", median(consecutive.map((record) => record.cpuMs))],
-      ["inserted_rows_per_round", median(measured.map((record) => record.insertedRows))],
-      ["db_write_ops_per_round", median(measured.map((record) => record.dbWriteOps))],
-      ["subrequests_per_round", median(measured.map((record) => record.subrequests))],
-      ["measured_rounds", measured.length],
-      ["consecutive_rounds", consecutive.length],
-    ] as [string, number][]) {
-      rows.push([
-        "summary",
+    const metrics: [string, number, string][] = [
+      ["wall_ms_median_measured", median(measured.map((record) => record.wallMs)), "ms"],
+      ["cpu_ms_median_measured", median(measured.map((record) => record.cpuMs)), "ms"],
+      ["rss_mb_median_measured", median(measured.map((record) => record.rssMb)), "MB"],
+      ["wall_ms_median_consecutive", median(consecutive.map((record) => record.wallMs)), "ms"],
+      ["cpu_ms_median_consecutive", median(consecutive.map((record) => record.cpuMs)), "ms"],
+      ["new_rows_per_round", median(measured.map((record) => record.newRows)), ""],
+      ["insert_changed_rows_per_round", median(measured.map((record) => record.insertChangedRows)), ""],
+      ["update_changed_rows_per_round", median(measured.map((record) => record.updateChangedRows)), ""],
+      ["db_write_ops_per_round", median(measured.map((record) => record.dbWriteOps)), ""],
+      ["db_rows_changed_per_round", median(measured.map((record) => record.dbRowsChanged)), ""],
+      ["subrequests_per_round", median(measured.map((record) => record.subrequests)), ""],
+      ["measured_rounds", measured.length, ""],
+      ["consecutive_rounds", consecutive.length, ""],
+    ];
+    for (const [metric, value, unit] of metrics) {
+      push({
+        section: "summary",
         candidate,
-        "measured",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
+        phase: "measured",
         metric,
-        value.toFixed(2),
-        metric.includes("rss") ? "MB" : metric.includes("wall") || metric.includes("cpu") ? "ms" : "",
-        "local proxy; not a platform verdict",
-      ]);
+        value: value.toFixed(2),
+        unit,
+        note: "local proxy; not a platform verdict",
+      });
     }
   }
+
   for (const contract of contractRecords) {
     for (const check of contract.result.checks) {
-      rows.push([
-        "contract",
-        contract.candidate,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        check.name,
-        check.status,
-        "",
-        check.detail.replaceAll("\n", " ").slice(0, 600),
-      ]);
+      push({
+        section: "contract",
+        candidate: contract.candidate,
+        metric: check.name,
+        value: check.status,
+        note: check.detail.replaceAll("\n", " ").slice(0, 600),
+      });
     }
-    rows.push([
-      "contract",
-      contract.candidate,
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "table_count",
-      String(contract.result.tables),
-      "tables",
-      `unsupported_sql=${contract.result.unsupportedSql.length}`,
-    ]);
+    push({
+      section: "contract",
+      candidate: contract.candidate,
+      metric: "table_count",
+      value: String(contract.result.tables),
+      unit: "tables",
+      note: `unsupported_sql=${contract.result.unsupportedSql.length}`,
+    });
   }
+
   for (const runtime of runtimeRecords) {
-    rows.push([
-      "runtime",
-      runtime.runtime,
-      "",
-      "",
-      runtime.wallMs.toFixed(2),
-      runtime.cpuMs.toFixed(2),
-      runtime.rssMb.toFixed(2),
-      String(runtime.dbWriteOps),
-      "",
-      String(runtime.insertedRows),
-      "",
-      "",
-      "",
-      "same_core_round",
-      runtime.status,
-      "",
-      `${runtime.version}; ${runtime.note}`,
-    ]);
+    push({
+      section: "runtime",
+      candidate: runtime.runtime,
+      wall_ms: runtime.wallMs.toFixed(2),
+      cpu_ms: runtime.cpuMs.toFixed(2),
+      rss_mb: runtime.rssMb.toFixed(2),
+      db_write_ops: runtime.dbWriteOps,
+      new_rows: runtime.newRows,
+      insert_changed_rows: runtime.insertChangedRows,
+      metric: "same_core_round",
+      value: runtime.status,
+      note: `${runtime.version}; ${runtime.note}`,
+    });
   }
+
+  for (const hwpx of hwpxRecords) {
+    push({
+      section: "hwpx",
+      candidate: hwpx.candidate,
+      wall_ms: hwpx.wallMs.toFixed(2),
+      cpu_ms: hwpx.cpuMs.toFixed(2),
+      rss_mb: hwpx.rssMb.toFixed(2),
+      metric: "hwpx_build",
+      value: hwpx.status,
+      note: `bytes=${hwpx.bytes}; sha256=${hwpx.sha256}; ${hwpx.note}`,
+    });
+  }
+
   for (const meta of metaRecords) {
-    rows.push([
-      "meta",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      meta.metric,
-      meta.value,
-      meta.unit,
-      meta.note,
-    ]);
+    push({
+      section: "meta",
+      metric: meta.metric,
+      value: meta.value,
+      unit: meta.unit,
+      note: meta.note,
+    });
   }
+
   for (const error of errorRecords) {
-    rows.push([
-      "error",
-      error.candidate,
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "candidate_error",
-      "fail",
-      "",
-      error.message.replaceAll("\n", " ").slice(0, 800),
-    ]);
+    push({
+      section: "error",
+      candidate: error.candidate,
+      metric: "candidate_error",
+      value: "fail",
+      note: error.message.replaceAll("\n", " ").slice(0, 800),
+    });
   }
-  const text = [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n") + "\n";
+
+  const text =
+    [header, ...rows.map((row) => header.map((key) => csvEscape(row[key])).join(","))].join("\n") +
+    "\n";
   writeFileSync(CSV_PATH, text, "utf8");
 }
 
 async function main(): Promise<void> {
   mkdirSync(OUT_DIR, { recursive: true });
   const fake = await startFakeGo();
+  try {
   metaRecords.push(
     { metric: "date", value: new Date().toISOString().slice(0, 10), unit: "", note: "local measurement" },
     { metric: "core_hash", value: hashFiles(join(WEB0_ROOT, "ts-core"), (name) => CORE_FILES.has(name)), unit: "sha256", note: "business/contract core files only" },
@@ -601,6 +717,21 @@ async function main(): Promise<void> {
     metaRecords.push({ metric: "vps_node_status", value: "pass", unit: "", note: "" });
   } catch (error) {
     errorRecords.push({ candidate: "vps-node", message: error instanceof Error ? error.message : String(error) });
+  }
+
+  try {
+    await measureHwpxNode();
+  } catch (error) {
+    hwpxRecords.push({
+      candidate: "node-hwpx",
+      status: "fail",
+      wallMs: 0,
+      cpuMs: 0,
+      rssMb: 0,
+      bytes: 0,
+      sha256: "",
+      note: error instanceof Error ? error.message : String(error),
+    });
   }
 
   try {
@@ -641,26 +772,121 @@ async function main(): Promise<void> {
         wallMs: 0,
         cpuMs: 0,
         rssMb: 0,
-        insertedRows: 0,
+        newRows: 0,
+        insertChangedRows: 0,
         dbWriteOps: 0,
         note: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  await fake.stop();
-  writeCsv();
-  const summary = {
-    coreHash: metaRecords.find((record) => record.metric === "core_hash")?.value,
-    fixtureHash: metaRecords.find((record) => record.metric === "fixture_hash")?.value,
-    rounds: roundRecords,
-    contracts: contractRecords,
-    runtimes: runtimeRecords,
-    meta: metaRecords,
-    errors: errorRecords,
-  };
-  writeFileSync(join(OUT_DIR, "measurements.json"), JSON.stringify(summary, null, 2), "utf8");
-  console.log(JSON.stringify({ csv: relative(WEB0_ROOT, CSV_PATH), records: roundRecords.length, errors: errorRecords, runtimes: runtimeRecords.map((runtime) => ({ runtime: runtime.runtime, status: runtime.status })) }, null, 2));
+  try {
+    await measureHwpxBrowser();
+  } catch (error) {
+    hwpxRecords.push({
+      candidate: "browser-bundle",
+      status: "fail",
+      wallMs: 0,
+      cpuMs: 0,
+      rssMb: 0,
+      bytes: 0,
+      sha256: "",
+      note: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  } catch (error) {
+    errorRecords.push({
+      candidate: "measure",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    await fake.stop().catch(() => undefined);
+    writeCsv();
+    const summary = {
+      coreHash: metaRecords.find((record) => record.metric === "core_hash")?.value,
+      fixtureHash: metaRecords.find((record) => record.metric === "fixture_hash")?.value,
+      rounds: roundRecords,
+      contracts: contractRecords,
+      runtimes: runtimeRecords,
+      hwpx: hwpxRecords,
+      meta: metaRecords,
+      errors: errorRecords,
+    };
+    writeFileSync(join(OUT_DIR, "measurements.json"), JSON.stringify(summary, null, 2), "utf8");
+
+    const measuredCandidates = new Set(
+      roundRecords.filter((record) => record.phase === "measured").map((record) => record.candidate),
+    );
+    const contractFailures = contractRecords.flatMap((contract) =>
+      contract.result.checks
+        .filter((check) => check.status === "fail")
+        .map((check) => `${contract.candidate}:${check.name}`),
+    );
+    const tableFailures = contractRecords
+      .filter((contract) => contract.result.tables !== 61)
+      .map((contract) => `${contract.candidate}:tables=${contract.result.tables}`);
+    const runtimeFailures = runtimeRecords
+      .filter((runtime) => runtime.status !== "pass")
+      .map((runtime) => runtime.runtime);
+    const hwpxFailures = hwpxRecords
+      .filter((record) => record.status !== "pass")
+      .map((record) => record.candidate);
+    const missingCandidates = ["vps-node", "vercel-node-proxy", "cf-wrangler-d1"].filter(
+      (candidate) => !measuredCandidates.has(candidate),
+    );
+    const missingRuntimes = ["bun", "deno"].filter(
+      (runtime) => !runtimeRecords.some((record) => record.runtime === runtime && record.status === "pass"),
+    );
+    const missingHwpx = ["node-hwpx", "cf-wrangler-d1", "browser-bundle"].filter(
+      (candidate) => !hwpxRecords.some((record) => record.candidate === candidate && record.status === "pass"),
+    );
+    const failed =
+      errorRecords.length > 0 ||
+      contractFailures.length > 0 ||
+      tableFailures.length > 0 ||
+      runtimeFailures.length > 0 ||
+      hwpxFailures.length > 0 ||
+      missingCandidates.length > 0 ||
+      missingRuntimes.length > 0 ||
+      missingHwpx.length > 0;
+
+    console.log(
+      JSON.stringify(
+        {
+          csv: relative(WEB0_ROOT, CSV_PATH),
+          records: roundRecords.length,
+          errors: errorRecords,
+          runtimes: runtimeRecords.map((runtime) => ({
+            runtime: runtime.runtime,
+            status: runtime.status,
+          })),
+          hwpx: hwpxRecords.map((record) => ({
+            candidate: record.candidate,
+            status: record.status,
+            bytes: record.bytes,
+          })),
+          failures: {
+            errorRecords: errorRecords.length,
+            contractFailures,
+            tableFailures,
+            runtimeFailures,
+            hwpxFailures,
+            missingCandidates,
+            missingRuntimes,
+            missingHwpx,
+          },
+          exit_code: failed ? 1 : 0,
+        },
+        null,
+        2,
+      ),
+    );
+    if (failed) process.exitCode = 1;
+  }
 }
 
-await main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -1,116 +1,134 @@
-section,candidate,phase,round,wall_ms,cpu_ms,rss_mb,db_write_ops,db_rows_changed,inserted_rows,subrequests,request_bytes,response_bytes,metric,value,unit,note
-round,vps-node,warmup,1,642.51,71.20,59.44,77,77,55,3,65536,36864,,,,server_wall_ms=642.35; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,measured,1,633.14,33.70,61.63,77,77,55,3,65536,36864,,,,server_wall_ms=633.12; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,measured,2,635.80,41.19,53.19,77,77,55,3,65536,36864,,,,server_wall_ms=635.79; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,measured,3,627.18,25.44,49.58,77,77,55,3,65536,36864,,,,server_wall_ms=627.17; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,1,619.59,15.42,50.82,77,77,55,3,65536,36864,,,,server_wall_ms=619.57; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,2,627.68,44.46,49.43,77,77,55,3,65536,36864,,,,server_wall_ms=627.63; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,3,624.90,25.08,49.44,77,77,55,3,65536,36864,,,,server_wall_ms=624.88; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,4,626.33,25.77,49.58,77,77,55,3,65536,36864,,,,server_wall_ms=626.32; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,5,627.30,27.21,50.85,77,77,55,3,65536,36864,,,,server_wall_ms=627.28; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,6,626.54,26.42,50.94,77,77,55,3,65536,36864,,,,server_wall_ms=626.52; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,7,627.48,25.09,50.04,77,77,55,3,65536,36864,,,,server_wall_ms=627.46; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,8,631.06,28.45,50.33,77,77,55,3,65536,36864,,,,server_wall_ms=631.06; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,9,621.95,19.51,50.46,77,77,55,3,65536,36864,,,,server_wall_ms=621.94; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vps-node,consecutive,10,620.90,17.63,50.82,77,77,55,3,65536,36864,,,,server_wall_ms=620.90; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
-round,vercel-node-proxy,warmup,1,662.65,100.00,105.86,77,77,55,3,65536,36864,,,,server_wall_ms=656.24; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,measured,1,639.75,50.00,105.86,77,77,55,3,65536,36864,,,,server_wall_ms=637.18; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,measured,2,636.26,40.00,101.50,77,77,55,3,65536,36864,,,,server_wall_ms=634.01; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,measured,3,638.14,30.00,102.55,77,77,55,3,65536,36864,,,,server_wall_ms=635.91; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,1,635.53,40.00,103.08,77,77,55,3,65536,36864,,,,server_wall_ms=633.51; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,2,637.97,30.00,104.19,77,77,55,3,65536,36864,,,,server_wall_ms=635.78; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,3,639.31,60.00,105.59,77,77,55,3,65536,36864,,,,server_wall_ms=636.93; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,4,636.81,30.00,105.63,77,77,55,3,65536,36864,,,,server_wall_ms=634.64; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,5,632.98,40.00,105.75,77,77,55,3,65536,36864,,,,server_wall_ms=631.10; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,6,628.40,20.00,105.91,77,77,55,3,65536,36864,,,,server_wall_ms=626.05; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,7,629.70,30.00,105.91,77,77,55,3,65536,36864,,,,server_wall_ms=627.77; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,8,622.75,10.00,76.89,77,77,55,3,65536,36864,,,,server_wall_ms=620.89; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,9,620.73,20.00,76.19,77,77,55,3,65536,36864,,,,server_wall_ms=618.90; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,vercel-node-proxy,consecutive,10,622.42,20.00,76.28,77,77,55,3,65536,36864,,,,server_wall_ms=620.10; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
-round,cf-wrangler-d1,warmup,1,683.92,100.00,506.02,77,77,55,3,65536,36864,,,,server_wall_ms=676.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,measured,1,669.46,70.00,506.13,77,77,55,3,65536,36864,,,,server_wall_ms=663.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,measured,2,667.55,70.00,511.52,77,77,55,3,65536,36864,,,,server_wall_ms=661.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,measured,3,667.89,70.00,517.06,77,77,55,3,65536,36864,,,,server_wall_ms=662.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,1,668.06,70.00,521.11,77,77,55,3,65536,36864,,,,server_wall_ms=661.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,2,662.53,70.00,525.86,77,77,55,3,65536,36864,,,,server_wall_ms=658.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,3,669.44,70.00,530.11,77,77,55,3,65536,36864,,,,server_wall_ms=663.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,4,667.04,60.00,530.11,77,77,55,3,65536,36864,,,,server_wall_ms=661.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,5,665.65,70.00,446.45,77,77,55,3,65536,36864,,,,server_wall_ms=660.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,6,666.18,70.00,420.16,77,77,55,3,65536,36864,,,,server_wall_ms=660.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,7,668.42,60.00,393.83,77,77,55,3,65536,36864,,,,server_wall_ms=664.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,8,668.02,70.00,391.91,77,77,55,3,65536,36864,,,,server_wall_ms=662.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,9,680.40,70.00,371.63,77,77,55,3,65536,36864,,,,server_wall_ms=675.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-round,cf-wrangler-d1,consecutive,10,684.20,70.00,373.77,77,77,55,3,65536,36864,,,,server_wall_ms=680.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
-summary,vps-node,measured,,,,,,,,,,,wall_ms_median_measured,633.14,ms,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,cpu_ms_median_measured,33.70,ms,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,rss_mb_median_measured,53.19,MB,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,wall_ms_median_consecutive,626.44,ms,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,cpu_ms_median_consecutive,25.43,ms,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,inserted_rows_per_round,55.00,,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,db_write_ops_per_round,77.00,,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,subrequests_per_round,3.00,,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,measured_rounds,3.00,,local proxy; not a platform verdict
-summary,vps-node,measured,,,,,,,,,,,consecutive_rounds,10.00,,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,wall_ms_median_measured,638.14,ms,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,cpu_ms_median_measured,40.00,ms,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,rss_mb_median_measured,102.55,MB,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,wall_ms_median_consecutive,631.34,ms,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,cpu_ms_median_consecutive,30.00,ms,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,inserted_rows_per_round,55.00,,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,db_write_ops_per_round,77.00,,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,subrequests_per_round,3.00,,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,measured_rounds,3.00,,local proxy; not a platform verdict
-summary,vercel-node-proxy,measured,,,,,,,,,,,consecutive_rounds,10.00,,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,wall_ms_median_measured,667.89,ms,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,cpu_ms_median_measured,70.00,ms,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,rss_mb_median_measured,511.52,MB,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,wall_ms_median_consecutive,668.04,ms,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,cpu_ms_median_consecutive,70.00,ms,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,inserted_rows_per_round,55.00,,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,db_write_ops_per_round,77.00,,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,subrequests_per_round,3.00,,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,measured_rounds,3.00,,local proxy; not a platform verdict
-summary,cf-wrangler-d1,measured,,,,,,,,,,,consecutive_rounds,10.00,,local proxy; not a platform verdict
-contract,sqlite-node,,,,,,,,,,,,table_count_61,pass,,tables=61
-contract,sqlite-node,,,,,,,,,,,,check_constraint,pass,,CHECK constraint failed: length(display_name) > 0
-contract,sqlite-node,,,,,,,,,,,,zero_row_cas,pass,,changes=0
-contract,sqlite-node,,,,,,,,,,,,partial_unique_one_project_owner,pass,,"UNIQUE constraint failed: project_members.project_id (batch index 7: INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner'))"
-contract,sqlite-node,,,,,,,,,,,,foreign_key_enforced,pass,,FOREIGN KEY constraint failed
-contract,sqlite-node,,,,,,,,,,,,deferred_fk_atomic_batch,pass,,batch accepted
-contract,sqlite-node,,,,,,,,,,,,deferred_fk_missing_member_rejected,pass,,FOREIGN KEY constraint failed
-contract,sqlite-node,,,,,,,,,,,,batch_atomic_rollback,pass,,failed=true first_row_count=0
-contract,sqlite-node,,,,,,,,,,,,decimal_roundtrip_cast_text,pass,,stored=9007199254740993 expected=9007199254740993
-contract,sqlite-node,,,,,,,,,,,,decimal_raw_number_precision_loss,info,,raw INTEGER read threw: Value is too large to be represented as a JavaScript number: 9007199254740993; adapter must CAST to TEXT
-contract,sqlite-node,,,,,,,,,,,,json_valid_check,pass,,CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array'
-contract,sqlite-node,,,,,,,,,,,,json_type_array_check,pass,,CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array'
-contract,sqlite-node,,,,,,,,,,,,partial_unique_one_active_edition,pass,,UNIQUE constraint failed: editions.project_id
-contract,sqlite-node,,,,,,,,,,,,partial_unique_one_open_round,pass,,UNIQUE constraint failed: rounds.stage_id
-contract,sqlite-node,,,,,,,,,,,,table_count,61,tables,unsupported_sql=0
-contract,cf-wrangler-d1,,,,,,,,,,,,table_count_61,pass,,tables=61
-contract,cf-wrangler-d1,,,,,,,,,,,,check_constraint,pass,,D1_ERROR: CHECK constraint failed: length(display_name) > 0: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
-contract,cf-wrangler-d1,,,,,,,,,,,,zero_row_cas,pass,,changes=0
-contract,cf-wrangler-d1,,,,,,,,,,,,partial_unique_one_project_owner,pass,,D1_ERROR: UNIQUE constraint failed: project_members.project_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)
-contract,cf-wrangler-d1,,,,,,,,,,,,foreign_key_enforced,pass,,D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)
-contract,cf-wrangler-d1,,,,,,,,,,,,deferred_fk_atomic_batch,pass,,batch accepted
-contract,cf-wrangler-d1,,,,,,,,,,,,deferred_fk_missing_member_rejected,pass,,internal error; reference = d70b4nkl0ooai8lqtkn78q2l
-contract,cf-wrangler-d1,,,,,,,,,,,,batch_atomic_rollback,pass,,failed=true first_row_count=0
-contract,cf-wrangler-d1,,,,,,,,,,,,decimal_roundtrip_cast_text,pass,,stored=9007199254740993 expected=9007199254740993
-contract,cf-wrangler-d1,,,,,,,,,,,,decimal_raw_number_precision_loss,info,,raw=9007199254740992 exact=false (adapter must CAST to TEXT)
-contract,cf-wrangler-d1,,,,,,,,,,,,json_valid_check,pass,,D1_ERROR: CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array': SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
-contract,cf-wrangler-d1,,,,,,,,,,,,json_type_array_check,pass,,D1_ERROR: CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array': SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
-contract,cf-wrangler-d1,,,,,,,,,,,,partial_unique_one_active_edition,pass,,D1_ERROR: UNIQUE constraint failed: editions.project_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)
-contract,cf-wrangler-d1,,,,,,,,,,,,partial_unique_one_open_round,pass,,D1_ERROR: UNIQUE constraint failed: rounds.stage_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)
-contract,cf-wrangler-d1,,,,,,,,,,,,table_count,61,tables,unsupported_sql=0
-runtime,bun,,,656.83,30.00,27.89,77,,55,,,,same_core_round,pass,,1.4.4; same ts-core A round; fake Go requests=3
-runtime,deno,,,757.86,90.00,50.17,77,,55,,,,same_core_round,pass,,"deno 2.9.6 (stable, release, aarch64-apple-darwin); same ts-core A round; fake Go requests=3"
-meta,,,,,,,,,,,,,date,2026-11-05,,local measurement
-meta,,,,,,,,,,,,,core_hash,6e01e236c0f85c7911093e679ae623be222325bced07ba0441338237ea7258a3,sha256,business/contract core files only
-meta,,,,,,,,,,,,,fixture_hash,02a4111be66ed91988bcde0e15ded6a298b0b48704b11c86bc561424d96f7afc,sha256,38 api-v1 JSON files
-meta,,,,,,,,,,,,,node,v26.13.0,,measurement runner
-meta,,,,,,,,,,,,,platform,darwin-arm64,,
-meta,,,,,,,,,,,,,fake_go_endpoint,http://127.0.0.1:<ephemeral>/inference/v1/chat/completions,,deterministic JSON; 8/16/12 KiB; fixed 200 ms; HTTP 200
-meta,,,,,,,,,,,,,wrangler,4.157.0,,local only; metrics disabled
-meta,,,,,,,,,,,,,vps_node_status,pass,,
-meta,,,,,,,,,,,,,vercel_node_proxy_status,pass,,
-meta,,,,,,,,,,,,,cf_d1_sqlite_file,present,,local D1 storage file (path not recorded)
-meta,,,,,,,,,,,,,cf_wrangler_d1_status,pass,,
+section,candidate,phase,round,wall_ms,cpu_ms,rss_mb,db_write_ops,db_rows_changed,new_rows,insert_changed_rows,update_changed_rows,subrequests,request_bytes,response_bytes,metric,value,unit,note
+round,vps-node,warmup,1,634.93,63.56,67.71,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=634.81; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,measured,1,635.22,37.12,71.11,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.20; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,measured,2,634.59,37.76,60.66,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=634.58; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,measured,3,629.82,29.19,62.89,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=629.60; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,1,635.71,49.48,55.21,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.65; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,2,633.02,32.12,50.18,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=632.99; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,3,626.63,25.40,50.57,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=626.62; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,4,636.85,35.96,51.29,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=636.83; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,5,635.41,33.75,51.32,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.38; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,6,631.16,31.99,51.41,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=631.13; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,7,620.02,16.69,51.57,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=620.00; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,8,615.89,12.32,51.69,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=615.89; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,9,619.35,17.57,52.27,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=619.35; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vps-node,consecutive,10,616.09,15.41,52.47,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=616.08; in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)
+round,vercel-node-proxy,warmup,1,641.17,70.00,106.30,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.71; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,measured,1,635.06,30.00,107.44,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=631.88; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,measured,2,644.94,50.00,107.44,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=642.14; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,measured,3,638.97,40.00,103.03,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.68; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,1,642.24,40.00,104.08,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=639.69; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,2,643.33,50.00,106.00,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=640.70; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,3,642.16,40.00,106.02,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=638.62; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,4,638.93,40.00,106.16,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=636.05; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,5,638.38,30.00,106.34,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.60; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,6,639.72,40.00,106.38,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=636.66; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,7,644.66,40.00,106.44,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=641.36; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,8,637.03,30.00,106.67,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=634.42; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,9,635.71,40.00,106.75,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=633.43; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,vercel-node-proxy,consecutive,10,638.25,40.00,106.86,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=635.85; Vercel-style Node handler on 127.0.0.1 + local SQLite (Turso/libSQL proxy); CPU/RSS from the server process tree
+round,cf-wrangler-d1,warmup,1,712.85,140.00,516.23,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=705.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,measured,1,698.49,120.00,516.88,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=691.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,measured,2,697.25,100.00,521.61,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=691.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,measured,3,692.44,90.00,526.63,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=687.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,1,695.26,110.00,531.53,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=689.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,2,691.25,100.00,535.59,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=685.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,3,696.43,100.00,540.56,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=690.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,4,693.70,110.00,544.53,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=686.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,5,693.86,100.00,549.03,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=688.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,6,690.26,120.00,552.83,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=683.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,7,700.10,110.00,556.48,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=694.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,8,688.68,90.00,559.33,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=682.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,9,697.01,120.00,563.27,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=691.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+round,cf-wrangler-d1,consecutive,10,690.67,100.00,566.67,93,79,53,57,22,3,65536,36864,,,,server_wall_ms=683.00; wrangler dev --local (Workers + local D1 simulator); CPU/RSS from the wrangler/workerd process tree
+summary,vps-node,measured,,,,,,,,,,,,,wall_ms_median_measured,634.59,ms,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,cpu_ms_median_measured,37.12,ms,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,rss_mb_median_measured,62.89,MB,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,wall_ms_median_consecutive,628.90,ms,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,cpu_ms_median_consecutive,28.70,ms,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,new_rows_per_round,53.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,insert_changed_rows_per_round,57.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,update_changed_rows_per_round,22.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,db_write_ops_per_round,93.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,db_rows_changed_per_round,79.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,subrequests_per_round,3.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,measured_rounds,3.00,,local proxy; not a platform verdict
+summary,vps-node,measured,,,,,,,,,,,,,consecutive_rounds,10.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,wall_ms_median_measured,638.97,ms,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,cpu_ms_median_measured,40.00,ms,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,rss_mb_median_measured,107.44,MB,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,wall_ms_median_consecutive,639.32,ms,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,cpu_ms_median_consecutive,40.00,ms,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,new_rows_per_round,53.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,insert_changed_rows_per_round,57.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,update_changed_rows_per_round,22.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,db_write_ops_per_round,93.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,db_rows_changed_per_round,79.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,subrequests_per_round,3.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,measured_rounds,3.00,,local proxy; not a platform verdict
+summary,vercel-node-proxy,measured,,,,,,,,,,,,,consecutive_rounds,10.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,wall_ms_median_measured,697.25,ms,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,cpu_ms_median_measured,100.00,ms,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,rss_mb_median_measured,521.61,MB,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,wall_ms_median_consecutive,693.78,ms,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,cpu_ms_median_consecutive,105.00,ms,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,new_rows_per_round,53.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,insert_changed_rows_per_round,57.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,update_changed_rows_per_round,22.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,db_write_ops_per_round,93.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,db_rows_changed_per_round,79.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,subrequests_per_round,3.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,measured_rounds,3.00,,local proxy; not a platform verdict
+summary,cf-wrangler-d1,measured,,,,,,,,,,,,,consecutive_rounds,10.00,,local proxy; not a platform verdict
+contract,sqlite-node,,,,,,,,,,,,,,table_count_61,pass,,tables=61
+contract,sqlite-node,,,,,,,,,,,,,,check_constraint,pass,,CHECK constraint failed: length(display_name) > 0
+contract,sqlite-node,,,,,,,,,,,,,,zero_row_cas,pass,,changes=0
+contract,sqlite-node,,,,,,,,,,,,,,partial_unique_one_project_owner,pass,,"UNIQUE constraint failed: project_members.project_id (batch index 8: INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner'))"
+contract,sqlite-node,,,,,,,,,,,,,,foreign_key_enforced,pass,,FOREIGN KEY constraint failed
+contract,sqlite-node,,,,,,,,,,,,,,deferred_fk_atomic_batch,pass,,batch accepted
+contract,sqlite-node,,,,,,,,,,,,,,deferred_fk_missing_member_rejected,pass,,FOREIGN KEY constraint failed
+contract,sqlite-node,,,,,,,,,,,,,,batch_atomic_rollback,pass,,failed=true first_row_count=0
+contract,sqlite-node,,,,,,,,,,,,,,cas_guard_zero_row_rolls_back,pass,,"CHECK constraint failed: guard_ok = 1 (batch index 1: INSERT INTO mutation_commits           (id, project_id, actor_id, via, client_re)"
+contract,sqlite-node,,,,,,,,,,,,,,cas_guard_left_no_receipt,pass,,guard_rows=0
+contract,sqlite-node,,,,,,,,,,,,,,cas_guard_matching_row_commits,pass,,matching CAS committed
+contract,sqlite-node,,,,,,,,,,,,,,decimal_roundtrip_cast_text,pass,,stored=9007199254740993 expected=9007199254740993
+contract,sqlite-node,,,,,,,,,,,,,,decimal_raw_number_precision_loss,info,,raw INTEGER read threw: Value is too large to be represented as a JavaScript number: 9007199254740993; adapter must CAST to TEXT
+contract,sqlite-node,,,,,,,,,,,,,,json_valid_check,pass,,CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array'
+contract,sqlite-node,,,,,,,,,,,,,,json_type_array_check,pass,,CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array'
+contract,sqlite-node,,,,,,,,,,,,,,partial_unique_one_active_edition,pass,,UNIQUE constraint failed: editions.project_id
+contract,sqlite-node,,,,,,,,,,,,,,partial_unique_one_open_round,pass,,UNIQUE constraint failed: rounds.stage_id
+contract,sqlite-node,,,,,,,,,,,,,,table_count,61,tables,unsupported_sql=0
+contract,cf-wrangler-d1,,,,,,,,,,,,,,table_count_61,pass,,tables=61
+contract,cf-wrangler-d1,,,,,,,,,,,,,,check_constraint,pass,,D1_ERROR: CHECK constraint failed: length(display_name) > 0: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,zero_row_cas,pass,,changes=0
+contract,cf-wrangler-d1,,,,,,,,,,,,,,partial_unique_one_project_owner,pass,,D1_ERROR: UNIQUE constraint failed: project_members.project_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,foreign_key_enforced,pass,,D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,deferred_fk_atomic_batch,pass,,batch accepted
+contract,cf-wrangler-d1,,,,,,,,,,,,,,deferred_fk_missing_member_rejected,pass,,internal error; reference = gnecp513a97mfcb7712cc7tc
+contract,cf-wrangler-d1,,,,,,,,,,,,,,batch_atomic_rollback,pass,,failed=true first_row_count=0
+contract,cf-wrangler-d1,,,,,,,,,,,,,,cas_guard_zero_row_rolls_back,pass,,D1_ERROR: CHECK constraint failed: guard_ok = 1: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,cas_guard_left_no_receipt,pass,,guard_rows=0
+contract,cf-wrangler-d1,,,,,,,,,,,,,,cas_guard_matching_row_commits,pass,,matching CAS committed
+contract,cf-wrangler-d1,,,,,,,,,,,,,,decimal_roundtrip_cast_text,pass,,stored=9007199254740993 expected=9007199254740993
+contract,cf-wrangler-d1,,,,,,,,,,,,,,decimal_raw_number_precision_loss,info,,raw=9007199254740992 exact=false (adapter must CAST to TEXT)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,json_valid_check,pass,,D1_ERROR: CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array': SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,json_type_array_check,pass,,D1_ERROR: CHECK constraint failed: json_valid(scopes) AND json_type(scopes) = 'array': SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,partial_unique_one_active_edition,pass,,D1_ERROR: UNIQUE constraint failed: editions.project_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,partial_unique_one_open_round,pass,,D1_ERROR: UNIQUE constraint failed: rounds.stage_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)
+contract,cf-wrangler-d1,,,,,,,,,,,,,,table_count,61,tables,unsupported_sql=0
+runtime,bun,,,659.80,30.00,27.64,93,,53,57,,,,,same_core_round,pass,,1.4.4; same ts-core A round; fake Go requests=3
+runtime,deno,,,697.28,60.00,50.95,93,,53,57,,,,,same_core_round,pass,,"deno 2.9.6 (stable, release, aarch64-apple-darwin); same ts-core A round; fake Go requests=3"
+hwpx,node-hwpx,,,1.21,4.22,53.49,,,,,,,,,hwpx_build,pass,,bytes=3061; sha256=5f609ded47cd4d5b8370ab1ff5bd3ad3955f9deff02104e6003372c068f8102e; 1 warmup + 3 measured; pure TS + fflate; out/hwpx/report.hwpx not committed
+hwpx,cf-wrangler-d1,,,2.39,0.00,572.52,,,,,,,,,hwpx_build,pass,,bytes=3061; sha256=5f609ded47cd4d5b8370ab1ff5bd3ad3955f9deff02104e6003372c068f8102e; same code in workerd; sha_equal_node=true
+hwpx,browser-bundle,,,0.00,0.00,0.00,,,,,,,,,hwpx_build,pass,,bytes=26625; sha256=; esbuild platform=browser bundle; source scan has no node:/DOM/window/Buffer
+meta,,,,,,,,,,,,,,,date,2026-11-05,,local measurement
+meta,,,,,,,,,,,,,,,core_hash,ce81ec7ac0e2c41b3a6689c9e11e55392da820453dc053f5d74c5258ee17a1b8,sha256,business/contract core files only
+meta,,,,,,,,,,,,,,,fixture_hash,02a4111be66ed91988bcde0e15ded6a298b0b48704b11c86bc561424d96f7afc,sha256,38 api-v1 JSON files
+meta,,,,,,,,,,,,,,,node,v26.13.0,,measurement runner
+meta,,,,,,,,,,,,,,,platform,darwin-arm64,,
+meta,,,,,,,,,,,,,,,fake_go_endpoint,http://127.0.0.1:<ephemeral>/inference/v1/chat/completions,,deterministic JSON; 8/16/12 KiB; fixed 200 ms; HTTP 200
+meta,,,,,,,,,,,,,,,wrangler,4.157.0,,local only; metrics disabled
+meta,,,,,,,,,,,,,,,vps_node_status,pass,,
+meta,,,,,,,,,,,,,,,vercel_node_proxy_status,pass,,
+meta,,,,,,,,,,,,,,,cf_d1_sqlite_file,present,,local D1 storage file (path not recorded)
+meta,,,,,,,,,,,,,,,cf_wrangler_d1_status,pass,,

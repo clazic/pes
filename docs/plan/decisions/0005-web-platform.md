@@ -53,16 +53,16 @@
 
 | 후보(로컬 대리) | 3회 벽시계 중앙값 | 프로세스 CPU 중앙값 | RSS 중앙값 | 라운드당 INSERT/쓰기 문 | subrequest | 10회 연속 오류 |
 |---|---:|---:|---:|---:|---:|---:|
-| CF: `wrangler dev --local` + 로컬 D1 | 667.89 ms | 70.00 ms | 511.52 MB | 55 / 77 | 3 | 0 |
-| VC: Vercel형 Node 핸들러 + 로컬 SQLite | 638.14 ms | 40.00 ms | 102.55 MB | 55 / 77 | 3 | 0 |
-| VPS: Node 26 + `node:sqlite` | 633.14 ms | 33.70 ms | 53.19 MB | 55 / 77 | 3 | 0 |
+| CF: `wrangler dev --local` + 로컬 D1 | 697.25 ms | 100.00 ms | 521.61 MB | 53 / 79 (쓰기 93) | 3 | 0 |
+| VC: Vercel형 Node 핸들러 + 로컬 SQLite | 638.97 ms | 40.00 ms | 107.44 MB | 53 / 79 (쓰기 93) | 3 | 0 |
+| VPS: Node 26 + `node:sqlite` | 634.59 ms | 37.12 ms | 62.89 MB | 53 / 79 (쓰기 93) | 3 | 0 |
 
-- **계약**: 38/38 fixture parse/validate, 7개 필수 경로 normal/error/replay 실행, SQLite·로컬 D1 계약 13 pass + 1 info, 미지원 SQL 0, 61표. CF D1에서 deferred FK 누락 거부가 `internal error; reference=…`로 반환되고 원시 INTEGER `number` 읽기가 정밀도를 잃는 것을 확인했다(어댑터는 `CAST AS TEXT` 사용).
+- **계약**: 38/38 fixture parse/validate, 7개 필수 경로 normal/error/replay 실행, SQLite·로컬 D1 계약 16 pass + 1 info, 미지원 SQL 0, 61표. CF D1에서 deferred FK 누락 거부가 `internal error; reference=…`로 반환되고 원시 INTEGER `number` 읽기가 정밀도를 잃는 것을 확인했다(어댑터는 `CAST AS TEXT` 사용).
 - **런타임**: Node 26.13.0·Bun 1.4.4·Deno 2.9.6이 같은 코어 A 라운드를 실행했다(0016).
 - **CF CPU 10 ms/호출, Vercel Active CPU, DO/WebSocket, R2/Blob, 실제 요청·과금은 측정하지 않았다.** `wrangler dev` 로컬 CPU는 요청당 CPU가 아니고, 프로세스 RSS는 Worker 128 MB 한도와 비교할 수 없다.
 - **계정·카드·비용**: Cloudflare/Vercel/Oracle/Hetzner 계정을 만들지 않았다. 카드 필요 여부, Turso/Blob 한도, Oracle 지역·할당, Hetzner 월 총액은 **사용자 결정 필요**다.
 - **시간 상자 밖**: 8시간 soak, 7일 VPS soak, 4주 운영 일지, WebSocket/SSE 8시간, 월 30일 실제 투영은 미측정이다.
-- A의 HWPX 서버측 변환 경로는 이 이슈의 만든 것 목록에 없어 실행하지 않았고, 후속 WEB0 항목으로 남긴다.
+- **A HWPX 최소 경로**: 합성 report.md→report.hwpx를 순수 TS + fflate로 만들었다. Node 1.21 ms/4.22 ms CPU/3,061 B, 로컬 workerd 2.39 ms/표본 하한 0 ms CPU/3,061 B로 **같은 sha256**, 브라우저 번들 26,625 B 통과. 한글에서 실제 열기·서식 충실도·hwpx-uri 대비 차이는 **사용자 확인 필요**다.
 
 **이 결과로 플랫폼을 확정하지 않는다.** 로컬 시험은 G1·G2·G3의 로컬 부분만 확인했고, G4~G8은 계정·카드·비용·시간 상자 때문에 미측정이다. 유료 후보를 1순위로 올리지 않는다.
 

@@ -5,6 +5,7 @@ import { readdirSync, rmSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { killTree } from "./process-stats.ts";
 
 export const WEB0_ROOT = fileURLToPath(new URL("../", import.meta.url));
 export const WRANGLER_BIN = join(WEB0_ROOT, "node_modules/wrangler/bin/wrangler.js");
@@ -103,7 +104,9 @@ export async function startWranglerDev(options: {
   while (Date.now() < deadline) {
     if (child.exitCode !== null) break;
     try {
-      const response = await fetch(`${url}/api/v1/capabilities`);
+      const response = await fetch(`${url}/api/v1/capabilities`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (response.status === 200) {
         return {
           process: child,
@@ -112,10 +115,10 @@ export async function startWranglerDev(options: {
           logs: () => chunks.join(""),
           stop: async () => {
             if (child.exitCode !== null) return;
-            child.kill("SIGTERM");
+            killTree(child.pid ?? 0, "SIGTERM");
             await new Promise<void>((resolve) => {
               const timer = setTimeout(() => {
-                child.kill("SIGKILL");
+                killTree(child.pid ?? 0, "SIGKILL");
                 resolve();
               }, 8000);
               child.once("exit", () => {
@@ -132,7 +135,7 @@ export async function startWranglerDev(options: {
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  child.kill("SIGKILL");
+  killTree(child.pid ?? 0, "SIGKILL");
   throw new Error(`wrangler dev did not become ready: ${lastError}\n${chunks.join("")}`);
 }
 

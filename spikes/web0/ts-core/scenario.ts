@@ -15,7 +15,12 @@ export interface RunStats {
   wallMs: number;
   dbWriteOps: number;
   dbRowsChanged: number;
-  insertedRows: number;
+  /** New physical rows: sum of per-table after-before deltas (no deletes here). */
+  newRows: number;
+  /** Rows changed by INSERT/UPSERT statements (an upsert update is included). */
+  insertChangedRows: number;
+  /** Rows changed by UPDATE statements. */
+  updateChangedRows: number;
   subrequests: number;
   requestBytes: number;
   responseBytes: number;
@@ -53,7 +58,8 @@ const TABLES = [
 export class CountingDb implements Db {
   writeOps = 0;
   rowsChanged = 0;
-  insertedRows = 0;
+  insertChangedRows = 0;
+  updateChangedRows = 0;
   readonly #inner: Db;
 
   constructor(inner: Db) {
@@ -68,7 +74,8 @@ export class CountingDb implements Db {
     const changes = await this.#inner.run(sql, params);
     this.writeOps += 1;
     this.rowsChanged += changes;
-    if (/^\s*INSERT/i.test(sql)) this.insertedRows += changes;
+    if (/^\s*INSERT/i.test(sql)) this.insertChangedRows += changes;
+    if (/^\s*UPDATE/i.test(sql)) this.updateChangedRows += changes;
     return changes;
   }
 
@@ -77,7 +84,9 @@ export class CountingDb implements Db {
     changes.forEach((change, index) => {
       this.writeOps += 1;
       this.rowsChanged += change;
-      if (/^\s*INSERT/i.test(statements[index]?.sql ?? "")) this.insertedRows += change;
+      const sql = statements[index]?.sql ?? "";
+      if (/^\s*INSERT/i.test(sql)) this.insertChangedRows += change;
+      if (/^\s*UPDATE/i.test(sql)) this.updateChangedRows += change;
     });
     return changes;
   }
@@ -85,7 +94,8 @@ export class CountingDb implements Db {
   resetCounters(): void {
     this.writeOps = 0;
     this.rowsChanged = 0;
-    this.insertedRows = 0;
+    this.insertChangedRows = 0;
+    this.updateChangedRows = 0;
   }
 }
 
@@ -527,12 +537,18 @@ export async function runRound(db: Db, options: ScenarioOptions): Promise<RunSta
   for (const table of TABLES) {
     tableDeltas[table] = (after[table] ?? 0) - (before[table] ?? 0);
   }
+  const newRows = Object.values(tableDeltas).reduce(
+    (sum, delta) => sum + Math.max(0, delta),
+    0,
+  );
   return {
     ids,
     wallMs: performance.now() - started,
     dbWriteOps: counting.writeOps,
     dbRowsChanged: counting.rowsChanged,
-    insertedRows: counting.insertedRows,
+    newRows,
+    insertChangedRows: counting.insertChangedRows,
+    updateChangedRows: counting.updateChangedRows,
     subrequests: 3,
     requestBytes: (12 + 24 + 28) * 1024,
     responseBytes: (8 + 16 + 12) * 1024,

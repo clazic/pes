@@ -110,7 +110,12 @@ export async function call(
   db: SqliteDb,
   fixture: Fixture,
   example: FixtureCase,
-  options: { requireCapabilitiesAuth?: boolean; body?: unknown; now?: number } = {},
+  options: {
+    requireCapabilitiesAuth?: boolean;
+    body?: unknown;
+    now?: number;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<{ status: number; envelope: Envelope }> {
   return handleCore(
     {
@@ -121,7 +126,7 @@ export async function call(
     {
       method: fixture.method,
       pathname: concretePath(fixture, example),
-      headers: example.request.headers ?? {},
+      headers: options.headers ?? example.request.headers ?? {},
       body: options.body ?? example.request.body,
     },
   );

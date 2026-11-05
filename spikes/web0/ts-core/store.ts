@@ -3,6 +3,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import type { Db, SqlStatement } from "./db.ts";
+import { incrementDecimal } from "./decimal.ts";
 
 export interface Ids {
   user: string;
@@ -105,6 +106,8 @@ export interface SeedOptions {
   competingLease?: boolean;
   /** Seed the run as already terminal, to produce run_terminal. */
   runStatus?: "queued" | "running" | "cancelled" | "succeeded";
+  /** Start above Number.MAX_SAFE_INTEGER to prove string-only decimal handling. */
+  largeDecimals?: boolean;
   ids?: Ids;
 }
 
@@ -153,6 +156,12 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
   const ids = options.ids ?? IDS;
   const t = FIXED_TIME;
   const runStatus = options.runStatus ?? "queued";
+  const controlRev = options.largeDecimals ? "9007199254740993" : "12";
+  const baseFence = options.largeDecimals ? "9007199254740992" : "2";
+  const nextFence = incrementDecimal(baseFence);
+  const baseVersionNo = options.largeDecimals ? "9007199254740992" : "3";
+  const previousVersionNo = options.largeDecimals ? "9007199254740991" : "2";
+  const objectRev = options.largeDecimals ? "9007199254740992" : "7";
   const statements: SqlStatement[] = [
     {
       sql: `INSERT INTO users (id, display_name, auth_subject, created_at)
@@ -173,8 +182,8 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
       sql: `INSERT INTO projects
         (id, slug, topic, owner_user_id, owner_role, active_edition_id, status,
          control_rev, current_policy_id, created_at)
-        VALUES (?, ?, ?, ?, 'owner', NULL, 'staging', 12, NULL, ?)`,
-      params: [ids.project, ids.slug, "합성 정책 연구", ids.user, t],
+        VALUES (?, ?, ?, ?, 'owner', NULL, 'staging', ?, NULL, ?)`,
+      params: [ids.project, ids.slug, "합성 정책 연구", ids.user, controlRev, t],
     },
     {
       sql: `INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`,
@@ -224,28 +233,30 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
     {
       sql: `INSERT INTO objects
         (id, project_id, edition_id, kind, display_no, current_version_id, rev, archived_at)
-        VALUES (?, ?, ?, 'artifact', 12, NULL, 7, NULL)`,
-      params: [ids.artifact, ids.project, ids.edition],
+        VALUES (?, ?, ?, 'artifact', 12, NULL, ?, NULL)`,
+      params: [ids.artifact, ids.project, ids.edition, objectRev],
     },
     {
       sql: `INSERT INTO object_versions
         (id, project_id, object_id, kind, version_no, based_on_version_id,
          created_in_round_id, actor_id, run_id, tx_id, content_hash, created_at)
-        VALUES (?, ?, ?, 'artifact', 2, NULL, ?, ?, NULL, ?, ?, ?)`,
-      params: [ids.previousVersion, ids.project, ids.artifact, ids.round, ids.agent, ids.seedTx, SHA, t],
+        VALUES (?, ?, ?, 'artifact', ?, NULL, ?, ?, NULL, ?, ?, ?)`,
+      params: [ids.previousVersion, ids.project, ids.artifact, previousVersionNo, ids.round, ids.agent, ids.seedTx, SHA, t],
     },
     {
       sql: `INSERT INTO object_versions
         (id, project_id, object_id, kind, version_no, based_on_version_id,
          created_in_round_id, actor_id, run_id, tx_id, content_hash, created_at)
-        VALUES (?, ?, ?, 'artifact', 3, ?, ?, ?, NULL, ?, ?, ?)`,
+        VALUES (?, ?, ?, 'artifact', ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         ids.baseVersion,
         ids.project,
         ids.artifact,
+        baseVersionNo,
         ids.previousVersion,
         ids.round,
         ids.agent,
+        null,
         ids.seedTx,
         SHA,
         t,
@@ -291,17 +302,31 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
          started_at, ended_at)
         VALUES (?, ?, ?, ?, ?, ?, 'A', 'node', 'opencode-go',
          'opencode-go/deepseek-v4.1-flash', 'worker', ?, NULL, NULL, NULL,
-         12, NULL, 'spike-1', NULL, NULL, NULL)`,
-      params: [ids.run, ids.project, ids.edition, ids.stage, ids.round, ids.agent, runStatus],
+         ?, NULL, 'spike-1', NULL, NULL, NULL)`,
+      params: [ids.run, ids.project, ids.edition, ids.stage, ids.round, ids.agent, runStatus, controlRev],
+    },
+    {
+      sql: `UPDATE object_versions SET run_id = ? WHERE project_id = ? AND id = ?`,
+      params: [ids.run, ids.project, ids.baseVersion],
     },
     {
       sql: `INSERT INTO project_leases
         (project_id, lease_id, run_id, owner_actor_id, fence, state,
          acquired_at, heartbeat_at, expires_at)
-        VALUES (?, ?, NULL, NULL, 2, 'released', ?, ?, ?)`,
-      params: [ids.project, "lea_01J9Z3K7Q0", t - 1000, t - 1000, t],
+        VALUES (?, ?, NULL, NULL, ?, 'released', ?, ?, ?)`,
+      params: [ids.project, "lea_01J9Z3K7Q0", baseFence, t - 1000, t - 1000, t],
     },
   ];
+
+  if (options.largeDecimals) {
+    statements.push({
+      sql: `INSERT INTO events
+        (event_seq, id, project_id, run_id, tx_id, tx_index, tx_size, type,
+         payload, schema_version, created_at)
+        VALUES (9007199254740992, ?, ?, NULL, ?, 0, 1, 'seed.large', '{}', 1, ?)`,
+      params: [newId("evt"), ids.project, ids.seedTx, t],
+    });
+  }
 
   if (options.competingLease) {
     statements.push(
@@ -313,7 +338,7 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
            started_at, ended_at)
           VALUES (?, ?, ?, ?, ?, ?, 'A', 'node', 'opencode-go',
            'opencode-go/deepseek-v4.1-flash', 'worker', 'running', NULL, NULL, NULL,
-           12, NULL, 'spike-1', NULL, NULL, NULL)`,
+           ?, NULL, 'spike-1', NULL, NULL, NULL)`,
         params: [
           ids.competingRun,
           ids.project,
@@ -321,17 +346,19 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
           ids.stage,
           ids.round,
           ids.agent,
+          controlRev,
         ],
       },
       {
         sql: `UPDATE project_leases
-              SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = 3,
+              SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?,
                   state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ?
               WHERE project_id = ?`,
         params: [
           "lea_01J9Z3K7QX",
           ids.competingRun,
           ids.agent,
+          nextFence,
           t,
           t,
           1762311720000,
@@ -362,9 +389,9 @@ export interface MutationInput {
   stageId?: string | null;
   roundId?: string | null;
   runId?: string | null;
-  baseControlRev?: number | null;
+  baseControlRev?: string | null;
   leaseId?: string | null;
-  fence?: number | null;
+  fence?: string | null;
   resultJson: string;
   createdAt: number;
 }

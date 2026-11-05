@@ -33,16 +33,21 @@ function send(response: ServerResponse, status: number, body: unknown): void {
 
 export async function preparePool(count: number, ddlPath: string): Promise<VcState> {
   const directory = await mkdtemp(join(tmpdir(), "pes-web0-vc-"));
-  const ddl = await readFile(ddlPath, "utf8");
-  const pool: string[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const file = join(directory, `round-${index}.sqlite`);
-    const db = new SqliteDb(file);
-    await db.exec(ddl);
-    db.close();
-    pool.push(file);
+  try {
+    const ddl = await readFile(ddlPath, "utf8");
+    const pool: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const file = join(directory, `round-${index}.sqlite`);
+      const db = new SqliteDb(file);
+      await db.exec(ddl);
+      db.close();
+      pool.push(file);
+    }
+    return { directory, ddl, fakeGoUrl: "", pool, next: 0 };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
   }
-  return { directory, ddl, fakeGoUrl: "", pool, next: 0 };
 }
 
 export async function closePool(state: VcState): Promise<void> {

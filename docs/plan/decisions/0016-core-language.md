@@ -53,19 +53,20 @@
 
 ## WEB0 런타임·테스트 러너 시험 (2026-11-05)
 
-`spikes/web0/`에서 같은 TypeScript 코어(A 한 라운드: 모델 호출 3·결과 제출 2·질문/답 1·wait/resume/complete·DB INSERT 55행)를 로컬에서 실행했다. 계정·배포·유료 호출은 하지 않았다.
+`spikes/web0/`에서 같은 TypeScript 코어(A 한 라운드: 모델 호출 3·결과 제출 2·질문/답 1·wait/resume/complete·신규 53행)를 로컬에서 실행했다. 계정·배포·유료 호출은 하지 않았다.
 
 | 런타임 | 버전 | 같은 코어 실행 | 벽시계(중앙값) | 프로세스 CPU | RSS | 비고 |
 |---|---|---:|---:|---:|---:|---|
-| Node | 26.13.0 | 통과 | 633.14 ms | 33.70 ms | 53.19 MB | `node:sqlite` 내장, `node:test` 67개 통과 |
-| Bun | 1.4.4 | 통과 | 656.83 ms | 30.00 ms | 27.89 MB | npm devDependency 바이너리, 1회 실행 |
-| Deno | 2.9.6 | 통과 | 757.86 ms | 90.00 ms | 50.17 MB | npm devDependency 바이너리, 1회 실행 |
+| Node | 26.13.0 | 통과 | 634.59 ms | 37.12 ms | 62.89 MB | `node:sqlite` 내장, `node:test` 82개 통과 |
+| Bun | 1.4.4 | 통과 | 659.80 ms | 30.00 ms | 27.64 MB | npm devDependency 바이너리, 1회 실행 |
+| Deno | 2.9.6 | 통과 | 697.28 ms | 60.00 ms | 50.95 MB | npm devDependency 바이너리, 1회 실행 |
 
-- 세 런타임 모두 `node:sqlite`가 동작했고 같은 55행을 썼다. 값은 로컬 스파이크이며 플랫폼 판정이 아니다.
-- 계약 시험: 38/38 fixture parse/validate, 7개 필수 경로 normal/error/replay 실행, SQLite·로컬 D1 계약 13 pass + 1 info, 미지원 SQL 0.
-- 테스트 러너는 **`node:test`**를 채택했다. Node 26이 TypeScript를 타입 제거로 바로 실행하므로 별도 트랜스파일러·러너 없이 `node --test`가 돌고, 67개 테스트가 통과했다. `tsc --noEmit`은 `typescript`로 돌린다.
+- 세 런타임 모두 `node:sqlite`가 동작했고 같은 신규 53행을 썼다. 값은 로컬 스파이크이며 플랫폼 판정이 아니다.
+- 계약 시험: 38/38 fixture parse/validate, 7개 필수 경로 normal/error/replay 실행, SQLite·로컬 D1 계약 16 pass + 1 info, 미지원 SQL 0.
+- 테스트 러너는 **`node:test`**를 채택했다. Node 26이 TypeScript를 타입 제거로 바로 실행하므로 별도 트랜스파일러·러너 없이 `node --test`가 돌고, 82개 테스트가 통과했다. `tsc --noEmit`은 `typescript`로 돌린다.
 - Bun/Deno는 **실행 가능성만 확인**했고, 각자의 테스트 러너로 전체 계약을 다시 돌리지는 않았다. Workers·Vercel·VPS 모두 Node/TS 경로가 있으므로, 런타임을 둘로 늘릴 근거가 이번 시험에서는 나오지 않았다.
-- 로컬 D1은 deferred FK 누락을 `internal error; reference=…`로 반환했고, 원시 INTEGER를 JS `number`로 읽으면 2^53+1이 손실됐다. `CAST(... AS TEXT)`로 읽어야 한다. `node:sqlite`는 같은 값을 원시로 읽으면 `ERR_OUT_OF_RANGE`를 던졌다.
+- 로컬 D1은 deferred FK 누락을 `internal error; reference=…`로 반환했고, 원시 INTEGER를 JS `number`로 읽으면 2^53+1이 손실됐다. `CAST(... AS TEXT)`로 읽어야 한다. `node:sqlite`는 같은 값을 원시로 읽으면 `ERR_OUT_OF_RANGE`를 던졌고, `lastInsertRowid`가 2^53을 넘는 쓰기는 `setReadBigInts(true)`로 흡수했다.
+- A HWPX 최소 변환기는 순수 TS + fflate로 Node와 로컬 workerd에서 **같은 3,061 B·같은 sha256**을 만들었고, esbuild 브라우저 번들도 통과했다. 한글에서 실제 열기·서식 충실도는 사용자 확인이 필요하다.
 
 ### 잠정 추천
 

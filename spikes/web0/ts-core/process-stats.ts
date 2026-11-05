@@ -78,6 +78,35 @@ export function snapshotTree(rootPid: number): TreeStats {
   return { cpuMs, rssKb, processes };
 }
 
+export function treePids(rootPid: number): number[] {
+  const rows = readRows();
+  const children = new Map<number, number[]>();
+  for (const row of rows) {
+    const list = children.get(row.ppid) ?? [];
+    list.push(row.pid);
+    children.set(row.ppid, list);
+  }
+  const out: number[] = [];
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (pid === undefined) break;
+    out.push(pid);
+    queue.push(...(children.get(pid) ?? []));
+  }
+  return out;
+}
+
+export function killTree(rootPid: number, signal: NodeJS.Signals): void {
+  for (const pid of treePids(rootPid).reverse()) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // already gone
+    }
+  }
+}
+
 export async function measureTree<T>(
   rootPid: number,
   fn: () => Promise<T>,

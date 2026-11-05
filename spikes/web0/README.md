@@ -31,6 +31,34 @@ npm run measure    # 1 warmup + 3 measured + 10 consecutive per candidate;
 Node 26 is used locally. The test runner is `node:test` (built in, no extra
 dependency). Type checking is `typescript` (`tsc --noEmit`).
 
+### Native binaries and install-script trust boundary
+
+`npm ci` installs **measurement-only** devDependencies pinned in `package-lock.json`:
+
+- `bun@1.4.4`, `deno@2.9.6`: npm packages with platform binaries as optional dependencies.
+- `wrangler@4.157.0` → `workerd` and `esbuild` platform binaries.
+- `esbuild@0.28.2`: used for the browser bundle check.
+
+These packages run `postinstall` scripts (`install.js` / `install.cjs`) that select or
+verify the platform binary. Some scripts also have a fallback download path when the
+optional platform package is missing. `npm 11` may warn that install scripts are not
+covered by `allowScripts`; the optional binary packages are still installed from the
+lockfile. Verify with:
+
+```sh
+./node_modules/.bin/bun --version
+./node_modules/.bin/deno --version
+npx wrangler --version
+npm run test:d1
+```
+
+Trust boundary: these are **not product dependencies**, are pinned by version and
+lockfile integrity, and are isolated under `spikes/web0/node_modules`. Do not promote
+them to `web/` or the product build. If install-script execution is not acceptable,
+install the measurement binaries in a separate opt-in step (or pre-populate the
+optional platform packages) and use `npm ci --ignore-scripts` only after verifying the
+binaries above. Global installs are not used.
+
 ### Local certificate note
 
 In this development environment the npm registry chain ended at a cross-signed

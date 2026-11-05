@@ -1,7 +1,7 @@
 // Local stand-in for a Vercel Node function process. Binds 127.0.0.1 only.
 
 import { createServer } from "node:http";
-import { preparePool, handler } from "./vc-handler.ts";
+import { closePool, preparePool, handler } from "./vc-handler.ts";
 
 const args = new Map<string, string>();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -32,8 +32,13 @@ server.listen(0, "127.0.0.1", () => {
   console.log(JSON.stringify({ ready: true, port: address.port }));
 });
 
-const shutdown = () => {
+let shuttingDown = false;
+const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await closePool(state).catch(() => undefined);
   server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
 };
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());

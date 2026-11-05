@@ -154,13 +154,56 @@ async function loadLease(ctx: RequestContext, projectId: string): Promise<LeaseR
   return rows[0] ?? null;
 }
 
-function assertLeaseHolder(lease: LeaseRow | null, runId: string, leaseId: string, fence: string): void {
+function assertLeaseHolder(
+  lease: LeaseRow | null,
+  runId: string,
+  leaseId: string,
+  fence: string,
+  now: number,
+): void {
   if (!lease || lease.state !== "active" || lease.run_id !== runId) {
     throw errors.notLeaseHolder(runId, lease?.lease_id ?? null);
   }
   if (lease.lease_id !== leaseId || compareDecimal(lease.fence, fence) !== 0) {
     throw errors.notLeaseHolder(runId, lease.lease_id);
   }
+  if (lease.expires_at <= now) throw errors.leaseLost(runId);
+}
+
+const TERMINAL_SQL = "'succeeded','failed','cancelled','interrupted'";
+
+/**
+ * Atomic guard: if the immediately preceding UPDATE/CAS changed 0 rows, this
+ * INSERT violates mutation_commits.guard_ok and the whole batch rolls back.
+ * It stays inside the 001 DDL (no extra table) and works on SQLite and D1.
+ */
+function guardStatement(
+  ctx: RequestContext,
+  projectId: string,
+  actorId: string,
+  tag: string,
+): SqlStatement {
+  const id = newId("grd");
+  return {
+    sql: `INSERT INTO mutation_commits
+      (id, project_id, actor_id, via, client_request_id, request_hash, action,
+       guard_ok, result_json, created_at)
+      SELECT ?, ?, ?, 'http', ?, ?, 'spike_guard', 0, '{}', ?
+      WHERE changes() = 0`,
+    params: [id, projectId, actorId, `guard:${tag}:${id}`, sha256Hex(`guard:${id}`), ctx.now],
+  };
+}
+
+function isGuardError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /guard_ok|CHECK constraint failed/i.test(message);
+}
+
+function replayResponse(
+  status: number,
+  data: Record<string, unknown>,
+): CoreResponse {
+  return { status, body: success(requestId(), { ...data, replayed: true }) };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +228,7 @@ export async function getCapabilities(ctx: RequestContext): Promise<CoreResponse
           "runs.wait": { supported: true },
           "runs.complete": { supported: true },
           "runs.create": { supported: false },
-          exports: { supported: false },
+          "exports.create": { supported: false },
           webmcp: { supported: false },
         },
         limits: {
@@ -386,16 +429,18 @@ export async function claimWithKey(
   if (!idempotencyKey) throw errors.missingIdempotencyKey();
   const input = validateClaim(body);
   const replay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
-  if (replay) {
-    return { status: 201, body: success(requestId(), { ...replay, replayed: true }) };
-  }
+  if (replay) return replayResponse(201, replay);
+
   const project = await loadProject(ctx, projectId);
   if (compareDecimal(input.expected_control_rev, project.control_rev) !== 0) {
-    throw errors.revConflict({ expected: input.expected_control_rev, current: project.control_rev });
+    throw errors.revConflict({
+      expected: input.expected_control_rev,
+      current: project.control_rev,
+      target: "$.body.expected_control_rev",
+    });
   }
   const run = await loadRun(ctx, projectId, input.run_id);
   if (TERMINAL.has(run.status)) throw errors.runTerminal(run.id, run.status);
-
   const lease = await loadLease(ctx, projectId);
   if (lease && lease.state === "active" && lease.expires_at > ctx.now) {
     throw errors.leaseHeld(
@@ -404,7 +449,9 @@ export async function claimWithKey(
       Math.max(0, lease.expires_at - ctx.now),
     );
   }
-  const fence = incrementDecimal(lease?.fence ?? "0");
+
+  const oldFence = lease?.fence ?? "0";
+  const fence = incrementDecimal(oldFence);
   const leaseId = newId("lea");
   const expiresAt = ctx.now + input.lease_ttl_ms;
   const txId = newId("mut");
@@ -415,16 +462,43 @@ export async function claimWithKey(
   };
   const statements: SqlStatement[] = [
     {
-      sql: `UPDATE project_leases
-        SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active',
-            acquired_at = ?, heartbeat_at = ?, expires_at = ?
-        WHERE project_id = ?`,
-      params: [leaseId, run.id, actorId, Number(fence), ctx.now, ctx.now, expiresAt, projectId],
+      sql: `INSERT INTO project_leases
+        (project_id, lease_id, run_id, owner_actor_id, fence, state,
+         acquired_at, heartbeat_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+          lease_id = excluded.lease_id, run_id = excluded.run_id,
+          owner_actor_id = excluded.owner_actor_id, fence = excluded.fence,
+          state = 'active', acquired_at = excluded.acquired_at,
+          heartbeat_at = excluded.heartbeat_at, expires_at = excluded.expires_at
+        WHERE (project_leases.state <> 'active' OR project_leases.expires_at <= ?)
+          AND project_leases.fence = ?
+          AND EXISTS (
+            SELECT 1 FROM projects
+            WHERE id = ? AND CAST(control_rev AS TEXT) = ?
+          )`,
+      params: [
+        projectId,
+        leaseId,
+        run.id,
+        actorId,
+        fence,
+        ctx.now,
+        ctx.now,
+        expiresAt,
+        ctx.now,
+        oldFence,
+        projectId,
+        input.expected_control_rev,
+      ],
     },
+    guardStatement(ctx, projectId, actorId, `claim-lease:${txId}`),
     {
-      sql: `UPDATE runs SET status = 'running', started_at = COALESCE(started_at, ?) WHERE id = ?`,
-      params: [ctx.now, run.id],
+      sql: `UPDATE runs SET status = 'running', started_at = COALESCE(started_at, ?)
+            WHERE project_id = ? AND id = ? AND status NOT IN (${TERMINAL_SQL})`,
+      params: [ctx.now, projectId, run.id],
     },
+    guardStatement(ctx, projectId, actorId, `claim-run:${txId}`),
     mutationStatement(txId, {
       projectId,
       actorId,
@@ -432,9 +506,9 @@ export async function claimWithKey(
       requestHash: sha256Hex(stableStringify(body)),
       action: "runs.claim",
       runId: run.id,
-      baseControlRev: Number(project.control_rev),
+      baseControlRev: input.expected_control_rev,
       leaseId,
-      fence: Number(fence),
+      fence,
       resultJson: JSON.stringify(result),
       createdAt: ctx.now,
     }),
@@ -447,7 +521,33 @@ export async function claimWithKey(
       createdAt: ctx.now,
     }),
   ];
-  await ctx.db.batch(statements);
+
+  try {
+    await ctx.db.batch(statements);
+  } catch (error) {
+    if (!isGuardError(error)) throw error;
+    const afterReplay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
+    if (afterReplay) return replayResponse(201, afterReplay);
+    const currentProject = await loadProject(ctx, projectId);
+    if (compareDecimal(input.expected_control_rev, currentProject.control_rev) !== 0) {
+      throw errors.revConflict({
+        expected: input.expected_control_rev,
+        current: currentProject.control_rev,
+        target: "$.body.expected_control_rev",
+      });
+    }
+    const currentRun = await loadRun(ctx, projectId, run.id);
+    if (TERMINAL.has(currentRun.status)) throw errors.runTerminal(currentRun.id, currentRun.status);
+    const currentLease = await loadLease(ctx, projectId);
+    if (currentLease && currentLease.state === "active" && currentLease.expires_at > ctx.now) {
+      throw errors.leaseHeld(
+        currentLease.run_id ?? "",
+        currentLease.expires_at,
+        Math.max(0, currentLease.expires_at - ctx.now),
+      );
+    }
+    throw errors.internal("claim CAS failed without a matching state");
+  }
   return { status: 201, body: success(requestId(), result) };
 }
 
@@ -462,14 +562,20 @@ export async function submitResults(
   if (!idempotencyKey) throw errors.missingIdempotencyKey();
   const input = validateResults(body);
   const replay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
-  if (replay) {
-    return { status: 201, body: success(requestId(), { ...replay, replayed: true }) };
-  }
+  if (replay) return replayResponse(201, replay);
+
   const project = await loadProject(ctx, projectId);
+  if (compareDecimal(input.base_control_rev, project.control_rev) !== 0) {
+    throw errors.revConflict({
+      expected: input.base_control_rev,
+      current: project.control_rev,
+      target: "$.body.base_control_rev",
+    });
+  }
   const run = await loadRun(ctx, projectId, runId);
   if (TERMINAL.has(run.status)) throw errors.runTerminal(run.id, run.status);
   const lease = await loadLease(ctx, projectId);
-  assertLeaseHolder(lease, runId, input.lease_id, input.fence);
+  assertLeaseHolder(lease, runId, input.lease_id, input.fence, ctx.now);
 
   interface ObjectState {
     id: string;
@@ -510,11 +616,12 @@ export async function submitResults(
   }
 
   const txId = newId("mut");
-  const eventBaseRows = await ctx.db.all<{ next_seq: number }>(
-    `SELECT COALESCE(MAX(event_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?`,
+  const eventBaseRows = await ctx.db.all<{ next_seq: string }>(
+    `SELECT CAST(COALESCE(MAX(event_seq), 0) + 1 AS TEXT) AS next_seq
+     FROM events WHERE project_id = ?`,
     [projectId],
   );
-  const nextEventSeq = eventBaseRows[0]?.next_seq ?? 1;
+  const nextEventSeq = eventBaseRows[0]?.next_seq ?? "1";
   const returnedVersions: { object_id: string; version_id: string; version_no: string }[] = [];
   const objectStatements: SqlStatement[] = [];
 
@@ -539,7 +646,7 @@ export async function submitResults(
           versionId,
           projectId,
           result.object_id,
-          Number(versionNo),
+          versionNo,
           result.base_version_id,
           actorId,
           runId,
@@ -549,9 +656,11 @@ export async function submitResults(
         ],
       },
       {
-        sql: `UPDATE objects SET current_version_id = ?, rev = ? WHERE project_id = ? AND id = ?`,
-        params: [versionId, Number(newRev), projectId, result.object_id],
+        sql: `UPDATE objects SET current_version_id = ?, rev = ?
+              WHERE project_id = ? AND id = ? AND current_version_id = ?`,
+        params: [versionId, newRev, projectId, result.object_id, result.base_version_id],
       },
+      guardStatement(ctx, projectId, actorId, `result-object:${txId}:${index}`),
       {
         sql: `INSERT INTO artifact_versions
           (project_id, version_id, object_id, object_kind, title, summary, body_md, status,
@@ -564,15 +673,42 @@ export async function submitResults(
               WHERE project_id = ? AND object_id = ?`,
         params: [versionId, projectId, result.object_id],
       },
+      guardStatement(ctx, projectId, actorId, `result-artifact:${txId}:${index}`),
     );
   });
 
   const resultData = {
     object_versions: returnedVersions,
     mutation_id: txId,
-    event_seq: String(nextEventSeq + 1),
+    event_seq: incrementDecimal(nextEventSeq),
   };
   const statements: SqlStatement[] = [
+    {
+      sql: `UPDATE project_leases SET heartbeat_at = ?
+            WHERE project_id = ? AND lease_id = ? AND fence = ? AND run_id = ?
+              AND state = 'active' AND expires_at > ?
+              AND EXISTS (
+                SELECT 1 FROM projects
+                WHERE id = ? AND CAST(control_rev AS TEXT) = ?
+              )
+              AND EXISTS (
+                SELECT 1 FROM runs
+                WHERE project_id = ? AND id = ? AND status NOT IN (${TERMINAL_SQL})
+              )`,
+      params: [
+        ctx.now,
+        projectId,
+        input.lease_id,
+        input.fence,
+        runId,
+        ctx.now,
+        projectId,
+        input.base_control_rev,
+        projectId,
+        runId,
+      ],
+    },
+    guardStatement(ctx, projectId, actorId, `results-lease:${txId}`),
     mutationStatement(txId, {
       projectId,
       actorId,
@@ -580,9 +716,9 @@ export async function submitResults(
       requestHash: sha256Hex(stableStringify(body)),
       action: "results.submit",
       runId,
-      baseControlRev: Number(project.control_rev),
+      baseControlRev: input.base_control_rev,
       leaseId: input.lease_id,
-      fence: Number(input.fence),
+      fence: input.fence,
       resultJson: JSON.stringify(resultData),
       createdAt: ctx.now,
     }),
@@ -618,7 +754,39 @@ export async function submitResults(
       createdAt: ctx.now,
     }),
   );
-  await ctx.db.batch(statements);
+
+  try {
+    await ctx.db.batch(statements);
+  } catch (error) {
+    if (!isGuardError(error)) throw error;
+    const afterReplay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
+    if (afterReplay) return replayResponse(201, afterReplay);
+    const currentProject = await loadProject(ctx, projectId);
+    if (compareDecimal(input.base_control_rev, currentProject.control_rev) !== 0) {
+      throw errors.revConflict({
+        expected: input.base_control_rev,
+        current: currentProject.control_rev,
+        target: "$.body.base_control_rev",
+      });
+    }
+    const currentLease = await loadLease(ctx, projectId);
+    assertLeaseHolder(currentLease, runId, input.lease_id, input.fence, ctx.now);
+    for (const result of input.results) {
+      const rows = await ctx.db.all<{ current_version_id: string | null }>(
+        `SELECT current_version_id FROM objects WHERE project_id = ? AND id = ?`,
+        [projectId, result.object_id],
+      );
+      const current = rows[0]?.current_version_id ?? "";
+      if (current !== result.base_version_id) {
+        throw errors.revConflict({
+          expected: result.base_version_id,
+          current,
+          objectId: result.object_id,
+        });
+      }
+    }
+    throw errors.internal("results CAS failed without a matching state");
+  }
   return { status: 201, body: success(requestId(), resultData) };
 }
 
@@ -633,18 +801,32 @@ export async function wait(
   const run = await loadRun(ctx, projectId, runId);
   if (TERMINAL.has(run.status)) throw errors.runTerminal(run.id, run.status);
   const lease = await loadLease(ctx, projectId);
-  assertLeaseHolder(lease, runId, input.lease_id, input.fence);
+  assertLeaseHolder(lease, runId, input.lease_id, input.fence, ctx.now);
+
   const txId = newId("mut");
   const statements: SqlStatement[] = [
     {
-      sql: `UPDATE runs SET status = 'waiting_human' WHERE project_id = ? AND id = ?`,
+      sql: `UPDATE project_leases
+            SET state = 'released', heartbeat_at = ?, expires_at = ?
+            WHERE project_id = ? AND lease_id = ? AND fence = ? AND run_id = ?
+              AND state = 'active' AND expires_at > ?`,
+      params: [
+        ctx.now,
+        ctx.now + 1,
+        projectId,
+        input.lease_id,
+        input.fence,
+        runId,
+        ctx.now,
+      ],
+    },
+    guardStatement(ctx, projectId, actorId, `wait-lease:${txId}`),
+    {
+      sql: `UPDATE runs SET status = 'waiting_human'
+            WHERE project_id = ? AND id = ? AND status NOT IN (${TERMINAL_SQL})`,
       params: [projectId, runId],
     },
-    {
-      sql: `UPDATE project_leases SET state = 'released', heartbeat_at = ?, expires_at = ?
-            WHERE project_id = ?`,
-      params: [ctx.now, ctx.now + 1, projectId],
-    },
+    guardStatement(ctx, projectId, actorId, `wait-run:${txId}`),
     mutationStatement(txId, {
       projectId,
       actorId,
@@ -653,7 +835,7 @@ export async function wait(
       action: "runs.wait",
       runId,
       leaseId: input.lease_id,
-      fence: Number(input.fence),
+      fence: input.fence,
       resultJson: "{}",
       createdAt: ctx.now,
     }),
@@ -673,7 +855,17 @@ export async function wait(
       createdAt: ctx.now,
     }),
   ];
-  await ctx.db.batch(statements);
+
+  try {
+    await ctx.db.batch(statements);
+  } catch (error) {
+    if (!isGuardError(error)) throw error;
+    const currentRun = await loadRun(ctx, projectId, runId);
+    if (TERMINAL.has(currentRun.status)) throw errors.runTerminal(currentRun.id, currentRun.status);
+    const currentLease = await loadLease(ctx, projectId);
+    assertLeaseHolder(currentLease, runId, input.lease_id, input.fence, ctx.now);
+    throw errors.internal("wait CAS failed without a matching state");
+  }
   return {
     status: 200,
     body: success(requestId(), {
@@ -695,29 +887,42 @@ export async function complete(
   if (!idempotencyKey) throw errors.missingIdempotencyKey();
   const input = validateComplete(body);
   const replay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
-  if (replay) {
-    return { status: 200, body: success(requestId(), { ...replay, replayed: true }) };
-  }
+  if (replay) return replayResponse(200, replay);
+
   const run = await loadRun(ctx, projectId, runId);
   if (TERMINAL.has(run.status)) throw errors.runTerminal(run.id, run.status);
   const lease = await loadLease(ctx, projectId);
-  assertLeaseHolder(lease, runId, input.lease_id, input.fence);
+  assertLeaseHolder(lease, runId, input.lease_id, input.fence, ctx.now);
+
   const txId = newId("mut");
   const result = {
     run: { id: runId, status: input.status, completed_at: ctx.now },
     stage_approved: false,
     note: "complete는 run 종료일 뿐 라운드 봉인·단계 승인이 아닙니다.",
   };
-  await ctx.db.batch([
+  const statements: SqlStatement[] = [
     {
-      sql: `UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?`,
+      sql: `UPDATE runs SET status = ?, ended_at = ?
+            WHERE project_id = ? AND id = ? AND status NOT IN (${TERMINAL_SQL})`,
       params: [input.status, ctx.now, projectId, runId],
     },
+    guardStatement(ctx, projectId, actorId, `complete-run:${txId}`),
     {
-      sql: `UPDATE project_leases SET state = 'released', heartbeat_at = ?, expires_at = ?
-            WHERE project_id = ?`,
-      params: [ctx.now, ctx.now + 1, projectId],
+      sql: `UPDATE project_leases
+            SET state = 'released', heartbeat_at = ?, expires_at = ?
+            WHERE project_id = ? AND lease_id = ? AND fence = ? AND run_id = ?
+              AND state = 'active' AND expires_at > ?`,
+      params: [
+        ctx.now,
+        ctx.now + 1,
+        projectId,
+        input.lease_id,
+        input.fence,
+        runId,
+        ctx.now,
+      ],
     },
+    guardStatement(ctx, projectId, actorId, `complete-lease:${txId}`),
     mutationStatement(txId, {
       projectId,
       actorId,
@@ -726,7 +931,7 @@ export async function complete(
       action: "runs.complete",
       runId,
       leaseId: input.lease_id,
-      fence: Number(input.fence),
+      fence: input.fence,
       resultJson: JSON.stringify(result),
       createdAt: ctx.now,
     }),
@@ -738,7 +943,20 @@ export async function complete(
       count: 1,
       createdAt: ctx.now,
     }),
-  ]);
+  ];
+
+  try {
+    await ctx.db.batch(statements);
+  } catch (error) {
+    if (!isGuardError(error)) throw error;
+    const afterReplay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
+    if (afterReplay) return replayResponse(200, afterReplay);
+    const currentRun = await loadRun(ctx, projectId, runId);
+    if (TERMINAL.has(currentRun.status)) throw errors.runTerminal(currentRun.id, currentRun.status);
+    const currentLease = await loadLease(ctx, projectId);
+    assertLeaseHolder(currentLease, runId, input.lease_id, input.fence, ctx.now);
+    throw errors.internal("complete CAS failed without a matching state");
+  }
   return { status: 200, body: success(requestId(), result) };
 }
 

@@ -4,6 +4,7 @@ import { D1Db, type D1DatabaseLike } from "../ts-core/db.ts";
 import { handleCore, headersToRecord, parseJsonBody } from "../ts-core/http.ts";
 import { runRound } from "../ts-core/scenario.ts";
 import { runContractSuite } from "../ts-core/contract-suite.ts";
+import { buildHwpxFromMarkdown } from "../ts-core/hwpx.ts";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -17,9 +18,37 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+async function sha256BytesHex(bytes: Uint8Array): Promise<string> {
+  const input = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/api/v1/_spike/hwpx" && request.method === "POST") {
+      try {
+        const markdown = await request.text();
+        const result = buildHwpxFromMarkdown(markdown);
+        return json({
+          ok: true,
+          bytes: result.bytes.byteLength,
+          sha256: await sha256BytesHex(result.bytes),
+          entries: result.entries,
+        });
+      } catch (error) {
+        return json(
+          { ok: false, error: error instanceof Error ? error.message : String(error) },
+          500,
+        );
+      }
+    }
     if (url.pathname === "/api/v1/_spike/round" && request.method === "POST") {
       try {
         const db = new D1Db(env.DB);

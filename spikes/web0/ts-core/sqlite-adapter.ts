@@ -27,7 +27,10 @@ export class SqliteDb implements MigratableDb {
   }
 
   async run(sql: string, params: SqlValue[] = []): Promise<number> {
-    const result = this.#db.prepare(sql).run(...params);
+    const statement = this.#db.prepare(sql);
+    // lastInsertRowid can exceed Number.MAX_SAFE_INTEGER (events.event_seq).
+    statement.setReadBigInts(true);
+    const result = statement.run(...params);
     return Number(result.changes);
   }
 
@@ -37,7 +40,9 @@ export class SqliteDb implements MigratableDb {
       const changes: number[] = [];
       for (const [index, statement] of statements.entries()) {
         try {
-          const result = this.#db.prepare(statement.sql).run(...(statement.params ?? []));
+          const prepared = this.#db.prepare(statement.sql);
+          prepared.setReadBigInts(true);
+          const result = prepared.run(...(statement.params ?? []));
           changes.push(Number(result.changes));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

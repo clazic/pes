@@ -17,6 +17,8 @@
     "@types/node": "26.6.6",
     "bun": "1.4.4",
     "deno": "2.9.6",
+    "esbuild": "0.28.2",
+    "fflate": "0.8.3",
     "typescript": "7.0.2",
     "wrangler": "4.157.0"
   }

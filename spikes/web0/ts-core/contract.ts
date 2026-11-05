@@ -153,12 +153,13 @@ export const errors = {
     expected: string;
     current: string;
     objectId?: string;
+    target?: string;
   }) =>
     new PesError({
       code: "rev_conflict",
       status: 409,
       message: "요청한 기반 버전이 현재 버전과 다릅니다.",
-      target: "$.body.results[0].base_version_id",
+      target: input.target ?? "$.body.results[0].base_version_id",
       details: {
         expected: input.expected,
         current: input.current,

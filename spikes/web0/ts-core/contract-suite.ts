@@ -40,10 +40,11 @@ async function seedProjectGraph(
   db: Db,
   suffix: string,
   putTwoOwners: boolean,
-): Promise<{ projectId: string; userId: string; secondUserId: string }> {
+): Promise<{ projectId: string; userId: string; secondUserId: string; actorId: string }> {
   const projectId = `prj_ct_${suffix}`;
   const userId = `usr_ct_${suffix}_a`;
   const secondUserId = `usr_ct_${suffix}_b`;
+  const actorId = `act_ct_${suffix}`;
   const editionId = `edt_ct_${suffix}`;
   const stageId = `stg_ct_${suffix}`;
   const roundId = `rnd_ct_${suffix}`;
@@ -56,6 +57,11 @@ async function seedProjectGraph(
     {
       sql: `INSERT INTO users (id, display_name, created_at) VALUES (?, '합성 계약 사용자 2', ?)`,
       params: [secondUserId, t],
+    },
+    {
+      sql: `INSERT INTO actors (id, kind, display_name)
+            VALUES (?, 'internal_ai', '합성 계약 실행기')`,
+      params: [actorId],
     },
     {
       sql: `INSERT INTO projects
@@ -89,7 +95,7 @@ async function seedProjectGraph(
     });
   }
   await db.batch(statements);
-  return { projectId, userId, secondUserId };
+  return { projectId, userId, secondUserId, actorId };
 }
 
 export async function runContractSuite(db: Db): Promise<ContractResult> {
@@ -213,6 +219,86 @@ export async function runContractSuite(db: Db): Promise<ContractResult> {
     "batch_atomic_rollback",
     rolledBack,
     `failed=${!rollback.ok} first_row_count=${rollbackRows[0]?.n ?? 0}`,
+  );
+
+  // Atomic CAS guard: a 0-row conditional update must abort the whole batch.
+  const guardCycle = await seedProjectGraph(db, newId("cas"), false);
+  const guardId = `grd_${newId("g")}`;
+  const guard = await attempt(() =>
+    db.batch([
+      {
+        sql: `UPDATE projects SET control_rev = control_rev
+              WHERE id = ? AND CAST(control_rev AS TEXT) = '999999999'`,
+        params: [guardCycle.projectId],
+      },
+      {
+        sql: `INSERT INTO mutation_commits
+          (id, project_id, actor_id, via, client_request_id, request_hash,
+           action, guard_ok, result_json, created_at)
+          SELECT ?, ?, ?, 'http', ?, ?, 'spike_guard', 0, '{}', ?
+          WHERE changes() = 0`,
+        params: [
+          guardId,
+          guardCycle.projectId,
+          guardCycle.actorId,
+          `guard:${guardId}`,
+          sha256Hex(guardId),
+          t,
+        ],
+      },
+    ]),
+  );
+  record(
+    checks,
+    "cas_guard_zero_row_rolls_back",
+    !guard.ok,
+    guard.ok ? "zero-row CAS committed" : guard.error,
+  );
+  const guardRows = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM mutation_commits WHERE id = ?`,
+    [guardId],
+  );
+  record(
+    checks,
+    "cas_guard_left_no_receipt",
+    (guardRows[0]?.n ?? 0) === 0,
+    `guard_rows=${guardRows[0]?.n ?? 0}`,
+  );
+
+  const okGuardId = `grd_${newId("g")}`;
+  const okControl = await db.all<{ v: string }>(
+    `SELECT CAST(control_rev AS TEXT) AS v FROM projects WHERE id = ?`,
+    [guardCycle.projectId],
+  );
+  const okGuard = await attempt(() =>
+    db.batch([
+      {
+        sql: `UPDATE projects SET control_rev = control_rev
+              WHERE id = ? AND CAST(control_rev AS TEXT) = ?`,
+        params: [guardCycle.projectId, okControl[0]?.v ?? "0"],
+      },
+      {
+        sql: `INSERT INTO mutation_commits
+          (id, project_id, actor_id, via, client_request_id, request_hash,
+           action, guard_ok, result_json, created_at)
+          SELECT ?, ?, ?, 'http', ?, ?, 'spike_guard', 0, '{}', ?
+          WHERE changes() = 0`,
+        params: [
+          okGuardId,
+          guardCycle.projectId,
+          guardCycle.actorId,
+          `guard:${okGuardId}`,
+          sha256Hex(okGuardId),
+          t,
+        ],
+      },
+    ]),
+  );
+  record(
+    checks,
+    "cas_guard_matching_row_commits",
+    okGuard.ok,
+    okGuard.ok ? "matching CAS committed" : okGuard.error,
   );
 
   // Decimal roundtrip above Number.MAX_SAFE_INTEGER.
