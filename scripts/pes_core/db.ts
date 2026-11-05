@@ -124,13 +124,19 @@ function assert_busy_timeout(db: Db): void {
 
 function assert_wal(db: Db, path: string, busy_timeout_ms: number): void {
   if (is_memory_path(path)) return;
-  const current = db.get<{ journal_mode: string }>("PRAGMA journal_mode");
-  if (current !== undefined && current.journal_mode.toLowerCase() === "wal") return;
+  // The mode read and the switch must share one budget. SQLite's own busy
+  // handler would otherwise wait up to the final 5000ms inside a single PRAGMA
+  // and escape that budget (including the deadline and the cause-preserving
+  // error), so this stage disables it and relies on its own retries.
+  db.exec("PRAGMA busy_timeout = 0");
 
-  const deadline = Date.now() + busy_timeout_ms;
+  const deadline = performance.now() + busy_timeout_ms;
   let delay_ms = WAL_RETRY_INITIAL_MS;
   for (;;) {
+    let busy_error: unknown;
     try {
+      const current = db.get<{ journal_mode: string }>("PRAGMA journal_mode");
+      if (current !== undefined && current.journal_mode.toLowerCase() === "wal") return;
       const row = db.get<{ journal_mode: string }>("PRAGMA journal_mode = WAL");
       if (row === undefined || row.journal_mode.toLowerCase() !== "wal") {
         throw new Error("failed to enable SQLite WAL mode for a file database");
@@ -138,19 +144,20 @@ function assert_wal(db: Db, path: string, busy_timeout_ms: number): void {
       return;
     } catch (error) {
       if (!is_sqlite_busy_error(error)) throw error;
-      const remaining_ms = deadline - Date.now();
-      if (remaining_ms <= 0) {
-        throw new Error(
-          `failed to enable SQLite WAL mode within ${busy_timeout_ms}ms: the database is locked by another connection`,
-          { cause: error },
-        );
-      }
-      // Synchronous retry: connect() is synchronous, so the timer queue cannot
-      // release another connection in this process. A cross-process holder
-      // releases independently, and same-process holders fail the budget.
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(delay_ms, remaining_ms));
-      delay_ms = Math.min(delay_ms * 2, WAL_RETRY_MAX_MS);
+      busy_error = error;
     }
+    const remaining_ms = deadline - performance.now();
+    if (remaining_ms <= 0) {
+      throw new Error(
+        `failed to enable SQLite WAL mode within ${busy_timeout_ms}ms: the database is locked by another connection`,
+        { cause: busy_error },
+      );
+    }
+    // Synchronous retry: connect() is synchronous, so the timer queue cannot
+    // release another connection in this process. A cross-process holder
+    // releases independently, and same-process holders fail the budget.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(delay_ms, remaining_ms));
+    delay_ms = Math.min(delay_ms * 2, WAL_RETRY_MAX_MS);
   }
 }
 
@@ -212,8 +219,8 @@ export function connect(path: string, options: ConnectOptions = {}): SqliteDb {
   const db = new SqliteDb(path);
   try {
     assert_foreign_keys(db);
-    assert_busy_timeout(db);
     assert_wal(db, path, wal_busy_timeout_ms);
+    assert_busy_timeout(db);
     assert_sqlite_runtime(db);
     return db;
   } catch (error) {

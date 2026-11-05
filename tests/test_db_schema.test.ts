@@ -265,6 +265,103 @@ test("connect reports a clear error when the WAL lock lasts past its retry budge
   }
 });
 
+test("connect keeps the WAL mode read inside the retry budget under an exclusive lock", async () => {
+  const home = isolated_home();
+  const path = db_path(home.env);
+  mkdirSync(dirname(path), { recursive: true });
+  const holder = new DatabaseSync(path);
+  try {
+    holder.exec("CREATE TABLE lock_probe (id INTEGER)");
+    assert.equal(
+      holder.prepare("PRAGMA journal_mode").get()?.journal_mode,
+      "delete",
+      "the fresh database must not be in WAL mode before the race",
+    );
+    holder.exec("BEGIN EXCLUSIVE");
+
+    // The holder keeps an exclusive lock for the whole child run. The mode
+    // read itself would wait on the default busy_timeout and push connect()
+    // past its own deadline; the whole WAL stage must fail within the budget.
+    const child = fileURLToPath(new URL("./helpers/wal_connect_child.ts", import.meta.url));
+    const budget_ms = 200;
+    const run = await run_node_async(home.env, [child, String(budget_ms)]);
+    assert.equal(run.status, 1, run.stderr);
+    const line = run.stdout.trim().split(/\r?\n/).at(-1);
+    assert.ok(line, `child must print a JSON result: ${run.stdout}`);
+    const result = JSON.parse(line) as { error?: string; cause?: string; waited_ms?: number };
+    assert.match(
+      result.error ?? "",
+      new RegExp(`failed to enable SQLite WAL mode within ${budget_ms}ms`),
+    );
+    assert.match(result.cause ?? "", /database is locked/i);
+    assert.ok(
+      (result.waited_ms ?? 0) >= budget_ms / 2,
+      `connect must retry until the budget is spent instead of failing on the first BUSY: ${String(result.waited_ms)}ms`,
+    );
+    assert.ok(
+      (result.waited_ms ?? 0) < budget_ms + 1500,
+      `the WAL stage must stay near its own budget: ${String(result.waited_ms)}ms`,
+    );
+  } finally {
+    try {
+      holder.exec("ROLLBACK");
+    } catch {
+      // No active transaction if the setup failed before BEGIN.
+    }
+    holder.close();
+    home.cleanup();
+  }
+});
+
+test("connect fails within a short budget after an exclusive lock becomes a write lock", async () => {
+  const home = isolated_home();
+  const path = db_path(home.env);
+  mkdirSync(dirname(path), { recursive: true });
+  const holder = new DatabaseSync(path);
+  let switch_lock: NodeJS.Timeout | undefined;
+  try {
+    holder.exec("CREATE TABLE lock_probe (id INTEGER)");
+    holder.exec("BEGIN EXCLUSIVE");
+
+    // The holder keeps a write lock after an exclusive phase, as in the
+    // review reproduction. A blocking mode read would spend the holder's
+    // exclusive interval before the switch budget even starts.
+    const child = fileURLToPath(new URL("./helpers/wal_connect_child.ts", import.meta.url));
+    const budget_ms = 800;
+    const run_promise = run_node_async(home.env, [child, String(budget_ms)]);
+    switch_lock = setTimeout(() => {
+      holder.exec("COMMIT; BEGIN IMMEDIATE");
+    }, 1800);
+    const run = await run_promise;
+    assert.equal(run.status, 1, run.stderr);
+    const line = run.stdout.trim().split(/\r?\n/).at(-1);
+    assert.ok(line, `child must print a JSON result: ${run.stdout}`);
+    const result = JSON.parse(line) as { error?: string; cause?: string; waited_ms?: number };
+    assert.match(
+      result.error ?? "",
+      new RegExp(`failed to enable SQLite WAL mode within ${budget_ms}ms`),
+    );
+    assert.match(result.cause ?? "", /database is locked/i);
+    assert.ok(
+      (result.waited_ms ?? 0) >= budget_ms / 2,
+      `connect must spend its budget instead of failing on the first BUSY: ${String(result.waited_ms)}ms`,
+    );
+    assert.ok(
+      (result.waited_ms ?? 0) < budget_ms + 1500,
+      `connect must not wait for the holder's lock transition: ${String(result.waited_ms)}ms`,
+    );
+  } finally {
+    if (switch_lock !== undefined) clearTimeout(switch_lock);
+    try {
+      holder.exec("ROLLBACK");
+    } catch {
+      // No active transaction if the setup failed before BEGIN.
+    }
+    holder.close();
+    home.cleanup();
+  }
+});
+
 test("two child processes migrating the same database apply exactly once", async () => {
   const child = fileURLToPath(new URL("./helpers/migrate_child.ts", import.meta.url));
   for (let iteration = 1; iteration <= 10; iteration += 1) {
