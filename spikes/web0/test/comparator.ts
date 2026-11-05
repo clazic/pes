@@ -48,6 +48,11 @@ export function normalizeDynamic(value: unknown, key?: string): unknown {
   return value;
 }
 
+export interface CompareOptions {
+  /** Paths where an empty actual list is valid (fileless scenarios). */
+  allowEmptyArrayPaths?: string[];
+}
+
 export interface ResponseExpectation {
   status: number;
   errorCode?: string;
@@ -81,18 +86,23 @@ function requireShape(
   expected: unknown,
   path: string,
   diffs: string[],
+  options: CompareOptions,
 ): void {
   if (Array.isArray(expected)) {
     if (!Array.isArray(actual)) {
       diffs.push(`${path}: expected array, got ${typeName(actual)}`);
       return;
     }
-    if (expected.length === 0 || actual.length === 0) {
-      // Lists are allowed to be empty (the fileless A scenario). When items exist,
-      // the first item must carry the fixture's required keys.
+    if (expected.length === 0) return;
+    if (actual.length === 0) {
+      if (!options.allowEmptyArrayPaths?.includes(path)) {
+        diffs.push(`${path}: expected at least one item`);
+      }
       return;
     }
-    requireShape(actual[0], expected[0], `${path}[0]`, diffs);
+    for (let index = 0; index < actual.length; index += 1) {
+      requireShape(actual[index], expected[0], `${path}[${index}]`, diffs, options);
+    }
     return;
   }
   if (expected !== null && typeof expected === "object") {
@@ -104,12 +114,20 @@ function requireShape(
     for (const key of Object.keys(expected as Record<string, unknown>)) {
       if (!Object.hasOwn(actualRecord, key)) {
         diffs.push(`${path}.${key}: missing required key`);
-      } else if (!isDynamicKey(key)) {
+      } else if (isDynamicKey(key)) {
+        checkDynamicType(
+          actualRecord[key],
+          (expected as Record<string, unknown>)[key],
+          `${path}.${key}`,
+          diffs,
+        );
+      } else {
         requireShape(
           actualRecord[key],
           (expected as Record<string, unknown>)[key],
           `${path}.${key}`,
           diffs,
+          options,
         );
       }
     }
@@ -119,6 +137,23 @@ function requireShape(
   const actualType = actual === null ? "null" : typeof actual;
   if (expectedType !== actualType) {
     diffs.push(`${path}: type ${actualType} !== ${expectedType}`);
+  }
+}
+
+function checkDynamicType(
+  actual: unknown,
+  expected: unknown,
+  path: string,
+  diffs: string[],
+): void {
+  if (expected === null) {
+    if (actual !== null) diffs.push(`${path}: dynamic value must be null`);
+    return;
+  }
+  const expectedType = typeof expected;
+  const actualType = actual === null ? "null" : typeof actual;
+  if (actualType !== expectedType) {
+    diffs.push(`${path}: dynamic type ${actualType} !== ${expectedType}`);
   }
 }
 
@@ -133,6 +168,7 @@ function typeName(value: unknown): string {
 export function compareContractResponse(
   actual: { status: number; envelope: Envelope },
   expectation: ResponseExpectation,
+  options: CompareOptions = {},
 ): string[] {
   const diffs: string[] = [];
   if (actual.status !== expectation.status) {
@@ -147,14 +183,14 @@ export function compareContractResponse(
     if (envelope.error.code !== expectation.errorCode) {
       diffs.push(`error.code: ${envelope.error.code} !== ${expectation.errorCode}`);
     }
-    requireShape(envelope, expectation.bodyShape, "$", diffs);
+    requireShape(envelope, expectation.bodyShape, "$", diffs, options);
     return diffs;
   }
   if (!("data" in envelope)) {
     diffs.push("success envelope missing (got error)");
     return diffs;
   }
-  requireShape(envelope, expectation.bodyShape, "$", diffs);
+  requireShape(envelope, expectation.bodyShape, "$", diffs, options);
   const data = envelope.data as Record<string, unknown>;
   if (expectation.replayed === true && data.replayed !== true) {
     diffs.push("data.replayed: expected true");

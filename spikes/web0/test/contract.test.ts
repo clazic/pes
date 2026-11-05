@@ -13,8 +13,9 @@ function assertContract(
   result: { status: number; envelope: Envelope },
   expectation: ResponseExpectation,
   label: string,
+  options: { allowEmptyArrayPaths?: string[] } = {},
 ): void {
-  const diffs = compareContractResponse(result, expectation);
+  const diffs = compareContractResponse(result, expectation, options);
   assert.deepEqual(diffs, [], `${label}: ${diffs.join("; ")}`);
 }
 
@@ -70,7 +71,9 @@ test("versions normal/error against fixture", async () => {
   const fixture = loadFixture("versions.json");
   const db = await freshDb();
   const normal = await call(db, fixture, fixture.normal);
-  assertContract(normal, expectationFromFixture(fixture, "normal"), "versions normal");
+  assertContract(normal, expectationFromFixture(fixture, "normal"), "versions normal", {
+    allowEmptyArrayPaths: ["$.data.files"],
+  });
   const error = await call(db, fixture, fixture.error);
   assertContract(error, expectationFromFixture(fixture, "error"), "versions error");
 });
@@ -207,6 +210,54 @@ test("comparator allows optional response fields and normalizes dynamic IDs/time
     lease: { lease_id: "<dynamic>", expires_at: "<dynamic>" },
     message: "그대로",
   });
+});
+
+test("comparator negative: array tail, dynamic types, and meta.request_id", async () => {
+  const fixture = loadFixture("results.json");
+  const db = await freshDb();
+  const lease = await claimOnce(db);
+  const normal = await call(db, fixture, fixture.normal, {
+    body: withLease(fixture, lease),
+  });
+  const data = structuredClone(dataOf(normal.envelope)) as Record<string, unknown>;
+  const versions = data.object_versions as Record<string, unknown>[];
+  versions.push({});
+  data.mutation_id = null;
+  const envelope = {
+    ...normal.envelope,
+    data,
+    meta: { ...(normal.envelope as { meta: Record<string, unknown> }).meta, request_id: 42 },
+  } as unknown as Envelope;
+  const diffs = compareContractResponse(
+    { status: 201, envelope },
+    expectationFromFixture(fixture, "normal"),
+  );
+  assert.ok(
+    diffs.some((diff) => diff.startsWith("$.data.object_versions[1]")),
+    diffs.join("; "),
+  );
+  assert.ok(diffs.some((diff) => diff.includes("mutation_id")), diffs.join("; "));
+  assert.ok(diffs.some((diff) => diff.includes("meta.request_id")), diffs.join("; "));
+});
+
+test("comparator negative: empty object_versions is not allowed", async () => {
+  const fixture = loadFixture("results.json");
+  const db = await freshDb();
+  const lease = await claimOnce(db);
+  const normal = await call(db, fixture, fixture.normal, {
+    body: withLease(fixture, lease),
+  });
+  const data = structuredClone(dataOf(normal.envelope)) as Record<string, unknown>;
+  data.object_versions = [];
+  const envelope = { ...normal.envelope, data } as Envelope;
+  const diffs = compareContractResponse(
+    { status: 201, envelope },
+    expectationFromFixture(fixture, "normal"),
+  );
+  assert.ok(
+    diffs.some((diff) => diff.includes("object_versions") && diff.includes("at least one")),
+    diffs.join("; "),
+  );
 });
 
 test("contract: unknown request field is rejected", async () => {

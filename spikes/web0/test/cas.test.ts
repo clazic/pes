@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { call, dataOf, freshDb, loadFixture } from "./helpers.ts";
-import { claimWithKey } from "../ts-core/service.ts";
+import { claimWithKey, submitResults } from "../ts-core/service.ts";
 import type { RequestContext } from "../ts-core/service.ts";
 import { IDS } from "../ts-core/store.ts";
 import { PesError } from "../ts-core/contract.ts";
+import type { Db, SqlStatement, SqlValue } from "../ts-core/db.ts";
 
 const T0 = 1762311600000;
 const TTL = 120000;
@@ -276,4 +277,197 @@ test("concurrent complete: only one new completion is committed", async () => {
     [IDS.project],
   );
   assert.equal(events[0]?.n, 1);
+});
+
+
+test("concurrent results with the same key: 201 + 201(replayed), one bundle", async () => {
+  const db = await freshDb();
+  const lease = await claimAt(db, T0, "idem_res_same_claim");
+  const body = leaseBody(lease);
+  const ctx = agentCtx(db, T0 + 10);
+  const results = await Promise.allSettled([
+    submitResults(ctx, IDS.project, IDS.run, body, "idem_res_same"),
+    submitResults(ctx, IDS.project, IDS.run, body, "idem_res_same"),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+  const data = results.map((result) => {
+    assert.equal(result.status, "fulfilled");
+    if (result.status !== "fulfilled") throw new Error("unreachable");
+    assert.equal(result.value.status, 201);
+    return dataOf(result.value.body);
+  });
+  assert.equal(data.filter((body) => body.replayed === true).length, 1);
+  assert.equal(data[0]?.event_seq, data[1]?.event_seq);
+  assert.equal(data[0]?.mutation_id, data[1]?.mutation_id);
+
+  const versions = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM object_versions WHERE project_id = ? AND object_id = ?`,
+    [IDS.project, IDS.artifact],
+  );
+  assert.equal(versions[0]?.n, 3); // 2 seeded + 1 result
+  const receipts = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM run_input_receipts WHERE project_id = ?`,
+    [IDS.project],
+  );
+  assert.equal(receipts[0]?.n, 1);
+  const events = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND type = 'results.submitted'`,
+    [IDS.project],
+  );
+  assert.equal(events[0]?.n, 2);
+  const mutations = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM mutation_commits WHERE project_id = ? AND action = 'results.submit'`,
+    [IDS.project],
+  );
+  assert.equal(mutations[0]?.n, 1);
+});
+
+test("concurrent results with different keys: 201 + 409 rev_conflict, one bundle", async () => {
+  const db = await freshDb();
+  const lease = await claimAt(db, T0, "idem_res_diff_claim");
+  const body = leaseBody(lease);
+  const ctx = agentCtx(db, T0 + 10);
+  const results = await Promise.allSettled([
+    submitResults(ctx, IDS.project, IDS.run, body, "idem_res_a"),
+    submitResults(ctx, IDS.project, IDS.run, body, "idem_res_b"),
+  ]);
+  const fulfilled = results.filter((result) => result.status === "fulfilled");
+  const rejected = results.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  const reason = rejected[0]?.status === "rejected" ? rejected[0].reason : null;
+  assert.ok(reason instanceof PesError, "loser must be a PesError");
+  assert.equal(reason.code, "rev_conflict");
+
+  const versions = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM object_versions WHERE project_id = ? AND object_id = ?`,
+    [IDS.project, IDS.artifact],
+  );
+  assert.equal(versions[0]?.n, 3);
+  const receipts = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM run_input_receipts WHERE project_id = ?`,
+    [IDS.project],
+  );
+  assert.equal(receipts[0]?.n, 1);
+  const events = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND type = 'results.submitted'`,
+    [IDS.project],
+  );
+  assert.equal(events[0]?.n, 2);
+  const mutations = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM mutation_commits WHERE project_id = ? AND action = 'results.submit'`,
+    [IDS.project],
+  );
+  assert.equal(mutations[0]?.n, 1);
+});
+
+test("unrelated DB error from results is not hidden as replay or rev_conflict", async () => {
+  const db = await freshDb();
+  const lease = await claimAt(db, T0, "idem_res_fail_claim");
+  const failing: Db = {
+    all: (sql, params) => db.all(sql, params),
+    run: (sql, params) => db.run(sql, params),
+    batch: async (_statements: SqlStatement[]) => {
+      throw new Error("disk I/O error");
+    },
+  };
+  const ctx: RequestContext = {
+    db: failing,
+    auth: { kind: "agent", actorId: IDS.agent, projectId: IDS.project },
+    now: T0 + 10,
+    ids: IDS,
+  };
+  await assert.rejects(
+    submitResults(ctx, IDS.project, IDS.run, leaseBody(lease), "idem_res_fail"),
+    /disk I\/O error/,
+  );
+  const versions = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM object_versions WHERE project_id = ? AND object_id = ?`,
+    [IDS.project, IDS.artifact],
+  );
+  assert.equal(versions[0]?.n, 2);
+});
+
+test("first claim with no lease row succeeds with fence 1", async () => {
+  const db = await freshDb();
+  await db.run(`DELETE FROM project_leases WHERE project_id = ?`, [IDS.project]);
+  const lease = await claimAt(db, T0, "idem_no_lease_ok");
+  assert.equal(lease.fence, "1");
+  const leases = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM project_leases WHERE project_id = ? AND state = 'active'`,
+    [IDS.project],
+  );
+  assert.equal(leases[0]?.n, 1);
+  const runs = await db.all<{ status: string }>(
+    `SELECT status FROM runs WHERE project_id = ? AND id = ?`,
+    [IDS.project, IDS.run],
+  );
+  assert.equal(runs[0]?.status, "running");
+});
+
+class LateRevChangeDb implements Db {
+  readonly #inner: Db;
+  readonly #projectId: string;
+
+  constructor(inner: Db, projectId: string) {
+    this.#inner = inner;
+    this.#projectId = projectId;
+  }
+
+  all<T = Record<string, unknown>>(sql: string, params?: SqlValue[]): Promise<T[]> {
+    return this.#inner.all<T>(sql, params);
+  }
+
+  run(sql: string, params?: SqlValue[]): Promise<number> {
+    return this.#inner.run(sql, params);
+  }
+
+  async batch(statements: SqlStatement[]): Promise<number[]> {
+    // Simulate another writer changing control_rev after claim pre-read.
+    await this.#inner.run(
+      `UPDATE projects SET control_rev = 13 WHERE id = ?`,
+      [this.#projectId],
+    );
+    return this.#inner.batch(statements);
+  }
+}
+
+test("first claim with no lease row still enforces control_rev CAS", async () => {
+  const db = await freshDb();
+  await db.run(`DELETE FROM project_leases WHERE project_id = ?`, [IDS.project]);
+  const ctx: RequestContext = {
+    db: new LateRevChangeDb(db, IDS.project),
+    auth: { kind: "agent", actorId: IDS.agent, projectId: IDS.project },
+    now: T0,
+    ids: IDS,
+  };
+  await assert.rejects(
+    claimWithKey(ctx, IDS.project, IDS.agent, claimBody(), "idem_no_lease_race"),
+    (error: unknown) => error instanceof PesError && error.code === "rev_conflict",
+  );
+  const leases = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM project_leases WHERE project_id = ?`,
+    [IDS.project],
+  );
+  assert.equal(leases[0]?.n, 0);
+  const runs = await db.all<{ status: string }>(
+    `SELECT status FROM runs WHERE project_id = ? AND id = ?`,
+    [IDS.project, IDS.run],
+  );
+  assert.equal(runs[0]?.status, "queued");
+  const mutations = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM mutation_commits WHERE client_request_id = ?`,
+    ["idem_no_lease_race"],
+  );
+  assert.equal(mutations[0]?.n, 0);
+  const events = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND type = 'run.claimed'`,
+    [IDS.project],
+  );
+  assert.equal(events[0]?.n, 0);
+  const rev = await db.all<{ rev: string }>(
+    `SELECT CAST(control_rev AS TEXT) AS rev FROM projects WHERE id = ?`,
+    [IDS.project],
+  );
+  assert.equal(rev[0]?.rev, "13");
 });

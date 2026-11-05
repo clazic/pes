@@ -9,7 +9,7 @@ import {
   type SuccessEnvelope,
 } from "./contract.ts";
 import type { Db, SqlStatement } from "./db.ts";
-import { compareDecimal, incrementDecimal } from "./decimal.ts";
+import { compareDecimal, incrementDecimal, isDecimalString } from "./decimal.ts";
 import { validateClaim, validateComplete, validateResults, validateWait } from "./dto.ts";
 import {
   eventStatements,
@@ -196,7 +196,14 @@ function guardStatement(
 
 function isGuardError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /guard_ok|CHECK constraint failed/i.test(message);
+  // Only the spike guard's specific CHECK, not every CHECK constraint.
+  return /guard_ok/i.test(message);
+}
+
+function isResultsUniqueConflict(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  // Only the two idempotency/version races; unrelated DB errors must surface.
+  return /UNIQUE constraint failed: (mutation_commits|object_versions)\b/i.test(message);
 }
 
 function replayResponse(
@@ -462,6 +469,12 @@ export async function claimWithKey(
   };
   const statements: SqlStatement[] = [
     {
+      sql: `UPDATE projects SET control_rev = control_rev
+            WHERE id = ? AND CAST(control_rev AS TEXT) = ?`,
+      params: [projectId, input.expected_control_rev],
+    },
+    guardStatement(ctx, projectId, actorId, `claim-project:${txId}`),
+    {
       sql: `INSERT INTO project_leases
         (project_id, lease_id, run_id, owner_actor_id, fence, state,
          acquired_at, heartbeat_at, expires_at)
@@ -616,16 +629,8 @@ export async function submitResults(
   }
 
   const txId = newId("mut");
-  const eventBaseRows = await ctx.db.all<{ next_seq: string }>(
-    `SELECT CAST(COALESCE(MAX(event_seq), 0) + 1 AS TEXT) AS next_seq
-     FROM events WHERE project_id = ?`,
-    [projectId],
-  );
-  const nextEventSeq = eventBaseRows[0]?.next_seq ?? "1";
   const returnedVersions: { object_id: string; version_id: string; version_no: string }[] = [];
-  const objectStatements: SqlStatement[] = [];
-
-  input.results.forEach((result, index) => {
+  const planned = input.results.map((result, index) => {
     const target = targets[index];
     if (!target) throw errors.internal("result target lost");
     const versionId = newId("ver");
@@ -636,52 +641,15 @@ export async function submitResults(
       version_id: versionId,
       version_no: versionNo,
     });
-    objectStatements.push(
-      {
-        sql: `INSERT INTO object_versions
-          (id, project_id, object_id, kind, version_no, based_on_version_id,
-           created_in_round_id, actor_id, run_id, tx_id, content_hash, created_at)
-          VALUES (?, ?, ?, 'artifact', ?, ?, NULL, ?, ?, ?, ?, ?)`,
-        params: [
-          versionId,
-          projectId,
-          result.object_id,
-          versionNo,
-          result.base_version_id,
-          actorId,
-          runId,
-          txId,
-          sha256Hex(result.body_md),
-          ctx.now,
-        ],
-      },
-      {
-        sql: `UPDATE objects SET current_version_id = ?, rev = ?
-              WHERE project_id = ? AND id = ? AND current_version_id = ?`,
-        params: [versionId, newRev, projectId, result.object_id, result.base_version_id],
-      },
-      guardStatement(ctx, projectId, actorId, `result-object:${txId}:${index}`),
-      {
-        sql: `INSERT INTO artifact_versions
-          (project_id, version_id, object_id, object_kind, title, summary, body_md, status,
-           stats, conflicts, verify, metadata_json)
-          VALUES (?, ?, ?, 'artifact', ?, '', ?, 'draft', '[]', '[]', 'null', '{}')`,
-        params: [projectId, versionId, result.object_id, result.title, result.body_md],
-      },
-      {
-        sql: `UPDATE artifacts SET origin_version_id = ?
-              WHERE project_id = ? AND object_id = ?`,
-        params: [versionId, projectId, result.object_id],
-      },
-      guardStatement(ctx, projectId, actorId, `result-artifact:${txId}:${index}`),
-    );
+    return { result, versionId, versionNo, newRev };
   });
 
   const resultData = {
     object_versions: returnedVersions,
     mutation_id: txId,
-    event_seq: incrementDecimal(nextEventSeq),
+    event_seq: "0",
   };
+
   const statements: SqlStatement[] = [
     {
       sql: `UPDATE project_leases SET heartbeat_at = ?
@@ -709,6 +677,27 @@ export async function submitResults(
       ],
     },
     guardStatement(ctx, projectId, actorId, `results-lease:${txId}`),
+  ];
+
+  // Object CAS first: a concurrent same-key or different-key submission fails
+  // here before any UNIQUE INSERT, then the catch below maps it to replay/rev_conflict.
+  planned.forEach((plan, index) => {
+    statements.push(
+      {
+        sql: `UPDATE objects SET current_version_id = NULL, rev = ?
+              WHERE project_id = ? AND id = ? AND current_version_id = ?`,
+        params: [
+          plan.newRev,
+          projectId,
+          plan.result.object_id,
+          plan.result.base_version_id,
+        ],
+      },
+      guardStatement(ctx, projectId, actorId, `result-object-cas:${txId}:${index}`),
+    );
+  });
+
+  statements.push(
     mutationStatement(txId, {
       projectId,
       actorId,
@@ -722,8 +711,49 @@ export async function submitResults(
       resultJson: JSON.stringify(resultData),
       createdAt: ctx.now,
     }),
-    ...objectStatements,
-  ];
+  );
+
+  planned.forEach((plan, index) => {
+    statements.push(
+      {
+        sql: `INSERT INTO object_versions
+          (id, project_id, object_id, kind, version_no, based_on_version_id,
+           created_in_round_id, actor_id, run_id, tx_id, content_hash, created_at)
+          VALUES (?, ?, ?, 'artifact', ?, ?, NULL, ?, ?, ?, ?, ?)`,
+        params: [
+          plan.versionId,
+          projectId,
+          plan.result.object_id,
+          plan.versionNo,
+          plan.result.base_version_id,
+          actorId,
+          runId,
+          txId,
+          sha256Hex(plan.result.body_md),
+          ctx.now,
+        ],
+      },
+      {
+        sql: `UPDATE objects SET current_version_id = ?
+              WHERE project_id = ? AND id = ? AND current_version_id IS NULL`,
+        params: [plan.versionId, projectId, plan.result.object_id],
+      },
+      guardStatement(ctx, projectId, actorId, `result-version:${txId}:${index}`),
+      {
+        sql: `INSERT INTO artifact_versions
+          (project_id, version_id, object_id, object_kind, title, summary, body_md, status,
+           stats, conflicts, verify, metadata_json)
+          VALUES (?, ?, ?, 'artifact', ?, '', ?, 'draft', '[]', '[]', 'null', '{}')`,
+        params: [projectId, plan.versionId, plan.result.object_id, plan.result.title, plan.result.body_md],
+      },
+      {
+        sql: `UPDATE artifacts SET origin_version_id = ?
+              WHERE project_id = ? AND object_id = ?`,
+        params: [plan.versionId, projectId, plan.result.object_id],
+      },
+      guardStatement(ctx, projectId, actorId, `result-artifact:${txId}:${index}`),
+    );
+  });
 
   for (const receipt of input.input_receipts) {
     statements.push({
@@ -753,12 +783,22 @@ export async function submitResults(
       objectId: input.results[0]?.object_id ?? null,
       createdAt: ctx.now,
     }),
+    {
+      // The actual last event for this tx (global AUTOINCREMENT), inside the
+      // same atomic batch, not a project MAX estimate.
+      sql: `UPDATE mutation_commits
+            SET result_json = json_set(result_json, '$.event_seq',
+              (SELECT CAST(MAX(event_seq) AS TEXT) FROM events WHERE tx_id = ?))
+            WHERE project_id = ? AND id = ?`,
+      params: [txId, projectId, txId],
+    },
+    guardStatement(ctx, projectId, actorId, `results-event-seq:${txId}`),
   );
 
   try {
     await ctx.db.batch(statements);
   } catch (error) {
-    if (!isGuardError(error)) throw error;
+    if (!isGuardError(error) && !isResultsUniqueConflict(error)) throw error;
     const afterReplay = await replayOrConflict(ctx, projectId, actorId, idempotencyKey, body);
     if (afterReplay) return replayResponse(201, afterReplay);
     const currentProject = await loadProject(ctx, projectId);
@@ -787,6 +827,16 @@ export async function submitResults(
     }
     throw errors.internal("results CAS failed without a matching state");
   }
+
+  const stored = await ctx.db.all<{ result_json: string }>(
+    `SELECT result_json FROM mutation_commits WHERE project_id = ? AND id = ?`,
+    [projectId, txId],
+  );
+  const storedData = JSON.parse(stored[0]?.result_json ?? "{}") as { event_seq?: unknown };
+  if (!isDecimalString(storedData.event_seq)) {
+    throw errors.internal("results receipt has no event_seq");
+  }
+  resultData.event_seq = storedData.event_seq;
   return { status: 201, body: success(requestId(), resultData) };
 }
 

@@ -29,6 +29,8 @@ export interface RunStats {
 
 export interface ScenarioOptions {
   fakeGoUrl: string;
+  /** Finite timeout for the Go HTTP call; defaults to 30 s. */
+  goTimeoutMs?: number;
   /** Unique ID namespace per round; defaults to a fresh namespace. */
   ids?: Ids;
   /** Optional hook used by the measurement runner to sample CPU around the round. */
@@ -121,6 +123,7 @@ async function callGo(
   callIndex: number,
   requestBytesTarget: number,
   fakeGoUrl: string,
+  timeoutMs: number,
 ): Promise<GoCallResult & { dispatchId: string }> {
   const dispatchId = newId("obd");
   const payload = goRequestPayload(callIndex, requestBytesTarget);
@@ -163,6 +166,7 @@ async function callGo(
     method: "POST",
     headers: { "Content-Type": "application/json", "X-PES-Spike": "web0" },
     body: payload,
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const responseText = await response.text();
   const responseBytes = Buffer.byteLength(responseText, "utf8");
@@ -417,11 +421,11 @@ export async function runRound(db: Db, options: ScenarioOptions): Promise<RunSta
   const lease1 = (claim1.body as { data: { lease: { lease_id: string; fence: string } } }).data.lease;
 
   options.onPhase?.("go-1");
-  const call1 = await callGo(counting, ctx, ctx.ids.run, 1, 12 * 1024, options.fakeGoUrl);
+  const call1 = await callGo(counting, ctx, ctx.ids.run, 1, 12 * 1024, options.fakeGoUrl, options.goTimeoutMs ?? 30000);
   void call1;
 
   options.onPhase?.("go-2");
-  const call2 = await callGo(counting, ctx, ctx.ids.run, 2, 24 * 1024, options.fakeGoUrl);
+  const call2 = await callGo(counting, ctx, ctx.ids.run, 2, 24 * 1024, options.fakeGoUrl, options.goTimeoutMs ?? 30000);
 
   options.onPhase?.("results-1");
   const draft = await submitResults(
@@ -483,7 +487,7 @@ export async function runRound(db: Db, options: ScenarioOptions): Promise<RunSta
   const lease2 = (claim2.body as { data: { lease: { lease_id: string; fence: string } } }).data.lease;
 
   options.onPhase?.("go-3");
-  const call3 = await callGo(counting, ctx, ctx.ids.run, 3, 28 * 1024, options.fakeGoUrl);
+  const call3 = await callGo(counting, ctx, ctx.ids.run, 3, 28 * 1024, options.fakeGoUrl, options.goTimeoutMs ?? 30000);
 
   options.onPhase?.("results-2");
   const revised = await submitResults(

@@ -22,11 +22,11 @@
 | `ts-core/hwpx.ts` | 합성 report.md → report.hwpx 최소 변환기(순수 TS + fflate) |
 | `worker/index.ts`, `wrangler.toml` | `wrangler dev --local` Workers + 로컬 D1 진입 |
 | `ts-core/vc-handler.ts`·`vc-server.ts` | Vercel Node 함수 형태의 로컬 핸들러 + 로컬 SQLite |
-| `test/` | `node:test` 82개(계약 비교기·10진 큰 값·CAS·만료·HWPX 포함) |
+| `test/` | `node:test` 91개(계약 비교기·10진 큰 값·CAS·만료·HWPX 포함) |
 
 ### 1.1 실행 명령과 러너 결정
 
-- 테스트 러너: **`node:test`**를 우선 시도해 채택했다. Node 26이 TypeScript를 타입 제거로 바로 실행하고, 추가 러너 의존성이 없으며, 82개 테스트가 통과했다. `tsc --noEmit`은 `typescript` devDependency로 돌린다.
+- 테스트 러너: **`node:test`**를 우선 시도해 채택했다. Node 26이 TypeScript를 타입 제거로 바로 실행하고, 추가 러너 의존성이 없으며, 91개 테스트가 통과했다. `tsc --noEmit`은 `typescript` devDependency로 돌린다.
 - `npm ci`는 npm 레지스트리의 devDependency만 쓴다. Bun 1.4.4·Deno 2.9.6은 npm 패키지의 플랫폼 바이너리로 `node_modules/.bin`에 설치되며 전역 설치가 아니다.
 - 이 개발 PC의 npm 레지스트리 인증서 체인이 Node 기본 신뢰 저장소와 맞지 않아 `NODE_EXTRA_CA_CERTS`가 필요할 수 있었다. 캐시가 있으면 `npm ci`는 그대로 통과한다. 이는 환경 문제이며 저장소 설정을 바꾸지 않았다(`spikes/web0/README.md` 참고).
 
@@ -49,9 +49,9 @@
 
 - status와 `error.code`는 정확히 비교한다.
 - fixture 응답의 모든 키를 재귀적으로 요구한다. 구현이 추가 선택 필드를 넣는 것은 허용한다.
-- 배열은 키/타입을 검사하고, 실제 배열이 비어 있으면 허용한다(파일 없는 A 시나리오).
-- `request_id`·`*_id`·`digest`·`cursor`·`created_at`·`expires_at` 등 동적 값은 `normalizeDynamic()`으로 명시 정규화한다.
-- 음성 검사: 필수 키를 지운 합성 실제 응답과 오류 code를 바꾼 기대값이 **실패**하는지 시험한다.
+- 배열은 **실제 모든 원소**에 fixture 원소의 필수 키를 적용한다. 빈 배열은 경로별로 명시한 `$.data.files`(파일 없는 A 시나리오)만 허용한다.
+- `request_id`·`*_id`·`digest`·`cursor`·`created_at`·`expires_at` 등 동적 값은 `normalizeDynamic()`으로 값만 정규화하고, 필드 타입과 null 여부는 검사한다.
+- 음성 검사: 필수 키를 지운 응답, 오류 code를 바꾼 기대값, `object_versions` 둘째 원소 `{}`, `mutation_id=null`, `meta.request_id=42`가 모두 **실패**하는지 시험한다.
 - `capabilities`의 `exports.create`처럼 fixture에 있는 키가 구현에 없던 곳은 구현을 fixture에 맞췄다(fixture는 수정하지 않음).
 
 | 경로 | normal | error | replay |
@@ -106,25 +106,28 @@
   - 응답·DB `CAST` 값·mutation 영수증의 base_control_rev/fence가 모두 일치
 - 이 테스트를 위해 시드 이벤트를 2^53에 두고, `node:sqlite` 쓰기 statement의 `lastInsertRowid` 문제를 어댑터에서 흡수했다.
 
-### 2.5 원자 CAS·만료·base_control_rev
+### 2.5 원자 CAS·만료·base_control_rev·event_seq
 
 - **원자 경계**: claim/results/wait/complete의 전제 검사와 변경을 같은 batch에 넣고, 조건부 UPDATE/UPSERT가 0행이면 `mutation_commits.guard_ok=0` INSERT가 CHECK로 실패해 **영수증·events까지 전부 롤백**한다. 001 DDL만 쓰고 별도 표를 만들지 않는다.
 - **동시 claim**: 다른 키 2개를 `Promise.all`로 실행하면 **하나만 201**, 다른 하나는 `lease_held`. 같은 키 2개는 **하나의 claim + 하나의 replay**로 수렴하고 lease/fence가 같다. 두 경우 모두 claim 영수증 1개, `run.claimed` events 2개만 남는다.
+- **lease 없는 최초 claim**: claim batch 맨 앞에 `projects.control_rev` CAS+guard를 두어 INSERT 경로도 같은 조건을 통과하게 했다. pre-read 뒤 control_rev가 12→13으로 바뀌면 **rev_conflict**이고 lease·run 상태·영수증·events가 남지 않는다.
+- **동시 results**: 객체 CAS를 UNIQUE INSERT보다 먼저 수행한다. 같은 키 동시 제출은 **201 + 201(replayed)**, 다른 키는 **201 + 409 rev_conflict**이며 결과 버전·영수증·events는 한 묶음만 남는다. `mutation_commits`/`object_versions` UNIQUE 충돌만 재조회로 해석하고, 그 밖의 DB 오류(예: disk I/O)는 숨기지 않고 그대로 실패한다.
 - **lease 만료**: `expires_at <= now`면 results/wait/complete는 `lease_lost`. `expires_at - 1`은 성공, `expires_at`·`expires_at + 1`은 거부하는 경계값 시험을 세 경로에 넣었다. 만료 뒤에도 원래 완료 영수증의 재생은 허용된다.
 - **results base_control_rev**: 요청값을 현재 project.control_rev와 비교하고, 불일치면 `rev_conflict`(target `$.body.base_control_rev`). 이 검사를 CAS guard에도 넣었고, 거부 시 객체 버전·영수증·events가 생기지 않는지 시험했다. 영수증에는 현재값이 아니라 **요청값**을 기록한다.
+- **event_seq**: 프로젝트 MAX 추정 대신, 같은 batch에서 events를 넣은 뒤 `json_set`으로 **해당 tx의 실제 마지막 event_seq**를 영수증에 기록하고 응답·replay가 그 값을 쓴다. 프로젝트 A의 claim 뒤에 프로젝트 B 이벤트 5개를 끼워 넣어도 A results의 응답·영수증·실제 events가 일치한다.
 
 ## 3. A 한 라운드 로컬 측정
 
-고정 시나리오: 모델 호출 3회(요청 12+24+28 KiB, 응답 8+16+12 KiB), 결과 제출 2회, 질문/답 1/1, wait/resume/complete 1/1/1, 파일 0바이트. 워밍업 1 + 측정 3 + 연속 10회. 모든 후보가 **같은 `ts-core` 코어 해시 `ce81ec7a…`**와 같은 가짜 Go를 썼다.
+고정 시나리오: 모델 호출 3회(요청 12+24+28 KiB, 응답 8+16+12 KiB), 결과 제출 2회, 질문/답 1/1, wait/resume/complete 1/1/1, 파일 0바이트. 워밍업 1 + 측정 3 + 연속 10회. 모든 후보가 **같은 `ts-core` 코어 해시 `de7f7c8c…`**와 같은 가짜 Go를 썼다.
 
 | 후보(로컬 대리) | 측정 3회 벽시계(ms) | 중앙값 | CPU 중앙값(ms) | RSS 중앙값(MB) | 연속 10회 중앙값 | 10회 오류 |
 |---|---|---|---|---|---|---|
-| VPS 대리: Node 26 + `node:sqlite` | 635.22 / 634.59 / 629.82 | **634.59** | 37.12 | 62.89 | 628.90 ms | 0 |
-| VC 대리: Node 함수 핸들러 + 로컬 SQLite | 635.06 / 644.94 / 638.97 | **638.97** | 40.00 | 107.44 | 639.32 ms | 0 |
-| CF 대리: `wrangler dev --local` + 로컬 D1 | 698.49 / 697.25 / 692.44 | **697.25** | 100.00 | 521.61 | 693.78 ms | 0 |
+| VPS 대리: Node 26 + `node:sqlite` | 635.10 / 621.00 / 625.59 | **625.59** | 24.68 | 63.32 | 628.24 ms | 0 |
+| VC 대리: Node 함수 핸들러 + 로컬 SQLite | 642.73 / 642.05 / 639.26 | **642.05** | 40.00 | 107.97 | 636.58 ms | 0 |
+| CF 대리: `wrangler dev --local` + 로컬 D1 | 695.55 / 688.46 / 696.43 | **695.55** | 110.00 | 528.47 | 687.64 ms | 0 |
 
-- 세 후보 모두 **라운드당 신규 행 53, INSERT/UPSERT 변경 행 57, UPDATE 변경 행 22, 전체 변경 행 79, 쓰기 문 93**, subrequest 3, 요청 64 KiB·응답 36 KiB로 같았다.
-- 계획 표의 "약 51행"은 UPDATE를 포함한 논리 행 수다. 이 구현의 **물리 신규 행은 53**(+3.9%, ±10% 안), 변경 행 79, 쓰기 문 93이다. 차이는 CAS guard·upsert·UPDATE 계수 방식에서 나며, 같은 코어라 후보별 차이는 없다. 이전 문서의 UPSERT 변경을 신규 행으로 잘못 센 값은 정정했다.
+- 세 후보 모두 **라운드당 신규 행 53, INSERT/UPSERT 변경 행 57, UPDATE 변경 행 28, 전체 변경 행 85, 쓰기 문 105**, subrequest 3, 요청 64 KiB·응답 36 KiB로 같았다.
+- 계획 표의 "약 51행"은 UPDATE를 포함한 논리 행 수다. 이 구현의 **물리 신규 행은 53**(+3.9%, ±10% 안), 전체 변경 행 85, 쓰기 문 105다. 차이는 CAS guard·upsert·UPDATE 계수 방식에서 나며, 같은 코어라 후보별 차이는 없다. 이전 문서의 UPSERT 변경을 신규 행으로 잘못 센 값은 정정했다.
 - VPS 대리 CPU/RSS는 Node 프로세스 전체(가짜 Go 클라이언트 포함) 값이다. CF 대리는 `wrangler`+`workerd` 프로세스 트리 전체 값이므로 **Workers 요청당 CPU나 128 MB 메모리 한도와 비교할 수 없다**. VC 대리는 함수 서버 프로세스 트리 값이다.
 - `wrangler dev` 로컬은 Cloudflare의 실제 CPU 계측을 노출하지 않는다. 따라서 **CF Free 10 ms/호출 판정은 하지 않았다**.
 
@@ -134,9 +137,9 @@ npm devDependency의 로컬 바이너리로 같은 `ts-core` A 라운드를 `nod
 
 | 런타임 | 버전 | 결과 | 벽시계(ms) | CPU(ms) | RSS(MB) | 신규 행 |
 |---|---|---|---:|---:|---:|---:|
-| Node | 26.13.0 | 통과(기준) | 634.59(중앙값) | 37.12 | 62.89 | 53 |
-| Bun | 1.4.4 | 통과 | 659.80 | 30.00 | 27.64 | 53 |
-| Deno | 2.9.6 | 통과 | 697.28 | 60.00 | 50.95 | 53 |
+| Node | 26.13.0 | 통과(기준) | 625.59(중앙값) | 24.68 | 63.32 | 53 |
+| Bun | 1.4.4 | 통과 | 660.36 | 30.00 | 28.53 | 53 |
+| Deno | 2.9.6 | 통과 | 682.36 | 80.00 | 50.88 | 53 |
 
 - 세 런타임 모두 `node:sqlite`가 동작했고, 같은 시나리오가 같은 53행을 썼다.
 - Bun/Deno는 1회 실행 값이며, 3회·10회 반복과 플랫폼 배포는 measured 범위 밖이다.
@@ -147,8 +150,8 @@ npm devDependency의 로컬 바이너리로 같은 `ts-core` A 라운드를 `nod
 
 | 경로 | 결과 | 벽시계(ms) | CPU(ms) | RSS(MB) | 결과 크기 | sha256 일치 |
 |---|---|---:|---:|---:|---:|---|
-| Node 26(= VPS/VC 대리) | 통과 | 1.21 | 4.22 | 53.49 | 3,061 B | 기준 |
-| `wrangler dev` 로컬 workerd(= CF 대리) | 통과 | 2.39 | 0.00(표본 하한) | 572.52 | 3,061 B | **Node와 동일** |
+| Node 26(= VPS/VC 대리) | 통과 | 1.61 | 5.55 | 54.41 | 3,061 B | 기준 |
+| `wrangler dev` 로컬 workerd(= CF 대리) | 통과 | 2.58 | 0.00(표본 하한) | 393.98 | 3,061 B | **Node와 동일** |
 | 브라우저 번들(esbuild `platform=browser`) | 통과 | — | — | — | 26,625 B 번들 | — |
 
 - 산출 구조를 테스트로 검증했다: `mimetype`이 **첫 zip 항목·무압축**, `version.xml`, `META-INF/container.xml`, `Contents/content.hpf`, `Contents/header.xml`, `Contents/section0.xml`, 표의 `hp:tbl`/`hp:tr`/`hp:tc`, 제목·문단·표 텍스트.
@@ -168,7 +171,7 @@ npm devDependency의 로컬 바이너리로 같은 `ts-core` A 라운드를 `nod
 | ① A 한 라운드 | 3/3 + 10/10 완주, 오류 0, subrequest 3/라운드 | 실제 staging CPU·한도, 콜드 스타트, 8시간/30일 |
 | ② TS 재사용 | 같은 코어를 Node·Bun·Deno·D1·Node 함수에서 실행, 계약 38/38 | 실제 배포 후 같은 commit 재현 |
 | ③ SQLite 계약 | 61표·FK/CHECK/부분 UNIQUE/0행/batch/deferred FK/10진 왕복 통과 | Turso 자체, D1 원격, 운영 크기·잠금 |
-| ④ 월 여유 | 라운드당 사용량 고정(3 subrequest, 신규 53행, 변경 79행) | 계정 한도·8시간 하루·30일 투영·R2/DO/KV |
+| ④ 월 여유 | 라운드당 사용량 고정(3 subrequest, 신규 53행, 변경 85행) | 계정 한도·8시간 하루·30일 투영·R2/DO/KV |
 | ⑤ 카드 | 계정을 만들지 않음 | **사용자 결정 필요**: CF/Vercel/Oracle/Hetzner 가입·카드 |
 | ⑥ 상시 통로 | 미실행 | **사용자 결정 필요**: 배포 계정 뒤 8시간 WebSocket/SSE soak |
 | ⑦ 운영 | 미실행 | **미측정(시간 상자 밖)**: 4주 운영 일지 |

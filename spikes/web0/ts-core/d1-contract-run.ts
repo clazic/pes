@@ -22,6 +22,7 @@ try {
     method: "POST",
     body: "{}",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(60000),
   });
   const text = await response.text();
   if (response.status !== 200) throw new Error(`contract failed ${response.status}: ${text.slice(0, 500)}`);

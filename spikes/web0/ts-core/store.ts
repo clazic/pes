@@ -314,7 +314,7 @@ export async function seedBase(db: Db, options: SeedOptions = {}): Promise<Seede
         (project_id, lease_id, run_id, owner_actor_id, fence, state,
          acquired_at, heartbeat_at, expires_at)
         VALUES (?, ?, NULL, NULL, ?, 'released', ?, ?, ?)`,
-      params: [ids.project, "lea_01J9Z3K7Q0", baseFence, t - 1000, t - 1000, t],
+      params: [ids.project, ids.lease, baseFence, t - 1000, t - 1000, t],
     },
   ];
 

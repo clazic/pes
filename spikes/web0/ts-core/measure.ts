@@ -154,30 +154,33 @@ function fakeDelta(fake: FakeGoServer, before: number): number {
 
 async function measureNode(fake: FakeGoServer): Promise<void> {
   const db = new SqliteDb(":memory:");
-  await db.exec(readFileSync(DDL_PATH, "utf8"));
-  const invoke = async (): Promise<RoundPayload> => {
-    const stats = await runRound(db, { fakeGoUrl: fake.url });
-    return { stats, serverWallMs: stats.wallMs };
-  };
-  const runOne = async (phase: RoundRecord["phase"], index: number) => {
-    const beforeFake = fake.stats.requests;
-    const cpuBefore = process.cpuUsage();
-    const wallBefore = performance.now();
-    const payload = await invoke();
-    const wallMs = performance.now() - wallBefore;
-    const cpu = process.cpuUsage(cpuBefore);
-    round("vps-node", phase, index, payload, {
-      wallMs,
-      cpuMs: (cpu.user + cpu.system) / 1000,
-      rssMb: process.memoryUsage().rss / 1024 / 1024,
-      subrequests: fakeDelta(fake, beforeFake),
-      note: "in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)",
-    });
-  };
-  for (let index = 1; index <= WARMUP; index += 1) await runOne("warmup", index);
-  for (let index = 1; index <= MEASURED; index += 1) await runOne("measured", index);
-  for (let index = 1; index <= CONSECUTIVE; index += 1) await runOne("consecutive", index);
-  db.close();
+  try {
+    await db.exec(readFileSync(DDL_PATH, "utf8"));
+    const invoke = async (): Promise<RoundPayload> => {
+      const stats = await runRound(db, { fakeGoUrl: fake.url });
+      return { stats, serverWallMs: stats.wallMs };
+    };
+    const runOne = async (phase: RoundRecord["phase"], index: number) => {
+      const beforeFake = fake.stats.requests;
+      const cpuBefore = process.cpuUsage();
+      const wallBefore = performance.now();
+      const payload = await invoke();
+      const wallMs = performance.now() - wallBefore;
+      const cpu = process.cpuUsage(cpuBefore);
+      round("vps-node", phase, index, payload, {
+        wallMs,
+        cpuMs: (cpu.user + cpu.system) / 1000,
+        rssMb: process.memoryUsage().rss / 1024 / 1024,
+        subrequests: fakeDelta(fake, beforeFake),
+        note: "in-process Node 26 + node:sqlite; CPU/RSS measured in the same process (includes fake Go client)",
+      });
+    };
+    for (let index = 1; index <= WARMUP; index += 1) await runOne("warmup", index);
+    for (let index = 1; index <= MEASURED; index += 1) await runOne("measured", index);
+    for (let index = 1; index <= CONSECUTIVE; index += 1) await runOne("consecutive", index);
+  } finally {
+    db.close();
+  }
 }
 
 async function startVcServer(fake: FakeGoServer): Promise<{ child: ReturnType<typeof spawn>; url: string }> {
@@ -427,6 +430,7 @@ async function measureCloudflare(fake: FakeGoServer): Promise<void> {
       method: "POST",
       body: "{}",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(60000),
     });
     const text = await response.text();
     if (response.status !== 200) throw new Error(`D1 contract failed ${response.status}: ${text.slice(0, 500)}`);
@@ -706,10 +710,13 @@ async function main(): Promise<void> {
   // SQLite contract (shared by VPS/VC local proxies).
   {
     const db = new SqliteDb(":memory:");
-    await db.exec(readFileSync(DDL_PATH, "utf8"));
-    const result = await runContractSuite(db);
-    db.close();
-    contractRecords.push({ candidate: "sqlite-node", result });
+    try {
+      await db.exec(readFileSync(DDL_PATH, "utf8"));
+      const result = await runContractSuite(db);
+      contractRecords.push({ candidate: "sqlite-node", result });
+    } finally {
+      db.close();
+    }
   }
 
   try {

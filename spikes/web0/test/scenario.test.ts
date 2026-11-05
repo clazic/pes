@@ -28,9 +28,9 @@ test("A round scenario executes on node:sqlite with 3 model calls and DB writes"
     assert.equal(stats.newRows, 53);
     assert.equal(stats.newRows, deltaSum);
     assert.equal(stats.insertChangedRows, 57);
-    assert.equal(stats.updateChangedRows, 22);
-    assert.equal(stats.dbRowsChanged, 79);
-    assert.equal(stats.dbWriteOps, 93);
+    assert.equal(stats.updateChangedRows, 28);
+    assert.equal(stats.dbRowsChanged, 85);
+    assert.equal(stats.dbWriteOps, 105);
     assert.ok(stats.insertChangedRows >= stats.newRows, "upserts can change without inserting");
     assert.equal(stats.tableDeltas.runs, 0); // seeded run is updated, not inserted
     assert.equal(stats.tableDeltas.object_versions, 4); // 2 results + question + answer
