@@ -187,11 +187,15 @@ function is_native_async_function(fn: unknown): boolean {
   );
 }
 
-function ignore_thenable_rejection(value: unknown): void {
+function ignore_native_promise_rejection(value: unknown): void {
   // The callback has already run, so its writes are rolled back. Attach a
-  // rejection handler so an async continuation cannot surface as an unhandled
-  // rejection after tx() reports the contract violation.
-  void Promise.resolve(value).catch(() => undefined);
+  // rejection handler so a native Promise cannot surface as an unhandled
+  // rejection after tx() reports the contract violation. Only a real Promise
+  // is touched: assimilating an arbitrary thenable would call its then() after
+  // the rollback and let it write outside the transaction. The built-in
+  // method is called directly so a Promise subclass cannot override then().
+  if (!(value instanceof Promise)) return;
+  void Promise.prototype.then.call(value, undefined, () => undefined);
 }
 
 /**
@@ -212,8 +216,8 @@ export function tx<T>(db: Db, fn: () => T extends PromiseLike<unknown> ? never :
   active_transactions.add(db);
   try {
     const result: unknown = fn();
-    if (is_thenable(result)) {
-      ignore_thenable_rejection(result);
+    if (result instanceof Promise || is_thenable(result)) {
+      ignore_native_promise_rejection(result);
       throw new Error("tx() callback must be synchronous; it returned a Promise");
     }
     db.exec("COMMIT");

@@ -500,3 +500,42 @@ test("async callbacks are rejected before BEGIN and cannot write after an await"
     close(fixture);
   }
 });
+
+test("a custom thenable returned from a sync callback is never executed", async () => {
+  const fixture = setup();
+  try {
+    const before = state_signature(fixture.db);
+    let then_calls = 0;
+
+    assert.throws(
+      () =>
+        tx(fixture.db, () => {
+          fixture.db.run("UPDATE db_meta SET cursor_epoch = 20 WHERE id = 1");
+          return {
+            then(resolve: () => void): void {
+              then_calls += 1;
+              fixture.db.run("UPDATE db_meta SET cursor_epoch = 30 WHERE id = 1");
+              resolve();
+            },
+          };
+        }),
+      /must be synchronous/,
+    );
+
+    // The rejection path must not assimilate the thenable: then() runs zero
+    // times and its deferred write is not saved after the rollback.
+    assert.equal(then_calls, 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(then_calls, 0);
+    assert.equal(state_signature(fixture.db), before);
+
+    // The connection is still usable and not stuck in a transaction.
+    assert.equal(
+      tx(fixture.db, () => fixture.db.get<{ cursor_epoch: bigint }>("SELECT cursor_epoch FROM db_meta WHERE id = 1"))
+        ?.cursor_epoch,
+      1n,
+    );
+  } finally {
+    close(fixture);
+  }
+});
