@@ -2,7 +2,7 @@
 
 - 작성: 2026-11-04, Claude 종합. Linear: SEL-22
 - 입력: [stage-1-api-codex.md](discussion/stage-1-api-codex.md), [stage-1-api-opencode.md](discussion/stage-1-api-opencode.md), Claude 추천안 [stage-1-api-claude-recs.md](discussion/stage-1-api-claude-recs.md), Codex 검수 [stage-1-api-codex-review.md](discussion/stage-1-api-codex-review.md)(A·B·C 32항목: 동의 18·수정 14·반대 0), Codex 최종 대조 [stage-1-api-final-check.md](discussion/stage-1-api-final-check.md), 합의 [stage-1-db.md](stage-1-db.md)
-- 상태: **확정 — 사용자 승인 2026-11-05.** **합의안(Claude·Codex)** — 최종 대조 지적 13건 반영
+- 상태: **확정 — 사용자 승인 2026-11-05. 2026-11-05 개정** — 사용자 정의 정정(방식 A 내장 실행기·TS·WEB15 등) 반영. **합의안(Claude·Codex)** — 최종 대조 지적 13건 반영
 
 ## 1. 목표
 
@@ -13,7 +13,7 @@
 | # | 주제 | 결정 |
 |---|---|---|
 | 1 | 원본 | HTTP/JSON. **닫힌 업무 명령 목록**(`result.submit`, `stage.approve` …), 표 CRUD·임의 ops 없음. 통로마다 별도 검증·직접 DB 쓰기 없음(로컬 CLI가 반드시 자기 HTTP를 거칠 필요는 없지만 같은 명령 서비스를 씀) |
-| 2 | 두 API 분리 | **PES API**(에이전트↔PES)와 **OpenCode 서버 API**(A 어댑터↔OpenCode). B는 OpenCode 세션 ID·DTO를 모름 |
+| 2 | 두 API 분리 | **PES API**(에이전트·내장 실행기↔PES)와 **OpenCode Go API**(PES 내장 실행기→Go). B는 OpenCode 세션 ID·DTO를 모름 |
 | 3 | 버전 | 경로 `/api/v1/projects/{id}/…`, 봉투 `format_version:"1.0"`(DB·workflow 버전과 별개). 요청의 모르는 필드는 거부, 응답의 선택 필드 추가는 허용, 모르는 정책·상태를 허용으로 해석하지 않음 |
 | 4 | 쓰기 안전 | `Idempotency-Key` 필수. **전제(expected)는 명령별로 필수 항목을 정함**(사람 답·첨언엔 lease 불필요, 최초 claim엔 기존 lease 없음). 순서: 인증·권한·정책 → 완료 영수증 재생 → rev/lease 검사. 1행 변경을 요구하는 CAS·가드가 0행이면 실패, 전부 롤백(빈 조회·정상 재생은 실패 아님). **모든 DB 변경 명령(결과·질문·답·정책·중단 등)은 변경·`mutation_commits` 영수증·`events`를 한 트랜잭션에**, 파일 바이트 전송은 별도 단계. 같은 키·같은 요청은 원래 결과 재생, 다른 요청은 거부 |
 | 5 | 숫자 | rev·control_rev·fence·event_seq는 **정규화한 10진 문자열**. 문자열 사전식 비교·JS Number 변환 금지 |
@@ -29,7 +29,7 @@
 | 15 | Go OFF | 기본 켜짐·프로젝트별 끄기(사용자 결정) 그대로. OFF 커밋 뒤 새 송신 승인 금지. **새 A run 시작·prompt·요약·첨부·재시도는 `403 policy_blocked`.** **prepared → blocked, authorized는 미송신이 확인될 때만 blocked**, 이미 승인된 건은 송신 여부·취소 시도·unknown 기록, sent 이력 보존. 영향받는 run의 옛 lease 제출 차단(이미 끝난 run은 그대로). Go 목적지로 가는 context·changes·inputs·파일·재시도도 차단. **이미 나간 자료는 회수 보장 없음**, **합성 자료도 우회 없음**. 재허용 뒤에도 사람이 명시적으로 시작/재개 + 새 claim |
 | 16 | WebMCP | 읽기 / 답 **초안은 브라우저 폼만** / 첨언·답글·사람→AI 질문·**할 일 제안 기록 추가**(run·다음 라운드·reopen 실행 아님) — 이 추가들은 **중간 위험 쓰기**. 제출·해결·claim·submit·complete·export·승인류 불가. 제한된 browser_actor 자격으로 접근하고 기록은 `actors.kind=browser_agent`, on_behalf_of_user_id는 위임 관계일 뿐 사람의 직접 작성·승인 증거가 아님 |
 | 17 | 외부 내보내기 | PES가 원본, 사람이 고른 정확한 버전·목적지·payload만 한 방향. Go ON ≠ 외부 내보내기 동의. 6단계 |
-| 18 | 이슈 | **2단계 22개 PR 유지**, API는 기존 PR에 귀속. 3단계 WebMCP 1개, 6단계 내보내기 1~2개 |
+| 18 | 이슈 | **현행 2단계 25개(PR1~19·20a·20b·20c·21·22·26)는 `roadmap.md` 2절을 따른다.** API는 기존 PR에 귀속. **2026-11-04 당시 2단계 22개로 승인한 기록은 그 시점의 이력으로 보존**한다. 3단계 WebMCP 1개, 6단계 내보내기 1~2개 |
 
 ## 3. 세부 값 (초기값 — capabilities로 공지, 시험으로 조정)
 
@@ -46,9 +46,9 @@
 
 ## 4. 방식 A의 PES 접근
 
-- A 세션의 **도구가 공통 PES API로 제출**. 토큰은 모델 프롬프트에 넣지 않고 신뢰하는 HTTP/MCP 도구가 주입
+- A 내장 실행기의 **도구가 공통 PES API로 제출**. Go 키는 모델 프롬프트에 넣지 않고 서버(로컬 키체인·웹 Worker secret)의 호출 계층이 주입
 - 등록된 run에만 claim 가능한 자격을 발급(또는 시작/claim용 서버 자격과 claim 후 실행 자격을 분리)해 최초 claim 순환 문제를 풀고, **허용 run을 서버가 검사**(본문의 run_id 선언을 믿지 않음)
-- 어댑터 책임: 세션 시작·중단, heartbeat·재접속, 중단 요청 재처리, 전송 영수증 추적, 정책 검사
+- 실행기 책임: 루프 시작·중단, heartbeat·재시작 복구, 중단 요청 재처리, Go 호출 영수증 추적, 호출마다 정책 검사
 
 ## 5. 재개 조건 (④ 실행 구조와 공통)
 
@@ -83,6 +83,23 @@ H = 사람(소유자), E = 프로젝트 토큰의 에이전트(내부 A·외부 
 
 3·4·5·6단계 기능의 경로는 방향만 정함. 아직 없는 동작은 capabilities에 미지원으로 표시하고 가짜 성공을 돌려주지 않음.
 
+### 6.1 WEB15 양방향 연결 명령 (2026-11-05 개정 초안)
+
+WEB15의 WebSocket/HTTP 메시지는 자유 형식이 아니라 아래 **닫힌 PES 명령**으로만 매핑한다. 연결 도우미는 사람/기기 링크 자격, AI 도구는 MCP/API 자격을 쓰며 서로 대체하지 않는다. 매 메시지·재접속마다 현재 `project_members`·scope·프로젝트·정책을 검사하고, expected rev·멱등 키·사건/영수증을 같은 tx에 남긴다. 권한 회수·교차 기기/프로젝트 메시지·가짜 완료는 거부한다. 파일 바이트는 WebSocket이 아니라 HTTP 업로드/다운로드로 보내고, WebSocket은 알림·상태·작은 메타데이터만 다룬다.
+
+| 명령(초안) | 경로(초안) | actor·scope | expected·멱등 |
+|---|---|---|---|
+| `sync.link.create` | `POST P/sync-links` | H(owner), `sync:link` | 기기 승인·1회 링크, 멱등 키 |
+| `sync.link.revoke` | `DELETE P/sync-links/{l}` | H(owner) 또는 같은 기기, `sync:link` | 즉시 회수, 다음 메시지 401 |
+| `sync.link.heartbeat` | `POST P/sync-links/{l}/heartbeat` | 도우미 기기 링크, `sync:link` | 마지막 확인·커서, rev 불변 |
+| `sync.push` | `POST P/sync-links/{l}/items` | 도우미 기기 링크, `sync:write` | base_rev/hash, 멱등 키, 충돌 409 |
+| `sync.pull` | `GET P/sync-links/{l}/items?cursor=` | 도우미 기기 링크, `sync:read` | 커서, 권한·deny 필터 |
+| `sync.conflict.resolve` | `POST P/sync-links/{l}/conflicts/{c}/resolve` | H(사람), `sync:resolve` | expected rev, 선택·이유 |
+| `schedule.report` | `POST P/agent-schedules/{s}/reports` | 도우미 기기 링크, `schedule:write` | expected rev, 멱등 키 |
+| `progress.report` | `POST P/agent-schedules/{s}/progress` | 도우미 기기 링크, `progress:write` | expected rev, `events.execution.progress.*`와 같은 tx |
+
+명령 이름·경로는 WEB15 구현 전 확정하되, 위 actor·scope·expected·멱등·tx 경계는 계약으로 유지한다. AI 도구는 이 표의 sync 명령을 쓰지 않고 기존 MCP/API 명령을 쓴다.
+
 ## 7. Claude 앱 (방식 B)
 
 - **직접 연결 우선**(Desktop 로컬 확장 등, ④에서 실제 시험), 제한되면 **명시적 전달**(묶음 복사 → 결과 가져오기)을 대안으로. 앱을 보장 대상에서 빼지 않음
@@ -96,10 +113,10 @@ H = 사람(소유자), E = 프로젝트 토큰의 에이전트(내부 A·외부 
 
 ## 9. 다음으로 넘기는 것
 
-- **DB**: 6단계 외부 내보내기 영수증(전송 전 영속 작업·payload hash·시도·목적지 상관키·unknown), supervisor 동작의 system actor 기록(④)
+- **DB**: 6단계 외부 내보내기 영수증(전송 전 영속 작업·payload hash·시도·목적지 상관키·unknown), A 실행기 동작의 system actor 기록(④)
 - **③ 화면**: 승인 시 snapshot/rev 표시, 충돌·`lease_lost`·커서 무효 복구, 중단/취소/인계 구분, Go in-flight/unknown 표시, 외부 전송 미리보기
-- **④ 실행 구조**: TTL·heartbeat(시험), OpenCode 버전·기능 감지, 중단 작업 재처리·재시작 복구, Claude 앱 연결
-- **2단계**: [검수 C절](discussion/stage-1-api-codex-review.md)의 기존 PR별 귀속을 그대로 승계(PR 1·2·3·4·5·6·7·8·9·10·11·12·13·14·15~17·18·19·20·21·22). **PR 10(토큰·정책)은 13·14·19·20의 선행.** 각 PR에서 자기 범위를 검사하고 21번(교차 계약)까지 미루지 않음. SQLite·D1에서 같은 원자 명령의 성공·충돌·부분 실패는 PR 2·4·21
+- **④ 실행 구조**: TTL·heartbeat(시험), Go API **주소·모델 목록·원시 model ID↔내부 ID·구독 적용 조건·billing source·allowance·오류/스트림 필드** 후보 검증, 사용량 추정, 중단 작업 재처리·재시작 복구, Claude 앱 연결
+- **2단계**: [검수 C절](discussion/stage-1-api-codex-review.md)의 기존 PR별 귀속을 승계하되, 현행 번호는 `roadmap.md` 2절의 PR1~19·20a·20b·20c·21·22·26(25개)을 따른다. **PR 10(토큰·정책)은 13·14·19·20a·20b·20c의 선행.** 각 PR에서 자기 범위를 검사하고 21번(교차 계약)까지 미루지 않음. SQLite·D1에서 같은 원자 명령의 성공·충돌·부분 실패는 PR 2·4·21
 - **5단계**: 로그인, 원격 MCP, 알림
 
 ## 10. 완료 기준 (SEL-22)

@@ -63,6 +63,37 @@ CREATE TABLE project_members (
 );
 CREATE UNIQUE INDEX one_project_owner ON project_members(project_id) WHERE role = 'owner';
 
+CREATE TABLE project_references (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    -- Local pointer when the source project is present in this DB. NULL when only A moved.
+    referenced_project_id TEXT REFERENCES projects(id) ON DELETE RESTRICT,
+    -- Stable source identity that survives A-only export/import (source project UUID / instance).
+    referenced_project_key TEXT NOT NULL,
+    source_snapshot_id TEXT,
+    -- Original snapshot identity, kept after the local snapshot row is explicitly released.
+    source_snapshot_key TEXT,
+    source_label TEXT NOT NULL,
+    latest_snapshot_id TEXT,
+    scope_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(scope_json) AND json_type(scope_json) = 'array'),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','source_missing','source_archived')),
+    attached_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+    attached_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    attached_at INTEGER NOT NULL DEFAULT 0 CHECK (attached_at >= 0),
+    refreshed_at INTEGER,
+    rev INTEGER NOT NULL DEFAULT 0 CHECK (typeof(rev) = 'integer' AND rev >= 0),
+    CHECK (referenced_project_id IS NULL OR project_id <> referenced_project_id),
+    CHECK (source_snapshot_id IS NULL OR referenced_project_id IS NOT NULL),
+    CHECK (latest_snapshot_id IS NULL OR referenced_project_id IS NOT NULL),
+    CHECK (status <> 'source_missing'
+        OR (source_snapshot_id IS NULL AND latest_snapshot_id IS NULL)),
+    UNIQUE (project_id, id),
+    FOREIGN KEY (referenced_project_id, source_snapshot_id)
+        REFERENCES snapshots(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (referenced_project_id, latest_snapshot_id)
+        REFERENCES snapshots(project_id, id) ON DELETE RESTRICT
+);
+
 CREATE TABLE agent_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -116,6 +147,10 @@ CREATE TABLE project_policy_versions (
     policy_rev INTEGER NOT NULL CHECK (typeof(policy_rev) = 'integer' AND policy_rev >= 1),
     -- Initialization explicitly allows Go, per confirmed stage-0 section 7-1.
     allow_opencode_go INTEGER NOT NULL DEFAULT 1 CHECK (allow_opencode_go IN (0,1)),
+    mode_a_model TEXT NOT NULL DEFAULT 'opencode-go/deepseek-v4.1-flash'
+        CHECK (mode_a_model LIKE 'opencode-go/%'),
+    go_usage_stop_percent INTEGER NOT NULL DEFAULT 90
+        CHECK (go_usage_stop_percent BETWEEN 50 AND 100),
     changed_by TEXT NOT NULL,
     changed_by_user_id TEXT NOT NULL,
     changed_by_kind TEXT NOT NULL DEFAULT 'human' CHECK (changed_by_kind = 'human'),
@@ -438,14 +473,152 @@ CREATE TABLE citations (
     FOREIGN KEY (project_id, source_version_id) REFERENCES source_versions(project_id, version_id) ON DELETE RESTRICT
 );
 
+CREATE TABLE file_policies (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    blob_id TEXT NOT NULL,
+    -- One current policy per stored blob. Role/version uses share it, so a role cannot be
+    -- more permissive than the blob's deny.
+    ai_access TEXT NOT NULL CHECK (ai_access IN ('allow','deny')),
+    rev INTEGER NOT NULL DEFAULT 1 CHECK (typeof(rev) = 'integer' AND rev >= 1),
+    changed_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+    changed_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    changed_at INTEGER NOT NULL DEFAULT 0 CHECK (changed_at >= 0),
+    reason TEXT,
+    tx_id TEXT NOT NULL,
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, blob_id),
+    UNIQUE (project_id, blob_id, id),
+    FOREIGN KEY (project_id, blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, tx_id) REFERENCES mutation_commits(project_id, id) ON DELETE RESTRICT
+);
+
 CREATE TABLE version_files (
     project_id TEXT NOT NULL,
     version_id TEXT NOT NULL,
     blob_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('attachment','image','source','rendered','manifest')),
+    file_policy_id TEXT NOT NULL,
     PRIMARY KEY (version_id, blob_id, role),
     FOREIGN KEY (project_id, version_id) REFERENCES object_versions(project_id, id) ON DELETE RESTRICT,
-    FOREIGN KEY (project_id, blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (project_id, blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, blob_id, file_policy_id)
+        REFERENCES file_policies(project_id, blob_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE file_ai_access_versions (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    file_policy_id TEXT NOT NULL,
+    ai_access TEXT NOT NULL CHECK (ai_access IN ('allow','deny')),
+    changed_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+    changed_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    changed_at INTEGER NOT NULL DEFAULT 0 CHECK (changed_at >= 0),
+    reason TEXT,
+    rev INTEGER NOT NULL CHECK (typeof(rev) = 'integer' AND rev >= 1),
+    tx_id TEXT NOT NULL,
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, file_policy_id, rev),
+    FOREIGN KEY (project_id, file_policy_id) REFERENCES file_policies(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, tx_id) REFERENCES mutation_commits(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE file_extractions (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    blob_id TEXT NOT NULL,
+    source_file_policy_id TEXT NOT NULL,
+    source_format TEXT NOT NULL,
+    extractor TEXT NOT NULL,
+    extractor_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending','ready','partial','failed','unsupported')),
+    text_blob_id TEXT,
+    text_file_policy_id TEXT,
+    text_hash TEXT,
+    page_count INTEGER CHECK (page_count IS NULL OR page_count >= 0),
+    table_count INTEGER CHECK (table_count IS NULL OR table_count >= 0),
+    warnings_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(warnings_json) AND json_type(warnings_json) = 'array'),
+    created_at INTEGER NOT NULL DEFAULT 0 CHECK (created_at >= 0),
+    tx_id TEXT NOT NULL,
+    CHECK (status NOT IN ('ready','partial')
+        OR (text_blob_id IS NOT NULL AND text_file_policy_id IS NOT NULL)),
+    CHECK (text_hash IS NULL OR length(text_hash) = 64),
+    UNIQUE (project_id, id),
+    FOREIGN KEY (project_id, version_id) REFERENCES object_versions(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, blob_id, source_file_policy_id)
+        REFERENCES file_policies(project_id, blob_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, text_blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, text_blob_id, text_file_policy_id)
+        REFERENCES file_policies(project_id, blob_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, tx_id) REFERENCES mutation_commits(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE sync_links (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    device_id TEXT NOT NULL,
+    link_kind TEXT NOT NULL DEFAULT 'bridge' CHECK (link_kind IN ('bridge','mcp')),
+    credential_kind TEXT NOT NULL DEFAULT 'helper_device'
+        CHECK (credential_kind IN ('human_device','helper_device')),
+    helper_actor_id TEXT REFERENCES actors(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','revoked')),
+    last_seen_at INTEGER,
+    last_cursor TEXT,
+    created_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at INTEGER NOT NULL DEFAULT 0 CHECK (created_at >= 0),
+    revoked_at INTEGER,
+    rev INTEGER NOT NULL DEFAULT 0 CHECK (typeof(rev) = 'integer' AND rev >= 0),
+    CHECK (credential_kind <> 'helper_device' OR helper_actor_id IS NOT NULL),
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, device_id, link_kind)
+);
+
+CREATE TABLE sync_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    link_id TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('up','down')),
+    version_id TEXT,
+    blob_id TEXT,
+    local_label TEXT NOT NULL,
+    remote_hash TEXT,
+    local_hash TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending','synced','conflict','source_missing','skipped')),
+    conflict_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(conflict_json) AND json_type(conflict_json) = 'object'),
+    updated_at INTEGER NOT NULL DEFAULT 0 CHECK (updated_at >= 0),
+    rev INTEGER NOT NULL DEFAULT 0 CHECK (typeof(rev) = 'integer' AND rev >= 0),
+    tx_id TEXT NOT NULL,
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, link_id, direction, local_label),
+    FOREIGN KEY (project_id, link_id) REFERENCES sync_links(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, version_id) REFERENCES object_versions(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, tx_id) REFERENCES mutation_commits(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE agent_schedules (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    link_id TEXT,
+    run_id TEXT,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned','running','done','failed','cancelled')),
+    seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0),
+    planned_at INTEGER,
+    started_at INTEGER,
+    ended_at INTEGER,
+    summary TEXT,
+    changed_files_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changed_files_json) AND json_type(changed_files_json) = 'array'),
+    updated_at INTEGER NOT NULL DEFAULT 0 CHECK (updated_at >= 0),
+    rev INTEGER NOT NULL DEFAULT 0 CHECK (typeof(rev) = 'integer' AND rev >= 0),
+    tx_id TEXT NOT NULL,
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, seq),
+    FOREIGN KEY (project_id, link_id) REFERENCES sync_links(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, tx_id) REFERENCES mutation_commits(project_id, id) ON DELETE RESTRICT
 );
 
 CREATE TABLE question_sets (
@@ -833,7 +1006,13 @@ CREATE TABLE runs (
     model TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'worker' CHECK (role IN ('worker','reviewer')),
     status TEXT NOT NULL CHECK (status IN
-        ('queued','running','waiting_human','succeeded','failed','cancelled','interrupted')),
+        ('queued','running','waiting_human','blocked_usage','succeeded','failed','cancelled','interrupted')),
+    -- Go usage/extra-usage blocks are not waiting_human. They release the lease and require
+    -- a fresh C4/R1 readiness check plus a new claim before resuming.
+    go_block_reason TEXT CHECK (go_block_reason IS NULL OR go_block_reason IN
+        ('usage_limit','extra_usage_off','usage_unknown','manual_hold')),
+    go_blocked_at INTEGER CHECK (go_blocked_at IS NULL OR go_blocked_at >= 0),
+    go_block_reset_at INTEGER CHECK (go_block_reset_at IS NULL OR go_block_reset_at >= 0),
     retry_of TEXT,
     parent_run_id TEXT,
     external_session_ref TEXT,
@@ -844,7 +1023,12 @@ CREATE TABLE runs (
     started_at INTEGER,
     ended_at INTEGER,
     CHECK (round_id IS NULL OR stage_id IS NOT NULL),
-    CHECK (mode <> 'A' OR (provider = 'opencode-go' AND model = 'opencode-go/deepseek-v4.1-flash')),
+    CHECK (mode <> 'A' OR (provider = 'opencode-go' AND model LIKE 'opencode-go/%')),
+    CHECK (status <> 'blocked_usage'
+        OR (go_block_reason IS NOT NULL AND go_blocked_at IS NOT NULL)),
+    CHECK (go_block_reason IS NULL OR status = 'blocked_usage'),
+    CHECK (go_blocked_at IS NULL OR go_block_reason IS NOT NULL),
+    CHECK (go_block_reset_at IS NULL OR status = 'blocked_usage'),
     CHECK (ended_at IS NULL OR started_at IS NULL OR ended_at >= started_at),
     CHECK (retry_of IS NULL OR retry_of <> id),
     UNIQUE (project_id, id),
@@ -935,15 +1119,34 @@ CREATE TABLE outbound_dispatches (
     policy_version_id TEXT NOT NULL,
     manifest_blob_id TEXT NOT NULL,
     payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64),
-    state TEXT NOT NULL CHECK (state IN ('prepared','authorized','sent','blocked','failed','unknown')),
+    state TEXT NOT NULL CHECK (state IN
+        ('prepared','authorized','sent','response','adopted','blocked','failed','unknown')),
     request_key TEXT NOT NULL,
+    external_request_id TEXT CHECK (external_request_id IS NULL OR length(external_request_id) > 0),
     authorized_at INTEGER,
     sent_at INTEGER,
+    response_blob_id TEXT,
+    response_hash TEXT CHECK (response_hash IS NULL OR length(response_hash) = 64),
+    response_at INTEGER,
+    adopted_version_id TEXT,
+    adopted_at INTEGER,
+    usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
+    billing_source TEXT,
+    allowance_json TEXT CHECK (allowance_json IS NULL OR json_valid(allowance_json)),
+    cost_json TEXT CHECK (cost_json IS NULL OR json_valid(cost_json)),
+    unknown_at INTEGER,
+    unknown_reason TEXT,
+    CHECK (state <> 'response' OR response_hash IS NOT NULL),
+    CHECK (state <> 'adopted' OR (response_hash IS NOT NULL AND adopted_version_id IS NOT NULL)),
+    CHECK (state <> 'unknown' OR unknown_at IS NOT NULL),
+    CHECK (adopted_at IS NULL OR adopted_version_id IS NOT NULL),
     UNIQUE (project_id, id),
     UNIQUE (project_id, run_id, request_key),
     FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (project_id, policy_version_id) REFERENCES project_policy_versions(project_id, id) ON DELETE RESTRICT,
-    FOREIGN KEY (project_id, manifest_blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (project_id, manifest_blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, response_blob_id) REFERENCES blobs(project_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_id, adopted_version_id) REFERENCES object_versions(project_id, id) ON DELETE RESTRICT
     -- Current-policy authorization and actual network destination are command checks.
 );
 

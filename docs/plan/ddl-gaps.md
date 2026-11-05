@@ -1,6 +1,6 @@
 # DDL 누락 대조 — 2~6단계
 
-- 기준 DDL: [schemas/stage-1-ddl-draft.sql](schemas/stage-1-ddl-draft.sql) (54개 표)
+- 기준 DDL: [schemas/stage-1-ddl-draft.sql](schemas/stage-1-ddl-draft.sql) (2026-11-05 현재 61개 표)
 - 대조 대상: [stage-2.md](stage-2.md) ~ [stage-6.md](stage-6.md)의 표·열·상태 값 요구
 - 작성: 2026-11-05, OpenCode. 계획서·DDL은 고치지 않았다. 실제 `~/pes-projects`·`~/.pes/`는 읽지 않았고, 공개 문서만 근거로 썼다.
 - 판정: **33항목** — 추가·변경 필요 30(조건부 R1 포함)·확인 필요 1·기존 표로 해결 2. **2단계는 누락 0**이다.
@@ -24,7 +24,7 @@
 | 5 | 5-WEB5 | `oauth_clients` | 원격 MCP OAuth의 client_id·redirect URI 허용 목록·metadata·등록 상태를 저장해야 한다. | **부분.** Workers OAuth Provider가 KV에 일부 저장할 수 있으나, PES의 허용 목록·감사·회수 계약을 D1에서 확인할 자리가 필요하다. | **5-WEB5** |
 | 5 | 5-WEB5 | `oauth_consents` | 사용자·client·프로젝트 범위의 동의와 철회를 저장하고 "연결된 앱" 화면에 보여 줘야 한다. | 불가. 현재 동의·프로젝트 범위를 저장하는 표가 없다. | **5-WEB5** |
 | 5 | 5-WEB5 | `oauth_tokens`(jti·회수) | 액세스/리프레시 토큰의 hash·jti·만료·회전·재사용 거부·회수를 D1에서 매 요청 검사해야 한다. | **부분.** Provider KV가 토큰을 보관하더라도, 5단계가 요구한 D1 jti 검사·즉시 회수 기록은 별도다. | **5-WEB5** |
-| 5 | 5-WEB6 | `runner_devices` | 기기 목록·마지막 확인·회수 표시를 위한 보조 표가 필요하다. 권한은 `agent_tokens`가 결정한다. | 불가. `agent_tokens`는 자격이고 기기 표시/회수 목록이 아니다. | **5-WEB6** |
+| 5 | 5-WEB4 | `agent_devices` | 여러 프로젝트를 쓰는 CLI·B 에이전트의 기기 목록·마지막 확인·회수 표시를 위한 보조 표가 필요하다. 권한은 `agent_tokens`가 결정한다. | 불가. `agent_tokens`는 자격이고 기기 표시/회수 목록이 아니다. | **5-WEB4** |
 | 5 | 5-WEB8 | `notification_outbox` | 업무 tx와 같은 tx에 알림 사건을 기록하고, dedupe key·상태·시도·unknown을 저장해야 한다. 시스템 경보는 `project_id`가 없을 수 있다. | 불가. `events`에는 발송 시도·영수증·unknown 상태가 없다. | **5-WEB8** |
 | 5 | 5-WEB8 | `notification_endpoints` | 메일 주소·Web Push endpoint·VAPID key·기기/사용자·회수를 저장해야 한다. | 불가. 현재 사용자/기기 연락처 표가 없다. | **5-WEB8** |
 | 5 | 5-WEB8 | `notification_preferences` | 사용자·프로젝트별 채널, 조용한 시간, 상세 제목 opt-in을 저장해야 한다. | 불가. `projects`/`users`에 알림 설정 자리가 없다. | **5-WEB8** |
@@ -48,7 +48,7 @@
 
 ## 3단계 메모
 
-U1~U6은 "새 표 없음" 원칙대로 기존 54개 표로 간다. `needs_review`, `importance`/`required`, `allow_comment_as_answer`, `text_format_version`, `anchor_resolutions`, `artifact_versions.conflicts`, `reflection_entries`는 이미 DDL에 있다. 3단계에서 실제로 빠진 것은 R1의 프로젝트 단위 opt-in 하나다.
+U1~U6은 "새 표 없음" 원칙대로 기존 표로 간다. **REF1은 `project_references`, MAT1은 `version_files` 확장·`file_ai_access_versions`·`file_extractions`로 예외다.** `needs_review`, `importance`/`required`, `allow_comment_as_answer`, `text_format_version`, `anchor_resolutions`, `artifact_versions.conflicts`, `reflection_entries`는 이미 DDL에 있다. 3단계에서 실제로 빠진 것은 R1의 프로젝트 단위 opt-in, REF1 참조 표, MAT1 파일 스위치·추출 표다.
 
 ## 4단계 메모
 

@@ -140,7 +140,7 @@ class Checks:
         is_a = p == "p1"
         self.insert("runs", id="run-" + p, project_id=p, edition_id="edition-" + p,
                     stage_id="stage-" + p + "-plan", round_id="round-" + p, actor_id="ai" if is_a else "code",
-                    mode="A" if is_a else "B", runtime="opencode" if is_a else "claude_code",
+                    mode="A" if is_a else "B", runtime="pes_builtin" if is_a else "claude_code",
                     provider="opencode-go" if is_a else "anthropic",
                     model="opencode-go/deepseek-v4.1-flash" if is_a else "unknown",
                     status="running", base_control_rev=0)
@@ -158,12 +158,37 @@ class Checks:
         self.insert("blobs", id="blob-" + p, project_id=p, storage_key="synthetic/" + p + "/manifest",
                     sha256=("b" if is_a else "c") * 64, size=20, media_type="application/json", state="ready",
                     created_by=human)
+        self.insert("file_policies", id="fp-" + p, project_id=p, blob_id="blob-" + p,
+                    ai_access="allow", rev=1, changed_by_actor_id=human,
+                    changed_by_user_id=user, changed_at=1000, tx_id="tx-" + p)
         self.insert("snapshots", id="snapshot-" + p, project_id=p, edition_id="edition-" + p,
                     stage_id="stage-" + p + "-plan", round_id="round-" + p, scope="round",
                     manifest_blob_id="blob-" + p, through_event_seq=seq, control_rev=0, content_hash=HASH)
 
     def seed_details(self):
         p = "p1"
+        self.insert("project_references", id="ref-p1-p2", project_id=p, referenced_project_id="p2",
+                    referenced_project_key="p2", source_snapshot_id="snapshot-p2",
+                    source_snapshot_key="snapshot-p2", source_label="p2 최종 보고서 v1",
+                    latest_snapshot_id="snapshot-p2",
+                    scope_json='["final_report","sources"]', attached_by_actor_id="human-p1",
+                    attached_by_user_id="user-p1", attached_at=1000)
+        self.insert("project_references", id="ref-missing-source", project_id=p,
+                    referenced_project_id=None, referenced_project_key="p2@remote",
+                    source_snapshot_id=None, source_snapshot_key="snapshot-p2",
+                    source_label="p2 원본 미이전", latest_snapshot_id=None,
+                    scope_json='["final_report"]', status="source_missing",
+                    attached_by_actor_id="human-p1", attached_by_user_id="user-p1", attached_at=1000)
+        p2_seq = self.scalar("SELECT event_seq FROM events WHERE id=?", ("event-p2",))
+        self.insert("snapshots", id="snapshot-ref-del", project_id="p2", edition_id="edition-p2",
+                    stage_id="stage-p2-plan", scope="stage", manifest_blob_id="blob-p2",
+                    through_event_seq=p2_seq, control_rev=0, content_hash=HASH)
+        self.insert("project_references", id="ref-delete", project_id=p, referenced_project_id="p2",
+                    referenced_project_key="p2", source_snapshot_id="snapshot-ref-del",
+                    source_snapshot_key="snapshot-ref-del", source_label="삭제 시험",
+                    latest_snapshot_id="snapshot-ref-del",
+                    scope_json='["final_report"]', attached_by_actor_id="human-p1",
+                    attached_by_user_id="user-p1", attached_at=1000)
         self.insert("editions", id="draft-p1", project_id=p, edition_no=3, status="draft")
         self.object(p, "source-twin", "source", 2)
         self.insert("sources", project_id=p, object_id="source-twin", kind="web")
@@ -254,7 +279,52 @@ class Checks:
         self.current("report-1", "report-v1")
         self.insert("artifact_components", project_id=p, parent_version_id="report-v1", position=0,
                     child_version_id="artifact-v1-p1")
-        self.insert("version_files", project_id=p, version_id="report-v1", blob_id="blob-p1", role="rendered")
+        self.insert("version_files", project_id=p, version_id="report-v1", blob_id="blob-p1",
+                    role="rendered", file_policy_id="fp-p1")
+        self.insert("file_ai_access_versions", id="ai-access-p1", project_id=p, file_policy_id="fp-p1",
+                    ai_access="allow", changed_by_actor_id="human-p1",
+                    changed_by_user_id="user-p1", changed_at=1000, rev=1, tx_id="tx-p1")
+        self.insert("file_extractions", id="extract-p1", project_id=p, version_id="report-v1",
+                    blob_id="blob-p1", source_file_policy_id="fp-p1", source_format="md",
+                    extractor="synthetic", extractor_version="1", status="ready",
+                    text_blob_id="blob-p1", text_file_policy_id="fp-p1", text_hash=HASH,
+                    page_count=1, table_count=0, tx_id="tx-p1")
+        # Same bytes (same blob) attached to a later version must reuse the same policy.
+        self.object(p, "report-2", "artifact", 3)
+        self.insert("artifacts", project_id=p, object_id="report-2", kind="report")
+        self.version(p, "report-2", "artifact", "report-v2", number=1)
+        self.insert("artifact_versions", project_id=p, object_id="report-2", version_id="report-v2",
+                    title="합성 보고서 2", body_blob_id="blob-p1", status="published")
+        self.current("report-2", "report-v2")
+        self.insert("version_files", project_id=p, version_id="report-v2", blob_id="blob-p1",
+                    role="rendered", file_policy_id="fp-p1")
+        # Deny policy is blob-scoped: rendered/source roles cannot become more permissive.
+        self.insert("blobs", id="blob-deny", project_id=p, storage_key="synthetic/p1/deny",
+                    sha256="d" * 64, size=20, media_type="text/plain", state="ready",
+                    created_by="human-p1")
+        self.insert("file_policies", id="fp-deny", project_id=p, blob_id="blob-deny",
+                    ai_access="deny", rev=1, changed_by_actor_id="human-p1",
+                    changed_by_user_id="user-p1", changed_at=1000, tx_id="tx-p1")
+        self.insert("file_ai_access_versions", id="ai-access-deny", project_id=p,
+                    file_policy_id="fp-deny", ai_access="deny", changed_by_actor_id="human-p1",
+                    changed_by_user_id="user-p1", changed_at=1000, rev=1, tx_id="tx-p1")
+        self.insert("version_files", project_id=p, version_id="report-v1", blob_id="blob-deny",
+                    role="rendered", file_policy_id="fp-deny")
+        self.insert("version_files", project_id=p, version_id="report-v1", blob_id="blob-deny",
+                    role="source", file_policy_id="fp-deny")
+        self.insert("file_extractions", id="extract-deny", project_id=p, version_id="report-v1",
+                    blob_id="blob-deny", source_file_policy_id="fp-deny", source_format="txt",
+                    extractor="synthetic", extractor_version="1", status="ready",
+                    text_blob_id="blob-deny", text_file_policy_id="fp-deny", text_hash=HASH,
+                    page_count=1, table_count=0, tx_id="tx-p1")
+        self.insert("sync_links", id="link-p1", project_id=p, device_id="device-p1",
+                    credential_kind="helper_device", helper_actor_id="code",
+                    created_by_user_id="user-p1")
+        self.insert("sync_items", id="sync-p1", project_id=p, link_id="link-p1", direction="up",
+                    version_id="report-v1", blob_id="blob-p1", local_label="synthetic/report.md",
+                    remote_hash=HASH, local_hash=HASH, state="synced", tx_id="tx-p1")
+        self.insert("agent_schedules", id="schedule-p1", project_id=p, link_id="link-p1", run_id="run-p1",
+                    title="합성 작업", status="done", seq=1, summary="완료", tx_id="tx-p1")
 
         self.object(p, "followup-1", "followup", 1)
         self.insert("followups", project_id=p, object_id="followup-1", origin_thread_id="thread-2",
@@ -314,7 +384,20 @@ class Checks:
         x = self.rejected
         sql = self.db.execute
         x("missing reference", lambda: self.insert("version_files", project_id="p1", version_id="missing",
-                                                  blob_id="blob-p1", role="attachment"))
+                                                  blob_id="blob-p1", role="attachment", file_policy_id="fp-p1"))
+        x("file policy for another blob", lambda: self.insert("version_files", project_id="p1",
+                version_id="artifact-v1-p1", blob_id="blob-p1", role="attachment", file_policy_id="fp-p2"))
+        x("file history without policy", lambda: self.insert("file_ai_access_versions", id="bad-ai-history",
+                project_id="p1", file_policy_id="missing", ai_access="allow",
+                changed_by_actor_id="human-p1", changed_by_user_id="user-p1", changed_at=1000,
+                rev=1, tx_id="tx-p1"))
+        x("extraction policy mismatch", lambda: self.insert("file_extractions", id="bad-extract",
+                project_id="p1", version_id="report-v1", blob_id="blob-p1",
+                source_file_policy_id="fp-p2", source_format="md", extractor="synthetic",
+                extractor_version="1", status="pending", tx_id="tx-p1"))
+        x("duplicate blob policy", lambda: self.insert("file_policies", id="fp-dup", project_id="p1",
+                blob_id="blob-p1", ai_access="allow", rev=2, changed_by_actor_id="human-p1",
+                changed_by_user_id="user-p1", changed_at=1000, tx_id="tx-p1"), "UNIQUE")
         x("foreign edition parent", lambda: self.insert("editions", id="bad-edition", project_id="p1",
                                                         edition_no=9, parent_edition_id="edition-p2"))
         x("foreign active edition", lambda: sql("UPDATE projects SET active_edition_id='edition-p2' WHERE id='p1'"))
@@ -331,7 +414,7 @@ class Checks:
         x("foreign citation", lambda: self.insert("citations", project_id="p1", artifact_version_id="artifact-v1-p1",
                                                  citation_no=2, source_version_id="source-v1-p2"))
         x("foreign file", lambda: self.insert("version_files", project_id="p1", version_id="artifact-v1-p1",
-                                             blob_id="blob-p2", role="attachment"))
+                                             blob_id="blob-p2", role="attachment", file_policy_id="fp-p2"))
         x("foreign relation", lambda: self.insert("version_relations", project_id="p1", from_version_id="report-v1",
                                                  to_version_id="artifact-v1-p2", kind="related"))
         x("foreign anchor resolution", lambda: self.insert("anchor_resolutions", id="bad-anchor", project_id="p1",
@@ -340,12 +423,30 @@ class Checks:
         x("reply in another thread", lambda: sql("UPDATE messages SET reply_to='message-1' WHERE object_id='message-2'"))
         x("foreign run target", lambda: self.insert("run_targets", project_id="p1", run_id="run-p1",
                                                     object_id="artifact-p2", base_rev=0))
+        x("reference snapshot project mismatch", lambda: self.insert(
+            "project_references", id="bad-ref", project_id="p1", referenced_project_id="p2",
+            referenced_project_key="p2", source_snapshot_id="snapshot-p1",
+            source_snapshot_key="snapshot-p1", source_label="wrong",
+            attached_by_actor_id="human-p1", attached_by_user_id="user-p1"))
+        x("missing source project cannot point at a local snapshot", lambda: self.insert(
+            "project_references", id="bad-missing-source", project_id="p1",
+            referenced_project_id=None, referenced_project_key="p2@remote",
+            source_snapshot_id="snapshot-p2", source_snapshot_key="snapshot-p2",
+            source_label="wrong", attached_by_actor_id="human-p1", attached_by_user_id="user-p1"), "CHECK")
         x("foreign lease run", lambda: sql("UPDATE project_leases SET run_id='run-p2',owner_actor_id='code' WHERE project_id='p1'"))
         x("foreign event transaction", lambda: self.insert("events", id="bad-event", project_id="p1", tx_id="tx-p2",
                                                            tx_index=1, tx_size=2, type="bad"))
         x("foreign event version", lambda: self.insert("events", id="bad-event", project_id="p1", tx_id="tx-p1",
                 tx_index=1, tx_size=2, type="bad", object_id="artifact-p1", after_version_id="artifact-v1-p2"))
         x("foreign dispatch policy", lambda: sql("UPDATE outbound_dispatches SET policy_version_id='policy-p2' WHERE id='dispatch-1'"))
+        x("dispatch response without hash", lambda: sql("UPDATE outbound_dispatches SET state='response' WHERE id='dispatch-1'"), "CHECK")
+        x("dispatch adopted without version", lambda: sql("UPDATE outbound_dispatches SET state='adopted', response_hash='" + HASH + "' WHERE id='dispatch-1'"), "CHECK")
+        x("dispatch unknown without time", lambda: sql("UPDATE outbound_dispatches SET state='unknown' WHERE id='dispatch-1'"), "CHECK")
+        x("sync helper without helper actor", lambda: self.insert("sync_links", id="bad-link", project_id="p1",
+                device_id="device-bad", credential_kind="helper_device", created_by_user_id="user-p1"), "CHECK")
+        x("sync item without transaction", lambda: self.insert("sync_items", id="bad-sync", project_id="p1",
+                link_id="link-p1", direction="up", local_label="synthetic/bad.md", state="synced",
+                tx_id="missing"), "FOREIGN KEY")
         x("foreign submission file", lambda: sql("UPDATE submissions SET raw_blob_id='blob-p2' WHERE id='submission-p1'"))
         x("foreign legacy target", lambda: sql("UPDATE legacy_mappings SET new_object_id='artifact-p2',new_version_id='artifact-v1-p2'"))
         x("ownerless project", lambda: self.insert("projects", id="ownerless", slug="synthetic-ownerless",
@@ -385,6 +486,52 @@ class Checks:
                 actor_id="human-p1", tx_id="tx-p1"), "CHECK")
         x("approval requires snapshot", lambda: sql("UPDATE stages SET status='approved' WHERE id='stage-p1-research'"), "CHECK")
         x("referenced file delete", lambda: sql("DELETE FROM blobs WHERE id='blob-p1'"))
+        x("referenced snapshot delete", lambda: sql("DELETE FROM snapshots WHERE id='snapshot-ref-del'"))
+        sql("UPDATE project_references SET source_snapshot_id=NULL, latest_snapshot_id=NULL, "
+            "status='source_missing' WHERE id='ref-delete'")
+        sql("DELETE FROM snapshots WHERE id='snapshot-ref-del'")
+        require(self.scalar("SELECT count(*) FROM project_references WHERE id='ref-delete' "
+                            "AND status='source_missing' AND source_snapshot_id IS NULL "
+                            "AND source_snapshot_key='snapshot-ref-del'") == 1,
+                "Explicit release must keep the source key and tombstone")
+        x("blocked usage without reason", lambda: sql("UPDATE runs SET status='blocked_usage' WHERE id='run-p1'"), "CHECK")
+        x("waiting_human cannot carry a usage block", lambda: sql("UPDATE runs SET status='waiting_human', "
+                "go_block_reason='usage_limit', go_blocked_at=3000 WHERE id='run-p1'"), "CHECK")
+        sql("SAVEPOINT f13")
+        sql("UPDATE runs SET status='blocked_usage', go_block_reason='usage_limit', "
+            "go_blocked_at=3000, go_block_reset_at=NULL WHERE id='run-p1'")
+        require(self.scalar("SELECT count(*) FROM runs WHERE id='run-p1' AND status='blocked_usage' "
+                            "AND go_block_reason='usage_limit'") == 1, "Usage block must be representable")
+        sql("UPDATE runs SET status='waiting_human', go_block_reason=NULL, go_blocked_at=NULL, "
+            "go_block_reset_at=NULL WHERE id='run-p1'")
+        require(self.scalar("SELECT count(*) FROM runs WHERE id='run-p1' AND status='waiting_human'") == 1,
+                "waiting_human must remain available for human input")
+        sql("ROLLBACK TO f13")
+        sql("RELEASE f13")
+        require(self.scalar("SELECT count(*) FROM version_files WHERE version_id='report-v2' "
+                            "AND blob_id='blob-p1' AND file_policy_id='fp-p1'") == 1,
+                "Same blob reattached to a new version must reuse its policy")
+        require(self.scalar("SELECT count(*) FROM version_files vf JOIN file_policies fp "
+                            "ON fp.id=vf.file_policy_id AND fp.project_id=vf.project_id "
+                            "WHERE vf.blob_id='blob-deny' AND fp.ai_access='deny'") == 2,
+                "Deny must apply to every role sharing the blob")
+        require(self.scalar("SELECT count(*) FROM file_extractions e JOIN file_policies s "
+                            "ON s.id=e.source_file_policy_id AND s.project_id=e.project_id "
+                            "JOIN file_policies t ON t.id=e.text_file_policy_id AND t.project_id=e.project_id "
+                            "WHERE e.id='extract-deny' AND s.ai_access='deny' AND t.ai_access='deny'") == 1,
+                "Extraction must inherit the deny policy")
+        sql("SAVEPOINT f07")
+        sql("UPDATE outbound_dispatches SET state='response', response_hash=?, response_at=3000, "
+            "external_request_id='synthetic-ext-1', usage_json='{}', billing_source='go_subscription', "
+            "allowance_json='{}', cost_json='{}' WHERE id='dispatch-1'", (HASH,))
+        sql("UPDATE outbound_dispatches SET state='adopted', adopted_version_id='artifact-v1-p1', "
+            "adopted_at=3000 WHERE id='dispatch-1'")
+        require(self.scalar("SELECT count(*) FROM outbound_dispatches WHERE id='dispatch-1' "
+                            "AND state='adopted' AND adopted_version_id='artifact-v1-p1' "
+                            "AND response_hash IS NOT NULL AND billing_source='go_subscription'") == 1,
+                "Persisted response/adoption must be representable")
+        sql("ROLLBACK TO f07")
+        sql("RELEASE f07")
         x("duplicate import", lambda: self.insert("import_batches", id="duplicate-import", project_id="p1",
                 source_fingerprint="synthetic-source-v1", source_schema="synthetic", importer_version="draft",
                 source_manifest_blob_id="blob-p1", state="staging"), "UNIQUE")

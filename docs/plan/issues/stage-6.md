@@ -5,8 +5,9 @@
 - 상태: **초안 — 사용자 승인 뒤 Linear 등록**. 이 문서는 원고이며 Linear에 아직 만들지 않았다.
 - 구성: **9개**(E1·E2, M1·M2·M3, G3, H1, X2, X1). 각 절이 이슈 하나다. **Codex CLI·OpenCode TUI 어댑터는 2026-11-05 사용자 결정으로 2단계 PR20b로 옮겼고, G1·G2는 제거했다.**
 - 규칙: **이슈 하나 = PR 하나.** 아래 각 절을 그대로 이슈 하나로 옮긴다. 표·테이블별 하위 이슈를 만들지 않는다.
-- 공통 선행: 2단계 PR1~19·20a·20b·21·22, 3단계 U1~U6, 4단계 S4-PR23~25·S4-U7~U12, 5단계 WEB0~WEB14가 끝난 상태를 전제로 한다. 4단계 이슈는 `S4-` 접두어로만 가리킨다. 마이그레이션 경로 `migrations/`와 번호 체계는 2단계 PR1이 만든 것을 쓰고, 아래 `006~008`은 **예시 번호**다. `scripts/api.py`·`scripts/command_service.py`는 2단계 PR4·13·14에서 정한 모듈 이름의 **예시**이며, 실제 이름은 그 PR의 산출물을 따른다.
+- 공통 선행: 2단계 PR1~19·20a·20b·20c·21·22·26, 3단계 U1~U6·REF1·MAT1, 4단계 S4-PR23~25·S4-U7~U12, 5단계 WEB0~WEB15가 끝난 상태를 전제로 한다. 4단계 이슈는 `S4-` 접두어로만 가리킨다. 마이그레이션 경로 `migrations/`와 번호 체계는 2단계 PR1이 만든 것을 쓰고, 아래 `006~008`은 **예시 번호**다. `src/api/index.ts`·`src/core/command_service.ts`는 2단계 PR4·13·14에서 정한 모듈 이름의 **예시**이며, 실제 이름은 그 PR의 산출물을 따른다.
 - 공통 자료: 시험은 합성 fixture만 쓴다. 실제 `~/pes-projects`·`~/.pes/`를 읽거나 쓰지 않고, 실제 프로젝트·토큰·캡처·payload를 저장소·로그·CI artifact에 넣지 않는다.
+- 설계 검사기: `docs/plan/schemas/check_ddl.py`는 **PR26 전까지 한시 실행하는 Python 보조 도구**다. **PR26이 설계 검사 계약을 TS 검사기·실행 명령·기존 합성 사례 동등성으로 옮기고, 6단계 필수 검사는 그 TS 산출물을 쓴다.** 새 6단계 모듈·시험은 TS 계약으로 둔다.
 
 ## 공통 완료 기준 (C15)
 
@@ -15,7 +16,7 @@
 - [ ] 성공·거부·충돌·부분 실패를 각각 자동 시험한다. 해피 패스만으로 끝내지 않는다.
 - [ ] 새 마이그레이션이면 SQLite와 D1에서 같은 의미로 통과한다. D1은 `db.batch()` 원자성, 0행 CAS 실패, deferred FK, 부분 인덱스를 확인한다.
 - [ ] 새 경로·명령이 1단계 API 6절과 `/api/v1/capabilities`에 반영됐고, 아직 없는 동작은 가짜 성공 없이 미지원으로 표시된다. 새 scope가 필요하면 5단계 WEB4의 scope 목록·MCP 도구 목록도 함께 갱신한다.
-- [ ] 매 PR과 main에서 Windows·macOS `python -m pytest -q`/`python3 -m pytest -q`가 통과한다.
+- [ ] 매 PR과 main에서 Windows·macOS의 **결정 뒤 확정할 TS 테스트 명령**이 통과한다(러너·실행 명령은 런타임 시험 뒤 확정).
 - [ ] 화면이 있으면 Playwright 스모크, 한글 IME, 200% 확대, 키보드·초점·접근성을 확인한다. Windows 필수 브라우저 시험을 건너뛰지 않는다.
 - [ ] 테스트는 임시 `HOME`·`PES_HOME`으로 격리한다. 실제 홈을 읽지 않았음을 시험 로그에 남긴다.
 - [ ] PR 본문에 실제 자료·토큰·비밀·외부 계정 식별자가 0건임을 확인한다.
@@ -23,9 +24,9 @@
 공통 회귀 명령:
 
 ```sh
-python3 -m pytest -q
+# 테스트 러너·실행 명령은 런타임 시험 뒤 확정할 TS 명령
 review_home="$(mktemp -d)"
-HOME="$review_home" PES_HOME="$review_home/pes-projects" python3 scripts/pes.py doctor
+HOME="$review_home" PES_HOME="$review_home/pes-projects" <결정 뒤 확정할 TS doctor 명령>
 ```
 
 Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더로 설정해 같은 doctor를 실행한다(X2 완료 기준의 `$reviewHome` 절차).
@@ -44,9 +45,9 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
   - `export_jobs`: `id`, `project_id`, `client_request_id`, `request_hash`(64자), `requested_by_user_id`, `destination`(`linear`/`notion`), `destination_account_ref`, `destination_scope`, `source_kind`(`selected_task`/`report_version`), `source_object_id`, `source_version_id`, `manifest_blob_id`, `payload_hash`(64자), `correlation_key`, `status`(`prepared`/`authorized`/`sending`/`partial`/`sent`/`failed`/`unknown`/`blocked`), `attempt_count`, `external_id?`, `external_url?`, `last_error_code?`, `created_at`, `updated_at`.
   - `export_attempts`: `id`, `project_id`, `job_id`, `attempt_no`, `state`(`prepared`/`sending`/`sent`/`partial`/`failed`/`unknown`), `request_hash`, `response_hash?`, `external_id?`, `external_url?`, `error_code?`, `started_at`, `ended_at`.
   - 제약: `UNIQUE(project_id, id)`, `UNIQUE(project_id, client_request_id)`, `UNIQUE(project_id, correlation_key)`, `UNIQUE(project_id, job_id, attempt_no)`, 프로젝트 복합 FK, 상태 CHECK, `source_version_id`·`manifest_blob_id` FK. `outbound_dispatches`를 재사용하지 않는다.
-- [ ] `docs/plan/schemas/check_ddl.py`에 `export_jobs`/`export_attempts` 양성 적재와 거부 사례를 추가한다: 같은 상관키 중복, 같은 키·다른 payload, 다른 프로젝트 버전 참조, 잘못된 상태 전이, 0행 갱신.
-- [ ] 2단계 PR4의 공통 명령 서비스(예: `scripts/command_service.py`)에 `preview_export()`, `create_export_job()`, `authorize_export_job()`, `block_export_job()`, `mark_export_sending()`, `record_export_attempt()`, `finish_export_job()`, `retry_export_job()`, `get_export_job()`을 추가한다.
-- [ ] `scripts/api.py`(2단계 PR13·14 라우터)에 `POST /api/v1/projects/{project_id}/exports/preview`, `POST .../exports`, `POST .../exports/{job_id}/authorize`, `GET .../exports/{job_id}`, `POST .../exports/{job_id}/retry`를 추가한다. 생성은 `202` 영속 접수와 `operation_id`를 반환하고, `authorize`는 사람 step-up 뒤 `prepared→authorized`만 한다. 취소 상태는 두지 않고, 권한 회수·정책 차단은 `blocked`로 기록한다.
+- [ ] **PR26 산출 TS 검사기**에 `export_jobs`/`export_attempts` 양성 적재와 거부 사례를 추가한다: 같은 상관키 중복, 같은 키·다른 payload, 다른 프로젝트 버전 참조, 잘못된 상태 전이, 0행 갱신.
+- [ ] 2단계 PR4의 공통 명령 서비스(예: `src/core/command_service.ts`)에 `preview_export()`, `create_export_job()`, `authorize_export_job()`, `block_export_job()`, `mark_export_sending()`, `record_export_attempt()`, `finish_export_job()`, `retry_export_job()`, `get_export_job()`을 추가한다.
+- [ ] `src/api/index.ts`(2단계 PR13·14 라우터)에 `POST /api/v1/projects/{project_id}/exports/preview`, `POST .../exports`, `POST .../exports/{job_id}/authorize`, `GET .../exports/{job_id}`, `POST .../exports/{job_id}/retry`를 추가한다. 생성은 `202` 영속 접수와 `operation_id`를 반환하고, `authorize`는 사람 step-up 뒤 `prepared→authorized`만 한다. 취소 상태는 두지 않고, 권한 회수·정책 차단은 `blocked`로 기록한다.
 - [ ] 생성·시도·사건·`mutation_commits` 영수증을 **같은 DB tx**에 쓰고, 네트워크 호출은 커밋 뒤에만 한다.
 - [ ] API `Idempotency-Key`와 외부 상관키 `correlation_key`를 구분한다. 같은 키·같은 요청은 원래 `export_job`·`operation_id`를 재생하고, 같은 키·다른 payload는 409다.
 - [ ] 사람 step-up(5단계 WEB2), **owner만 실행**, WebMCP·에이전트 토큰·OAuth 위임 거부를 서버에서 검사한다. approver에게 export 권한을 주지 않는다.
@@ -55,10 +56,10 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **완료 기준**
 
-- [ ] `python3 docs/plan/schemas/check_ddl.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_export_core.py tests/test_stage6_export_api.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_export_d1.py` (2단계 PR2 D1 smoke 하네스)
-- [ ] `python3 -m pytest -q`
+- [ ] `PR26 산출 TS 검사기 실행 명령`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/export_core.test.ts tests/stage6/export_api.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/export_d1.test.ts` (2단계 PR2 D1 smoke 하네스)
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
 - [ ] owner만 export를 만들 수 있고, approver·editor·에이전트·WebMCP는 403이다.
 - [ ] `prepared→authorized→sending→partial/sent/failed/unknown`, `prepared/authorized→blocked` 전이와 금지 전이 거부가 시험된다. 사람 승인 증거와 송신 직전 권한 재검사가 같은 계약에 남는다.
 - [ ] 같은 `Idempotency-Key`·같은 요청은 원래 `export_job`·`operation_id`를 재생하고, 같은 키·다른 payload는 409다. 다른 프로젝트 자원 참조가 403/404, 0행 CAS가 실패로 롤백된다.
@@ -82,10 +83,10 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **할 일**
 
-- [ ] `scripts/exporters/base.py`에 `ExportAdapter` 프로토콜(`build_payload`, `send`, `classify_response`, `verify_external`)을 만든다.
-- [ ] `scripts/exporters/linear.py`에 `build_linear_payload()`·`send_linear()`를 만든다. payload는 **사람이 '할 일로'에서 고른 항목의 제목 + 사람이 쓴 요약**만이고, 연구 내용·질문·답·파일은 자동 포함하지 않는다.
-- [ ] `scripts/exporters/notion.py`에 `build_notion_payload()`·`send_notion()`을 만든다. `S4-U8` 버전 선택에서 고른 **정확한 보고서 버전 사본**만 보내고, Notion 편집을 PES로 되돌리는 동기화는 만들지 않는다.
-- [ ] `scripts/export_service.py`에 `build_export_preview()`, `dispatch_export_job()`, `classify_export_result()`, `verify_export_result()`를 추가한다. 목적지 상태 `미설정`/`미지원`/`활성`을 구분하고, 비활성 이유를 UI에 보여 준다.
+- [ ] `src/exporters/base.ts`에 `ExportAdapter` 프로토콜(`build_payload`, `send`, `classify_response`, `verify_external`)을 만든다.
+- [ ] `src/exporters/linear.ts`에 `build_linear_payload()`·`send_linear()`를 만든다. payload는 **사람이 '할 일로'에서 고른 항목의 제목 + 사람이 쓴 요약**만이고, 연구 내용·질문·답·파일은 자동 포함하지 않는다.
+- [ ] `src/exporters/notion.ts`에 `build_notion_payload()`·`send_notion()`을 만든다. `S4-U8` 버전 선택에서 고른 **정확한 보고서 버전 사본**만 보내고, Notion 편집을 PES로 되돌리는 동기화는 만들지 않는다.
+- [ ] `src/export_service.ts`에 `build_export_preview()`, `dispatch_export_job()`, `classify_export_result()`, `verify_export_result()`를 추가한다. 목적지 상태 `미설정`/`미지원`/`활성`을 구분하고, 비활성 이유를 UI에 보여 준다.
 - [ ] E1의 명령 서비스와 역할을 나눈다: 상태·영수증 전이는 E1, 목적지 payload·호출·응답 분류는 E2가 맡고 같은 전이를 두 곳에서 구현하지 않는다.
 - [ ] `templates/export-preview.html`·`templates/export-status.html`을 추가한다. 포함/제외, 목적지 계정·워크스페이스, 민감 내용 경고, `Go ON ≠ export 동의` 문구, 외부 ID·URL, 시도·unknown·재시도 결과를 표시한다.
 - [ ] 보고서/비교 화면(S4-U8)에서 "내보내기" 진입을 추가하되, 기본 "할 일로"는 PES 다음 라운드 할 일로 유지한다.
@@ -96,9 +97,9 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **완료 기준**
 
-- [ ] `python3 -m pytest -q tests/test_stage6_export_linear.py tests/test_stage6_export_notion.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_export_preview.py`
-- [ ] `python3 -m pytest -q`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/export_linear.test.ts tests/stage6/export_notion.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/export_preview.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
 - [ ] 가짜 서버에서 성공·중복·`unknown`·재시도·부분 생성이 모두 재현되고, `unknown`이 성공으로 표시되지 않는다. 부분 생성 뒤 영구 실패·응답 유실·수동 재전송에서 외부 객체가 남은 실패를 `partial`로 유지한다.
 - [ ] 사람이 고른 항목/정확한 보고서 버전만 전송되고, 연구 내용 자동 전송이 0건이다. WebMCP·에이전트 토큰·OAuth 위임이 export를 실행하면 403이다.
 - [ ] 미리보기에서 목적지·포함 범위·민감 경고·비활성 이유가 보이고, 승인 뒤 payload/목적지가 바뀌면 다시 확인을 요구한다.
@@ -124,9 +125,9 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 - [ ] `projects`에 `allow_member_external_agents INTEGER NOT NULL DEFAULT 0 CHECK (... IN (0,1))`를 추가한다. 기본값은 **불허**다.
 - [ ] WEB3의 `ownership_transfers`·`projects.owner_user_id`·과거 `project_policy_versions.changed_by_user_id` FK 계약을 재사용해, owner 이전 뒤에도 과거 정책 행이 FK 오류 없이 남고 approver/멤버 정합성이 유지되는지 검증한다. M1에서 소유권 FK를 새로 만들지 않는다.
 - [ ] `question_assignments`(id TEXT PRIMARY KEY, project_id, question_id, from_actor_id?, to_actor_id, changed_by_user_id, tx_id, created_at, UNIQUE(project_id, id))를 추가하고, `objects.rev` 증가·`events` `question.assigned`·`mutation_commits` 영수증을 같은 tx에 남긴다.
-- [ ] `scripts/command_service.py`에 `approve_stage()`, `reopen_stage()`, `change_member_role()`, `assign_question()`, `set_member_external_ai()`를 추가한다. `transfer_project_owner()`는 WEB3 계약을 호출·검증만 한다.
+- [ ] `src/core/command_service.ts`에 `approve_stage()`, `reopen_stage()`, `change_member_role()`, `assign_question()`, `set_member_external_ai()`를 추가한다. `transfer_project_owner()`는 WEB3 계약을 호출·검증만 한다.
 - [ ] `approve_stage()`/`reopen_stage()`는 owner, 또는 **approver 도입 시** `project_members.role='approver'`인 **사람**만 허용하고, 현재 멤버·5분 step-up·`snapshot_id`/rev를 서버에서 검증한다. `assurance=verified` 문자열만으로 통과시키지 않는다.
-- [ ] `scripts/api.py`의 `POST P/stages/{s}/approve`·`/reopen`·멤버·초대·질문 배정 경로에 위 검사를 연결하고, `/api/v1/capabilities`와 UI 권한 표에 approver 도입 시에만 `approver` 범위를 추가한다.
+- [ ] `src/api/index.ts`의 `POST P/stages/{s}/approve`·`/reopen`·멤버·초대·질문 배정 경로에 위 검사를 연결하고, `/api/v1/capabilities`와 UI 권한 표에 approver 도입 시에만 `approver` 범위를 추가한다.
 - [ ] `templates/settings-members.html`·`templates/invite-accept.html`을 추가한다. 초대는 owner만, 7일 1회, 기본 reader, 공개 링크 없음. 초대 수락 화면에 현재 Go 전송 허용과 연결된 외부 에이전트를 보여 주고, owner가 프로젝트별 멤버 외부 AI 연결을 켜고 끈다.
 - [ ] editor의 승인·reopen·정책·토큰·삭제·멤버·판 시작을 모두 403으로 만들고, approver도 승인·reopen 밖의 동작은 할 수 없게 한다.
 - [ ] 마지막 owner 제거·owner 없는 상태·owner 2명을 모두 거부한다.
@@ -134,10 +135,10 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **완료 기준**
 
-- [ ] `python3 docs/plan/schemas/check_ddl.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_roles.py tests/test_stage6_owner_transfer.py tests/test_stage6_question_assignment.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_invites.py`
-- [ ] `python3 -m pytest -q`
+- [ ] `PR26 산출 TS 검사기 실행 명령`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/roles.test.ts tests/stage6/owner_transfer.test.ts tests/stage6/question_assignment.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/invites.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
 - [ ] approver 도입 시 owner/approver/editor/reader 권한 매트릭스 전 항목이 통과하고, editor·에이전트·WebMCP 승인이 403이다. owner만 유지 시 owner/editor/reader로 같은 승인·reopen 경계가 통과한다.
 - [ ] owner 이전 전후 `project_policy_versions.changed_by_user_id`가 보존되고, 과거 정책 행이 FK 오류 없이 남는다(WEB3 계약 재사용).
 - [ ] 초대 수락 화면에 외부 AI 경로가 보이고, 기본 불허에서 멤버 연결이 차단된다.
@@ -161,20 +162,20 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **할 일**
 
-- [ ] `scripts/command_service.py`에 `assert_base_version()`, `revise_object()`, `resolve_edit_conflict()`를 추가한다. 요청 `base_version_id`와 현재 `objects.current_version_id`/`objects.rev`를 비교하고, 불일치면 409를 낸다.
+- [ ] `src/core/command_service.ts`에 `assert_base_version()`, `revise_object()`, `resolve_edit_conflict()`를 추가한다. 요청 `base_version_id`와 현재 `objects.current_version_id`/`objects.rev`를 비교하고, 불일치면 409를 낸다.
 - [ ] 새 `object_versions`는 항상 `based_on_version_id`를 기록하고, `actor_id`·`run_id`·`tx_id`·`content_hash`를 같은 tx에 넣는다. 실패한 tx를 성공 버전으로 부분 저장하지 않는다.
 - [ ] 409 오류 봉투 `details`에 `expected_version_id`, `current_version_id`, `current_rev`, `base_version_id`를 넣는다. 자동 병합·자동 재기반을 하지 않는다.
 - [ ] `templates/artifact-edit.html`에 Markdown+미리보기, 현재/기대 버전, 충돌 대화(한쪽 선택·새 버전에 다시 적용), 승인·게시본 보호 안내를 추가한다.
 - [ ] `templates/artifact-conflict.html`을 추가하고, `sessionStorage` 초안 키(프로젝트·사용자·판·객체·기반 버전)를 유지한다. 409·타임아웃·응답 유실에서 초안을 지우지 않고, 서버 영수증 뒤에만 성공 표시한다.
 - [ ] 승인·게시 스냅숏은 수정하지 않는다. 수정하려면 새 버전 + stale + 재승인 흐름을 안내한다.
 - [ ] "누가 편집 중" 표시는 선택 기능으로 두고 문서 잠금으로 쓰지 않는다. CRDT/OT를 넣지 않는다.
-- [ ] `scripts/api.py`의 `POST P/objects/{o}/revisions`(또는 4단계 PR25 명령)에 `base_version_id` 필수·409·멱등 키를 연결한다.
+- [ ] `src/api/index.ts`의 `POST P/objects/{o}/revisions`(또는 4단계 PR25 명령)에 `base_version_id` 필수·409·멱등 키를 연결한다.
 - [ ] 두 사람·사람 대 worker·재접속·권한 회수 뒤 편집을 각각 시험한다.
 
 **완료 기준**
 
-- [ ] `python3 -m pytest -q tests/test_stage6_conflict.py tests/test_stage6_conflict_ui.py`
-- [ ] `python3 -m pytest -q`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/conflict.test.ts tests/stage6/conflict_ui.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
 - [ ] 두 사람이 같은 기준 버전에서 편집하면 한쪽만 성공하고 다른 쪽은 409이며, **양쪽 초안·버전이 보존**된다.
 - [ ] 409 뒤 새 버전에 다시 적용하면 `based_on_version_id`가 새 기준과 맞고, 승인 스냅숏은 변하지 않는다.
 - [ ] 사람 대 worker, 재접속, 권한 회수 뒤 편집에서 덮어쓰기 0건이다.
@@ -199,22 +200,22 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 - [ ] 새 마이그레이션 `migrations/008_stage6_adoption.sql`에 `adoption_proposals`를 추가한다: `id`, `project_id`, `parent_run_id`, `child_run_id`, `object_id`, `base_version_id`, `proposed_version_id`, `proposal_hash`, `state`(`pending`/`accepted`/`rejected`/`conflict`/`withdrawn`), `created_at`, `decided_at?`, `decided_by_run_id?`. 제약: `UNIQUE(project_id, id)`, 프로젝트 복합 FK(`parent_run_id`·`child_run_id`·`object_id`·`base_version_id`·`proposed_version_id`), 상태 CHECK.
 - [ ] `runs`에 `parent_relation TEXT CHECK (parent_relation IN ('worker_child','handoff','reviewer'))`를 추가해 `parent_run_id`의 관계 종류를 구분한다. 기존 행은 마이그레이션에서 안전한 기본값/널로 처리한다.
-- [ ] `scripts/adoption_service.py`에 `submit_adoption_proposal()`, `adopt_proposals_batch()`, `assert_parent_fence()`, `propagate_parent_state()`를 추가한다.
+- [ ] `src/adoption_service.ts`에 `submit_adoption_proposal()`, `adopt_proposals_batch()`, `assert_parent_fence()`, `propagate_parent_state()`를 추가한다.
 - [ ] child 자격은 `proposal:write`만 가진 최소 권한 통로로 만든다. claim·채택·결과 제출·승인 권한을 주지 않고, `parent_run_id`만으로 권한 분리가 됐다고 보지 않는다.
 - [ ] `proposal:write`를 5단계 WEB4의 scope 목록·`/api/v1/capabilities`·MCP 도구 목록에 추가하고, child 토큰은 이 scope만 갖게 한다.
-- [ ] `scripts/api.py`에 `POST P/runs/{run_id}/adoption-proposals`, `POST P/runs/{run_id}/adoptions`, `GET P/runs/{run_id}/adoptions`를 추가한다.
+- [ ] `src/api/index.ts`에 `POST P/runs/{run_id}/adoption-proposals`, `POST P/runs/{run_id}/adoptions`, `GET P/runs/{run_id}/adoptions`를 추가한다.
 - [ ] 채택 tx에서 `object_versions.actor_id`는 **부모 run/actor**, `mutation_commits`·`events`도 같은 actor로 맞춘다. child의 task·역할·세션·제안 hash·모델·근거는 `adoption_proposals`/`events`에 별도 출처로 남긴다.
 - [ ] 다른 객체를 한 tx에 채택하는 batch는 전체 롤백한다. 같은 객체에 두 제안이 오면 409로 한쪽만 채택하고 자동 병합하지 않는다.
 - [ ] 부모 OFF·만료·중단·`waiting_human`·담당 반납을 child 반출·제출에 전파한다. 재개는 부모의 새 claim·현재 정책·잔여 예산 확인 뒤에만 한다.
-- [ ] child·reviewer·재시도·인계가 누적 예산을 초기화하지 않게 예약·정산을 연결하고, 최대 병렬 수는 측정값으로 제한한다.
+- [ ] child·reviewer·재시도·인계가 **Go 사용량 문턱**을 초기화하지 않게 추정·기록을 연결하고, 최대 병렬 수는 측정값으로 제한한다.
 - [ ] reviewer는 부모가 lease를 놓은 뒤 별도 run/새 claim으로 실행하고, 메인 결론을 주지 않는다.
 
 **완료 기준**
 
-- [ ] `python3 docs/plan/schemas/check_ddl.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_adoption.py tests/test_stage6_adoption_budget.py`
-- [ ] `python3 -m pytest -q tests/test_stage6_adoption_fence.py`
-- [ ] `python3 -m pytest -q`
+- [ ] `PR26 산출 TS 검사기 실행 명령`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/adoption.test.ts tests/stage6/adoption_budget.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/adoption_fence.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
 - [ ] 동시 제안 뒤 직렬 채택되고, 같은 대상은 하나만 성공·나머지 409, 다른 대상 batch는 성공한다.
 - [ ] 부모 만료/인계/OFF 뒤 지연 제안이 거부되고, 옛 fence 제출이 0건 채택된다.
 - [ ] child 제안 채택 뒤 `object_versions.actor_id`·`mutation_commits.actor_id`가 부모와 일치하고, child 출처가 보존된다.
@@ -231,26 +232,27 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 ## G3. [6단계] 다중 에이전트 교차 계약(2단계 어댑터 회귀)
 
-**목표**: 2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI가 같은 DB 상태에서 같은 의미로 동작하는지 회귀하고, M1·M3·E2와 A 회귀까지 교차 검증한다. Gemini 등 추가 에이전트는 후보·계약 시험만 한다.
+**목표**: 2단계 PR20a의 Claude Code·Claude 앱, PR20b의 Codex CLI·OpenCode TUI, PR20c의 Codex 앱·OpenCode 앱이 같은 DB 상태에서 같은 의미로 동작하는지 회귀하고, M1·M3·E2와 A 회귀까지 교차 검증한다. Gemini 등 추가 에이전트는 후보·계약 시험만 한다.
 
-**선행**: PR20a·20b·21, M1·M3·E2.
+**선행**: PR20a·20b·20c·21, M1·M3·E2.
 
 **할 일**
 
-- [ ] `tests/test_stage6_agent_cross.py`를 새로 만들고, PR21 교차 계약 하네스를 확장한다. 공통 하네스는 `tests/test_cross_contract.py`가 있으면 재사용하고 새로 만들지 않는다.
-- [ ] **2단계 PR20a의 Claude Code·Claude 앱과 PR20b의 Codex CLI·OpenCode TUI**의 같은 명령·같은 오류·같은 actor 규칙을 표로 시험한다.
+- [ ] `tests/stage6/agent_cross.test.ts`를 새로 만들고, PR21 교차 계약 하네스를 확장한다. 공통 하네스는 `tests/cross_contract.test.ts`가 있으면 재사용하고 새로 만들지 않는다.
+- [ ] **2단계 PR20a의 Claude Code·Claude 앱, PR20b의 Codex CLI·OpenCode TUI, PR20c의 Codex 앱·OpenCode 앱**의 같은 명령·같은 오류·같은 actor 규칙을 표로 시험한다.
 - [ ] M3 다중 worker 채택, E2 내보내기, M1 승인·초대를 교차 시나리오에 넣는다: child가 제안하고 **부모 run이 유효 lease/fence로 채택**한 뒤 사람이 단계 승인하고, 다른 에이전트가 이어받는다. Claude 앱 수동 가져오기만 사람 actor·새 claim 계약을 별도 시험한다.
 - [ ] Claude 앱 직접 연결·명시적 전달을 모두 시험한다. 앱이 붙여넣은 결과의 실제 제출자는 `human`이고, `claude_app(미검증)`은 출처로만 남긴다.
 - [ ] 인계·중복·충돌·OFF 유실 0건을 확인한다. 앱은 새 claim·기반 버전 대조·중복 방지를 거친다.
-- [ ] A(OpenCode/DeepSeek) 회귀를 포함해 A/B가 같은 버전 결과를 내는지 확인한다.
+- [ ] A(PES 내장 실행기/Go) 회귀를 포함해 A/B가 같은 버전 결과를 내는지 확인한다.
+- [ ] **deny 파일 경계**: PES API/MCP 응답에서 deny를 빼도 B/Codex/TUI/OpenCode의 PC 동기화 폴더·로컬 파일 직접 읽기는 별개다. 여섯 도구별 로컬 직접 읽기·동기화 캐시·파일 OFF 뒤 재접속을 시험하고, 사람 보관 영역/AI workspace·도우미 자격·파일/셸/업로드 권한 통제 범위를 확인한다. 통제 불가 도구는 “A·B 모두 제외 보장”으로 표시하지 않는다.
 - [ ] Gemini 등 추가 에이전트는 **후보·계약 시험만** 하고, 실제 어댑터 구현·완료 약속을 만들지 않는다.
 - [ ] `docs/adapters/adapter-matrix.md`에 지원 수준·알려진 한계·시험 결과를 표로 남긴다.
 
 **완료 기준**
 
-- [ ] `python3 -m pytest -q tests/test_stage6_agent_cross.py`
-- [ ] `python3 -m pytest -q`
-- [ ] 네 에이전트가 같은 합성 프로젝트에서 같은 명령 의미·오류 코드·actor 규칙을 보인다.
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/agent_cross.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
+- [ ] 여섯 에이전트가 같은 합성 프로젝트에서 같은 명령 의미·오류 코드·actor 규칙을 보인다.
 - [ ] M3 child 제안→부모 run 유효 lease/fence 채택→사람 단계 승인, E2 미리보기→사람 전송, M1 승인→감사 흐름이 교차 시나리오에서 통과한다. Claude 앱 수동 가져오기만 사람 actor·새 claim을 별도로 시험한다.
 - [ ] 앱 직접 연결·명시적 전달 모두 실제 제출자와 출처가 정확하고, 중복 가져오기 0건이다.
 - [ ] 인계·OFF·경합·유실 시나리오에서 자동 재시도로 중복 실행되지 않는다.
@@ -259,7 +261,7 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 **지킬 것**
 
 - G3는 교차·통합 시험이며 개별 PR의 자체 검증을 대신하지 않는다.
-- 2단계 PR20a·20b의 어댑터를 다시 만들지 않는다. G3는 회귀·교차 검증만 한다.
+- 2단계 PR20a·20b·20c의 어댑터를 다시 만들지 않는다. G3는 회귀·교차 검증만 한다.
 - 앱의 "연결됨"을 실제 생존·완료로 과장하지 않는다. 마지막 확인 시각과 미상을 구분한다.
 - 사람이 붙여넣은 결과를 에이전트 제출로 바꾸지 않는다. 실제 actor를 기록한다.
 - 새 어댑터도 승인·정책·토큰·삭제·외부 export 권한을 얻지 않는다.
@@ -283,7 +285,7 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **완료 기준**
 
-- [ ] `python3 -m pytest -q` (문서 PR이지만 기존 회귀를 깨지 않는다)
+- [ ] `결정 뒤 확정할 TS 테스트 명령` (문서 PR이지만 기존 회귀를 깨지 않는다)
 - [ ] `git diff --check`
 - [ ] 평가 보고서와 규칙 갱신 PR이 병합되고, `AGENTS.md`에서 새 규칙을 찾을 수 있다.
 - [ ] main 직접 쓰기 0건, 실제 자료·토큰·캡처 0건, 사람이 병합했다는 기록이 있다.
@@ -306,22 +308,22 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **할 일**
 
-- [ ] `tests/test_stage6_integration.py`에 합성 프로젝트 종단 시나리오를 만든다: 초대→승인→동시 편집→다중 worker 제안·채택→Linear/Notion 미리보기·전송→unknown→재시도.
-- [ ] `tests/test_stage6_backup_export.py`에 `export_jobs`·`export_attempts`·`ownership_transfers`·`question_assignments`·`adoption_proposals`가 포함된 백업·복구·**마이그레이션 전진 복구**를 넣는다. Worker 이전 버전 롤백, 구버전 앱/신스키마 호환 창, 백업에서 격리 복구, 전진 마이그레이션을 구분하고 외부 전송·unknown 증거는 DB 롤백으로 지우지 않는다.
+- [ ] `tests/stage6/integration.test.ts`에 합성 프로젝트 종단 시나리오를 만든다: 초대→승인→동시 편집→다중 worker 제안·채택→Linear/Notion 미리보기·전송→unknown→재시도.
+- [ ] `tests/stage6/backup_export.test.ts`에 `export_jobs`·`export_attempts`·`ownership_transfers`·`question_assignments`·`adoption_proposals`가 포함된 백업·복구·**마이그레이션 전진 복구**를 넣는다. Worker 이전 버전 롤백, 구버전 앱/신스키마 호환 창, 백업에서 격리 복구, 전진 마이그레이션을 구분하고 외부 전송·unknown 증거는 DB 롤백으로 지우지 않는다.
 - [ ] `docs/runbooks/export-unknown.md`를 새로 만든다. `unknown`을 DB 롤백으로 지우지 않고, 외부 ID 확인·사용자 재전송·중복 가능성·부분 생성 재개 절차를 적는다.
 - [ ] `docs/runbooks/stage6-operations.md`를 새로 만든다. 새 표 백업/복구, 권한·감사, 비용, Windows/Mac, 장애 훈련, 잔여 백로그를 적는다.
 - [ ] `README.md`와 `docs/agents/README.md`에 사용 안내를 추가한다: 초대·approver·충돌·다중 worker·내보내기·어댑터·hc-team. 실제 계정·자료 예시는 넣지 않는다.
 - [ ] 기존 화면 제거는 **전환 승인과 별도 사용자 확인**으로 결정한다. 최소 한 마이너 버전 보존·실제 사용 중단 확인 뒤 제거 여부를 묻고, 미승인 시 보존·운영 백로그로 남긴다. 기존 고정 HTML·ask 링크 보존 약속을 깨지 않는다.
-- [ ] `scripts/pes.py doctor`에 새 표·마이그레이션·외부 내보내기 설정·에이전트 토큰 존재 여부를 진단하는 항목을 추가한다(비밀값은 표시하지 않음).
+- [ ] `src/cli/pes.ts doctor`에 새 표·마이그레이션·외부 내보내기 설정·에이전트 토큰 존재 여부를 진단하는 항목을 추가한다(비밀값은 표시하지 않음).
 - [ ] Windows/Mac에서 설치·복구·알림·내보내기 안내를 재현한다.
 
 **완료 기준**
 
-- [ ] `python3 -m pytest -q tests/test_stage6_integration.py tests/test_stage6_backup_export.py`
-- [ ] `python3 docs/plan/schemas/check_ddl.py`
-- [ ] `python3 -m pytest -q`
-- [ ] macOS/Linux: `review_home="$(mktemp -d)" && HOME="$review_home" PES_HOME="$review_home/pes-projects" python3 scripts/pes.py doctor`
-- [ ] Windows PowerShell: `$reviewHome = Join-Path $env:TEMP ("pes-review-" + [guid]::NewGuid())`; `New-Item -ItemType Directory -Path $reviewHome`; `$env:HOME = $reviewHome`; `$env:USERPROFILE = $reviewHome`; `$env:PES_HOME = Join-Path $reviewHome "pes-projects"`; `python scripts/pes.py doctor`
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/integration.test.ts tests/stage6/backup_export.test.ts`
+- [ ] `PR26 산출 TS 검사기 실행 명령`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
+- [ ] macOS/Linux: `review_home="$(mktemp -d)" && HOME="$review_home" PES_HOME="$review_home/pes-projects" 결정 뒤 확정할 TS 명령 doctor`
+- [ ] Windows PowerShell: `$reviewHome = Join-Path $env:TEMP ("pes-review-" + [guid]::NewGuid())`; `New-Item -ItemType Directory -Path $reviewHome`; `$env:HOME = $reviewHome`; `$env:USERPROFILE = $reviewHome`; `$env:PES_HOME = Join-Path $reviewHome "pes-projects"`; `결정 뒤 확정할 TS 명령 doctor`
 - [ ] 5절 게이트 중 hwpx 제외 전부 통과하고, 문서만 보고 새 환경에서 재현할 수 있다.
 - [ ] 새 표가 백업·복구되고, unknown을 DB 롤백으로 지우지 않는 절차가 시험된다. 마이그레이션 전진 복구·Worker 이전 버전 롤백·호환 창·격리 복구가 구분된다.
 - [ ] 기존 화면 제거는 별도 사용자 확인·최소 보존 기간·실제 사용 중단 확인을 거치고, 미승인 시 보존·백로그로 남는다.
@@ -338,20 +340,22 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 ## X1. [6단계] hwpx 변환 최종 확인·릴리스
 
-**목표**: 로컬 명령 래퍼로 `report.md`→`report-uri.md`→`report.hwpx`를 만들고, Windows 한글에서 표·그림·각주·긴 한글을 확인하며 실패를 숨기지 않는다.
+**목표**: **서버측 변환 작업자/브라우저 변환을 우선**해 A가 사람 PC 없이 `report.md`→`report-uri.md`→`report.hwpx`를 만들고, 로컬 명령은 보조로 두며, Windows 한글에서 표·그림·각주·긴 한글을 확인하고 실패를 숨기지 않는다.
 
 **선행**: X2, PR9·16, WEB9, E1·E2·M1~M3·G3, H1.
 
 **할 일**
 
-- [ ] `scripts/hwpx_convert.py`를 새로 만든다. `resolve_hwpx_binary()`는 `PES_HWPX_BIN`/설치 경로를 찾고, 없으면 명시적 오류를 낸다.
+- [ ] `src/hwpx/server.ts`에 **서버측 변환 작업자 경로**를 만든다. Workflows/Container에서 외부 변환기를 호출하고, 사용자 PC 상주·연결을 요구하지 않는다. 외부 변환기는 PES 코드가 아닌 **도구 경계**로 둔다.
+- [ ] `src/hwpx/browser.ts`에 **브라우저 변환 경로**를 만든다. 서버측 경로가 불가할 때 사용자 PC 상주 없이 같은 `report.hwpx` 계약을 만족하는지 시험한다.
+- [ ] `src/hwpx/convert.ts`에 로컬 보조 래퍼를 만든다. `resolve_hwpx_binary()`는 `PES_HWPX_BIN`/설치 경로를 찾고, 없으면 명시적 오류를 낸다. **서버측·브라우저 경로가 둘 다 불가하면 A의 HWPX 지원 범위를 사용자 결정 항목으로 올린다.**
 - [ ] `convert_markdown_to_hwpx(input_md, output_hwpx, images_dir)`를 구현한다. `hwpx-uri` 스킬 설명의 Go 단일 바이너리 인터페이스를 **X1 시작 시 확인**하고, 인자·OS 지원이 다르면 노트에 실제 값을 적는다.
-- [ ] `scripts/pes.py`에 `hwpx` 하위 명령을 추가한다. `python3 scripts/pes.py hwpx --input <report.md> --output <report.hwpx> --images <dir>`로 어느 런타임에서도 호출 가능하게 한다.
-- [ ] `skills/publish/SKILL.md`의 hwpx 절차를 "스킬 로드"가 아니라 이 로컬 명령 호출로 바꾼다. 스킬이 없거나 바이너리가 없을 때의 한계를 적는다.
+- [ ] `src/cli/pes.ts`에 `hwpx` 하위 명령을 추가한다. **결정 뒤 확정할 TS 명령** `hwpx --input <report.md> --output <report.hwpx> --images <dir>`로 어느 런타임에서도 호출 가능하게 한다.
+- [ ] `skills/publish/SKILL.md`의 hwpx 절차를 "스킬 로드"가 아니라 이 명령/API 호출로 바꾼다. 서버측·브라우저·로컬 중 어느 경로를 쓰는지와 불가 시 한계를 적는다.
 - [ ] `record_hwpx_artifact()`로 기반 보고서 버전·변환기 버전·입력/이미지 hash·출력 hash·실행 시각을 남긴다. `report-uri.md`는 승인 원고와 다른 **파생본**으로 보존한다.
 - [ ] 업로드 `ready`와 보고서 버전 등록을 구분한다. 변환 실패는 정식 산출물로 등록하지 않는다.
 - [ ] 재실행은 같은 파일명 덮어쓰기가 아니라 보존/멱등 계약을 따른다.
-- [ ] `tests/test_stage6_hwpx.py`와 `tests/fixtures/hwpx/`에 합성 한국어 보고서(표 3개 이상, 그림/이미지, 각주, 긴 제목, 출처 부록)를 넣고 zip/XML·이미지 참조·스타일·각주 번호를 자동 검사한다.
+- [ ] `tests/stage6/hwpx.test.ts`·`tests/stage6/hwpx_server.test.ts`·`tests/stage6/hwpx_browser.test.ts`와 `tests/fixtures/hwpx/`에 합성 한국어 보고서(표 3개 이상, 그림/이미지, 각주, 긴 제목, 출처 부록)를 넣고 zip/XML·이미지 참조·스타일·각주 번호를 자동 검사한다. **A는 사람 PC 없이 서버측/브라우저 경로로 완료**하는 사례를 포함한다.
 - [ ] 실패 경로(바이너리 없음, 깨진 md, 누락 이미지, 지원하지 않는 차트)를 시험하고, docx/PDF로 조용히 대체하지 않는다.
 - [ ] Windows 한글에서 표 머리·그림·각주·쪽 나눔을 수동 확인하고, Mac은 가능한 범위에서 같은 파일을 연다.
 - [ ] 증거를 **합성 자동 / Windows 수동 / 실자료 허용·미허용 / 도구 미설치·실패** 네 가지로 분리 기록한다.
@@ -359,9 +363,10 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **완료 기준**
 
-- [ ] `python3 -m pytest -q tests/test_stage6_hwpx.py`
-- [ ] `python3 -m pytest -q`
-- [ ] `PES_HWPX_BIN=<합성 환경 경로> python3 scripts/pes.py hwpx --input tests/fixtures/hwpx/report.md --output <임시 폴더>/report.hwpx --images tests/fixtures/hwpx/images` (Windows PowerShell은 `$env:PES_HWPX_BIN`과 `$env:TEMP` 경로를 쓴다)
+- [ ] `결정 뒤 확정할 TS 테스트 명령 tests/stage6/hwpx.test.ts tests/stage6/hwpx_server.test.ts tests/stage6/hwpx_browser.test.ts`
+- [ ] `결정 뒤 확정할 TS 테스트 명령`
+- [ ] `PES_HWPX_BIN=<합성 환경 경로> 결정 뒤 확정할 TS 명령 hwpx --input tests/fixtures/hwpx/report.md --output <임시 폴더>/report.hwpx --images tests/fixtures/hwpx/images` (Windows PowerShell은 `$env:PES_HWPX_BIN`과 `$env:TEMP` 경로를 쓴다)
+- [ ] **A가 사람 PC 없이 서버측 또는 브라우저 경로로 변환**하고, 두 경로가 모두 불가할 때 사용자 결정 항목이 남는다.
 - [ ] 합성 보고서가 구조 검사를 통과하고, Windows 한글에서 표·그림·각주·긴 한글·쪽 나눔이 확인된다.
 - [ ] 바이너리 없음·깨진 md·누락 이미지·미지원 차트에서 명시적 오류가 나고 산출물이 등록되지 않는다.
 - [ ] 네 가지 증거가 분리 기록되고, 실자료 미허용을 자동 허용으로 간주하지 않는다.
@@ -369,7 +374,8 @@ Windows PowerShell에서는 `HOME`·`USERPROFILE`·`PES_HOME`을 임시 폴더�
 
 **지킬 것**
 
-- PES는 변환기를 다시 구현하지 않는다. 설치된 로컬 `hwpx-uri` 바이너리를 호출한다.
+- PES는 변환기를 다시 구현하지 않는다. **외부 변환기는 도구 경계**로 두고, 서버측 작업자/브라우저/로컬 보조 중 선택한 경로를 명시한다.
+- **A의 HWPX 최종 변환이 사용자 PC 상주·연결을 필수로 요구하지 않게** 한다. 불가하면 A 지원 범위를 사용자 결정으로 올린다.
 - 실패를 숨기지 않는다. docx/PDF 안내는 "HWPX 미완료"와 구분하고 조용한 대체 성공으로 표시하지 않는다.
 - 실제 보고서 사본·경로·수신자·로그는 저장소 밖. 합성 자료만 커밋한다.
 - 기반 보고서 버전·변환기 버전·hash 없는 hwpx를 정식 산출물로 등록하지 않는다.

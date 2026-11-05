@@ -15,7 +15,7 @@
 
 ## 채택
 
-1번. **`stage-1-db.md`·`stage-1-api.md`·`stage-1-ui.md`·`stage-1-runners.md` 네 설계서를 승인**한다. DDL 초안 54표와 `check_ddl.py`를 기준선으로 삼는다.
+1번. **`stage-1-db.md`·`stage-1-api.md`·`stage-1-ui.md`·`stage-1-runners.md` 네 설계서를 승인**한다. DDL 초안 54표와 `check_ddl.py`를 기준선으로 삼는다. **2026-11-05 REF1·MAT1·5차 동기화 표가 더해져 60표가 됐다.**
 
 ## 이유
 

@@ -36,10 +36,10 @@
 | [stage-1-api.md](stage-1-api.md) | 1단계 HTTP/JSON API 계약: 닫힌 명령·멱등·오류·MCP·변경분. | 확정 |
 | [stage-1-ui.md](stage-1-ui.md) | 1단계 작업 공간 화면 설계: 질문·답·첨언·인쇄·접근성. | 확정 |
 | [stage-1-runners.md](stage-1-runners.md) | 1단계 방식 A·B 실행 구조: lease·재개·인계·비용·기록. | 확정 |
-| [stage-2.md](stage-2.md) | 2단계 새 뼈대: 로컬 SQLite+API, 22 PR, 프로젝트 이전·전환. | 검수 반영 |
-| [stage-3.md](stage-3.md) | 3단계 소통 기능: U1~U6, W1 WebMCP·R1 자동 재개·T1 실제 시험. | 검수 반영 |
+| [stage-2.md](stage-2.md) | 2단계 새 뼈대: 로컬 SQLite+API, 25 PR(PR1~19·20a·20b·20c·21·22·26), 프로젝트 이전·전환. | 검수 반영 |
+| [stage-3.md](stage-3.md) | 3단계 소통 기능: U1~U6, REF1 이전 프로젝트 참고자료, MAT1 내 자료·AI 참조 스위치, W1 WebMCP·R1 자동 재개·T1 실제 시험. | 검수 반영 |
 | [stage-4.md](stage-4.md) | 4단계 판과 고급 소통: PR23~25·U7~U12, 판 이월·비교·편집. | 검수 반영 |
-| [stage-5.md](stage-5.md) | 5단계 웹 이전: WEB0~WEB14, 무료 Cloudflare 전제·로그인·runner·백업. | 검수 반영 |
+| [stage-5.md](stage-5.md) | 5단계 웹 이전: WEB0~WEB15, 플랫폼 후보 3군·로그인·웹 A 실행기(Workflows)·양방향 연결·백업. | 검수 반영 |
 | [stage-6.md](stage-6.md) | 6단계 넓히기: E/M/G/H/X, 다중 에이전트·사람·내보내기·hwpx. | 검수 반영 |
 | [roadmap.md](roadmap.md) | 0~6단계 지도: 이슈 수·의존·위험·사용자 결정·불일치 규칙. | 검수 반영 |
 | [summary-for-approval.md](summary-for-approval.md) | 2~6단계 계획을 사용자 승인 전에 읽는 비개발자용 요약. | 초안 |
@@ -55,7 +55,7 @@
 
 | 문서 | 한 줄 설명 | 상태 |
 |---|---|---|
-| [schemas/stage-1-ddl-draft.sql](schemas/stage-1-ddl-draft.sql) | 1단계 확정 DDL 초안(54개 표). 마이그레이션의 기준 문서. | 확정 |
+| [schemas/stage-1-ddl-draft.sql](schemas/stage-1-ddl-draft.sql) | 1단계 확정 DDL 초안(61개 표, REF1·MAT1·5차 동기화 표 포함). 마이그레이션의 기준 문서. | 확정 |
 | [schemas/check_ddl.py](schemas/check_ddl.py) | DDL을 임시 SQLite에서 실행하고 성공·거부·롤백을 검사하는 스크립트. | 확정 |
 | [schemas/project-v0.15.json](schemas/project-v0.15.json) | 현행 `project.json` 기준 JSON Schema. | 확정 |
 
@@ -71,13 +71,13 @@
 
 | 문서 | 한 줄 설명 | 상태 |
 |---|---|---|
-| [issues/stage-2.md](issues/stage-2.md) | 2단계 PR1~22 구현 이슈 원고. | 초안 |
+| [issues/stage-2.md](issues/stage-2.md) | 2단계 PR1~19·20a·20b·20c·21·22·26 구현 이슈 원고. | 초안 |
 | [issues/stage-2-review.md](issues/stage-2-review.md) | 2단계 이슈 원고 동료 검토. | 검수 기록 |
-| [issues/stage-3.md](issues/stage-3.md) | 3단계 U1~U6·W1·R1·T1 구현 이슈 원고. | 초안 |
+| [issues/stage-3.md](issues/stage-3.md) | 3단계 U1~U6·REF1·MAT1·W1·R1·T1 구현 이슈 원고. | 초안 |
 | [issues/stage-3-review.md](issues/stage-3-review.md) | 3단계 이슈 원고 동료 검토. | 검수 기록 |
 | [issues/stage-4.md](issues/stage-4.md) | 4단계 PR23~25·U7~U12 구현 이슈 원고. | 초안 |
 | [issues/stage-4-review.md](issues/stage-4-review.md) | 4단계 이슈 원고 동료 검토. | 검수 기록 |
-| [issues/stage-5.md](issues/stage-5.md) | 5단계 WEB0~WEB14 구현 이슈 원고. | 초안 |
+| [issues/stage-5.md](issues/stage-5.md) | 5단계 WEB0~WEB15 구현 이슈 원고. | 초안 |
 | [issues/stage-5-review.md](issues/stage-5-review.md) | 5단계 이슈 원고 동료 검토. | 검수 기록 |
 | [issues/stage-6.md](issues/stage-6.md) | 6단계 E1~E2·M1~M3·G1~G3·H1·X1~X2 구현 이슈 원고. | 초안 |
 | [issues/stage-6-review.md](issues/stage-6-review.md) | 6단계 이슈 원고 동료 검토. | 검수 기록 |
@@ -90,7 +90,7 @@
 | [spikes/mode-a/README.md](spikes/mode-a/README.md) | 방식 A 시험 코드 실행법·범위. | 시험 기록 |
 | [spikes/mode-a/mode_a_spike.py](spikes/mode-a/mode_a_spike.py) | 방식 A 시험 코드. 제품 코드가 아니다. | 시험 기록 |
 | [spikes/mode-a/results-2026-11-05.json](spikes/mode-a/results-2026-11-05.json) | 방식 A 원시 결과(경로·비밀번호 제거). | 시험 기록 |
-| [spikes/web0-plan.md](spikes/web0-plan.md) | WEB0 코어 언어 시험 계획. 실행은 2단계 PR4·13 픽스처 직후. | 초안 |
+| [spikes/web0-plan.md](spikes/web0-plan.md) | WEB0 코어 언어 시험 계획. 실행은 2단계 PR1 전, TS 계약 픽스처 사용. | 초안 |
 
 ## 7. discussion/ — 검수·대조 기록
 

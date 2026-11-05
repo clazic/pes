@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PES 재설계 — 그림으로 보는 2~6단계 계획</title>
+<style>
+  :root { --ink:#1f2933; --soft:#52606d; --line:#d9e2ec; --bg:#f7f9fb; --card:#fff;
+          --a:#2f80ed; --b:#27ae60; --c:#f2994a; --d:#9b51e0; --e:#eb5757; --f:#00a3a3; --g:#6c7a89; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  header { padding:48px 24px 24px; text-align:center; }
+  h1 { font-size:34px; margin:0 0 8px; }
+  .sub { color:var(--soft); font-size:18px; }
+  section { max-width:1100px; margin:0 auto; padding:28px 24px; }
+  h2 { font-size:26px; margin:0 0 6px; }
+  .lead { color:var(--soft); font-size:17px; margin:0 0 18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; }
+  .grid { display:grid; gap:16px; }
+  .g2 { grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); }
+  .g3 { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .g4 { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+  .big { font-size:42px; font-weight:800; }
+  .tag { display:inline-block; padding:2px 10px; border-radius:999px; font-size:13px; font-weight:700; color:#fff; }
+  .muted { color:var(--soft); font-size:15px; }
+  svg { width:100%; height:auto; display:block; }
+  .stage { border-top:6px solid var(--g); min-height:150px; }
+  .stage h3 { margin:6px 0 4px; font-size:20px; }
+  .stage p { margin:0; font-size:15px; color:var(--soft); }
+  .num { font-size:14px; font-weight:800; color:var(--soft); }
+  .decide { border-left:6px solid var(--c); }
+  .decide h3 { margin:0 0 6px; font-size:18px; }
+  .decide ul { margin:0; padding-left:18px; color:var(--soft); font-size:15px; }
+  .risk { display:flex; gap:14px; align-items:flex-start; }
+  .risk .icon { flex:0 0 52px; }
+  .risk h3 { margin:0 0 4px; font-size:17px; }
+  .risk p { margin:0; font-size:15px; color:var(--soft); }
+  footer { text-align:center; color:var(--soft); font-size:14px; padding:30px 24px 60px; }
+  @media print { body { background:#fff; } section { break-inside:avoid; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PES는 이렇게 바뀝니다</h1>
+  <div class="sub">2~6단계 계획과 로드맵을 그림으로 · 2026-11-05 · 승인 대기</div>
+</header>
+
+<!-- 1. 전과 후 -->
+<section>
+  <h2>1. 한 장으로 보는 변화</h2>
+  <p class="lead">지금은 파일 한 장에 모든 것을 적어 두고, 앞으로는 서랍장(DB)에 차곡차곡 쌓습니다.</p>
+  <div class="card">
+    <svg viewBox="0 0 1000 300" role="img" aria-label="지금은 파일 하나, 앞으로는 DB와 웹 화면, 여러 AI">
+      <!-- 지금 -->
+      <text x="160" y="30" font-size="22" font-weight="800" text-anchor="middle" fill="#52606d">지금</text>
+      <rect x="95" y="55" width="130" height="165" rx="10" fill="#fff" stroke="#9aa5b1" stroke-width="3"/>
+      <polygon points="195,55 225,85 195,85" fill="#d9e2ec"/>
+      <line x1="115" y1="110" x2="205" y2="110" stroke="#cbd2d9" stroke-width="6"/>
+      <line x1="115" y1="135" x2="205" y2="135" stroke="#cbd2d9" stroke-width="6"/>
+      <line x1="115" y1="160" x2="180" y2="160" stroke="#cbd2d9" stroke-width="6"/>
+      <text x="160" y="250" font-size="18" text-anchor="middle" fill="#1f2933">project.json 한 장</text>
+      <text x="160" y="275" font-size="15" text-anchor="middle" fill="#52606d">고치면 덮어써요</text>
+
+      <!-- 화살표 -->
+      <line x1="290" y1="140" x2="400" y2="140" stroke="#2f80ed" stroke-width="8"/>
+      <polygon points="400,122 430,140 400,158" fill="#2f80ed"/>
+
+      <!-- 앞으로 -->
+      <text x="700" y="30" font-size="22" font-weight="800" text-anchor="middle" fill="#2f80ed">앞으로</text>
+      <!-- DB 서랍장 -->
+      <rect x="610" y="90" width="180" height="140" rx="10" fill="#eaf2fd" stroke="#2f80ed" stroke-width="3"/>
+      <rect x="625" y="105" width="150" height="32" rx="5" fill="#fff" stroke="#2f80ed"/>
+      <rect x="625" y="145" width="150" height="32" rx="5" fill="#fff" stroke="#2f80ed"/>
+      <rect x="625" y="185" width="150" height="32" rx="5" fill="#fff" stroke="#2f80ed"/>
+      <circle cx="700" cy="121" r="4" fill="#2f80ed"/><circle cx="700" cy="161" r="4" fill="#2f80ed"/><circle cx="700" cy="201" r="4" fill="#2f80ed"/>
+      <text x="700" y="255" font-size="18" text-anchor="middle">DB 서랍장</text>
+      <text x="700" y="278" font-size="15" text-anchor="middle" fill="#52606d">고쳐도 옛 판이 남아요</text>
+      <!-- 사람 -->
+      <circle cx="490" cy="95" r="20" fill="#27ae60"/><rect x="468" y="118" width="44" height="45" rx="14" fill="#27ae60"/>
+      <text x="490" y="190" font-size="16" text-anchor="middle">사람</text>
+      <text x="490" y="210" font-size="14" text-anchor="middle" fill="#52606d">웹 화면에서 답·승인</text>
+      <line x1="520" y1="135" x2="605" y2="155" stroke="#27ae60" stroke-width="4" stroke-dasharray="6 5"/>
+      <!-- AI들 -->
+      <rect x="860" y="60" width="110" height="40" rx="8" fill="#f2994a"/><text x="915" y="86" font-size="15" text-anchor="middle" fill="#fff" font-weight="700">방식 A</text>
+      <rect x="860" y="120" width="110" height="40" rx="8" fill="#9b51e0"/><text x="915" y="146" font-size="15" text-anchor="middle" fill="#fff" font-weight="700">방식 B</text>
+      <text x="915" y="190" font-size="14" text-anchor="middle" fill="#52606d">AI들은 정해진</text>
+      <text x="915" y="208" font-size="14" text-anchor="middle" fill="#52606d">창구(API)로만</text>
+      <line x1="855" y1="80" x2="795" y2="130" stroke="#f2994a" stroke-width="4"/>
+      <line x1="855" y1="140" x2="795" y2="160" stroke="#9b51e0" stroke-width="4"/>
+    </svg>
+  </div>
+</section>
+
+<!-- 2. 방식 A·B -->
+<section>
+  <h2>2. AI가 일하는 두 가지 방식</h2>
+  <p class="lead">둘 다 같은 서랍장, 같은 창구를 씁니다.</p>
+  <div class="grid g2">
+    <div class="card" style="border-top:6px solid var(--c)">
+      <span class="tag" style="background:var(--c)">방식 A</span>
+      <svg viewBox="0 0 400 140" aria-label="PES가 AI를 직접 돌림">
+        <rect x="20" y="30" width="170" height="80" rx="12" fill="#fff4ec" stroke="#f2994a" stroke-width="3"/>
+        <text x="105" y="65" font-size="18" text-anchor="middle" font-weight="700">PES</text>
+        <text x="105" y="90" font-size="14" text-anchor="middle" fill="#52606d">AI를 직접 켬</text>
+        <line x1="195" y1="70" x2="245" y2="70" stroke="#f2994a" stroke-width="6"/><polygon points="245,58 265,70 245,82" fill="#f2994a"/>
+        <circle cx="325" cy="70" r="45" fill="#f2994a"/><text x="325" y="66" font-size="15" text-anchor="middle" fill="#fff" font-weight="700">DeepSeek</text>
+        <text x="325" y="86" font-size="12" text-anchor="middle" fill="#fff">(OpenCode)</text>
+      </svg>
+      <p class="muted">사람은 웹에서 답만. 모델은 하나, 다른 모델로 몰래 바꾸지 않음. 비용 상한을 넘으면 멈춤.</p>
+    </div>
+    <div class="card" style="border-top:6px solid var(--d)">
+      <span class="tag" style="background:var(--d)">방식 B</span>
+      <svg viewBox="0 0 400 140" aria-label="사람이 터미널 AI를 켬">
+        <circle cx="45" cy="45" r="18" fill="#27ae60"/><rect x="25" y="66" width="40" height="40" rx="12" fill="#27ae60"/>
+        <line x1="75" y1="70" x2="115" y2="70" stroke="#9b51e0" stroke-width="6"/><polygon points="115,58 135,70 115,82" fill="#9b51e0"/>
+        <rect x="145" y="12" width="110" height="26" rx="6" fill="#9b51e0"/><text x="200" y="30" font-size="13" text-anchor="middle" fill="#fff">Claude Code</text>
+        <rect x="145" y="44" width="110" height="26" rx="6" fill="#9b51e0"/><text x="200" y="62" font-size="13" text-anchor="middle" fill="#fff">Claude 앱</text>
+        <rect x="145" y="76" width="110" height="26" rx="6" fill="#b37fe6"/><text x="200" y="94" font-size="13" text-anchor="middle" fill="#fff">Codex CLI</text>
+        <rect x="145" y="108" width="110" height="26" rx="6" fill="#b37fe6"/><text x="200" y="126" font-size="13" text-anchor="middle" fill="#fff">OpenCode 화면판</text>
+        <line x1="265" y1="70" x2="305" y2="70" stroke="#9b51e0" stroke-width="6"/><polygon points="305,58 325,70 305,82" fill="#9b51e0"/>
+        <rect x="330" y="40" width="60" height="60" rx="10" fill="#f3eafd" stroke="#9b51e0" stroke-width="3"/><text x="360" y="76" font-size="15" text-anchor="middle" font-weight="700">PES</text>
+      </svg>
+      <p class="muted">사람이 터미널에서 AI를 켜고, PES는 질문·답·기록만. 네 가지 AI 모두 <b>2단계</b>에서 붙입니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3. 계단 -->
+<section>
+  <h2>3. 일곱 계단</h2>
+  <p class="lead">0·1단계는 끝났어요. 이제 2단계부터 오릅니다.</p>
+  <div class="card">
+    <svg viewBox="0 0 1000 300" role="img" aria-label="0단계부터 6단계까지 계단">
+      <g font-size="16" text-anchor="middle">
+        <rect x="20"  y="240" width="130" height="50"  fill="#27ae60"/><text x="85"  y="272" fill="#fff" font-weight="700">0 기반 ✓</text>
+        <rect x="160" y="205" width="130" height="85"  fill="#27ae60"/><text x="225" y="240" fill="#fff" font-weight="700">1 설계 ✓</text>
+        <rect x="300" y="170" width="130" height="120" fill="#2f80ed"/><text x="365" y="205" fill="#fff" font-weight="700">2 새 뼈대</text>
+        <rect x="440" y="135" width="130" height="155" fill="#56a0f5"/><text x="505" y="170" fill="#fff" font-weight="700">3 소통</text>
+        <rect x="580" y="100" width="130" height="190" fill="#7db7f7"/><text x="645" y="135" fill="#fff" font-weight="700">4 판</text>
+        <rect x="720" y="65"  width="130" height="225" fill="#a4cdfa"/><text x="785" y="100" fill="#1f2933" font-weight="700">5 웹</text>
+        <rect x="860" y="30"  width="130" height="260" fill="#cbe2fc"/><text x="925" y="65" fill="#1f2933" font-weight="700">6 넓히기</text>
+      </g>
+      <!-- 사람 -->
+      <circle cx="365" cy="140" r="14" fill="#f2994a"/><rect x="351" y="155" width="28" height="14" rx="5" fill="#f2994a"/>
+      <text x="365" y="122" font-size="14" text-anchor="middle" fill="#f2994a" font-weight="700">지금 여기</text>
+    </svg>
+  </div>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card stage" style="border-top-color:var(--a)"><div class="num">2단계 · 이슈 22+</div><h3>새 뼈대</h3><p>내 컴퓨터 안의 작은 DB와 창구. 옛 프로젝트를 사본으로 옮기고, AI 네 가지를 연결.</p></div>
+    <div class="card stage" style="border-top-color:#56a0f5"><div class="num">3단계 · 이슈 9</div><h3>소통</h3><p>질문 고치기·더하기·빼기, 글에 첨언, AI와 대화, 반영 내역, 범위 골라 인쇄를 한 화면에.</p></div>
+    <div class="card stage" style="border-top-color:#7db7f7"><div class="num">4단계 · 이슈 9</div><h3>판</h3><p>끝난 보고서를 2판·3판으로. 판 비교, 갈림길 맛보기, AI 반대 의견. 새 화면이 기본.</p></div>
+    <div class="card stage" style="border-top-color:#a4cdfa"><div class="num">5단계 · 이슈 15</div><h3>웹</h3><p>Cloudflare <b>무료</b>로 웹에 올림. 어디서나 로그인해 답·승인. 알림, 백업.</p></div>
+    <div class="card stage" style="border-top-color:#cbe2fc"><div class="num">6단계 · 이슈 11</div><h3>넓히기</h3><p>여러 사람, Linear·Notion으로 보내기, 여러 AI 작업자, 마지막에 hwpx 확인.</p></div>
+    <div class="card stage" style="border-top-color:var(--g)"><div class="num">전체</div><h3>이슈 약 97개</h3><p>Linear 한도 260개 안. 163개 여유.</p></div>
+  </div>
+</section>
+
+<!-- 4. 이슈 막대 -->
+<section>
+  <h2>4. 이슈는 한도 안에 넉넉히</h2>
+  <div class="card">
+    <svg viewBox="0 0 1000 120" aria-label="이슈 97개, 한도 260개">
+      <rect x="20" y="40" width="960" height="44" rx="22" fill="#eef2f6"/>
+      <rect x="20" y="40" width="358" height="44" rx="22" fill="#2f80ed"/>
+      <text x="200" y="69" font-size="18" fill="#fff" text-anchor="middle" font-weight="700">쓸 이슈 약 97</text>
+      <text x="680" y="69" font-size="18" fill="#52606d" text-anchor="middle">여유 163</text>
+      <text x="980" y="30" font-size="15" fill="#52606d" text-anchor="end">한도 260</text>
+    </svg>
+    <p class="muted">이슈 하나 = 작업 묶음(PR) 하나. 작은 일은 이슈 안 체크리스트로 해서 이슈를 아낍니다.</p>
+  </div>
+</section>
+
+<!-- 5. 순서 -->
+<section>
+  <h2>5. 가는 순서</h2>
+  <p class="lead">웹에서 쓸 언어 시험(WEB0)을 2단계 도중에 미리 해 봅니다 — 나중에 통째로 다시 만들지 않으려고.</p>
+  <div class="card">
+    <svg viewBox="0 0 1000 220" aria-label="단계 순서와 WEB0 조기 시험">
+      <g font-size="15" text-anchor="middle">
+        <rect x="20"  y="80" width="150" height="56" rx="10" fill="#2f80ed"/><text x="95"  y="113" fill="#fff" font-weight="700">2단계 앞부분</text>
+        <rect x="230" y="80" width="150" height="56" rx="10" fill="#2f80ed"/><text x="305" y="113" fill="#fff" font-weight="700">2단계 뒷부분</text>
+        <rect x="440" y="80" width="120" height="56" rx="10" fill="#56a0f5"/><text x="500" y="113" fill="#fff" font-weight="700">3단계</text>
+        <rect x="600" y="80" width="120" height="56" rx="10" fill="#7db7f7"/><text x="660" y="113" fill="#fff" font-weight="700">4단계</text>
+        <rect x="760" y="80" width="100" height="56" rx="10" fill="#a4cdfa"/><text x="810" y="113" font-weight="700">5단계</text>
+        <rect x="890" y="80" width="90"  height="56" rx="10" fill="#cbe2fc"/><text x="935" y="113" font-weight="700">6단계</text>
+      </g>
+      <g stroke="#9aa5b1" stroke-width="4">
+        <line x1="170" y1="108" x2="230" y2="108"/><line x1="380" y1="108" x2="440" y2="108"/>
+        <line x1="560" y1="108" x2="600" y2="108"/><line x1="720" y1="108" x2="760" y2="108"/><line x1="860" y1="108" x2="890" y2="108"/>
+      </g>
+      <!-- WEB0 -->
+      <circle cx="200" cy="40" r="26" fill="#eb5757"/><text x="200" y="46" font-size="15" fill="#fff" text-anchor="middle" font-weight="800">WEB0</text>
+      <line x1="200" y1="66" x2="200" y2="80" stroke="#eb5757" stroke-width="4"/>
+      <text x="200" y="175" font-size="14" fill="#eb5757" text-anchor="middle" font-weight="700">계약 시험이 나오자마자</text>
+      <text x="200" y="195" font-size="14" fill="#52606d" text-anchor="middle">웹 언어를 미리 판정</text>
+      <text x="660" y="175" font-size="14" fill="#52606d" text-anchor="middle">단계마다 끝나면 승인받고 다음으로</text>
+    </svg>
+  </div>
+</section>
+
+<!-- 6. 정할 것 -->
+<section>
+  <h2>6. 여쭤볼 것 (그때그때)</h2>
+  <p class="lead">돈·자료·되돌리기 어려운 것만. 같은 걸 두 번 묻지 않아요.</p>
+  <div class="grid g4">
+    <div class="card decide"><h3>2단계</h3><ul><li>옮길 실제 프로젝트</li><li>방식 A 비용 상한</li></ul></div>
+    <div class="card decide"><h3>3단계</h3><ul><li>실제 자료로 시험할 범위</li></ul></div>
+    <div class="card decide"><h3>5단계</h3><ul><li>자료 보관 위치·기관 규정</li><li>도메인</li><li>웹으로 옮길 범위</li><li>백업 위치·암호키</li><li>R2 결제 수단(요구할 때만)</li><li>유료 전환(한도 넘을 때만)</li></ul></div>
+    <div class="card decide"><h3>6단계</h3><ul><li>Linear·Notion 계정</li><li>승인 담당자 둘지</li><li>누구를 초대할지</li><li>hwpx 확인용 사본</li></ul></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <b>이미 정하신 것</b>
+    <span class="muted"> — Cloudflare 무료로 설계 · 방식 B는 AI 네 가지를 2단계에 · Linear엔 사람이 고른 할 일만 · 승인 위임은 6단계에서 · 저장소 공개 유지</span>
+  </div>
+</section>
+
+<!-- 7. 위험 -->
+<section>
+  <h2>7. 걱정거리와 방패</h2>
+  <div class="grid g2">
+    <div class="card risk"><div class="icon"><svg viewBox="0 0 52 52"><path d="M26 4 L46 12 V26 C46 38 37 46 26 49 C15 46 6 38 6 26 V12 Z" fill="#27ae60"/><path d="M17 26 l7 7 l12 -14" stroke="#fff" stroke-width="4" fill="none"/></svg></div><div><h3>자료가 사라지거나 새어 나감</h3><p>원본은 그대로, 사본으로 먼저. 지문(hash)으로 확인. 실제 자료는 공개 저장소에 안 올림.</p></div></div>
+    <div class="card risk"><div class="icon"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="#f2994a"/><text x="26" y="34" font-size="22" text-anchor="middle" fill="#fff" font-weight="800">₩</text></svg></div><div><h3>AI 비용이 커짐</h3><p>상한을 먼저 정하고, 없으면 돌리지 않음.</p></div></div>
+    <div class="card risk"><div class="icon"><svg viewBox="0 0 52 52"><rect x="6" y="14" width="40" height="26" rx="13" fill="#2f80ed"/><rect x="6" y="14" width="30" height="26" rx="13" fill="#eb5757"/></svg></div><div><h3>무료 한도에 걸림</h3><p>80%면 경고, 90%면 줄이기. R2는 무료 근처에서 PES가 스스로 업로드를 멈춤.</p></div></div>
+    <div class="card risk"><div class="icon"><svg viewBox="0 0 52 52"><rect x="6" y="8" width="40" height="30" rx="4" fill="#9b51e0"/><rect x="18" y="40" width="16" height="6" fill="#9b51e0"/><path d="M14 30 l8 -10 l6 6 l10 -12" stroke="#fff" stroke-width="3" fill="none"/></svg></div><div><h3>기존 화면·한글 입력·인쇄가 깨짐</h3><p>새 화면과 옛 화면을 나란히 두고 비교. 언제든 옛 화면(/legacy)으로 돌아감.</p></div></div>
+  </div>
+</section>
+
+<footer>
+  자료: docs/plan/summary-for-approval.md · roadmap.md · stage-2.md ~ stage-6.md (커밋 adb8b87)<br>
+  승인하시면 2단계 구현 이슈를 만들고 시작합니다.
+</footer>
+</body>
+</html>

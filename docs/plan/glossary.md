@@ -95,10 +95,10 @@
 | **cursor** | 변경분을 읽는 불투명 위치. db instance·epoch·event_seq를 묶고 무효면 재동기화한다. | [stage-1-api.md](stage-1-api.md) 2절 13 | page, offset, timestamp |
 | **Go 정책** | 프로젝트별 OpenCode Go 반출 허용·차단의 불변 버전. 일반 export 동의와 다르다. | [stage-1-db.md](stage-1-db.md) 2절 1·3.1 | 전송 동의, API 키, 일반 내보내기 |
 | **outbound dispatch** | Go로 나가는 자료의 prepared·authorized·sent·blocked·failed·unknown 영수증. | [stage-1-db.md](stage-1-db.md) 3.6·[stage-1-api.md](stage-1-api.md) 2절 15 | export job, event, audit log |
-| **방식 A** | PES가 소유한 OpenCode+DeepSeek가 PES 안에서 6단계를 수행하고 PES가 실행을 제어한다. | [00-brief.md](00-brief.md) 3절·[stage-1-runners.md](stage-1-runners.md) 3절 | 내부 AI 전체, 사용자 OpenCode 서버 |
-| **방식 B** | 외부 에이전트(Claude Code·Claude 앱, 이후 Codex·OpenCode TUI)가 작업하고 PES는 소통·기록을 맡는다. | [00-brief.md](00-brief.md) 3절·[stage-1-runners.md](stage-1-runners.md) 4절 | Claude 전용, 외부 AI 전체, API 구독 |
-| **runner** | 사용자 컴퓨터에서 밖으로 연결해 queued run을 claim하고 PES 전용 OpenCode를 띄우는 데몬. | [stage-5.md](stage-5.md) 2.4·[stage-1-runners.md](stage-1-runners.md) A3 | 서버, 에이전트, OpenCode 서버 |
-| **supervisor** | runner 안에서 OpenCode 프로세스·프로필·workspace를 관리하는 구성요소. | [stage-1-runners.md](stage-1-runners.md) A3·[stage-5.md](stage-5.md) WEB7 | runner, agent |
+| **방식 A** | PES가 OpenCode Go API를 직접 호출하고 자체 에이전트 루프·업무 도구로 6단계를 수행한다. opencode 프로그램·로컬 runner 없음. | [00-brief.md](00-brief.md) 3절·[stage-1-runners.md](stage-1-runners.md) 3절 | 사용자 OpenCode 서버, 외부 에이전트 |
+| **방식 B** | 사람 컴퓨터의 AI(Claude Code 등)가 skill로 프로젝트를 만들어 PES에 등록하고, 이후 사람은 웹 대시보드에서 작업한다. 모델은 사람 컴퓨터에서 돈다. | [00-brief.md](00-brief.md) 3절·[stage-1-runners.md](stage-1-runners.md) 4절 | Claude 전용, 외부 AI 전체, API 구독 |
+| **runner** | (폐기) 사용자 컴퓨터에서 queued run을 claim하던 A 실행기. 2026-11-05 정정으로 A는 웹 Workflows가 맡는다. | [stage-5.md](stage-5.md) 2.4 | 서버, 에이전트, Workflow |
+| **Workflow 실행기** | A의 모델 호출 1회를 step 1개로 나눠 실행하고, step 사이 상태를 D1에 남기는 Cloudflare Workflows 실행기. | [stage-5.md](stage-5.md) 2.4·WEB6·WEB7 | runner, supervisor |
 | **agent token** | 프로젝트 범위 기계 자격. 해시·scope·30일·회수·교체를 가진다. | [stage-1-db.md](stage-1-db.md) 2절 13·3.1 | API key, 사람 세션, OAuth 토큰 |
 | **scope** | 에이전트 토큰·OAuth grant가 허용하는 명령 집합. 역할(role)과 다르다. | [stage-1-db.md](stage-1-db.md) 2절 13·[stage-1-api.md](stage-1-api.md) 2절 12 | role, 권한 그룹, 메뉴 |
 | **OAuth grant** | 사람이 원격 MCP 앱에 위임한 자격. 사람 세션이 아니다. | [stage-5.md](stage-5.md) 2.5 | 에이전트 키, 로그인 세션 |
@@ -117,9 +117,12 @@
 
 | 용어 | 뜻 | 처음 정의 | 쓰지 않는 말 |
 |---|---|---|---|
-| **WEB0** | 5단계 코어 언어 기술 시험. Python Workers·TS 이식·Python 서버 중 하나를 정한다. | [stage-5.md](stage-5.md) 2.1·4절 | W1, WEB1, 코어 |
-| **WEB1~WEB14** | 5단계 웹 구현 14개. WEB1 골격, WEB2 로그인, WEB3 멤버, WEB4 키, WEB5 MCP, WEB6 runner, WEB7 supervisor, WEB8 알림, WEB9 이전, WEB10 운영, WEB11 보안, WEB12 한도, WEB13 WebMCP, WEB14 통합. | [stage-5.md](stage-5.md) 4절 | U1~U6, PR 1~22, W1 |
-| **U1~U6** | 3단계 소통 기능 6개. U1 작업 공간 틀, U2 질문 작업면, U3 가정·결정·반영, U4 첨언·후속, U5 프롬프트 복사·B 대기, U6 범위 인쇄. | [stage-1-ui.md](stage-1-ui.md) 7절·[stage-3.md](stage-3.md) 2.1~2.7 | WEB1~WEB14, PR 1~22 |
+| **WEB0** | 5단계 번호이지만 2단계 PR1 전에 하는 TS 단일 언어·플랫폼 후보(Cloudflare/Vercel+VPS) 시험. TS 계약 픽스처로 같은 코드가 후보에서 도는지 확인한다. | [stage-5.md](stage-5.md) 2.1·4절 | W1, WEB1, 코어 |
+| **WEB1~WEB15** | 5단계 웹 구현 15개. WEB1 골격, WEB2 로그인, WEB3 멤버, WEB4 키, WEB5 MCP, **WEB6 Workflows 실행기, WEB7 A 에이전트 루프·사용량**, WEB8 알림, WEB9 이전, WEB10 운영, WEB11 보안, WEB12 한도, WEB13 WebMCP, **WEB15 양방향 연결**, WEB14 통합. | [stage-5.md](stage-5.md) 4절 | U1~U6, PR 1~26, W1 |
+| **웹소켓 연결** | PC 연결 도우미와 웹 PES의 상시 양방향 통로. 큰 파일은 HTTP, 끊기면 커서부터 재접속. | [stage-5.md](stage-5.md) 2.5.1 | MCP, WebMCP |
+| **U1~U6** | 3단계 소통 기능 6개. U1 작업 공간 틀, U2 질문 작업면, U3 가정·결정·반영, U4 첨언·후속, U5 프롬프트 복사·B 대기, U6 범위 인쇄. | [stage-1-ui.md](stage-1-ui.md) 7절·[stage-3.md](stage-3.md) 2.1~2.7 | WEB1~WEB15, PR 1~26 |
+| **REF1** | 3단계 이전 프로젝트 참고자료. 원본의 특정 스냅숏을 가리키는 읽기 전용 참조이며 복사·이전이 아니다. | [stage-3.md](stage-3.md) REF1 | `/pes:start --import`, PR11 legacy importer |
+| **MAT1** | 3단계 내 자료 올리기·글자 추출·미리보기·파일별 AI 참조 스위치. 기본 allow, deny는 A·B 모두 AI에 안 내보냄. | [stage-3.md](stage-3.md) MAT1 | 파일 이전·hwpx 출력 |
 | **U1** | 3단계 작업 공간 틀. 셸·URL·딥링크·갱신·초안·기존 화면 연결. | [stage-1-ui.md](stage-1-ui.md) 7절·[stage-3.md](stage-3.md) 2.2 | WEB1, PR 18 |
 | **U2** | 3단계 질문 작업면. 질문/폼 발행·고치기·묶음 답·의견. | [stage-1-ui.md](stage-1-ui.md) 7절·[stage-3.md](stage-3.md) 2.3 | WEB2, PR 8 |
 | **U3** | 3단계 가정·결정·반영. 판단·범위·반영 내역. | [stage-1-ui.md](stage-1-ui.md) 7절·[stage-3.md](stage-3.md) 2.4 | WEB3, PR 14 |
@@ -129,5 +132,5 @@
 | **W1** | 3단계 WebMCP 실험. 읽기·답 초안·첨언만. | [stage-3.md](stage-3.md) 2.8 | WEB13, MCP, WebMCP 정식 지원 |
 | **R1** | 3단계 자동 재개 옵션. 기본 수동, 프로젝트별 opt-in. | [stage-3.md](stage-3.md) 2.9 | 자동 실행 전체, WEB7, wait |
 | **T1** | 3단계 실제 프로젝트 시험. 허용 1개·분리 홈·사본. | [stage-3.md](stage-3.md) 2.10 | 2단계 PR22 파일럿, 전체 이전 |
-| **PR 1~22** | 2단계 로컬 뼈대 구현 22개. | [stage-1-db.md](stage-1-db.md) 10절·[stage-2.md](stage-2.md) 4.2 | 5단계 WEB, 4단계 PR 23~25 |
+| **PR 1~19·20a·20b·20c·21·22·26** | 2단계 로컬 뼈대 구현 25개. 2026-11-04 당시 22개였고, PR20 분할과 PR26 추가로 25개가 됐다. | [stage-1-db.md](stage-1-db.md) 10절·[stage-2.md](stage-2.md) 4.2 | 5단계 WEB, 4단계 PR 23~25 |
 | **6단계 E/M/G/H/X** | E1~E2 내보내기, M1~M3 사람·worker 동시성, G1~G3 다른 에이전트, H1 hc-team 운영 평가, X1~X2 hwpx·통합. | [stage-6.md](stage-6.md) 2.1 | PR 23~25, WEB, SEL |

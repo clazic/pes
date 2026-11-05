@@ -26,6 +26,8 @@
 ## 영향
 
 - SEL-19, `stage-1-api.md` 7절, `stage-1-runners.md`, 2단계 PR 20, 5단계 WEB5.
+- **0014**: Codex 앱·OpenCode 앱을 2단계 PR20c로 추가한다. 보장 에이전트(Claude Code·Claude 앱)는 그대로다.
+- **B의 흐름(2026-11-05 사용자 정의)**: 사람 컴퓨터의 skill/plugin으로 프로젝트를 만들어 PES에 등록하고, 이후 사람은 웹 대시보드에서 작업한다. 실제 모델은 사람 컴퓨터에서 돌고, **PC 도우미↔웹은 WebSocket/HTTP, AI 도구↔PES는 MCP/API, 브라우저 탭 안 보조만 WebMCP**로 연결한다. WebMCP는 PC↔웹 통로가 아니다.
 - 앱 연결이 안 되면 복사·붙여넣기 전달을 보장 경로로 두고, 사람이 붙여 넣은 제출의 실제 제출자는 사람으로 기록한다.
 - 앱·CLI가 같은 PES API 명령을 쓴다.
 

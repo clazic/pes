@@ -40,6 +40,7 @@ python -m venv .venv
 ## 금지
 
 - 실제 `~/pes-projects`·`~/.pes/`를 읽거나 쓰지 않는다. 테스트·진단은 임시 `HOME`·`PES_HOME`으로 격리한다.
+- **`scripts/pes.py`(특히 `doctor`·`list`·`status`)·`scripts/serve.py`는 `HOME`(Windows `USERPROFILE`)과 `PES_HOME`을 둘 다 임시 폴더로 바꾼 상태에서만 실행한다.** 격리 없이 한 번이라도 실행하면 실제 프로젝트 이름·상태가 모델 대화로 나간다(2026-11-05 SEL-14 사고, `docs/plan/defects.md`). 격리 방법이 확실하지 않으면 실행하지 말고 코드를 읽는다.
 - 실키, 기관 자료, 실제 프로젝트 내용을 fixture·로그·문서·커밋에 넣지 않는다.
 - 이 저장소는 **공개**다(2026-11-04 다시 공개로 전환, `docs/plan/00-brief.md` 1절). 커밋·이슈·PR에 올라가는 모든 내용이 공개된다고 가정한다.
 
