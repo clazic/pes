@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -187,47 +189,135 @@ test("migrate checks schema state under the write lock when another connection w
   }
 });
 
-test("two child processes migrating the same database apply exactly once", async () => {
+test("connect retries the initial WAL switch until another process releases its lock", async () => {
   const home = isolated_home();
+  const path = db_path(home.env);
+  mkdirSync(dirname(path), { recursive: true });
+  const holder = new DatabaseSync(path);
+  let release: NodeJS.Timeout | undefined;
   try {
-    const child = fileURLToPath(new URL("./helpers/migrate_child.ts", import.meta.url));
-    const runs = await Promise.all([
-      run_node_async(home.env, [child]),
-      run_node_async(home.env, [child]),
-    ]);
-    for (const run of runs) {
-      assert.equal(run.status, 0, run.stderr);
-    }
-    const results = runs.map((run) => {
-      const line = run.stdout.trim().split(/\r?\n/).at(-1);
-      assert.ok(line, `child must print a JSON result: ${run.stdout}`);
-      return JSON.parse(line) as { applied: boolean; schema_version: string; error?: string };
-    });
-    for (const result of results) {
-      assert.equal(result.error, undefined);
-      assert.equal(result.schema_version, "1");
-    }
-    assert.deepEqual(results.map((result) => result.applied).sort(), [false, true]);
+    holder.exec("CREATE TABLE lock_probe (id INTEGER)");
+    assert.equal(
+      holder.prepare("PRAGMA journal_mode").get()?.journal_mode,
+      "delete",
+      "the fresh database must not be in WAL mode before the race",
+    );
+    holder.exec("BEGIN IMMEDIATE");
 
-    const db = connect(db_path(home.env));
-    try {
-      assert.equal(
-        db.get<{ count: bigint }>(
-          "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-        )?.count,
-        61n,
-      );
-      assert.equal(db.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count, 1n);
-      assert.equal(
-        db.get<{ schema_version: bigint }>("SELECT schema_version FROM db_meta WHERE id = 1")
-          ?.schema_version,
-        1n,
-      );
-    } finally {
-      db.close();
-    }
+    // The holder is a real write lock in this process, but the release timer
+    // can only fire while this test awaits the child. The child therefore
+    // retries from another process and succeeds once the lock is gone.
+    release = setTimeout(() => {
+      holder.exec("ROLLBACK");
+    }, 500);
+
+    const child = fileURLToPath(new URL("./helpers/wal_connect_child.ts", import.meta.url));
+    const run = await run_node_async(home.env, [child]);
+    assert.equal(run.status, 0, run.stderr);
+    const line = run.stdout.trim().split(/\r?\n/).at(-1);
+    assert.ok(line, `child must print a JSON result: ${run.stdout}`);
+    const result = JSON.parse(line) as {
+      journal_mode?: string;
+      error?: string;
+      waited_ms?: number;
+    };
+    assert.equal(result.error, undefined);
+    assert.equal(result.journal_mode, "wal");
   } finally {
+    if (release !== undefined) clearTimeout(release);
+    holder.close();
     home.cleanup();
+  }
+});
+
+test("connect reports a clear error when the WAL lock lasts past its retry budget", () => {
+  const home = isolated_home();
+  const path = db_path(home.env);
+  mkdirSync(dirname(path), { recursive: true });
+  const holder = new DatabaseSync(path);
+  try {
+    holder.exec("CREATE TABLE lock_probe (id INTEGER)");
+    holder.exec("BEGIN IMMEDIATE");
+
+    const started = Date.now();
+    assert.throws(
+      () => connect(path, { wal_busy_timeout_ms: 50 }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /failed to enable SQLite WAL mode within 50ms/);
+        assert.ok(error.cause instanceof Error, "the original busy error must be kept as the cause");
+        assert.match(error.cause.message, /database is locked/);
+        return true;
+      },
+    );
+    assert.ok(
+      Date.now() - started >= 25,
+      "connect must retry until the budget is spent instead of failing on the first BUSY",
+    );
+  } finally {
+    try {
+      holder.exec("ROLLBACK");
+    } catch {
+      // No active transaction if the setup failed before BEGIN.
+    }
+    holder.close();
+    home.cleanup();
+  }
+});
+
+test("two child processes migrating the same database apply exactly once", async () => {
+  const child = fileURLToPath(new URL("./helpers/migrate_child.ts", import.meta.url));
+  for (let iteration = 1; iteration <= 10; iteration += 1) {
+    const home = isolated_home();
+    try {
+      const runs = await Promise.all([
+        run_node_async(home.env, [child]),
+        run_node_async(home.env, [child]),
+      ]);
+      for (const run of runs) {
+        assert.equal(run.status, 0, `iteration ${iteration}: ${run.stderr}`);
+      }
+      const results = runs.map((run) => {
+        const line = run.stdout.trim().split(/\r?\n/).at(-1);
+        assert.ok(line, `iteration ${iteration}: child must print a JSON result: ${run.stdout}`);
+        return JSON.parse(line) as { applied: boolean; schema_version: string; error?: string };
+      });
+      for (const result of results) {
+        assert.equal(result.error, undefined, `iteration ${iteration}`);
+        assert.equal(result.schema_version, "1", `iteration ${iteration}`);
+      }
+      assert.deepEqual(
+        results.map((result) => result.applied).sort(),
+        [false, true],
+        `iteration ${iteration}`,
+      );
+
+      const db = connect(db_path(home.env));
+      try {
+        assert.equal(
+          db.get<{ count: bigint }>(
+            "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+          )?.count,
+          61n,
+          `iteration ${iteration}`,
+        );
+        assert.equal(
+          db.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count,
+          1n,
+          `iteration ${iteration}`,
+        );
+        assert.equal(
+          db.get<{ schema_version: bigint }>("SELECT schema_version FROM db_meta WHERE id = 1")
+            ?.schema_version,
+          1n,
+          `iteration ${iteration}`,
+        );
+      } finally {
+        db.close();
+      }
+    } finally {
+      home.cleanup();
+    }
   }
 });
 

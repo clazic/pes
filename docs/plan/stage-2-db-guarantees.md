@@ -90,7 +90,7 @@ DDL이 **보장하지 않는** 것: 아래 3절.
 - **드라이버**: `node:sqlite` `DatabaseSync`. 별도 드라이버 의존성 없음.
 - **foreign_keys**: `PRAGMA foreign_keys=ON` 뒤 `PRAGMA foreign_keys`가 1인지 확인한다. 켜지지 않으면 연결 실패.
 - **busy_timeout**: 5000ms로 두고 실제 값을 확인한다. 짧은 tx(`BEGIN IMMEDIATE`)와 함께 쓴다.
-- **WAL**: 파일 DB는 `PRAGMA journal_mode=WAL`을 적용하고 `wal`인지 확인한다. `:memory:`는 건너뛴다. WAL의 `-wal`/`-shm` 파일은 SQLite가 만드는 연결 부산물이다.
+- **WAL**: 파일 DB는 현재 `journal_mode`를 먼저 읽어 이미 `wal`이면 그대로 두고, 아니면 `PRAGMA journal_mode=WAL`을 적용해 `wal`인지 확인한다. `:memory:`는 건너뛴다. 전환은 `busy_timeout`이 적용되지 않아 다른 연결의 잠금에 `SQLITE_BUSY`가 나면 10ms→최대 100ms 백오프로 `BUSY_TIMEOUT_MS` 상한까지 재시도하고, 상한을 넘으면 원래 오류를 `cause`로 담은 오류로 연결을 닫는다. WAL의 `-wal`/`-shm` 파일은 SQLite가 만드는 연결 부산물이다.
 - **부모 폴더**: DB 파일의 부모 폴더만 `mkdir -p` 한다. 객체 폴더·세션·토큰·백업 등 다른 파일은 PR1이 만들지 않는다.
 - **정수는 bigint**: 모든 prepared statement에 `setReadBigInts(true)`를 적용한다. SQLite INTEGER는 `number`로 읽지 않는다. 2^53 초과 값의 손실을 막기 위해 `2^53+1` 왕복을 시험한다. API의 10진 문자열 계약은 PR13이 이 위에 얹는다.
 - **tx 콜백은 동기만**: native async 함수는 `BEGIN` 전에 거부하고, 동기 함수가 thenable을 반환하면 롤백·오류로 처리한다. 반환된 thenable은 실행하지 않으며, unhandled rejection 방어는 native `Promise`에만 내장 rejection 핸들러를 붙인다. tx는 동기 콜백 계약이며, 콜백이 스스로 시작한 비동기 작업(이미 생성된 Promise의 후속 실행)은 취소할 수 없다 — 타입(`never`)과 실행 전 async 거부로 막는다.

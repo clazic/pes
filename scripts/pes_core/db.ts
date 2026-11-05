@@ -22,6 +22,13 @@ import { new_id } from "./ids.ts";
 export const SQLITE_MIN_VERSION = "3.38.0";
 export const BUSY_TIMEOUT_MS = 5000;
 
+// The initial switch to WAL does not consult busy_timeout in SQLite: another
+// connection holding a lock makes `PRAGMA journal_mode = WAL` return
+// SQLITE_BUSY immediately. Retry that specific failure with a short backoff.
+const WAL_RETRY_INITIAL_MS = 10;
+const WAL_RETRY_MAX_MS = 100;
+const SQLITE_BUSY = 5;
+
 export type SqlValue = null | number | bigint | string | Uint8Array;
 
 export interface RunResult {
@@ -115,12 +122,43 @@ function assert_busy_timeout(db: Db): void {
   }
 }
 
-function assert_wal(db: Db, path: string): void {
+function assert_wal(db: Db, path: string, busy_timeout_ms: number): void {
   if (is_memory_path(path)) return;
-  const row = db.get<{ journal_mode: string }>("PRAGMA journal_mode = WAL");
-  if (row === undefined || row.journal_mode.toLowerCase() !== "wal") {
-    throw new Error("failed to enable SQLite WAL mode for a file database");
+  const current = db.get<{ journal_mode: string }>("PRAGMA journal_mode");
+  if (current !== undefined && current.journal_mode.toLowerCase() === "wal") return;
+
+  const deadline = Date.now() + busy_timeout_ms;
+  let delay_ms = WAL_RETRY_INITIAL_MS;
+  for (;;) {
+    try {
+      const row = db.get<{ journal_mode: string }>("PRAGMA journal_mode = WAL");
+      if (row === undefined || row.journal_mode.toLowerCase() !== "wal") {
+        throw new Error("failed to enable SQLite WAL mode for a file database");
+      }
+      return;
+    } catch (error) {
+      if (!is_sqlite_busy_error(error)) throw error;
+      const remaining_ms = deadline - Date.now();
+      if (remaining_ms <= 0) {
+        throw new Error(
+          `failed to enable SQLite WAL mode within ${busy_timeout_ms}ms: the database is locked by another connection`,
+          { cause: error },
+        );
+      }
+      // Synchronous retry: connect() is synchronous, so the timer queue cannot
+      // release another connection in this process. A cross-process holder
+      // releases independently, and same-process holders fail the budget.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(delay_ms, remaining_ms));
+      delay_ms = Math.min(delay_ms * 2, WAL_RETRY_MAX_MS);
+    }
   }
+}
+
+function is_sqlite_busy_error(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const candidate = error as Error & { errcode?: unknown };
+  if (candidate.errcode === SQLITE_BUSY) return true;
+  return /database is locked/i.test(candidate.message);
 }
 
 function assert_sqlite_runtime(db: Db): void {
@@ -154,7 +192,20 @@ function assert_sqlite_runtime(db: Db): void {
   }
 }
 
-export function connect(path: string): SqliteDb {
+export interface ConnectOptions {
+  /**
+   * Total time to keep retrying the initial switch to WAL while another
+   * connection holds a lock. Defaults to BUSY_TIMEOUT_MS; tests shorten it to
+   * exercise the timeout without waiting five seconds.
+   */
+  wal_busy_timeout_ms?: number;
+}
+
+export function connect(path: string, options: ConnectOptions = {}): SqliteDb {
+  const wal_busy_timeout_ms = options.wal_busy_timeout_ms ?? BUSY_TIMEOUT_MS;
+  if (!Number.isFinite(wal_busy_timeout_ms) || wal_busy_timeout_ms < 0) {
+    throw new RangeError("wal_busy_timeout_ms must be a non-negative finite number");
+  }
   if (!is_memory_path(path)) {
     mkdirSync(dirname(resolve(path)), { recursive: true });
   }
@@ -162,7 +213,7 @@ export function connect(path: string): SqliteDb {
   try {
     assert_foreign_keys(db);
     assert_busy_timeout(db);
-    assert_wal(db, path);
+    assert_wal(db, path, wal_busy_timeout_ms);
     assert_sqlite_runtime(db);
     return db;
   } catch (error) {
