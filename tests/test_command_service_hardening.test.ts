@@ -447,7 +447,7 @@ test("the registry cannot be extended at runtime (closed means closed)", () => {
     // frozen or otherwise read-only: good
   }
   const leaked = COMMANDS.has("evil.run_sql");
-  registry.delete("evil.run_sql");
+  assert.throws(() => registry.delete("evil.run_sql"), TypeError);
   assert.equal(added || leaked, false, "COMMANDS.set must not be able to register a command at runtime");
   assert.deepEqual([...COMMANDS.keys()].sort(), before);
 });

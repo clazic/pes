@@ -556,7 +556,7 @@ test("policy copy: a Date value is handled consistently: the hash, the policy co
     assert.equal(same.replayed, true);
     assert.deepEqual(same.result, first.result);
     assert.ok(error instanceof ApiError, "a different Date under the same key must not replay as the same request");
-    assert.equal(error.code, "conflict");
+    assert.equal(error.code, "idempotency_key_reuse");
   });
 });
 
