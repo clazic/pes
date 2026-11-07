@@ -31,7 +31,7 @@
 | `files` | `manifest.json`을 뺀 모든 파일의 `{path, sha256, size}`. `path`는 `/` 구분 상대 경로, `sha256`은 소문자 64자, `size`는 바이트 수 |
 | `table_counts` | 내보낸 표별 행 수(0행 표는 생략 가능). `users`·`actors`도 포함 |
 
-`rows/project.json`은 `{format_version, project_id, tables:[{name, columns:[{name,type}], rows:[[...]]}]}`이다. 정수는 10진 문자열로 적고, 가져올 때 열 선언 타입이 `INT`이면 `bigint`로 되돌린다. 표는 이름순, 행은 `rowid`순이다.
+`rows/project.json`은 `{format_version, project_id, tables:[{name, columns:[{name,type}], rows:[[...]]}]}`이다. 정수는 10진 문자열로 적고, 가져올 때 열 선언 타입이 `INT`이면 `bigint`로 되돌린다. BLOB은 `{"$blob":"<base64>"}`로 적고 그대로 바이트로 복원한다(빈 BLOB 포함). 표는 이름순, 행은 `rowid`순이다.
 
 ## 3. 프로젝트 소속 표
 
@@ -52,23 +52,26 @@
 |---|---|
 | `manifest_missing` | `manifest.json`이 없거나 읽을 수 없음 |
 | `manifest_invalid` | JSON 아님, 필수 필드·타입·64자 hash·중복 경로 위반 |
-| `path_unsafe` | 절대 경로, `..`, 빈 구간, 역슬래시, 드라이브 문자 |
+| `path_unsafe` | 절대 경로, `..`, 빈 구간, 역슬래시, 드라이브 문자, 또는 symlink |
 | `file_missing` | manifest에 있는 파일이 없거나 일반 파일이 아님 |
 | `size_mismatch` | 기록한 크기와 실제 크기가 다름 |
 | `hash_mismatch` | 기록한 sha256과 실제 바이트가 다름 |
-| `extra_file` | manifest에 없는 파일이 묶음 안에 있음 |
+| `extra_file` | manifest에 없는 파일이 묶음 안에 있음(끊긴 symlink 디렉터리 포함) |
 | `row_count_mismatch` | `rows/`의 표별 행 수와 `table_counts`가 다르거나 rows 파일이 깨짐 |
+
+파일 검사는 `lstatSync`로 한다. 묶음 안 symlink는 대상 바이트가 맞아도 일반 파일로 인정하지 않고 `path_unsafe`로 보고하며, symlink 디렉터리는 따라 들어가지 않고 `extra_file`로 보고한다.
 
 `import_bundle`은 검증을 먼저 한다. 문제가 하나라도 있으면 `BackupError("bundle_invalid")`에 `.problems`를 담고, 행·파일·epoch 어느 것도 쓰지 않는다.
 
 ## 5. 가져오기 순서와 epoch
 
 1. 묶음 전체 검증(위 4절).
-2. 같은 `project_id`가 있으면 `project_exists`, 같은 slug 등 유일 키가 겹치면 `project_conflict`.
-3. 대상 객체 경로에 같은 바이트가 있으면 건너뛰고, 다른 바이트가 있으면 `object_conflict`. 이 검사는 하나도 쓰기 전에 끝낸다.
-4. 새 객체 파일을 `wx`(덮어쓰지 않음)로 복사한다.
-5. 행 삽입과 epoch 갱신을 **하나의 `tx()`**로 한다. 표 사이 순환 FK 때문에 `PRAGMA defer_foreign_keys = ON`으로 COMMIT까지 검사를 미룬다(트랜잭션과 함께 자동 해제).
-6. 실패하면 tx는 롤백되고, 4단계에서 만든 파일만 지운다.
+2. rows 파일의 `blobs.storage_key`가 안전한 상대 경로인지 확인하고, 그 집합이 manifest의 `objects/` 목록과 정확히 같은지 확인한다. 하나라도 어긋나면 `bundle_invalid`다(검증만으로는 rows 파일 안의 값을 판단할 수 없다).
+3. 같은 `project_id`가 있으면 `project_exists`, 같은 slug 등 유일 키가 겹치면 `project_conflict`.
+4. 대상 객체 경로를 검사한다. `objects_dir`과 대상 사이의 기존 디렉터리를 `lstat`/`realpath`로 확인해 symlink를 건너뛰지 않는다. symlink를 지나거나 대상이 symlink면 `object_path_unsafe`다. 같은 바이트가 있으면 건너뛰고, 다른 바이트가 있으면 `object_conflict`. 이 검사는 하나도 쓰기 전에 끝낸다.
+5. 새 객체 파일을 `wx`(덮어쓰지 않음)로 복사한다. 이때 새로 만든 디렉터리도 기록한다.
+6. 행 삽입과 epoch 갱신을 **하나의 `tx()`**로 한다. 표 사이 순환 FK 때문에 `PRAGMA defer_foreign_keys = ON`으로 COMMIT까지 검사를 미룬다(트랜잭션과 함께 자동 해제).
+7. 실패하면 tx는 롤백되고, 5단계에서 만든 파일과 디렉터리(빈 것만)를 지운다.
 
 성공하면 대상 `db_meta.cursor_epoch`은 `max(대상 epoch, manifest.cursor_epoch) + 1`이 된다. `database_instance_id`는 바꾸지 않는다. `assert_cursor_epoch`은 10진 문자열·bigint만 받고, 현재 epoch와 다르면 `cursor_epoch_stale`, 10진수가 아니면 `cursor_epoch_invalid`다.
 

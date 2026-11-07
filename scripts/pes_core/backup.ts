@@ -22,14 +22,16 @@
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  rmdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { tx, type Db, type SqlValue } from "./db.ts";
 
@@ -141,6 +143,18 @@ function message_of(error: unknown): string {
 
 function bigint_replacer(_key: string, value: unknown): unknown {
   return typeof value === "bigint" ? value.toString() : value;
+}
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * Encode one SQLite value for the rows JSON. Integers become decimal strings
+ * (restored from the declared column type), and BLOBs become a tagged base64
+ * object so JSON.stringify cannot flatten them into `{"0":..}`.
+ */
+function encode_value(value: SqlValue | undefined): unknown {
+  if (value instanceof Uint8Array) return { $blob: Buffer.from(value).toString("base64") };
+  return value ?? null;
 }
 
 function escape_identifier(name: string): string {
@@ -343,7 +357,7 @@ export function export_project(
     tables: snapshot.tables.map((table) => ({
       name: table.name,
       columns: table.columns.map((column) => ({ name: column.name, type: column.type })),
-      rows: table.rows.map((row) => table.columns.map((column) => row[column.name] ?? null)),
+      rows: table.rows.map((row) => table.columns.map((column) => encode_value(row[column.name]))),
     })),
   };
   const payloads: Array<{ path: string; bytes: Uint8Array }> = [
@@ -589,7 +603,17 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
     const full_path = join(bundle_dir, ...file.path.split("/"));
     let size: number;
     try {
-      const stat = statSync(full_path);
+      // lstat: a symlink is not a regular bundle file even if it resolves to
+      // matching bytes outside the bundle.
+      const stat = lstatSync(full_path);
+      if (stat.isSymbolicLink()) {
+        problems.push({
+          code: "path_unsafe",
+          path: file.path,
+          message: `manifest file is a symbolic link, not a regular file: ${file.path}`,
+        });
+        continue;
+      }
       if (!stat.isFile()) {
         problems.push({
           code: "file_missing",
@@ -768,6 +792,15 @@ function invalid_row(message: string): BackupError {
 
 function decode_value(value: unknown, type: string): SqlValue {
   if (value === null) return null;
+  if (value !== null && typeof value === "object") {
+    if (Array.isArray(value)) throw invalid_row("found an array where a column value was expected");
+    const tagged = value as Record<string, unknown>;
+    if (typeof tagged.$blob === "string") {
+      if (!BASE64.test(tagged.$blob)) throw invalid_row("blob value is not valid base64");
+      return Uint8Array.from(Buffer.from(tagged.$blob, "base64"));
+    }
+    throw invalid_row("unsupported object value in the rows file");
+  }
   const integer_column = type.toUpperCase().includes("INT");
   if (typeof value === "string") {
     if (!integer_column) return value;
@@ -853,6 +886,135 @@ interface PendingObjectFile {
   bytes: Uint8Array;
 }
 
+function lstat_or_undefined(path: string): ReturnType<typeof lstatSync> | undefined {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function manifest_object_keys(manifest: Manifest): Set<string> {
+  const keys = new Set<string>();
+  for (const file of manifest.files) {
+    if (file.path.startsWith("objects/")) keys.add(file.path.slice("objects/".length));
+  }
+  return keys;
+}
+
+/**
+ * Re-check the blobs rows themselves. The manifest inventory only proves that
+ * the listed files are self-consistent; a rewritten rows file could still point
+ * a storage_key outside the objects folder or disagree with that inventory.
+ */
+function validate_bundle_blob_rows(tables: RowsTable[], manifest: Manifest): void {
+  const blobs = tables.find((table) => table.name === "blobs");
+  const row_keys = new Set<string>();
+  if (blobs !== undefined) {
+    const index = blobs.columns.findIndex((column) => column.name === "storage_key");
+    if (index < 0) throw invalid_row("blobs table has no storage_key column");
+    for (const row of blobs.rows) {
+      const key = row[index];
+      if (typeof key !== "string" || !is_safe_bundle_path(key)) {
+        throw new BackupError(
+          "bundle_invalid",
+          `blobs.storage_key is not a safe relative path: ${String(key)}`,
+          [{ code: "path_unsafe", message: `blobs.storage_key is not a safe relative path: ${String(key)}` }],
+        );
+      }
+      if (row_keys.has(key)) throw invalid_row(`duplicate blobs.storage_key: ${key}`);
+      row_keys.add(key);
+    }
+  }
+
+  const object_keys = manifest_object_keys(manifest);
+  for (const key of row_keys) {
+    if (!object_keys.has(key)) {
+      throw new BackupError("bundle_invalid", `blobs row has no object file: ${key}`, [
+        { code: "file_missing", path: `objects/${key}`, message: `blobs row has no object file: ${key}` },
+      ]);
+    }
+  }
+  for (const key of object_keys) {
+    if (!row_keys.has(key)) {
+      throw new BackupError("bundle_invalid", `object file has no blobs row: ${key}`, [
+        { code: "extra_file", path: `objects/${key}`, message: `object file has no blobs row: ${key}` },
+      ]);
+    }
+  }
+}
+
+/**
+ * Refuse to write through a symlinked directory between objects_dir and the
+ * target file. Components that do not exist yet are safe: they are created by
+ * this import and tracked for rollback.
+ */
+function assert_safe_target_ancestors(objects_dir: string, target: string): void {
+  const root = resolve(objects_dir);
+  const root_stat = lstat_or_undefined(root);
+  let root_real = root;
+  if (root_stat !== undefined) {
+    if (!root_stat.isSymbolicLink() && !root_stat.isDirectory()) {
+      throw new BackupError("object_conflict", `objects folder is not a directory: ${objects_dir}`);
+    }
+    root_real = realpathSync(root);
+  }
+
+  const parent = resolve(dirname(target));
+  const rel = relative(root, parent);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new BackupError("object_path_unsafe", `object path escapes the objects folder: ${target}`);
+  }
+  const segments = rel === "" ? [] : rel.split(sep);
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    const stat = lstat_or_undefined(current);
+    if (stat === undefined) break;
+    if (stat.isSymbolicLink()) {
+      throw new BackupError("object_path_unsafe", `object path crosses a symbolic link: ${current}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new BackupError("object_conflict", `object path parent is not a directory: ${current}`);
+    }
+    const real = realpathSync(current);
+    if (real !== root_real && !real.startsWith(root_real + sep)) {
+      throw new BackupError("object_path_unsafe", `object path escapes the objects folder: ${current}`);
+    }
+  }
+}
+
+/** Create missing directories below objects_dir and remember them for rollback. */
+function ensure_directory_under(objects_dir: string, directory: string, created: string[]): void {
+  const root = resolve(objects_dir);
+  const target = resolve(directory);
+  const rel = relative(root, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new BackupError("object_path_unsafe", `object path escapes the objects folder: ${directory}`);
+  }
+  const segments = rel === "" ? [] : rel.split(sep);
+  let current = root;
+  const paths = [root];
+  for (const segment of segments) {
+    current = join(current, segment);
+    paths.push(current);
+  }
+
+  for (const path of paths) {
+    const stat = lstat_or_undefined(path);
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        throw new BackupError("object_path_unsafe", `object path parent is not a real directory: ${path}`);
+      }
+      continue;
+    }
+    if (path === root) mkdirSync(path, { recursive: true });
+    else mkdirSync(path);
+    created.push(path);
+  }
+}
+
 function preflight_object_files(
   bundle_dir: string,
   objects_dir: string,
@@ -882,7 +1044,15 @@ function preflight_object_files(
     }
 
     const target = join(objects_dir, ...storage_key.split("/"));
-    if (existsSync(target)) {
+    assert_safe_target_ancestors(objects_dir, target);
+    const existing_stat = lstat_or_undefined(target);
+    if (existing_stat !== undefined) {
+      if (existing_stat.isSymbolicLink()) {
+        throw new BackupError("object_path_unsafe", `target object path is a symbolic link: ${storage_key}`);
+      }
+      if (!existing_stat.isFile()) {
+        throw new BackupError("object_conflict", `target object path is not a regular file: ${storage_key}`);
+      }
       let existing: Uint8Array;
       try {
         existing = readFileSync(target);
@@ -957,6 +1127,7 @@ export function import_bundle(db: Db, objects_dir: string, bundle_dir: string): 
   const manifest = read_manifest(bundle_dir);
   const tables = read_bundle_rows(bundle_dir, manifest);
   const project = require_project_row(tables, manifest.project_id);
+  validate_bundle_blob_rows(tables, manifest);
 
   if (db.get("SELECT 1 AS present FROM projects WHERE id = ?", manifest.project_id) !== undefined) {
     throw new BackupError("project_exists", `project ${manifest.project_id} already exists in the target database`);
@@ -967,21 +1138,29 @@ export function import_bundle(db: Db, objects_dir: string, bundle_dir: string): 
   }
 
   const pending = preflight_object_files(bundle_dir, objects_dir, manifest);
-  const created: string[] = [];
+  const created_files: string[] = [];
+  const created_dirs: string[] = [];
   try {
     for (const file of pending) {
-      mkdirSync(dirname(file.target), { recursive: true });
+      ensure_directory_under(objects_dir, dirname(file.target), created_dirs);
       writeFileSync(file.target, file.bytes, { flag: "wx" });
-      created.push(file.target);
+      created_files.push(file.target);
     }
     const cursor_epoch = tx(db, () => insert_bundle(db, tables, manifest));
     return { project_id: manifest.project_id, cursor_epoch };
   } catch (error) {
-    for (const path of created.reverse()) {
+    for (const path of created_files.reverse()) {
       try {
         rmSync(path, { force: true });
       } catch {
         // Best effort: the rows transaction rolls back independently.
+      }
+    }
+    for (const path of created_dirs.reverse()) {
+      try {
+        rmdirSync(path);
+      } catch {
+        // Keep a non-empty directory; it existed before or holds other work.
       }
     }
     throw translate_import_error(error);
