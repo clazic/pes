@@ -158,7 +158,51 @@ function require_non_empty_string(payload: Record<string, unknown>, field: strin
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new ApiError("invalid_payload", `${field} must be a non-empty string`);
   }
+  // A lone surrogate cannot be stored faithfully in SQLite TEXT: the receipt
+  // would keep the code unit while the column gets U+FFFD. Reject it up front.
+  if (!value.isWellFormed()) {
+    throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
+  }
   return value;
+}
+
+/**
+ * Deep copy of the JSON-shaped payload used only for the policy call. The
+ * service hashes and executes the caller's original, so a policy that mutates
+ * its copy cannot change the receipt key or the stored value.
+ */
+function clone_json_value(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((entry) => clone_json_value(entry));
+  const record = value as Record<string, unknown>;
+  const copy: Record<string, unknown> = {};
+  for (const key of Object.keys(record)) {
+    if (record[key] === undefined) continue;
+    copy[key] = clone_json_value(record[key]);
+  }
+  return copy;
+}
+
+/** Contexts are flat, but the policy still gets its own copy. */
+function clone_context(ctx: MutationContext): MutationContext {
+  return { ...ctx };
+}
+
+/** Only an explicit boolean true opens the gate; truthy look-alikes fail closed. */
+function policy_allows(decision: unknown): boolean {
+  return (
+    decision !== null &&
+    typeof decision === "object" &&
+    (decision as { allowed?: unknown }).allowed === true
+  );
+}
+
+function policy_denial_reason(decision: unknown): string {
+  if (decision !== null && typeof decision === "object") {
+    const reason = (decision as { reason?: unknown }).reason;
+    if (typeof reason === "string" && reason.length > 0) return reason;
+  }
+  return "policy denied";
 }
 
 /** Deterministic JSON used only for request hashing. */
@@ -463,8 +507,34 @@ const SET_TOPIC_COMMAND: CommandDefinition = {
   run: run_set_topic,
 };
 
+/**
+ * A Map subclass whose mutators are blocked, so the registry is closed at
+ * runtime as well as at compile time. Map.prototype is used to seed entries
+ * because the overridden set() throws before construction could finish.
+ */
+class ReadonlyCommandRegistry extends Map<string, CommandDefinition> {
+  constructor(entries: Iterable<readonly [string, CommandDefinition]>) {
+    super();
+    for (const [key, value] of entries) {
+      Map.prototype.set.call(this, key, value);
+    }
+  }
+
+  override set(_key: string, _value: CommandDefinition): this {
+    throw new TypeError("COMMANDS is read-only");
+  }
+
+  override delete(_key: string): boolean {
+    return false;
+  }
+
+  override clear(): void {
+    throw new TypeError("COMMANDS is read-only");
+  }
+}
+
 /** The closed command registry. Adding a table CRUD or arbitrary SQL command is forbidden. */
-export const COMMANDS: ReadonlyMap<string, CommandDefinition> = new Map([
+export const COMMANDS: ReadonlyMap<string, CommandDefinition> = new ReadonlyCommandRegistry([
   ["project.bootstrap", BOOTSTRAP_COMMAND],
   ["project.set_topic", SET_TOPIC_COMMAND],
 ]);
@@ -548,9 +618,12 @@ export class CommandService {
       throw new ApiError("invalid_payload", "project.bootstrap runs without a project or actor");
     }
 
-    const decision = this.#policy.check(ctx, command, payload);
-    if (!decision.allowed) {
-      throw new ApiError("policy_denied", decision.reason.length > 0 ? decision.reason : "policy denied");
+    // The checker is external code: give it copies so a mutation cannot move
+    // the receipt key or change what the original payload stores, and treat
+    // anything other than an explicit boolean true as a denial.
+    const decision: unknown = this.#policy.check(clone_context(ctx), command, clone_json_value(payload));
+    if (!policy_allows(decision)) {
+      throw new ApiError("policy_denied", policy_denial_reason(decision));
     }
 
     const replay = this.#replayed_result(definition, ctx, actor_id, hash);
