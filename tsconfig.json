@@ -14,5 +14,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["scripts/pes_core/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["spikes", "node_modules"]
+  "exclude": ["spikes", "node_modules", "**/node_modules"]
 }
