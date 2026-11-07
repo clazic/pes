@@ -612,7 +612,11 @@ class ReadonlyCommandRegistry implements ReadonlyMap<string, CommandDefinition> 
     callbackfn: (value: CommandDefinition, key: string, map: ReadonlyMap<string, CommandDefinition>) => void,
     thisArg?: unknown,
   ): void {
-    this.#table.forEach(callbackfn, thisArg);
+    // Wrap the callback: delegating directly would hand the internal Map to it
+    // as the third argument.
+    this.#table.forEach((value, key) => {
+      callbackfn.call(thisArg, value, key, this);
+    });
   }
 
   [Symbol.iterator]() {
