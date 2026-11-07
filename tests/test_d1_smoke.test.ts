@@ -866,6 +866,95 @@ describe("d1_smoke 단위(가짜 D1)", () => {
     });
   });
 
+  describe("[보강2] 가드 오류 귀속", () => {
+    const MARKER = "PES_D1_ZERO_ROWS_GUARD";
+
+    /** 오류 문구를 모두 지우는 D1 래퍼 흉내. 가드가 0행에서 내는 오류도 문구가 같다. */
+    function scrubbed_d1(user_error: boolean) {
+      const batches: { sql: string }[][] = [];
+      const d1 = {
+        prepare(sql: string) {
+          return { sql, bind() { return this; } };
+        },
+        async batch(statements: { sql: string }[]) {
+          batches.push(statements);
+          if (user_error) throw new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+          return statements.map(() => ({ meta: { changes: 1 } }));
+        },
+      };
+      return { d1: d1 as unknown as D1Like, batches };
+    }
+
+    test("[보강2] 표식이 안 보이는 D1 에서 사용자 문장의 overflow 는 ZeroRowsError 로 바뀌지 않는다", async () => {
+      // 현재 가드는 overflow 를 내지 않으므로, 어떤 overflow 도 가드의 0행 실패일 수 없다.
+      const { d1 } = scrubbed_d1(true);
+      await assert.rejects(
+        run_batch(d1, [{ sql: "SELECT abs(-9223372036854775808)" }, { sql: "UPDATE t SET a = 1", require_change: true }]),
+        (error: unknown) => error instanceof Error && !is_zero_rows(error) && /integer overflow/i.test(error.message),
+      );
+    });
+
+    test("[보강2] 사용자 문장 오류 문구에 가드 표식이 우연히 들어 있어도 ZeroRowsError 로 오보하지 않는다", async () => {
+      const boom = new Error(`D1_ERROR: user text ${MARKER} is in here: SQLITE_ERROR`);
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(
+        run_batch(fake.d1, [{ sql: "INSERT INTO t VALUES (1)" }, { sql: "UPDATE t SET a = 1", require_change: true }]),
+        (error: unknown) => error === boom,
+      );
+    });
+
+    test("[보강2] 표식이 보이는 D1 에서 overflow 는 원본 그대로이고 탐침은 쓰기 문장을 보내지 않는다", async () => {
+      const overflow = new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+      const batches: { sql: string }[][] = [];
+      let call = 0;
+      const d1 = {
+        prepare(sql: string) {
+          return { sql, bind() { return this; } };
+        },
+        async batch(statements: { sql: string }[]) {
+          batches.push(statements);
+          call += 1;
+          if (call === 1) throw overflow;
+          throw new Error(`D1_ERROR: JSON path error near '${MARKER}[': SQLITE_ERROR`);
+        },
+      } as unknown as D1Like;
+      await assert.rejects(
+        run_batch(d1, [{ sql: "INSERT INTO t VALUES (1)", require_change: true }]),
+        (error: unknown) => error === overflow,
+      );
+      for (const extra of batches.slice(1)) {
+        for (const item of extra) assert.match(item.sql, /^\s*SELECT\b/i, "탐침이 SELECT 가 아닌 문장을 보냈다");
+      }
+    });
+
+    test("[보강2] 가드 오류(표식 있음)는 ZeroRowsError 이고 탐침 batch 를 더 보내지 않는다", async () => {
+      const fake = fake_d1({ fail: new Error(`D1_ERROR: JSON path error near '${MARKER}[': SQLITE_ERROR`) });
+      await assert.rejects(run_batch(fake.d1, [{ sql: "A", require_change: true }]), is_zero_rows);
+      assert.equal(fake.batches.length, 1);
+    });
+
+    test("[보강2] 가드가 없으면 표식 문구가 있어도 원본 오류 그대로", async () => {
+      const boom = new Error(`D1_ERROR: ${MARKER} SQLITE_ERROR`);
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(run_batch(fake.d1, [{ sql: "A" }]), (error: unknown) => error === boom);
+    });
+
+    test("[보강2] 오류가 Error 가 아닌 값(문자열)이어도 그대로 던진다", async () => {
+      const d1 = {
+        prepare(sql: string) {
+          return { sql, bind() { return this; } };
+        },
+        async batch() {
+          throw "integer overflow";
+        },
+      } as unknown as D1Like;
+      await assert.rejects(
+        run_batch(d1, [{ sql: "A", require_change: true }]),
+        (error: unknown) => error === "integer overflow",
+      );
+    });
+  });
+
   describe("ZeroRowsError / assert_changed", () => {
     test("[보강] 기본 메시지·name·Error 상속", () => {
       const error = new ZeroRowsError();
@@ -922,6 +1011,71 @@ describe("d1 (로컬 miniflare)", {
   });
 
   scenarios("d1");
+
+  describe("[보강2] 가드 동작(로컬 D1)", () => {
+    test("[보강2] 사용자 문장의 integer overflow 는 ZeroRowsError 가 아니다(가드 문장이 있어도)", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          user("u1"),
+          { sql: "SELECT abs(-9223372036854775808)" },
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u1"], require_change: true },
+        ]),
+        (error: unknown) => error instanceof Error && !is_zero_rows(error) && /overflow/i.test(error.message),
+      );
+      const { results } = await d1.prepare("SELECT count(*) AS n FROM users").all();
+      assert.equal(Number(results[0]?.n), 0, "실패한 batch 가 롤백되지 않았다");
+    });
+
+    test("[보강2] 오류 문구에 표식이 든 사용자 문장은 ZeroRowsError 로 오보되지 않는다", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          user("u1"),
+          { sql: "SELECT json_extract('{}', 'PES_D1_ZERO_ROWS_GUARD[')" },
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u1"], require_change: true },
+        ]),
+        (error: unknown) => error instanceof Error && !is_zero_rows(error),
+      );
+    });
+
+    test("[보강2] 앞선 문장이 0행이어도 require_change 문장이 1행이면 가드는 통과한다", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      const { changes } = await run_batch(d1, [
+        user("u1"),
+        { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"] },
+        { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["y", "u1"], require_change: true },
+      ]);
+      assert.deepEqual(changes, [1, 0, 1]);
+    });
+
+    test("[보강2] 한 batch 의 두 번째 require_change 가 0행이면 첫 문장도 롤백된다", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          { ...user("u1"), require_change: true },
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"], require_change: true },
+        ]),
+        is_zero_rows,
+      );
+      const { results } = await d1.prepare("SELECT count(*) AS n FROM users").all();
+      assert.equal(Number(results[0]?.n), 0);
+    });
+
+    test("[보강2] 0행 실패 뒤에도 같은 D1 은 정상 동작한다(탐침이 상태를 남기지 않는다)", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [{ sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"], require_change: true }]),
+        is_zero_rows,
+      );
+      assert.deepEqual((await run_batch(d1, [user("u2")])).changes, [1]);
+    });
+  });
 
   describe("d1_smoke 도구 함수", () => {
     test("split_sql: 문자열·주석 안의 ';' 에서 자르지 않고 빈 조각은 버린다", () => {
