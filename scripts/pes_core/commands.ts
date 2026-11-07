@@ -127,19 +127,71 @@ interface CommandDefinition {
 
 const VIAS = new Set<string>(["web", "cli", "http", "mcp", "webmcp", "import"]);
 
+function require_well_formed(value: string, field: string): string {
+  if (!value.isWellFormed()) {
+    throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
+  }
+  return value;
+}
+
 function validate_context(ctx: MutationContext): void {
   if (typeof ctx.client_request_id !== "string" || ctx.client_request_id.length === 0) {
     throw new ApiError("invalid_payload", "client_request_id must be a non-empty string");
   }
+  require_well_formed(ctx.client_request_id, "client_request_id");
   if (!VIAS.has(ctx.via)) {
     throw new ApiError("invalid_payload", `via is not a known transport: ${String(ctx.via)}`);
   }
-  if (ctx.project_id !== null && typeof ctx.project_id !== "string") {
-    throw new ApiError("invalid_payload", "project_id must be a string or null");
+  if (ctx.project_id !== null) {
+    if (typeof ctx.project_id !== "string") {
+      throw new ApiError("invalid_payload", "project_id must be a string or null");
+    }
+    require_well_formed(ctx.project_id, "project_id");
   }
-  if (ctx.actor_id !== null && typeof ctx.actor_id !== "string") {
-    throw new ApiError("invalid_payload", "actor_id must be a string or null");
+  if (ctx.actor_id !== null) {
+    if (typeof ctx.actor_id !== "string") {
+      throw new ApiError("invalid_payload", "actor_id must be a string or null");
+    }
+    require_well_formed(ctx.actor_id, "actor_id");
   }
+}
+
+/** Read each context field exactly once so getters cannot disagree later. */
+function snapshot_context(ctx: MutationContext): MutationContext {
+  return {
+    project_id: ctx.project_id,
+    actor_id: ctx.actor_id,
+    via: ctx.via,
+    client_request_id: ctx.client_request_id,
+    ...(ctx.base_control_rev === undefined ? {} : { base_control_rev: ctx.base_control_rev }),
+  };
+}
+
+/**
+ * One JSON round trip at the entry point. JSON.stringify applies toJSON and
+ * reads getters once; JSON.parse produces ordinary JSON data (including
+ * "__proto__" as an own key). Every later step uses only this snapshot.
+ */
+function snapshot_payload(payload: unknown): unknown {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(payload);
+  } catch {
+    throw new ApiError("invalid_payload", "payload must be JSON-serializable");
+  }
+  if (text === undefined) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ApiError("invalid_payload", "payload must be JSON-serializable");
+  }
+}
+
+/** A second parse of the snapshot for the policy: own keys, no shared objects. */
+function copy_snapshot(snapshot: unknown): unknown {
+  if (snapshot === undefined) return undefined;
+  const text = JSON.stringify(snapshot);
+  return text === undefined ? undefined : JSON.parse(text);
 }
 
 function is_record(value: unknown): value is Record<string, unknown> {
@@ -166,23 +218,6 @@ function require_non_empty_string(payload: Record<string, unknown>, field: strin
   return value;
 }
 
-/**
- * Deep copy of the JSON-shaped payload used only for the policy call. The
- * service hashes and executes the caller's original, so a policy that mutates
- * its copy cannot change the receipt key or the stored value.
- */
-function clone_json_value(value: unknown): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((entry) => clone_json_value(entry));
-  const record = value as Record<string, unknown>;
-  const copy: Record<string, unknown> = {};
-  for (const key of Object.keys(record)) {
-    if (record[key] === undefined) continue;
-    copy[key] = clone_json_value(record[key]);
-  }
-  return copy;
-}
-
 /** Contexts are flat, but the policy still gets its own copy. */
 function clone_context(ctx: MutationContext): MutationContext {
   return { ...ctx };
@@ -190,23 +225,37 @@ function clone_context(ctx: MutationContext): MutationContext {
 
 /** Only an explicit boolean true opens the gate; truthy look-alikes fail closed. */
 function policy_allows(decision: unknown): boolean {
-  return (
-    decision !== null &&
-    typeof decision === "object" &&
-    (decision as { allowed?: unknown }).allowed === true
-  );
+  try {
+    return (
+      decision !== null &&
+      typeof decision === "object" &&
+      (decision as { allowed?: unknown }).allowed === true
+    );
+  } catch {
+    return false;
+  }
 }
 
 function policy_denial_reason(decision: unknown): string {
-  if (decision !== null && typeof decision === "object") {
-    const reason = (decision as { reason?: unknown }).reason;
-    if (typeof reason === "string" && reason.length > 0) return reason;
+  try {
+    if (decision !== null && typeof decision === "object") {
+      const reason = (decision as { reason?: unknown }).reason;
+      if (typeof reason === "string" && reason.length > 0) return reason;
+    }
+  } catch {
+    // fall through to the default message
   }
   return "policy denied";
 }
 
 /** Deterministic JSON used only for request hashing. */
 function canonical_json(value: unknown): string {
+  if (value !== null && (typeof value === "object" || typeof value === "function")) {
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") {
+      return canonical_json((toJSON as (this: unknown) => unknown).call(value));
+    }
+  }
   if (value === null || typeof value !== "object") {
     const encoded = JSON.stringify(value);
     return encoded === undefined ? "null" : encoded;
@@ -493,51 +542,89 @@ function run_set_topic(runtime: CommandRuntime): CommandResult {
   };
 }
 
-const BOOTSTRAP_COMMAND: CommandDefinition = {
+const BOOTSTRAP_COMMAND: CommandDefinition = Object.freeze({
   action: "project.created",
   scope: "bootstrap",
   rev_bearing: false,
   run: run_bootstrap,
-};
+});
 
-const SET_TOPIC_COMMAND: CommandDefinition = {
+const SET_TOPIC_COMMAND: CommandDefinition = Object.freeze({
   action: "project.topic_set",
   scope: "project",
   rev_bearing: true,
   run: run_set_topic,
-};
+});
 
 /**
- * A Map subclass whose mutators are blocked, so the registry is closed at
- * runtime as well as at compile time. Map.prototype is used to seed entries
- * because the overridden set() throws before construction could finish.
+ * The service reads commands from this private table. It is not exported, so
+ * changing the exported view (or bypassing it) cannot affect execution.
  */
-class ReadonlyCommandRegistry extends Map<string, CommandDefinition> {
-  constructor(entries: Iterable<readonly [string, CommandDefinition]>) {
-    super();
-    for (const [key, value] of entries) {
-      Map.prototype.set.call(this, key, value);
+const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, CommandDefinition>([
+  ["project.bootstrap", BOOTSTRAP_COMMAND],
+  ["project.set_topic", SET_TOPIC_COMMAND],
+]);
+
+/**
+ * A frozen read-only view with read methods only. Command names are own
+ * enumerable properties (so Object.keys is the registry); the read methods are
+ * prototype methods. There is no set/delete/clear, so neither a caller nor
+ * Map.prototype.set.call can mutate the registry.
+ */
+class ReadonlyCommandRegistry implements ReadonlyMap<string, CommandDefinition> {
+  readonly #table: ReadonlyMap<string, CommandDefinition>;
+
+  constructor(table: ReadonlyMap<string, CommandDefinition>) {
+    this.#table = table;
+    for (const [name, definition] of table) {
+      Object.defineProperty(this, name, {
+        value: definition,
+        enumerable: true,
+        writable: false,
+        configurable: false,
+      });
     }
+    Object.freeze(this);
   }
 
-  override set(_key: string, _value: CommandDefinition): this {
-    throw new TypeError("COMMANDS is read-only");
+  get size(): number {
+    return this.#table.size;
   }
 
-  override delete(_key: string): boolean {
-    return false;
+  get(key: string): CommandDefinition | undefined {
+    return this.#table.get(key);
   }
 
-  override clear(): void {
-    throw new TypeError("COMMANDS is read-only");
+  has(key: string): boolean {
+    return this.#table.has(key);
+  }
+
+  keys() {
+    return this.#table.keys();
+  }
+
+  values() {
+    return this.#table.values();
+  }
+
+  entries() {
+    return this.#table.entries();
+  }
+
+  forEach(
+    callbackfn: (value: CommandDefinition, key: string, map: ReadonlyMap<string, CommandDefinition>) => void,
+    thisArg?: unknown,
+  ): void {
+    this.#table.forEach(callbackfn, thisArg);
+  }
+
+  [Symbol.iterator]() {
+    return this.#table.entries();
   }
 }
 
 /** The closed command registry. Adding a table CRUD or arbitrary SQL command is forbidden. */
-export const COMMANDS: ReadonlyMap<string, CommandDefinition> = new ReadonlyCommandRegistry([
-  ["project.bootstrap", BOOTSTRAP_COMMAND],
-  ["project.set_topic", SET_TOPIC_COMMAND],
-]);
+export const COMMANDS: ReadonlyMap<string, CommandDefinition> = new ReadonlyCommandRegistry(COMMAND_TABLE);
 
 function translate_error(error: unknown): never {
   if (error instanceof ApiError) throw error;
@@ -586,14 +673,20 @@ export class CommandService {
    * non-Promise signature). The registry check runs before any transaction.
    */
   execute_sync(ctx: MutationContext, command: string, payload: unknown): CommandOutcome {
-    const definition = COMMANDS.get(command);
+    const definition = COMMAND_TABLE.get(command);
     if (definition === undefined) {
       throw new ApiError("unknown_command", `unknown command: ${command}`);
     }
-    validate_context(ctx);
-    const hash = request_hash(command, payload);
+    // Take one input snapshot before anything can observe or mutate it. All
+    // later work (hash, policy copy, validation, execution) uses these values.
+    const payload_snapshot = snapshot_payload(payload);
+    const ctx_snapshot = snapshot_context(ctx);
+    validate_context(ctx_snapshot);
+    const hash = request_hash(command, payload_snapshot);
     try {
-      return tx(this.#db, () => this.#execute_in_tx(definition, command, ctx, payload, hash));
+      return tx(this.#db, () =>
+        this.#execute_in_tx(definition, command, ctx_snapshot, payload_snapshot, hash),
+      );
     } catch (error) {
       throw translate_error(error);
     }
@@ -621,7 +714,7 @@ export class CommandService {
     // The checker is external code: give it copies so a mutation cannot move
     // the receipt key or change what the original payload stores, and treat
     // anything other than an explicit boolean true as a denial.
-    const decision: unknown = this.#policy.check(clone_context(ctx), command, clone_json_value(payload));
+    const decision: unknown = this.#policy.check(clone_context(ctx), command, copy_snapshot(payload));
     if (!policy_allows(decision)) {
       throw new ApiError("policy_denied", policy_denial_reason(decision));
     }
