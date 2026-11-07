@@ -576,6 +576,37 @@ function parse_rows_doc(text: string): RowsDoc {
   return { format_version: BACKUP_FORMAT_VERSION, project_id: doc.project_id, tables };
 }
 
+type SafeFile =
+  | { kind: "ok"; size: number }
+  | { kind: "symlink" }
+  | { kind: "not_file" }
+  | { kind: "missing" };
+
+/**
+ * lstat every path component below `bundle_dir` before anything is opened.
+ * A symlink at any level (intermediate directory or the file itself) is
+ * rejected, so a file behind a linked directory is never read.
+ */
+function check_bundle_file(bundle_dir: string, relative_path: string): SafeFile {
+  const parts = relative_path.split("/");
+  let current = bundle_dir;
+  for (let index = 0; index < parts.length; index += 1) {
+    current = join(current, parts[index]);
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(current);
+    } catch {
+      return { kind: "missing" };
+    }
+    if (stat.isSymbolicLink()) return { kind: "symlink" };
+    if (index === parts.length - 1) {
+      return stat.isFile() ? { kind: "ok", size: stat.size } : { kind: "not_file" };
+    }
+    if (!stat.isDirectory()) return { kind: "not_file" };
+  }
+  return { kind: "missing" };
+}
+
 /**
  * Verify a bundle without side effects. Reports every problem it can find
  * (never stops at the first one) and never throws for a bad bundle.
@@ -583,7 +614,17 @@ function parse_rows_doc(text: string): RowsDoc {
 export function verify_bundle(bundle_dir: string): VerifyResult {
   const manifest_path = join(bundle_dir, MANIFEST_FILE);
   let manifest_text: string;
+  const manifest_check = check_bundle_file(bundle_dir, MANIFEST_FILE);
+  if (manifest_check.kind === "symlink") {
+    return {
+      ok: false,
+      problems: [
+        { code: "path_unsafe", path: MANIFEST_FILE, message: "manifest.json is a symbolic link, not a regular file" },
+      ],
+    };
+  }
   try {
+    if (manifest_check.kind !== "ok") throw new Error("not a regular file");
     manifest_text = readFileSync(manifest_path, "utf8");
   } catch {
     return {
@@ -635,29 +676,24 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
       continue;
     }
     const full_path = join(bundle_dir, ...file.path.split("/"));
-    let size: number;
-    try {
-      // lstat: a symlink is not a regular bundle file even if it resolves to
-      // matching bytes outside the bundle.
-      const stat = lstatSync(full_path);
-      if (stat.isSymbolicLink()) {
-        problems.push({
-          code: "path_unsafe",
-          path: file.path,
-          message: `manifest file is a symbolic link, not a regular file: ${file.path}`,
-        });
-        continue;
-      }
-      if (!stat.isFile()) {
-        problems.push({
-          code: "file_missing",
-          path: file.path,
-          message: `manifest file is not a regular file: ${file.path}`,
-        });
-        continue;
-      }
-      size = stat.size;
-    } catch {
+    const checked = check_bundle_file(bundle_dir, file.path);
+    if (checked.kind === "symlink") {
+      problems.push({
+        code: "path_unsafe",
+        path: file.path,
+        message: `manifest path is or crosses a symbolic link: ${file.path}`,
+      });
+      continue;
+    }
+    if (checked.kind === "not_file") {
+      problems.push({
+        code: "file_missing",
+        path: file.path,
+        message: `manifest file is not a regular file: ${file.path}`,
+      });
+      continue;
+    }
+    if (checked.kind === "missing") {
       problems.push({
         code: "file_missing",
         path: file.path,
@@ -665,6 +701,7 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
       });
       continue;
     }
+    const size = checked.size;
     let bytes: Uint8Array;
     try {
       bytes = readFileSync(full_path);
@@ -676,7 +713,7 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
       });
       continue;
     }
-    accepted_bytes.set(file.path, bytes);
+    if (file.path.startsWith("rows/")) accepted_bytes.set(file.path, bytes);
     if (size !== file.size) {
       problems.push({
         code: "size_mismatch",
@@ -773,7 +810,14 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
 
 function read_manifest(bundle_dir: string): Manifest {
   let parsed: unknown;
+  const manifest_check = check_bundle_file(bundle_dir, MANIFEST_FILE);
+  if (manifest_check.kind === "symlink") {
+    throw new BackupError("bundle_invalid", "manifest.json is a symbolic link", [
+      { code: "path_unsafe", path: MANIFEST_FILE, message: "manifest.json is a symbolic link, not a regular file" },
+    ]);
+  }
   try {
+    if (manifest_check.kind !== "ok") throw new Error("manifest.json is not a regular file");
     parsed = JSON.parse(readFileSync(join(bundle_dir, MANIFEST_FILE), "utf8"));
   } catch (error) {
     throw new BackupError("bundle_invalid", `manifest.json is unreadable: ${message_of(error)}`, [
@@ -799,6 +843,12 @@ function read_bundle_rows(bundle_dir: string, manifest: Manifest): RowsTable[] {
   const by_name = new Map<string, RowsTable>();
   for (const entry of entries) {
     let doc: RowsDoc;
+    const rows_check = check_bundle_file(bundle_dir, entry.path);
+    if (rows_check.kind !== "ok") {
+      throw new BackupError("bundle_invalid", `rows file is not a safe regular file: ${entry.path}`, [
+        { code: rows_check.kind === "symlink" ? "path_unsafe" : "file_missing", path: entry.path, message: `rows file is not a safe regular file: ${entry.path}` },
+      ]);
+    }
     try {
       doc = parse_rows_doc(readFileSync(join(bundle_dir, ...entry.path.split("/")), "utf8"));
     } catch (error) {
@@ -1156,8 +1206,15 @@ function preflight_object_files_inner(
         { code: "path_unsafe", path: file.path, message: `unsafe object path: ${file.path}` },
       ]);
     }
+    const object_check = check_bundle_file(bundle_dir, file.path);
+    if (object_check.kind === "symlink") {
+      throw new BackupError("bundle_invalid", `object path is or crosses a symbolic link: ${file.path}`, [
+        { code: "path_unsafe", path: file.path, message: `object path is or crosses a symbolic link: ${file.path}` },
+      ]);
+    }
     let bytes: Uint8Array;
     try {
+      if (object_check.kind !== "ok") throw new Error("not a regular file");
       bytes = readFileSync(join(bundle_dir, ...file.path.split("/")));
     } catch {
       throw new BackupError("bundle_invalid", `object file is missing: ${file.path}`, [
