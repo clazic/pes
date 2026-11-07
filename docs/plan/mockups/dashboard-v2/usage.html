@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PES 대시보드 v2 시안 — 사용량(Go 사용량 계기 · 멈춤 · 재개)</title>
+<style>
+  /* PES 대시보드 v2 공통 스타일 — 시안마다 같은 블록을 그대로 넣는다(자기완결). 외부 글꼴·이미지 없음. */
+  :root {
+    color-scheme: light;
+    --bg: #f3f6f8;
+    --surface: #ffffff;
+    --surface-soft: #f8fafb;
+    --surface-sunk: #eef2f5;
+    --ink: #17202a;
+    --ink-2: #3d4852;
+    --muted: #5b6773;
+    --line: #d8e0e6;
+    --line-strong: #b9c7d2;
+    --control: #6b7785;
+    --accent: #1f5f8b;
+    --accent-dark: #184d70;
+    --accent-soft: #e8f1f7;
+    --accent-line: #a9c7dd;
+    --ok: #1f7a4d;
+    --ok-soft: #e6f4ec;
+    --ok-line: #a7d3bb;
+    --warn: #8a5a00;
+    --warn-soft: #fff4d6;
+    --warn-line: #e3c272;
+    --bad: #a33a3a;
+    --bad-soft: #fbeaea;
+    --bad-line: #e2aaaa;
+    --off: #3d4852;
+    --off-soft: #eef1f4;
+    --off-line: #c5ced6;
+    --mode-a: #9a4a00;
+    --mode-a-soft: #fdf0e6;
+    --mode-a-line: #f0c6a0;
+    --mode-b: #5b3a9e;
+    --mode-b-soft: #f1ecfb;
+    --mode-b-line: #cdbdf0;
+    --meter-track: #d6e6f2;
+    --meter-fill: #1f5f8b;
+    --meter-warn-track: #fdeac0;
+    --meter-warn-fill: #a56c00;
+    --meter-bad-track: #f6d4d4;
+    --meter-bad-fill: #b42f2f;
+    --radius: 10px;
+    --radius-s: 6px;
+    --shadow: 0 1px 2px rgba(23, 32, 42, 0.05);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1, h2, h3, h4 { margin: 0; line-height: 1.35; letter-spacing: -0.01em; }
+  h1 { font-size: 21px; }
+  h2 { font-size: 17px; }
+  h3 { font-size: 15px; }
+  h4 { font-size: 14px; }
+  p { margin: 0; }
+  p + p { margin-top: 6px; }
+  ul, ol { margin: 0; padding: 0; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--accent-dark); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  code, .mono { font-family: var(--mono); font-size: 0.92em; }
+  .wrap-any { overflow-wrap: anywhere; word-break: break-all; }
+  kbd {
+    display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid var(--line-strong);
+    border-bottom-width: 2px; border-radius: 4px; background: var(--surface-soft);
+    font-family: var(--font); font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--ink-2);
+  }
+  .vh {
+    position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .skip-link {
+    position: absolute; left: 12px; top: -60px; z-index: 100; padding: 8px 12px;
+    border: 2px solid var(--accent); border-radius: 6px; background: var(--surface);
+    color: var(--accent); font-weight: 800; text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+  .page { width: min(100%, 1600px); margin: 0 auto; padding: 16px 20px 48px; }
+  .stack > * + * { margin-top: 14px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .row.between { justify-content: space-between; }
+  .row.top { align-items: flex-start; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .tiny { font-size: 11.5px; }
+  .strong { font-weight: 800; }
+  .num { font-variant-numeric: tabular-nums; }
+  .nowrap { white-space: nowrap; }
+
+  /* 시안 설명(제품 화면이 아님) */
+  .mock-bar {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+    margin-bottom: 14px; padding: 10px 14px; border: 1px dashed var(--line-strong);
+    border-radius: var(--radius); background: #fbfcfd; color: var(--ink-2); font-size: 13px;
+  }
+  .mock-bar strong { color: var(--ink); }
+  .mock-bar nav ul { display: flex; flex-wrap: wrap; gap: 4px 12px; list-style: none; }
+  .anno {
+    margin-top: 10px; padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: 8px;
+    background: #fbfcfd; color: var(--ink-2); font-size: 12.5px; line-height: 1.6;
+  }
+  .anno-tag {
+    display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px;
+    background: var(--off-soft); color: var(--off); font-size: 11px; font-weight: 800; vertical-align: 1px;
+  }
+  .anno ul { margin: 4px 0 0 18px; }
+
+  /* 전역 머리줄 */
+  .gbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow);
+  }
+  .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 800; text-decoration: none; }
+  .brand-mark {
+    display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 26px;
+    border-radius: 6px; background: var(--ink); color: #fff; font-size: 12px; letter-spacing: 0.08em;
+  }
+  .gnav ul { display: flex; flex-wrap: wrap; gap: 2px; list-style: none; }
+  .gnav a {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 10px;
+    border-radius: 6px; color: var(--ink-2); font-size: 13px; font-weight: 700; text-decoration: none;
+  }
+  .gnav a:hover { background: var(--surface-soft); color: var(--ink); }
+  .gnav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-dark); }
+  .gbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+  .count {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+    padding: 0 6px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 800;
+  }
+  .count.quiet { background: var(--off-soft); color: var(--off); }
+  .user { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+  .avatar {
+    display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+    border-radius: 50%; background: var(--accent-soft); color: var(--accent-dark); font-size: 12px; font-weight: 800;
+  }
+
+  /* 버튼 */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px;
+    padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+    color: var(--ink); font-size: 13.5px; font-weight: 700; line-height: 1.3; text-decoration: none; white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface-soft); color: var(--ink); }
+  .btn-primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .btn-primary:hover { border-color: var(--accent-dark); background: var(--accent-dark); color: #fff; }
+  .btn-danger { border-color: var(--bad); color: var(--bad); }
+  .btn-danger:hover { background: var(--bad-soft); color: var(--bad); }
+  .btn-small { min-height: 30px; padding: 3px 10px; font-size: 12.5px; }
+  .btn[aria-disabled="true"] { border-color: var(--line); background: var(--surface-sunk); color: var(--muted); cursor: not-allowed; }
+  .btn[aria-disabled="true"]:hover { background: var(--surface-sunk); color: var(--muted); }
+  .link-button {
+    padding: 2px 1px; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 700;
+    text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  }
+  .link-button[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
+  .btn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .btn-row.end { justify-content: flex-end; }
+
+  /* 상태 표기: 모양 + 글자 + 색. 모양은 테두리로 그려 강제 색 모드에서도 남는다. */
+  .st {
+    display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 8px; border: 1px solid var(--off-line);
+    border-radius: 999px; background: var(--off-soft); color: var(--off); font-size: 12px; font-weight: 800;
+    line-height: 1.6; white-space: nowrap; vertical-align: middle;
+  }
+  .st.ok { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok); }
+  .st.run { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-dark); }
+  .st.you { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .st.warn { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+  .st.bad { border-color: var(--bad-line); background: var(--bad-soft); color: var(--bad); }
+  .st.off { border-color: var(--off-line); background: var(--off-soft); color: var(--off); }
+  .st.unk { border: 1px dashed var(--control); background: var(--surface); color: var(--ink-2); }
+  .st.plain { border-color: transparent; background: transparent; padding-left: 0; }
+  .mk { display: inline-block; flex: none; width: 9px; height: 9px; }
+  .mk.circle { border: 4.5px solid currentColor; border-radius: 50%; }
+  .mk.ring { border: 2px solid currentColor; border-radius: 50%; }
+  .mk.dot-ring { border: 2px dotted currentColor; border-radius: 50%; width: 10px; height: 10px; }
+  .mk.square { border: 4.5px solid currentColor; border-radius: 1px; }
+  .mk.hsquare { border: 2px solid currentColor; border-radius: 1px; }
+  .mk.diamond { width: 8px; height: 8px; border: 4px solid currentColor; transform: rotate(45deg); }
+  .mk.tri { width: 0; height: 0; border-right: 5px solid transparent; border-bottom: 9px solid currentColor; border-left: 5px solid transparent; }
+  .mk.pause { width: 8px; height: 9px; border-right: 3px solid currentColor; border-left: 3px solid currentColor; }
+  .mk.dash { width: 10px; height: 0; border-top: 2px solid currentColor; }
+
+  /* 방식 배지 */
+  .mode {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid; border-radius: 5px;
+    font-size: 12px; font-weight: 800; line-height: 1.6; white-space: nowrap; vertical-align: middle;
+  }
+  .mode.a { border-color: var(--mode-a-line); background: var(--mode-a-soft); color: var(--mode-a); }
+  .mode.b { border-color: var(--mode-b-line); background: var(--mode-b-soft); color: var(--mode-b); }
+  .tag {
+    display: inline-flex; align-items: center; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 5px;
+    background: var(--surface-soft); color: var(--ink-2); font-size: 11.5px; font-weight: 800; line-height: 1.7; white-space: nowrap;
+  }
+  .tag.acc { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-dark); }
+  .tag.warn { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+  .tag.bad { border-color: var(--bad-line); background: var(--bad-soft); color: var(--bad); }
+  .tag.ok { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok); }
+
+  /* 카드·패널 */
+  .card {
+    min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface); box-shadow: var(--shadow);
+  }
+  .card.tight { padding: 12px 14px; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .card-head > div { min-width: 0; }
+  .eyebrow { margin-bottom: 2px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: 0.02em; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .cards { display: grid; gap: 12px; align-items: stretch; }
+  .cards > * { min-width: 0; }
+  .c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .section-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin: 26px 0 10px; }
+  .section-title h2 { font-size: 18px; }
+  .section-title p { color: var(--muted); font-size: 13px; }
+  .divider { height: 1px; margin: 12px 0; background: var(--line); border: 0; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); font-weight: 700; }
+  .kv dd { margin: 0; min-width: 0; }
+
+  /* 지금 할 일 */
+  .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: start; border-left: 5px solid var(--accent); }
+  .now.bad { border-left-color: var(--bad); }
+  .now.warn { border-left-color: var(--warn); }
+  .now.ok { border-left-color: var(--ok); }
+  .now h2 { font-size: 18px; }
+  .now .now-text { color: var(--ink-2); font-size: 13.5px; }
+  .now .now-act { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .now .then { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
+  .then .then-label { color: var(--muted); font-weight: 800; }
+  .mini { display: flex; flex-direction: column; gap: 6px; }
+  .mini h3 { font-size: 14px; }
+  .mini .line { font-size: 13px; color: var(--ink-2); }
+  .mini .foot { margin-top: auto; padding-top: 6px; font-size: 12.5px; }
+
+  /* 상태 줄 */
+  .strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); overflow: hidden; }
+  .strip > div { min-width: 0; padding: 6px 10px; border-right: 1px solid var(--line); }
+  .strip > div:last-child { border-right: 0; }
+  .strip .k { display: block; color: var(--muted); font-size: 11.5px; font-weight: 700; }
+  .strip .v { display: block; font-size: 13px; font-weight: 800; }
+
+  /* 표 */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  caption { padding: 0 0 8px; color: var(--ink); font-size: 14px; font-weight: 800; text-align: left; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  thead th { border-bottom: 1px solid var(--line-strong); background: var(--surface-soft); color: var(--ink-2); font-size: 12px; font-weight: 800; }
+  tbody th { font-weight: 700; }
+  tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.is-selected td, tr.is-selected th { background: var(--accent-soft); }
+  .cell-sub { display: block; color: var(--muted); font-size: 12px; }
+
+  /* 입력 */
+  .field { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 800; }
+  input[type="text"], input[type="number"], input[type="search"], input[type="datetime-local"], select, textarea {
+    width: 100%; min-height: 36px; padding: 6px 10px; border: 1px solid var(--control); border-radius: 7px; background: var(--surface);
+  }
+  textarea { min-height: 64px; resize: vertical; line-height: 1.55; }
+  input[type="radio"], input[type="checkbox"] { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); flex: none; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  legend .hint, .field .hint, caption .hint, h2 .hint, h3 .hint { font-weight: 400; }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  legend { margin-bottom: 6px; padding: 0; font-size: 13px; font-weight: 800; }
+  .choice { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .choice.is-on { border-color: var(--accent); background: var(--accent-soft); }
+  .choice .choice-body { min-width: 0; }
+  .check-line { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; font-size: 13px; }
+
+  /* 스위치(role="switch") */
+  .switch { display: inline-flex; align-items: center; gap: 8px; padding: 2px 0; border: 0; background: none; color: var(--ink); font-size: 13px; font-weight: 800; }
+  .switch .track { position: relative; flex: none; width: 40px; height: 22px; border: 2px solid var(--control); border-radius: 999px; background: var(--surface); }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--control); }
+  .switch[aria-checked="true"] .track { border-color: var(--ok); background: var(--ok); }
+  .switch[aria-checked="true"] .track::after { left: 20px; background: #fff; }
+  .switch .sw-state { min-width: 30px; text-align: left; }
+  .switch[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
+  .switch[aria-disabled="true"] .track { border-style: dashed; }
+
+  /* 계기 */
+  .meter { position: relative; height: 12px; margin: 14px 0 26px; border-radius: 999px; background: var(--meter-track); }
+  .meter .fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; background: var(--meter-fill); }
+  .meter.warn { background: var(--meter-warn-track); }
+  .meter.warn .fill { background: var(--meter-warn-fill); }
+  .meter.bad { background: var(--meter-bad-track); }
+  .meter.bad .fill { background: var(--meter-bad-fill); }
+  .meter .th { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
+  .meter .th-label { position: absolute; top: 100%; margin-top: 8px; transform: translateX(-50%); color: var(--ink-2); font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+
+  /* 안내 상자 */
+  .callout { padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface); font-size: 13px; }
+  .callout.warn { border-color: var(--warn-line); border-left-color: var(--warn); background: var(--warn-soft); }
+  .callout.bad { border-color: var(--bad-line); border-left-color: var(--bad); background: var(--bad-soft); }
+  .callout.ok { border-color: var(--ok-line); border-left-color: var(--ok); background: var(--ok-soft); }
+  .callout.off { border-left-color: var(--control); background: var(--surface-soft); }
+  .callout strong { color: var(--ink); }
+
+  /* 확인 대화 상자 예시(실제 화면은 <dialog> + 초점 가두기·복귀) */
+  .dialog { max-width: 640px; padding: 18px 20px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 10px 30px rgba(23, 32, 42, 0.16); }
+  .dialog h3 { font-size: 16px; }
+  .dialog .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .dialog ul.facts { margin: 8px 0 0 18px; font-size: 13px; }
+  .dialog ul.facts li + li { margin-top: 4px; }
+
+  /* 목록 */
+  .plain-list { list-style: none; }
+  .plain-list > li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .plain-list > li:last-child { border-bottom: 0; }
+  .bullets { margin-left: 18px; }
+  .bullets li + li { margin-top: 3px; }
+
+  /* 탭(시안 안 보기 전환) */
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs a, .tabs span.tab {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; margin-bottom: -1px; padding: 6px 12px;
+    border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--ink-2);
+    font-size: 13px; font-weight: 800; text-decoration: none;
+  }
+  .tabs a[aria-current="page"], .tabs span.tab.is-on { border-color: var(--line); background: var(--surface); color: var(--accent-dark); }
+
+  /* 순서 있는 단계 */
+  .steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; }
+  .steps li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+  .steps .n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--off-soft); color: var(--off); font-size: 11px; font-weight: 800; }
+  .steps li.done .n { background: var(--ok); color: #fff; }
+  .steps li.cur { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
+  .steps li.cur .n { background: var(--accent); color: #fff; }
+
+  /* 시간 줄 */
+  .timeline { list-style: none; }
+  .timeline > li { position: relative; padding: 0 0 12px 22px; }
+  .timeline > li::before { content: ""; position: absolute; top: 18px; bottom: -2px; left: 5px; width: 2px; background: var(--line); }
+  .timeline > li:last-child::before { display: none; }
+  .timeline > li > .mk { position: absolute; top: 6px; left: 1px; }
+  .timeline .t-time { color: var(--muted); font-size: 12px; font-weight: 700; }
+  .timeline .t-title { font-weight: 800; }
+  .timeline .t-body { color: var(--ink-2); font-size: 13px; }
+
+  /* 인용 칩 */
+  .cite { display: inline-flex; align-items: baseline; gap: 4px; margin: 0 2px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-soft); color: var(--ink-2); font-size: 12px; font-weight: 700; text-decoration: none; white-space: normal; }
+  .cite:hover { border-color: var(--accent); color: var(--accent-dark); }
+  .cite.ref { border-color: var(--mode-b-line); background: var(--mode-b-soft); color: var(--mode-b); }
+  .cite.file { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok); }
+  .cite.warn { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+
+  /* 반응형: 1280 미만은 한 열, 900 미만(휴대폰 폭)은 촘촘하게 */
+  @media (max-width: 1279px) {
+    .c4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .strip > div:nth-child(3n) { border-right: 0; }
+    .strip > div:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+  }
+  @media (max-width: 899px) {
+    .page { padding: 10px 10px 40px; }
+    .c2, .c3, .c4, .c5 { grid-template-columns: minmax(0, 1fr); }
+    .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .strip > div { border-bottom: 1px solid var(--line); }
+    .strip > div:nth-child(3n) { border-right: 1px solid var(--line); }
+    .strip > div:nth-child(2n) { border-right: 0; }
+    .now { grid-template-columns: minmax(0, 1fr); }
+    .now .now-act { align-items: stretch; }
+    .gbar-right { margin-left: 0; }
+  }
+  @media (pointer: coarse) {
+    .btn { min-height: 44px; }
+    .btn-small { min-height: 40px; }
+    .gnav a { min-height: 44px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+  }
+  @media print {
+    .mock-bar, .anno, .skip-link { display: none !important; }
+    body, html { background: #fff; }
+    .card { box-shadow: none; }
+  }
+
+  .gauge h3 { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+  .gauge .big { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+  .gauge .big strong { font-size: 32px; line-height: 1.1; }
+  .gauge dl { margin-top: 2px; }
+  .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+  .base-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .base-inputs input { text-align: right; }
+  .checklist { list-style: none; }
+  .checklist li { display: grid; grid-template-columns: 210px minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .checklist li:last-child { border-bottom: 0; }
+  .checklist li > .st { justify-self: end; }
+  .rank { list-style: none; margin-top: 8px; }
+  .rank li { display: grid; grid-template-columns: 210px minmax(0, 1fr) 56px; gap: 10px; align-items: center; padding: 5px 0; font-size: 13px; }
+  .rank .bar { position: relative; height: 14px; }
+  .rank .bar span { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 0 4px 4px 0; background: var(--meter-fill); }
+  .rank .bar span.ext { background: #8a97a3; }
+  .rank .val { font-variant-numeric: tabular-nums; text-align: right; font-weight: 800; }
+  .rank li:focus-within, .rank li:hover { background: var(--surface-soft); }
+  .rank .tip { display: none; grid-column: 1 / -1; color: var(--ink-2); font-size: 12px; }
+  .rank li:hover .tip, .rank li:focus .tip { display: block; }
+  .flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; list-style: none; margin-top: 10px; }
+  .flow li { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; }
+  .flow li.past { background: var(--surface-soft); }
+  .flow li.now-step { border: 2px solid var(--accent); padding: 7px 9px; }
+  .flow .f-time { display: block; color: var(--muted); font-weight: 800; }
+  .flow .f-title { display: block; margin: 2px 0; color: var(--ink); font-weight: 800; }
+  .mini-meter { position: relative; height: 8px; margin-top: 4px; border-radius: 999px; background: var(--meter-track); }
+  .mini-meter span { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; background: var(--meter-fill); }
+  .mini-meter.warn { background: var(--meter-warn-track); }
+  .mini-meter.warn span { background: var(--meter-warn-fill); }
+  @media (max-width: 1279px) {
+    .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .two-col { grid-template-columns: minmax(0, 1fr); }
+    .checklist li { grid-template-columns: minmax(0, 1fr) auto; }
+    .checklist li > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  }
+  @media (max-width: 899px) {
+    .flow { grid-template-columns: minmax(0, 1fr); }
+    .rank li { grid-template-columns: minmax(0, 1fr) 56px; }
+    .rank .bar { grid-column: 1 / -1; grid-row: 2; }
+    .base-inputs { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<div class="page">
+  <div class="mock-bar" role="note" aria-label="시안 설명">
+    <p><strong>시안 · 사용량</strong> — 방식 A 실행이 Go 사용량 멈춤 문턱(90%)에 걸려 멈춘 뒤의 화면(16:12 기준). 계기 3개, Extra Usage 꺼짐 확인, 다른 앱 사용량 기준점, 재개 준비 검사, 확인 안 된 호출 정리, 웹 운영 한도(관리자). 수치는 합성 예시입니다.</p>
+    <nav aria-label="시안 이동"><ul><li><a href="index.html">시안 목록</a></li><li><a href="#blocked">멈춘 실행</a></li><li><a href="#flow">멈춤에서 재개까지</a></li><li><a href="#ops">운영 한도</a></li><li><a href="#states">상태 견본</a></li></ul></nav>
+  </div>
+
+  <header class="gbar" aria-label="PES 전역 머리줄">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">PES</span><span>연구 작업대</span></a>
+    <nav class="gnav" aria-label="전역 메뉴">
+      <ul>
+        <li><a href="workspace.html">프로젝트</a></li>
+        <li><a href="#">내 차례 <span class="count" aria-label="4건">4</span></a></li>
+        <li><a href="#">내 컴퓨터</a></li>
+        <li><a href="#" aria-current="page">사용량</a></li>
+        <li><a href="#">알림 <span class="count" aria-label="안 읽음 3건">3</span></a></li>
+      </ul>
+    </nav>
+    <div class="gbar-right"><span class="user"><span class="avatar" aria-hidden="true">김</span>김연구 · Go 구독 관리자</span></div>
+  </header>
+
+  <main id="main">
+    <div class="section-title">
+      <h1>사용량</h1>
+      <p>OpenCode Go 구독 계정 1개 · 모든 방식 A 프로젝트가 함께 씁니다 · 모든 수치는 PES 추정입니다</p>
+    </div>
+    <div class="tabs" aria-label="사용량 보기">
+      <span class="tab is-on" aria-current="true">Go 사용량</span>
+      <a href="#ops">웹 운영 한도 · 관리자</a>
+    </div>
+
+    <article class="card now bad" style="margin-top:12px" aria-labelledby="now-t">
+      <div>
+        <p class="eyebrow">지금 할 일 · 막힘</p>
+        <h2 id="now-t">방식 A 실행 1건이 Go 사용량 때문에 멈췄습니다</h2>
+        <p class="now-text">청년 주거 지원 효과(가상) · 기획 R1 · 15:52 멈춤 · 5시간 구간 추정 91%(문턱 90%). 재개 가능 시각 16:40(PES 추정). 그 전에 확인 안 된 호출 1건을 정리해 주세요.</p>
+      </div>
+      <div class="now-act"><a class="btn btn-primary" href="#unknown">확인 안 된 호출 정리</a><a class="btn" href="#blocked">멈춘 실행 보기</a></div>
+      <div class="then"><span class="then-label">그다음</span><a href="#extra">Extra Usage 꺼짐 확인 — 11-12에 만료</a><span class="muted">멈춘 동안에도 답·첨언·자료 올리기는 됩니다</span></div>
+    </article>
+
+    <section aria-labelledby="g-title">
+      <div class="section-title"><h2 id="g-title">Go 사용량 계기 · 추정</h2><p>PES가 센 사용 + 다른 앱 기준점. 세 구간 중 하나라도 문턱에 닿으면 새 호출을 멈춥니다.</p></div>
+      <div class="cards c3">
+        <article class="card gauge" aria-labelledby="g5">
+          <h3 id="g5"><span>5시간 구간</span><span class="st bad"><span class="mk square" aria-hidden="true"></span>문턱 넘음 · 멈춤</span></h3>
+          <p class="big"><strong>91%</strong><span class="tag">추정</span></p>
+          <div class="meter bad" role="img" aria-label="5시간 구간 추정 사용률 91%, 멈춤 문턱 90%"><span class="fill" style="width:91%"></span><span class="th" style="left:90%"></span><span class="th-label" style="left:90%">문턱 90%</span></div>
+          <dl class="kv"><dt>PES가 셈</dt><dd>71% · 실행 3건</dd><dt>기준점</dt><dd>20% · 11-05 15:30 입력</dd><dt>재개 가능</dt><dd><strong>16:40</strong> PES 추정 — 5시간 전 사용분이 빠지는 시각</dd></dl>
+        </article>
+        <article class="card gauge" aria-labelledby="gw">
+          <h3 id="gw"><span>주간</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></h3>
+          <p class="big"><strong>64%</strong><span class="tag">추정</span></p>
+          <div class="meter" role="img" aria-label="주간 추정 사용률 64%, 멈춤 문턱 90%"><span class="fill" style="width:64%"></span><span class="th" style="left:90%"></span><span class="th-label" style="left:90%">문턱 90%</span></div>
+          <dl class="kv"><dt>PES가 셈</dt><dd>41% · 실행 9건</dd><dt>기준점</dt><dd>23% · 11-05 15:30 입력</dd><dt>다시 채워짐</dt><dd>확인 안 됨 — Go가 알려 주지 않음</dd></dl>
+        </article>
+        <article class="card gauge" aria-labelledby="gm">
+          <h3 id="gm"><span>월간</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></h3>
+          <p class="big"><strong>38%</strong><span class="tag">추정</span></p>
+          <div class="meter" role="img" aria-label="월간 추정 사용률 38%, 멈춤 문턱 90%"><span class="fill" style="width:38%"></span><span class="th" style="left:90%"></span><span class="th-label" style="left:90%">문턱 90%</span></div>
+          <dl class="kv"><dt>PES가 셈</dt><dd>23% · 실행 21건</dd><dt>기준점</dt><dd>15% · 11-05 15:30 입력</dd><dt>다시 채워짐</dt><dd>12-01 — 구독 주기(사람이 입력)</dd></dl>
+        </article>
+      </div>
+      <details class="card" style="margin-top:10px">
+        <summary><strong>표로 보기</strong> — 계기와 같은 숫자</summary>
+        <div class="table-wrap" style="margin-top:8px">
+          <table>
+            <caption class="vh">Go 사용량 추정 표</caption>
+            <thead><tr><th scope="col">구간</th><th scope="col" class="num">추정</th><th scope="col" class="num">PES가 셈</th><th scope="col" class="num">기준점</th><th scope="col" class="num">문턱</th><th scope="col">상태</th><th scope="col">재개·재설정</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">5시간</th><td class="num">91%</td><td class="num">71%</td><td class="num">20%</td><td class="num">90%</td><td>문턱 넘음</td><td>16:40 PES 추정</td></tr>
+              <tr><th scope="row">주간</th><td class="num">64%</td><td class="num">41%</td><td class="num">23%</td><td class="num">90%</td><td>여유</td><td>확인 안 됨</td></tr>
+              <tr><th scope="row">월간</th><td class="num">38%</td><td class="num">23%</td><td class="num">15%</td><td class="num">90%</td><td>여유</td><td>12-01 사람이 입력</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <p class="anno"><span class="anno-tag">설명</span>Go 구독의 공식 사용량 조회 방법은 아직 확인되지 않았습니다(PR19 확인 대상). 그래서 PES가 호출마다 센 토큰으로 한도(월 금액의 100%·50%·20%) 대비 사용률을 추정하고, 다른 앱 사용량은 사람이 적은 기준점으로만 더합니다. 모르는 값은 0으로 쓰지 않습니다. 주의 색은 문턱 10%p 아래(80%)부터입니다. 금액 상한은 따로 두지 않습니다.</p>
+    </section>
+
+    <div class="two-col" style="margin-top:14px">
+      <section class="card" id="extra" aria-labelledby="ex-t">
+        <div class="card-head"><div><p class="eyebrow">방식 A를 시작하기 전 확인</p><h2 id="ex-t">Extra Usage 꺼짐 확인</h2></div><span class="st ok"><span class="mk circle" aria-hidden="true"></span>확인됨</span></div>
+        <dl class="kv">
+          <dt>마지막 확인</dt><dd>11-05 09:10 · 김연구</dd>
+          <dt>유효</dt><dd>11-12 09:10까지 (7일 — 예시값, 10절 질문 1)</dd>
+          <dt>범위</dt><dd>Go 구독 계정 1개 (표시 이름만 저장)</dd>
+        </dl>
+        <p class="small" style="margin-top:8px">PES는 콘솔 설정을 직접 볼 수 없습니다. OpenCode 콘솔에서 Extra Usage(종량제 잔액)가 꺼져 있는 것을 본 뒤 눌러 주세요. 확인이 없거나 지나면 방식 A를 시작하지 않습니다. 응답에 과금 표시가 보이면 즉시 멈춥니다.</p>
+        <div class="btn-row" style="margin-top:10px"><button class="btn btn-primary" type="button">콘솔에서 다시 확인함 — 지금 시각 기록</button><button class="btn" type="button">확인 방법 보기</button></div>
+      </section>
+      <section class="card" id="base" aria-labelledby="bs-t">
+        <div class="card-head"><div><p class="eyebrow">PES가 못 보는 사용량</p><h2 id="bs-t">다른 앱에서 쓴 Go 사용량(기준점)</h2></div><span class="st ok"><span class="mk circle" aria-hidden="true"></span>입력됨 · 15:30</span></div>
+        <p class="small">같은 구독을 OpenCode TUI·앱 같은 다른 도구로도 쓰면 PES는 그 양을 모릅니다. 콘솔에서 본 사용률을 적어 주세요.</p>
+        <div class="base-inputs">
+          <div><label class="field" for="b5">5시간 %</label><input type="number" id="b5" value="20" min="0" max="100"></div>
+          <div><label class="field" for="bw">주간 %</label><input type="number" id="bw" value="23" min="0" max="100"></div>
+          <div><label class="field" for="bm">월간 %</label><input type="number" id="bm" value="15" min="0" max="100"></div>
+        </div>
+        <label class="check-line" for="b-none"><input type="checkbox" id="b-none"><span>다른 앱에서 이 구독을 쓰지 않습니다 <span class="hint">(0으로 기록 · 7일마다 다시 확인 — 10절 질문 1)</span></span></label>
+        <div class="btn-row" style="margin-top:10px"><button class="btn" type="button">기준점 저장</button><span class="hint">비어 있거나 오래되면 방식 A를 시작하지 않습니다.</span></div>
+      </section>
+    </div>
+
+    <section class="card" id="blocked" style="margin-top:14px" aria-labelledby="bl-t">
+      <div class="card-head"><div><p class="eyebrow">멈춘 실행 1 · 소유자가 재개</p><h2 id="bl-t">청년 주거 지원 효과(가상) · 기획 R1 · 실행 R1-2</h2></div><span class="st bad"><span class="mk square" aria-hidden="true"></span>사용량 때문에 멈춤</span></div>
+      <dl class="kv">
+        <dt>멈춘 시각</dt><dd>15:52 · 담당을 놓음(다른 실행이 대신 잡지 않음)</dd>
+        <dt>사유</dt><dd>사용량 문턱 — 5시간 구간 추정 91% ≥ 90%</dd>
+        <dt>모델</dt><dd><code>opencode-go/deepseek-v4.1-flash</code> · 재개해도 같은 모델(다른 모델로 바꾸지 않음)</dd>
+        <dt>재개 가능</dt><dd>16:40 PES 추정 · 지나도 저절로 다시 시작하지 않음</dd>
+      </dl>
+      <h3 style="margin-top:14px">재개 준비 검사 <span class="hint">(누를 때 서버가 한 번 더 검사)</span></h3>
+      <ul class="checklist" style="margin-top:6px">
+        <li><span class="strong">Go 전송 정책</span><span>켜짐 · 정책 3번</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>통과</span></li>
+        <li><span class="strong">Extra Usage 꺼짐 확인</span><span>11-12 09:10까지 유효</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>통과</span></li>
+        <li><span class="strong">다른 앱 사용량 기준점</span><span>15:30 입력</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>통과</span></li>
+        <li><span class="strong">추정 사용량</span><span>5시간 91% — 문턱 90% 아래로 내려가야 함 · 16:40 예상 84%</span><span class="st bad"><span class="mk square" aria-hidden="true"></span>아직</span></li>
+        <li><span class="strong">확인 안 된 호출</span><span>1건 — 사람이 정리해야 함</span><span class="st bad"><span class="mk square" aria-hidden="true"></span>아직</span></li>
+        <li><span class="strong">모델</span><span>목록에 있음 · 사용 가능</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>통과</span></li>
+        <li><span class="strong">사람 답</span><span>필요 없음 — 질문 대기로 멈춘 것이 아님</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>통과</span></li>
+      </ul>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-primary" type="button" aria-disabled="true" aria-describedby="cont-why">계속</button>
+        <button class="btn" type="button">다른 방식으로 넘기기</button>
+        <button class="btn" type="button">실행 취소</button>
+      </div>
+      <p class="hint" id="cont-why" style="margin-top:6px">계속은 모든 항목을 통과하면 켜집니다(소유자). 누르면 새 담당으로 이어 가고, 이미 저장된 결과는 다시 만들지 않습니다.</p>
+    </section>
+
+    <section class="card" id="unknown" style="margin-top:14px" aria-labelledby="uk-t">
+      <div class="card-head"><div><p class="eyebrow">확인 안 된 호출 1 · 소유자가 정리</p><h2 id="uk-t">Go가 처리했는지 모르는 호출</h2></div><span class="st bad"><span class="mk square" aria-hidden="true"></span>확인 안 됨</span></div>
+      <div class="table-wrap" role="region" aria-label="확인 안 된 호출" tabindex="0">
+        <table>
+          <caption class="vh">확인 안 된 호출 목록</caption>
+          <thead><tr><th scope="col">실행</th><th scope="col">시각</th><th scope="col">무슨 일</th><th scope="col">사용량 예약</th><th scope="col">정리</th></tr></thead>
+          <tbody>
+            <tr><td>R1-2 · 기획 R1</td><td class="num">15:51</td><td>응답을 받기 전에 연결이 끊겼습니다. Go가 처리했는지 알 수 없습니다.</td><td>최대 출력 8,000토큰 예약 유지</td><td><div class="btn-row"><button class="btn btn-small" type="button">처리됨으로 정리</button><button class="btn btn-small" type="button">처리 안 됨으로 정리</button></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin-top:6px">PES는 같은 호출을 자동으로 다시 하지 않습니다. 콘솔 사용 내역을 보고 정리해 주세요. 정리 전까지 예약은 사용량에 남아 있고, 정리한 사람·시각·이유가 기록됩니다.</p>
+    </section>
+
+    <section class="card" id="flow" style="margin-top:14px" aria-labelledby="fl-t">
+      <h2 id="fl-t">멈춤에서 재개까지 <span class="hint">(지금 16:12)</span></h2>
+      <ol class="flow">
+        <li class="past"><span class="f-time">14:30</span><span class="f-title">실행 시작</span>김연구 · 추정 62%</li>
+        <li class="past"><span class="f-time">15:51</span><span class="f-title">응답 유실</span>확인 안 된 호출 1 · 예약 유지</li>
+        <li class="past"><span class="f-time">15:52</span><span class="f-title">사용량 때문에 멈춤</span>91% ≥ 90% · 담당 놓음 · 알림</li>
+        <li class="now-step"><span class="f-time">지금</span><span class="f-title">사람이 정리</span>확인 안 된 호출 정리하기</li>
+        <li><span class="f-time">16:40</span><span class="f-title">재개 가능 시각</span>추정 84% 예상</li>
+        <li><span class="f-time">그 뒤</span><span class="f-title">준비 검사 통과</span>“재개 준비됨” 알림</li>
+        <li><span class="f-time">사람이 누름</span><span class="f-title">계속</span>서버 재검사 · 새 담당</li>
+      </ol>
+      <p class="anno"><span class="anno-tag">설명</span>사용량 멈춤은 “내 답 기다림”과 다른 상태입니다. 멈춘 동안에도 사람은 답·첨언·자료 올리기를 할 수 있습니다. 재개 가능 시각이 지나거나 사용량이 줄어도 PES는 저절로 다시 시작하지 않습니다(자동 재개 옵션도 이 경우에는 쓰지 않음).</p>
+    </section>
+
+    <div class="two-col" style="margin-top:14px">
+      <section class="card" aria-labelledby="rk-t">
+        <h2 id="rk-t">이번 주 사용량을 쓴 곳 <span class="hint">(주간 64% 중)</span></h2>
+        <ol class="rank" aria-label="사용량 순위">
+          <li tabindex="0"><span>다른 앱(기준점)</span><span class="bar" aria-hidden="true"><span class="ext" style="width:36%"></span></span><span class="val">23%p</span><span class="tip">사람이 적은 기준점 · PES가 나눌 수 없음</span></li>
+          <li tabindex="0"><span>청년 주거 · R1-2 (멈춤)</span><span class="bar" aria-hidden="true"><span style="width:34%"></span></span><span class="val">22%p</span><span class="tip">기획 R1 · 호출 31회 · 확인 안 된 호출 1 포함</span></li>
+          <li tabindex="0"><span>청년 주거 · R1-1</span><span class="bar" aria-hidden="true"><span style="width:19%"></span></span><span class="val">12%p</span><span class="tip">기획 R1 · 끝남</span></li>
+          <li tabindex="0"><span>청년 주거 · 검토 R1-r</span><span class="bar" aria-hidden="true"><span style="width:11%"></span></span><span class="val">7%p</span><span class="tip">독립 검토 실행 · 같은 모델</span></li>
+        </ol>
+        <p class="hint" style="margin-top:6px">파란 막대는 PES가 센 실행, 회색은 다른 앱 기준점입니다. 값은 막대 끝 숫자로 모두 보입니다.</p>
+      </section>
+      <section class="card" aria-labelledby="ps-t">
+        <h2 id="ps-t">프로젝트별 설정 <span class="hint">(소유자만 바꿈)</span></h2>
+        <div class="table-wrap" style="margin-top:8px">
+          <table>
+            <caption class="vh">프로젝트별 방식 A 설정</caption>
+            <thead><tr><th scope="col">프로젝트</th><th scope="col">방식</th><th scope="col">모델</th><th scope="col" class="num">문턱</th><th scope="col">상태</th></tr></thead>
+            <tbody>
+              <tr><td>청년 주거 지원 효과(가상)</td><td><span class="mode a">A</span></td><td><code>deepseek-v4.1-flash</code></td><td class="num">90%</td><td><span class="st bad"><span class="mk square" aria-hidden="true"></span>멈춤 1</span></td></tr>
+              <tr><td>농촌 의료 접근성 개선 연구(가상)</td><td><span class="mode a">A</span></td><td><code>deepseek-v4.1-flash</code></td><td class="num">90%</td><td><span class="st off"><span class="mk dash" aria-hidden="true"></span>실행 없음</span></td></tr>
+              <tr><td>지역 돌봄 인력 수급 개선 연구(가상)</td><td><span class="mode b">B</span></td><td>도구에서 고름</td><td class="num">—</td><td>B 비용은 PES가 막지 못함</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="hint" style="margin-top:6px">문턱은 프로젝트마다 정하지만 사용량은 한 구독을 함께 씁니다. 계기에는 가장 낮은 문턱을 그립니다.</p>
+      </section>
+    </div>
+
+    <section class="card" id="ops" style="margin-top:14px" aria-labelledby="ops-t">
+      <div class="card-head"><div><p class="eyebrow">웹 운영 한도 · 관리자 · 5단계(WEB12)</p><h2 id="ops-t">무료 요금제 사용률</h2></div><span class="st ok"><span class="mk circle" aria-hidden="true"></span>모두 80% 아래</span></div>
+      <div class="table-wrap" role="region" aria-label="웹 운영 한도" tabindex="0">
+        <table>
+          <caption class="vh">웹 운영 한도 사용률</caption>
+          <colgroup><col style="width:20%"><col style="width:18%"><col style="width:18%"><col style="width:26%"><col style="width:18%"></colgroup>
+          <thead><tr><th scope="col">자원</th><th scope="col" class="num">사용</th><th scope="col" class="num">무료 한도</th><th scope="col">사용률</th><th scope="col">상태</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">요청(하루)</th><td class="num">4,380</td><td class="num">100,000</td><td>4%<div class="mini-meter" role="img" aria-label="4%"><span style="width:4%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></td></tr>
+            <tr><th scope="row">DB 읽기(하루)</th><td class="num">13,200행</td><td class="num">5,000,000행</td><td>0.3%<div class="mini-meter" role="img" aria-label="0.3%"><span style="width:1%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></td></tr>
+            <tr><th scope="row">DB 쓰기(하루)</th><td class="num">1,050행</td><td class="num">100,000행</td><td>1%<div class="mini-meter" role="img" aria-label="1%"><span style="width:1%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></td></tr>
+            <tr><th scope="row">DB 크기</th><td class="num">182MB</td><td class="num">350MB 안전선</td><td>52%<div class="mini-meter" role="img" aria-label="52%"><span style="width:52%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></td></tr>
+            <tr><th scope="row">파일 저장(달)</th><td class="num">7.1GB</td><td class="num">10GB</td><td>71%<div class="mini-meter" role="img" aria-label="71%"><span style="width:71%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유 · 초과분은 과금</span></td></tr>
+            <tr><th scope="row">실행 단계(하루)</th><td class="num">980</td><td class="num">3,000</td><td>33%<div class="mini-meter" role="img" aria-label="33%"><span style="width:33%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></td></tr>
+            <tr><th scope="row">알림 메일(하루)</th><td class="num">41</td><td class="num">100</td><td>41%<div class="mini-meter" role="img" aria-label="41%"><span style="width:41%"></span></div></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></td></tr>
+            <tr><th scope="row">실시간 연결 요청</th><td class="num">미확인</td><td class="num">미확인</td><td>—</td><td><span class="st unk"><span class="mk dot-ring" aria-hidden="true"></span>미확인 · 0으로 쓰지 않음</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="anno"><span class="anno-tag">설명</span>80%에서 알리고 90%에서 줄입니다(갱신 간격 늘리기·급하지 않은 알림·백업 미루기·새 실행 막기). “새 실행 막기”는 한도를 지켰다는 증명이 아닙니다. 파일 저장은 무료량을 넘으면 과금되므로 실제 비용이 생기기 전에 사용자에게 묻습니다. 플랫폼 이름과 한도는 WEB0 실측 뒤 확정합니다.</p>
+    </section>
+
+    <section id="states" aria-labelledby="st-t">
+      <div class="section-title"><h2 id="st-t">상태 견본</h2><p>사용량 관련 상태는 근거와 함께 보입니다.</p></div>
+      <div class="cards c2">
+        <div class="card">
+          <table>
+            <caption>멈춘 사유 (실행 상태 “사용량 때문에 멈춤”)</caption>
+            <thead><tr><th scope="col">표시</th><th scope="col">뜻 · 사람이 할 일</th></tr></thead>
+            <tbody>
+              <tr><td><span class="st bad"><span class="mk square" aria-hidden="true"></span>사용량 문턱·한도</span></td><td>추정이 문턱에 닿았거나 Go가 한도 오류를 줌 · 재개 가능 시각까지 기다리기</td></tr>
+              <tr><td><span class="st bad"><span class="mk square" aria-hidden="true"></span>Extra Usage 확인 필요</span></td><td>꺼짐 확인이 없거나 지남 · 콘솔 확인 후 기록</td></tr>
+              <tr><td><span class="st bad"><span class="mk square" aria-hidden="true"></span>사용량 확인 불가</span></td><td>기준점 없음·오래됨·응답에 과금 정보 없음 · 기준점 적기</td></tr>
+              <tr><td><span class="st off"><span class="mk pause" aria-hidden="true"></span>사람이 멈춤</span></td><td>소유자가 일부러 멈춤 · 원할 때 계속</td></tr>
+              <tr><td><span class="st bad"><span class="mk square" aria-hidden="true"></span>과금 표시 감지</span></td><td>응답에 과금 표시가 있어 즉시 멈춤 · Extra Usage 확인, 사용자에게 알림</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <table>
+            <caption>재개 가능 시각의 근거</caption>
+            <thead><tr><th scope="col">표시</th><th scope="col">뜻</th></tr></thead>
+            <tbody>
+              <tr><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>Go가 알려 줌</span></td><td>한도 오류 응답에 다시 쓸 수 있는 시각이 있음</td></tr>
+              <tr><td><span class="st run"><span class="mk ring" aria-hidden="true"></span>PES 추정</span></td><td>PES가 센 호출 시각으로 계산 · 틀릴 수 있음</td></tr>
+              <tr><td><span class="st unk"><span class="mk dot-ring" aria-hidden="true"></span>재개 시각 미확인</span></td><td>근거가 없음 · 0이나 추정값으로 채우지 않음</td></tr>
+            </tbody>
+          </table>
+          <table style="margin-top:14px">
+            <caption>Extra Usage 꺼짐 확인 · 기준점</caption>
+            <tbody>
+              <tr><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>확인됨</span></td><td>유효 기간 안</td></tr>
+              <tr><td><span class="st warn"><span class="mk tri" aria-hidden="true"></span>곧 만료</span></td><td>하루 안에 끝남 · 알림</td></tr>
+              <tr><td><span class="st bad"><span class="mk square" aria-hidden="true"></span>만료 · 기록 없음</span></td><td>방식 A를 시작하지 않음</td></tr>
+              <tr><td><span class="st warn"><span class="mk tri" aria-hidden="true"></span>기준점 오래됨</span></td><td>구간이 바뀌어 다시 적어야 함</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="cards c3" style="margin-top:12px">
+        <div class="card gauge"><h3><span>계기 · 여유</span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>여유</span></h3><div class="meter" role="img" aria-label="예시 40%"><span class="fill" style="width:40%"></span><span class="th" style="left:90%"></span><span class="th-label" style="left:90%">문턱 90%</span></div><p class="small">80% 아래 · 파란색</p></div>
+        <div class="card gauge"><h3><span>계기 · 주의</span><span class="st warn"><span class="mk tri" aria-hidden="true"></span>주의</span></h3><div class="meter warn" role="img" aria-label="예시 84%"><span class="fill" style="width:84%"></span><span class="th" style="left:90%"></span><span class="th-label" style="left:90%">문턱 90%</span></div><p class="small">문턱 10%p 아래부터 · 표시만, 멈추지 않음</p></div>
+        <div class="card gauge"><h3><span>계기 · 문턱 넘음</span><span class="st bad"><span class="mk square" aria-hidden="true"></span>멈춤</span></h3><div class="meter bad" role="img" aria-label="예시 93%"><span class="fill" style="width:93%"></span><span class="th" style="left:90%"></span><span class="th-label" style="left:90%">문턱 90%</span></div><p class="small">새 호출·새 실행·검토 실행을 시작하지 않음</p></div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

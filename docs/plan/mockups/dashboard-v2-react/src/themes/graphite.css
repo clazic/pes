@@ -1,0 +1,118 @@
+/*
+ * tweakcn 테마 “Graphite” (registry:style `graphite`)
+ * 받은 곳: https://tweakcn.com/r/themes/graphite.json — `npx shadcn@4.23.0 view <주소>`로 받음(2026-11-05)
+ * 출처·라이선스: tweakcn(https://github.com/jnsahaj/tweakcn) · Apache License 2.0
+ * 그대로 옮긴 것: cssVars.light → `.theme-graphite`, cssVars.dark → `.theme-graphite.dark` (색 · radius · shadow-2xs~2xl)
+ * 받지 않은 것: font-mono, font-sans, font-serif, letter-spacing, shadow-blur, shadow-color, shadow-offset-x, shadow-offset-y, shadow-opacity, shadow-spread, spacing, tracking-normal, tracking-tight, tracking-tighter, tracking-wide, tracking-wider, tracking-widest
+ *   — 글꼴은 Pretendard 고정(테마 글꼴 무시), 한글 자간 0 유지, 간격은 Tailwind 기본, 그림자 재료 변수는 합쳐진 shadow-* 로 대신함
+ *   — 테마의 css(`body { letter-spacing }`)도 받지 않음
+ * 맨 아래 “PES 보정”: 대비 AA(글자 4.5:1 · 테두리 3:1)를 넘기려고 바꾼 값만 따로 적고 받은 값을 주석으로 남긴다.
+ * 이 파일은 시안 폴더 밖 스크립트가 받은 JSON에서 만들었다. 손으로 바꿀 때는 “PES 보정”에만 더한다.
+ */
+
+.theme-graphite {
+  --background: oklch(0.9551 0 0);
+  --foreground: oklch(0.3211 0 0);
+  --card: oklch(0.9702 0 0);
+  --card-foreground: oklch(0.3211 0 0);
+  --popover: oklch(0.9702 0 0);
+  --popover-foreground: oklch(0.3211 0 0);
+  --primary: oklch(0.4891 0 0);
+  --primary-foreground: oklch(1.0000 0 0);
+  --secondary: oklch(0.9067 0 0);
+  --secondary-foreground: oklch(0.3211 0 0);
+  --muted: oklch(0.8853 0 0);
+  --muted-foreground: oklch(0.5103 0 0);
+  --accent: oklch(0.8078 0 0);
+  --accent-foreground: oklch(0.3211 0 0);
+  --destructive: oklch(0.5594 0.1900 25.8625);
+  --destructive-foreground: oklch(1.0000 0 0);
+  --border: oklch(0.8576 0 0);
+  --input: oklch(0.9067 0 0);
+  --ring: oklch(0.4891 0 0);
+  --chart-1: oklch(0.4891 0 0);
+  --chart-2: oklch(0.4863 0.0361 196.0278);
+  --chart-3: oklch(0.6534 0 0);
+  --chart-4: oklch(0.7316 0 0);
+  --chart-5: oklch(0.8078 0 0);
+  --radius: 0.35rem;
+  --sidebar: oklch(0.9370 0 0);
+  --sidebar-foreground: oklch(0.3211 0 0);
+  --sidebar-primary: oklch(0.4891 0 0);
+  --sidebar-primary-foreground: oklch(1.0000 0 0);
+  --sidebar-accent: oklch(0.8078 0 0);
+  --sidebar-accent-foreground: oklch(0.3211 0 0);
+  --sidebar-border: oklch(0.8576 0 0);
+  --sidebar-ring: oklch(0.4891 0 0);
+  --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 20% / 0.07);
+  --shadow-xs: 0px 2px 0px 0px hsl(0 0% 20% / 0.07);
+  --shadow-sm: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 1px 2px -1px hsl(0 0% 20% / 0.15);
+  --shadow: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 1px 2px -1px hsl(0 0% 20% / 0.15);
+  --shadow-md: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 2px 4px -1px hsl(0 0% 20% / 0.15);
+  --shadow-lg: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 4px 6px -1px hsl(0 0% 20% / 0.15);
+  --shadow-xl: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 8px 10px -1px hsl(0 0% 20% / 0.15);
+  --shadow-2xl: 0px 2px 0px 0px hsl(0 0% 20% / 0.38);
+}
+
+.theme-graphite.dark {
+  --background: oklch(0.2178 0 0);
+  --foreground: oklch(0.8853 0 0);
+  --card: oklch(0.2435 0 0);
+  --card-foreground: oklch(0.8853 0 0);
+  --popover: oklch(0.2435 0 0);
+  --popover-foreground: oklch(0.8853 0 0);
+  --primary: oklch(0.7058 0 0);
+  --primary-foreground: oklch(0.2178 0 0);
+  --secondary: oklch(0.3092 0 0);
+  --secondary-foreground: oklch(0.8853 0 0);
+  --muted: oklch(0.2850 0 0);
+  --muted-foreground: oklch(0.5999 0 0);
+  --accent: oklch(0.3715 0 0);
+  --accent-foreground: oklch(0.8853 0 0);
+  --destructive: oklch(0.6591 0.1530 22.1703);
+  --destructive-foreground: oklch(1.0000 0 0);
+  --border: oklch(0.3290 0 0);
+  --input: oklch(0.3092 0 0);
+  --ring: oklch(0.7058 0 0);
+  --chart-1: oklch(0.7058 0 0);
+  --chart-2: oklch(0.6714 0.0339 206.3482);
+  --chart-3: oklch(0.5452 0 0);
+  --chart-4: oklch(0.4604 0 0);
+  --chart-5: oklch(0.3715 0 0);
+  --radius: 0.35rem;
+  --sidebar: oklch(0.2393 0 0);
+  --sidebar-foreground: oklch(0.8853 0 0);
+  --sidebar-primary: oklch(0.7058 0 0);
+  --sidebar-primary-foreground: oklch(0.2178 0 0);
+  --sidebar-accent: oklch(0.3715 0 0);
+  --sidebar-accent-foreground: oklch(0.8853 0 0);
+  --sidebar-border: oklch(0.3290 0 0);
+  --sidebar-ring: oklch(0.7058 0 0);
+  --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 20% / 0.07);
+  --shadow-xs: 0px 2px 0px 0px hsl(0 0% 20% / 0.07);
+  --shadow-sm: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 1px 2px -1px hsl(0 0% 20% / 0.15);
+  --shadow: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 1px 2px -1px hsl(0 0% 20% / 0.15);
+  --shadow-md: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 2px 4px -1px hsl(0 0% 20% / 0.15);
+  --shadow-lg: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 4px 6px -1px hsl(0 0% 20% / 0.15);
+  --shadow-xl: 0px 2px 0px 0px hsl(0 0% 20% / 0.15), 0px 8px 10px -1px hsl(0 0% 20% / 0.15);
+  --shadow-2xl: 0px 2px 0px 0px hsl(0 0% 20% / 0.38);
+}
+
+/* ── PES 보정 ── */
+.theme-graphite {
+  /* 받은 값 oklch(0.5594 0.1900 25.8625) · 위험 글자 대비 — 받은 값은 카드 바탕에서 3.8~4.0:1(4.5 미만). PES 상태 색 bad와 같게 */
+  --destructive: var(--bad);
+  /* 받은 값 oklch(0.9067 0 0) · 입력·체크 상자·라디오 테두리 — 받은 값은 1.2~1.9:1. 1.4.11(3:1)을 넘게 PES control로 */
+  --input: var(--control);
+  /* 받은 값 oklch(0.5103 0 0) · 옅은 바탕(muted) 위 보조 글자 4.07 → 4.6:1 이상 */
+  --muted-foreground: oklch(0.4800 0 0);
+}
+
+.theme-graphite.dark {
+  /* 받은 값 oklch(0.6591 0.1530 22.1703) · 위험 글자 대비 — 받은 값은 카드 바탕에서 3.8~4.0:1(4.5 미만). PES 상태 색 bad와 같게 */
+  --destructive: var(--bad);
+  /* 받은 값 oklch(0.3092 0 0) · 입력·체크 상자·라디오 테두리 — 받은 값은 1.2~1.9:1. 1.4.11(3:1)을 넘게 PES control로 */
+  --input: var(--control);
+  /* 받은 값 oklch(0.5999 0 0) · 카드 위 보조 글자 4.13 → 5.6:1 */
+  --muted-foreground: oklch(0.6800 0 0);
+}

@@ -1,0 +1,130 @@
+/*
+ * tweakcn 테마 “Modern Minimal” (registry:style `modern-minimal`)
+ * 받은 곳: https://tweakcn.com/r/themes/modern-minimal.json — `npx shadcn@4.23.0 view <주소>`로 받음(2026-11-05)
+ * 출처·라이선스: tweakcn(https://github.com/jnsahaj/tweakcn) · Apache License 2.0
+ * 그대로 옮긴 것: cssVars.light → `.theme-modern-minimal`, cssVars.dark → `.theme-modern-minimal.dark` (색 · radius · shadow-2xs~2xl)
+ * 받지 않은 것: font-mono, font-sans, font-serif, letter-spacing, shadow-blur, shadow-color, shadow-offset-x, shadow-offset-y, shadow-opacity, shadow-spread, spacing, tracking-normal, tracking-tight, tracking-tighter, tracking-wide, tracking-wider, tracking-widest
+ *   — 글꼴은 Pretendard 고정(테마 글꼴 무시), 한글 자간 0 유지, 간격은 Tailwind 기본, 그림자 재료 변수는 합쳐진 shadow-* 로 대신함
+ *   — 테마의 css(`body { letter-spacing }`)도 받지 않음
+ * 맨 아래 “PES 보정”: 대비 AA(글자 4.5:1 · 테두리 3:1)를 넘기려고 바꾼 값만 따로 적고 받은 값을 주석으로 남긴다.
+ * 이 파일은 시안 폴더 밖 스크립트가 받은 JSON에서 만들었다. 손으로 바꿀 때는 “PES 보정”에만 더한다.
+ */
+
+.theme-modern-minimal {
+  --background: oklch(1.0000 0 0);
+  --foreground: oklch(0.3211 0 0);
+  --card: oklch(1.0000 0 0);
+  --card-foreground: oklch(0.3211 0 0);
+  --popover: oklch(1.0000 0 0);
+  --popover-foreground: oklch(0.3211 0 0);
+  --primary: oklch(0.6231 0.1880 259.8145);
+  --primary-foreground: oklch(1.0000 0 0);
+  --secondary: oklch(0.9670 0.0029 264.5419);
+  --secondary-foreground: oklch(0.4461 0.0263 256.8018);
+  --muted: oklch(0.9846 0.0017 247.8389);
+  --muted-foreground: oklch(0.5510 0.0234 264.3637);
+  --accent: oklch(0.9514 0.0250 236.8242);
+  --accent-foreground: oklch(0.3791 0.1378 265.5222);
+  --destructive: oklch(0.6368 0.2078 25.3313);
+  --destructive-foreground: oklch(1.0000 0 0);
+  --border: oklch(0.9276 0.0058 264.5313);
+  --input: oklch(0.9276 0.0058 264.5313);
+  --ring: oklch(0.6231 0.1880 259.8145);
+  --chart-1: oklch(0.6231 0.1880 259.8145);
+  --chart-2: oklch(0.5461 0.2152 262.8809);
+  --chart-3: oklch(0.4882 0.2172 264.3763);
+  --chart-4: oklch(0.4244 0.1809 265.6377);
+  --chart-5: oklch(0.3791 0.1378 265.5222);
+  --radius: 0.375rem;
+  --sidebar: oklch(0.9846 0.0017 247.8389);
+  --sidebar-foreground: oklch(0.3211 0 0);
+  --sidebar-primary: oklch(0.6231 0.1880 259.8145);
+  --sidebar-primary-foreground: oklch(1.0000 0 0);
+  --sidebar-accent: oklch(0.9514 0.0250 236.8242);
+  --sidebar-accent-foreground: oklch(0.3791 0.1378 265.5222);
+  --sidebar-border: oklch(0.9276 0.0058 264.5313);
+  --sidebar-ring: oklch(0.6231 0.1880 259.8145);
+  --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
+  --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
+  --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
+  --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+}
+
+.theme-modern-minimal.dark {
+  --background: oklch(0.2046 0 0);
+  --foreground: oklch(0.9219 0 0);
+  --card: oklch(0.2686 0 0);
+  --card-foreground: oklch(0.9219 0 0);
+  --popover: oklch(0.2686 0 0);
+  --popover-foreground: oklch(0.9219 0 0);
+  --primary: oklch(0.6231 0.1880 259.8145);
+  --primary-foreground: oklch(1.0000 0 0);
+  --secondary: oklch(0.2686 0 0);
+  --secondary-foreground: oklch(0.9219 0 0);
+  --muted: oklch(0.2393 0 0);
+  --muted-foreground: oklch(0.7155 0 0);
+  --accent: oklch(0.3791 0.1378 265.5222);
+  --accent-foreground: oklch(0.8823 0.0571 254.1284);
+  --destructive: oklch(0.6368 0.2078 25.3313);
+  --destructive-foreground: oklch(1.0000 0 0);
+  --border: oklch(0.3715 0 0);
+  --input: oklch(0.3715 0 0);
+  --ring: oklch(0.6231 0.1880 259.8145);
+  --chart-1: oklch(0.7137 0.1434 254.6240);
+  --chart-2: oklch(0.6231 0.1880 259.8145);
+  --chart-3: oklch(0.5461 0.2152 262.8809);
+  --chart-4: oklch(0.4882 0.2172 264.3763);
+  --chart-5: oklch(0.4244 0.1809 265.6377);
+  --radius: 0.375rem;
+  --sidebar: oklch(0.2046 0 0);
+  --sidebar-foreground: oklch(0.9219 0 0);
+  --sidebar-primary: oklch(0.6231 0.1880 259.8145);
+  --sidebar-primary-foreground: oklch(1.0000 0 0);
+  --sidebar-accent: oklch(0.3791 0.1378 265.5222);
+  --sidebar-accent-foreground: oklch(0.8823 0.0571 254.1284);
+  --sidebar-border: oklch(0.3715 0 0);
+  --sidebar-ring: oklch(0.6231 0.1880 259.8145);
+  --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
+  --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
+  --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
+  --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+}
+
+/* ── PES 보정 ── */
+.theme-modern-minimal {
+  /* 받은 값 oklch(0.6368 0.2078 25.3313) · 위험 글자 대비 — 받은 값은 카드 바탕에서 3.8~4.0:1(4.5 미만). PES 상태 색 bad와 같게 */
+  --destructive: var(--bad);
+  /* 받은 값 oklch(0.9276 0.0058 264.5313) · 입력·체크 상자·라디오 테두리 — 받은 값은 1.2~1.9:1. 1.4.11(3:1)을 넘게 PES control로 */
+  --input: var(--control);
+  /* 받은 값 oklch(0.6231 0.1880 259.8145) · 흰 글자 3.68:1 → 5.17:1. 같은 테마의 chart-2 색(한 단계 진한 파랑) */
+  --primary: oklch(0.5461 0.2152 262.8809);
+  /* 받은 값 oklch(0.6231 0.1880 259.8145) · 위와 같음(사이드바 표지) */
+  --sidebar-primary: oklch(0.5461 0.2152 262.8809);
+  /* 받은 값 oklch(0.6231 0.1880 259.8145) · 초점 테두리를 강조색과 맞춤 */
+  --ring: oklch(0.5461 0.2152 262.8809);
+  /* 받은 값 oklch(0.5510 0.0234 264.3637) · 옅은 색 상자(주의·막힘·됨) 위 보조 글자 4.2 → 4.6:1 이상. 같은 색상, 조금 진하게 */
+  --muted-foreground: oklch(0.5100 0.0234 264.3637);
+}
+
+.theme-modern-minimal.dark {
+  /* 받은 값 oklch(0.6368 0.2078 25.3313) · 위험 글자 대비 — 받은 값은 카드 바탕에서 3.8~4.0:1(4.5 미만). PES 상태 색 bad와 같게 */
+  --destructive: var(--bad);
+  /* 받은 값 oklch(0.3715 0 0) · 입력·체크 상자·라디오 테두리 — 받은 값은 1.2~1.9:1. 1.4.11(3:1)을 넘게 PES control로 */
+  --input: var(--control);
+  /* 받은 값 oklch(0.6231 0.1880 259.8145) · 흰 글자 3.68:1 → 5.17:1 */
+  --primary: oklch(0.5461 0.2152 262.8809);
+  /* 받은 값 oklch(0.6231 0.1880 259.8145) · 위와 같음 */
+  --sidebar-primary: oklch(0.5461 0.2152 262.8809);
+  /* 어두운 바탕 위 강조 글자·링크(카드 위 4.12 → 7.0:1). 같은 테마의 dark chart-1 */
+  --primary-ink: oklch(0.7137 0.1434 254.6240);
+  /* 받은 값 oklch(0.6231 0.1880 259.8145) · 초점 테두리를 강조 글자와 맞춤 */
+  --ring: oklch(0.7137 0.1434 254.6240);
+}

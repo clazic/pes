@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PES 대시보드 v2 시안 — 새 프로젝트(방식 A 마법사 · 방식 B 등록)</title>
+<style>
+  /* PES 대시보드 v2 공통 스타일 — 시안마다 같은 블록을 그대로 넣는다(자기완결). 외부 글꼴·이미지 없음. */
+  :root {
+    color-scheme: light;
+    --bg: #f3f6f8;
+    --surface: #ffffff;
+    --surface-soft: #f8fafb;
+    --surface-sunk: #eef2f5;
+    --ink: #17202a;
+    --ink-2: #3d4852;
+    --muted: #5b6773;
+    --line: #d8e0e6;
+    --line-strong: #b9c7d2;
+    --control: #6b7785;
+    --accent: #1f5f8b;
+    --accent-dark: #184d70;
+    --accent-soft: #e8f1f7;
+    --accent-line: #a9c7dd;
+    --ok: #1f7a4d;
+    --ok-soft: #e6f4ec;
+    --ok-line: #a7d3bb;
+    --warn: #8a5a00;
+    --warn-soft: #fff4d6;
+    --warn-line: #e3c272;
+    --bad: #a33a3a;
+    --bad-soft: #fbeaea;
+    --bad-line: #e2aaaa;
+    --off: #3d4852;
+    --off-soft: #eef1f4;
+    --off-line: #c5ced6;
+    --mode-a: #9a4a00;
+    --mode-a-soft: #fdf0e6;
+    --mode-a-line: #f0c6a0;
+    --mode-b: #5b3a9e;
+    --mode-b-soft: #f1ecfb;
+    --mode-b-line: #cdbdf0;
+    --meter-track: #d6e6f2;
+    --meter-fill: #1f5f8b;
+    --meter-warn-track: #fdeac0;
+    --meter-warn-fill: #a56c00;
+    --meter-bad-track: #f6d4d4;
+    --meter-bad-fill: #b42f2f;
+    --radius: 10px;
+    --radius-s: 6px;
+    --shadow: 0 1px 2px rgba(23, 32, 42, 0.05);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1, h2, h3, h4 { margin: 0; line-height: 1.35; letter-spacing: -0.01em; }
+  h1 { font-size: 21px; }
+  h2 { font-size: 17px; }
+  h3 { font-size: 15px; }
+  h4 { font-size: 14px; }
+  p { margin: 0; }
+  p + p { margin-top: 6px; }
+  ul, ol { margin: 0; padding: 0; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--accent-dark); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  code, .mono { font-family: var(--mono); font-size: 0.92em; }
+  .wrap-any { overflow-wrap: anywhere; word-break: break-all; }
+  kbd {
+    display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid var(--line-strong);
+    border-bottom-width: 2px; border-radius: 4px; background: var(--surface-soft);
+    font-family: var(--font); font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--ink-2);
+  }
+  .vh {
+    position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .skip-link {
+    position: absolute; left: 12px; top: -60px; z-index: 100; padding: 8px 12px;
+    border: 2px solid var(--accent); border-radius: 6px; background: var(--surface);
+    color: var(--accent); font-weight: 800; text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+  .page { width: min(100%, 1600px); margin: 0 auto; padding: 16px 20px 48px; }
+  .stack > * + * { margin-top: 14px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .row.between { justify-content: space-between; }
+  .row.top { align-items: flex-start; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .tiny { font-size: 11.5px; }
+  .strong { font-weight: 800; }
+  .num { font-variant-numeric: tabular-nums; }
+  .nowrap { white-space: nowrap; }
+
+  /* 시안 설명(제품 화면이 아님) */
+  .mock-bar {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+    margin-bottom: 14px; padding: 10px 14px; border: 1px dashed var(--line-strong);
+    border-radius: var(--radius); background: #fbfcfd; color: var(--ink-2); font-size: 13px;
+  }
+  .mock-bar strong { color: var(--ink); }
+  .mock-bar nav ul { display: flex; flex-wrap: wrap; gap: 4px 12px; list-style: none; }
+  .anno {
+    margin-top: 10px; padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: 8px;
+    background: #fbfcfd; color: var(--ink-2); font-size: 12.5px; line-height: 1.6;
+  }
+  .anno-tag {
+    display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px;
+    background: var(--off-soft); color: var(--off); font-size: 11px; font-weight: 800; vertical-align: 1px;
+  }
+  .anno ul { margin: 4px 0 0 18px; }
+
+  /* 전역 머리줄 */
+  .gbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow);
+  }
+  .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 800; text-decoration: none; }
+  .brand-mark {
+    display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 26px;
+    border-radius: 6px; background: var(--ink); color: #fff; font-size: 12px; letter-spacing: 0.08em;
+  }
+  .gnav ul { display: flex; flex-wrap: wrap; gap: 2px; list-style: none; }
+  .gnav a {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 10px;
+    border-radius: 6px; color: var(--ink-2); font-size: 13px; font-weight: 700; text-decoration: none;
+  }
+  .gnav a:hover { background: var(--surface-soft); color: var(--ink); }
+  .gnav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-dark); }
+  .gbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+  .count {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+    padding: 0 6px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 800;
+  }
+  .count.quiet { background: var(--off-soft); color: var(--off); }
+  .user { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+  .avatar {
+    display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+    border-radius: 50%; background: var(--accent-soft); color: var(--accent-dark); font-size: 12px; font-weight: 800;
+  }
+
+  /* 버튼 */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px;
+    padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+    color: var(--ink); font-size: 13.5px; font-weight: 700; line-height: 1.3; text-decoration: none; white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface-soft); color: var(--ink); }
+  .btn-primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .btn-primary:hover { border-color: var(--accent-dark); background: var(--accent-dark); color: #fff; }
+  .btn-danger { border-color: var(--bad); color: var(--bad); }
+  .btn-danger:hover { background: var(--bad-soft); color: var(--bad); }
+  .btn-small { min-height: 30px; padding: 3px 10px; font-size: 12.5px; }
+  .btn[aria-disabled="true"] { border-color: var(--line); background: var(--surface-sunk); color: var(--muted); cursor: not-allowed; }
+  .btn[aria-disabled="true"]:hover { background: var(--surface-sunk); color: var(--muted); }
+  .link-button {
+    padding: 2px 1px; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 700;
+    text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  }
+  .link-button[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
+  .btn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .btn-row.end { justify-content: flex-end; }
+
+  /* 상태 표기: 모양 + 글자 + 색. 모양은 테두리로 그려 강제 색 모드에서도 남는다. */
+  .st {
+    display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 8px; border: 1px solid var(--off-line);
+    border-radius: 999px; background: var(--off-soft); color: var(--off); font-size: 12px; font-weight: 800;
+    line-height: 1.6; white-space: nowrap; vertical-align: middle;
+  }
+  .st.ok { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok); }
+  .st.run { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-dark); }
+  .st.you { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .st.warn { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+  .st.bad { border-color: var(--bad-line); background: var(--bad-soft); color: var(--bad); }
+  .st.off { border-color: var(--off-line); background: var(--off-soft); color: var(--off); }
+  .st.unk { border: 1px dashed var(--control); background: var(--surface); color: var(--ink-2); }
+  .st.plain { border-color: transparent; background: transparent; padding-left: 0; }
+  .mk { display: inline-block; flex: none; width: 9px; height: 9px; }
+  .mk.circle { border: 4.5px solid currentColor; border-radius: 50%; }
+  .mk.ring { border: 2px solid currentColor; border-radius: 50%; }
+  .mk.dot-ring { border: 2px dotted currentColor; border-radius: 50%; width: 10px; height: 10px; }
+  .mk.square { border: 4.5px solid currentColor; border-radius: 1px; }
+  .mk.hsquare { border: 2px solid currentColor; border-radius: 1px; }
+  .mk.diamond { width: 8px; height: 8px; border: 4px solid currentColor; transform: rotate(45deg); }
+  .mk.tri { width: 0; height: 0; border-right: 5px solid transparent; border-bottom: 9px solid currentColor; border-left: 5px solid transparent; }
+  .mk.pause { width: 8px; height: 9px; border-right: 3px solid currentColor; border-left: 3px solid currentColor; }
+  .mk.dash { width: 10px; height: 0; border-top: 2px solid currentColor; }
+
+  /* 방식 배지 */
+  .mode {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid; border-radius: 5px;
+    font-size: 12px; font-weight: 800; line-height: 1.6; white-space: nowrap; vertical-align: middle;
+  }
+  .mode.a { border-color: var(--mode-a-line); background: var(--mode-a-soft); color: var(--mode-a); }
+  .mode.b { border-color: var(--mode-b-line); background: var(--mode-b-soft); color: var(--mode-b); }
+  .tag {
+    display: inline-flex; align-items: center; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 5px;
+    background: var(--surface-soft); color: var(--ink-2); font-size: 11.5px; font-weight: 800; line-height: 1.7; white-space: nowrap;
+  }
+  .tag.acc { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-dark); }
+  .tag.warn { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+  .tag.bad { border-color: var(--bad-line); background: var(--bad-soft); color: var(--bad); }
+  .tag.ok { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok); }
+
+  /* 카드·패널 */
+  .card {
+    min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface); box-shadow: var(--shadow);
+  }
+  .card.tight { padding: 12px 14px; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .card-head > div { min-width: 0; }
+  .eyebrow { margin-bottom: 2px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: 0.02em; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .cards { display: grid; gap: 12px; align-items: stretch; }
+  .cards > * { min-width: 0; }
+  .c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .section-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin: 26px 0 10px; }
+  .section-title h2 { font-size: 18px; }
+  .section-title p { color: var(--muted); font-size: 13px; }
+  .divider { height: 1px; margin: 12px 0; background: var(--line); border: 0; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); font-weight: 700; }
+  .kv dd { margin: 0; min-width: 0; }
+
+  /* 지금 할 일 */
+  .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: start; border-left: 5px solid var(--accent); }
+  .now.bad { border-left-color: var(--bad); }
+  .now.warn { border-left-color: var(--warn); }
+  .now.ok { border-left-color: var(--ok); }
+  .now h2 { font-size: 18px; }
+  .now .now-text { color: var(--ink-2); font-size: 13.5px; }
+  .now .now-act { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .now .then { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
+  .then .then-label { color: var(--muted); font-weight: 800; }
+  .mini { display: flex; flex-direction: column; gap: 6px; }
+  .mini h3 { font-size: 14px; }
+  .mini .line { font-size: 13px; color: var(--ink-2); }
+  .mini .foot { margin-top: auto; padding-top: 6px; font-size: 12.5px; }
+
+  /* 상태 줄 */
+  .strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); overflow: hidden; }
+  .strip > div { min-width: 0; padding: 6px 10px; border-right: 1px solid var(--line); }
+  .strip > div:last-child { border-right: 0; }
+  .strip .k { display: block; color: var(--muted); font-size: 11.5px; font-weight: 700; }
+  .strip .v { display: block; font-size: 13px; font-weight: 800; }
+
+  /* 표 */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  caption { padding: 0 0 8px; color: var(--ink); font-size: 14px; font-weight: 800; text-align: left; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  thead th { border-bottom: 1px solid var(--line-strong); background: var(--surface-soft); color: var(--ink-2); font-size: 12px; font-weight: 800; }
+  tbody th { font-weight: 700; }
+  tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.is-selected td, tr.is-selected th { background: var(--accent-soft); }
+  .cell-sub { display: block; color: var(--muted); font-size: 12px; }
+
+  /* 입력 */
+  .field { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 800; }
+  input[type="text"], input[type="number"], input[type="search"], input[type="datetime-local"], select, textarea {
+    width: 100%; min-height: 36px; padding: 6px 10px; border: 1px solid var(--control); border-radius: 7px; background: var(--surface);
+  }
+  textarea { min-height: 64px; resize: vertical; line-height: 1.55; }
+  input[type="radio"], input[type="checkbox"] { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); flex: none; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  legend .hint, .field .hint, caption .hint, h2 .hint, h3 .hint { font-weight: 400; }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  legend { margin-bottom: 6px; padding: 0; font-size: 13px; font-weight: 800; }
+  .choice { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .choice.is-on { border-color: var(--accent); background: var(--accent-soft); }
+  .choice .choice-body { min-width: 0; }
+  .check-line { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; font-size: 13px; }
+
+  /* 스위치(role="switch") */
+  .switch { display: inline-flex; align-items: center; gap: 8px; padding: 2px 0; border: 0; background: none; color: var(--ink); font-size: 13px; font-weight: 800; }
+  .switch .track { position: relative; flex: none; width: 40px; height: 22px; border: 2px solid var(--control); border-radius: 999px; background: var(--surface); }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--control); }
+  .switch[aria-checked="true"] .track { border-color: var(--ok); background: var(--ok); }
+  .switch[aria-checked="true"] .track::after { left: 20px; background: #fff; }
+  .switch .sw-state { min-width: 30px; text-align: left; }
+  .switch[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
+  .switch[aria-disabled="true"] .track { border-style: dashed; }
+
+  /* 계기 */
+  .meter { position: relative; height: 12px; margin: 14px 0 26px; border-radius: 999px; background: var(--meter-track); }
+  .meter .fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; background: var(--meter-fill); }
+  .meter.warn { background: var(--meter-warn-track); }
+  .meter.warn .fill { background: var(--meter-warn-fill); }
+  .meter.bad { background: var(--meter-bad-track); }
+  .meter.bad .fill { background: var(--meter-bad-fill); }
+  .meter .th { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
+  .meter .th-label { position: absolute; top: 100%; margin-top: 8px; transform: translateX(-50%); color: var(--ink-2); font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+
+  /* 안내 상자 */
+  .callout { padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface); font-size: 13px; }
+  .callout.warn { border-color: var(--warn-line); border-left-color: var(--warn); background: var(--warn-soft); }
+  .callout.bad { border-color: var(--bad-line); border-left-color: var(--bad); background: var(--bad-soft); }
+  .callout.ok { border-color: var(--ok-line); border-left-color: var(--ok); background: var(--ok-soft); }
+  .callout.off { border-left-color: var(--control); background: var(--surface-soft); }
+  .callout strong { color: var(--ink); }
+
+  /* 확인 대화 상자 예시(실제 화면은 <dialog> + 초점 가두기·복귀) */
+  .dialog { max-width: 640px; padding: 18px 20px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 10px 30px rgba(23, 32, 42, 0.16); }
+  .dialog h3 { font-size: 16px; }
+  .dialog .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .dialog ul.facts { margin: 8px 0 0 18px; font-size: 13px; }
+  .dialog ul.facts li + li { margin-top: 4px; }
+
+  /* 목록 */
+  .plain-list { list-style: none; }
+  .plain-list > li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .plain-list > li:last-child { border-bottom: 0; }
+  .bullets { margin-left: 18px; }
+  .bullets li + li { margin-top: 3px; }
+
+  /* 탭(시안 안 보기 전환) */
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs a, .tabs span.tab {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; margin-bottom: -1px; padding: 6px 12px;
+    border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--ink-2);
+    font-size: 13px; font-weight: 800; text-decoration: none;
+  }
+  .tabs a[aria-current="page"], .tabs span.tab.is-on { border-color: var(--line); background: var(--surface); color: var(--accent-dark); }
+
+  /* 순서 있는 단계 */
+  .steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; }
+  .steps li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+  .steps .n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--off-soft); color: var(--off); font-size: 11px; font-weight: 800; }
+  .steps li.done .n { background: var(--ok); color: #fff; }
+  .steps li.cur { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
+  .steps li.cur .n { background: var(--accent); color: #fff; }
+
+  /* 시간 줄 */
+  .timeline { list-style: none; }
+  .timeline > li { position: relative; padding: 0 0 12px 22px; }
+  .timeline > li::before { content: ""; position: absolute; top: 18px; bottom: -2px; left: 5px; width: 2px; background: var(--line); }
+  .timeline > li:last-child::before { display: none; }
+  .timeline > li > .mk { position: absolute; top: 6px; left: 1px; }
+  .timeline .t-time { color: var(--muted); font-size: 12px; font-weight: 700; }
+  .timeline .t-title { font-weight: 800; }
+  .timeline .t-body { color: var(--ink-2); font-size: 13px; }
+
+  /* 인용 칩 */
+  .cite { display: inline-flex; align-items: baseline; gap: 4px; margin: 0 2px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-soft); color: var(--ink-2); font-size: 12px; font-weight: 700; text-decoration: none; white-space: normal; }
+  .cite:hover { border-color: var(--accent); color: var(--accent-dark); }
+  .cite.ref { border-color: var(--mode-b-line); background: var(--mode-b-soft); color: var(--mode-b); }
+  .cite.file { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok); }
+  .cite.warn { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+
+  /* 반응형: 1280 미만은 한 열, 900 미만(휴대폰 폭)은 촘촘하게 */
+  @media (max-width: 1279px) {
+    .c4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .strip > div:nth-child(3n) { border-right: 0; }
+    .strip > div:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+  }
+  @media (max-width: 899px) {
+    .page { padding: 10px 10px 40px; }
+    .c2, .c3, .c4, .c5 { grid-template-columns: minmax(0, 1fr); }
+    .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .strip > div { border-bottom: 1px solid var(--line); }
+    .strip > div:nth-child(3n) { border-right: 1px solid var(--line); }
+    .strip > div:nth-child(2n) { border-right: 0; }
+    .now { grid-template-columns: minmax(0, 1fr); }
+    .now .now-act { align-items: stretch; }
+    .gbar-right { margin-left: 0; }
+  }
+  @media (pointer: coarse) {
+    .btn { min-height: 44px; }
+    .btn-small { min-height: 40px; }
+    .gnav a { min-height: 44px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+  }
+  @media print {
+    .mock-bar, .anno, .skip-link { display: none !important; }
+    body, html { background: #fff; }
+    .card { box-shadow: none; }
+  }
+
+  .mode-pick { margin-top: 12px; }
+  .pick { position: relative; display: flex; flex-direction: column; gap: 8px; }
+  .pick.is-on { border: 2px solid var(--accent); padding: 15px; }
+  .pick h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 16px; }
+  .pick ul { margin: 0 0 0 18px; color: var(--ink-2); font-size: 13px; }
+  .pick ul li + li { margin-top: 3px; }
+  .pick .pick-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; }
+  .wiz { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 14px; }
+  .wiz-steps { position: sticky; top: 12px; }
+  .wiz-steps ol { list-style: none; }
+  .wiz-steps li a { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; border-radius: 8px; color: var(--ink-2); font-size: 13px; font-weight: 700; text-decoration: none; }
+  .wiz-steps li a:hover { background: var(--surface-soft); }
+  .wiz-steps li a[aria-current="step"] { background: var(--accent-soft); color: var(--accent-dark); }
+  .wiz-steps .n { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--off-soft); color: var(--off); font-size: 12px; font-weight: 800; }
+  .wiz-steps .done .n { background: var(--ok); color: #fff; }
+  .wiz-steps .cur .n { background: var(--accent); color: #fff; }
+  .wiz-steps .s-note { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .wiz-body > section + section { margin-top: 14px; }
+  .step-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-bottom: 10px; }
+  .step-head h2 { display: flex; align-items: center; gap: 8px; }
+  .step-no { color: var(--muted); font-size: 13px; font-weight: 800; }
+  .step.is-cur { border: 2px solid var(--accent); padding: 15px; }
+  .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+  .model { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .model.is-on { border: 2px solid var(--accent); padding: 9px 11px; background: var(--accent-soft); }
+  .model.is-off { background: var(--surface-sunk); color: var(--muted); }
+  .model code { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .model .m-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
+  .drop { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; padding: 18px; border: 2px dashed var(--control); border-radius: 12px; background: var(--surface-soft); text-align: center; }
+  .drop p { width: 100%; }
+  .fmt { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+  .extract-peek { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .extract-peek .peek-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 12px; background: var(--surface-soft); border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .extract-peek table { font-size: 12.5px; }
+  .proj-pick { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .proj-pick.is-on { border: 2px solid var(--accent); padding: 9px 11px; background: var(--accent-soft); }
+  .proj-pick + .proj-pick { margin-top: 8px; }
+  .checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; }
+  .result-list { list-style: none; counter-reset: r; }
+  .result-list > li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .result-list > li:last-child { border-bottom: 0; }
+  .result-list > li::before { counter-increment: r; content: counter(r); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--off-soft); color: var(--off); font-size: 12px; font-weight: 800; }
+  .code-line { display: block; margin-top: 4px; padding: 6px 10px; border-radius: 6px; background: var(--ink); color: #fff; font-family: var(--mono); font-size: 13px; }
+  .device { border: 2px solid var(--mode-b-line); }
+  .device .code { display: inline-block; margin: 4px 0; padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-soft); font-family: var(--mono); font-size: 22px; font-weight: 800; letter-spacing: 0.12em; }
+  @media (max-width: 1279px) {
+    .wiz { grid-template-columns: minmax(0, 1fr); }
+    .wiz-steps { position: static; }
+    .wiz-steps ol { display: flex; flex-wrap: wrap; gap: 4px; }
+    .wiz-steps .s-note { display: none; }
+  }
+  @media (max-width: 899px) {
+    .two, .checks { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<div class="page">
+  <div class="mock-bar" role="note" aria-label="시안 설명">
+    <p><strong>시안 · 새 프로젝트</strong> — 방식 고르기, 방식 A 만들기 마법사 6칸(4칸 “내 자료”를 하는 중), 만든 뒤 결과, 방식 B 등록 안내와 기기 승인. 검토하기 쉽게 모든 칸을 펼쳐 두었습니다. 합성 예시입니다.</p>
+    <nav aria-label="시안 이동"><ul><li><a href="index.html">시안 목록</a></li><li><a href="#wizard">A 마법사</a></li><li><a href="#done">만든 뒤</a></li><li><a href="#mode-b">B 등록</a></li></ul></nav>
+  </div>
+
+  <header class="gbar" aria-label="PES 전역 머리줄">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">PES</span><span>연구 작업대</span></a>
+    <nav class="gnav" aria-label="전역 메뉴">
+      <ul>
+        <li><a href="#" aria-current="page">프로젝트</a></li>
+        <li><a href="#">내 차례 <span class="count" aria-label="3건">3</span></a></li>
+        <li><a href="#">내 컴퓨터</a></li>
+        <li><a href="usage.html">사용량</a></li>
+        <li><a href="#">알림 <span class="count" aria-label="안 읽음 2건">2</span></a></li>
+      </ul>
+    </nav>
+    <div class="gbar-right"><span class="user"><span class="avatar" aria-hidden="true">김</span>김연구</span></div>
+  </header>
+
+  <main id="main">
+    <div class="section-title">
+      <h1>새 프로젝트</h1>
+      <p>만들기 전에는 서버에 아무것도 저장하지 않습니다. 입력은 이 탭에만 있고 새로고침해도 남습니다.</p>
+    </div>
+
+    <section aria-labelledby="pick-title">
+      <h2 id="pick-title" class="vh">어떻게 시작할까요</h2>
+      <div class="cards c2 mode-pick">
+        <article class="card pick is-on" aria-labelledby="pick-a">
+          <p class="eyebrow">고름</p>
+          <h3 id="pick-a"><span class="mode a">방식 A</span>웹에서 바로 — PES가 AI를 부릅니다</h3>
+          <p class="small">내 컴퓨터가 꺼져 있어도 됩니다. PES가 OpenCode Go로 AI를 직접 호출합니다.</p>
+          <ul>
+            <li>필요: OpenCode Go 구독, Extra Usage 꺼짐 확인</li>
+            <li>모델: <code>opencode-go</code> 목록에서 고름 · 기본 <code>deepseek-v4.1-flash</code></li>
+            <li>자료: Go로 보냄 — 프로젝트마다, 파일마다 끌 수 있음</li>
+            <li>비용: Go 구독 사용량 안에서만. 문턱(기본 90%)에서 멈춤</li>
+          </ul>
+          <div class="pick-foot"><a class="btn btn-primary" href="#wizard">방식 A로 만들기</a></div>
+        </article>
+        <article class="card pick" aria-labelledby="pick-b">
+          <p class="eyebrow">다른 방법</p>
+          <h3 id="pick-b"><span class="mode b">방식 B</span>내 컴퓨터 AI로 만들고 웹에서 이어 하기</h3>
+          <p class="small">Claude Code·Claude 앱·Codex CLI·Codex 앱·OpenCode TUI·OpenCode 앱으로 만들어 이 웹에 등록합니다.</p>
+          <ul>
+            <li>필요: 내 컴퓨터의 AI 도구, 연결 도우미(선택)</li>
+            <li>모델: 각 도구에서 고름 — PES는 도구가 알린 값만 봄</li>
+            <li>자료: 내 컴퓨터와 웹이 양쪽으로 주고받음</li>
+            <li>비용: 각 도구의 구독 — PES가 멈출 수 없음</li>
+          </ul>
+          <div class="pick-foot"><a class="btn" href="#mode-b">등록 안내 보기</a></div>
+        </article>
+      </div>
+      <p class="anno"><span class="anno-tag">설명</span>이 선택은 “처음 만드는 방법”입니다. 만든 뒤에도 실행마다 방식 A·B를 고를 수 있고, 사람이 다른 방식으로 넘길 수 있습니다(인계). 같은 상태면 A·B 화면의 문구·버튼·권한이 같습니다.</p>
+    </section>
+
+    <div class="wiz" id="wizard">
+      <nav class="card wiz-steps" aria-label="방식 A 만들기 단계">
+        <p class="eyebrow">방식 A로 만들기 · 6칸</p>
+        <ol>
+          <li class="done"><a href="#s1"><span class="n" aria-hidden="true">1</span>기본 정보<span class="s-note">완료</span></a></li>
+          <li class="done"><a href="#s2"><span class="n" aria-hidden="true">2</span>AI 모델<span class="s-note">완료</span></a></li>
+          <li class="done"><a href="#s3"><span class="n" aria-hidden="true">3</span>자료 보내기·사용량<span class="s-note">완료</span></a></li>
+          <li class="cur"><a href="#s4" aria-current="step"><span class="n" aria-hidden="true">4</span>내 자료<span class="s-note">지금</span></a></li>
+          <li><a href="#s5"><span class="n" aria-hidden="true">5</span>참고 프로젝트<span class="s-note">선택</span></a></li>
+          <li><a href="#s6"><span class="n" aria-hidden="true">6</span>확인하고 만들기</a></li>
+        </ol>
+        <p class="hint" style="margin-top:8px">건너뛰어도 되는 칸: 4·5. 나중에 작업 공간에서 언제든 할 수 있습니다.</p>
+      </nav>
+
+      <div class="wiz-body">
+        <section class="card step" id="s1" aria-labelledby="s1-t">
+          <div class="step-head"><h2 id="s1-t"><span class="step-no">1/6</span>기본 정보</h2><span class="st ok"><span class="mk circle" aria-hidden="true"></span>완료</span></div>
+          <div class="two">
+            <div>
+              <label class="field" for="pname">프로젝트 이름</label>
+              <input type="text" id="pname" value="농촌 의료 접근성 개선 연구">
+            </div>
+            <div>
+              <label class="field" for="pslug">주소</label>
+              <input type="text" id="pslug" value="rural-care-access" aria-describedby="pslug-h">
+              <p class="hint" id="pslug-h"><span class="st ok"><span class="mk circle" aria-hidden="true"></span>쓸 수 있음</span> /p/rural-care-access · 이름에서 제안, 바꿀 수 있음</p>
+            </div>
+          </div>
+          <label class="field" for="pgoal">한 줄 목적</label>
+          <textarea id="pgoal" rows="2">농촌 주민의 의료 접근성 격차와 개선 방안을 찾는다. (가상)</textarea>
+          <p class="hint">연구 기간·발주처·분량은 기획 단계 시작 질문에서 묻습니다.</p>
+        </section>
+
+        <section class="card step" id="s2" aria-labelledby="s2-t">
+          <div class="step-head"><h2 id="s2-t"><span class="step-no">2/6</span>AI 모델</h2><span class="st ok"><span class="mk circle" aria-hidden="true"></span>완료</span></div>
+          <fieldset>
+            <legend>방식 A 실행에 쓸 모델 <span class="hint">(목록 확인 11-05 09:00 · 목록 경로는 PR19 검증 전 예시)</span></legend>
+            <label class="model is-on" for="m1"><input type="radio" name="model" id="m1" checked><span><code>opencode-go/deepseek-v4.1-flash</code> <span class="tag acc">기본</span><span class="m-meta"><span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>사용 가능</span></span><span>사용량 가중치: 확인됨</span></span></span></label>
+            <label class="model" for="m2" style="margin-top:8px"><input type="radio" name="model" id="m2"><span><code>opencode-go/예시-모델-b</code><span class="m-meta"><span><span class="st ok"><span class="mk circle" aria-hidden="true"></span>사용 가능</span></span><span><span class="st warn"><span class="mk tri" aria-hidden="true"></span>사용량 가중치 미확인</span> 추정 사용률이 덜 정확할 수 있음</span></span></span></label>
+            <label class="model is-off" for="m3" style="margin-top:8px"><input type="radio" name="model" id="m3" disabled><span><code>opencode-go/예시-모델-c</code><span class="m-meta"><span><span class="st off"><span class="mk hsquare" aria-hidden="true"></span>지금 목록에 없음</span></span><span>고를 수 없음</span></span></span></label>
+          </fieldset>
+          <div class="callout" style="margin-top:10px">실행 하나는 시작할 때 고른 모델 하나로만 갑니다. 실패해도 다른 모델로 <strong>자동으로 바꾸지 않습니다</strong>. 바꾸면 다음 실행부터 적용되고, 프로젝트 설정에서 소유자만 바꿀 수 있습니다.</div>
+          <p class="anno"><span class="anno-tag">설명</span>목록을 받지 못하면: “모델 목록을 받지 못했습니다(마지막 확인 09:00). 기본 모델로 만들 수 있고, 첫 실행 전에 다시 확인합니다.” 브라우저가 Go를 직접 부르지 않고 PES 서버가 확인한 목록만 보여 줍니다.</p>
+        </section>
+
+        <section class="card step" id="s3" aria-labelledby="s3-t">
+          <div class="step-head"><h2 id="s3-t"><span class="step-no">3/6</span>자료 보내기·사용량</h2><span class="st ok"><span class="mk circle" aria-hidden="true"></span>완료 · 1개는 나중에</span></div>
+          <div class="two">
+            <div>
+              <p class="field" id="go-sw-l">Go로 자료 보내기 <span class="hint">(이 프로젝트)</span></p>
+              <button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="go-sw-l" aria-describedby="go-sw-h"><span class="track" aria-hidden="true"></span><span class="sw-state">켜짐</span></button>
+              <ul class="bullets small" id="go-sw-h" style="margin-top:6px">
+                <li>보내는 것: 질문·답, 결과물, AI 참조를 허용한 자료의 뽑은 글자, 허용된 참고자료</li>
+                <li>끄면: 방식 A를 쓸 수 없고 방식 B나 사람 작업으로 갑니다</li>
+                <li>이미 보낸 자료는 끄더라도 회수되지 않습니다</li>
+              </ul>
+            </div>
+            <div>
+              <label class="field" for="stop">멈춤 문턱</label>
+              <input type="number" id="stop" min="50" max="100" step="5" value="90" style="max-width:120px" aria-describedby="stop-h">
+              <p class="hint" id="stop-h">Go 추정 사용량이 이 값에 닿으면 새 AI 호출을 멈춥니다. 기본 90% · 50~100% · 주의 표시는 80%부터.</p>
+            </div>
+          </div>
+          <hr class="divider">
+          <div class="two">
+            <div class="callout ok">
+              <p><strong>Extra Usage 꺼짐 확인</strong> <span class="st ok"><span class="mk circle" aria-hidden="true"></span>확인됨</span></p>
+              <p class="small">11-05 14:26 김연구 · 7일 유효(예시값 — 10절 질문 1) · Go 구독 계정 단위</p>
+              <p class="small">OpenCode 콘솔에서 Extra Usage가 꺼져 있는 것을 보고 눌렀습니다. 확인이 없거나 지나면 방식 A를 시작하지 않습니다.</p>
+            </div>
+            <div class="callout warn">
+              <p><strong>다른 앱에서 쓴 Go 사용량</strong> <span class="st warn"><span class="mk tri" aria-hidden="true"></span>나중에</span></p>
+              <p class="small">PES는 같은 구독의 다른 앱 사용량을 볼 수 없습니다. 콘솔에서 본 사용률을 적어 주세요. 비워 두면 첫 실행 전에 다시 묻고, 그때도 모르면 시작하지 않습니다.</p>
+              <div class="btn-row" style="margin-top:6px"><button class="btn btn-small" type="button">지금 적기</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card step is-cur" id="s4" aria-labelledby="s4-t">
+          <div class="step-head"><h2 id="s4-t"><span class="step-no">4/6</span>내 자료 <span class="hint">(건너뛸 수 있음)</span></h2><span class="st run"><span class="mk ring" aria-hidden="true"></span>지금 하는 칸</span></div>
+          <div class="drop">
+            <p><strong>파일을 여기에 끌어 놓거나</strong></p>
+            <button class="btn" type="button">파일 고르기</button>
+            <p class="fmt" aria-label="받는 형식"><span class="tag">hwpx</span><span class="tag">hwp</span><span class="tag">pdf</span><span class="tag">docx</span><span class="tag">xlsx</span><span class="tag">pptx</span><span class="tag">csv</span><span class="tag">txt</span><span class="tag">md</span><span class="tag">doc · xls · ppt</span></p>
+            <p class="hint">파일당 최대 25MB · 이 프로젝트 최대 200개(예시값 — MAT1에서 확정). 글자 뽑기는 이 브라우저에서 합니다.</p>
+          </div>
+          <div class="table-wrap" role="region" aria-label="고른 파일" tabindex="0" style="margin-top:12px">
+            <table>
+              <caption>고른 파일 4개 — 아직 올리지 않음</caption>
+              <colgroup><col style="width:34%"><col style="width:32%"><col style="width:18%"><col style="width:16%"></colgroup>
+              <thead><tr><th scope="col">파일</th><th scope="col">글자 뽑기</th><th scope="col">AI 참조</th><th scope="col">동작</th></tr></thead>
+              <tbody>
+                <tr><td class="wrap-any">2024 시군별 의료기관 분포(가상).xlsx<span class="cell-sub">1.4MB</span></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>준비됨</span><span class="cell-sub">시트 4 · 표 6</span></td><td><button class="switch" type="button" role="switch" aria-checked="true" aria-label="AI 참조: 2024 시군별 의료기관 분포"><span class="track" aria-hidden="true"></span><span class="sw-state">허용</span></button></td><td><button class="link-button" type="button">미리보기</button></td></tr>
+                <tr><td class="wrap-any">선행연구 요약(가상).pdf<span class="cell-sub">8.2MB</span></td><td><span class="st warn"><span class="mk tri" aria-hidden="true"></span>일부만</span><span class="cell-sub">24쪽 중 3쪽은 글자가 없는 그림(스캔)</span></td><td><button class="switch" type="button" role="switch" aria-checked="true" aria-label="AI 참조: 선행연구 요약"><span class="track" aria-hidden="true"></span><span class="sw-state">허용</span></button></td><td><button class="link-button" type="button">미리보기</button></td></tr>
+                <tr><td class="wrap-any">보건소 면담 메모(가상).hwp<span class="cell-sub">0.6MB</span></td><td><span class="st off"><span class="mk hsquare" aria-hidden="true"></span>지원 안 함</span><span class="cell-sub">옛 한글 형식 — 한글에서 hwpx로 저장해 다시 올려 주세요</span></td><td><button class="switch" type="button" role="switch" aria-checked="true" aria-label="AI 참조: 보건소 면담 메모"><span class="track" aria-hidden="true"></span><span class="sw-state">허용</span></button><span class="cell-sub">뽑은 글자가 없어 보낼 내용 없음</span></td><td><button class="link-button" type="button">빼기</button></td></tr>
+                <tr><td class="wrap-any">내부 검토 의견(가상).docx<span class="cell-sub">0.3MB</span></td><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>준비됨</span><span class="cell-sub">쪽 6 · 표 1</span></td><td><button class="switch" type="button" role="switch" aria-checked="false" aria-label="AI 참조: 내부 검토 의견"><span class="track" aria-hidden="true"></span><span class="sw-state">금지</span></button><span class="cell-sub">올릴 때부터 금지</span></td><td><button class="link-button" type="button">미리보기</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="extract-peek" aria-label="뽑은 글자 미리보기">
+            <div class="peek-head"><strong>미리보기 · 2024 시군별 의료기관 분포(가상).xlsx · 시트 2</strong><span class="muted">원본 그대로 보관 · AI에는 아래 뽑은 글자·표만 갑니다</span></div>
+            <div class="table-wrap">
+              <table>
+                <caption class="vh">시트 2 일부</caption>
+                <thead><tr><th scope="col">시군(가상)</th><th scope="col" class="num">의원</th><th scope="col" class="num">보건지소</th><th scope="col" class="num">인구(천 명)</th></tr></thead>
+                <tbody>
+                  <tr><td>C군</td><td class="num">14</td><td class="num">9</td><td class="num">41</td></tr>
+                  <tr><td>D군</td><td class="num">6</td><td class="num">11</td><td class="num">23</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="btn-row end" style="margin-top:12px"><a class="btn" href="#s3">이전</a><a class="btn btn-primary" href="#s5">다음: 참고 프로젝트</a></div>
+          <p class="anno"><span class="anno-tag">설명</span>AI 참조는 파일마다 기본 “허용”입니다. “금지”로 올리면 처음부터 금지 정책으로 저장해 허용 구간이 생기지 않게 합니다(계획 보완 요청 — notes G11). 지원 안 함·실패·일부만은 숨기지 않습니다.</p>
+        </section>
+
+        <section class="card step" id="s5" aria-labelledby="s5-t">
+          <div class="step-head"><h2 id="s5-t"><span class="step-no">5/6</span>참고 프로젝트 <span class="hint">(건너뛸 수 있음)</span></h2><span class="st off"><span class="mk dash" aria-hidden="true"></span>아직</span></div>
+          <fieldset>
+            <legend>이전 프로젝트를 읽기 전용으로 붙입니다 — 내가 권한이 있는 프로젝트만 보입니다</legend>
+            <label class="proj-pick is-on" for="rp1"><input type="checkbox" id="rp1" checked><span><strong>장기요양 기관 실태 분석(가상)</strong> <span class="tag">1판 완료</span><span class="cell-sub">소유자 김연구 · 마지막 승인 11-04</span></span></label>
+            <label class="proj-pick" for="rp2"><input type="checkbox" id="rp2"><span><strong>청년 주거 지원 효과(가상)</strong> <span class="tag">기획 R1 진행 중</span><span class="cell-sub">소유자 김연구 · 승인한 버전 없음 — 단계 승인본이 생기면 붙일 수 있음</span></span></label>
+          </fieldset>
+          <div class="two" style="margin-top:6px">
+            <div>
+              <label class="field" for="rv">고정할 버전</label>
+              <select id="rv"><option selected>1판 완료본 · 11-01</option><option>2판 R1 승인본 · 11-04 (진행 중인 판)</option></select>
+              <p class="hint">붙인 뒤 원본에 새 버전이 생겨도 저절로 바뀌지 않습니다. “새 버전 있음”을 알려 드립니다.</p>
+            </div>
+            <div>
+              <p class="field">붙일 범위</p>
+              <div class="checks">
+                <label class="check-line" for="sc1"><input type="checkbox" id="sc1" checked><span>최종 보고서</span></label>
+                <label class="check-line" for="sc2"><input type="checkbox" id="sc2" checked><span>조사 출처</span></label>
+                <label class="check-line" for="sc3"><input type="checkbox" id="sc3"><span>단계 보고서</span></label>
+                <label class="check-line" for="sc4"><input type="checkbox" id="sc4"><span>결정 기록</span></label>
+                <label class="check-line" for="sc5"><input type="checkbox" id="sc5"><span>질문·답</span></label>
+                <label class="check-line" for="sc6"><input type="checkbox" id="sc6"><span>첨부 파일</span></label>
+              </div>
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-top:12px">
+            <table>
+              <caption>이 참고자료가 AI에 가는 방식 (원본 정책과 이 프로젝트 정책 중 엄격한 쪽)</caption>
+              <thead><tr><th scope="col">어디로</th><th scope="col">결과</th><th scope="col">이유</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">방식 A (PES → Go)</th><td><span class="st off"><span class="mk hsquare" aria-hidden="true"></span>보내지 않음</span></td><td>원본 프로젝트가 Go 전송 꺼짐</td></tr>
+                <tr><th scope="row">방식 B (PES를 거쳐 읽기)</th><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>원본이 허용한 목적지만</span></td><td>원본 허용 범위를 따름 · 원본의 AI 참조 금지 파일 2개는 빠짐</td></tr>
+                <tr><th scope="row">사람</th><td><span class="st ok"><span class="mk circle" aria-hidden="true"></span>볼 수 있음</span></td><td>두 프로젝트 모두 권한이 있음</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="anno"><span class="anno-tag">설명</span>참고는 복사·이전이 아니라 원본의 고정 버전을 가리키는 읽기 전용 연결입니다. 원본을 고치지 않습니다. 원본이 지워지면 “원본 없음”, 권한이 사라지면 “권한 없음”으로 바뀌고 내용은 보이지 않습니다.</p>
+        </section>
+
+        <section class="card step" id="s6" aria-labelledby="s6-t">
+          <div class="step-head"><h2 id="s6-t"><span class="step-no">6/6</span>확인하고 만들기</h2><span class="st off"><span class="mk dash" aria-hidden="true"></span>아직</span></div>
+          <div class="two">
+            <dl class="kv">
+              <dt>이름</dt><dd>농촌 의료 접근성 개선 연구</dd>
+              <dt>방식</dt><dd><span class="mode a">방식 A</span> 웹에서 바로</dd>
+              <dt>모델</dt><dd><code>opencode-go/deepseek-v4.1-flash</code></dd>
+              <dt>Go 전송</dt><dd>켜짐 · 멈춤 문턱 90%</dd>
+              <dt>내 자료</dt><dd>4개 · AI 참조 허용 3 · 금지 1 · 지원 안 함 1</dd>
+              <dt>참고 프로젝트</dt><dd>1개 · 1판 완료본 고정 · 방식 A 제외</dd>
+              <dt>첫 단계</dt><dd>기획 — 시작 질문 6개</dd>
+            </dl>
+            <div class="callout warn">
+              <p><strong>첫 AI 실행 전에 할 일</strong></p>
+              <ul class="bullets small" style="margin-top:4px">
+                <li>다른 앱에서 쓴 Go 사용량 적기 — 비어 있음</li>
+                <li>Extra Usage 꺼짐 확인 — 됨(11-12까지)</li>
+              </ul>
+              <p class="small" style="margin-top:6px">만들기는 AI를 실행하지 않습니다. 기획 시작 질문에 답한 뒤 “AI 실행 시작”을 누릅니다.</p>
+            </div>
+          </div>
+          <div class="btn-row end" style="margin-top:12px"><a class="btn" href="#s5">이전</a><button class="btn btn-primary" type="button">만들기</button></div>
+        </section>
+
+        <section class="card" id="done" aria-labelledby="done-t">
+          <div class="step-head"><h2 id="done-t">만들기를 누른 뒤</h2><span class="st warn"><span class="mk tri" aria-hidden="true"></span>1개 다시 시도 필요</span></div>
+          <ol class="result-list">
+            <li><div><strong>프로젝트 만들기</strong><span class="cell-sub">소유자·처음 정책(Go 전송 켜짐·모델·문턱)·1판을 한 번에 — 하나라도 실패하면 아무것도 만들지 않음</span></div><span class="st ok"><span class="mk circle" aria-hidden="true"></span>접수됨 14:31</span></li>
+            <li><div><strong>자료 4개 올리기</strong><span class="cell-sub">선행연구 요약(가상).pdf — 연결이 끊겨 올리지 못했습니다. 프로젝트는 이미 만들어졌습니다.</span></div><span class="btn-row"><span class="st warn"><span class="mk tri" aria-hidden="true"></span>3 / 4</span><button class="btn btn-small" type="button">다시 올리기</button></span></li>
+            <li><div><strong>참고 프로젝트 붙이기</strong><span class="cell-sub">장기요양 기관 실태 분석(가상) · 1판 완료본</span></div><span class="st ok"><span class="mk circle" aria-hidden="true"></span>붙음</span></li>
+            <li><div><strong>기획 시작 질문 준비</strong><span class="cell-sub">질문 은행에서 6개 · 단계 시작(라운드 전)</span></div><span class="st ok"><span class="mk circle" aria-hidden="true"></span>준비됨</span></li>
+          </ol>
+          <div class="btn-row end"><a class="btn btn-primary" href="workspace.html">작업 공간 열기 — 시작 질문에 답하기</a></div>
+          <div class="cards c3" style="margin-top:12px">
+            <div class="callout"><p><strong><span class="st run"><span class="mk ring" aria-hidden="true"></span>접수 확인 중</span></strong></p><p class="small">응답이 늦어 같은 요청 번호로 확인 중입니다. 다시 눌러도 두 번 만들지 않습니다.</p></div>
+            <div class="callout bad"><p><strong><span class="st bad"><span class="mk square" aria-hidden="true"></span>같은 주소가 있음</span></strong></p><p class="small">/p/rural-care-access는 이미 있습니다. 주소를 바꾸세요. 입력은 그대로 있습니다.</p></div>
+            <div class="callout bad"><p><strong><span class="st bad"><span class="mk square" aria-hidden="true"></span>로그인이 끝남</span></strong></p><p class="small">다시 로그인하면 이 화면으로 돌아옵니다. 입력은 이 탭에 남아 있습니다.</p></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <section id="mode-b" aria-labelledby="b-title">
+      <div class="section-title">
+        <h2 id="b-title"><span class="mode b">방식 B</span> 내 컴퓨터 AI로 만들고 웹에 등록하기</h2>
+        <p>연결은 내 컴퓨터가 먼저 겁니다. 자료·진행·일정은 양쪽으로 오갑니다.</p>
+      </div>
+      <div class="cards c2">
+        <article class="card" aria-labelledby="b-steps">
+          <h3 id="b-steps">순서</h3>
+          <ol class="bullets" style="margin-top:8px">
+            <li><strong>처음 한 번:</strong> 내 컴퓨터에서 PES에 로그인합니다. 브라우저에 “기기 승인” 화면이 뜹니다.<span class="code-line">pes login</span></li>
+            <li><strong>AI 도구에서 만들기:</strong> 예를 들어 Claude Code에서 시작합니다.<span class="code-line">/pes:start 지역 돌봄 인력 수급</span></li>
+            <li><strong>코드 확인:</strong> 내 컴퓨터 화면에 나온 코드와 오른쪽 웹 화면의 코드가 같은지 봅니다.</li>
+            <li><strong>승인:</strong> 같을 때만 승인합니다. 프로젝트가 이 웹에 등록되고 내가 소유자가 됩니다.</li>
+            <li><strong>이어 하기:</strong> 웹 작업 공간에서 답·승인하고, AI는 내 컴퓨터에서 일합니다. AI가 꺼져 있으면 “AI 미접속 · 대기 중”으로 보입니다.</li>
+          </ol>
+        </article>
+        <article class="card device" aria-labelledby="dev-t">
+          <p class="eyebrow">기기 승인 · 10분 안에</p>
+          <h3 id="dev-t">이 기기가 프로젝트를 등록하려고 합니다</h3>
+          <p class="code" aria-label="코드 K X R M 4 8 2 1">KXRM-4821</p>
+          <dl class="kv" style="margin-top:6px">
+            <dt>기기</dt><dd>연구실 노트북 (사람이 붙인 이름)</dd>
+            <dt>도구</dt><dd>Claude Code — 도구가 알린 이름</dd>
+            <dt>프로젝트</dt><dd>지역 돌봄 인력 수급 개선 연구 · 주소 dolbom-insight (방식 B 예)</dd>
+            <dt>요청 시각</dt><dd>11-05 14:40</dd>
+          </dl>
+          <div class="callout warn" style="margin-top:10px">내 컴퓨터 화면의 코드와 다르면 <strong>거절</strong>하세요. 이 승인은 사람 자격이며, 에이전트 키로는 할 수 없습니다.</div>
+          <div class="btn-row end" style="margin-top:12px"><button class="btn btn-danger" type="button">거절</button><button class="btn btn-primary" type="button">코드가 같음 — 승인</button></div>
+          <p class="anno"><span class="anno-tag">설명</span>다른 상태: 코드 만료(“다시 요청하세요”), 이미 등록된 주소(“그 프로젝트 열기”), 다른 계정의 요청(거절), 접수 확인 중. 5단계에서는 승인 전에 다시 로그인 확인(재인증)을 받습니다.</p>
+        </article>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="table-wrap" role="region" aria-label="방식 B 도구 6가지" tabindex="0">
+          <table>
+            <caption>방식 B 도구 6가지 — 연결 방법과 한계</caption>
+            <colgroup><col style="width:14%"><col style="width:30%"><col style="width:16%"><col style="width:20%"><col style="width:20%"></colgroup>
+            <thead><tr><th scope="col">도구</th><th scope="col">연결 방법</th><th scope="col">확인 상태</th><th scope="col">AI 참조 금지 통제</th><th scope="col">알아 둘 것</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Claude Code</th><td>PES MCP 직접 · 도우미 선택</td><td><span class="tag">PR20a 시험</span></td><td><span class="st warn"><span class="mk tri" aria-hidden="true"></span>제한 있음</span><span class="cell-sub">폴더 직접 읽기 가능</span></td><td>6단계 전체 기준 도구</td></tr>
+              <tr><th scope="row">Claude 앱</th><td>로컬 확장 또는 원격 커넥터(5단계) · 안 되면 복사·붙여넣기</td><td><span class="tag">PR20a 시험</span></td><td><span class="st unk"><span class="mk dot-ring" aria-hidden="true"></span>확인 중</span></td><td>복사만으로는 전달 확인이 아님</td></tr>
+              <tr><th scope="row">Codex CLI</th><td>PES MCP 직접</td><td><span class="tag">PR20b 시험</span></td><td><span class="st warn"><span class="mk tri" aria-hidden="true"></span>제한 있음</span></td><td>모델·사용량은 “도구가 알린 값”</td></tr>
+              <tr><th scope="row">Codex 앱</th><td>직접 연결 확인 중 · 안 되면 복사·붙여넣기</td><td><span class="tag">PR20c 시험</span></td><td><span class="st unk"><span class="mk dot-ring" aria-hidden="true"></span>확인 중</span></td><td>설정 공유 미확인</td></tr>
+              <tr><th scope="row">OpenCode TUI</th><td>PES MCP 직접</td><td><span class="tag">PR20b 시험</span></td><td><span class="st warn"><span class="mk tri" aria-hidden="true"></span>제한 있음</span></td><td>Go 모델을 쓰면 이 프로젝트의 Go 전송 정책이 적용됨</td></tr>
+              <tr><th scope="row">OpenCode 앱</th><td>직접 연결 확인 중 · 안 되면 복사·붙여넣기</td><td><span class="tag">PR20c 시험</span></td><td><span class="st unk"><span class="mk dot-ring" aria-hidden="true"></span>확인 중</span></td><td>PES 방식 A 실행과 별개 · Go 모델이면 Go 정책</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="anno"><span class="anno-tag">설명</span>방식 B의 AI 비용은 각 도구의 구독이며 PES가 멈출 수 없습니다. 브라우저 탭 안 보조(WebMCP)는 내 컴퓨터 연결을 대신하지 않습니다.</p>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>
