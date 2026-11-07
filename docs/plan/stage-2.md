@@ -107,6 +107,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 - **선택지**: (A) **PR1에서 실제 SQLite 버전·`json_valid`·`json_type`·DDL 실행 검사**, (B) 서비스 계층에서 JSON 검사로 대체.
 - **판단 기준**: DDL이 요구하는 SQLite 기능, Windows/macOS 설치 난이도, CI 비용, 사용자 환경.
 - **추천**: **A**. DDL의 JSON 함수 사용(`schemas/stage-1-ddl-draft.sql:70,98,149`)은 SQLite 빌드 기능이므로, PR1에서 실제 SQLite 버전·필수 함수·DDL 실행을 검사하고 Windows/macOS CI에 고정 런타임을 포함한다. 실패 증거가 나오면 그때 별도 변경안으로 다룬다. 런타임 버전만으로 SQLite 기능을 보장했다고 가정하지 않는다.
+- **PR1 확정(2026-11-05)**: 런타임은 **Node 26 + `node:test` + `tsc --noEmit`**, DB는 `node:sqlite`, SQLite 최소 **3.38.0**(연결 시 실제 버전·JSON 함수 검사). 근거와 PR1 시험 항목은 [stage-2-db-guarantees.md](stage-2-db-guarantees.md)·[0016](decisions/0016-core-language.md).
 
 ### 2.7 PES 홈과 DB·객체 위치, `pes home`
 

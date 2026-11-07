@@ -47,3 +47,35 @@ jobs:
       - name: Run tests
         timeout-minutes: 8
         run: python -m pytest -q -p no:cacheprovider
+
+  typescript:
+    name: ${{ matrix.os }} / Node 26
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Install development dependencies
+        run: npm ci
+
+      - name: Print runtime versions
+        run: node -e "const { DatabaseSync } = require('node:sqlite'); const db = new DatabaseSync(':memory:'); console.log('node ' + process.version); console.log('sqlite ' + db.prepare('select sqlite_version() as v').get().v); db.close();"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
