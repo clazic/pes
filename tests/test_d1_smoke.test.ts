@@ -847,9 +847,13 @@ describe("d1_smoke 단위(가짜 D1)", () => {
       );
     });
 
-    test("[보강] 가드가 있고 overflow 오류면 ZeroRowsError", async () => {
-      const fake = fake_d1({ fail: new Error("D1_ERROR: integer overflow: SQLITE_ERROR") });
-      await assert.rejects(run_batch(fake.d1, [{ sql: "A", require_change: true }]), is_zero_rows);
+    test("[보강] 가드가 있어도 overflow 오류는 원본 그대로(계약 변경: 가드는 overflow 를 내지 않는다)", async () => {
+      const boom = new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(
+        run_batch(fake.d1, [{ sql: "A", require_change: true }]),
+        (error: unknown) => error === boom && !is_zero_rows(error),
+      );
     });
 
     test("[보강] 결과에 meta.changes 가 없으면 조용히 0 으로 넘기지 않고 오류", async () => {
@@ -915,7 +919,7 @@ describe("d1_smoke 단위(가짜 D1)", () => {
           batches.push(statements);
           call += 1;
           if (call === 1) throw overflow;
-          throw new Error(`D1_ERROR: JSON path error near '${MARKER}[': SQLITE_ERROR`);
+          throw new Error(`D1_ERROR: bad JSON path: '${MARKER}[': SQLITE_ERROR`);
         },
       } as unknown as D1Like;
       await assert.rejects(
@@ -928,9 +932,26 @@ describe("d1_smoke 단위(가짜 D1)", () => {
     });
 
     test("[보강2] 가드 오류(표식 있음)는 ZeroRowsError 이고 탐침 batch 를 더 보내지 않는다", async () => {
-      const fake = fake_d1({ fail: new Error(`D1_ERROR: JSON path error near '${MARKER}[': SQLITE_ERROR`) });
+      const fake = fake_d1({ fail: new Error(`D1_ERROR: bad JSON path: '${MARKER}[': SQLITE_ERROR`) });
       await assert.rejects(run_batch(fake.d1, [{ sql: "A", require_change: true }]), is_zero_rows);
       assert.equal(fake.batches.length, 1);
+    });
+
+    test("[보강2] 가드 경로와 정확히 같지 않은 'bad JSON path' 오류는 원본 그대로", async () => {
+      for (const message of [
+        `D1_ERROR: bad JSON path: 'x.${MARKER}[[': SQLITE_ERROR`,
+        `D1_ERROR: bad JSON path: '${MARKER}': SQLITE_ERROR`,
+        `D1_ERROR: bad JSON path: 'a${MARKER}[': SQLITE_ERROR`,
+        `D1_ERROR: CHECK constraint failed: ${MARKER}: SQLITE_ERROR`,
+      ]) {
+        const boom = new Error(message);
+        const fake = fake_d1({ fail: boom });
+        await assert.rejects(
+          run_batch(fake.d1, [{ sql: "A", require_change: true }]),
+          (error: unknown) => error === boom,
+          message,
+        );
+      }
     });
 
     test("[보강2] 가드가 없으면 표식 문구가 있어도 원본 오류 그대로", async () => {
@@ -1028,17 +1049,25 @@ describe("d1 (로컬 miniflare)", {
       assert.equal(Number(results[0]?.n), 0, "실패한 batch 가 롤백되지 않았다");
     });
 
-    test("[보강2] 오류 문구에 표식이 든 사용자 문장은 ZeroRowsError 로 오보되지 않는다", async () => {
+    test("[보강2] 표식이 다른 오류 문구 안에 든 사용자 문장은 ZeroRowsError 로 오보되지 않는다", async () => {
+      // 사용자가 가드와 똑같은 json_extract 경로 식을 쓰는 경우는 범위 밖이다(ADR 0018 한계로 기록).
+      // 여기서는 표식이 다른 모양의 오류(다른 json 경로 오류·제약 오류) 문구에 들어가는 경우만 본다.
       const d1 = await next_d1();
       await apply_migrations(d1, MIGRATION_001);
-      await assert.rejects(
-        run_batch(d1, [
-          user("u1"),
-          { sql: "SELECT json_extract('{}', 'PES_D1_ZERO_ROWS_GUARD[')" },
-          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u1"], require_change: true },
-        ]),
-        (error: unknown) => error instanceof Error && !is_zero_rows(error),
-      );
+      for (const sql of [
+        "SELECT json_extract('{}', 'x.PES_D1_ZERO_ROWS_GUARD[[')",
+        "SELECT json_extract('{\"PES_D1_ZERO_ROWS_GUARD\":', '$')",
+        "INSERT INTO users (id, display_name) VALUES ('PES_D1_ZERO_ROWS_GUARD', NULL)",
+      ]) {
+        await assert.rejects(
+          run_batch(d1, [
+            { sql },
+            { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u1"], require_change: true },
+          ]),
+          (error: unknown) => error instanceof Error && !is_zero_rows(error),
+          sql,
+        );
+      }
     });
 
     test("[보강2] 앞선 문장이 0행이어도 require_change 문장이 1행이면 가드는 통과한다", async () => {
