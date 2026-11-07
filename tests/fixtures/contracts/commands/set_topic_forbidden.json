@@ -1,0 +1,19 @@
+{
+  "name": "set_topic_forbidden",
+  "description": "다른 프로젝트의 소유자는 이 프로젝트를 바꿀 수 없다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p2",
+        "client_request_id": "req-forbidden-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "남의 주제" }
+      },
+      "expect": {
+        "error": { "error": { "code": "forbidden", "message": "$any" } }
+      }
+    }
+  ]
+}

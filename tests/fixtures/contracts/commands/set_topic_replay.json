@@ -1,0 +1,38 @@
+{
+  "name": "set_topic_replay",
+  "description": "같은 키·같은 요청은 재생된다. 그 사이 rev가 올라 base_control_rev가 낡았어도 재생이 rev 검사보다 먼저다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-replay-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "재생 주제" }
+      },
+      "expect": {
+        "ok": {
+          "replayed": false,
+          "result": { "project_id": "$p1", "topic": "재생 주제", "control_rev": 1 }
+        }
+      }
+    },
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-replay-1",
+        "base_control_rev": 0,
+        "payload": { "topic": "재생 주제" }
+      },
+      "expect": {
+        "ok": {
+          "replayed": true,
+          "result": { "project_id": "$p1", "topic": "재생 주제", "control_rev": 1 }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "set_topic_ok",
+  "description": "rev가 맞으면 주제가 바뀌고 control_rev가 1 오른다. 사건과 영수증이 하나씩 남는다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-ok-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "바뀐 합성 주제" }
+      },
+      "expect": {
+        "ok": {
+          "replayed": false,
+          "result": { "project_id": "$p1", "topic": "바뀐 합성 주제", "control_rev": 1 }
+        }
+      }
+    }
+  ]
+}

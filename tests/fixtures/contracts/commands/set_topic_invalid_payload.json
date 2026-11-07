@@ -1,0 +1,32 @@
+{
+  "name": "set_topic_invalid_payload",
+  "description": "빈 주제나 잘못된 형식은 거부된다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-invalid-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "   " }
+      },
+      "expect": {
+        "error": { "error": { "code": "invalid_payload", "message": "$any" } }
+      }
+    },
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-invalid-2",
+        "base_control_rev": "current",
+        "payload": { "topic": 42 }
+      },
+      "expect": {
+        "error": { "error": { "code": "invalid_payload", "message": "$any" } }
+      }
+    }
+  ]
+}

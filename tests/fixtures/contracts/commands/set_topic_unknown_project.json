@@ -1,0 +1,19 @@
+{
+  "name": "set_topic_unknown_project",
+  "description": "없는 프로젝트(목적지)는 거부된다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "missing",
+        "actor": "p1",
+        "client_request_id": "req-missing-1",
+        "base_control_rev": 0,
+        "payload": { "topic": "어디에도 없음" }
+      },
+      "expect": {
+        "error": { "error": { "code": "not_found", "message": "$any" } }
+      }
+    }
+  ]
+}

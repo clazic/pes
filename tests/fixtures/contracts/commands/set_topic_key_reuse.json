@@ -1,0 +1,30 @@
+{
+  "name": "set_topic_key_reuse",
+  "description": "같은 키에 다른 요청(request_hash 다름)은 거부되고 아무것도 바뀌지 않는다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-reuse-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "첫 주제" }
+      },
+      "expect": { "ok": { "replayed": false, "result": { "topic": "첫 주제", "control_rev": 1 } } }
+    },
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-reuse-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "다른 주제" }
+      },
+      "expect": {
+        "error": { "error": { "code": "idempotency_key_reuse", "message": "$any" } }
+      }
+    }
+  ]
+}

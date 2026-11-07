@@ -1,0 +1,19 @@
+{
+  "name": "unknown_command",
+  "description": "닫힌 등록표에 없는 명령은 거부된다. 표 CRUD나 임의 SQL 명령은 없다.",
+  "steps": [
+    {
+      "request": {
+        "command": "table.insert",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-unknown-1",
+        "base_control_rev": "current",
+        "payload": { "table": "projects", "row": {} }
+      },
+      "expect": {
+        "error": { "error": { "code": "unknown_command", "message": "$any" } }
+      }
+    }
+  ]
+}
