@@ -68,7 +68,7 @@
 1. 묶음 전체 검증(위 4절).
 2. rows 파일의 `blobs.storage_key`가 안전한 상대 경로인지 확인하고, 그 집합이 manifest의 `objects/` 목록과 정확히 같은지 확인한다. 하나라도 어긋나면 `bundle_invalid`다(검증만으로는 rows 파일 안의 값을 판단할 수 없다).
 3. 같은 `project_id`가 있으면 `project_exists`, 같은 slug 등 유일 키가 겹치면 `project_conflict`.
-4. 대상 객체 경로를 검사한다. `objects_dir`과 대상 사이의 기존 디렉터리를 `lstat`/`realpath`로 확인해 symlink를 건너뛰지 않는다. symlink를 지나거나 대상이 symlink면 `object_path_unsafe`다. 같은 바이트가 있으면 건너뛰고, 다른 바이트가 있으면 `object_conflict`. 이 검사는 하나도 쓰기 전에 끝낸다.
+4. 대상 객체 경로를 검사한다. `objects_dir`과 대상 사이의 기존 디렉터리를 `lstat`/`realpath`로 확인해 symlink를 건너뛰지 않는다. symlink를 지나거나 대상이 symlink면 `object_path_unsafe`다. `objects_dir` 자체가 끊긴 symlink이거나 파일시스템 오류가 나도 `object_path_unsafe`로 거부한다. 같은 바이트가 있으면 건너뛰고, 다른 바이트가 있으면 `object_conflict`. 이 검사는 하나도 쓰기 전에 끝낸다.
 5. 새 객체 파일을 `wx`(덮어쓰지 않음)로 복사한다. 이때 새로 만든 디렉터리도 기록한다.
 6. 행 삽입과 epoch 갱신을 **하나의 `tx()`**로 한다. 표 사이 순환 FK 때문에 `PRAGMA defer_foreign_keys = ON`으로 COMMIT까지 검사를 미룬다(트랜잭션과 함께 자동 해제).
 7. 실패하면 tx는 롤백되고, 5단계에서 만든 파일과 디렉터리(빈 것만)를 지운다.

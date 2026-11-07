@@ -1015,7 +1015,7 @@ function ensure_directory_under(objects_dir: string, directory: string, created:
   }
 }
 
-function preflight_object_files(
+function preflight_object_files_inner(
   bundle_dir: string,
   objects_dir: string,
   manifest: Manifest,
@@ -1067,6 +1067,27 @@ function preflight_object_files(
     pending.push({ target, bytes });
   }
   return pending;
+}
+
+/**
+ * Any filesystem failure while judging the target objects folder (dangling
+ * symlinks, permission errors, ...) is a refusal, not a raw Node error. This
+ * runs before any file or row is written.
+ */
+function preflight_object_files(
+  bundle_dir: string,
+  objects_dir: string,
+  manifest: Manifest,
+): PendingObjectFile[] {
+  try {
+    return preflight_object_files_inner(bundle_dir, objects_dir, manifest);
+  } catch (error) {
+    if (error instanceof BackupError) throw error;
+    throw new BackupError(
+      "object_path_unsafe",
+      `cannot inspect the target objects folder: ${message_of(error)}`,
+    );
+  }
 }
 
 function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint {
