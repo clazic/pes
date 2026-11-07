@@ -1,0 +1,9 @@
+{
+  "name": "spec_example",
+  "description": "문서 8.1의 예시 벡터",
+  "command": "project.set_topic",
+  "ctx": {"via": "cli", "client_request_id": "req-1", "base_control_rev": 0},
+  "payload": {"n":1,"topic":"가"},
+  "canonical": "{\"n\":1,\"topic\":\"가\"}",
+  "sha256": "54877204a50ae33ca4e175d46813a1f760859a78124c138ea3d66c83eb0fc3fa"
+}

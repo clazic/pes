@@ -1,0 +1,9 @@
+{
+  "name": "number_forms",
+  "description": "숫자 정규화: -0→0, 1.0→1, 1E2→100, 1e21→1e+21, 0.1",
+  "command": "project.set_topic",
+  "ctx": {"via": "cli", "client_request_id": "req-1", "base_control_rev": 0},
+  "payload": {"topic":"t","a":-0,"b":1.0,"c":1E2,"d":1e21,"e":0.1,"f":1.5,"g":-7},
+  "canonical": "{\"a\":0,\"b\":1,\"c\":100,\"d\":1e+21,\"e\":0.1,\"f\":1.5,\"g\":-7,\"topic\":\"t\"}",
+  "sha256": "7f315b6bdb353fd93f47e634dc5d2387e833fa707cd6700972feb3008de33864"
+}

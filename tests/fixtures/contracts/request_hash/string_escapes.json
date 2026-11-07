@@ -1,0 +1,9 @@
+{
+  "name": "string_escapes",
+  "description": "JSON.stringify 이스케이프: 따옴표·역슬래시·제어문자·DEL·U+2028은 그대로",
+  "command": "project.set_topic",
+  "ctx": {"via": "cli", "client_request_id": "req-1", "base_control_rev": 0},
+  "payload": {"topic":"q\"b\\ \n\t\u0001\u007f\u2028 é 😀"},
+  "canonical": "{\"topic\":\"q\\\"b\\\\ \\n\\t\\u0001  é 😀\"}",
+  "sha256": "22dc3da71bb7c7f667c54b08ac82d51d3e498b60c3c95f199aca38c6f0aea680"
+}
