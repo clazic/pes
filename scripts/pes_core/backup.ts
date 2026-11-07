@@ -30,6 +30,9 @@ import {
   rmdirSync,
   rmSync,
   writeFileSync,
+  openSync,
+  closeSync,
+  writeSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -619,6 +622,9 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
   const manifest = parsed as unknown as Manifest;
 
   const problems: BundleProblem[] = [];
+  // Bytes of files that passed the path / regular-file checks. Later steps
+  // parse these bytes and never reopen a manifest path.
+  const accepted_bytes = new Map<string, Uint8Array>();
   for (const file of manifest.files) {
     if (!is_safe_bundle_path(file.path)) {
       problems.push({
@@ -670,6 +676,7 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
       });
       continue;
     }
+    accepted_bytes.set(file.path, bytes);
     if (size !== file.size) {
       problems.push({
         code: "size_mismatch",
@@ -711,9 +718,15 @@ export function verify_bundle(bundle_dir: string): VerifyResult {
     const count_paths = new Map<string, string>();
     let row_files_valid = true;
     for (const entry of rows_entries) {
+      const entry_bytes = accepted_bytes.get(entry.path);
+      // Rejected entries were already reported above; never reopen them.
+      if (entry_bytes === undefined) {
+        row_files_valid = false;
+        continue;
+      }
       let doc: RowsDoc;
       try {
-        doc = parse_rows_doc(readFileSync(join(bundle_dir, ...entry.path.split("/")), "utf8"));
+        doc = parse_rows_doc(Buffer.from(entry_bytes).toString("utf8"));
       } catch (error) {
         row_files_valid = false;
         problems.push({
@@ -870,7 +883,85 @@ function row_matches(
   return columns.every((name, index) => value_matches(existing[name], values[index]));
 }
 
-function insert_rows(db: Db, table: RowsTable): void {
+/** Source event_seq -> event_seq assigned in the target database. */
+type EventSeqMap = Map<string, bigint>;
+
+function sort_events_first(tables: RowsTable[]): RowsTable[] {
+  return [...tables.filter((t) => t.name === "events"), ...tables.filter((t) => t.name !== "events")];
+}
+
+function insert_events(db: Db, table: RowsTable, seq_map: EventSeqMap): void {
+  const seq_index = table.columns.findIndex((column) => column.name === "event_seq");
+  if (seq_index < 0) throw invalid_row("events table has no event_seq column");
+  const kept = table.columns.map((column, index) => ({ column, index })).filter((c) => c.index !== seq_index);
+  const quoted_names = kept.map((c) => `"${escape_identifier(c.column.name)}"`).join(", ");
+  const placeholders = kept.map(() => "?").join(", ");
+  const sql = `INSERT INTO "events" (${quoted_names}) VALUES (${placeholders})`;
+  const decoded = table.rows.map((raw) => ({
+    source_seq: decode_value(raw[seq_index], table.columns[seq_index]!.type),
+    values: kept.map((c) => decode_value(raw[c.index], c.column.type)),
+  }));
+  // Keep the source order: new numbers are assigned in ascending source order.
+  decoded.sort((left, right) => {
+    const a = BigInt(String(left.source_seq));
+    const b = BigInt(String(right.source_seq));
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  for (const row of decoded) {
+    const key = String(row.source_seq);
+    if (seq_map.has(key)) throw invalid_row(`duplicate events.event_seq ${key}`);
+    const result = db.run(sql, ...row.values);
+    seq_map.set(key, result.last_insert_rowid);
+  }
+}
+
+function remap_event_columns(table: RowsTable, seq_map: EventSeqMap): unknown[][] {
+  const indexes = table.columns
+    .map((column, index) => ({ name: column.name, index }))
+    .filter((c) => c.name.endsWith("event_seq"));
+  if (indexes.length === 0) return table.rows;
+  return table.rows.map((raw) => {
+    const row = [...raw];
+    for (const { index } of indexes) {
+      const value = row[index];
+      if (value === null || value === undefined) continue;
+      const mapped = seq_map.get(String(value));
+      if (mapped === undefined) {
+        throw invalid_row(`${table.name} refers to event_seq ${String(value)} that is not in the bundle`);
+      }
+      row[index] = { $int: mapped };
+    }
+    return row;
+  });
+}
+
+/**
+ * References to a project that is not in the target keep their source identity
+ * but lose every local pointer: the data of that project is not copied.
+ */
+function relink_missing_references(db: Db, table: RowsTable): unknown[][] {
+  const column = (name: string) => table.columns.findIndex((c) => c.name === name);
+  const ref_index = column("referenced_project_id");
+  if (ref_index < 0) return table.rows;
+  const source_snapshot = column("source_snapshot_id");
+  const latest_snapshot = column("latest_snapshot_id");
+  const status = column("status");
+  return table.rows.map((raw) => {
+    const referenced = raw[ref_index];
+    if (referenced === null || referenced === undefined) return raw;
+    if (typeof referenced === "string" && db.get("SELECT 1 AS present FROM projects WHERE id = ?", referenced) !== undefined) {
+      return raw;
+    }
+    const row = [...raw];
+    row[ref_index] = null;
+    if (source_snapshot >= 0) row[source_snapshot] = null;
+    if (latest_snapshot >= 0) row[latest_snapshot] = null;
+    if (status >= 0) row[status] = "source_missing";
+    return row;
+  });
+}
+
+function insert_rows(db: Db, table: RowsTable, rows: unknown[][]): void {
   const names = table.columns.map((column) => column.name);
   const quoted_names = names.map((name) => `"${escape_identifier(name)}"`).join(", ");
   const placeholders = names.map(() => "?").join(", ");
@@ -878,8 +969,14 @@ function insert_rows(db: Db, table: RowsTable): void {
   const id_index = names.indexOf("id");
   const skippable = (table.name === "users" || table.name === "actors") && id_index >= 0;
 
-  for (const raw of table.rows) {
-    const values = table.columns.map((column, index) => decode_value(raw[index], column.type));
+  for (const raw of rows) {
+    const values = table.columns.map((column, index) => {
+      const cell = raw[index];
+      if (cell !== null && typeof cell === "object" && "$int" in (cell as object) && typeof (cell as { $int: unknown }).$int === "bigint") {
+        return (cell as { $int: bigint }).$int;
+      }
+      return decode_value(cell, column.type);
+    });
     if (skippable) {
       const existing = db.get<Record<string, SqlValue>>(
         `SELECT * FROM "${escape_identifier(table.name)}" WHERE id = ?`,
@@ -1120,6 +1217,13 @@ function preflight_object_files(
   }
 }
 
+function writeAll(fd: number, bytes: Uint8Array): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    offset += writeSync(fd, bytes, offset, bytes.length - offset);
+  }
+}
+
 function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint {
   // Rows contain cycles (projects <-> project_members/editions, editions <->
   // stages), so per-statement foreign key checks cannot work with any single
@@ -1135,7 +1239,8 @@ function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint 
   // Only these tables may appear without a project_id column; everything else
   // in a project bundle must belong to manifest.project_id.
   const global_tables = new Set(["projects", "users", "actors"]);
-  for (const table of tables) {
+  const seq_map: EventSeqMap = new Map();
+  for (const table of sort_events_first(tables)) {
     if (table.name === "db_meta" || !existing_tables.has(table.name)) {
       throw invalid_row(`target schema has no table ${table.name}`);
     }
@@ -1158,7 +1263,14 @@ function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint 
     } else if (!global_tables.has(table.name)) {
       throw invalid_row(`table ${table.name} is not part of a project bundle`);
     }
-    insert_rows(db, table);
+    if (table.name === "events") {
+      insert_events(db, table, seq_map);
+    } else {
+      const rows = table.name === "project_references"
+        ? relink_missing_references(db, table)
+        : remap_event_columns(table, seq_map);
+      insert_rows(db, table, rows);
+    }
   }
 
   const meta = db.get<{ cursor_epoch: bigint }>("SELECT cursor_epoch FROM db_meta WHERE id = 1");
@@ -1210,8 +1322,15 @@ export function import_bundle(db: Db, objects_dir: string, bundle_dir: string): 
   try {
     for (const file of pending) {
       ensure_directory_under(objects_dir, dirname(file.target), created_dirs);
-      writeFileSync(file.target, file.bytes, { flag: "wx" });
+      // openSync(wx) fails with EEXIST for a file this import does not own, so
+      // only a successfully created file is registered for cleanup.
+      const fd = openSync(file.target, "wx");
       created_files.push(file.target);
+      try {
+        writeAll(fd, file.bytes);
+      } finally {
+        closeSync(fd);
+      }
     }
     const cursor_epoch = tx(db, () => insert_bundle(db, tables, manifest));
     return { project_id: manifest.project_id, cursor_epoch };
