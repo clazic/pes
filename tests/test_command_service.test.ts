@@ -9,6 +9,11 @@
 //                      payload {topic: non-empty string}.
 //                      result {project_id, topic, control_rev}; control_rev goes up by 1.
 //
+// bootstrap_project(db, input, deps) in bootstrap.ts keeps its signature (no ctx). Internally it runs
+// the project.bootstrap command through the service synchronously, with via='cli' and a freshly
+// generated client_request_id. tests/test_db_bootstrap.test.ts expects its events (>= 1, same
+// tx_id as the single receipt). execute() must therefore work synchronously.
+//
 // Interfaces fixed by these tests (the worker implements exactly these):
 //   new CommandService(db, {clock, policy}); service.execute(ctx, command, payload)
 //     -> {result, replayed}. (The tests `await` the call, so sync or async both work.)

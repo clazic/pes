@@ -157,9 +157,16 @@ test("bootstrap creates owner, initial policy, edition, six stages, counters, an
     );
     assert.ok(counters.every((counter) => counter.next_no === 1n));
 
+    // PR4 requirement change: every change leaves events tied to its receipt.
+    const events = db.all<{ tx_id: string }>("SELECT tx_id FROM events");
+    assert.ok(events.length >= 1, "bootstrap leaves at least one event");
+    assert.ok(events.every((event) => event.tx_id === result.tx_id));
     assert.equal(
-      db.get<{ count: bigint }>("SELECT count(*) AS count FROM events")?.count,
-      0n,
+      db.get<{ count: bigint }>(
+        "SELECT count(*) AS count FROM mutation_commits WHERE id = ?",
+        result.tx_id,
+      )?.count,
+      1n,
     );
     assert.equal(
       db.get<{ count: bigint }>("SELECT count(*) AS count FROM db_meta")?.count,
