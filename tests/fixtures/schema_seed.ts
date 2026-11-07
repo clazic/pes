@@ -306,6 +306,21 @@ export function seed_representative_graph(
     run_id,
     answer_version_id,
   );
+  // The event gets its own receipt: bootstrap already used project.tx_id for its
+  // events (UNIQUE(tx_id, tx_index)), so reusing it at tx_index 0 would collide.
+  const event_tx_id = new_id();
+  db.run(
+    `INSERT INTO mutation_commits
+       (id, project_id, actor_id, via, client_request_id, request_hash, action,
+        result_json, created_at)
+     VALUES (?, ?, ?, 'cli', ?, ?, 'fixture.create', '{}', ?)`,
+    event_tx_id,
+    project.project_id,
+    project.owner_actor_id,
+    `seed-${event_tx_id}`,
+    SYNTHETIC_HASH,
+    now,
+  );
   db.run(
     `INSERT INTO events
        (id, project_id, run_id, tx_id, tx_index, tx_size, type, object_id,
@@ -314,7 +329,7 @@ export function seed_representative_graph(
     event_id,
     project.project_id,
     run_id,
-    project.tx_id,
+    event_tx_id,
     artifact_object_id,
     artifact_version_id,
     now,

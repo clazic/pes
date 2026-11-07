@@ -10,13 +10,14 @@
 //                      result {project_id, topic, control_rev}; control_rev goes up by 1.
 //
 // bootstrap_project(db, input, deps) in bootstrap.ts keeps its signature (no ctx). Internally it runs
-// the project.bootstrap command through the service synchronously, with via='cli' and a freshly
-// generated client_request_id. tests/test_db_bootstrap.test.ts expects its events (>= 1, same
-// tx_id as the single receipt). execute() must therefore work synchronously.
+// the project.bootstrap command through the service with the synchronous execute_sync(ctx, command,
+// payload), with via='cli' and a freshly generated client_request_id. tests/test_db_bootstrap.test.ts
+// expects its events (>= 1, same tx_id as the single receipt).
+// execute() is async: it returns a Promise, errors are rejections, and it never yields inside a tx.
 //
 // Interfaces fixed by these tests (the worker implements exactly these):
 //   new CommandService(db, {clock, policy}); service.execute(ctx, command, payload)
-//     -> {result, replayed}. (The tests `await` the call, so sync or async both work.)
+//     -> {result, replayed}. (Async: tests `await` the call.)
 //   MutationContext {project_id: string|null, actor_id: string|null, via, client_request_id,
 //     base_control_rev?: number}
 //   PolicyChecker.check(ctx, command, payload) -> {allowed: true} | {allowed: false, reason: string}
