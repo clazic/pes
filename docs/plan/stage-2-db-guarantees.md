@@ -119,3 +119,26 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **정책 우선**: 인증·권한·현재 정책 검사가 영수증 재생보다 먼저다. OFF 뒤에는 OFF 전에 성공한 결과가 재생되지 않는다.
 - **원자성**: 조건부 UPDATE가 0행이거나 events/영수증 INSERT가 실패하면 tx 전체를 롤백하고 성공으로 보이지 않는다. 실패한 시도는 영수증을 남기지 않으므로 같은 키로 다시 실행할 수 있다.
 - **닫힌 표면**: 표 CRUD·임의 SQL·ops 명령은 등록표에 없다. 새 쓰기는 도메인 명령 하나로만 추가한다.
+- **오류 번역**: SQLite UNIQUE·PRIMARY KEY 제약만 `ApiError("conflict", "UNIQUE constraint conflict")`로 바꾼다. 원문(표·열 이름)은 메시지·`details` 어디에도 넣지 않는다. FOREIGN KEY·NOT NULL·CHECK 등 다른 SQLite 오류는 tx 롤백 뒤 원래 오류를 그대로 던진다.
+
+### 8.1 request_hash 정규화 (언어 중립)
+
+영수증의 `request_hash`는 다음 규칙으로 계산한다. 다른 언어 구현도 같은 입력에서 같은 64자 hex를 내야 한다(영수증을 장기 보존하고 재생 판정에 쓰므로).
+
+1. **입력 스냅샷**: 명령 진입 시 payload를 `JSON.stringify`→`JSON.parse` 한 번으로 고정한다. `JSON.stringify`는 `toJSON`을 적용하고 getter를 한 번 읽는다. 최상위 `undefined`·함수·심볼만 있는 payload는 `null`로 정규화한다. 순환 참조·BigInt는 `invalid_payload`다. 이후 해시·정책 사본·검증·실행은 모두 이 스냅샷만 쓴다.
+2. **해시 대상 문자열**: `command + "\n" + canonical_json(snapshot)`을 UTF-8로 인코딩한 바이트.
+3. **canonical_json**:
+   - 객체 키는 **UTF-16 코드 유닛 순서**(JavaScript `Array.prototype.sort()` 기본)로 정렬한다. 키와 문자열 값은 ECMAScript `JSON.stringify` 규칙으로 인용·이스케이프한다.
+   - 배열은 순서를 유지한다.
+   - 숫자·불리언·`null`은 ECMAScript `JSON.stringify` 출력 그대로다. 스냅샷은 `JSON.parse` 결과이므로 NaN·Infinity는 없고, `-0`은 `0`으로 직렬화된다.
+   - 공백·개행을 넣지 않는다.
+4. **해시**: 위 문자열의 SHA-256, 소문자 16진수 64자.
+5. **포함/제외**: `command`와 payload 스냅샷만 포함한다. `base_control_rev`·`project_id`·`actor_id`·`via`·`client_request_id`는 해시에 넣지 않는다. 영수증 조회 키는 `(project_id, actor_id, client_request_id)`이고 해시는 요청 본문 비교에만 쓴다.
+
+예: command `project.set_topic`, payload `{"n":1,"topic":"가"}` → 해시 대상 `project.set_topic\n{"n":1,"topic":"가"}` → SHA-256 `54877204a50ae33ca4e175d46813a1f760859a78124c138ea3d66c83eb0fc3fa`.
+
+### 8.2 후속 확장(예정)
+
+- **PR10**: `PolicyChecker.check`가 tx 안의 읽기 전용 `db`(또는 정책 행 조회 함수)를 받도록 시그니처를 넓혀, `project_policy_versions` 현재 행을 같은 tx에서 읽는다.
+- **PR5**: `EventDraft`에 `run_id`·`object_id`·`edition/stage/round`, `insert_receipt`에 `lease_id`·`fence`·`edition_id` 필드를 더한다.
+- **PR5 이전 검토**: 새 명령이 영수증을 빠뜨리지 않도록 `run()`이 action을 제외한 영수증 필드를 반환하고 서비스가 쓰는 구조(부트스트랩만 정책 FK 때문에 훅으로 예외)를 검토한다.

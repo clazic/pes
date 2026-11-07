@@ -179,7 +179,10 @@ function snapshot_payload(payload: unknown): unknown {
   } catch {
     throw new ApiError("invalid_payload", "payload must be JSON-serializable");
   }
-  if (text === undefined) return undefined;
+  // JSON.stringify returns undefined for undefined/function/symbol payloads.
+  // They are not JSON data; normalize to null so the snapshot is always JSON
+  // (validation rejects non-object payloads afterwards).
+  if (text === undefined) return null;
   try {
     return JSON.parse(text);
   } catch {
@@ -189,9 +192,7 @@ function snapshot_payload(payload: unknown): unknown {
 
 /** A second parse of the snapshot for the policy: own keys, no shared objects. */
 function copy_snapshot(snapshot: unknown): unknown {
-  if (snapshot === undefined) return undefined;
-  const text = JSON.stringify(snapshot);
-  return text === undefined ? undefined : JSON.parse(text);
+  return JSON.parse(JSON.stringify(snapshot));
 }
 
 function is_record(value: unknown): value is Record<string, unknown> {
@@ -248,25 +249,21 @@ function policy_denial_reason(decision: unknown): string {
   return "policy denied";
 }
 
-/** Deterministic JSON used only for request hashing. */
+/**
+ * Deterministic JSON used only for request hashing. The input is always the
+ * JSON snapshot (never a live caller object), so toJSON and undefined handling
+ * are not needed here. Key order is UTF-16 code unit order, matching
+ * Array.prototype.sort; see docs/plan/stage-2-db-guarantees.md 8절.
+ */
 function canonical_json(value: unknown): string {
-  if (value !== null && (typeof value === "object" || typeof value === "function")) {
-    const toJSON = (value as { toJSON?: unknown }).toJSON;
-    if (typeof toJSON === "function") {
-      return canonical_json((toJSON as (this: unknown) => unknown).call(value));
-    }
-  }
   if (value === null || typeof value !== "object") {
-    const encoded = JSON.stringify(value);
-    return encoded === undefined ? "null" : encoded;
+    return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
     return `[${value.map((entry) => canonical_json(entry)).join(",")}]`;
   }
   const record = value as Record<string, unknown>;
-  const keys = Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort();
+  const keys = Object.keys(record).sort();
   return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical_json(record[key])}`).join(",")}}`;
 }
 
@@ -626,17 +623,29 @@ class ReadonlyCommandRegistry implements ReadonlyMap<string, CommandDefinition> 
 /** The closed command registry. Adding a table CRUD or arbitrary SQL command is forbidden. */
 export const COMMANDS: ReadonlyMap<string, CommandDefinition> = new ReadonlyCommandRegistry(COMMAND_TABLE);
 
+// SQLite extended result codes for uniqueness violations only. Everything else
+// (FOREIGN KEY, NOT NULL, CHECK, programming errors) is rethrown unchanged:
+// those are not a client-facing "conflict", and the tx has already rolled back.
+const SQLITE_CONSTRAINT_PRIMARYKEY = 1555;
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+const SQLITE_CONSTRAINT_ROWID = 2579;
+
+/**
+ * Only uniqueness violations become a client-safe conflict. The raw SQLite
+ * message (which names tables and columns) is never exposed, not even in
+ * details; other SQLite errors keep their original error for the caller.
+ */
 function translate_error(error: unknown): never {
   if (error instanceof ApiError) throw error;
   if (error instanceof Error) {
-    const candidate = error as Error & { code?: unknown; errcode?: unknown };
+    const candidate = error as Error & { errcode?: unknown };
     const errcode = typeof candidate.errcode === "number" ? candidate.errcode : undefined;
-    // SQLITE_CONSTRAINT family: UNIQUE, CHECK, FOREIGN KEY, NOT NULL.
-    if (errcode !== undefined && (errcode & 0xff) === 19) {
-      throw new ApiError("conflict", error.message);
-    }
-    if (candidate.code === "ERR_SQLITE_ERROR" && /constraint/i.test(error.message)) {
-      throw new ApiError("conflict", error.message);
+    if (
+      errcode === SQLITE_CONSTRAINT_UNIQUE ||
+      errcode === SQLITE_CONSTRAINT_PRIMARYKEY ||
+      errcode === SQLITE_CONSTRAINT_ROWID
+    ) {
+      throw new ApiError("conflict", "UNIQUE constraint conflict");
     }
   }
   throw error;
