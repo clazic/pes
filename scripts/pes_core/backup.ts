@@ -317,13 +317,27 @@ function read_snapshot(db: Db, project_id: string): ExportSnapshot {
   };
 }
 
-function write_bundle_file(root: string, relative_path: string, bytes: Uint8Array): void {
+function escapes_root(rel: string): boolean {
+  return isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`);
+}
+
+function write_bundle_file(
+  root: string,
+  relative_path: string,
+  bytes: Uint8Array,
+  created_dirs: string[],
+): void {
   const target = join(root, ...relative_path.split("/"));
-  mkdirSync(dirname(target), { recursive: true });
+  ensure_directory_under(root, dirname(target), created_dirs);
   writeFileSync(target, bytes);
 }
 
-function cleanup_bundle(out_dir: string, existed: boolean, relative_paths: string[]): void {
+function cleanup_bundle(
+  out_dir: string,
+  existed: boolean,
+  relative_paths: string[],
+  created_dirs: string[],
+): void {
   if (!existed) {
     rmSync(out_dir, { recursive: true, force: true });
     return;
@@ -333,6 +347,13 @@ function cleanup_bundle(out_dir: string, existed: boolean, relative_paths: strin
       rmSync(join(out_dir, ...relative_path.split("/")), { force: true });
     } catch {
       // Best effort: the original out_dir was empty by contract.
+    }
+  }
+  for (const directory of created_dirs.reverse()) {
+    try {
+      rmdirSync(directory);
+    } catch {
+      // Keep a directory that still holds something; it was not created empty.
     }
   }
 }
@@ -390,15 +411,22 @@ export function export_project(
 
   const existed = existsSync(out_dir);
   mkdirSync(out_dir, { recursive: true });
+  const created_dirs: string[] = [];
   try {
-    for (const payload of payloads) write_bundle_file(out_dir, payload.path, payload.bytes);
+    for (const payload of payloads) write_bundle_file(out_dir, payload.path, payload.bytes, created_dirs);
     write_bundle_file(
       out_dir,
       MANIFEST_FILE,
       new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`),
+      created_dirs,
     );
   } catch (error) {
-    cleanup_bundle(out_dir, existed, [...payloads.map((payload) => payload.path), MANIFEST_FILE]);
+    cleanup_bundle(
+      out_dir,
+      existed,
+      [...payloads.map((payload) => payload.path), MANIFEST_FILE],
+      created_dirs,
+    );
     throw error;
   }
 
@@ -953,17 +981,19 @@ function validate_bundle_blob_rows(tables: RowsTable[], manifest: Manifest): voi
 function assert_safe_target_ancestors(objects_dir: string, target: string): void {
   const root = resolve(objects_dir);
   const root_stat = lstat_or_undefined(root);
-  let root_real = root;
   if (root_stat !== undefined) {
-    if (!root_stat.isSymbolicLink() && !root_stat.isDirectory()) {
+    if (root_stat.isSymbolicLink()) {
+      throw new BackupError("object_path_unsafe", `objects folder is a symbolic link: ${objects_dir}`);
+    }
+    if (!root_stat.isDirectory()) {
       throw new BackupError("object_conflict", `objects folder is not a directory: ${objects_dir}`);
     }
-    root_real = realpathSync(root);
   }
+  const root_real = root_stat === undefined ? root : realpathSync(root);
 
   const parent = resolve(dirname(target));
   const rel = relative(root, parent);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (escapes_root(rel)) {
     throw new BackupError("object_path_unsafe", `object path escapes the objects folder: ${target}`);
   }
   const segments = rel === "" ? [] : rel.split(sep);
@@ -990,7 +1020,7 @@ function ensure_directory_under(objects_dir: string, directory: string, created:
   const root = resolve(objects_dir);
   const target = resolve(directory);
   const rel = relative(root, target);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (escapes_root(rel)) {
     throw new BackupError("object_path_unsafe", `object path escapes the objects folder: ${directory}`);
   }
   const segments = rel === "" ? [] : rel.split(sep);
@@ -1102,6 +1132,9 @@ function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint 
       .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
       .map((row) => row.name),
   );
+  // Only these tables may appear without a project_id column; everything else
+  // in a project bundle must belong to manifest.project_id.
+  const global_tables = new Set(["projects", "users", "actors"]);
   for (const table of tables) {
     if (table.name === "db_meta" || !existing_tables.has(table.name)) {
       throw invalid_row(`target schema has no table ${table.name}`);
@@ -1111,6 +1144,19 @@ function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint 
       if (!target_columns.has(column.name)) {
         throw invalid_row(`target table ${table.name} has no column ${column.name}`);
       }
+    }
+    if (target_columns.has("project_id")) {
+      const project_index = table.columns.findIndex((column) => column.name === "project_id");
+      if (project_index < 0) {
+        throw invalid_row(`target table ${table.name} has a project_id column but the rows file does not`);
+      }
+      for (const [row_index, row] of table.rows.entries()) {
+        if (row[project_index] !== manifest.project_id) {
+          throw invalid_row(`rows table ${table.name} row ${row_index} belongs to another project`);
+        }
+      }
+    } else if (!global_tables.has(table.name)) {
+      throw invalid_row(`table ${table.name} is not part of a project bundle`);
     }
     insert_rows(db, table);
   }

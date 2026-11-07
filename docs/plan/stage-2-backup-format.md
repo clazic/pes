@@ -17,7 +17,7 @@
 - `out_dir`은 없거나 비어 있어야 한다. 아니면 `BackupError("out_dir_not_empty")`이고 아무것도 쓰지 않는다.
 - 없는 `project_id`는 `BackupError("project_not_found")`이고 `out_dir`을 만들지 않는다.
 - 행은 **하나의 `tx()` 안에서** 읽는다. DB 파일 복사·`VACUUM INTO`·`ATTACH`·`wal_checkpoint`를 쓰지 않는다. 객체 파일은 행을 읽은 뒤 불투명하게 복사하며, 행 해시와 파일 바이트가 달라도 해석하지 않는다.
-- `manifest.json`은 마지막에 쓴다. 쓰기가 실패하면 이번에 만든 파일을 지운다(원래 비어 있던 `out_dir`은 빈 상태로 돌아간다).
+- `manifest.json`은 마지막에 쓴다. 쓰기가 실패하면 이번에 만든 파일과 하위 디렉터리(빈 것만)를 지운다(원래 비어 있던 `out_dir`은 빈 상태로 돌아간다).
 - 같은 프로젝트를 두 번 내보내면 파일 바이트까지 같다. 시각·경로 같은 비결정 값은 넣지 않는다.
 
 ## 2. manifest 필드
@@ -67,11 +67,12 @@
 
 1. 묶음 전체 검증(위 4절).
 2. rows 파일의 `blobs.storage_key`가 안전한 상대 경로인지 확인하고, 그 집합이 manifest의 `objects/` 목록과 정확히 같은지 확인한다. 하나라도 어긋나면 `bundle_invalid`다(검증만으로는 rows 파일 안의 값을 판단할 수 없다).
-3. 같은 `project_id`가 있으면 `project_exists`, 같은 slug 등 유일 키가 겹치면 `project_conflict`.
-4. 대상 객체 경로를 검사한다. `objects_dir`과 대상 사이의 기존 디렉터리를 `lstat`/`realpath`로 확인해 symlink를 건너뛰지 않는다. symlink를 지나거나 대상이 symlink면 `object_path_unsafe`다. `objects_dir` 자체가 끊긴 symlink이거나 파일시스템 오류가 나도 `object_path_unsafe`로 거부한다. 같은 바이트가 있으면 건너뛰고, 다른 바이트가 있으면 `object_conflict`. 이 검사는 하나도 쓰기 전에 끝낸다.
-5. 새 객체 파일을 `wx`(덮어쓰지 않음)로 복사한다. 이때 새로 만든 디렉터리도 기록한다.
-6. 행 삽입과 epoch 갱신을 **하나의 `tx()`**로 한다. 표 사이 순환 FK 때문에 `PRAGMA defer_foreign_keys = ON`으로 COMMIT까지 검사를 미룬다(트랜잭션과 함께 자동 해제).
-7. 실패하면 tx는 롤백되고, 5단계에서 만든 파일과 디렉터리(빈 것만)를 지운다.
+3. rows 파일의 표 소속을 확인한다. 대상 스키마에 `project_id` 열이 있는 표는 모든 행의 `project_id`가 `manifest.project_id`여야 하고, 그 밖의 표는 `projects`·`users`·`actors`만 허용한다. 위반은 `bundle_invalid`다.
+4. 같은 `project_id`가 있으면 `project_exists`, 같은 slug 등 유일 키가 겹치면 `project_conflict`.
+5. 대상 객체 경로를 검사한다. `objects_dir`과 대상 사이의 기존 디렉터리를 `lstat`/`realpath`로 확인해 symlink를 건너뛰지 않는다. symlink를 지나거나 대상이 symlink면 `object_path_unsafe`다. `objects_dir` 자체가 symlink(끊긴 링크 포함)이거나 파일시스템 오류가 나도 `object_path_unsafe`로 거부한다. 같은 바이트가 있으면 건너뛰고, 다른 바이트가 있으면 `object_conflict`. 이 검사는 하나도 쓰기 전에 끝낸다.
+6. 새 객체 파일을 `wx`(덮어쓰지 않음)로 복사한다. 이때 새로 만든 디렉터리도 기록한다.
+7. 행 삽입과 epoch 갱신을 **하나의 `tx()`**로 한다. 표 사이 순환 FK 때문에 `PRAGMA defer_foreign_keys = ON`으로 COMMIT까지 검사를 미룬다(트랜잭션과 함께 자동 해제).
+8. 실패하면 tx는 롤백되고, 6단계에서 만든 파일과 디렉터리(빈 것만)를 지운다.
 
 성공하면 대상 `db_meta.cursor_epoch`은 `max(대상 epoch, manifest.cursor_epoch) + 1`이 된다. `database_instance_id`는 바꾸지 않는다. `assert_cursor_epoch`은 10진 문자열·bigint만 받고, 현재 epoch와 다르면 `cursor_epoch_stale`, 10진수가 아니면 `cursor_epoch_invalid`다.
 
