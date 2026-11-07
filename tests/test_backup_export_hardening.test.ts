@@ -35,6 +35,7 @@ import {
   make_world,
   meta_of,
   project_rows,
+  source_rows_in_target_numbering,
   sha256_hex,
   type World,
 } from "./helpers/backup_fixture.ts";
@@ -208,10 +209,12 @@ test("nullable columns of real tables (users.disabled_at, auth_subject) round tr
   with_world((world) => {
     const { dir } = export_a(world);
     import_bundle(world.tgt, world.tgt_objects, dir);
-    assert.deepEqual(
-      project_rows(world.tgt, world.a.project_id, world.a.owner_user_id),
+    // event_seq is re-assigned by the target (order and references preserved); every other column is strictly equal.
+    const moved = source_rows_in_target_numbering(
       project_rows(world.src, world.a.project_id, world.a.owner_user_id),
+      project_rows(world.tgt, world.a.project_id, world.a.owner_user_id),
     );
+    assert.deepEqual(moved.actual, moved.expected);
     const user = world.tgt.get<{ disabled_at: unknown; auth_subject: unknown }>(
       "SELECT disabled_at, auth_subject FROM users WHERE id = ?",
       world.a.owner_user_id,

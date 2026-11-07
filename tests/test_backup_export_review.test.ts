@@ -21,6 +21,7 @@ import {
   make_world,
   meta_of,
   project_rows,
+  source_rows_in_target_numbering,
   type World,
 } from "./helpers/backup_fixture.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -179,8 +180,8 @@ function insert_event(db: Db, project: BootstrapResult, tx_index: number, tx_siz
     id,
     project.project_id,
     project.tx_id,
-    tx_index,
-    tx_size,
+    tx_index + 1, // index 0 of the project's tx is the bootstrap project.created event
+    tx_size + 1,
     type,
   );
   const row = db.get<{ event_seq: bigint }>("SELECT event_seq FROM events WHERE id = ?", id);
@@ -206,20 +207,22 @@ function insert_snapshot(db: Db, project: BootstrapResult, blob_id: string, thro
 test("A imports alone when source and target both have events with overlapping event_seq; new numbers are assigned and event references follow", () => {
   with_world((world) => {
     // Source: B has event 1, A has events 2 and 3 (A's second event is referenced by a stage, first by a snapshot).
+    // (bootstrap already wrote one project.created event per project on each side)
     insert_event(world.src, world.b, 0, 1, "synthetic.b");
     const a1 = insert_event(world.src, world.a, 0, 2, "synthetic.a1");
     const a2 = insert_event(world.src, world.a, 1, 2, "synthetic.a2");
-    assert.deepEqual([a1.seq, a2.seq], [2n, 3n]);
+    assert.ok(a1.seq > 1n && a2.seq > a1.seq);
     world.src.run("UPDATE stages SET stale_since_event_seq = ? WHERE id = ?", a2.seq, world.a.stage_ids.research);
     const snapshot_id = insert_snapshot(world.src, world.a, world.a_blobs[0]!.id, a1.seq);
 
-    // Target: C already has events 1..3, so every source number collides.
+    // Target: C already has its bootstrap event (1) plus three more, so source numbers collide with C's.
     const c_events = [0, 1, 2].map((i) => insert_event(world.tgt, world.c, i, 3, `synthetic.c${i}`));
-    assert.deepEqual(c_events.map((e) => e.seq), [1n, 2n, 3n]);
+    assert.deepEqual(c_events.map((e) => e.seq), [2n, 3n, 4n]);
 
     const { dir } = export_project_to(world, world.a, "events");
     assert.equal(verify_bundle(dir).ok, true);
 
+    const a_source_rows = project_rows(world.src, world.a.project_id, world.a.owner_user_id);
     const c_before = project_rows(world.tgt, world.c.project_id, world.c.owner_user_id);
     const c_event_rows_before = JSON.stringify(world.tgt.all("SELECT * FROM events WHERE project_id = ? ORDER BY event_seq", world.c.project_id), (_k, v) => (typeof v === "bigint" ? `${v}n` : v));
     const epoch_before = meta_of(world.tgt).cursor_epoch;
@@ -233,20 +236,34 @@ test("A imports alone when source and target both have events with overlapping e
       "SELECT id, event_seq FROM events WHERE project_id = ? ORDER BY event_seq",
       world.a.project_id,
     );
-    assert.deepEqual(imported.map((row) => row.id), [a1.id, a2.id], "both events imported, source order preserved");
-    const new1 = BigInt(imported[0]!.event_seq);
-    const new2 = BigInt(imported[1]!.event_seq);
-    for (const seq of [new1, new2]) assert.ok(!c_events.some((e) => e.seq === seq), `new seq ${seq} collides with an existing target event`);
-    assert.ok(new1 > 3n && new2 > new1, `new numbers come after the target's existing ones (${new1}, ${new2})`);
+    const src_ids = world.src
+      .all<{ id: string }>("SELECT id FROM events WHERE project_id = ? ORDER BY event_seq", world.a.project_id)
+      .map((row) => row.id);
+    assert.equal(src_ids.length, 3, "bootstrap event plus two synthetic ones");
+    assert.deepEqual(imported.map((row) => row.id), src_ids, "all of A's events imported, source order preserved");
+    const new1 = imported.find((row) => row.id === a1.id)!.event_seq;
+    const new2 = imported.find((row) => row.id === a2.id)!.event_seq;
+    const target_max_before = c_events[c_events.length - 1]!.seq;
+    for (const row of imported) {
+      const seq = BigInt(row.event_seq);
+      assert.ok(!c_events.some((e) => e.seq === seq) && seq !== 1n, `new seq ${seq} collides with an existing target event`);
+      assert.ok(seq > target_max_before, `new number ${seq} comes after the target's existing ones`);
+    }
 
     // References follow the same mapping.
     const stage = world.tgt.get<{ stale_since_event_seq: bigint | null }>(
       "SELECT stale_since_event_seq FROM stages WHERE id = ?",
       world.a.stage_ids.research,
     );
-    assert.equal(stage?.stale_since_event_seq === null ? null : BigInt(stage!.stale_since_event_seq!), new2);
+    assert.equal(stage?.stale_since_event_seq === null ? null : BigInt(stage!.stale_since_event_seq!), BigInt(new2));
     const snapshot = world.tgt.get<{ through_event_seq: bigint | null }>("SELECT through_event_seq FROM snapshots WHERE id = ?", snapshot_id);
-    assert.equal(snapshot?.through_event_seq === null ? null : BigInt(snapshot!.through_event_seq!), new1);
+    assert.equal(snapshot?.through_event_seq === null ? null : BigInt(snapshot!.through_event_seq!), BigInt(new1));
+
+    // Whole project: order-preserving mapping; every event_seq reference follows it; other columns strictly equal.
+    const moved = source_rows_in_target_numbering(a_source_rows, project_rows(world.tgt, world.a.project_id, world.a.owner_user_id));
+    assert.equal(moved.mapping.get(a1.seq), BigInt(new1));
+    assert.equal(moved.mapping.get(a2.seq), BigInt(new2));
+    assert.deepEqual(moved.actual, moved.expected);
 
     // The target's own events are untouched.
     const c_event_rows_after = JSON.stringify(world.tgt.all("SELECT * FROM events WHERE project_id = ? ORDER BY event_seq", world.c.project_id), (_k, v) => (typeof v === "bigint" ? `${v}n` : v));
@@ -261,8 +278,11 @@ test("A imports alone when source and target both have events with overlapping e
 
 test("the bootstrap-only overlap case (one event on each side, both event_seq 1) imports", () => {
   with_world((world) => {
-    insert_event(world.src, world.a, 0, 1, "synthetic.a");
-    insert_event(world.tgt, world.c, 0, 1, "synthetic.c");
+    const a_boot = world.src.get<{ event_seq: bigint }>("SELECT event_seq FROM events WHERE project_id = ?", world.a.project_id);
+    const c_boot = world.tgt.get<{ event_seq: bigint }>("SELECT event_seq FROM events WHERE project_id = ?", world.c.project_id);
+    assert.equal(BigInt(a_boot!.event_seq), 1n);
+    assert.equal(BigInt(c_boot!.event_seq), 1n, "only the two bootstrap events exist, both numbered 1");
+    const a_source_rows = project_rows(world.src, world.a.project_id, world.a.owner_user_id);
     const { dir } = export_project_to(world, world.a, "events-min");
     assert.equal(verify_bundle(dir).ok, true);
     import_bundle(world.tgt, world.tgt_objects, dir);
@@ -270,6 +290,9 @@ test("the bootstrap-only overlap case (one event on each side, both event_seq 1)
     assert.equal(seqs.length, 2);
     assert.equal(new Set(seqs.map((row) => BigInt(row.event_seq))).size, 2);
     assert.equal(BigInt(seqs.find((row) => row.project_id === world.c.project_id)!.event_seq), 1n, "C keeps number 1");
+    assert.ok(BigInt(seqs.find((row) => row.project_id === world.a.project_id)!.event_seq) > 1n, "A gets a new number");
+    const moved = source_rows_in_target_numbering(a_source_rows, project_rows(world.tgt, world.a.project_id, world.a.owner_user_id));
+    assert.deepEqual(moved.actual, moved.expected);
   });
 });
 

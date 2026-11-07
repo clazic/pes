@@ -170,6 +170,73 @@ export function project_rows(db: Db, project_id: string, owner_user_id: string):
   return out;
 }
 
+/** Parses the `"<n>n"` bigint marker written by project_rows; non-markers give null. */
+function parse_seq(value: unknown): bigint | null {
+  return typeof value === "string" && /^-?\d+n$/.test(value) ? BigInt(value.slice(0, -1)) : null;
+}
+
+/**
+ * event_seq is DB-global and is re-assigned by import. Given the project's rows read from the source
+ * and from the target (both from project_rows), this checks that the numbering is a faithful mapping and
+ * returns it (source event_seq -> target event_seq):
+ *  - the same event ids exist on both sides, one to one;
+ *  - the mapping preserves the source order (strictly increasing);
+ *  - no two source events share a target number.
+ */
+export function event_seq_mapping(src_rows: Record<string, string[]>, tgt_rows: Record<string, string[]>): Map<bigint, bigint> {
+  const read = (rows: Record<string, string[]>): { id: string; seq: bigint }[] =>
+    (rows["events"] ?? [])
+      .map((text) => JSON.parse(text) as { id: string; event_seq: string })
+      .map((row) => ({ id: row.id, seq: parse_seq(row.event_seq)! }))
+      .sort((x, y) => (x.seq < y.seq ? -1 : x.seq > y.seq ? 1 : 0));
+  const src = read(src_rows);
+  const tgt = read(tgt_rows);
+  if (src.length !== tgt.length) throw new Error(`event count differs: source ${src.length}, target ${tgt.length}`);
+  const mapping = new Map<bigint, bigint>();
+  for (let i = 0; i < src.length; i += 1) {
+    if (src[i]!.id !== tgt[i]!.id) throw new Error(`event order or identity differs at position ${i}: ${src[i]!.id} vs ${tgt[i]!.id}`);
+    if (i > 0 && !(tgt[i]!.seq > tgt[i - 1]!.seq)) throw new Error("target event numbers are not strictly increasing in source order");
+    mapping.set(src[i]!.seq, tgt[i]!.seq);
+  }
+  return mapping;
+}
+
+/**
+ * Rewrites every `*event_seq` value (events.event_seq, stages.stale_since_event_seq,
+ * snapshots.through_event_seq, ...) of project_rows output through `mapping`. A non-null value that is
+ * not in the mapping throws, so a dangling or foreign reference cannot pass. Every other column is kept as is.
+ */
+export function remap_event_seq(rows: Record<string, string[]>, mapping: Map<bigint, bigint>): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [table, list] of Object.entries(rows)) {
+    out[table] = list
+      .map((text) => {
+        const row = JSON.parse(text) as Record<string, unknown>;
+        for (const key of Object.keys(row)) {
+          if (!key.endsWith("event_seq") || row[key] === null) continue;
+          const old = parse_seq(row[key]);
+          const next = old === null ? undefined : mapping.get(old);
+          if (next === undefined) throw new Error(`${table}.${key} = ${String(row[key])} is not a known event number`);
+          row[key] = `${next.toString()}n`;
+        }
+        return JSON.stringify(row);
+      })
+      .sort();
+  }
+  return out;
+}
+
+/** Source project rows with event numbers moved to the target's numbering, to compare with the target's rows. */
+export function source_rows_in_target_numbering(
+  src_rows: Record<string, string[]>,
+  tgt_rows: Record<string, string[]>,
+): { expected: Record<string, string[]>; actual: Record<string, string[]>; mapping: Map<bigint, bigint> } {
+  const mapping = event_seq_mapping(src_rows, tgt_rows);
+  const normalize = (rows: Record<string, string[]>): Record<string, string[]> =>
+    Object.fromEntries(Object.entries(rows).map(([t, l]) => [t, l.map((x) => JSON.stringify(JSON.parse(x))).sort()]));
+  return { expected: remap_event_seq(src_rows, mapping), actual: normalize(tgt_rows), mapping };
+}
+
 /** Full content of every table of a DB except db_meta, as sorted JSON strings per table. */
 export function all_rows_except_meta(db: Db): Record<string, string[]> {
   const tables = db

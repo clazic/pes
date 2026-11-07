@@ -81,6 +81,7 @@ import {
   make_world,
   meta_of,
   project_rows,
+  source_rows_in_target_numbering,
   sha256_hex,
   type World,
 } from "./helpers/backup_fixture.ts";
@@ -227,10 +228,12 @@ test("export then import into a new db restores the project rows and files; othe
     assert.equal(result.project_id, world.a.project_id);
 
     // Project A: every row is equal to the source (ids, rev, timestamps, bigint values).
-    assert.deepEqual(
-      project_rows(world.tgt, world.a.project_id, world.a.owner_user_id),
+    // event_seq is re-assigned by the target (order and references preserved); every other column is strictly equal.
+    const moved = source_rows_in_target_numbering(
       project_rows(world.src, world.a.project_id, world.a.owner_user_id),
+      project_rows(world.tgt, world.a.project_id, world.a.owner_user_id),
     );
+    assert.deepEqual(moved.actual, moved.expected);
     assert.deepEqual(world.tgt.all("PRAGMA foreign_key_check"), []);
     assert.equal(world.tgt.get<{ integrity_check: string }>("PRAGMA integrity_check")?.integrity_check, "ok");
 
