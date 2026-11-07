@@ -10,7 +10,9 @@
 // 0018): D1 rejects bigint parameters, blocks sqlite_version(), reports a
 // deferred FK violation as an internal/reset error, executes exec() line by
 // line, and needs a guard statement to turn "0 rows changed" into a batch
-// failure so the whole transaction rolls back.
+// failure so the whole transaction rolls back. The guard carries a unique
+// marker so a user statement's own integer overflow is not mistaken for a
+// zero-row failure.
 
 export type D1Param = string | number | null;
 
@@ -143,13 +145,38 @@ export async function apply_migrations(
 }
 
 // changes() reports the row count of the previous DML statement. The CASE
-// branch is evaluated only when that count is 0; abs() of the smallest 64-bit
-// integer overflows and fails the batch, so earlier statements roll back.
-const ZERO_ROWS_GUARD =
-  "SELECT CASE WHEN changes() = 0 THEN abs(-9223372036854775808) ELSE 1 END";
+// branch is evaluated only when that count is 0. An invalid JSON path raises a
+// distinctive error (the marker below) instead of an anonymous integer
+// overflow, so callers can tell a guard failure apart from a user statement
+// that overflowed on its own. The expression only fails on the 0-row branch.
+const ZERO_ROWS_MARKER = "PES_D1_ZERO_ROWS_GUARD";
+const ZERO_ROWS_GUARD = `SELECT CASE WHEN changes() = 0 THEN json_extract('{}', '${ZERO_ROWS_MARKER}[') ELSE 1 END`;
+
+// Same failure without CASE: used only after an ambiguous overflow to check
+// whether this D1 actually preserves the guard marker in error messages.
+const ZERO_ROWS_PROBE = `SELECT json_extract('{}', '${ZERO_ROWS_MARKER}[')`;
+
+function is_zero_rows_guard_error(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(ZERO_ROWS_MARKER);
+}
 
 function is_integer_overflow(error: unknown): boolean {
   return error instanceof Error && /integer overflow/i.test(error.message);
+}
+
+/**
+ * Ask the D1 implementation whether its errors expose the guard marker. Local
+ * D1 does. A wrapper that replaces SQL errors with its own text does not; in
+ * that case an anonymous overflow next to a guard is attributed to the guard
+ * for compatibility.
+ */
+async function guard_marker_is_visible(d1: D1Like): Promise<boolean> {
+  try {
+    await d1.batch([d1.prepare(ZERO_ROWS_PROBE)]);
+    return false;
+  } catch (error) {
+    return error instanceof Error && error.message.includes(ZERO_ROWS_MARKER);
+  }
 }
 
 function bind_statement(d1: D1Like, statement: BatchStatement): D1PreparedLike {
@@ -199,8 +226,20 @@ export async function run_batch(
   try {
     results = await d1.batch(prepared);
   } catch (error) {
-    if (guards > 0 && is_integer_overflow(error)) {
-      throw new ZeroRowsError("a require_change statement changed 0 rows; the batch was rolled back");
+    if (guards > 0) {
+      if (is_zero_rows_guard_error(error)) {
+        throw new ZeroRowsError("a require_change statement changed 0 rows; the batch was rolled back");
+      }
+      if (is_integer_overflow(error) && (await guard_marker_is_visible(d1))) {
+        // This D1 would have surfaced the guard marker if the guard had failed,
+        // so the overflow came from one of the caller's own statements.
+        throw error;
+      }
+      if (is_integer_overflow(error)) {
+        // The implementation hides SQL error text: the only overflow we know
+        // how to attribute is the guard's.
+        throw new ZeroRowsError("a require_change statement changed 0 rows; the batch was rolled back");
+      }
     }
     throw error;
   }

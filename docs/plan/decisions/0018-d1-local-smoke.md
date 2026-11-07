@@ -32,7 +32,7 @@ D1은 SQLite와 같은 SQL 엔진을 쓰지만 API·실행 경계에서 차이�
 - **계정·네트워크 없이 로컬 D1을 그대로 쓴다.** miniflare는 로컬 workerd에서 D1 바인딩을 만들고, 테스트는 메모리 저장소만 쓴다(`persist` 없음). 운영 D1·Cloudflare 계정에 접근하지 않는다.
 - **재현성이 높다.** `wrangler` 4.157.0은 miniflare 5 베타를 끌고 오므로, 안정판 4를 직접 고정해야 같은 마이그레이션·batch 의미를 반복 측정할 수 있다.
 - **도구 경계가 좁다.** `d1_smoke.ts`가 miniflare를 모르므로 나중에 Worker의 실제 `D1Database`를 그대로 넣을 수 있고, 테스트 도구가 없는 환경에서는 D1 부분만 이유를 남기고 건너뛴다(`PES_D1_SMOKE=1`이면 실패).
-- **0행을 성공으로 흘리지 않는다.** `changes()`와 정수 overflow를 쓰는 가드 문장을 같은 batch에 넣어, 0행이면 batch 자체가 실패하고 앞선 변경도 함께 롤백된다.
+- **0행을 성공으로 흘리지 않는다.** `changes()`와 고유 오류 표식을 쓰는 가드 문장을 같은 batch에 넣어, 0행이면 batch 자체가 실패하고 앞선 변경도 함께 롤백된다. 가드의 표식이 있으므로 사용자 문장이 스스로 낸 정수 overflow를 0행 실패로 오보하지 않는다.
 
 ### SQLite와 D1의 차이·실행 제한 (2026-11-08 로컬 측정)
 
@@ -43,7 +43,7 @@ D1은 SQLite와 같은 SQL 엔진을 쓰지만 API·실행 경계에서 차이�
 | deferred FK 누락 | `FOREIGN KEY constraint failed` | `Durable Object was reset and rolled back…` 형태의 내부 오류 | 오류 문구를 해석하지 않고 reject를 그대로 전달하며, 롤백은 표를 다시 읽어 확인한다. 0016의 WEB0에서는 `internal error; reference=…`로 관측됐다([0016-core-language.md](0016-core-language.md) WEB0 절). |
 | 2^53 초과 INTEGER | `bigint`로 읽을 수 있음 | 원시 JS `number`로 읽으면 정밀도 손실 | 10진 문자열로 넣고 `CAST(… AS TEXT)`로 읽는다. |
 | 여러 줄 DDL | `exec()`가 스크립트 전체를 실행 | `exec()`는 줄 단위라 여러 줄 DDL에 쓸 수 없음 | `split_sql`로 문장별 `prepare` 후 한 번의 `batch`로 적용한다. |
-| 0행 확인 | `changes`를 반환 | batch 안에서 0행을 실패로 바꾸려면 별도 가드 필요 | `SELECT CASE WHEN changes() = 0 THEN abs(-9223372036854775808) ELSE 1 END`를 같은 batch에 붙인다. 0행일 때 `D1_ERROR: integer overflow: SQLITE_ERROR`로 실패하고 전체가 롤백된다. |
+| 0행 확인 | `changes`를 반환 | batch 안에서 0행을 실패로 바꾸려면 별도 가드 필요 | `SELECT CASE WHEN changes() = 0 THEN json_extract('{}', 'PES_D1_ZERO_ROWS_GUARD[') ELSE 1 END`를 같은 batch에 붙인다. 0행일 때 `D1_ERROR: bad JSON path: 'PES_D1_ZERO_ROWS_GUARD[': SQLITE_ERROR`로 실패하고 전체가 롤백된다. 오류 문구에 든 고유 표식으로 가드 실패와 사용자 문장의 `integer overflow`를 구분한다. |
 | 도구 버전 | Node 26 내장 | `wrangler` 4.157.0은 miniflare 5 베타를 끌고 옴 | `miniflare` 4.20260730.0만 `tests/d1`에 고정한다. |
 
 실행 제한:
@@ -58,6 +58,7 @@ D1은 SQLite와 같은 SQL 엔진을 쓰지만 API·실행 경계에서 차이�
 - 새 파일: `scripts/pes_core/d1_smoke.ts`, `.github/workflows/d1-smoke.yml`, 이 결정 기록.
 - CI: 마이그레이션·DB 어댑터·`tests/d1`·이 workflow가 바뀌는 PR과 `main` push에서 `d1-smoke` job이 돈다.
 - 테스트: `tests/test_d1_smoke.test.ts`가 같은 시나리오를 `node:sqlite`와 로컬 D1에서 비교한다. D1 도구는 `tests/d1`의 고정된 개발 의존성으로만 설치한다.
+- 0행 가드 실패는 오류 문구의 고유 표식으로 판별한다. 표식을 보존하지 않는 D1 래퍼에서는 표식 가시성을 한 번 확인한 뒤 일반 `integer overflow`를 가드 실패로 간주한다. 로컬 D1은 표식을 그대로 보존하므로 사용자 문장이 스스로 낸 overflow를 0행 실패로 오보하지 않는다.
 - 앞으로 D1을 실제로 쓰는 코드(PR13 이후 API·Worker 경계)는 `bigint` 바인딩·`sqlite_version()`·`exec()` 다중 문장을 쓰지 않는다. 큰 정수는 10진 문자열로 주고받고, 스키마 버전은 `db_meta`로 확인한다.
 - `tsconfig.json`은 중첩 `node_modules`를 제외해 `tests/d1` 도구 소스를 타입 검사 대상에서 뺀다.
 
@@ -67,7 +68,7 @@ D1은 SQLite와 같은 SQL 엔진을 쓰지만 API·실행 경계에서 차이�
 - miniflare 5가 안정판이 되어 4와 같은 D1 의미를 내고 Node 26에서 검증될 때.
 - D1이 `bigint` 바인딩을 지원하거나 `sqlite_version()`·`exec()` 제한을 바꿀 때.
 - `node:sqlite`의 SQLite 버전·JSON 함수·트랜잭션 동작이 바뀌어 참조 엔진 비교가 성립하지 않을 때.
-- 0행 가드가 `abs()` overflow 외의 방법을 요구하거나, D1이 가드 오류 문구를 바꿔 `ZeroRowsError` 판별이 깨질 때.
+- 0행 가드가 `json_extract`의 잘못된 경로 오류 외의 방법을 요구하거나, D1이 가드 오류 문구에서 고유 표식을 지워 `ZeroRowsError` 판별이 깨질 때.
 
 ## 상태
 
