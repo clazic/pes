@@ -1,0 +1,1211 @@
+// SEL-35 (stage 2 PR2): D1 호환 smoke.
+//
+// ── worker 가 구현할 계약: scripts/pes_core/d1_smoke.ts ─────────────────────────
+// miniflare 를 import 하지 않는다. 아래 최소 D1 모양만 받는다(Cloudflare D1Database 가 그대로 맞는다).
+//
+//   export type D1Param = string | number | null;      // bigint 는 D1 이 받지 못한다
+//   export interface D1ResultLike { meta: { changes: number } }
+//   export interface D1PreparedLike { bind(...values: D1Param[]): D1PreparedLike }
+//   export interface D1Like {
+//     prepare(sql: string): D1PreparedLike;
+//     batch(statements: D1PreparedLike[]): Promise<D1ResultLike[]>;
+//   }
+//   export interface BatchStatement {
+//     sql: string;
+//     params?: readonly D1Param[];
+//     require_change?: boolean;   // true 이면 이 문장이 0행을 바꾸면 전체 batch 가 실패한다
+//   }
+//
+//   export class ZeroRowsError extends Error { }       // name === "ZeroRowsError"
+//
+//   // 0행 확인 helper. changes === 0 이면 ZeroRowsError, 아니면 아무 일도 없다.
+//   export function assert_changed(changes: number, what: string): void;
+//
+//   // SQL 텍스트를 문장 배열로 나눈다. 각 원소는 앞뒤 공백·끝 ';' 가 없는 한 문장.
+//   // 문자열 리터럴('...;...'), `-- ...;` 줄 주석, `/* ...; */` 블록 주석 안의 ';' 에서는 자르지 않는다.
+//   // 빈 조각·주석뿐인 조각은 버린다. (D1 의 exec 는 줄 단위라 여러 줄 DDL 에 쓸 수 없다.)
+//   export function split_sql(sql: string): string[];
+//
+//   // 마이그레이션 SQL 전체를 batch 한 번(=한 tx)으로 적용한다. 중간에 실패하면 아무것도 남지 않는다.
+//   // 빈 SQL 이면 D1 을 부르지 않고 { statements: 0 }.
+//   export function apply_migrations(d1: D1Like, sql: string): Promise<{ statements: number }>;
+//
+//   // 문장들을 batch 한 번(=한 tx)으로 실행한다. 반환 changes 는 statements 와 같은 길이·순서의 변경 행 수.
+//   //  - require_change 인 문장은 직후에 가드 문장을 같은 batch 에 붙여, 0행이면 batch 안에서 실패하게 한다
+//   //    (그래야 앞서 실행한 문장도 함께 롤백된다). 실패는 ZeroRowsError 로 보고한다.
+//   //    가드 예: `SELECT CASE WHEN changes() = 0 THEN abs(-9223372036854775808) ELSE 1 END`
+//   //    (로컬 D1 측정: 존재하지 않는 표를 가리키는 가드는 컴파일 때 실패해 쓸 수 없고, 위 형태는 0행일 때만 실패한다.)
+//   //    가드 문장의 changes 는 반환값에서 뺀다.
+//   //  - require_change 가 없으면 0행도 성공이다(changes 에 0 이 그대로 나온다).
+//   //  - params 에 bigint 가 있으면 아무것도 실행하기 전에 TypeError. 큰 정수는 10진 문자열로 넘긴다.
+//   //  - 빈 배열이면 D1 을 부르지 않고 { changes: [] }.
+//   //  - 그 밖의 SQL 오류(제약 위반, tx 끝의 deferred FK 위반 등)는 D1 오류를 그대로 reject 한다.
+//   export function run_batch(d1: D1Like, statements: readonly BatchStatement[]): Promise<{ changes: number[] }>;
+//
+// ── 실행 ──────────────────────────────────────────────────────────────────────
+//   (cd tests/d1 && npm ci) && PES_D1_SMOKE=1 node --test tests/test_d1_smoke.test.ts
+// 로컬 D1(miniflare)만 쓴다. 계정·로그인·원격 접근 없음. 도구가 없고 PES_D1_SMOKE=1 도 아니면 D1 부분은
+// 이유를 적고 건너뛴다. PES_D1_SMOKE=1 인데 도구가 없으면 실패한다.
+// 같은 시나리오를 node:sqlite(참조 엔진)로도 돌려 성공·실패 의미가 같은지 본다. 참조 엔진 부분은 도구 없이 항상 돈다.
+
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { after, before, describe, test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { connect, tx, type Db } from "../scripts/pes_core/db.ts";
+import {
+  ZeroRowsError,
+  apply_migrations,
+  assert_changed,
+  run_batch,
+  split_sql,
+  type BatchStatement,
+  type D1Like,
+} from "../scripts/pes_core/d1_smoke.ts";
+
+// ── 도구 확인 ────────────────────────────────────────────────────────────────
+
+const D1_DIR = fileURLToPath(new URL("./d1/", import.meta.url));
+const MINIFLARE_ENTRY = join(D1_DIR, "node_modules", "miniflare", "dist", "src", "index.js");
+const MIGRATION_001 = readFileSync(
+  fileURLToPath(new URL("../scripts/pes_core/migrations/001_initial.sql", import.meta.url)),
+  "utf8",
+);
+
+const forced = process.env.PES_D1_SMOKE === "1";
+const tool_present = existsSync(MINIFLARE_ENTRY);
+const run_d1 = tool_present;
+
+const POOL_SIZE = 40;
+
+interface MiniflareLike {
+  getD1Database(binding: string): Promise<D1Full>;
+  dispose(): Promise<void>;
+}
+interface D1Full {
+  prepare(sql: string): PreparedFull;
+  batch: D1Like["batch"];
+}
+interface PreparedFull {
+  bind(...values: unknown[]): PreparedFull;
+  all(): Promise<{ results: Record<string, unknown>[] }>;
+}
+
+let miniflare: MiniflareLike | undefined;
+let pool_next = 0;
+
+async function next_d1(): Promise<D1Full> {
+  assert.ok(miniflare, "miniflare 가 시작되지 않았다");
+  assert.ok(pool_next < POOL_SIZE, "D1 풀이 모자란다: POOL_SIZE 를 늘린다");
+  const binding = `DB${pool_next}`;
+  pool_next += 1;
+  return miniflare.getD1Database(binding);
+}
+
+// ── 엔진 추상화: 같은 시나리오를 D1 과 node:sqlite 에서 돌린다 ────────────────────────
+
+type Row = Record<string, unknown>;
+type Kind = "d1" | "sqlite";
+
+interface Engine {
+  kind: Kind;
+  apply(sql: string): Promise<void>;
+  batch(statements: readonly BatchStatement[]): Promise<number[]>;
+  rows(sql: string, params?: readonly (string | number | null)[]): Promise<Row[]>;
+  close(): void;
+}
+
+class RefZeroRows extends Error {
+  override name = "ZeroRowsError";
+}
+
+function normalize(row: Row): Row {
+  const out: Row = {};
+  for (const [key, value] of Object.entries(row)) {
+    out[key] = typeof value === "bigint" ? Number(value) : value;
+  }
+  return out;
+}
+
+function sqlite_engine(): Engine {
+  const db: Db = connect(":memory:");
+  return {
+    kind: "sqlite",
+    async apply(sql) {
+      tx(db, () => {
+        db.exec(sql);
+      });
+    },
+    async batch(statements) {
+      return tx(db, () => {
+        const changes: number[] = [];
+        for (const statement of statements) {
+          const result = db.run(statement.sql, ...(statement.params ?? []));
+          const count = Number(result.changes);
+          if (statement.require_change === true && count === 0) {
+            throw new RefZeroRows("statement changed 0 rows");
+          }
+          changes.push(count);
+        }
+        return changes;
+      });
+    },
+    async rows(sql, params = []) {
+      return db.all(sql, ...params).map((row) => normalize(row));
+    },
+    close() {
+      db.close();
+    },
+  };
+}
+
+async function d1_engine(): Promise<Engine> {
+  const d1 = await next_d1();
+  return {
+    kind: "d1",
+    async apply(sql) {
+      await apply_migrations(d1, sql);
+    },
+    async batch(statements) {
+      return (await run_batch(d1, statements)).changes;
+    },
+    async rows(sql, params = []) {
+      const { results } = await d1.prepare(sql).bind(...params).all();
+      return results.map((row) => normalize(row));
+    },
+    close() {},
+  };
+}
+
+async function fresh(kind: Kind): Promise<Engine> {
+  const engine = kind === "d1" ? await d1_engine() : sqlite_engine();
+  await engine.apply(MIGRATION_001);
+  return engine;
+}
+
+async function count(engine: Engine, table: string): Promise<number> {
+  const rows = await engine.rows(`SELECT count(*) AS n FROM ${table}`);
+  return Number(rows[0]?.n);
+}
+
+function is_zero_rows(error: unknown): boolean {
+  return error instanceof Error && error.name === "ZeroRowsError";
+}
+
+// ── 합성 데이터(전부 지어낸 값) ────────────────────────────────────────────────
+
+const USER_SQL = "INSERT INTO users (id, display_name) VALUES (?, ?)";
+const PROJECT_SQL = "INSERT INTO projects (id, slug, topic, owner_user_id) VALUES (?, ?, ?, ?)";
+const MEMBER_SQL = "INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)";
+
+function user(id: string): BatchStatement {
+  return { sql: USER_SQL, params: [id, `user ${id}`] };
+}
+
+/** 사용자 → 프로젝트 → owner 멤버. projects→project_members 는 deferred FK 라 이 순서가 허용된다. */
+function project_with_owner(project_id: string, user_id: string): BatchStatement[] {
+  return [
+    user(user_id),
+    { sql: PROJECT_SQL, params: [project_id, `slug-${project_id}`, "synthetic topic", user_id] },
+    { sql: MEMBER_SQL, params: [project_id, user_id, "owner"] },
+  ];
+}
+
+const EDITION_SQL =
+  "INSERT INTO editions (id, project_id, edition_no, status, settings_json) VALUES (?, ?, ?, ?, ?)";
+
+function edition(id: string, project_id: string, no: number, status: string, settings = "{}"): BatchStatement {
+  return { sql: EDITION_SQL, params: [id, project_id, no, status, settings] };
+}
+
+// ── 시나리오(양쪽 엔진에서 같은 기대) ────────────────────────────────────────────
+
+function scenarios(kind: Kind): void {
+  describe(kind, () => {
+    test("001 마이그레이션이 61개 표와 부분 UNIQUE 인덱스를 만든다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const tables = await engine.rows(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
+        );
+        assert.equal(tables.length, 61);
+        const indexes = await engine.rows(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('one_project_owner','one_active_edition','one_open_round') ORDER BY name",
+        );
+        assert.deepEqual(
+          indexes.map((row) => row.name),
+          ["one_active_edition", "one_open_round", "one_project_owner"],
+        );
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("foreign_keys 가 켜져 있다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const rows = await engine.rows("PRAGMA foreign_keys");
+        assert.equal(Number(rows[0]?.foreign_keys), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("batch: 정상 문장들이 모두 반영되고 문장별 changes 를 돌려준다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const changes = await engine.batch(project_with_owner("p1", "u1"));
+        assert.deepEqual(changes, [1, 1, 1]);
+        assert.equal(await count(engine, "users"), 1);
+        assert.equal(await count(engine, "projects"), 1);
+        assert.equal(await count(engine, "project_members"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("batch 원자성: 중간 문장이 실패하면 앞 문장도 남지 않는다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await assert.rejects(
+          engine.batch([user("u1"), user("u2"), user("u1") /* PK 중복 */, user("u3")]),
+        );
+        assert.equal(await count(engine, "users"), 0);
+        // 실패 뒤에도 연결이 정상이다.
+        assert.deepEqual(await engine.batch([user("u9")]), [1]);
+        assert.equal(await count(engine, "users"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("뒤늦은 실패: 마지막 문장의 CHECK 위반이 앞의 성공 문장 전부를 롤백한다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await assert.rejects(
+          engine.batch([
+            ...project_with_owner("p1", "u1"),
+            user("u2"),
+            { sql: USER_SQL, params: ["u3", ""] }, // length(display_name) > 0 위반
+          ]),
+        );
+        for (const table of ["users", "projects", "project_members"]) {
+          assert.equal(await count(engine, table), 0, `${table} 에 행이 남았다`);
+        }
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("deferred FK: tx 안에서는 순서가 틀려도 되고 끝에서 충족되면 성공한다", async () => {
+      const engine = await fresh(kind);
+      try {
+        // projects 가 project_members 보다 먼저 들어가도(project_members 는 아직 없다) 끝에서 맞으면 된다.
+        const changes = await engine.batch(project_with_owner("p1", "u1"));
+        assert.deepEqual(changes, [1, 1, 1]);
+        const rows = await engine.rows("SELECT owner_user_id FROM projects WHERE id = ?", ["p1"]);
+        assert.equal(rows[0]?.owner_user_id, "u1");
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("deferred FK: tx 끝까지 충족되지 않으면 전체가 실패하고 롤백된다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const [u, p] = project_with_owner("p1", "u1"); // owner 멤버 행을 일부러 뺀다
+        await assert.rejects(engine.batch([u, p]));
+        assert.equal(await count(engine, "users"), 0);
+        assert.equal(await count(engine, "projects"), 0);
+        // 실패 뒤 정상 batch 가 된다.
+        assert.deepEqual(await engine.batch(project_with_owner("p2", "u2")), [1, 1, 1]);
+        assert.equal(await count(engine, "projects"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("deferred FK 위반은 앞서 성공한 0행 확인·갱신까지 함께 롤백한다(뒤늦은 실패)", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch(project_with_owner("p1", "u1"));
+        const [u, p] = project_with_owner("p2", "u2");
+        await assert.rejects(
+          engine.batch([
+            {
+              sql: "UPDATE projects SET control_rev = control_rev + 1 WHERE id = ? AND control_rev = ?",
+              params: ["p1", 0],
+              require_change: true,
+            },
+            u,
+            p, // owner 멤버 없음 → tx 끝에서 실패
+          ]),
+        );
+        const rows = await engine.rows("SELECT control_rev FROM projects WHERE id = ?", ["p1"]);
+        assert.equal(rows[0]?.control_rev, 0, "앞선 UPDATE 가 롤백되지 않았다");
+        assert.equal(await count(engine, "projects"), 1);
+        assert.equal(await count(engine, "users"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("부분 UNIQUE one_project_owner: owner 는 프로젝트당 하나, 다른 역할은 여럿", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch(project_with_owner("p1", "u1"));
+        await assert.rejects(engine.batch([user("u2"), { sql: MEMBER_SQL, params: ["p1", "u2", "owner"] }]));
+        assert.equal(await count(engine, "users"), 1, "실패한 batch 의 user 가 남았다");
+
+        const changes = await engine.batch([
+          user("u2"),
+          user("u3"),
+          { sql: MEMBER_SQL, params: ["p1", "u2", "editor"] },
+          { sql: MEMBER_SQL, params: ["p1", "u3", "editor"] },
+        ]);
+        assert.deepEqual(changes, [1, 1, 1, 1]);
+        assert.equal(await count(engine, "project_members"), 3);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("부분 UNIQUE one_active_edition: active 판은 프로젝트당 하나, draft 는 여럿", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch(project_with_owner("p1", "u1"));
+        await engine.batch([
+          edition("e1", "p1", 1, "active"),
+          edition("e2", "p1", 2, "draft"),
+          edition("e3", "p1", 3, "draft"),
+        ]);
+        await assert.rejects(engine.batch([edition("e4", "p1", 4, "active")]));
+        assert.equal(await count(engine, "editions"), 3);
+        // 다른 프로젝트의 active 는 허용된다.
+        await engine.batch([...project_with_owner("p2", "u2"), edition("e5", "p2", 1, "active")]);
+        assert.equal(await count(engine, "editions"), 4);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("JSON 함수와 json_valid CHECK", async () => {
+      const engine = await fresh(kind);
+      try {
+        const rows = await engine.rows(
+          `SELECT json_valid('{"a":[1,2]}') AS valid,
+                  json_valid('{') AS invalid,
+                  json_type('[1]') AS arr,
+                  json_type('{"a":1}') AS obj,
+                  json_extract('{"a":[1,2]}', '$.a[1]') AS second,
+                  json_array_length('[1,2,3]') AS len`,
+        );
+        assert.deepEqual(rows[0], { valid: 1, invalid: 0, arr: "array", obj: "object", second: 2, len: 3 });
+
+        await engine.batch(project_with_owner("p1", "u1"));
+        await engine.batch([edition("e1", "p1", 1, "draft", '{"theme":{"k":[10,20]}}')]);
+        const stored = await engine.rows(
+          "SELECT json_extract(settings_json, '$.theme.k[1]') AS v FROM editions WHERE id = ?",
+          ["e1"],
+        );
+        assert.equal(stored[0]?.v, 20);
+
+        await assert.rejects(engine.batch([edition("e2", "p1", 2, "draft", "{")]));
+        assert.equal(await count(engine, "editions"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("0행 실패: require_change 문장이 0행이면 batch 전체가 ZeroRowsError 로 실패한다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await assert.rejects(
+          engine.batch([
+            user("u1"),
+            {
+              sql: "UPDATE users SET display_name = ? WHERE id = ?",
+              params: ["changed", "no-such-user"],
+              require_change: true,
+            },
+            user("u2"),
+          ]),
+          is_zero_rows,
+        );
+        assert.equal(await count(engine, "users"), 0, "0행 실패인데 앞 문장이 남았다");
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("0행 실패: INSERT OR IGNORE 가 무시되어 0행이면 require_change 로 실패한다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch([user("u1")]);
+        await assert.rejects(
+          engine.batch([
+            user("u2"),
+            { sql: "INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)", params: ["u1", "dup"], require_change: true },
+          ]),
+          is_zero_rows,
+        );
+        assert.equal(await count(engine, "users"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("0행이 아니면 require_change 는 통과하고 changes 는 가드를 포함하지 않는다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch([user("u1")]);
+        const changes = await engine.batch([
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["new", "u1"], require_change: true },
+          user("u2"),
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u2"], require_change: true },
+        ]);
+        assert.deepEqual(changes, [1, 1, 1]);
+        const rows = await engine.rows("SELECT display_name FROM users WHERE id = ?", ["u1"]);
+        assert.equal(rows[0]?.display_name, "new");
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("require_change 가 없으면 0행도 성공이고 changes 에 0 이 나온다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const changes = await engine.batch([
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "no-such-user"] },
+          user("u1"),
+        ]);
+        assert.deepEqual(changes, [0, 1]);
+        assert.equal(await count(engine, "users"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("rev 충돌(대표 명령): 낡은 control_rev 의 UPDATE 는 0행이라 같은 batch 의 기록까지 롤백된다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch(project_with_owner("p1", "u1"));
+        const bump = (expected: number): BatchStatement => ({
+          sql: "UPDATE projects SET control_rev = control_rev + 1 WHERE id = ? AND control_rev = ?",
+          params: ["p1", expected],
+          require_change: true,
+        });
+
+        assert.deepEqual(await engine.batch([bump(0), user("u2")]), [1, 1]);
+        // 같은 base 로 한 번 더 → 충돌.
+        await assert.rejects(engine.batch([bump(0), user("u3")]), is_zero_rows);
+
+        const rows = await engine.rows("SELECT control_rev FROM projects WHERE id = ?", ["p1"]);
+        assert.equal(rows[0]?.control_rev, 1);
+        const ids = await engine.rows("SELECT id FROM users ORDER BY id");
+        assert.deepEqual(ids.map((row) => row.id), ["u1", "u2"]);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("2^53 를 넘는 INTEGER: 10진 문자열로 넣고 CAST AS TEXT 로 읽으면 손실이 없다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const big = "9007199254740993"; // 2^53 + 1
+        await engine.batch([
+          user("u1"),
+          {
+            sql: "INSERT INTO projects (id, slug, topic, owner_user_id, control_rev) VALUES (?, ?, ?, ?, ?)",
+            params: ["p1", "slug-p1", "synthetic topic", "u1", big],
+          },
+          { sql: MEMBER_SQL, params: ["p1", "u1", "owner"] },
+        ]);
+        const rows = await engine.rows(
+          "SELECT CAST(control_rev AS TEXT) AS s, typeof(control_rev) AS t FROM projects WHERE id = ?",
+          ["p1"],
+        );
+        assert.deepEqual(rows[0], { s: big, t: "integer" });
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("[보강] DELETE 가 0행이면 require_change 로 실패하고 앞의 다중 행 변경도 롤백된다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await assert.rejects(
+          engine.batch([
+            user("u1"),
+            user("u2"),
+            { sql: "DELETE FROM users WHERE id = ?", params: ["none"], require_change: true },
+          ]),
+          is_zero_rows,
+        );
+        assert.equal(await count(engine, "users"), 0);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("[보강] 여러 행을 바꾼 UPDATE 의 changes 는 실제 행 수이고 require_change 를 통과한다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch([user("u1"), user("u2"), user("u3")]);
+        const changes = await engine.batch([
+          { sql: "UPDATE users SET display_name = ?", params: ["same"], require_change: true },
+          { sql: "DELETE FROM users WHERE id <> ?", params: ["u1"], require_change: true },
+        ]);
+        assert.deepEqual(changes, [3, 2]);
+        assert.equal(await count(engine, "users"), 1);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("[보강] 앞 require_change 가 통과해도 뒤 require_change 가 0행이면 전체가 롤백된다", async () => {
+      const engine = await fresh(kind);
+      try {
+        await engine.batch([user("u1")]);
+        await assert.rejects(
+          engine.batch([
+            { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["a", "u1"], require_change: true },
+            user("u2"),
+            { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["b", "none"], require_change: true },
+          ]),
+          is_zero_rows,
+        );
+        const rows = await engine.rows("SELECT id, display_name FROM users ORDER BY id");
+        assert.deepEqual(rows, [{ id: "u1", display_name: "user u1" }]);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("[보강] require_change 는 직전 문장 기준이다: 앞 문장이 행을 바꿨어도 자기 문장이 0행이면 실패", async () => {
+      const engine = await fresh(kind);
+      try {
+        await assert.rejects(
+          engine.batch([
+            user("u1"),
+            { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"], require_change: true },
+          ]),
+          is_zero_rows,
+        );
+        assert.equal(await count(engine, "users"), 0);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("[보강] 문장 자체의 정수 오버플로는 ZeroRowsError 로 오보되지 않는다", async () => {
+      const engine = await fresh(kind);
+      try {
+        let caught: unknown;
+        try {
+          await engine.batch([
+            user("u1"),
+            { sql: "SELECT abs(-9223372036854775808)" },
+            { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["a", "u1"], require_change: true },
+          ]);
+        } catch (error) {
+          caught = error;
+        }
+        assert.ok(caught instanceof Error, "오버플로가 실패로 보고되어야 한다");
+        assert.ok(!is_zero_rows(caught), `0행이 아닌데 ZeroRowsError 로 보고됨: ${(caught as Error).message}`);
+        assert.equal(await count(engine, "users"), 0);
+      } finally {
+        engine.close();
+      }
+    });
+
+    test("[보강] 같은 id 두 번 UPDATE 후 INSERT OR REPLACE 도 changes 를 문장별로 돌려준다", async () => {
+      const engine = await fresh(kind);
+      try {
+        const changes = await engine.batch([
+          user("u1"),
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["a", "u1"] },
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["b", "u1"], require_change: true },
+          { sql: "INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)", params: ["u1", "dup"] },
+        ]);
+        assert.deepEqual(changes, [1, 1, 1, 0]);
+      } finally {
+        engine.close();
+      }
+    });
+  });
+}
+
+// ── 가짜 D1 단위 테스트(도구 없이 항상 돈다) ──────────────────────────────────────
+
+interface FakePrepared {
+  sql: string;
+  bound: unknown[] | undefined;
+  bind(...values: unknown[]): FakePrepared;
+}
+
+function fake_d1(options: { changes?: number[]; fail?: Error } = {}) {
+  const prepared: FakePrepared[] = [];
+  const batches: FakePrepared[][] = [];
+  const d1 = {
+    prepare(sql: string): FakePrepared {
+      const item: FakePrepared = {
+        sql,
+        bound: undefined,
+        bind(...values: unknown[]) {
+          item.bound = values;
+          return item;
+        },
+      };
+      prepared.push(item);
+      return item;
+    },
+    async batch(statements: FakePrepared[]) {
+      batches.push(statements);
+      if (options.fail) throw options.fail;
+      return statements.map((_, index) => ({ meta: { changes: options.changes?.[index] ?? 1 } }));
+    },
+  };
+  return { d1: d1 as unknown as D1Like, prepared, batches };
+}
+
+describe("d1_smoke 단위(가짜 D1)", () => {
+  describe("split_sql 경계", () => {
+    test("[보강] 작은따옴표 이스케이프('')와 그 안의 ';'", () => {
+      assert.deepEqual(split_sql("INSERT INTO t VALUES ('it''s;ok'); SELECT 1"), [
+        "INSERT INTO t VALUES ('it''s;ok')",
+        "SELECT 1",
+      ]);
+      assert.deepEqual(split_sql("SELECT ''''; SELECT 2"), ["SELECT ''''", "SELECT 2"]);
+      assert.deepEqual(split_sql("SELECT ''; SELECT 2"), ["SELECT ''", "SELECT 2"]);
+    });
+
+    test("[보강] 큰따옴표·백틱·대괄호 식별자 안의 ';' 와 이스케이프", () => {
+      assert.deepEqual(split_sql('SELECT "a;""b" FROM t; SELECT 2'), ['SELECT "a;""b" FROM t', "SELECT 2"]);
+      assert.deepEqual(split_sql("SELECT `a;``b` FROM t; SELECT 2"), ["SELECT `a;``b` FROM t", "SELECT 2"]);
+      assert.deepEqual(split_sql("SELECT [a;b] FROM t; SELECT 2"), ["SELECT [a;b] FROM t", "SELECT 2"]);
+    });
+
+    test("[보강] 주석 안의 따옴표·대괄호는 문자열을 열지 않는다", () => {
+      assert.deepEqual(split_sql("SELECT 1 -- don't; stop\n; SELECT 2"), ["SELECT 1 -- don't; stop", "SELECT 2"]);
+      assert.deepEqual(split_sql("SELECT 1 /* it's [ \" */; SELECT 2"), ["SELECT 1 /* it's [ \" */", "SELECT 2"]);
+    });
+
+    test("[보강] 문자열 안의 '--' 와 '/*' 는 주석이 아니다", () => {
+      assert.deepEqual(split_sql("SELECT '--'; SELECT '/*'; SELECT 3"), ["SELECT '--'", "SELECT '/*'", "SELECT 3"]);
+    });
+
+    test("[보강] 블록 주석은 중첩되지 않는다(SQLite 규칙): 첫 '*/' 에서 닫힌다", () => {
+      assert.deepEqual(split_sql("SELECT 1 /* a /* b */; SELECT 2 /* c */"), [
+        "SELECT 1 /* a /* b */",
+        "SELECT 2 /* c */",
+      ]);
+    });
+
+    test("[보강] 닫히지 않은 문자열·블록 주석·줄 주석은 EOF 까지 삼킨다", () => {
+      assert.deepEqual(split_sql("SELECT 'a;b"), ["SELECT 'a;b"]);
+      assert.deepEqual(split_sql("SELECT 1; /* x; y"), ["SELECT 1"]);
+      assert.deepEqual(split_sql("SELECT 1; -- x; y"), ["SELECT 1"]);
+      assert.deepEqual(split_sql("SELECT 1 -- x"), ["SELECT 1 -- x"]);
+      assert.deepEqual(split_sql("SELECT [a;b"), ["SELECT [a;b"]);
+    });
+
+    test("[보강] 줄 주석은 \\r\\n 과 \\r 에서도 끝난다", () => {
+      assert.deepEqual(split_sql("SELECT 1 -- a;b\r\n; SELECT 2"), ["SELECT 1 -- a;b", "SELECT 2"]);
+      assert.deepEqual(split_sql("SELECT 1 -- a\rFROM t; SELECT 2"), ["SELECT 1 -- a\rFROM t", "SELECT 2"]);
+    });
+
+    test("[보강] 빈 입력·세미콜론뿐·주석뿐은 빈 배열", () => {
+      assert.deepEqual(split_sql(""), []);
+      assert.deepEqual(split_sql("   \n\t "), []);
+      assert.deepEqual(split_sql(";;; ;\n;"), []);
+      assert.deepEqual(split_sql("/* a */ ; -- b\n ; /* c; */"), []);
+    });
+
+    test("[보강] 끝 ';' 가 없는 마지막 문장도 나오고 앞뒤 공백은 잘린다", () => {
+      assert.deepEqual(split_sql("\n  SELECT   1  ;  SELECT 2  \n"), ["SELECT   1", "SELECT 2"]);
+    });
+
+    test("[보강] 'BEGIN' 이라는 단어·문자열·식별자는 문장 경계에 영향이 없다", () => {
+      assert.deepEqual(
+        split_sql("SELECT 'BEGIN'; SELECT begin_at FROM t; BEGIN; COMMIT; SELECT \"end\""),
+        ["SELECT 'BEGIN'", "SELECT begin_at FROM t", "BEGIN", "COMMIT", 'SELECT "end"'],
+      );
+    });
+
+    test("[보강] 001 마이그레이션: 나눈 문장을 ';' 로 이어 다시 나눠도 같다(멱등)", () => {
+      const parts = split_sql(MIGRATION_001);
+      assert.deepEqual(split_sql(parts.join(";\n")), parts);
+      for (const part of parts) {
+        assert.equal(part, part.trim());
+        assert.ok(!part.endsWith(";"));
+      }
+    });
+  });
+
+  describe("apply_migrations", () => {
+    test("[보강] batch 를 정확히 한 번, 문장 수만큼 prepare 하고 개수를 돌려준다", async () => {
+      const fake = fake_d1();
+      const result = await apply_migrations(fake.d1, "CREATE TABLE a (x); CREATE TABLE b (y); -- end");
+      assert.deepEqual(result, { statements: 2 });
+      assert.equal(fake.batches.length, 1);
+      assert.deepEqual(
+        fake.batches[0].map((item) => item.sql),
+        ["CREATE TABLE a (x)", "CREATE TABLE b (y)"],
+      );
+      assert.ok(fake.prepared.every((item) => item.bound === undefined), "bind 를 부르면 안 된다");
+    });
+
+    test("[보강] 빈 SQL 은 prepare 도 batch 도 부르지 않는다", async () => {
+      const fake = fake_d1();
+      assert.deepEqual(await apply_migrations(fake.d1, ";; -- x"), { statements: 0 });
+      assert.equal(fake.prepared.length, 0);
+      assert.equal(fake.batches.length, 0);
+    });
+
+    test("[보강] D1 오류는 그대로 reject 된다(삼키지도 감싸지도 않음)", async () => {
+      const boom = new Error("boom");
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(apply_migrations(fake.d1, "SELECT 1"), (error: unknown) => error === boom);
+    });
+  });
+
+  describe("run_batch 호출 형태", () => {
+    test("[보강] require_change 문장 바로 뒤에만 가드가 붙고 changes 는 가드를 건너뛴다", async () => {
+      // 입력 [A, B(rc), C, D(rc)] → batch [A, B, guard, C, D, guard]
+      const fake = fake_d1({ changes: [10, 20, 99, 30, 40, 98] });
+      const result = await run_batch(fake.d1, [
+        { sql: "A" },
+        { sql: "B", require_change: true },
+        { sql: "C" },
+        { sql: "D", require_change: true },
+      ]);
+      assert.deepEqual(result, { changes: [10, 20, 30, 40] });
+      assert.equal(fake.batches.length, 1);
+      const sent = fake.batches[0].map((item) => item.sql);
+      assert.equal(sent.length, 6);
+      assert.deepEqual([sent[0], sent[1], sent[3], sent[4]], ["A", "B", "C", "D"]);
+      assert.match(sent[2], /changes\(\)/);
+      assert.equal(sent[5], sent[2], "두 가드는 같은 문장이다");
+    });
+
+    test("[보강] require_change 가 false·없음이면 가드가 붙지 않는다", async () => {
+      const fake = fake_d1();
+      await run_batch(fake.d1, [{ sql: "A", require_change: false }, { sql: "B" }]);
+      assert.deepEqual(fake.batches[0].map((item) => item.sql), ["A", "B"]);
+    });
+
+    test("[보강] params 가 없으면 bind 를 부르지 않고, 빈 배열이면 빈 bind, 값은 순서대로 bind", async () => {
+      const fake = fake_d1();
+      await run_batch(fake.d1, [{ sql: "A" }, { sql: "B", params: [] }, { sql: "C", params: ["x", 2, null] }]);
+      const [a, b, c] = fake.batches[0];
+      assert.equal(a.bound, undefined);
+      assert.deepEqual(b.bound, []);
+      assert.deepEqual(c.bound, ["x", 2, null]);
+    });
+
+    test("[보강] bigint 는 prepare·batch 호출 전에 TypeError (두 번째 문장·마지막 값이어도)", async () => {
+      const fake = fake_d1();
+      await assert.rejects(
+        run_batch(fake.d1, [
+          { sql: "A", params: ["ok"] },
+          { sql: "B", params: ["ok", 1, 2n as unknown as number] },
+        ]),
+        TypeError,
+      );
+      assert.equal(fake.prepared.length, 0, "검사 전에 prepare 가 불렸다");
+      assert.equal(fake.batches.length, 0);
+    });
+
+    test("[보강] 0n 도 bigint 라 거부한다(falsy 로 지나치지 않는다)", async () => {
+      const fake = fake_d1();
+      await assert.rejects(run_batch(fake.d1, [{ sql: "A", params: [0n as unknown as number] }]), TypeError);
+      assert.equal(fake.prepared.length, 0);
+    });
+
+    test("[보강] 빈 배열은 D1 을 부르지 않는다", async () => {
+      const fake = fake_d1();
+      assert.deepEqual(await run_batch(fake.d1, []), { changes: [] });
+      assert.equal(fake.prepared.length, 0);
+      assert.equal(fake.batches.length, 0);
+    });
+
+    test("[보강] 가드 없는 batch 의 'integer overflow' 오류는 ZeroRowsError 가 아니라 원본 그대로", async () => {
+      const boom = new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(run_batch(fake.d1, [{ sql: "A" }]), (error: unknown) => error === boom);
+    });
+
+    test("[보강] 가드가 있어도 overflow 가 아닌 오류는 원본 그대로", async () => {
+      const boom = new Error("UNIQUE constraint failed: users.id");
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(
+        run_batch(fake.d1, [{ sql: "A", require_change: true }]),
+        (error: unknown) => error === boom && !is_zero_rows(error),
+      );
+    });
+
+    test("[보강] 가드가 있어도 overflow 오류는 원본 그대로(계약 변경: 가드는 overflow 를 내지 않는다)", async () => {
+      const boom = new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(
+        run_batch(fake.d1, [{ sql: "A", require_change: true }]),
+        (error: unknown) => error === boom && !is_zero_rows(error),
+      );
+    });
+
+    test("[보강] 결과에 meta.changes 가 없으면 조용히 0 으로 넘기지 않고 오류", async () => {
+      const d1 = {
+        prepare: (sql: string) => ({ sql, bind() { return this; } }),
+        batch: async () => [{ meta: {} }],
+      } as unknown as D1Like;
+      await assert.rejects(run_batch(d1, [{ sql: "A" }]), /meta\.changes/);
+      const short = {
+        prepare: (sql: string) => ({ sql, bind() { return this; } }),
+        batch: async () => [],
+      } as unknown as D1Like;
+      await assert.rejects(run_batch(short, [{ sql: "A" }]), /meta\.changes/);
+    });
+  });
+
+  describe("[보강2] 가드 오류 귀속", () => {
+    const MARKER = "PES_D1_ZERO_ROWS_GUARD";
+
+    /** 오류 문구를 모두 지우는 D1 래퍼 흉내. 가드가 0행에서 내는 오류도 문구가 같다. */
+    function scrubbed_d1(user_error: boolean) {
+      const batches: { sql: string }[][] = [];
+      const d1 = {
+        prepare(sql: string) {
+          return { sql, bind() { return this; } };
+        },
+        async batch(statements: { sql: string }[]) {
+          batches.push(statements);
+          if (user_error) throw new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+          return statements.map(() => ({ meta: { changes: 1 } }));
+        },
+      };
+      return { d1: d1 as unknown as D1Like, batches };
+    }
+
+    test("[보강2] 표식이 안 보이는 D1 에서 사용자 문장의 overflow 는 ZeroRowsError 로 바뀌지 않는다", async () => {
+      // 현재 가드는 overflow 를 내지 않으므로, 어떤 overflow 도 가드의 0행 실패일 수 없다.
+      const { d1 } = scrubbed_d1(true);
+      await assert.rejects(
+        run_batch(d1, [{ sql: "SELECT abs(-9223372036854775808)" }, { sql: "UPDATE t SET a = 1", require_change: true }]),
+        (error: unknown) => error instanceof Error && !is_zero_rows(error) && /integer overflow/i.test(error.message),
+      );
+    });
+
+    test("[보강2] 사용자 문장 오류 문구에 가드 표식이 우연히 들어 있어도 ZeroRowsError 로 오보하지 않는다", async () => {
+      const boom = new Error(`D1_ERROR: user text ${MARKER} is in here: SQLITE_ERROR`);
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(
+        run_batch(fake.d1, [{ sql: "INSERT INTO t VALUES (1)" }, { sql: "UPDATE t SET a = 1", require_change: true }]),
+        (error: unknown) => error === boom,
+      );
+    });
+
+    test("[보강2] 표식이 보이는 D1 에서 overflow 는 원본 그대로이고 탐침은 쓰기 문장을 보내지 않는다", async () => {
+      const overflow = new Error("D1_ERROR: integer overflow: SQLITE_ERROR");
+      const batches: { sql: string }[][] = [];
+      let call = 0;
+      const d1 = {
+        prepare(sql: string) {
+          return { sql, bind() { return this; } };
+        },
+        async batch(statements: { sql: string }[]) {
+          batches.push(statements);
+          call += 1;
+          if (call === 1) throw overflow;
+          throw new Error(`D1_ERROR: bad JSON path: '${MARKER}[': SQLITE_ERROR`);
+        },
+      } as unknown as D1Like;
+      await assert.rejects(
+        run_batch(d1, [{ sql: "INSERT INTO t VALUES (1)", require_change: true }]),
+        (error: unknown) => error === overflow,
+      );
+      for (const extra of batches.slice(1)) {
+        for (const item of extra) assert.match(item.sql, /^\s*SELECT\b/i, "탐침이 SELECT 가 아닌 문장을 보냈다");
+      }
+    });
+
+    test("[보강2] 가드 오류(표식 있음)는 ZeroRowsError 이고 탐침 batch 를 더 보내지 않는다", async () => {
+      const fake = fake_d1({ fail: new Error(`D1_ERROR: bad JSON path: '${MARKER}[': SQLITE_ERROR`) });
+      await assert.rejects(run_batch(fake.d1, [{ sql: "A", require_change: true }]), is_zero_rows);
+      assert.equal(fake.batches.length, 1);
+    });
+
+    test("[보강2] 가드 경로와 정확히 같지 않은 'bad JSON path' 오류는 원본 그대로", async () => {
+      for (const message of [
+        `D1_ERROR: bad JSON path: 'x.${MARKER}[[': SQLITE_ERROR`,
+        `D1_ERROR: bad JSON path: '${MARKER}': SQLITE_ERROR`,
+        `D1_ERROR: bad JSON path: 'a${MARKER}[': SQLITE_ERROR`,
+        `D1_ERROR: CHECK constraint failed: ${MARKER}: SQLITE_ERROR`,
+      ]) {
+        const boom = new Error(message);
+        const fake = fake_d1({ fail: boom });
+        await assert.rejects(
+          run_batch(fake.d1, [{ sql: "A", require_change: true }]),
+          (error: unknown) => error === boom,
+          message,
+        );
+      }
+    });
+
+    test("[보강2] 가드가 없으면 표식 문구가 있어도 원본 오류 그대로", async () => {
+      const boom = new Error(`D1_ERROR: ${MARKER} SQLITE_ERROR`);
+      const fake = fake_d1({ fail: boom });
+      await assert.rejects(run_batch(fake.d1, [{ sql: "A" }]), (error: unknown) => error === boom);
+    });
+
+    test("[보강2] 오류가 Error 가 아닌 값(문자열)이어도 그대로 던진다", async () => {
+      const d1 = {
+        prepare(sql: string) {
+          return { sql, bind() { return this; } };
+        },
+        async batch() {
+          throw "integer overflow";
+        },
+      } as unknown as D1Like;
+      await assert.rejects(
+        run_batch(d1, [{ sql: "A", require_change: true }]),
+        (error: unknown) => error === "integer overflow",
+      );
+    });
+  });
+
+  describe("ZeroRowsError / assert_changed", () => {
+    test("[보강] 기본 메시지·name·Error 상속", () => {
+      const error = new ZeroRowsError();
+      assert.ok(error instanceof Error);
+      assert.equal(error.name, "ZeroRowsError");
+      assert.match(error.message, /0 rows/);
+      assert.equal(new ZeroRowsError("custom").message, "custom");
+    });
+
+    test("[보강] assert_changed 메시지에 what 이 들어간다", () => {
+      assert.throws(() => assert_changed(0, "bump control_rev"), /bump control_rev/);
+    });
+  });
+});
+
+// ── 참조 엔진(node:sqlite): 도구 없이 항상 돈다 ───────────────────────────────────
+
+scenarios("sqlite");
+
+// ── 로컬 D1 ─────────────────────────────────────────────────────────────────
+
+if (!tool_present && forced) {
+  test("PES_D1_SMOKE=1 인데 D1 도구(tests/d1/node_modules/miniflare)가 없다", () => {
+    assert.fail(
+      `D1 도구가 설치되지 않았다: ${MINIFLARE_ENTRY} 없음. (cd tests/d1 && npm ci) 를 먼저 실행한다.`,
+    );
+  });
+}
+
+describe("d1 (로컬 miniflare)", {
+  skip: run_d1
+    ? false
+    : "tests/d1/node_modules 에 miniflare 가 없어 건너뜀. (cd tests/d1 && npm ci) 후 PES_D1_SMOKE=1 로 실행한다.",
+}, () => {
+  before(async () => {
+    const mod = (await import(pathToFileURL(MINIFLARE_ENTRY).href)) as {
+      Miniflare: new (options: Record<string, unknown>) => MiniflareLike;
+    };
+    const d1Databases: Record<string, string> = {};
+    for (let index = 0; index < POOL_SIZE; index += 1) {
+      d1Databases[`DB${index}`] = `pes-d1-smoke-${index}`;
+    }
+    // 저장소를 만들지 않는다(persist 옵션 없음 = 메모리). 계정·네트워크 접근 없음.
+    miniflare = new mod.Miniflare({
+      modules: true,
+      script: "export default { fetch() { return new Response('ok'); } }",
+      d1Databases,
+    });
+  });
+
+  after(async () => {
+    await miniflare?.dispose();
+    miniflare = undefined;
+  });
+
+  scenarios("d1");
+
+  describe("[보강2] 가드 동작(로컬 D1)", () => {
+    test("[보강2] 사용자 문장의 integer overflow 는 ZeroRowsError 가 아니다(가드 문장이 있어도)", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          user("u1"),
+          { sql: "SELECT abs(-9223372036854775808)" },
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u1"], require_change: true },
+        ]),
+        (error: unknown) => error instanceof Error && !is_zero_rows(error) && /overflow/i.test(error.message),
+      );
+      const { results } = await d1.prepare("SELECT count(*) AS n FROM users").all();
+      assert.equal(Number(results[0]?.n), 0, "실패한 batch 가 롤백되지 않았다");
+    });
+
+    test("[보강2] 표식이 다른 오류 문구 안에 든 사용자 문장은 ZeroRowsError 로 오보되지 않는다", async () => {
+      // 사용자가 가드와 똑같은 json_extract 경로 식을 쓰는 경우는 범위 밖이다(ADR 0018 한계로 기록).
+      // 여기서는 표식이 다른 모양의 오류(다른 json 경로 오류·제약 오류) 문구에 들어가는 경우만 본다.
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      for (const sql of [
+        "SELECT json_extract('{}', 'x.PES_D1_ZERO_ROWS_GUARD[[')",
+        "SELECT json_extract('{\"PES_D1_ZERO_ROWS_GUARD\":', '$')",
+        "INSERT INTO users (id, display_name) VALUES ('PES_D1_ZERO_ROWS_GUARD', NULL)",
+      ]) {
+        await assert.rejects(
+          run_batch(d1, [
+            { sql },
+            { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "u1"], require_change: true },
+          ]),
+          (error: unknown) => error instanceof Error && !is_zero_rows(error),
+          sql,
+        );
+      }
+    });
+
+    test("[보강2] 앞선 문장이 0행이어도 require_change 문장이 1행이면 가드는 통과한다", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      const { changes } = await run_batch(d1, [
+        user("u1"),
+        { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"] },
+        { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["y", "u1"], require_change: true },
+      ]);
+      assert.deepEqual(changes, [1, 0, 1]);
+    });
+
+    test("[보강2] 한 batch 의 두 번째 require_change 가 0행이면 첫 문장도 롤백된다", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          { ...user("u1"), require_change: true },
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"], require_change: true },
+        ]),
+        is_zero_rows,
+      );
+      const { results } = await d1.prepare("SELECT count(*) AS n FROM users").all();
+      assert.equal(Number(results[0]?.n), 0);
+    });
+
+    test("[보강2] 0행 실패 뒤에도 같은 D1 은 정상 동작한다(탐침이 상태를 남기지 않는다)", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [{ sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"], require_change: true }]),
+        is_zero_rows,
+      );
+      assert.deepEqual((await run_batch(d1, [user("u2")])).changes, [1]);
+    });
+  });
+
+  describe("d1_smoke 도구 함수", () => {
+    test("split_sql: 문자열·주석 안의 ';' 에서 자르지 않고 빈 조각은 버린다", () => {
+      const parts = split_sql(
+        [
+          "CREATE TABLE t (",
+          "  a TEXT, -- 주석; 안의 세미콜론",
+          "  b TEXT /* 블록; 주석 */",
+          ");",
+          "",
+          "INSERT INTO t VALUES ('x;y', 'z');",
+          "-- 끝 주석만 있는 조각;",
+          ";",
+        ].join("\n"),
+      );
+      assert.equal(parts.length, 2);
+      assert.match(parts[0], /^CREATE TABLE t/);
+      assert.ok(parts[1].includes("'x;y'"));
+      for (const part of parts) assert.ok(!part.trim().endsWith(";"));
+    });
+
+    test("split_sql: 실제 001 마이그레이션이 CREATE 문 수만큼 나뉜다", () => {
+      const parts = split_sql(MIGRATION_001);
+      const creates = parts.filter((part) => /^CREATE\s/i.test(part.replace(/^(\s*--.*\n)+/g, "").trim()));
+      assert.ok(parts.length >= 61, `문장 ${parts.length}개`);
+      assert.ok(creates.length >= 61, `CREATE ${creates.length}개`);
+    });
+
+    test("apply_migrations: 중간 문장이 실패하면 앞서 만든 표도 남지 않는다", async () => {
+      const d1 = await next_d1();
+      await assert.rejects(
+        apply_migrations(
+          d1,
+          "CREATE TABLE keep_me (id TEXT PRIMARY KEY);\nCREATE TABLE keep_me (id TEXT PRIMARY KEY);",
+        ),
+      );
+      const { results } = await d1
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'keep_me'")
+        .all();
+      assert.equal(results.length, 0);
+    });
+
+    test("apply_migrations: 여러 줄·주석·문자열 안의 ';' 가 있는 SQL 을 적용한다", async () => {
+      const d1 = await next_d1();
+      const result = await apply_migrations(
+        d1,
+        [
+          "-- 주석; 세미콜론",
+          "CREATE TABLE t (",
+          "  id TEXT PRIMARY KEY,",
+          "  v TEXT NOT NULL",
+          ");",
+          "INSERT INTO t VALUES ('a', 'x;y');",
+        ].join("\n"),
+      );
+      assert.equal(result.statements, 2);
+      const { results } = await d1.prepare("SELECT v FROM t WHERE id = 'a'").all();
+      assert.equal(results[0]?.v, "x;y");
+    });
+
+    test("apply_migrations: 빈 SQL 은 아무것도 하지 않는다", async () => {
+      const d1 = await next_d1();
+      assert.deepEqual(await apply_migrations(d1, "  \n-- 주석뿐\n"), { statements: 0 });
+    });
+
+    test("run_batch: 빈 배열은 { changes: [] }", async () => {
+      const d1 = await next_d1();
+      assert.deepEqual(await run_batch(d1, []), { changes: [] });
+    });
+
+    test("run_batch: bigint 파라미터는 아무것도 실행하기 전에 TypeError", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          user("u1"),
+          { sql: USER_SQL, params: ["u2", 9007199254740993n as unknown as string] },
+        ]),
+        TypeError,
+      );
+      const { results } = await d1.prepare("SELECT count(*) AS n FROM users").all();
+      assert.equal(Number(results[0]?.n), 0);
+    });
+
+    test("0행은 ZeroRowsError 클래스로 보고된다", async () => {
+      const d1 = await next_d1();
+      await apply_migrations(d1, MIGRATION_001);
+      await assert.rejects(
+        run_batch(d1, [
+          { sql: "UPDATE users SET display_name = ? WHERE id = ?", params: ["x", "none"], require_change: true },
+        ]),
+        (error: unknown) => error instanceof ZeroRowsError && error instanceof Error,
+      );
+    });
+
+    test("assert_changed: 0 이면 ZeroRowsError, 1 이상이면 통과", () => {
+      assert.doesNotThrow(() => assert_changed(1, "update users"));
+      assert.doesNotThrow(() => assert_changed(7, "update users"));
+      assert.throws(() => assert_changed(0, "update users"), (error: unknown) => {
+        return error instanceof ZeroRowsError && error.name === "ZeroRowsError" && /update users/.test(error.message);
+      });
+    });
+  });
+});

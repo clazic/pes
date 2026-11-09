@@ -1,0 +1,42 @@
+name: D1 smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "scripts/pes_core/**"
+      - "tests/d1/**"
+      - "tests/test_d1_smoke.test.ts"
+      - ".github/workflows/d1-smoke.yml"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  d1-smoke:
+    name: d1-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install local D1 tools
+        run: cd tests/d1 && npm ci
+
+      - name: Run D1 smoke
+        env:
+          PES_D1_SMOKE: "1"
+        run: node --test tests/test_d1_smoke.test.ts
