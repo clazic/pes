@@ -1,0 +1,9 @@
+{
+  "name": "nested_key_order",
+  "description": "중첩 객체 키 정렬, 배열 순서 유지",
+  "command": "project.set_topic",
+  "ctx": {"via": "cli", "client_request_id": "req-1", "base_control_rev": 0},
+  "payload": {"topic":"t","z":{"b":[3,1,2],"a":{"y":1,"x":2}},"a":[{"d":1,"c":2}]},
+  "canonical": "{\"a\":[{\"c\":2,\"d\":1}],\"topic\":\"t\",\"z\":{\"a\":{\"x\":2,\"y\":1},\"b\":[3,1,2]}}",
+  "sha256": "a40daf18e37e93f072ef6123beac3202300cfb9629db22801f591493f7ad009b"
+}

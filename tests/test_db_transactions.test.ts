@@ -86,7 +86,29 @@ test("representative synthetic rows can be inserted in one transaction", () => {
     assert.equal(count(fixture.db, "answer_versions"), 1n);
     assert.equal(count(fixture.db, "runs"), 1n);
     assert.equal(count(fixture.db, "project_leases"), 1n);
-    assert.equal(count(fixture.db, "events"), 1n);
+    // bootstrap's own events plus exactly one event made by the seed.
+    const bootstrap_events = fixture.db.get<{ n: bigint }>(
+      "SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND tx_id = ?",
+      fixture.project.project_id,
+      fixture.project.tx_id,
+    )?.n;
+    assert.ok(bootstrap_events !== undefined && bootstrap_events >= 1n);
+    assert.equal(
+      fixture.db.get<{ n: bigint }>(
+        "SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND type = 'fixture.created'",
+        fixture.project.project_id,
+      )?.n,
+      1n,
+    );
+    assert.equal(
+      fixture.db.get<{ n: bigint }>(
+        "SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND tx_id <> ?",
+        fixture.project.project_id,
+        fixture.project.tx_id,
+      )?.n,
+      1n,
+    );
+    assert.equal(count(fixture.db, "events"), bootstrap_events + 1n);
     assert.equal(count(fixture.db, "blobs"), 1n);
     assert.equal(count(fixture.db, "file_policies"), 1n);
     assert.equal(count(fixture.db, "version_files"), 1n);

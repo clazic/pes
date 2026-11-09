@@ -101,10 +101,44 @@ DDL이 **보장하지 않는** 것: 아래 3절.
 `bootstrap_project(db, input, deps)`는 **한 tx**에서 아래를 만든다. 어느 한 행이라도 실패하면 전부 롤백한다.
 
 - `users` 1행(owner), `actors` 1행(`kind='human'`, owner user), `projects` 1행(`status='staging'`으로 시작해 마지막에 `active`), `project_members` 1행(`role='owner'`).
-- `mutation_commits` 1행. `project_policy_versions.tx_id`가 NOT NULL FK라 최소 행이 필요하다. **영수증 재생·멱등·events·명령 서비스는 PR4 범위**이며 여기서 구현하지 않는다.
+- `mutation_commits` 1행(영수증)과 `events` 1행. PR4부터 bootstrap은 명령 서비스를 지나며, `project_policy_versions.tx_id`가 참조하는 영수증과 사건을 같은 tx에 남긴다. 영수증 재생·멱등은 8절.
 - `project_policy_versions` 1행(`policy_rev=1`, `allow_opencode_go=1`, 기본 모델·문턱 90, `changed_by_kind='human'`).
 - `editions` 1행(`edition_no=1`, `status='active'`)과 `stages` 6행(`plan`~`publish`, `ordinal` 1~6, `status='pending'`).
 - `counters` 9행(객체 kind별 `next_no=1`).
 - 포인터: `editions.current_stage_id`=plan 단계, `projects.active_edition_id`, `projects.current_policy_id`, `projects.status='active'`.
 
-만들지 않는 것: **열린 라운드**(PR6), **events**, **영수증 재생**, **명령 서비스**. `PR13`의 `project.create`가 이 기본기를 API 계약으로 감싼다.
+만들지 않는 것: **열린 라운드**(PR6). 명령 서비스·`events`·영수증 재생은 PR4(8절)가 맡는다. `PR13`의 `project.create`가 이 기본기를 API 계약으로 감싼다.
+
+## 8. 변경 명령 서비스(PR4)가 보장하는 것
+
+PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandService` 하나를 지난다. 외부 호출은 `execute()`(async 래퍼, 예외는 rejection)를 쓰고, 동기 호출자인 `bootstrap_project`는 같은 핵심인 `execute_sync()`를 쓴다. tx 안에는 `await`가 없어 명령 실행 중 이벤트 루프에 양보하지 않는다. `bootstrap.ts`는 `bootstrap_project` 시그니처만 유지하고 내부에서 `project.bootstrap` 명령을 서비스로 실행한다. 업무 표 INSERT/UPDATE/DELETE SQL은 `commands.ts`에만 있다.
+
+- **실행 순서**: 닫힌 등록표(`COMMANDS`) → 프로젝트·행위자 확인(`forbidden`/`not_found`) → 현재 정책(`policy_denied`) → 영수증 재생(`client_request_id`+`request_hash`) → rev → 변경 → `events`+`mutation_commits`. 전부 한 tx다.
+- **멱등**: 같은 키·같은 요청은 저장된 결과를 재생하고 아무것도 쓰지 않는다. 같은 키·다른 요청은 `idempotency_key_reuse`로 거부한다. `request_hash`는 명령과 payload만 덮고 `base_control_rev`는 덮지 않으므로, 낡은 base로 다시 보내도 재생이 rev 검사보다 먼저 동작한다.
+- **영수증 장기 보존**: `mutation_commits`·`events`를 UPDATE/DELETE하는 경로가 없고, 재생은 시간이 지나도 유효하다.
+- **정책 우선**: 인증·권한·현재 정책 검사가 영수증 재생보다 먼저다. OFF 뒤에는 OFF 전에 성공한 결과가 재생되지 않는다.
+- **원자성**: 조건부 UPDATE가 0행이거나 events/영수증 INSERT가 실패하면 tx 전체를 롤백하고 성공으로 보이지 않는다. 실패한 시도는 영수증을 남기지 않으므로 같은 키로 다시 실행할 수 있다.
+- **닫힌 표면**: 표 CRUD·임의 SQL·ops 명령은 등록표에 없다. 새 쓰기는 도메인 명령 하나로만 추가한다.
+- **오류 번역**: SQLite UNIQUE·PRIMARY KEY 제약만 `ApiError("conflict", "UNIQUE constraint conflict")`로 바꾼다. 원문(표·열 이름)은 메시지·`details` 어디에도 넣지 않는다. FOREIGN KEY·NOT NULL·CHECK 등 다른 SQLite 오류는 tx 롤백 뒤 원래 오류를 그대로 던진다.
+
+### 8.1 request_hash 정규화 (언어 중립)
+
+영수증의 `request_hash`는 다음 규칙으로 계산한다. 다른 언어 구현도 같은 입력에서 같은 64자 hex를 내야 한다(영수증을 장기 보존하고 재생 판정에 쓰므로).
+
+1. **입력 스냅샷**: 명령 진입 시 payload를 `JSON.stringify`→`JSON.parse` 한 번으로 고정한다. `JSON.stringify`는 `toJSON`을 적용하고 getter를 한 번 읽는다. 최상위 `undefined`·함수·심볼만 있는 payload는 `null`로 정규화한다. 순환 참조·BigInt는 `invalid_payload`다. 이후 해시·정책 사본·검증·실행은 모두 이 스냅샷만 쓴다.
+2. **해시 대상 문자열**: `command + "\n" + canonical_json(snapshot)`을 UTF-8로 인코딩한 바이트.
+3. **canonical_json**:
+   - 객체 키는 **UTF-16 코드 유닛 순서**(JavaScript `Array.prototype.sort()` 기본)로 정렬한다. 키와 문자열 값은 ECMAScript `JSON.stringify` 규칙으로 인용·이스케이프한다.
+   - 배열은 순서를 유지한다.
+   - 숫자·불리언·`null`은 ECMAScript `JSON.stringify` 출력 그대로다. 스냅샷은 `JSON.parse` 결과이므로 NaN·Infinity는 없고, `-0`은 `0`으로 직렬화된다.
+   - 공백·개행을 넣지 않는다.
+4. **해시**: 위 문자열의 SHA-256, 소문자 16진수 64자.
+5. **포함/제외**: `command`와 payload 스냅샷만 포함한다. `base_control_rev`·`project_id`·`actor_id`·`via`·`client_request_id`는 해시에 넣지 않는다. 영수증 조회 키는 `(project_id, actor_id, client_request_id)`이고 해시는 요청 본문 비교에만 쓴다.
+
+예: command `project.set_topic`, payload `{"n":1,"topic":"가"}` → 해시 대상 `project.set_topic\n{"n":1,"topic":"가"}` → SHA-256 `54877204a50ae33ca4e175d46813a1f760859a78124c138ea3d66c83eb0fc3fa`.
+
+### 8.2 후속 확장(예정)
+
+- **PR10**: `PolicyChecker.check`가 tx 안의 읽기 전용 `db`(또는 정책 행 조회 함수)를 받도록 시그니처를 넓혀, `project_policy_versions` 현재 행을 같은 tx에서 읽는다.
+- **PR5**: `EventDraft`에 `run_id`·`object_id`·`edition/stage/round`, `insert_receipt`에 `lease_id`·`fence`·`edition_id` 필드를 더한다.
+- **PR5 이전 검토**: 새 명령이 영수증을 빠뜨리지 않도록 `run()`이 action을 제외한 영수증 필드를 반환하고 서비스가 쓰는 구조(부트스트랩만 정책 FK 때문에 훅으로 예외)를 검토한다.

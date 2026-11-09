@@ -1,0 +1,9 @@
+{
+  "name": "scalars_and_empties",
+  "description": "null·불리언·빈 배열·빈 객체",
+  "command": "project.set_topic",
+  "ctx": {"via": "cli", "client_request_id": "req-1", "base_control_rev": 0},
+  "payload": {"topic":"t","a":null,"b":true,"c":false,"d":[],"e":{},"f":""},
+  "canonical": "{\"a\":null,\"b\":true,\"c\":false,\"d\":[],\"e\":{},\"f\":\"\",\"topic\":\"t\"}",
+  "sha256": "079fe78f0ff9bb31eda62976207c110f19be31278f3033ba34da0159feb7164b"
+}

@@ -1,0 +1,42 @@
+{
+  "name": "policy_off_after_done",
+  "description": "OFF 전에 끝난 요청을 OFF 뒤 같은 키로 다시 보내도 금지된 결과가 재생되지 않는다. 정책이 다시 켜지면 같은 영수증이 재생된다.",
+  "steps": [
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-off-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "OFF 전 완료" }
+      },
+      "expect": { "ok": { "replayed": false, "result": { "topic": "OFF 전 완료", "control_rev": 1 } } }
+    },
+    {
+      "policy": "deny",
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-off-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "OFF 전 완료" }
+      },
+      "expect": {
+        "error": { "error": { "code": "policy_denied", "message": "$any" } }
+      }
+    },
+    {
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-off-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "OFF 전 완료" }
+      },
+      "expect": { "ok": { "replayed": true, "result": { "topic": "OFF 전 완료", "control_rev": 1 } } }
+    }
+  ]
+}

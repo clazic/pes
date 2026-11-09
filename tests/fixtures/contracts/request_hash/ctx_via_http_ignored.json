@@ -1,0 +1,9 @@
+{
+  "name": "ctx_via_http_ignored",
+  "description": "same_payload: via·client_request_id는 해시에 안 들어감(http)",
+  "command": "project.set_topic",
+  "ctx": {"via": "http", "client_request_id": "k", "base_control_rev": 0},
+  "payload": {"n":1,"topic":"가"},
+  "canonical": "{\"n\":1,\"topic\":\"가\"}",
+  "sha256": "54877204a50ae33ca4e175d46813a1f760859a78124c138ea3d66c83eb0fc3fa"
+}

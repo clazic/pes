@@ -1,0 +1,9 @@
+{
+  "name": "utf16_key_order",
+  "description": "키 정렬은 코드 포인트가 아니라 UTF-16 코드 유닛 순서: U+1F600(서로게이트 D83D)이 U+FF5E보다 앞",
+  "command": "project.set_topic",
+  "ctx": {"via": "cli", "client_request_id": "req-1", "base_control_rev": 0},
+  "payload": {"topic":"t","\uff5e":1,"\ud83d\ude00":2,"a":3},
+  "canonical": "{\"a\":3,\"topic\":\"t\",\"😀\":2,\"～\":1}",
+  "sha256": "97c3f7e0a234e9afa097a5c6e6a2515b6a97b98e4648a105f23af93d1f668619"
+}

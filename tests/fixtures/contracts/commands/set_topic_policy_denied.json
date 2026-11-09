@@ -1,0 +1,20 @@
+{
+  "name": "set_topic_policy_denied",
+  "description": "현재 정책이 거부하면 변경하지 않는다.",
+  "steps": [
+    {
+      "policy": "deny",
+      "request": {
+        "command": "project.set_topic",
+        "project": "p1",
+        "actor": "p1",
+        "client_request_id": "req-deny-1",
+        "base_control_rev": "current",
+        "payload": { "topic": "금지된 주제" }
+      },
+      "expect": {
+        "error": { "error": { "code": "policy_denied", "message": "$any" } }
+      }
+    }
+  ]
+}

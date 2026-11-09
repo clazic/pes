@@ -1,0 +1,18 @@
+{
+  "name": "bootstrap_duplicate_slug",
+  "description": "이미 쓰는 slug로 project.bootstrap을 하면 거부되고 아무것도 남지 않는다. (setup이 만든 p1의 slug는 synthetic-p1)",
+  "steps": [
+    {
+      "request": {
+        "command": "project.bootstrap",
+        "project": "none",
+        "actor": "none",
+        "client_request_id": "req-boot-dup-1",
+        "payload": { "slug": "synthetic-p1", "topic": "중복", "owner_display_name": "합성 소유자" }
+      },
+      "expect": {
+        "error": { "error": { "code": "conflict", "message": "$any" } }
+      }
+    }
+  ]
+}
