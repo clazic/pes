@@ -289,6 +289,7 @@ function optional_edition(
 
 function optional_actor(
   runtime: CommandRuntime,
+  project_id: string,
   payload: Record<string, unknown>,
   field: string,
 ): string | null {
@@ -297,9 +298,13 @@ function optional_actor(
   if (typeof value !== "string" || value.trim().length === 0 || !value.isWellFormed()) {
     throw new ApiError("invalid_payload", `${field} must be a non-empty string or null`);
   }
-  const actor = runtime.db.get<{ ok: bigint }>("SELECT 1 AS ok FROM actors WHERE id = ?", value);
+  const actor = runtime.db.get<{ ok: bigint }>(
+    "SELECT 1 AS ok FROM actors a JOIN project_members m ON m.user_id = a.user_id WHERE a.id = ? AND m.project_id = ?",
+    value,
+    project_id,
+  );
   if (actor === undefined) {
-    throw new ApiError("not_found", `${field} is not an actor`);
+    throw new ApiError("not_found", `${field} is not an actor of this project`);
   }
   return value;
 }
@@ -321,7 +326,11 @@ function parse_artifact_fields(payload: Record<string, unknown>): ArtifactFields
   return { title, summary, question, body_md, status, confidence, stats, conflicts, verify, metadata };
 }
 
-function parse_source_facts(runtime: CommandRuntime, payload: Record<string, unknown>): SourceFacts {
+function parse_source_facts(
+  runtime: CommandRuntime,
+  project_id: string,
+  payload: Record<string, unknown>,
+): SourceFacts {
   const title = require_non_empty_string(payload, "title");
   const url = optional_text(payload, "url");
   const locator = json_object(payload, "locator");
@@ -329,7 +338,7 @@ function parse_source_facts(runtime: CommandRuntime, payload: Record<string, unk
   const method = require_enum(payload, "method", SOURCE_METHODS);
   const verification_state = require_enum(payload, "verification_state", VERIFICATION_STATES);
   const quote = optional_text(payload, "quote");
-  const verified_by_actor_id = optional_actor(runtime, payload, "verified_by_actor_id");
+  const verified_by_actor_id = optional_actor(runtime, project_id, payload, "verified_by_actor_id");
   if (verification_state === "unreachable" && quote !== null) {
     throw new ApiError("invalid_payload", "an unreachable source cannot carry an excerpt");
   }
@@ -740,7 +749,7 @@ function run_add_source(runtime: CommandRuntime): CommandResult {
   const source_kind = require_enum(payload, "source_kind", SOURCE_KINDS);
   const canonical_locator = optional_text(payload, "canonical_locator");
   const scope = content_scope(runtime);
-  const facts = parse_source_facts(runtime, payload);
+  const facts = parse_source_facts(runtime, scope.project_id, payload);
   const object = read_object(runtime, scope.project_id, object_id);
   require_bare_object(runtime, scope.project_id, object, "source");
 
@@ -882,7 +891,7 @@ function run_append_version(runtime: CommandRuntime): CommandResult {
   }
 
   require_fields(payload, ["object_id", "based_on_version_id", ...SOURCE_COMMON_FIELDS]);
-  const facts = parse_source_facts(runtime, payload);
+  const facts = parse_source_facts(runtime, scope.project_id, payload);
   const based_on_version_id = resolve_based_on(runtime, scope.project_id, object, payload);
   version_no = next_version_no(runtime, scope.project_id, object_id);
   const result = { project_id: scope.project_id, object_id, version_id, version_no };
@@ -1093,7 +1102,9 @@ function map_library_item(item: Record<string, unknown>): {
   artifact_kind: string;
   fields: ArtifactFields;
 } {
-  const extras: Record<string, unknown> = { legacy_id: item.id };
+  // Null-prototype bag: item keys such as "__proto__" or "constructor" stay
+  // ordinary data and reach JSON, and they cannot pollute a prototype.
+  const extras = Object.create(null) as Record<string, unknown>;
   const artifact_kind = map_artifact_kind(item, extras);
 
   const title = typeof item.title === "string" ? item.title : "";
@@ -1151,9 +1162,18 @@ function map_library_item(item: Record<string, unknown>): {
     "conflicts",
     "verify",
     "sources",
+    // The importer owns these two: an item key with the same name is kept in
+    // the original event payload, not merged into the bookkeeping.
+    "legacy_id",
+    "kind_original",
   ]);
   for (const key of Object.keys(item)) {
     if (!mapped.has(key)) extras[key] = item[key];
+  }
+  // Bookkeeping wins over any item key of the same name (leader decision).
+  extras.legacy_id = item.id;
+  if (typeof item.kind !== "string" || !ARTIFACT_KINDS.has(item.kind)) {
+    extras.kind_original = item.kind;
   }
 
   return {
@@ -1191,41 +1211,36 @@ function plan_library_source(source: Record<string, unknown>): Omit<PlannedSourc
   };
 }
 
-function plan_library(runtime: CommandRuntime, raw_items: unknown[]): PlannedItem[] {
-  return raw_items.map((raw) => {
-    if (!is_record(raw)) {
-      throw new ApiError("invalid_payload", "every library item must be a JSON object");
-    }
-    const legacy_id = raw.id;
-    if (typeof legacy_id !== "string" || legacy_id.trim().length === 0 || !legacy_id.isWellFormed()) {
-      throw new ApiError("invalid_payload", "every library item needs a non-empty id");
-    }
-    const sources_value = raw.sources;
-    let sources: unknown[] = [];
-    if (sources_value === undefined || sources_value === null) sources = [];
-    else if (Array.isArray(sources_value)) sources = sources_value;
-    else throw new ApiError("invalid_payload", "item.sources must be an array");
+function plan_library_item(runtime: CommandRuntime, raw: Record<string, unknown>): PlannedItem {
+  const legacy_id = raw.id;
+  if (typeof legacy_id !== "string" || legacy_id.trim().length === 0 || !legacy_id.isWellFormed()) {
+    throw new ApiError("invalid_payload", "every library item needs a non-empty id");
+  }
+  const sources_value = raw.sources;
+  let sources: unknown[] = [];
+  if (sources_value === undefined || sources_value === null) sources = [];
+  else if (Array.isArray(sources_value)) sources = sources_value;
+  else throw new ApiError("invalid_payload", "item.sources must be an array");
 
-    const mapped = map_library_item(raw);
-    return {
-      legacy_id,
-      object_id: runtime.new_id(),
-      version_id: runtime.new_id(),
-      artifact_kind: mapped.artifact_kind,
-      fields: mapped.fields,
-      archived: mapped.fields.status === "removed",
-      sources: sources.map((source) => {
-        if (!is_record(source)) {
-          throw new ApiError("invalid_payload", "every library source must be a JSON object");
-        }
-        return {
-          object_id: runtime.new_id(),
-          version_id: runtime.new_id(),
-          ...plan_library_source(source),
-        };
-      }),
-    };
-  });
+  const mapped = map_library_item(raw);
+  return {
+    legacy_id,
+    object_id: runtime.new_id(),
+    version_id: runtime.new_id(),
+    artifact_kind: mapped.artifact_kind,
+    fields: mapped.fields,
+    archived: mapped.fields.status === "removed",
+    sources: sources.map((source) => {
+      if (!is_record(source)) {
+        throw new ApiError("invalid_payload", "every library source must be a JSON object");
+      }
+      return {
+        object_id: runtime.new_id(),
+        version_id: runtime.new_id(),
+        ...plan_library_source(source),
+      };
+    }),
+  };
 }
 
 function prior_import_items(value: unknown): ImportItem[] | null {
@@ -1248,15 +1263,50 @@ function prior_import_items(value: unknown): ImportItem[] | null {
   return items;
 }
 
-function prior_import(
-  runtime: CommandRuntime,
-  project_id: string,
-  library_hash: string,
-): ImportItem[] | null {
+interface PriorImport {
+  library_hash: string | null;
+  shell: string | null;
+  items: ImportItem[];
+}
+
+/** All top-level library metadata, excluding the item list. */
+function library_shell(library: Record<string, unknown>): string {
+  const shell = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(library)) {
+    if (key !== "items") shell[key] = library[key];
+  }
+  return canonical_json(shell);
+}
+
+/**
+ * SQLite TEXT cannot store a lone surrogate faithfully. Refuse the whole
+ * library before any write instead of silently replacing code units.
+ */
+function require_well_formed_library(value: unknown): void {
+  if (typeof value === "string") {
+    if (!value.isWellFormed()) {
+      throw new ApiError("invalid_payload", "library text contains a lone surrogate");
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) require_well_formed_library(entry);
+    return;
+  }
+  if (is_record(value)) {
+    for (const key of Object.keys(value)) {
+      require_well_formed_library(key);
+      require_well_formed_library(value[key]);
+    }
+  }
+}
+
+function prior_imports(runtime: CommandRuntime, project_id: string): PriorImport[] {
   const rows = runtime.db.all<{ payload: string }>(
     "SELECT payload FROM events WHERE project_id = ? AND type = 'content.library_imported' ORDER BY event_seq",
     project_id,
   );
+  const out: PriorImport[] = [];
   for (const row of rows) {
     let parsed: unknown;
     try {
@@ -1265,11 +1315,14 @@ function prior_import(
       continue;
     }
     if (!is_record(parsed)) continue;
-    if (parsed.library_hash !== library_hash) continue;
     const items = prior_import_items(parsed.items);
-    if (items !== null) return items;
+    if (items === null) continue;
+    const library_hash = typeof parsed.library_hash === "string" ? parsed.library_hash : null;
+    const original = parsed.original;
+    const shell = is_record(original) ? library_shell(original) : null;
+    out.push({ library_hash, shell, items });
   }
-  return null;
+  return out;
 }
 
 function legacy_source_facts(source: PlannedSource): SourceFacts {
@@ -1285,6 +1338,31 @@ function legacy_source_facts(source: PlannedSource): SourceFacts {
   };
 }
 
+/** A new key for the same library writes only a receipt and one skipped event. */
+function skip_library_import(
+  runtime: CommandRuntime,
+  scope: ContentScope,
+  items: ImportItem[],
+): CommandResult {
+  const result = { project_id: scope.project_id, already_imported: true, items };
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    action: "content.library_imported",
+    base_control_rev: null,
+    result,
+  });
+  return {
+    result,
+    events: [
+      {
+        type: "content.library_import_skipped",
+        payload: { already_imported: true, items },
+      },
+    ],
+  };
+}
+
 function run_import_library(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   require_fields(payload, ["library"]);
@@ -1292,6 +1370,7 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
   if (!is_record(library)) {
     throw new ApiError("invalid_payload", "library must be a JSON object");
   }
+  require_well_formed_library(library);
   const raw_items = library.items;
   if (!Array.isArray(raw_items)) {
     throw new ApiError("invalid_payload", "library.items must be an array");
@@ -1324,33 +1403,45 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
 
   const scope = content_scope(runtime);
   const library_hash = createHash("sha256").update(canonical_json(library)).digest("hex");
-  const prior = prior_import(runtime, scope.project_id, library_hash);
-  if (prior !== null) {
-    const result = { project_id: scope.project_id, already_imported: true, items: prior };
-    insert_receipt(runtime, {
-      project_id: scope.project_id,
-      actor_id: scope.actor_id,
-      action: "content.library_imported",
-      base_control_rev: null,
-      result,
-    });
-    return {
-      result,
-      events: [
-        {
-          type: "content.library_import_skipped",
-          payload: { already_imported: true, items: prior },
-        },
-      ],
-    };
+
+  const prior = prior_imports(runtime, scope.project_id);
+  const exact = prior.find((entry) => entry.library_hash === library_hash);
+  if (exact !== undefined) {
+    return skip_library_import(runtime, scope, exact.items);
   }
 
-  const planned = plan_library(runtime, raw_items);
-  const items = planned.map((item) => ({
-    legacy_id: item.legacy_id,
-    object_id: item.object_id,
-    version_id: item.version_id,
-  }));
+  // The same library metadata (everything except items) plus an earlier import
+  // whose items are all present here: reuse those items by legacy id and import
+  // only the items that are new.
+  const shell = library_shell(library);
+  const reused = new Map<string, ImportItem>();
+  for (const entry of prior) {
+    if (entry.shell !== shell) continue;
+    if (!entry.items.every((item) => seen.has(item.legacy_id))) continue;
+    for (const item of entry.items) {
+      if (!reused.has(item.legacy_id)) reused.set(item.legacy_id, item);
+    }
+  }
+
+  const planned: PlannedItem[] = [];
+  const items: ImportItem[] = [];
+  for (const raw of raw_items) {
+    const item = raw as Record<string, unknown>;
+    const legacy_id = item.id as string;
+    const known = reused.get(legacy_id);
+    if (known !== undefined) {
+      items.push(known);
+      continue;
+    }
+    const entry = plan_library_item(runtime, item);
+    planned.push(entry);
+    items.push({ legacy_id, object_id: entry.object_id, version_id: entry.version_id });
+  }
+
+  if (planned.length === 0 && raw_items.length > 0) {
+    return skip_library_import(runtime, scope, items);
+  }
+
   const result = { project_id: scope.project_id, already_imported: false, items };
   insert_receipt(runtime, {
     project_id: scope.project_id,
