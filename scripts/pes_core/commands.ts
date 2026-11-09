@@ -14,9 +14,11 @@
 import { createHash } from "node:crypto";
 
 import type { Clock } from "./clock.ts";
+import { resolve_run_config, type RunConfig } from "./config.ts";
 import { tx, type Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { new_id } from "./ids.ts";
+import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 
 /** Stage keys in ordinal order; bootstrap creates exactly these six. */
 export const STAGE_KEYS = [
@@ -68,6 +70,8 @@ export interface CommandServiceOptions {
   policy: PolicyChecker;
   /** Test seam; defaults to the shared server identifier generator. */
   new_id?: () => string;
+  /** Run/lease timing; omitted -> resolve_run_config(). */
+  run_config?: RunConfig;
 }
 
 export interface CommandOutcome {
@@ -75,7 +79,7 @@ export interface CommandOutcome {
   replayed: boolean;
 }
 
-interface ProjectRow {
+export interface ProjectRow {
   id: string;
   control_rev: bigint;
   status: string;
@@ -92,7 +96,7 @@ interface ResolvedScope {
   actor_id: string;
 }
 
-interface CommandRuntime {
+export interface CommandRuntime {
   db: Db;
   ctx: MutationContext;
   payload: unknown;
@@ -102,21 +106,23 @@ interface CommandRuntime {
   new_id: () => string;
   project: ProjectRow | null;
   actor_id: string | null;
+  run_config: RunConfig;
 }
 
-interface EventDraft {
+export interface EventDraft {
   type: string;
   payload: unknown;
   before_rev?: number;
   after_rev?: number;
+  run_id?: string | null;
 }
 
-interface CommandResult {
+export interface CommandResult {
   result: unknown;
   events: EventDraft[];
 }
 
-interface CommandDefinition {
+export interface CommandDefinition {
   /** mutation_commits.action for this command. */
   action: string;
   /** "project" commands require an existing project and actor; bootstrap creates them. */
@@ -195,18 +201,18 @@ function copy_snapshot(snapshot: unknown): unknown {
   return JSON.parse(JSON.stringify(snapshot));
 }
 
-function is_record(value: unknown): value is Record<string, unknown> {
+export function is_record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function require_record(payload: unknown): Record<string, unknown> {
+export function require_record(payload: unknown): Record<string, unknown> {
   if (!is_record(payload)) {
     throw new ApiError("invalid_payload", "payload must be a JSON object");
   }
   return payload;
 }
 
-function require_non_empty_string(payload: Record<string, unknown>, field: string): string {
+export function require_non_empty_string(payload: Record<string, unknown>, field: string): string {
   const value = payload[field];
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new ApiError("invalid_payload", `${field} must be a non-empty string`);
@@ -297,7 +303,7 @@ function result_project_id(result: unknown): string {
   throw new Error("the command result must include project_id");
 }
 
-function insert_receipt(
+export function insert_receipt(
   runtime: CommandRuntime,
   fields: {
     project_id: string;
@@ -305,13 +311,16 @@ function insert_receipt(
     action: string;
     base_control_rev: number | null;
     result: unknown;
+    run_id?: string | null;
+    lease_id?: string | null;
+    fence?: number | null;
   },
 ): void {
   const written = runtime.db.run(
     `INSERT INTO mutation_commits
        (id, project_id, actor_id, via, client_request_id, request_hash, action,
-        base_control_rev, result_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        base_control_rev, run_id, lease_id, fence, result_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     runtime.tx_id,
     fields.project_id,
     fields.actor_id,
@@ -320,6 +329,9 @@ function insert_receipt(
     runtime.request_hash,
     fields.action,
     fields.base_control_rev,
+    fields.run_id ?? null,
+    fields.lease_id ?? null,
+    fields.fence ?? null,
     JSON.stringify(fields.result),
     runtime.now_ms,
   );
@@ -335,11 +347,12 @@ function write_events(runtime: CommandRuntime, project_id: string, events: Event
   for (const [index, event] of events.entries()) {
     const written = runtime.db.run(
       `INSERT INTO events
-         (id, project_id, tx_id, tx_index, tx_size, type, object_id, before_rev,
+         (id, project_id, run_id, tx_id, tx_index, tx_size, type, object_id, before_rev,
           after_rev, payload, schema_version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1, ?)`,
       runtime.new_id(),
       project_id,
+      event.run_id ?? null,
       runtime.tx_id,
       index,
       events.length,
@@ -560,6 +573,7 @@ const SET_TOPIC_COMMAND: CommandDefinition = Object.freeze({
 const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, CommandDefinition>([
   ["project.bootstrap", BOOTSTRAP_COMMAND],
   ["project.set_topic", SET_TOPIC_COMMAND],
+  ...RUN_COMMAND_ENTRIES,
 ]);
 
 /**
@@ -660,12 +674,14 @@ export class CommandService {
   readonly #clock: Clock;
   readonly #policy: PolicyChecker;
   readonly #new_id: () => string;
+  readonly #run_config: RunConfig;
 
   constructor(db: Db, options: CommandServiceOptions) {
     this.#db = db;
     this.#clock = options.clock;
     this.#policy = options.policy;
     this.#new_id = options.new_id ?? new_id;
+    this.#run_config = options.run_config ?? resolve_run_config();
   }
 
   /**
@@ -754,6 +770,7 @@ export class CommandService {
       new_id: this.#new_id,
       project,
       actor_id,
+      run_config: this.#run_config,
     };
     const outcome = definition.run(runtime);
     write_events(runtime, project?.id ?? result_project_id(outcome.result), outcome.events);
