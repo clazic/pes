@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "react", "jsx-a11y"],
+  "jsPlugins": ["@shadcn/lint", "oxlint-tailwindcss"],
+  "ignorePatterns": ["dist/**", "live-edit/**"],
+  "settings": {
+    "tailwindcss": { "entryPoint": "src/index.css" }
+  },
+  "rules": {
+    "shadcn/no-unknown-classes": "error",
+    "shadcn/no-raw-colors": "error",
+    "shadcn/no-arbitrary-values": "warn",
+    "shadcn/no-inline-styles": "warn",
+    "shadcn/require-static-classes": "warn",
+    "shadcn/no-restyle": "warn",
+
+    "jsx-a11y/prefer-tag-over-role": "off",
+
+    "tailwindcss/no-conflicting-classes": "error",
+    "tailwindcss/no-contradicting-variants": "warn",
+    "tailwindcss/no-dark-without-light": "warn",
+    "tailwindcss/no-duplicate-classes": "warn",
+    "tailwindcss/no-dynamic-classes": "error",
+    "tailwindcss/no-unknown-classes": "error",
+    "tailwindcss/enforce-canonical": "warn",
+    "tailwindcss/enforce-negative-arbitrary-values": "warn",
+    "tailwindcss/no-deprecated-classes": "error",
+    "tailwindcss/no-unnecessary-arbitrary-value": "warn",
+    "tailwindcss/consistent-variant-order": "warn",
+    "tailwindcss/enforce-consistent-important-position": "warn",
+    "tailwindcss/enforce-consistent-variable-syntax": "warn",
+    "tailwindcss/enforce-shorthand": "warn",
+    "tailwindcss/enforce-sort-order": "off",
+    "tailwindcss/no-unnecessary-whitespace": "warn",
+    "tailwindcss/no-hardcoded-colors": "warn"
+  }
+}

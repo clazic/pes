@@ -45,7 +45,7 @@ export interface NavItem {
   icon?: React.ReactNode
   /** aria-current — 지금 화면(page) · 지금 단계(step) */
   current?: "page" | "step"
-  /** 보이는 수 배지(화면 읽기에는 srText로). icon = 차례 모양(◆ 나의 할 일 · 도는 고리 AI가 하는 중 …) */
+  /** 보이는 수 배지(화면 읽기에는 srText로). icon = 차례 모양(◆ 나의 할 일 · 도는 고리 AI 작업 중 …) */
   badge?: { text?: string; quiet?: boolean; icon?: React.ReactNode }
   /** 보이는 꼬리표(예: 새 버전) */
   tag?: React.ReactNode
@@ -54,6 +54,10 @@ export interface NavItem {
   /** 오른쪽 작은 글(상태) */
   meta?: string
   items?: NavSubItem[]
+  /** 하위 항목의 이름(화면 읽기 “— 라운드 펼치기”의 “라운드”) — 기본 라운드 */
+  subNoun?: string
+  /** 하위 항목을 펼친 채 시작(기본 펼침) */
+  open?: boolean
   tooltip?: string
   onPick?: () => void
 }
@@ -94,7 +98,7 @@ export function NavMain({
                   <DropdownMenuTrigger asChild>
                     <SidebarMenuButton
                       aria-current={item.current}
-                      aria-label={`${item.title}${item.meta ? ` · ${item.meta}` : ""} — 라운드 열기`}
+                      aria-label={`${item.title}${item.meta ? ` · ${item.meta}` : ""} — ${item.subNoun ?? "라운드"} 열기`}
                     >
                       {item.icon}
                       <span>{item.title}</span>
@@ -122,13 +126,13 @@ export function NavMain({
                 </DropdownMenu>
               </SidebarMenuItem>
             ) : (
-              <Collapsible key={item.key} asChild defaultOpen className="group/collapsible">
+              <Collapsible key={item.key} asChild defaultOpen={item.open ?? true} className="group/collapsible">
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
                       tooltip={item.tooltip ?? item.title}
                       aria-current={item.current}
-                      aria-label={`${item.title}${item.meta ? ` · ${item.meta}` : ""} — 라운드 펼치기`}
+                      aria-label={`${item.title}${item.meta ? ` · ${item.meta}` : ""} — ${item.subNoun ?? "라운드"} 펼치기`}
                     >
                       {item.icon}
                       <span className="min-w-0 truncate">{item.title}</span>
@@ -143,7 +147,7 @@ export function NavMain({
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <SidebarMenuSub aria-label={`${item.title} 라운드`}>
+                    <SidebarMenuSub aria-label={`${item.title} ${item.subNoun ?? "라운드"}`}>
                       {item.items.map((sub) => (
                         <SidebarMenuSubItem key={sub.key}>
                           <SidebarMenuSubButton asChild isActive={sub.active}>

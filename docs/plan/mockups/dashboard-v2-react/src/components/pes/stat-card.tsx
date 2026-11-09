@@ -32,23 +32,23 @@ export function StatCard({
   className?: string;
 }) {
   return (
-    <Card aria-labelledby={id} className={cn("@container/card gap-0 bg-gradient-to-t from-primary/[0.05] to-card py-0 dark:bg-card dark:bg-none", className)}>
+    <Card aria-labelledby={id} className={cn("@container/card gap-0 bg-linear-to-t from-primary/5 to-card py-0 dark:bg-card dark:bg-none", className)}>
       <div className="px-4 pt-3.5 @[15rem]/card:px-5 @[15rem]/card:pt-4">
         <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
           <div className="flex min-w-0 items-center gap-1">
-            <h3 id={id} className="min-w-0 text-[13px] font-normal text-muted-foreground">
+            <h3 id={id} className="min-w-0 text-meta font-normal text-muted-foreground">
               {label}
             </h3>
             {labelAside}
           </div>
           {badge ? <div className="flex shrink-0 flex-col items-end gap-1">{badge}</div> : null}
         </div>
-        <p className="mt-2 text-[24px] leading-none font-semibold tracking-tight whitespace-nowrap @[15rem]/card:text-[30px]">
+        <p className="mt-2 text-[19px] leading-none font-semibold tracking-tight whitespace-nowrap @[15rem]/card:text-[23px]">
           {value}
           {unit ? <span className="ml-1 text-sm font-medium text-muted-foreground">{unit}</span> : null}
         </p>
       </div>
-      <div className="mt-auto flex flex-col items-start gap-1 px-4 pt-2.5 pb-3.5 text-[13px] @[15rem]/card:px-5 @[15rem]/card:pt-3 @[15rem]/card:pb-4">
+      <div className="mt-auto flex flex-col items-start gap-1 px-4 pt-2.5 pb-3.5 text-meta @[15rem]/card:px-5 @[15rem]/card:pt-3 @[15rem]/card:pb-4">
         {lead ? <div className="font-medium">{lead}</div> : null}
         {sub ? <div className="text-muted-foreground">{sub}</div> : null}
         {footer}
@@ -57,10 +57,19 @@ export function StatCard({
   );
 }
 
-/** 요약 카드 줄(본문 컨테이너 폭 기준). dense = 휴대폰에서도 두 장씩(숫자만 있는 요약 카드 — 첫 화면을 다 차지하지 않게) */
-export function StatRow({ label, children, className, dense }: { label: string; children: React.ReactNode; className?: string; dense?: boolean }) {
+/**
+ * 요약 카드 줄(본문 컨테이너 폭 기준). dense = 휴대폰에서도 두 장씩(숫자만 있는 요약 카드 — 첫 화면을 다 차지하지 않게)
+ * headed = 쪽 제목(h1) 바로 아래에 올 때 화면 읽기용 h2를 둔다 — 카드 이름(h3)이 h1 다음에 바로 오지 않게(제목 단계 건너뛰기 없음, 6차)
+ */
+export function StatRow({ label, children, className, dense, headed }: { label: string; children: React.ReactNode; className?: string; dense?: boolean; headed?: boolean }) {
+  const hid = React.useId();
   return (
-    <section aria-label={label} className={cn("grid gap-4 @5xl/main:grid-cols-4", dense ? "grid-cols-2 gap-3 @xl/main:gap-4" : "grid-cols-1 @xl/main:grid-cols-2", className)}>
+    <section aria-label={headed ? undefined : label} aria-labelledby={headed ? hid : undefined} className={cn("grid gap-4 @5xl/main:grid-cols-4", dense ? "grid-cols-2 gap-3 @xl/main:gap-4" : "grid-cols-1 @xl/main:grid-cols-2", className)}>
+      {headed ? (
+        <h2 id={hid} className="sr-only">
+          {label}
+        </h2>
+      ) : null}
       {children}
     </section>
   );

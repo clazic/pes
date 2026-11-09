@@ -22,17 +22,17 @@ export function RegisterBPage() {
       <SectionTitle as="h1" title="내 컴퓨터 AI로 만들고 웹에 등록하기" sub="연결은 내 컴퓨터가 먼저 겁니다." right={<ModeBadge mode="B" detail="내 컴퓨터 AI" />} />
       <div className="grid grid-cols-1 gap-3 desk:grid-cols-2">
         <Card className="gap-0 px-5" aria-labelledby="b-steps">
-          <h2 id="b-steps" className="text-[17px]">
+          <h2 id="b-steps" className="text-title">
             순서
           </h2>
           <ol className="mt-2 ml-5 list-decimal space-y-2 text-sm">
             <li>
               <strong>로그인</strong> — 내 컴퓨터에서 한 번. 브라우저에 “기기 승인”이 뜹니다.
-              <code className="mt-1 block rounded-md bg-foreground px-2.5 py-1.5 text-[13px] text-background">pes login</code>
+              <code className="mt-1 block rounded-md bg-foreground px-2.5 py-1.5 text-meta text-background">pes login</code>
             </li>
             <li>
               <strong>만들기</strong> — AI 도구에서 시작합니다(예: Claude Code).
-              <code className="mt-1 block rounded-md bg-foreground px-2.5 py-1.5 text-[13px] text-background">/pes:start 지역 돌봄 인력 수급</code>
+              <code className="mt-1 block rounded-md bg-foreground px-2.5 py-1.5 text-meta text-background">/pes:start 지역 돌봄 인력 수급</code>
             </li>
             <li>
               <strong>코드 확인</strong> — 내 컴퓨터와 웹의 코드가 같은지 봅니다.
@@ -56,7 +56,7 @@ export function RegisterBPage() {
           </div>
         </Card>
         <Card className="gap-0 px-5" aria-labelledby="b-cost">
-          <h2 id="b-cost" className="text-[17px]">
+          <h2 id="b-cost" className="text-title">
             알아 둘 것
           </h2>
           <ul className="mt-2 ml-4.5 list-disc space-y-1 text-sm">

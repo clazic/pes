@@ -138,6 +138,18 @@ export function useResyncing() {
   return v;
 }
 
+/**
+ * 방해 줄이기(5차, 설계 16.5): 연구 공간에 들어가 있으면 그 프로젝트의 사건만 알린다(토스트 · 화면 읽기).
+ * 다른 프로젝트의 사건은 그대로 받아 화면 자료는 바뀌고, 알림 목록에는 남는다.
+ */
+let focusProject: string | null = null;
+export function setFocusProject(slug: string | null) {
+  focusProject = slug;
+}
+export function getFocusProject() {
+  return focusProject;
+}
+
 async function pullChanges(qc: QueryClient, project: string, cursorRef: React.RefObject<string>) {
   try {
     const page = await pes.getChanges(project, cursorRef.current ?? "0");
@@ -149,7 +161,8 @@ async function pullChanges(qc: QueryClient, project: string, cursorRef: React.Re
         }
       }
       // 사람이 할 일이 생긴 사건만 조용히 알린다(설계 3.5)
-      if (tx.human_action) {
+      const quiet = focusProject !== null && tx.project !== undefined && tx.project !== "*" && tx.project !== focusProject;
+      if (tx.human_action && !quiet) {
         live.announce(tx.human_action);
         toast.info(tx.human_action);
       }
@@ -222,7 +235,7 @@ export function useRefreshState(): "live" | "slow" | "paused" | "offline" | "res
 export function simulateAiQuestion(slug: string) {
   pes.simulateAiQuestion(slug);
 }
-/** 시안: 차례 바뀜 장면 — AI가 하는 중(소식 있음) → finishMs 뒤 AI 끝남 → 나의 할 일 */
+/** 시안: 차례 바뀜 장면 — AI 작업 중(소식 있음) → finishMs 뒤 AI 끝남 → 나의 할 일 */
 export function playTurnDemo(finishMs?: number) {
   pes.playTurnDemo(finishMs);
 }

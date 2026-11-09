@@ -33,19 +33,19 @@ const TAG: Record<TagTone, string> = {
 /** 작은 꼬리표(필수·중요도·판 등). 상태 색은 상태에만 쓰므로 “필수”는 파랑(acc)으로 쓴다(설계 3.4). */
 export function Tag({ children, tone = "plain", className }: { children: React.ReactNode; tone?: TagTone; className?: string }) {
   return (
-    <Badge variant="outline" className={cn("h-auto rounded-md px-1.5 py-0 text-[11.5px] leading-[1.7] font-medium", TAG[tone], className)}>
+    <Badge variant="outline" className={cn("h-auto rounded-md px-1.5 py-0 text-caption leading-[1.7] font-medium", TAG[tone], className)}>
       {children}
     </Badge>
   );
 }
 
 export function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <p className={cn("mb-1 text-[12.5px] font-medium text-muted-foreground", className)}>{children}</p>;
+  return <p className={cn("mb-1 text-caption font-medium text-muted-foreground", className)}>{children}</p>;
 }
 
 export function Hint({ children, className, id }: { children: React.ReactNode; className?: string; id?: string }) {
   return (
-    <p id={id} className={cn("text-[12.5px] text-muted-foreground", className)}>
+    <p id={id} className={cn("text-caption text-muted-foreground", className)}>
       {children}
     </p>
   );
@@ -54,8 +54,8 @@ export function Hint({ children, className, id }: { children: React.ReactNode; c
 /** 시안 주석(제품 화면이 아님) — 점선 상자 */
 export function Anno({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div data-mock="note" className={cn("mt-2.5 rounded-lg border border-dashed border-line-strong bg-muted/40 px-3 py-2 text-[12.5px] leading-relaxed text-ink-2", className)}>
-      <span className="mr-1.5 inline-block rounded bg-off-soft px-1.5 align-[1px] text-[11px] font-semibold text-off">시안 설명</span>
+    <div data-mock="note" className={cn("mt-2.5 rounded-lg border border-dashed border-line-strong bg-muted/40 px-3 py-2 text-caption leading-relaxed text-ink-2", className)}>
+      <span className="mr-1.5 inline-block rounded bg-off-soft px-1.5 align-[1px] text-caption font-semibold text-off">시안 설명</span>
       {children}
     </div>
   );
@@ -63,7 +63,7 @@ export function Anno({ children, className }: { children: React.ReactNode; class
 
 export function KV({ items, className }: { items: [React.ReactNode, React.ReactNode][]; className?: string }) {
   return (
-    <dl className={cn("grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]", className)}>
+    <dl className={cn("grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta", className)}>
       {items.map(([k, v], i) => (
         <React.Fragment key={i}>
           <dt className="font-medium text-muted-foreground">{k}</dt>
@@ -81,7 +81,7 @@ export function KV({ items, className }: { items: [React.ReactNode, React.ReactN
 export function SectionTitle({ title, sub, id, as: As = "h2", right, className, aside }: { title: React.ReactNode; sub?: React.ReactNode; id?: string; as?: "h1" | "h2"; right?: React.ReactNode; className?: string; aside?: React.ReactNode }) {
   const h1 = As === "h1";
   const heading = (
-    <As id={id} className={h1 ? "text-[22px] tracking-tight" : "text-base"}>
+    <As id={id} className={h1 ? "text-page tracking-tight" : "text-title"}>
       {title}
     </As>
   );
@@ -96,7 +96,7 @@ export function SectionTitle({ title, sub, id, as: As = "h2", right, className, 
         ) : (
           heading
         )}
-        {sub ? <p className={cn("mt-1 text-muted-foreground", h1 ? "text-sm" : "text-[13px]")}>{sub}</p> : null}
+        {sub ? <p className={cn("mt-1 text-muted-foreground", h1 ? "text-sm" : "text-meta")}>{sub}</p> : null}
       </div>
       {right ? <div className="flex flex-wrap items-center gap-2">{right}</div> : null}
     </div>
@@ -105,7 +105,7 @@ export function SectionTitle({ title, sub, id, as: As = "h2", right, className, 
 
 export function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border bg-muted px-1 font-sans text-[11px] leading-none font-medium text-muted-foreground">
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border bg-muted px-1 font-sans text-caption leading-none font-medium text-muted-foreground">
       {children}
     </kbd>
   );
@@ -117,7 +117,7 @@ export function Kbd({ children }: { children: React.ReactNode }) {
  */
 export function CardHead({ eyebrow, title, titleId, meta, right, as: As = "h2", size, aside }: { eyebrow?: React.ReactNode; title: React.ReactNode; titleId?: string; meta?: React.ReactNode; right?: React.ReactNode; as?: "h2" | "h3"; size?: "lg"; aside?: React.ReactNode }) {
   const heading = (
-    <As id={titleId} className={size === "lg" ? "text-xl tracking-tight" : As === "h2" ? "text-base" : "text-[15px]"}>
+    <As id={titleId} className={size === "lg" ? "text-page tracking-tight" : As === "h2" ? "text-title" : "text-body"}>
       {title}
     </As>
   );
@@ -133,7 +133,7 @@ export function CardHead({ eyebrow, title, titleId, meta, right, as: As = "h2", 
         ) : (
           heading
         )}
-        {meta ? <div className="mt-1 text-[12.5px] text-muted-foreground">{meta}</div> : null}
+        {meta ? <div className="mt-1 text-caption text-muted-foreground">{meta}</div> : null}
       </div>
       {right ? <div className="flex flex-wrap items-center gap-2">{right}</div> : null}
     </div>

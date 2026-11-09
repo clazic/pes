@@ -74,11 +74,35 @@
 @custom-variant phone (@media (max-width: 899.98px) and (pointer: coarse));
 @custom-variant coarse (@media (pointer: coarse));
 
+/* 스크롤 막대 숨기기(명령 메뉴 · 사이드바) — shadcn 부품이 쓰지만 정의가 없어 효과가 없던 것(@shadcn/lint no-unknown-classes) */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @theme {
-  /* 배치 기준(설계 3.8): tab 900 · desk 1280 · wide 1440 */
+  /* 배치 기준(설계 3.8): tab 900 · desk 1280 · wide 1440 · xwide 1600(AI 동료 칸 400px) */
   --breakpoint-tab: 56.25rem;
   --breakpoint-desk: 80rem;
   --breakpoint-wide: 90rem;
+  --breakpoint-xwide: 100rem;
+  /* 작은 글자 한 단계 키움(사용자 2026-11-10): text-xs 최소 12px · text-sm 최소 13px. 사용자가 브라우저 글자를 키우면 rem 쪽을 따른다. */
+  --text-xs: max(0.75rem, 12px);
+  --text-sm: max(0.875rem, 13px);
+  /* 글자 크기 5단계(사용자 2026-11-10): 훑는 곳은 촘촘하게, 읽고 판단하는 글만 크게.
+     캡션 12 · 보조 13(표 · 칩 · 메뉴 · 단추) · 본문 15(질문 · 결과 글 · 설명) · 소제목 16(카드 제목) · 제목 20(화면 · 지금 할 일) */
+  --text-caption: max(0.75rem, 12px);
+  --text-caption--line-height: 1.5;
+  --text-meta: max(0.875rem, 13px);
+  --text-meta--line-height: 1.55;
+  --text-body: max(1.0714rem, 15px);
+  --text-body--line-height: 1.65;
+  --text-title: max(1.1428rem, 16px);
+  --text-title--line-height: 1.4;
+  --text-page: max(1.4286rem, 20px);
+  --text-page--line-height: 1.3;
 }
 
 @theme inline {
@@ -184,6 +208,8 @@
     @apply border-border;
   }
   html {
+    /* 글자 크기 한 단계 줄임(사용자 2026-11-08): rem 기준 14px */
+    font-size: 87.5%;
     background: var(--background);
     -webkit-text-size-adjust: 100%;
     /* #조각으로 옮길 때 붙어 있는 머리줄(56px)에 가리지 않게 */
@@ -192,7 +218,7 @@
   body {
     @apply bg-background font-sans text-foreground;
     margin: 0;
-    font-size: 0.875rem;
+    font-size: max(0.875rem, 13px);
     line-height: 1.6;
     word-break: keep-all;
     overflow-wrap: break-word;
@@ -230,21 +256,27 @@
     /* 숫자 표(사용량·시간·크기)는 자릿수를 맞춘다 */
     font-variant-numeric: tabular-nums;
   }
+  /* 누르는 것은 손가락 모양(6차 — Tailwind v4 기본은 단추도 화살표). 못 누르는 것은 아래 not-allowed 그대로 */
+  button:not(:disabled, [aria-disabled="true"]),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  summary,
+  select {
+    cursor: pointer;
+  }
   [aria-disabled="true"] {
     cursor: not-allowed;
+  }
+  /* 화면이 바뀐 뒤 초점을 받는 제목(경로 초점 — RootLayout)은 테두리 없이: #main · #now-title과 같은 규칙 */
+  [data-route-focus]:focus {
+    outline: none;
   }
 }
 
 @layer components {
-  /* 굵은 포인터: 누르는 곳 44px 이상(설계 3.9) */
-  @media (pointer: coarse) {
-    [data-slot="button"] {
-      min-height: 44px;
-    }
-    [data-slot="button"][data-size="sm"] {
-      min-height: 40px;
-    }
-  }
   /* 휴대폰 입력 글자 16px(확대 방지) */
   @media (max-width: 899.98px) and (pointer: coarse) {
     input,
@@ -256,9 +288,68 @@
 }
 
 /*
+ * 굵은 포인터(손가락) — 누르는 곳 44px(설계 3.9 · 6차 점검). 데스크톱(가는 포인터)의 촘촘한 크기는 그대로 둔다(사용자 결정).
+ * 층(@layer) 밖 규칙이라 단추의 min-h-8 · size-9 같은 유틸리티를 이긴다 — 예전 components 층 규칙은 유틸리티에 져서 실제로는
+ * 28~32px였고, 글자 줄임(html 87.5%) 뒤 rem 크기(min-h-10 · size-9)도 35~32px로 줄었다. 그래서 px로 고정한다.
+ */
+@media (pointer: coarse) {
+  /* 실제 크기 44px: 단추(링크 단추 포함) · 토글 · 탭 · 접기 · 선택 상자 · 입력 칸 · 사이드바 메뉴 */
+  :is(button, a)[data-variant],
+  [data-slot="tabs-trigger"],
+  [data-slot="collapsible-trigger"],
+  [data-slot="select-trigger"],
+  input[data-slot="input"],
+  [data-sidebar="menu-button"],
+  [data-sidebar="menu-sub-button"] {
+    min-height: 44px;
+  }
+  :is(button, a)[data-variant],
+  [data-slot="tabs-trigger"] {
+    min-width: 44px;
+  }
+  [data-slot="tabs-list"] {
+    height: auto;
+  }
+  /*
+   * 머리줄(390 폭에 아이콘 6개 + “모든 프로젝트”)과 글 옆 작은 조작(ⓘ · 스위치 · 체크 상자)은 보이는 크기를 그대로 두고
+   * 누름 영역만 넓힌다(배치가 흔들리지 않게). 머리줄은 옆 간격의 절반까지만 넓혀 이웃과 겹치지 않는다.
+   */
+  .site-header :is(button, a)[data-variant] {
+    min-height: 0;
+    min-width: 0;
+  }
+  .site-header :is(button, a[href]),
+  [data-slot="popover-trigger"],
+  [data-slot="switch"],
+  [data-slot="checkbox"] {
+    position: relative;
+  }
+  .site-header :is(button, a[href])::after,
+  [data-slot="switch"]::after {
+    content: "";
+    position: absolute;
+    left: -2px;
+    right: -2px;
+    top: 50%;
+    height: 44px;
+    translate: 0 -50%;
+  }
+  [data-slot="popover-trigger"]::after,
+  [data-slot="checkbox"]::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 44px;
+    height: 44px;
+    translate: -50% -50%;
+  }
+}
+
+/*
  * 차례 표시기(설계 15절)의 움직임 — 이 셋뿐이다.
  *  1. 공이 옮겨 가는 것(차례가 바뀔 때 한 번, 0.52초)
- *  2. AI가 하는 중 + 소식 있음일 때 공 둘레를 천천히 도는 점(1.8초에 한 바퀴, 밝기 변화 없음)
+ *  2. AI 작업 중 + 소식 있음일 때 공 둘레를 천천히 도는 점(1.8초에 한 바퀴, 밝기 변화 없음)
  *  3. 나의 할 일로 바뀌는 순간 한 번 퍼지는 고리(0.9초, 한 번만 — 반복·번쩍임 없음)
  * 움직임 줄이기에서는 아래 prefers-reduced-motion 규칙이 셋 다 끈다(도는 점은 맨 위에 멈춤, 퍼지는 고리는 보이지 않음).
  */
@@ -289,6 +380,33 @@
   to {
     opacity: 0;
     transform: scale(1.85);
+  }
+}
+
+/*
+ * 결과 글의 문제 부분(5차, 설계 16.4) — 물결 밑줄은 장식이다. 뜻은 문단 끝의 표시 단추(모양 + 글자: 근거 부족 · 검증 실패 …)와
+ * 여백 선이 함께 전한다(색만으로 구분하지 않음). AI에게 맡긴 것은 점선.
+ */
+.pes-flag {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+}
+.pes-flag-warn {
+  text-decoration-color: var(--warn);
+}
+.pes-flag-bad {
+  text-decoration-color: var(--bad);
+}
+.pes-flag-ai {
+  text-decoration-style: dashed;
+  text-decoration-color: var(--primary-ink);
+}
+@media (forced-colors: active) {
+  .pes-flag {
+    text-decoration-color: CanvasText;
   }
 }
 

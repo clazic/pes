@@ -35,7 +35,7 @@ function ConflictDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: b
           <DialogDescription>어느 쪽을 쓸까요? 어느 쪽도 지우지 않습니다. 고르는 일은 사람만 합니다(데스크톱 권장).</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-1 gap-2 tab:grid-cols-2">
-          <div className="rounded-lg border border-line bg-surface-soft px-2.5 py-2 text-[12.5px]">
+          <div className="rounded-lg border border-line bg-surface-soft px-2.5 py-2 text-caption">
             <strong>내 컴퓨터</strong>
             {c.pc.map((l) => (
               <span key={l} className="block font-mono">
@@ -43,7 +43,7 @@ function ConflictDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: b
               </span>
             ))}
           </div>
-          <div className="rounded-lg border border-line bg-surface-soft px-2.5 py-2 text-[12.5px]">
+          <div className="rounded-lg border border-line bg-surface-soft px-2.5 py-2 text-caption">
             <strong>웹 PES</strong>
             {c.web.map((l) => (
               <span key={l} className="block font-mono">
@@ -53,21 +53,21 @@ function ConflictDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: b
           </div>
         </div>
         <fieldset>
-          <legend className="mb-1.5 text-[13px] font-semibold">고르기</legend>
+          <legend className="mb-1.5 text-meta font-semibold">고르기</legend>
           <RadioGroup value={choice} onValueChange={(v) => setChoice(v as typeof choice)} className="gap-1.5" aria-label="충돌 처리 방법">
             {CHOICES.map((o) => (
               <label key={o.v} htmlFor={`cf-${o.v}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2", choice === o.v ? "border-primary bg-primary-soft" : "border-line")}>
                 <RadioGroupItem id={`cf-${o.v}`} value={o.v} className="mt-1" />
                 <span>
-                  <strong className="text-[13.5px]">{o.title}</strong>
-                  <span className="block text-[12.5px] text-muted-foreground">{o.hint}</span>
+                  <strong className="text-meta">{o.title}</strong>
+                  <span className="block text-caption text-muted-foreground">{o.hint}</span>
                 </span>
               </label>
             ))}
           </RadioGroup>
         </fieldset>
         <div>
-          <Label htmlFor="cf-why" className="text-[13px] font-semibold">
+          <Label htmlFor="cf-why" className="text-meta font-semibold">
             이유 <span className="font-normal text-muted-foreground">(선택)</span>
           </Label>
           <Input id="cf-why" className="mt-1" placeholder="예: 박검토가 고친 일정이 최신" value={why} onChange={(e) => setWhy(e.target.value)} />

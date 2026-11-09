@@ -19,12 +19,12 @@ function Radios<T extends string>({ legend, value, options, onChange }: { legend
   const id = React.useId();
   return (
     <fieldset className="mt-3">
-      <legend className="mb-1.5 text-[13px] font-semibold">{legend}</legend>
+      <legend className="mb-1.5 text-meta font-semibold">{legend}</legend>
       <RadioGroup value={value} onValueChange={(v) => onChange(v as T)} className="gap-1.5">
         {options.map((o) => (
           <div key={o.v} className="flex items-start gap-2">
             <RadioGroupItem value={o.v} id={`${id}-${o.v}`} className="mt-1" />
-            <Label htmlFor={`${id}-${o.v}`} className="flex-col items-start gap-0 text-[13px] font-medium">
+            <Label htmlFor={`${id}-${o.v}`} className="flex-col items-start gap-0 text-meta font-medium">
               {o.label}
               {o.hint ? <span className="text-xs font-normal text-muted-foreground">{o.hint}</span> : null}
             </Label>
@@ -72,8 +72,8 @@ export function MockDock() {
           <SheetDescription>합성 예시만 씁니다. 네트워크 호출이 없습니다. 바꾼 값은 이 탭에만 남습니다.</SheetDescription>
         </SheetHeader>
 
-        <section aria-labelledby="mock-screen" className="mt-3 rounded-lg border border-dashed border-line-strong bg-muted/40 px-3 py-2 text-[12.5px] text-ink-2">
-          <h3 id="mock-screen" className="text-[13px] font-semibold text-foreground">
+        <section aria-labelledby="mock-screen" className="mt-3 rounded-lg border border-dashed border-line-strong bg-muted/40 px-3 py-2 text-caption text-ink-2">
+          <h3 id="mock-screen" className="text-meta font-semibold text-foreground">
             {handle?.mock.title ?? "시안"}
           </h3>
           {handle?.mock.desc ? <p className="mt-0.5">{handle.mock.desc}</p> : null}
@@ -92,7 +92,7 @@ export function MockDock() {
         </section>
 
         <div className="mt-3 flex items-center justify-between gap-2">
-          <Label htmlFor="mock-notes" className="flex-col items-start gap-0 text-[13px] font-medium">
+          <Label htmlFor="mock-notes" className="flex-col items-start gap-0 text-meta font-medium">
             시안 설명 상자 보이기
             <span className="text-xs font-normal text-muted-foreground">점선 상자(설계 근거·결정 번호). 기본은 숨김</span>
           </Label>
@@ -100,7 +100,7 @@ export function MockDock() {
         </div>
 
         <Separator className="my-3" />
-        <p className="text-[13px] font-semibold">시안 조작</p>
+        <p className="text-meta font-semibold">시안 조작</p>
         <Radios
           legend="보는 사람(역할)"
           value={s.role}
@@ -132,17 +132,17 @@ export function MockDock() {
           ]}
         />
         <div className="mt-3 flex items-center justify-between gap-2">
-          <Label htmlFor="mc-conflict" className="text-[13px] font-medium">
+          <Label htmlFor="mc-conflict" className="text-meta font-medium">
             다음 제출을 버전 충돌로
           </Label>
           <Switch id="mc-conflict" checked={s.nextSubmit === "conflict"} onCheckedChange={(c) => set({ nextSubmit: c ? "conflict" : "ok" })} />
         </div>
         <Separator className="my-3" />
         <section aria-labelledby="mock-turn" className="rounded-lg border border-dashed border-line-strong px-3 py-2.5">
-          <h3 id="mock-turn" className="text-[13px] font-semibold">
+          <h3 id="mock-turn" className="text-meta font-semibold">
             차례 바뀜 장면 — AI 끝남 → 나의 할 일
           </h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">장기요양 2판(방식 B): 도우미가 방금 진행을 알려 AI가 하는 중(점이 돎) → 6초 뒤 AI가 질문 2개를 올림 → 나의 할 일로 바뀜. 여러 번 재생할 수 있습니다.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">장기요양 2판(방식 B): 도우미가 방금 진행을 알려 AI 작업 중(점이 돎) → 6초 뒤 AI가 질문 2개를 올림 → 나의 할 일로 바뀜. 여러 번 재생할 수 있습니다.</p>
           <div className="mt-2 flex flex-col gap-1.5">
             <Button size="sm" onClick={() => play("/")}>
               <PlayIcon aria-hidden="true" />
@@ -166,7 +166,7 @@ export function MockDock() {
           </Button>
         </div>
         <Separator className="my-3" />
-        <p className="text-[13px] font-semibold">불린 명령(최근 8)</p>
+        <p className="text-meta font-semibold">불린 명령(최근 8)</p>
         <ul className="mt-1 text-xs text-ink-2">
           {pes.calls.slice(-8).reverse().map((c, i) => (
             <li key={i} className="font-mono">

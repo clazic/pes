@@ -18,7 +18,7 @@ const MODE_ICON: Record<ColorMode, typeof SunIcon> = { light: SunIcon, dark: Moo
 /** 테마 견본: 그 테마의 클래스를 견본 칸에 직접 붙여 그 테마 변수로 그린다(바탕 · 카드 · 강조 · 글자). */
 function Swatch({ id, dark }: { id: ThemeId; dark: boolean }) {
   return (
-    <span aria-hidden="true" className={cn(`theme-${id}`, dark && "dark", "flex h-5 w-9 shrink-0 overflow-hidden rounded-md border border-[color:var(--border)]")}>
+    <span aria-hidden="true" className={cn(`theme-${id}`, dark && "dark", "flex h-5 w-9 shrink-0 overflow-hidden rounded-md border border-(--border)")}>
       <span className="h-full w-1/4 bg-background" />
       <span className="h-full w-1/4 bg-card" />
       <span className="h-full w-1/4 bg-primary" />

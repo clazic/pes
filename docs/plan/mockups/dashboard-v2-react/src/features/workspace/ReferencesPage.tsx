@@ -21,10 +21,10 @@ export const SNAPSHOTS = [
 export function SnapshotPick({ value, onChange, name }: { value: string; onChange: (v: string) => void; name: string }) {
   return (
     <fieldset>
-      <legend className="mb-1.5 text-[13px] font-semibold">고정할 버전</legend>
+      <legend className="mb-1.5 text-meta font-semibold">고정할 버전</legend>
       <RadioGroup value={value} onValueChange={onChange} aria-label={`${name} 고정할 버전`} className="gap-1.5">
         {SNAPSHOTS.map((s) => (
-          <label key={s.id} htmlFor={`${name}-${s.id}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[13px]", value === s.id ? "border-primary bg-primary-soft" : "border-line")}>
+          <label key={s.id} htmlFor={`${name}-${s.id}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-meta", value === s.id ? "border-primary bg-primary-soft" : "border-line")}>
             <RadioGroupItem id={`${name}-${s.id}`} value={s.id} className="mt-0.5" />
             <span>
               <strong>{s.label}</strong> {s.approved ? <Tag tone="ok">{s.note}</Tag> : <Tag tone="warn">승인 안 됨</Tag>}
@@ -50,10 +50,10 @@ export function ReferencesPage() {
           <CardHead eyebrow="붙이기" title="장기요양 기관 실태 분석(가상)" titleId="attach-t" />
           <SnapshotPick value={snap} onChange={setSnap} name="attach" />
           <fieldset>
-            <legend className="mb-1.5 text-[13px] font-semibold">붙일 범위</legend>
+            <legend className="mb-1.5 text-meta font-semibold">붙일 범위</legend>
             <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 tab:grid-cols-3">
               {["최종 보고서", "조사 출처", "단계 보고서", "결정 기록", "질문·답", "첨부 파일"].map((s, i) => (
-                <div key={s} className="flex items-center gap-2 text-[13px]">
+                <div key={s} className="flex items-center gap-2 text-meta">
                   <Checkbox id={`sc-${i}`} defaultChecked={i < 2} />
                   <Label htmlFor={`sc-${i}`} className="font-normal">
                     {s}

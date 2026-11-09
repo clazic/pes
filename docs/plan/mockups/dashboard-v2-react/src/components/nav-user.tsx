@@ -28,7 +28,7 @@ export function NavUser() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="rounded-full" aria-label={`사용자 메뉴 — ${name} · ${role}`}>
           <Avatar className="size-8">
-            <AvatarFallback className="bg-primary-soft text-[13px] font-semibold text-primary-ink">{name.slice(0, 1)}</AvatarFallback>
+            <AvatarFallback className="bg-primary-soft text-meta font-semibold text-primary-ink">{name.slice(0, 1)}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
@@ -36,7 +36,7 @@ export function NavUser() {
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
             <Avatar className="size-8">
-              <AvatarFallback className="bg-primary-soft text-[13px] font-semibold text-primary-ink">{name.slice(0, 1)}</AvatarFallback>
+              <AvatarFallback className="bg-primary-soft text-meta font-semibold text-primary-ink">{name.slice(0, 1)}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left leading-tight">
               <span className="truncate font-semibold text-foreground">{name}</span>

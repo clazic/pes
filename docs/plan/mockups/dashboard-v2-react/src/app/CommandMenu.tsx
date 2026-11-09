@@ -1,13 +1,17 @@
 import * as React from "react";
-import { useNavigate } from "react-router";
+import { useMatch, useNavigate } from "react-router";
+import { useWorkspace } from "@/api/queries";
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { aiSheet, researchUi, useResearchUi } from "@/lib/research-ui";
 
 /**
  * 명령 메뉴(Ctrl/Cmd+K) — 하나의 동작 목록(stage-1-ui 결정 5, 설계 4.15).
  * 한글 조합 중에는 단축키를 무시한다. 사람 권한 동작은 메뉴를 거쳐도 서버가 다시 검사한다.
  * 검색 결과 없음을 AI 전송으로 바꾸지 않는다.
  */
-const ACTIONS: { group: string; label: string; to: string; owner?: boolean }[] = [
+type Action = { group: string; label: string; to?: string; run?: () => void; owner?: boolean };
+const ACTIONS: Action[] = [
+  { group: "전체", label: "모든 프로젝트(관리 공간)", to: "/" },
   { group: "작업 공간", label: "질문으로 가기 — 지역 돌봄 · 조사 R2", to: "/p/dolbom-insight/e/1/s/research/r/2#q-21" },
   { group: "작업 공간", label: "AI 작업 보기", to: "/p/dolbom-insight/ai" },
   { group: "작업 공간", label: "AI 실행 시작 · 계속", to: "/p/dolbom-insight/e/1/s/research/r/2#ai", owner: true },
@@ -39,9 +43,28 @@ export function useCommandMenu() {
   return { open, setOpen };
 }
 
+/** 연구 공간 안이면 그 연구의 동작을 맨 앞에(5차 — 설계 16.5) */
+function useResearchActions(): Action[] {
+  const slug = useMatch("/p/:slug/*")?.params.slug ?? "";
+  const ws = useWorkspace(slug).data;
+  const ui = useResearchUi();
+  if (!ws || ws.slug !== slug) return [];
+  const round = `/p/${slug}/e/${ws.edition}/s/${ws.current.stage}/r/${ws.current.round}`;
+  return [
+    { group: "이 연구", label: "연구 개요 — 이어서 하기", to: `/p/${slug}` },
+    { group: "이 연구", label: "지금 할 일", to: round },
+    { group: "이 연구", label: "막힌 것·풀 것", to: `/p/${slug}/problems` },
+    ...(ws.result ? [{ group: "이 연구", label: "결과 글 — 문제 표시 보기", to: `${round}?t=review` }] : []),
+    { group: "이 연구", label: ui.focus ? "집중 모드 끝내기" : "집중 모드 켜기", run: () => researchUi.set({ focus: !ui.focus }) },
+    { group: "이 연구", label: "AI 동료에게 부탁하기", run: () => aiSheet.ask(null) },
+  ];
+}
+
 export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const navigate = useNavigate();
-  const groups = [...new Set(ACTIONS.map((a) => a.group))];
+  const research = useResearchActions();
+  const all = [...research, ...ACTIONS];
+  const groups = [...new Set(all.map((a) => a.group))];
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <Command>
@@ -50,12 +73,13 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
         <CommandEmpty>찾는 동작이 없습니다. 검색어를 AI에게 보내지 않습니다.</CommandEmpty>
         {groups.map((g) => (
           <CommandGroup key={g} heading={g}>
-            {ACTIONS.filter((a) => a.group === g).map((a) => (
+            {all.filter((a) => a.group === g).map((a) => (
               <CommandItem
                 key={a.label}
                 onSelect={() => {
                   onOpenChange(false);
-                  navigate(a.to);
+                  if (a.run) a.run();
+                  else if (a.to) navigate(a.to);
                 }}
               >
                 <span className="min-w-0 flex-1">{a.label}</span>

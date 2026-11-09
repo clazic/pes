@@ -1,5 +1,5 @@
 import * as React from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 // PES 시안: 넓은 표만 가로로 스크롤하고, 그 영역은 키보드 초점을 받는다(설계 3.8). regionLabel을 주면 role="region".
 function Table({
@@ -16,7 +16,7 @@ function Table({
     >
       <table
         data-slot="table"
-        className={cn("w-full caption-top border-collapse text-[13px]", className)}
+        className={cn("w-full caption-top border-collapse text-meta", className)}
         {...props}
       />
     </div>

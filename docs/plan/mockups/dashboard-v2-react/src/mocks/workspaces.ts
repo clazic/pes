@@ -1,14 +1,15 @@
-import type { WorkspaceView } from "@/api/types";
+import type { WorkspaceCore } from "@/api/types";
 
 /**
- * 작업 공간 읽기 묶음(GET P/workspace) 합성 예시 4개.
+ * 작업 공간 읽기 묶음(GET P/workspace) 합성 예시 4개. 연구 공간 칸(연구 개요 · 막힌 것·풀 것 · 지금 할 일 순서 · AI 제안)은
+ * mocks/research.ts와 목 클라이언트가 읽을 때 계산해 붙인다(5차 — 실제로는 서버).
  * - dolbom-insight: 방식 B(Claude Code), 조사 R2에서 AI가 질문 3개를 올리고 기다림 — 정적 시안 workspace.html 장면(14:12)
  * - youth-housing: 방식 A, 기획 R1이 API 사용량 문턱에 걸려 멈춤(16:12)
  * - rural-care-access: 방식 A, 막 만든 프로젝트의 기획 시작 질문(라운드 전, round_id=NULL)
- * - ltc-survey: 방식 B(Codex CLI), 2판 조사 R1 — AI가 하는 중(소식 없음 · AI 접속 미확인), AI가 읽기: 막음
+ * - ltc-survey: 방식 B(Codex CLI), 2판 조사 R1 — AI 작업 중(소식 없음 · AI 접속 미확인), AI가 읽기: 막음
  */
 
-const dolbom: WorkspaceView = {
+const dolbom: WorkspaceCore = {
   scene_time: "14:12",
   slug: "dolbom-insight",
   title: "지역 돌봄 인력 수급 개선 연구",
@@ -68,14 +69,14 @@ const dolbom: WorkspaceView = {
       view: "current_you",
       rounds: [
         { label: "단계 시작", state: "답함" },
-        { label: "R1", state: "봉인" },
+        { label: "R1", state: "고정" },
         { label: "R2", state: "보는 중", current: true },
       ],
     },
-    { key: "analyze", view: "pending", state_text: "아직" },
-    { key: "write", view: "pending", state_text: "아직" },
-    { key: "verify", view: "pending", state_text: "아직" },
-    { key: "publish", view: "pending", state_text: "아직" },
+    { key: "analyze", view: "pending", state_text: "시작 전" },
+    { key: "write", view: "pending", state_text: "시작 전" },
+    { key: "verify", view: "pending", state_text: "시작 전" },
+    { key: "publish", view: "pending", state_text: "시작 전" },
   ],
   nav_counts: { questions: 2, files: 11, refs_new: true },
   form: {
@@ -115,7 +116,7 @@ const dolbom: WorkspaceView = {
         importance: "보통",
         required: false,
         recheck: {
-          diff: { removed: "5곳", added: "6곳", note: "선택지 “광역시 1곳 포함” 추가." },
+          diff: { removed: "5곳으로", added: "6곳으로", note: "선택지 “광역시 1곳 포함, 5곳” 추가." },
           old_answer: "v1: 늘리지 않음",
         },
         meta: "Q-22 · 질문 v2 · 박검토가 14:18에 고침",
@@ -179,6 +180,11 @@ const dolbom: WorkspaceView = {
       {
         text: "기관 내부 검토 의견은 인력 부족을 임금보다 근무 형태의 문제로 보았다",
         cites: [{ kind: "before_off", label: "내부 검토 의견(가상).docx — AI 참조를 끄기 전에 쓰인 근거", href: "/p/dolbom-insight/files#f4" }],
+      },
+      {
+        // 5차: 막힌 것·풀 것 “자료 어긋남” 예시가 붙는 문단(표 2 · 2023년 값)
+        text: "표 2 기준으로 2023년 A시 요양보호사는 1,180명이다",
+        cites: [{ kind: "file", label: "2024 지역별 돌봄 인력 현황(가상).xlsx · 시트 2", href: "/p/dolbom-insight/files#f1" }],
       },
     ],
   },
@@ -274,7 +280,7 @@ const dolbom: WorkspaceView = {
   },
 };
 
-const youth: WorkspaceView = {
+const youth: WorkspaceCore = {
   scene_time: "16:12",
   slug: "youth-housing",
   title: "청년 주거 지원 효과",
@@ -322,11 +328,11 @@ const youth: WorkspaceView = {
   },
   stages: [
     { key: "plan", view: "current_blocked", state_text: "현재 · 막힘", rounds: [{ label: "단계 시작", state: "답함" }, { label: "R1", state: "보는 중", current: true }] },
-    { key: "research", view: "pending", state_text: "아직" },
-    { key: "analyze", view: "pending", state_text: "아직" },
-    { key: "write", view: "pending", state_text: "아직" },
-    { key: "verify", view: "pending", state_text: "아직" },
-    { key: "publish", view: "pending", state_text: "아직" },
+    { key: "research", view: "pending", state_text: "시작 전" },
+    { key: "analyze", view: "pending", state_text: "시작 전" },
+    { key: "write", view: "pending", state_text: "시작 전" },
+    { key: "verify", view: "pending", state_text: "시작 전" },
+    { key: "publish", view: "pending", state_text: "시작 전" },
   ],
   nav_counts: { questions: 0, files: 3, refs_new: false },
   form: { version: 1, answerable: 0, total: 0, required_left: 0, round_label: "기획 R1", asks_count: 0, questions: [] },
@@ -367,7 +373,7 @@ const youth: WorkspaceView = {
   asks: [],
 };
 
-const rural: WorkspaceView = {
+const rural: WorkspaceCore = {
   scene_time: "14:35",
   slug: "rural-care-access",
   title: "농촌 의료 접근성 개선 연구",
@@ -384,26 +390,26 @@ const rural: WorkspaceView = {
     { k: "답 제출", v: "0 / 6" },
     { k: "단계 승인", v: "미승인" },
     { k: "반영 완료", v: "—" },
-    { k: "API 사용량", v: "콘솔 기준값 없음" },
+    { k: "API 사용량", v: "API 회사 화면에서 본 숫자 없음" },
   ],
   now: {
     rank: 2,
     kind: "answer",
     title: "기획 시작 질문 6개에 답해 주세요",
-    facts: ["필수 4개", "첫 실행 전 콘솔 기준값 필요"],
-    detail: "라운드 전(단계 시작) 질문입니다. 답을 보낸 뒤 ‘AI 실행 시작’을 누르면 첫 라운드가 시작됩니다. 콘솔 기준값(t0)이 비어 있으면 방식 A를 시작하지 않습니다.",
+    facts: ["필수 4개", "첫 실행 전 API 회사 화면에서 본 숫자 필요"],
+    detail: "라운드 전(단계 시작) 질문입니다. 답을 보낸 뒤 ‘AI 실행 시작’을 누르면 첫 라운드가 시작됩니다. API 회사 화면에서 본 숫자이 비어 있으면 방식 A를 시작하지 않습니다.",
     action: { label: "질문으로 가기", href: "#qpanel" },
-    then: [{ label: "콘솔 기준값 적기", href: "/usage#base" }],
+    then: [{ label: "API 회사 화면에서 본 숫자 적기", href: "/usage#base" }],
   },
   ai_card: { title: "실행 없음", status: { domain: "run", value: "queued", label: "아직 시작 안 함" }, line: "만들기는 AI를 실행하지 않습니다. 시작 질문에 답한 뒤 소유자가 시작합니다.", foot: "완료 0 · 진행 0 · 예정 0" },
-  third_card: { kind: "usage", connection: "연구실 구독 API · 구독형", status: { domain: "baseline", value: "none" }, short: "연구실 구독 API", line: "콘솔 기준값(t0)이 비어 있어 첫 실행 전에 적어야 합니다.", foot: "추가 요금(Extra Usage) 꺼짐 확인됨 · 11-12까지" },
+  third_card: { kind: "usage", connection: "연구실 구독 API · 구독형", status: { domain: "baseline", value: "none" }, short: "연구실 구독 API", line: "API 회사 화면에서 본 숫자이 비어 있어 첫 실행 전에 적어야 합니다.", foot: "추가 요금 꺼짐 확인됨 · 11-12까지" },
   stages: [
     { key: "plan", view: "current_you", rounds: [{ label: "단계 시작", state: "보는 중", current: true }] },
-    { key: "research", view: "pending", state_text: "아직" },
-    { key: "analyze", view: "pending", state_text: "아직" },
-    { key: "write", view: "pending", state_text: "아직" },
-    { key: "verify", view: "pending", state_text: "아직" },
-    { key: "publish", view: "pending", state_text: "아직" },
+    { key: "research", view: "pending", state_text: "시작 전" },
+    { key: "analyze", view: "pending", state_text: "시작 전" },
+    { key: "write", view: "pending", state_text: "시작 전" },
+    { key: "verify", view: "pending", state_text: "시작 전" },
+    { key: "publish", view: "pending", state_text: "시작 전" },
   ],
   nav_counts: { questions: 6, files: 4, refs_new: false },
   form: {
@@ -439,7 +445,7 @@ const rural: WorkspaceView = {
   approval: { stage_label: "기획", reasons: ["필수 시작 질문 4개 답 없음", "실행 시작 전"], note: "단계 시작 질문은 라운드가 아니므로 R0을 만들지 않습니다." },
   runs: {
     mode_label: "방식 A · 연구실 구독 API · deepseek-v4.1-flash",
-    continue_reason: "필수 시작 질문에 답하고 콘솔 기준값을 적은 뒤 누를 수 있습니다.",
+    continue_reason: "필수 시작 질문에 답하고 API 회사 화면에서 본 숫자을 적은 뒤 누를 수 있습니다.",
     rows: [],
     lanes: { done: [], running: [], planned: [{ time: "시작 뒤", title: "맥락 모으기", body: "시작 답 · 자료(허용 3) · 참고 프로젝트 목록" }] },
     running_empty: "아직 실행이 없습니다.",
@@ -448,7 +454,7 @@ const rural: WorkspaceView = {
   asks: [],
 };
 
-const ltc: WorkspaceView = {
+const ltc: WorkspaceCore = {
   scene_time: "11-04 18:20",
   slug: "ltc-survey",
   title: "장기요양 기관 실태 분석",
@@ -470,7 +476,7 @@ const ltc: WorkspaceView = {
   now: {
     rank: 6,
     kind: "wait",
-    title: "지금은 AI가 하는 중입니다 — 진행 상황 보기",
+    title: "지금은 AI 작업 중입니다 — 진행 상황 보기",
     facts: ["Codex CLI · 2판 조사 R1 진행 중"],
     detail: "기획을 다시 열어 조사 단계가 “앞 단계 변경 — 다시 확인”입니다.",
     action: { label: "진행 보기", href: "#ai" },
@@ -493,11 +499,11 @@ const ltc: WorkspaceView = {
   },
   stages: [
     { key: "plan", view: "approved", state_text: "승인(2판)" },
-    { key: "research", view: "stale", state_text: "다시 확인 필요", rounds: [{ label: "R1", state: "보는 중", current: true }] },
-    { key: "analyze", view: "pending", state_text: "아직" },
-    { key: "write", view: "pending", state_text: "아직" },
-    { key: "verify", view: "pending", state_text: "아직" },
-    { key: "publish", view: "pending", state_text: "아직" },
+    { key: "research", view: "stale", state_text: "확인 필요", rounds: [{ label: "R1", state: "보는 중", current: true }] },
+    { key: "analyze", view: "pending", state_text: "시작 전" },
+    { key: "write", view: "pending", state_text: "시작 전" },
+    { key: "verify", view: "pending", state_text: "시작 전" },
+    { key: "publish", view: "pending", state_text: "시작 전" },
   ],
   nav_counts: { questions: 0, files: 9, refs_new: false },
   form: { version: 1, answerable: 0, total: 0, required_left: 0, round_label: "2판 조사 R1", asks_count: 0, questions: [] },
@@ -521,7 +527,7 @@ const ltc: WorkspaceView = {
   asks: [],
 };
 
-export const WORKSPACES: Record<string, WorkspaceView> = {
+export const WORKSPACES: Record<string, WorkspaceCore> = {
   "dolbom-insight": dolbom,
   "youth-housing": youth,
   "rural-care-access": rural,

@@ -2,7 +2,9 @@ import type { ProjectsView } from "@/api/types";
 
 /**
  * 프로젝트 목록 — 정적 시안 projects.html과 같은 장면(16:12). 모든 이름·수치는 합성 예시.
- * 차례(나의 할 일 · AI가 하는 중 · 기다림 · 끝남)는 목 클라이언트가 읽을 때 이 목록(turns · waiting)과 AI 진행 소식으로 계산해 카드마다 붙인다(4차).
+ * 차례(나의 할 일 · AI 작업 중 · 기다림 · 끝남)는 목 클라이언트가 읽을 때 이 목록(turns · waiting)과 AI 진행 소식으로 계산해 카드마다 붙인다(4차).
+ * 5차: 연구 내용 문제(결과 글 문제 n건) · 자료 문제(글자 뽑기 실패)는 막힌 것·풀 것에서 계산해 이 목록에 더한다(목 클라이언트 syncResearchTurns).
+ * 카드 주소(href)는 연구 공간 첫 화면(연구 개요), 할 일 바로 가기는 그 일이 열리는 “지금 할 일” 단계.
  */
 export const PROJECTS: ProjectsView = {
   scene_time: "16:12",
@@ -17,7 +19,9 @@ export const PROJECTS: ProjectsView = {
       short: "확인 안 된 호출 정리",
       text: "실행 멈춤 · 사용량 — 확인 안 된 호출 1건 정리 필요",
       since: "15:52부터",
-      action: { label: "정리하기", href: "/usage#unknown", primary: true },
+      action: { label: "정리하기", href: "/p/youth-housing/e/1/s/plan/r/1?t=blocked", primary: true },
+      step: "blocked",
+      order: 1,
     },
     {
       id: "t2",
@@ -30,6 +34,8 @@ export const PROJECTS: ProjectsView = {
       text: "필수 1개 남음 · AI는 답을 기다림",
       since: "기한 11-07",
       action: { label: "답하기", href: "/p/dolbom-insight/e/1/s/research/r/2#q-21" },
+      step: "answer",
+      order: 2,
     },
     {
       id: "t3",
@@ -39,9 +45,11 @@ export const PROJECTS: ProjectsView = {
       project_title: "농촌 의료 접근성 개선 연구(가상)",
       where: "기획 시작 · 방식 A",
       short: "기획 시작 질문 6",
-      text: "답하면 첫 실행 가능 · 먼저 콘솔 기준값 적기",
+      text: "답하면 첫 실행 가능 · 먼저 API 회사 화면에서 본 숫자 적기",
       since: "기한 없음",
       action: { label: "답하기", href: "/p/rural-care-access/e/1/s/plan/r/start" },
+      step: "answer",
+      order: 3,
     },
     {
       id: "t4",
@@ -54,6 +62,8 @@ export const PROJECTS: ProjectsView = {
       text: "충돌 1건 — 어느 쪽을 쓸지 고르기",
       since: "14:05부터",
       action: { label: "고르기", href: "/p/dolbom-insight/e/1/s/research/r/2#sync" },
+      step: "sync",
+      order: 5,
     },
     {
       // 작업 공간 지금 할 일의 “그다음”과 같은 일 — 목록·작업 공간·사이드바가 같은 수를 세게(4차)
@@ -66,7 +76,9 @@ export const PROJECTS: ProjectsView = {
       short: "참고 프로젝트 새 버전",
       text: "장기요양 기관 실태 분석(가상) 2판 R1 승인본 — 갱신하거나 지금 버전 유지",
       since: "11-04부터",
-      action: { label: "보기", href: "/p/dolbom-insight/references" },
+      action: { label: "보기", href: "/p/dolbom-insight/e/1/s/research/r/2?t=refs" },
+      step: "refs",
+      order: 7,
     },
   ],
   waiting: [],
@@ -93,7 +105,7 @@ export const PROJECTS: ProjectsView = {
       foot: ["마지막 활동 14:22 · 박검토", "알림 1"],
       current: "조사 R2",
       table: { ai: "내 답 기다림 · 연결됨 14:12", last: "14:22" },
-      href: "/p/dolbom-insight/e/1/s/research/r/2",
+      href: "/p/dolbom-insight",
     },
     {
       slug: "youth-housing",
@@ -117,7 +129,7 @@ export const PROJECTS: ProjectsView = {
       foot: ["마지막 활동 15:52 · 실행기", "알림 1"],
       current: "기획 R1",
       table: { ai: "실행 멈춤 · 사용량 문턱", last: "15:52" },
-      href: "/p/youth-housing/e/1/s/plan/r/1",
+      href: "/p/youth-housing",
     },
     {
       slug: "rural-care-access",
@@ -141,7 +153,7 @@ export const PROJECTS: ProjectsView = {
       foot: ["만든 날 11-05 14:31", "자료 4"],
       current: "기획 시작",
       table: { ai: "실행 없음", last: "14:31" },
-      href: "/p/rural-care-access/e/1/s/plan/r/start",
+      href: "/p/rural-care-access",
     },
     {
       slug: "ltc-survey",
@@ -165,7 +177,7 @@ export const PROJECTS: ProjectsView = {
       foot: ["마지막 활동 11-04", "참고됨 2"],
       current: "2판 조사 R1",
       table: { ai: "진행 중 · 방식 A 불가", last: "11-04" },
-      href: "/p/ltc-survey/e/2/s/research/r/1",
+      href: "/p/ltc-survey",
     },
   ],
   archived_count: 2,
@@ -174,7 +186,7 @@ export const PROJECTS: ProjectsView = {
 };
 
 /**
- * AI 진행 소식(서버가 실행 담당·사건·도우미 보고로 계산) — 차례 표시기의 “AI가 하는 중”.
+ * AI 진행 소식(서버가 실행 담당·사건·도우미 보고로 계산) — 차례 표시기의 “AI 작업 중”.
  * 시각은 장면 시각에서 몇 분 전인지로 적고, 목 클라이언트가 시안을 연 시각 기준으로 바꾼다(경과 시간이 실제로 흐르게).
  * ltc-survey: 실행 2-R1-1이 17:50부터 진행(장면 18:20 → 30분째), Codex CLI 마지막 호출 18:02(18분 전) — 시험값을 넘어 “소식 없음”(F09).
  */

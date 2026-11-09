@@ -112,28 +112,28 @@ export function AddConnectionDialog({ open, onOpenChange, onCreated }: { open: b
           </Callout>
         ) : stage === "stepup" ? (
           <div className="rounded-xl border border-line-strong bg-surface-soft p-3.5">
-            <h3 className="text-[15px]">본인 확인이 필요합니다</h3>
-            <p className="mt-1.5 text-[13px]">이 확인은 이 요청 한 건에만 쓰입니다: AI 연결 등록 · {name} · {BILLING_LABEL[billing]}.</p>
+            <h3 className="text-meta">본인 확인이 필요합니다</h3>
+            <p className="mt-1.5 text-meta">이 확인은 이 요청 한 건에만 쓰입니다: AI 연결 등록 · {name} · {BILLING_LABEL[billing]}.</p>
             <div className="mt-3 flex flex-col gap-2">
               <Button variant="default" disabled={create.pending} onClick={() => void save("passkey")}>
                 <FingerprintIcon aria-hidden="true" />
-                패스키로 확인(5단계 웹)
+                패스키로 확인
               </Button>
               <Button disabled={create.pending} onClick={() => void save("local_owner")}>
                 <MonitorIcon aria-hidden="true" />
-                이 컴퓨터의 소유자 세션으로 확인(2~4단계 로컬)
+                이 컴퓨터에서 소유자로 확인
               </Button>
             </div>
-            {create.phase === "confirming" ? <p role="status" className="mt-2 text-[13px]"><Status of="submission" value="pending" /> 같은 요청 번호로 확인 중입니다.</p> : null}
-            {create.error ? <p role="alert" className="mt-2 text-[13px] font-medium text-bad">{create.error.message}</p> : null}
+            {create.phase === "confirming" ? <p role="status" className="mt-2 text-meta"><Status of="submission" value="pending" /> 같은 요청 번호로 확인 중입니다.</p> : null}
+            {create.error ? <p role="alert" className="mt-2 text-meta font-medium text-bad">{create.error.message}</p> : null}
           </div>
         ) : (
           <div className="space-y-3">
             <fieldset>
-              <legend className="mb-1.5 text-[13px] font-semibold">종류</legend>
+              <legend className="mb-1.5 text-meta font-semibold">종류</legend>
               <RadioGroup value={kind} onValueChange={(v) => setKind(v as AiConnection["kind"])} className="grid grid-cols-1 gap-1.5 tab:grid-cols-2" aria-label="AI 연결 종류">
                 {KINDS.map((k) => (
-                  <label key={k} htmlFor={`kind-${k}`} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-[13px]", kind === k ? "border-primary bg-primary-soft" : "border-line")}>
+                  <label key={k} htmlFor={`kind-${k}`} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-meta", kind === k ? "border-primary bg-primary-soft" : "border-line")}>
                     <RadioGroupItem id={`kind-${k}`} value={k} />
                     {KIND_LABEL[k]}
                   </label>
@@ -142,24 +142,24 @@ export function AddConnectionDialog({ open, onOpenChange, onCreated }: { open: b
             </fieldset>
             <div className="grid grid-cols-1 gap-3 tab:grid-cols-2">
               <div>
-                <Label htmlFor="cn-name" className="text-[13px] font-semibold">
+                <Label htmlFor="cn-name" className="text-meta font-semibold">
                   이름 <span className="font-normal text-muted-foreground">(사람이 알아보는 이름)</span>
                 </Label>
                 <Input id="cn-name" className="mt-1" placeholder="예: 연구실 종량제 API" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="cn-url" className="text-[13px] font-semibold">
+                <Label htmlFor="cn-url" className="text-meta font-semibold">
                   주소(endpoint)
                 </Label>
                 <Input id="cn-url" className="mt-1" placeholder={PLACEHOLDER[kind]} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
               </div>
             </div>
             <div>
-              <Label htmlFor={keyId} className="text-[13px] font-semibold">
+              <Label htmlFor={keyId} className="text-meta font-semibold">
                 API 키 {kind === "custom" ? <span className="font-normal text-muted-foreground">(없으면 비워 둠)</span> : null}
               </Label>
               <Input id={keyId} className="mt-1" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} aria-describedby={`${keyId}-h`} />
-              <p className="mt-1 flex flex-wrap items-center gap-1 text-[12.5px] text-muted-foreground">
+              <p className="mt-1 flex flex-wrap items-center gap-1 text-caption text-muted-foreground">
                 <span id={`${keyId}-h`}>저장하면 다시 보이지 않습니다(끝 4자리만).</span>
                 <InfoTip label="API 키 저장 설명" wide>
                   <p>저장 위치: {STORAGE_LABEL.os_keychain} / 웹에서는 {STORAGE_LABEL.server_secret}. 키는 로그·화면·AI 프롬프트·기록에 남기지 않고, 브라우저에 두지 않습니다.</p>
@@ -184,7 +184,7 @@ export function AddConnectionDialog({ open, onOpenChange, onCreated }: { open: b
             </div>
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Label htmlFor="cn-models" className="text-[13px] font-semibold">
+                <Label htmlFor="cn-models" className="text-meta font-semibold">
                   모델 <span className="font-normal text-muted-foreground">(한 줄에 하나 · 첫 줄이 기본)</span>
                 </Label>
                 <Button size="sm" onClick={() => void loadModels()} aria-disabled={!endpoint || undefined}>
@@ -196,10 +196,10 @@ export function AddConnectionDialog({ open, onOpenChange, onCreated }: { open: b
               {modelNote ? <Hint className="mt-1">{modelNote}</Hint> : null}
             </div>
             <fieldset>
-              <legend className="mb-1.5 text-[13px] font-semibold">과금 방식</legend>
+              <legend className="mb-1.5 text-meta font-semibold">과금 방식</legend>
               <RadioGroup value={billing} onValueChange={(v) => setBilling(v as AiConnection["billing"])} className="grid grid-cols-1 gap-1.5 tab:grid-cols-2" aria-label="과금 방식">
                 {(["subscription", "metered"] as const).map((b) => (
-                  <label key={b} htmlFor={`bill-${b}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[13px]", billing === b ? "border-primary bg-primary-soft" : "border-line")}>
+                  <label key={b} htmlFor={`bill-${b}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-meta", billing === b ? "border-primary bg-primary-soft" : "border-line")}>
                     <RadioGroupItem id={`bill-${b}`} value={b} className="mt-0.5" />
                     <span>
                       <strong>{BILLING_LABEL[b]}</strong>
@@ -212,30 +212,30 @@ export function AddConnectionDialog({ open, onOpenChange, onCreated }: { open: b
             {billing === "subscription" ? (
               <div className="grid grid-cols-1 gap-3 tab:grid-cols-2">
                 <div>
-                  <Label htmlFor="cn-stop" className="text-[13px] font-semibold">
+                  <Label htmlFor="cn-stop" className="text-meta font-semibold">
                     멈춤 문턱(%)
                   </Label>
                   <Input id="cn-stop" type="number" min={50} max={100} step={5} className="mt-1 max-w-[120px]" value={stop} onChange={(e) => setStop(Number(e.target.value))} />
                   <Hint className="mt-1">이 값에 닿기 전에 새 호출을 멈춤 · 기본 90%</Hint>
                 </div>
-                <div className="flex items-start gap-2 pt-6 text-[13px]">
+                <div className="flex items-start gap-2 pt-6 text-meta">
                   <Checkbox id="cn-extra" checked={extra} onCheckedChange={(c) => setExtra(c === true)} className="mt-0.5" />
                   <Label htmlFor="cn-extra" className="block leading-snug font-normal">
-                    이 구독은 한도를 넘으면 추가 요금(Extra Usage)으로 이어질 수 있음 — 꺼짐 확인을 받은 뒤에만 시작
+                    이 구독은 한도를 넘으면 추가 요금으로 이어질 수 있음 — 꺼짐 확인을 받은 뒤에만 시작
                   </Label>
                 </div>
               </div>
             ) : (
               <div>
-                <Label htmlFor="cn-cap" className="text-[13px] font-semibold">
+                <Label htmlFor="cn-cap" className="text-meta font-semibold">
                   월 비용 상한(원) <span className="font-medium text-bad">필수</span>
                 </Label>
                 <Input id="cn-cap" inputMode="numeric" className="mt-1 max-w-[200px]" placeholder="예: 50000" value={cap} onChange={(e) => setCap(e.target.value)} aria-invalid={billing === "metered" && !(capNum > 0) ? true : undefined} />
-                <p className="mt-1 flex flex-wrap items-center gap-1 text-[12.5px] text-muted-foreground">
+                <p className="mt-1 flex flex-wrap items-center gap-1 text-caption text-muted-foreground">
                   상한에 닿기 전에 멈춤 · 단가를 모르는 모델로는 시작하지 않음
                   <InfoTip label="비용 상한 설명" wide>
                     <p>추정 비용이 상한에 닿기 전에 다음 호출을 보내지 않고 멈춥니다. 모델 단가를 모르면 비용을 셀 수 없어 그 모델로는 시작하지 않습니다(0으로 두지 않음).</p>
-                    <p>제공사 콘솔에서도 한도를 걸어 두세요 — PES는 제공사의 과금을 막을 수 없습니다. 같은 키를 다른 곳에서 쓰면 그 비용은 PES가 모릅니다.</p>
+                    <p>API 회사 화면에서도 한도를 걸어 두세요 — PES는 제공사의 과금을 막을 수 없습니다. 같은 키를 다른 곳에서 쓰면 그 비용은 PES가 모릅니다.</p>
                   </InfoTip>
                 </p>
               </div>

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useMatch } from "react-router";
 import { useProjects } from "@/api/queries";
 import { turnKey, turnLabel, type TurnKey } from "@/components/pes/turn";
 import { turnBaseline, useMockSettings } from "@/lib/mock-settings";
@@ -13,6 +14,8 @@ import { turnBaseline, useMockSettings } from "@/lib/mock-settings";
 export function TurnAnnouncer() {
   const q = useProjects();
   const { role } = useMockSettings();
+  // 연구 공간 안에서는 그 프로젝트의 차례 전환만 알린다(방해 줄이기 — 설계 16.5)
+  const inProject = useMatch("/p/:slug/*")?.params.slug ?? null;
   const prev = React.useRef<{ role: string; epoch: number; keys: Map<string, TurnKey> } | null>(null);
   const timer = React.useRef<number | undefined>(undefined);
   const [text, setText] = React.useState("");
@@ -32,7 +35,7 @@ export function TurnAnnouncer() {
         if (!p.turn) return false;
         const was = before.keys.get(p.slug);
         const now = turnKey(p.turn);
-        return was !== undefined && was !== now && (now === "you" || now === "done");
+        return was !== undefined && was !== now && (now === "you" || now === "done") && (!inProject || p.slug === inProject);
       })
       .map((p) => `${p.title}: ${turnLabel(p.turn!)}${p.turn!.text ? ` · ${p.turn!.text}` : ""}`);
     if (!msgs.length) return;
@@ -40,7 +43,7 @@ export function TurnAnnouncer() {
     setText("");
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setText(`차례가 바뀌었습니다 — ${msgs.join(" / ")}`), 80);
-  }, [q.data, role]);
+  }, [q.data, role, inProject]);
 
   return (
     <p className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-turn-announcer="">

@@ -57,7 +57,7 @@ export function SettingsPage() {
   const modelWhy = !conn ? "연결을 고르세요." : conn.billing === "metered" && !conn.metered?.cap ? "이 연결에는 비용 상한이 없어 시작할 수 없습니다." : modelDef?.price?.source === "unknown" ? "이 모델은 단가를 몰라 비용을 셀 수 없습니다 — 단가를 적어야 고를 수 있습니다." : !modelDef?.available ? "지금 목록에 없는 모델입니다." : null;
 
   const offSpec: ConfirmSpec = {
-    eyebrow: "확인 대화 상자 · 소유자만 · 엄격해지는 동작",
+    eyebrow: "소유자만",
     title: "이 프로젝트의 AI가 읽기를 막을까요?",
     target: `${ws.title} · AI가 읽기 정책 3번(rev 3)`,
     verb: "AI가 읽기 막기",
@@ -69,7 +69,7 @@ export function SettingsPage() {
     footnote: "막기는 휴대폰에서도 됩니다. 정책 변경이므로 이 요청 한 건에 대한 본인 확인은 생략하지 않습니다(Codex F01).",
   };
   const onSpec: ConfirmSpec = {
-    eyebrow: "확인 대화 상자 · 소유자만 · 느슨해지는 동작(데스크톱)",
+    eyebrow: "소유자만 · 데스크톱에서",
     title: "이 프로젝트의 AI가 읽기를 다시 허용할까요?",
     target: `${ws.title} · AI가 읽기 정책 4번 만들기(rev 4)`,
     verb: "AI가 읽기 다시 허용",
@@ -79,7 +79,7 @@ export function SettingsPage() {
     stepUp: true,
   };
   const modelSpec: ConfirmSpec = {
-    eyebrow: "확인 대화 상자 · 소유자만",
+    eyebrow: "소유자만",
     title: `방식 A 연결·모델을 ${conn?.name ?? "?"} · ${model}(으)로 바꿀까요?`,
     target: `${ws.title} · 정책 rev 3 → rev 4`,
     verb: "연결·모델 바꾸기",
@@ -130,10 +130,10 @@ export function SettingsPage() {
             </Callout>
           ) : null}
           <fieldset className="mt-2">
-            <legend className="mb-1.5 text-[13px] font-semibold">쓸 AI 연결</legend>
+            <legend className="mb-1.5 text-meta font-semibold">쓸 AI 연결</legend>
             <RadioGroup value={connId} onValueChange={setConnId} className="gap-1.5" aria-label="쓸 AI 연결">
               {conns.map((c) => (
-                <label key={c.id} htmlFor={`sc-${c.id}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[13px]", connId === c.id ? "border-primary bg-primary-soft" : "border-line")}>
+                <label key={c.id} htmlFor={`sc-${c.id}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-meta", connId === c.id ? "border-primary bg-primary-soft" : "border-line")}>
                   <RadioGroupItem id={`sc-${c.id}`} value={c.id} className="mt-0.5" />
                   <span className="min-w-0">
                     <strong>{c.name}</strong> <Tag>{KIND_LABEL[c.kind]}</Tag> <Tag tone={c.billing === "metered" ? "warn" : "plain"}>{BILLING_LABEL[c.billing]}</Tag>
@@ -146,7 +146,7 @@ export function SettingsPage() {
             </RadioGroup>
           </fieldset>
           <div className="mt-2.5">
-            <Label htmlFor="st-model-pick" className="text-[13px] font-semibold">
+            <Label htmlFor="st-model-pick" className="text-meta font-semibold">
               모델
             </Label>
             <Select value={model} onValueChange={setModel}>

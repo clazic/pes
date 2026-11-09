@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Switch as SwitchPrimitive } from "radix-ui"
 
 // PES 시안: 켜짐 = 초록 바탕 + 흰 손잡이, 꺼짐 = 흰 바탕 + 회색 테두리·손잡이(정적 시안과 같은 모양).

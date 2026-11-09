@@ -29,7 +29,7 @@ type Filter = "all" | "deny" | "extract" | "sync";
 function PolicyMatrix({ apiOn }: { apiOn: boolean }) {
   return (
     <FoldCard id="where" className="mt-3" title="실제로 AI에 가나요?" meta="엄격한 쪽 우선 · 목적지별 정책 조합">
-      <p className="mb-2 flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
+      <p className="mb-2 flex flex-wrap items-center gap-2 text-meta text-ink-2">
         AI가 읽기(프로젝트) · AI 참조(파일) · 참고 원본 정책 중 더 엄격한 쪽을 따릅니다. 서버가 목적지별로 계산합니다.
         <Status of="transfer" value={apiOn ? "on" : "off"} label={`이 프로젝트: ${STATUS.transfer[apiOn ? "on" : "off"]!.label}`} />
       </p>
@@ -74,7 +74,7 @@ function PolicyMatrix({ apiOn }: { apiOn: boolean }) {
 function offSpec(files: FileRow[], folder?: string): ConfirmSpec {
   const one = files.length === 1 ? files[0]! : null;
   return {
-    eyebrow: "확인 대화 상자 · 소유자만 · 엄격해지는 동작",
+    eyebrow: "소유자만",
     title: one ? `“${one.name}”의 AI 참조를 끌까요?` : `폴더 “${folder}”의 파일 ${files.length}개 AI 참조를 끌까요?`,
     target: one ? `${one.name} · ${one.version} · AI 참조 정책 rev 1` : `${folder}/ · 파일 ${files.length}개 · 한 tx`,
     verb: "AI 참조 끄기",
@@ -102,7 +102,7 @@ function offSpec(files: FileRow[], folder?: string): ConfirmSpec {
 function onSpec(files: FileRow[], folder?: string): ConfirmSpec {
   const one = files.length === 1 ? files[0]! : null;
   return {
-    eyebrow: "확인 대화 상자 · 소유자만 · 느슨해지는 동작(데스크톱)",
+    eyebrow: "소유자만 · 데스크톱에서",
     title: one ? `“${one.name}”의 AI 참조를 다시 허용할까요?` : `폴더 “${folder}”의 파일 ${files.length}개 AI 참조를 다시 허용할까요?`,
     target: one ? `${one.name} · ${one.version} · AI 참조 정책 새 rev` : `${folder}/ · 파일 ${files.length}개 · 한 tx`,
     verb: "AI 참조 다시 허용",
@@ -135,7 +135,7 @@ function FilesTable({ m, filter, query, onAccess }: { m: MaterialsView; filter: 
     <TableRow key={f.id} id={f.id} data-state={f.id === "f2" ? "selected" : undefined}>
       <TableCell>
         <span className={cn("flex items-start gap-2", indent && "pl-5")}>
-          <span className="inline-flex h-[22px] min-w-[42px] shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface-soft px-1.5 text-[11px] font-semibold text-ink-2 uppercase">{f.format}</span>
+          <span className="inline-flex h-[22px] min-w-[42px] shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface-soft px-1.5 text-caption font-semibold text-ink-2 uppercase">{f.format}</span>
           <span className="min-w-0 break-all">
             {f.name}
             <span className="block text-xs text-muted-foreground">
@@ -349,13 +349,13 @@ export function MaterialsPage() {
                 <p>
                   <strong>빠진 곳 3가지</strong> · AI에게도 “빠진 곳 있음”을 알림
                 </p>
-                <ul className="mt-1 ml-4.5 list-disc text-[12.5px]">
+                <ul className="mt-1 ml-4.5 list-disc text-caption">
                   <li>3·7·19쪽: 글자가 없는 그림(스캔) — AI가 이 쪽을 읽지 못합니다.</li>
                   <li>12쪽 표: 칸이 합쳐져 4개 중 1개는 일부만 뽑혔습니다.</li>
                   <li>각주 31개 중 28개만 본문과 이어졌습니다.</li>
                 </ul>
               </Callout>
-              <div role="group" aria-label="쪽 이동" className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[12.5px]">
+              <div role="group" aria-label="쪽 이동" className="mt-2.5 flex flex-wrap items-center gap-1.5 text-caption">
                 <Button size="sm" aria-disabled={page <= 1 || undefined} onClick={() => setPage((p) => (gapsOnly ? ([3, 7, 19].reverse().find((x) => x < p) ?? p) : Math.max(1, p - 1)))}>
                   이전 쪽
                 </Button>
@@ -371,16 +371,16 @@ export function MaterialsPage() {
               </div>
               <div className="mt-2.5 grid grid-cols-1 gap-2.5 tab:grid-cols-2">
                 <div>
-                  <p className="text-[12.5px] font-semibold">원본 {page}쪽</p>
-                  <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-line bg-[repeating-linear-gradient(135deg,var(--surface-soft),var(--surface-soft)_8px,var(--surface-sunk)_8px,var(--surface-sunk)_16px)] p-3 text-center text-[13px] text-muted-foreground">
+                  <p className="text-caption font-semibold">원본 {page}쪽</p>
+                  <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-line bg-[repeating-linear-gradient(135deg,var(--surface-soft),var(--surface-soft)_8px,var(--surface-sunk)_8px,var(--surface-sunk)_16px)] p-3 text-center text-meta text-muted-foreground">
                     원본 쪽 그림 자리
                     <br />
                     (시안에서는 그림을 넣지 않음)
                   </div>
                 </div>
                 <div>
-                  <p className="text-[12.5px] font-semibold">AI가 읽는 글자</p>
-                  <div className="min-h-[220px] rounded-lg border border-line bg-surface px-3 py-2.5 text-[13px] leading-relaxed">
+                  <p className="text-caption font-semibold">AI가 읽는 글자</p>
+                  <div className="min-h-[220px] rounded-lg border border-line bg-surface px-3 py-2.5 text-meta leading-relaxed">
                     {[3, 7, 19].includes(page) ? (
                       <span className="my-2 block rounded-md border border-dashed border-warn-line bg-warn-soft px-2 py-1.5 text-xs font-medium text-warn">이 쪽은 글자층이 없습니다(스캔). 뽑은 글자 없음.</span>
                     ) : (
@@ -390,7 +390,7 @@ export function MaterialsPage() {
                   </div>
                 </div>
               </div>
-              <p className="mt-2 flex items-center gap-1 text-[12.5px] text-muted-foreground">
+              <p className="mt-2 flex items-center gap-1 text-caption text-muted-foreground">
                 글자가 있는 PDF로 다시 올리면 새 버전(v2) — v1은 남음
                 <InfoTip label="스캔 쪽 설명">
                   <p>스캔 쪽의 글자 인식(OCR)은 나중 선택입니다. 실제 글자 뽑기 라이브러리는 이 화면에서만 따로 불러오는 웹 워커에서 돕니다(0017).</p>

@@ -1,12 +1,13 @@
 import * as React from "react";
-import { Link } from "react-router";
-import { ArrowDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react";
+import { Link, useNavigate } from "react-router";
+import { ArrowDownIcon, ArrowUpIcon, EllipsisIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCommand } from "@/api/queries";
 import type { QuestionView, WorkspaceView } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -19,6 +20,7 @@ import { InfoTip, MoreContent, MoreRoot, MoreTrigger } from "@/components/pes/di
 import { Chip, Status, StatusFrom } from "@/components/pes/status";
 import { clearDraft, draftKey, draftToAnswerText, readDraftNow, useDraft } from "@/lib/draft";
 import { useMockSettings } from "@/lib/mock-settings";
+import { answersSent } from "@/lib/research-ui";
 import { cn } from "@/lib/utils";
 import { usePhoneTools } from "./phone-tools";
 
@@ -48,23 +50,33 @@ function QuestionTags({ q, extra }: { q: QuestionView; extra?: React.ReactNode }
 function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slug: string; formVersion: number; readOnly: boolean }) {
   const key = draftKey(slug, formVersion, q.id, q.version);
   const [draft, setDraft] = useDraft(key);
-  const send = useCommand("submission.create", { successText: (r) => `보냄 · 접수 번호 ${r.receipt_no}${r.replayed ? " (같은 요청 — 다시 처리하지 않음)" : ""}` });
   const showTools = usePhoneTools();
   const titleId = `${q.id}-t`;
-  const answer = draftToAnswerText(draft, q.options);
   const otherOpt = q.options.find((o) => o.label.startsWith("기타"));
-  const blockedReason = !answer ? (q.options.length ? "선택지를 고르거나 허용된 경우 의견으로 답하면 보낼 수 있습니다." : "의견을 적으면 보낼 수 있습니다.") : null;
-  const defaultLabel = q.default_option ? q.options.find((o) => o.id === q.default_option)?.label : null;
   const commentOnly = q.options.length === 0;
+
+  if (q.deferred) {
+    return (
+      <article id={q.id} aria-labelledby={titleId} data-jk="" tabIndex={-1} className="rounded-xl border border-dashed border-line-strong bg-surface-soft p-3 outline-none">
+        <QuestionTags q={q} extra={<Status of="question" value="deferred" />} />
+        <h3 id={titleId} className="mt-1.5 text-body">
+          {q.text}
+        </h3>
+        <p className="mt-1 text-meta text-ink-2">
+          {q.deferred.by}가 {q.deferred.at}에 보류함 — 지우지 않았고 다음 라운드에서 다시 묻습니다.
+        </p>
+      </article>
+    );
+  }
 
   if (q.sent) {
     return (
-      <article id={q.id} aria-labelledby={titleId} className="rounded-xl border border-line bg-surface-soft p-3">
+      <article id={q.id} aria-labelledby={titleId} data-jk="" tabIndex={-1} className="rounded-xl border border-line bg-surface-soft p-3 outline-none">
         <QuestionTags q={q} extra={<Status of="answer" value="sent" />} />
-        <h3 id={titleId} className="mt-1.5 text-[15px]">
+        <h3 id={titleId} className="mt-1.5 text-body">
           {q.text}
         </h3>
-        <p className="mt-1.5 text-[13px]">
+        <p className="mt-1.5 text-meta">
           <strong>답:</strong> {q.sent.answer} <span className="text-muted-foreground">— {q.sent.by} {q.sent.at} 보냄 · 접수 번호 {q.sent.receipt_no}</span>
         </p>
         {!readOnly ? (
@@ -83,7 +95,7 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
     <>
       <Textarea id={`${q.id}-op`} rows={2} placeholder={commentOnly ? "답을 적어 주세요" : "이 질문에 대한 생각(답과 따로 남음)"} value={draft?.comment ?? ""} onChange={(e) => setDraft({ comment: e.target.value })} />
       {q.allow_comment_as_answer && !commentOnly ? (
-        <div className="mt-2 flex items-start gap-2 text-[13px]">
+        <div className="mt-2 flex items-start gap-2 text-meta">
           <Checkbox id={`${q.id}-asans`} checked={Boolean(draft?.commentAsAnswer)} onCheckedChange={(c) => setDraft({ commentAsAnswer: c === true })} className="mt-0.5" />
           <Label htmlFor={`${q.id}-asans`} className="block leading-snug font-normal">
             이 의견을 답으로 보내기
@@ -96,24 +108,38 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
   );
 
   return (
-    <article id={q.id} aria-labelledby={titleId} className={cn("rounded-xl border bg-surface p-3", q.recheck ? "border-warn-line" : "border-line")}>
+    <article id={q.id} aria-labelledby={titleId} data-jk="" tabIndex={-1} className={cn("rounded-xl border bg-surface p-3 outline-none", q.recheck ? "border-warn-line" : "border-line")}>
       <div className="flex flex-wrap items-start justify-between gap-1.5">
         <QuestionTags q={q} extra={q.recheck ? <Status of="question" value="recheck" /> : null} />
         {!readOnly && showTools ? (
-          <div className="flex gap-2.5">
-            <Button variant="link">고치기</Button>
-            <Button variant="link">빼기</Button>
-          </div>
+          // 자주 쓰지 않는 질문 손보기는 ⋯ 메뉴로 — 카드에는 답하는 데 필요한 것만
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant="ghost" className="coarse:size-11" aria-label={`${q.number} 질문 손보기 — 고치기 · 빼기`}>
+                <EllipsisIcon aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={4} className="w-36">
+              <DropdownMenuItem>
+                <PencilIcon aria-hidden="true" />
+                질문 고치기
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Trash2Icon aria-hidden="true" />
+                질문 빼기
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
       </div>
-      <h3 id={titleId} className="mt-1.5 text-[15px]">
+      <h3 id={titleId} className="mt-1.5 text-body">
         {q.text}
       </h3>
-      {q.help ? <p className="mt-1 text-[13px] text-ink-2">{q.help}</p> : null}
+      {q.help ? <p className="mt-1 text-body text-ink-2">{q.help}</p> : null}
       {q.recheck ? (
-        <div className="mt-2 rounded-lg border border-warn-line bg-warn-soft px-2.5 py-2 text-[12.5px]">
+        <div className="mt-2 rounded-lg border border-warn-line bg-warn-soft px-2.5 py-2 text-caption">
           <p>
-            바뀐 곳: <del className="text-bad">{q.recheck.diff.removed}</del> → <ins className="font-semibold text-ok no-underline">{q.recheck.diff.added}</ins>, {q.recheck.diff.note}
+            질문에서 바뀐 곳: <del className="text-bad">{q.recheck.diff.removed}</del> → <ins className="font-semibold text-ok no-underline">{q.recheck.diff.added}</ins>, {q.recheck.diff.note}
           </p>
           <p className="mt-0.5">
             옛 답({q.recheck.old_answer})은 옮기지 않음 · <Link to="#">옛 답 보기</Link>
@@ -132,16 +158,20 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
         <>
           {q.options.length ? (
             <fieldset className="mt-2">
-              <legend className="mb-1 text-[13px] font-semibold">하나를 고르세요</legend>
-              <RadioGroup value={draft?.option ?? ""} onValueChange={(v) => setDraft({ option: v, usedDefault: false })} className="gap-1.5" aria-label={`${q.number} 선택지`}>
+              <legend className="mb-1 text-meta font-semibold">하나를 고르세요</legend>
+              <RadioGroup value={draft?.option ?? ""} onValueChange={(v) => setDraft({ option: v, usedDefault: v === q.default_option })} className="gap-1.5" aria-label={`${q.number} 선택지`}>
                 {q.options.map((o) => {
                   const id = `${q.id}-${o.id}`;
                   return (
-                    <label key={o.id} htmlFor={id} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-[7px] text-[13.5px] coarse:min-h-12 coarse:items-center", draft?.option === o.id ? "border-primary bg-primary-soft" : "border-line bg-surface")}>
+                    <label key={o.id} htmlFor={id} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-[7px] text-body coarse:min-h-[48px] coarse:items-center", draft?.option === o.id ? "border-primary bg-primary-soft" : "border-line bg-surface")}>
                       <RadioGroupItem value={o.id} id={id} className="mt-0.5" />
                       <span>
                         {o.label}
-                        {o.id === q.default_option ? <span className="ml-1.5 text-xs text-muted-foreground">기본값</span> : null}
+                        {o.id === q.default_option ? (
+                          <span className="ml-1.5 text-xs text-muted-foreground">
+                            기본값<span className="sr-only"> — 고르기 전에는 답이 아닙니다</span>
+                          </span>
+                        ) : null}
                       </span>
                     </label>
                   );
@@ -149,7 +179,7 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
               </RadioGroup>
               {otherOpt && draft?.option === otherOpt.id ? (
                 <div className="mt-1.5">
-                  <Label htmlFor={`${q.id}-other`} className="text-[13px] font-medium">
+                  <Label htmlFor={`${q.id}-other`} className="text-meta font-medium">
                     직접 쓰기
                   </Label>
                   <Input id={`${q.id}-other`} className="mt-1" value={draft?.other ?? ""} onChange={(e) => setDraft({ other: e.target.value })} />
@@ -157,17 +187,9 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
               ) : null}
             </fieldset>
           ) : null}
-          {defaultLabel ? (
-            <Button size="sm" className="mt-2" aria-describedby={`${q.id}-defh`} onClick={() => setDraft({ option: q.default_option, usedDefault: true })}>
-              기본값으로 고르기
-              <span id={`${q.id}-defh`} className="sr-only">
-                기본값: {defaultLabel} — 고르기 전에는 답이 아닙니다
-              </span>
-            </Button>
-          ) : null}
           {commentOnly ? (
             <div className="mt-2.5">
-              <Label htmlFor={`${q.id}-op`} className="mb-1 block text-[13px] font-semibold">
+              <Label htmlFor={`${q.id}-op`} className="mb-1 block text-meta font-semibold">
                 답(의견)
               </Label>
               {comment}
@@ -183,41 +205,10 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
               </MoreContent>
             </MoreRoot>
           )}
-          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2">
-            <span role="status">
-              {send.phase === "confirming" ? (
-                <Status of="submission" value="pending" />
-              ) : send.phase === "unknown" ? (
-                <Status of="generic" value="result_unknown" />
-              ) : send.phase === "error" ? (
-                <Status of="submission" value={send.error?.code === "version_conflict" ? "conflict" : "failed"} />
-              ) : draft ? (
-                <Status of="answer" value="draft" />
-              ) : (
-                <Status of="answer" value="none" />
-              )}
-            </span>
-            {send.phase === "unknown" ? (
-              <Button size="sm" onClick={send.recheck}>
-                같은 요청 번호로 확인
-              </Button>
-            ) : (
-              <ActionButton
-                size="sm"
-                blockedBy={send.pending ? "보내는 중입니다" : blockedReason}
-                onClick={() =>
-                  send.run(
-                    { slug, form_version: formVersion, answers: [{ question_id: q.id, text: answer ?? "" }] },
-                    { onSuccess: () => clearDraft(key) },
-                  )
-                }
-              >
-                이 질문만 보내기
-              </ActionButton>
-            )}
+          {/* 보내기는 한 길(아래 “답 검토 후 보내기”) — 카드에는 초안 상태만 */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line pt-2">
+            <span role="status">{draft ? <Status of="answer" value="draft" /> : <Status of="answer" value="none" />}</span>
           </div>
-          {send.error && send.phase !== "unknown" ? <p className="mt-1.5 text-xs font-medium text-bad">{send.error.message}</p> : null}
-          {send.phase === "unknown" ? <p className="mt-1.5 text-xs text-ink-2">{send.error?.message}</p> : null}
         </>
       )}
     </article>
@@ -225,8 +216,10 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
 }
 
 function ReviewDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: boolean; onOpenChange: (o: boolean) => void }) {
-  const send = useCommand("submission.create", { successText: (r) => `보냄 · 접수 번호 ${r.receipt_no}` });
-  const open_q = ws.form.questions.filter((q) => !q.sent);
+  // 성공 확인은 화면 가운데(같은 단계 자리)에 — 토스트와 겹쳐 두 번 읽히지 않게 조용히
+  const send = useCommand("submission.create", { silent: true });
+  const navigate = useNavigate();
+  const open_q = ws.form.questions.filter((q) => !q.sent && !q.deferred);
   const rows = open_q.map((q) => {
     const key = draftKey(ws.slug, ws.form.version, q.id, q.version);
     return { q, key, text: answerTextFor(q, key) };
@@ -242,8 +235,8 @@ function ReviewDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: boo
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>답 검토 후 보내기 · {ws.form.round_label} · 폼 v{ws.form.version}</DialogTitle>
-          <DialogDescription>한 번에 보냅니다. 당시 폼 v{ws.form.version} 기준으로 필수·조건부·의견 응답을 확인하고, 하나라도 맞지 않으면 아무것도 접수하지 않습니다.</DialogDescription>
+          <DialogTitle>답 검토 후 보내기 · {ws.form.round_label}</DialogTitle>
+          <DialogDescription>한 번에 보냅니다. 그사이 질문이 바뀌었거나 빠진 필수 답이 있으면 아무것도 보내지 않습니다.</DialogDescription>
         </DialogHeader>
         {send.phase === "done" && send.receipt ? (
           <Callout tone="ok" role="status">
@@ -254,10 +247,10 @@ function ReviewDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: boo
           </Callout>
         ) : (
           <>
-            <ul className="divide-y divide-line text-[13.5px]">
+            <ul className="divide-y divide-line text-meta">
               {rows.map((r) => (
                 <li key={r.q.id} className="py-2">
-                  <span className="block text-[12.5px] font-medium text-muted-foreground">
+                  <span className="block text-caption font-medium text-muted-foreground">
                     {r.q.number} · {r.q.required ? "필수" : "선택"}
                     {r.q.recheck ? " · 질문 변경 — 답 재확인" : ""}
                   </span>
@@ -277,7 +270,7 @@ function ReviewDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: boo
           </>
         )}
         {send.phase === "confirming" ? (
-          <p role="status" className="text-[13px]">
+          <p role="status" className="text-meta">
             <Status of="submission" value="pending" /> 응답이 늦습니다. 같은 요청 번호로 확인 중이라 다시 눌러도 두 번 보내지 않습니다.
           </p>
         ) : null}
@@ -310,7 +303,15 @@ function ReviewDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: boo
                 onClick={() =>
                   send.run(
                     { slug: ws.slug, form_version: ws.form.version, answers: toSend.map((r) => ({ question_id: r.q.id, text: r.text ?? "" })) },
-                    { onSuccess: () => toSend.forEach((r) => clearDraft(r.key)) },
+                    {
+                      onSuccess: (res) => {
+                        toSend.forEach((r) => clearDraft(r.key));
+                        // 같은 단계에 머물며 “보냄” 확인을 보인다(다음 단계로 저절로 넘기지 않음)
+                        answersSent.set({ slug: ws.slug, receipt_no: res.receipt.receipt_no, count: toSend.length });
+                        onOpenChange(false);
+                        navigate({ search: "?t=answer" }, { replace: true });
+                      },
+                    },
                   )
                 }
               >
@@ -331,10 +332,10 @@ function AddQuestionDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>질문 더하기 — 새 폼 v{ws.form.version + 1}을 만듭니다</DialogTitle>
-          <DialogDescription>사람이 더한 질문은 “사람이 더함”으로 보입니다. 질문 방향(누가 누구에게 묻는가)은 U2에서 정합니다(설계 G8).</DialogDescription>
+          <DialogTitle>질문 더하기</DialogTitle>
+          <DialogDescription>사람이 더한 질문은 “사람이 더함”으로 보입니다. 더하면 질문 목록이 새 버전이 되고, 이미 보낸 답은 그대로 남습니다.</DialogDescription>
         </DialogHeader>
-        <Label htmlFor="addq" className="text-[13px] font-semibold">
+        <Label htmlFor="addq" className="text-meta font-semibold">
           질문 문구
         </Label>
         <Textarea id="addq" rows={3} value={text} onChange={(e) => setText(e.target.value)} />
@@ -352,16 +353,14 @@ function AddQuestionDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open
 export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
   const settings = useMockSettings();
   const readOnly = settings.role === "reader";
-  const owner = settings.role === "owner";
   const [review, setReview] = React.useState(false);
   const [adding, setAdding] = React.useState(false);
   const showTools = usePhoneTools();
-  const approveBlocked = !owner ? "단계 승인은 소유자만 할 수 있습니다." : ws.approval.reasons.length ? ws.approval.reasons.join(" · ") : null;
 
   return (
     <Card className="gap-0 px-5">
       <CardHead
-        eyebrow={`질문·답 · 폼 v${ws.form.version}`}
+        eyebrow="질문·답"
         title={ws.form.total ? `답할 질문 ${ws.form.answerable} / 전체 ${ws.form.total}` : "열린 질문 없음"}
         titleId="q-title"
         right={ws.form.required_left ? <Tag tone="acc">필수 {ws.form.required_left} 남음</Tag> : null}
@@ -376,7 +375,7 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
             <EmptyState
               title="지금 답할 질문이 없습니다"
               body={ws.now.kind === "blocked" ? "실행이 멈춰 새 질문이 없습니다. 첨언·자료 올리기는 지금도 됩니다." : "AI가 결과를 내면 여기에 질문이 옵니다."}
-              action={<Button asChild><Link to="#ai">AI 작업 보기</Link></Button>}
+              action={<Button asChild><Link to={`/p/${ws.slug}/ai`}>AI 작업 기록 보기</Link></Button>}
             />
           ) : (
             ws.form.questions.map((q) => <QuestionCard key={`${q.id}-${q.version}`} q={q} slug={ws.slug} formVersion={ws.form.version} readOnly={readOnly} />)
@@ -405,14 +404,14 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
               <Button variant="default" onClick={() => setReview(true)}>
                 답 검토 후 보내기
               </Button>
-              <span className="text-[12.5px] text-ink-2">초안은 이 탭에만 있습니다</span>
+              <span className="text-caption text-ink-2">초안은 이 탭에만 있습니다</span>
             </div>
           ) : null}
         </TabsContent>
         <TabsContent value="ask">
           {ws.asks.length ? (
             ws.asks.map((a) => (
-              <div key={a.number} className="rounded-xl border border-line p-3 text-[13px]">
+              <div key={a.number} className="rounded-xl border border-line p-3 text-meta">
                 <p>
                   <strong>
                     {a.number} · {a.who}
@@ -435,25 +434,7 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
         </TabsContent>
       </Tabs>
 
-      {/* 단계 승인: 단추 + 못 누르는 이유 한 줄. “소유자만”은 그 권한이 없는 사람에게만 보인다(14절) */}
-      <div className="mt-3.5 rounded-xl border border-line bg-surface-soft p-3" aria-labelledby="ap-t">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="ap-t" className="flex flex-wrap items-center gap-1.5 text-sm">
-            {ws.approval.stage_label} 단계 승인 {!owner ? <Tag>소유자만</Tag> : null}
-          </h3>
-          <ActionButton size="sm" blockedBy={approveBlocked} reasonId="ap-why">
-            승인 검토하기
-          </ActionButton>
-        </div>
-        {approveBlocked ? (
-          <p id="ap-why" className="mt-1.5 flex flex-wrap items-center gap-1 text-[12.5px] text-ink-2">
-            <span>{owner ? `아직: ${approveBlocked}` : approveBlocked}</span>
-            <InfoTip label="단계 승인 설명">
-              <p>{ws.approval.note}</p>
-            </InfoTip>
-          </p>
-        ) : null}
-      </div>
+      {/* 단계 승인은 지금 할 일의 “단계 승인” 단계(다음 마일스톤)로 옮겼다(5차) — 질문 폼은 답하기 한 가지만 */}
       <ReviewDialog ws={ws} open={review} onOpenChange={setReview} />
       <AddQuestionDialog ws={ws} open={adding} onOpenChange={setAdding} />
     </Card>

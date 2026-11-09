@@ -40,7 +40,7 @@ export function NotificationsPage() {
             {q.data.map((n) => {
               const resolved = n.id === "n4" && conflictResolved;
               return (
-                <li key={n.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-[13.5px]">
+                <li key={n.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-meta">
                   <span className="min-w-0">
                     {n.unread ? <span className="sr-only">안 읽음: </span> : null}
                     <Link to={n.href} className={n.unread ? "font-semibold" : ""}>
@@ -70,16 +70,16 @@ export function NotificationsPage() {
               </InfoTip>
             }
           />
-          <div className="space-y-2.5 text-[13px]">
-            <div className="flex items-center justify-between gap-2">
+          <div className="space-y-2.5 text-meta">
+            <div className="flex items-center justify-between gap-2 coarse:min-h-[44px]">
               <Label htmlFor="nt-mail" className="font-medium">메일(기본)</Label>
               <Switch id="nt-mail" defaultChecked />
             </div>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 coarse:min-h-[44px]">
               <Label htmlFor="nt-push" className="font-medium">푸시</Label>
               <Switch id="nt-push" defaultChecked />
             </div>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 coarse:min-h-[44px]">
               <Label htmlFor="nt-detail" className="font-medium">상세 제목(프로젝트 이름 등)</Label>
               <Switch id="nt-detail" checked={detail} onCheckedChange={setDetail} />
             </div>
@@ -87,9 +87,9 @@ export function NotificationsPage() {
             <More label={`사건별 설정 ${EVENTS.length}`}>
             <fieldset>
               <legend className="sr-only">사건별</legend>
-              <ul className="space-y-1.5 text-[13px] text-ink">
+              <ul className="space-y-1.5 text-meta text-ink">
                 {EVENTS.map((e, i) => (
-                  <li key={e} className="flex items-center justify-between gap-2">
+                  <li key={e} className="flex items-center justify-between gap-2 coarse:min-h-[44px]">
                     <Label htmlFor={`ev-${i}`} className="font-normal">
                       {e}
                     </Label>
