@@ -166,3 +166,9 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **출처 사실**: `source_versions`에 확인 시점·발췌·위치·방법·판정·확인 행위자를 저장한다. `verified_by_actor_id`는 그 프로젝트 소속이며 비활성화되지 않은(`actors.disabled_at`·`users.disabled_at` NULL) 행위자여야 한다(아니면 `not_found`). `verification_state='unreachable'`인 버전에는 발췌를 붙일 수 없다(`invalid_payload`).
 - **연결**: `version_relations`의 from 버전은 그 객체의 최신 버전이어야 하고, 같은 (from,to,kind)는 한 번만 둔다.
 - **library**: `content.import_library`는 한 tx에서 항목·출처·각주를 만들고 원본 JSON을 같은 tx의 `content.library_imported` 사건 payload `original`에 보존한다. 같은 library를 다시 가져오면(`library_hash` 동일) 업무 행을 만들지 않고 첫 결과를 돌려준다. 같은 library 정체성(항목 목록을 뺀 메타데이터가 동일) 안에서는 `legacy_id` 기준으로 이미 가져온 항목을 항목별로 건너뛰고 새 항목만 추가한다(부분집합·부분겹침·상위집합 모두). 항목 목록 밖 메타데이터가 다른 library는 별도 가져오기다. `legacy_id`·`kind_original`은 가져오기 고유 필드로 item의 같은 이름 키에 덮이지 않으며, item의 `__proto__` 같은 own 키도 데이터로 보존한다. library의 모든 문자열에 외톨이 서로게이트가 있으면 `invalid_payload`로 아무것도 쓰지 않는다. 파일 바이트 저장은 PR9/11 경계다.
+  - **항목 id·비교 키**: 항목 `id`는 0 이상의 안전 정수 또는 비어 있지 않은 문자열이다(실제 library의 id는 정수). 중복·재가져오기 비교는 타입을 붙인 키(`number:5` / `string:5`)로 해서 5와 "5"는 다른 항목이다. `legacy_extra.legacy_id`와 결과 `items`는 원래 값(정수는 정수 그대로)이다.
+  - **library 정체성**: 항목 목록과 휘발 키(`imported`·`round`)를 뺀 최상위 메타데이터다. 해시(`shell_hash`)와 항목 비교 키 목록(`item_keys`)을 사건 payload에 따로 두므로 재가져오기 판정은 `original`을 파싱하지 않는다.
+  - **건너뛴 가져오기**: 같은 정체성·같은 id지만 내용이 바뀐 파일은 구조 행에 반영하지 않고(옛 내용 유지) 건너뛰되, `content.library_import_skipped` 사건에 그 파일의 `original`과 `library_hash`를 남긴다. 정확히 같은 파일의 반복은 `library_hash`만 남긴다.
+  - **제목**: 제목이 없거나 문자열이 아니면 `(제목 없음)`으로 저장하고 원래 값(없었으면 null)을 `legacy_extra.title_original`에 둔다.
+  - **`archived_at`**: library 가져오기에서 `status:"removed"`인 항목에만 찍는 가져오기 전용 표시다. `append_version`/`add_artifact`로 status를 바꿔도 `archived_at`은 바뀌지 않는다. 버전 상태가 기준이다.
+  - **예정**: library 원본을 사건 payload에 두는 것은 D1 행 2MB 한도 때문에 PR9/11의 blob 경계로 옮길 예정이다.

@@ -143,8 +143,11 @@ interface SourceFacts {
   verified_by_actor_id: string | null;
 }
 
+/** Library item id: a safe non-negative integer or a non-empty string. */
+type LegacyId = string | number;
+
 interface ImportItem {
-  legacy_id: string;
+  legacy_id: LegacyId;
   object_id: string;
   version_id: string;
 }
@@ -161,7 +164,7 @@ interface PlannedSource {
 }
 
 interface PlannedItem {
-  legacy_id: string;
+  legacy_id: LegacyId;
   object_id: string;
   version_id: string;
   artifact_kind: string;
@@ -1111,8 +1114,10 @@ function map_library_item(item: Record<string, unknown>): {
   const extras = Object.create(null) as Record<string, unknown>;
   const artifact_kind = map_artifact_kind(item, extras);
 
-  const title = typeof item.title === "string" ? item.title : "";
-  if (item.title !== undefined && typeof item.title !== "string") extras.title = item.title;
+  // A missing or non-string title gets a sentinel; the original value (null when
+  // the key was absent) is kept in legacy_extra.title_original.
+  const title = typeof item.title === "string" ? item.title : MISSING_TITLE;
+  if (typeof item.title !== "string") extras.title_original = item.title === undefined ? null : item.title;
 
   const summary = typeof item.summary === "string" ? item.summary : "";
   if (item.summary !== undefined && typeof item.summary !== "string") extras.summary = item.summary;
@@ -1216,10 +1221,7 @@ function plan_library_source(source: Record<string, unknown>): Omit<PlannedSourc
 }
 
 function plan_library_item(runtime: CommandRuntime, raw: Record<string, unknown>): PlannedItem {
-  const legacy_id = raw.id;
-  if (typeof legacy_id !== "string" || legacy_id.trim().length === 0 || !legacy_id.isWellFormed()) {
-    throw new ApiError("invalid_payload", "every library item needs a non-empty id");
-  }
+  const legacy_id = require_legacy_id(raw.id);
   const sources_value = raw.sources;
   let sources: unknown[] = [];
   if (sources_value === undefined || sources_value === null) sources = [];
@@ -1256,7 +1258,7 @@ function prior_import_items(value: unknown): ImportItem[] | null {
     const object_id = entry.object_id;
     const version_id = entry.version_id;
     if (
-      typeof legacy_id !== "string" ||
+      !is_legacy_id(legacy_id) ||
       typeof object_id !== "string" ||
       typeof version_id !== "string"
     ) {
@@ -1269,17 +1271,40 @@ function prior_import_items(value: unknown): ImportItem[] | null {
 
 interface PriorImport {
   library_hash: string | null;
-  shell: string | null;
+  shell_hash: string | null;
   items: ImportItem[];
+  keys: string[];
 }
 
-/** All top-level library metadata, excluding the item list. */
-function library_shell(library: Record<string, unknown>): string {
+const MISSING_TITLE = "(제목 없음)";
+
+/** Top-level keys that change on every export and are not part of identity. */
+const VOLATILE_LIBRARY_KEYS: ReadonlySet<string> = new Set(["items", "imported", "round"]);
+
+function is_legacy_id(value: unknown): value is LegacyId {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0;
+  return typeof value === "string" && value.trim().length > 0 && value.isWellFormed();
+}
+
+function require_legacy_id(value: unknown): LegacyId {
+  if (!is_legacy_id(value)) {
+    throw new ApiError("invalid_payload", "every library item needs a safe integer or non-empty string id");
+  }
+  return value;
+}
+
+/** Typed comparison key: 5 and "5" are different items. */
+function legacy_key(id: LegacyId): string {
+  return typeof id === "number" ? `number:${id}` : `string:${id}`;
+}
+
+/** Hash of the library metadata excluding the item list and volatile keys. */
+function library_shell_hash(library: Record<string, unknown>): string {
   const shell = Object.create(null) as Record<string, unknown>;
   for (const key of Object.keys(library)) {
-    if (key !== "items") shell[key] = library[key];
+    if (!VOLATILE_LIBRARY_KEYS.has(key)) shell[key] = library[key];
   }
-  return canonical_json(shell);
+  return createHash("sha256").update(canonical_json(shell)).digest("hex");
 }
 
 /**
@@ -1322,9 +1347,8 @@ function prior_imports(runtime: CommandRuntime, project_id: string): PriorImport
     const items = prior_import_items(parsed.items);
     if (items === null) continue;
     const library_hash = typeof parsed.library_hash === "string" ? parsed.library_hash : null;
-    const original = parsed.original;
-    const shell = is_record(original) ? library_shell(original) : null;
-    out.push({ library_hash, shell, items });
+    const shell_hash = typeof parsed.shell_hash === "string" ? parsed.shell_hash : null;
+    out.push({ library_hash, shell_hash, items, keys: items.map((entry) => legacy_key(entry.legacy_id)) });
   }
   return out;
 }
@@ -1347,6 +1371,7 @@ function skip_library_import(
   runtime: CommandRuntime,
   scope: ContentScope,
   items: ImportItem[],
+  seen: { library_hash: string; original: Record<string, unknown> | null },
 ): CommandResult {
   const result = { project_id: scope.project_id, already_imported: true, items };
   insert_receipt(runtime, {
@@ -1361,7 +1386,10 @@ function skip_library_import(
     events: [
       {
         type: "content.library_import_skipped",
-        payload: { already_imported: true, items },
+        payload:
+          seen.original === null
+            ? { already_imported: true, items, library_hash: seen.library_hash }
+            : { already_imported: true, items, library_hash: seen.library_hash, original: seen.original },
       },
     ],
   };
@@ -1384,14 +1412,11 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
     if (!is_record(item)) {
       throw new ApiError("invalid_payload", "every library item must be a JSON object");
     }
-    const legacy_id = item.id;
-    if (typeof legacy_id !== "string" || legacy_id.trim().length === 0 || !legacy_id.isWellFormed()) {
-      throw new ApiError("invalid_payload", "every library item needs a non-empty id");
-    }
-    if (seen.has(legacy_id)) {
+    const key = legacy_key(require_legacy_id(item.id));
+    if (seen.has(key)) {
       throw new ApiError("invalid_payload", "library item ids must be unique");
     }
-    seen.add(legacy_id);
+    seen.add(key);
     const sources = item.sources;
     if (sources !== undefined && sources !== null) {
       if (!Array.isArray(sources)) {
@@ -1411,27 +1436,28 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
   const prior = prior_imports(runtime, scope.project_id);
   const exact = prior.find((entry) => entry.library_hash === library_hash);
   if (exact !== undefined) {
-    return skip_library_import(runtime, scope, exact.items);
+    return skip_library_import(runtime, scope, exact.items, { library_hash, original: null });
   }
 
   // Within the same library identity (everything except the item list), each
   // legacy id already imported in this project is reused; only ids that are new
   // are written. The earlier import bundle does not have to be fully contained.
-  const shell = library_shell(library);
+  const shell_hash = library_shell_hash(library);
   const reused = new Map<string, ImportItem>();
   for (const entry of prior) {
-    if (entry.shell !== shell) continue;
-    for (const item of entry.items) {
-      if (!reused.has(item.legacy_id)) reused.set(item.legacy_id, item);
-    }
+    if (entry.shell_hash !== shell_hash) continue;
+    entry.items.forEach((item, index) => {
+      const key = entry.keys[index]!;
+      if (!reused.has(key)) reused.set(key, item);
+    });
   }
 
   const planned: PlannedItem[] = [];
   const items: ImportItem[] = [];
   for (const raw of raw_items) {
     const item = raw as Record<string, unknown>;
-    const legacy_id = item.id as string;
-    const known = reused.get(legacy_id);
+    const legacy_id = item.id as LegacyId;
+    const known = reused.get(legacy_key(legacy_id));
     if (known !== undefined) {
       items.push(known);
       continue;
@@ -1442,7 +1468,7 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
   }
 
   if (planned.length === 0 && raw_items.length > 0) {
-    return skip_library_import(runtime, scope, items);
+    return skip_library_import(runtime, scope, items, { library_hash, original: library });
   }
 
   const result = { project_id: scope.project_id, already_imported: false, items };
@@ -1524,7 +1550,13 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
     events: [
       {
         type: "content.library_imported",
-        payload: { original: library, library_hash, items },
+        payload: {
+          original: library,
+          library_hash,
+          shell_hash,
+          item_keys: items.map((entry) => legacy_key(entry.legacy_id)),
+          items,
+        },
       },
     ],
   };
