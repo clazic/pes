@@ -794,7 +794,7 @@ test("import_library rejects bad shapes anywhere in the library with nothing wri
       { items: [...good(30), { id: "G5", title: "중복" }] },
       { items: [...good(30), { id: "" }] },
       { items: [...good(30), { id: "   " }] },
-      { items: [...good(30), { id: 7 }] },
+      { items: [...good(30), { id: 7.5 }] },
       { items: [...good(30), { id: null }] },
       { items: [...good(30), { id: "\ud800" }] },
       { items: [...good(30), null] },
