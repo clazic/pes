@@ -825,7 +825,7 @@ test("new versions of both sides leave the old citations and relations pointing 
       "SELECT from_version_id, to_version_id FROM version_relations WHERE from_version_id = ?",
       a1.version_id,
     );
-    assert.deepEqual(old_rel, [{ from_version_id: a1.version_id, to_version_id: t1.version_id }]);
+    assert.deepEqual(old_rel.map((row) => ({ ...row })), [{ from_version_id: a1.version_id, to_version_id: t1.version_id }]);
     assert.equal(citations_of(env.db, a2.version_id)[0]?.source_version_id, s2.version_id);
     const all_rel = json_row(env.db.all("SELECT * FROM version_relations WHERE from_version_id = ?", a1.version_id));
     assert.equal(all_rel, json_row(JSON.parse(rel_before).filter((r: { from_version_id: string }) => r.from_version_id === a1.version_id)));
