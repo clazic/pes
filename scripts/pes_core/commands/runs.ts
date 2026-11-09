@@ -160,31 +160,53 @@ function guarded_result(
   };
 }
 
-/** Input receipts already applied by this run or by an ancestor run in the hand-off chain. */
+/** The root of a hand-off chain (the same run when it has no parent). */
+function flow_root(runtime: CommandRuntime, project_id: string, run_id: string): string | null {
+  const seen = new Set<string>();
+  let current: string | null = run_id;
+  let root: string | null = null;
+  while (current !== null && !seen.has(current)) {
+    seen.add(current);
+    root = current;
+    const parent: { parent_run_id: string | null } | undefined = runtime.db.get<{
+      parent_run_id: string | null;
+    }>("SELECT parent_run_id FROM runs WHERE project_id = ? AND id = ?", project_id, current);
+    current = parent?.parent_run_id ?? null;
+  }
+  return root;
+}
+
+/**
+ * Input receipts already applied anywhere in this hand-off flow: the root run
+ * found through parent_run_id and every run descended from that root (ancestors,
+ * descendants, siblings). Independent roots do not see each other.
+ */
 function applied_receipt(
   runtime: CommandRuntime,
   project_id: string,
   run_id: string,
   input_version_id: string,
 ): { applied_tx_id: string | null } | undefined {
-  const seen = new Set<string>();
-  let current: string | null = run_id;
-  while (current !== null && !seen.has(current)) {
-    seen.add(current);
-    const applied = runtime.db.get<{ applied_tx_id: string | null }>(
-      `SELECT applied_tx_id FROM run_input_receipts
-       WHERE project_id = ? AND run_id = ? AND input_version_id = ? AND state = 'applied'`,
-      project_id,
-      current,
-      input_version_id,
-    );
-    if (applied !== undefined) return applied;
-    const parent: { parent_run_id: string | null } | undefined = runtime.db.get<{
-      parent_run_id: string | null;
-    }>("SELECT parent_run_id FROM runs WHERE project_id = ? AND id = ?", project_id, current);
-    current = parent?.parent_run_id ?? null;
-  }
-  return undefined;
+  const root = flow_root(runtime, project_id, run_id);
+  if (root === null) return undefined;
+  return runtime.db.get<{ applied_tx_id: string | null }>(
+    `WITH RECURSIVE flow(id) AS (
+       SELECT id FROM runs WHERE project_id = ? AND id = ?
+       UNION
+       SELECT child.id FROM runs child JOIN flow ON child.parent_run_id = flow.id
+       WHERE child.project_id = ?
+     )
+     SELECT applied_tx_id FROM run_input_receipts
+     WHERE project_id = ? AND input_version_id = ? AND state = 'applied'
+       AND run_id IN (SELECT id FROM flow)
+     ORDER BY rowid
+     LIMIT 1`,
+    project_id,
+    root,
+    project_id,
+    project_id,
+    input_version_id,
+  );
 }
 
 function require_input_version(runtime: CommandRuntime, project_id: string, input_version_id: string): void {
@@ -274,6 +296,15 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the project already has an active lease");
   }
 
+  // fence is stored as a SQLite integer and returned as a JSON number. Refuse
+  // the claim before any write when the next value would leave the safe range:
+  // a lease that later commands cannot present is never created.
+  const next_fence = (previous === undefined ? 0n : previous.fence) + 1n;
+  if (next_fence > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new ApiError("conflict", "the lease fence is exhausted");
+  }
+  const fence = Number(next_fence);
+
   // Replacing an expired lease also ends the displaced run if it is still
   // running, in the same transaction and with its own event. Finished runs
   // (succeeded/failed/interrupted/...) are left untouched.
@@ -307,7 +338,6 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     }
   }
 
-  const fence = previous === undefined ? 1 : Number(previous.fence) + 1;
   const lease_id = runtime.new_id();
   const expires_at = runtime.now_ms + runtime.run_config.lease_ttl_ms;
 
@@ -345,7 +375,7 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     }
   } else {
     const written = runtime.db.run(
-      "UPDATE runs SET status = 'running', started_at = COALESCE(started_at, ?), ended_at = NULL WHERE project_id = ? AND id = ?",
+      "UPDATE runs SET status = 'running', started_at = COALESCE(started_at, ?), ended_at = NULL, go_block_reason = NULL, go_blocked_at = NULL, go_block_reset_at = NULL WHERE project_id = ? AND id = ?",
       runtime.now_ms,
       scope.project_id,
       run_id,
@@ -687,8 +717,7 @@ function definition(action: string, run: (runtime: CommandRuntime) => CommandRes
   return Object.freeze({ action, scope: "project", rev_bearing: false, run });
 }
 
-/** Registry entries merged into COMMANDS by commands.ts (names, not actions). */
-export const RUN_COMMAND_ENTRIES: ReadonlyArray<readonly [string, CommandDefinition]> = [
+const RUN_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> = [
   ["run.claim", definition("run.claimed", run_claim)],
   ["run.heartbeat", definition("run.heartbeat", run_heartbeat)],
   ["run.wait", definition("run.waiting_human", run_wait)],
@@ -698,3 +727,12 @@ export const RUN_COMMAND_ENTRIES: ReadonlyArray<readonly [string, CommandDefinit
   ["run.interrupt", definition("run.interrupted", run_interrupt)],
   ["run.record_receipt", definition("run.input_receipt_recorded", run_record_receipt)],
 ];
+
+/**
+ * Registry entries merged into COMMANDS by commands.ts (names, not actions).
+ * The array and each name/definition tuple are frozen, so importing this module
+ * before commands.ts cannot inject or replace a command.
+ */
+export const RUN_COMMAND_ENTRIES: ReadonlyArray<readonly [string, CommandDefinition]> = Object.freeze(
+  RUN_COMMAND_INPUTS.map((entry) => Object.freeze([entry[0], entry[1]] as const)),
+);

@@ -559,7 +559,9 @@ export class CommandService {
     this.#clock = options.clock;
     this.#policy = options.policy;
     this.#new_id = options.new_id ?? new_id;
-    this.#run_config = options.run_config ?? resolve_run_config();
+    // Validate and copy the injected timing once. The service never reads the
+    // ambient environment; a composition point resolves env explicitly.
+    this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
   }
 
   /**
