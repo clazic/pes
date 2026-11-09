@@ -724,6 +724,8 @@ test("no code outside the command service writes business tables", () => {
   for (const file of files) {
     const rel = relative(CORE_DIR, file);
     if (!rel.includes("/") && !rel.includes("\\") && WRITE_ALLOWED.has(rel)) continue;
+    // PR5: command definitions live in scripts/pes_core/commands/ (judged by folder, not file name).
+    if (rel.split(/[\\/]/)[0] === "commands" && rel.split(/[\\/]/).length > 1) continue;
     const source = strip_comments(readFileSync(file, "utf8"));
     for (const m of source.matchAll(re)) {
       violations.push(`${relative(REPO, file)}: ${m[0].replace(/\s+/g, " ")}`);

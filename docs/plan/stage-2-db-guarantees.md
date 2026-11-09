@@ -140,5 +140,18 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 ### 8.2 후속 확장(예정)
 
 - **PR10**: `PolicyChecker.check`가 tx 안의 읽기 전용 `db`(또는 정책 행 조회 함수)를 받도록 시그니처를 넓혀, `project_policy_versions` 현재 행을 같은 tx에서 읽는다.
-- **PR5**: `EventDraft`에 `run_id`·`object_id`·`edition/stage/round`, `insert_receipt`에 `lease_id`·`fence`·`edition_id` 필드를 더한다.
+- **PR5(반영)**: `EventDraft.run_id`와 영수증의 `run_id`·`lease_id`·`fence`를 더했다(8.3).
 - **PR5 이전 검토**: 새 명령이 영수증을 빠뜨리지 않도록 `run()`이 action을 제외한 영수증 필드를 반환하고 서비스가 쓰는 구조(부트스트랩만 정책 FK 때문에 훅으로 예외)를 검토한다.
+
+### 8.3 run·lease·fence(PR5)
+
+`scripts/pes_core/commands/runs.ts`가 `run.claim`·`run.heartbeat`·`run.wait`·`run.complete`·`run.release`·`run.handoff`·`run.interrupt`·`run.record_receipt`를 정의하고, `scripts/pes_core/runs.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 run 쓰기는 8절의 실행 순서(등록표 → 프로젝트·행위자 → 정책 → 영수증 재생 → rev/lease → 변경 → `events`+영수증)를 그대로 지나며 한 tx다.
+
+- **claim**: 프로젝트에 활성·미만료 lease가 없을 때만 run을 만들거나 재개한다. run은 `running`, lease는 `active`, `fence`는 이전 값 + 1(첫 lease는 1)이다. `run_id` 재개는 `queued`·`waiting_human`·`blocked_usage`·`interrupted`에서만 되고 `succeeded`·`failed`·`cancelled`는 거부한다. `blocked_usage`를 재개하면 `go_block_reason`·`go_blocked_at`·`go_block_reset_at`을 함께 지운다(DDL의 `go_block_reason IS NULL OR status = 'blocked_usage'` 제약). 재개 payload에 `parent_run_id`나 `role`이 있으면 `invalid_payload`다. 만료된 lease를 대신할 때 그 lease의 run이 아직 `running`이면 같은 tx에서 `interrupted`로 끝내고(`ended_at` 설정) `events.run_id`가 그 옛 run인 interrupt 사건을 남긴다. 이미 끝난 run은 건드리지 않는다. 다음 `fence`가 `Number.MAX_SAFE_INTEGER`를 넘으면 쓰기 전에 `conflict`로 거부한다.
+- **가드**: claim을 뺀 모든 run 명령은 `project_leases` 행이 그 프로젝트의 **활성·미만료**(`now < expires_at`) lease이고 `lease_id`·`fence`·`run_id`·소유 행위자가 정확히 같을 때만 통과한다. 아니면 `conflict`이고 아무것도 쓰지 않는다. 만료(`now >= expires_at`)·해제된 lease는 되살리지 않으며, 새 claim만 새 `lease_id`와 더 높은 `fence`를 만든다.
+- **heartbeat**: `expires_at = now + lease_ttl_ms`로 연장하고 `fence`는 바꾸지 않는다. 만료 경계(`now == expires_at`)에서는 거부한다.
+- **wait**: run을 `waiting_human`으로 바꾸고 lease를 `released`로 놓으며(가드의 `fence`는 보존), 같은 tx에 사건과 영수증을 남긴다. 대기 중에는 다른 run이 claim할 수 있고, 재개는 새 claim·새 `fence`다.
+- **complete**: `succeeded`(기본) 또는 `failed`로 run을 끝내고 lease를 놓는다. 승인·봉인·단계 변경은 하지 않는다. `release`·`handoff`는 run을 `queued`, `interrupt`는 `interrupted`로 둔다.
+- **입력 영수증**: `applied`는 같은 프로젝트의 `mutation_commits.id`인 `applied_tx_id`가 있을 때만 인정한다. 중복 반영 방지 범위는 **같은 인계 흐름**이다. `parent_run_id` 사슬을 거슬러 뿌리 run을 찾고, 그 뿌리에서 파생된 모든 run(조상·후손·형제)이 이미 `applied`한 입력은 다시 적용하지 않고 `already_applied: true`로 답하며 저장된 `applied_tx_id`를 바꾸지 않는다. 뿌리가 다른 독립 run은 서로 막지 않는다. 인계 뒤 원본 run을 재개하거나 형제 run을 파생해도 같은 흐름에서는 한 번만 반영된다.
+- **영수증·사건**: run 명령의 영수증은 `run_id`·`lease_id`·`fence`를, 사건은 `events.run_id`를 남긴다. 거부·검증 실패는 영수증도 사건도 남기지 않는다.
+- **설정**: `lease_ttl_ms`·`heartbeat_interval_ms`는 `scripts/pes_core/config.ts`에만 있다. 서비스는 `process.env`를 읽지 않는다. API/CLI 같은 합성 지점이 `resolve_run_config(overrides, process.env)`로 env를 명시해 넘기고, 주입된 `RunConfig`가 없으면 서비스는 설정 기본값만 쓴다. 주입값도 생성자에서 `resolve_run_config(overrides, {})`로 검증·복사·동결하며, 잘못된 값은 생성 시점에 거부한다. 우선순위는 주입값 > env > 기본값이며, 양의 안전 정수만 받고 heartbeat가 TTL보다 짧아야 한다.

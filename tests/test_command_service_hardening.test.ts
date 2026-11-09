@@ -1412,6 +1412,13 @@ test("a rolled-back command leaves no orphan events even when it fails after the
 
 const ALLOWED_WRITERS = new Set(["commands.ts", "db.ts", "backup.ts", "d1_smoke.ts"]);
 
+/** PR5: command definitions under scripts/pes_core/commands/ may write; judged by folder, not file name. */
+function is_allowed_writer(rel: string): boolean {
+  if (ALLOWED_WRITERS.has(rel)) return true;
+  const parts = rel.split(/[\\/]/);
+  return parts.length > 1 && parts[0] === "commands";
+}
+
 function business_tables(): string[] {
   const sql = readFileSync(join(CORE_DIR, "migrations", "001_initial.sql"), "utf8");
   return [...sql.matchAll(/CREATE\s+TABLE\s+(\w+)/gi)].map((m) => m[1]!).filter((t) => t !== "db_meta");
@@ -1493,7 +1500,7 @@ test("strong scan: files outside the allowed writers contain no business-table w
   const violations: string[] = [];
   for (const file of files) {
     const rel = relative(CORE_DIR, file);
-    if (ALLOWED_WRITERS.has(rel)) continue;
+    if (is_allowed_writer(rel)) continue;
     for (const m of without_comment_lines(readFileSync(file, "utf8")).matchAll(re)) {
       violations.push(`${relative(REPO, file)}: ${m[0].replace(/\s+/g, " ")}`);
     }
@@ -1506,7 +1513,7 @@ test("files outside the allowed writers never call run/exec/prepare on a databas
   const violations: string[] = [];
   for (const file of ts_files(CORE_DIR)) {
     const rel = relative(CORE_DIR, file);
-    if (ALLOWED_WRITERS.has(rel)) continue;
+    if (is_allowed_writer(rel)) continue;
     for (const m of without_comment_lines(readFileSync(file, "utf8")).matchAll(re)) {
       violations.push(`${relative(REPO, file)}: ${m[0]}`);
     }

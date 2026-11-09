@@ -14,9 +14,35 @@
 import { createHash } from "node:crypto";
 
 import type { Clock } from "./clock.ts";
+import { resolve_run_config, type RunConfig } from "./config.ts";
 import { tx, type Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { new_id } from "./ids.ts";
+import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
+import {
+  insert_receipt,
+  is_record,
+  require_non_empty_string,
+  require_record,
+  require_well_formed,
+  write_events,
+  type CommandDefinition,
+  type CommandResult,
+  type CommandRuntime,
+  type EventDraft,
+  type MutationContext,
+  type ProjectRow,
+} from "./commands/shared.ts";
+
+export type {
+  CommandDefinition,
+  CommandResult,
+  CommandRuntime,
+  CommandVia,
+  EventDraft,
+  MutationContext,
+  ProjectRow,
+} from "./commands/shared.ts";
 
 /** Stage keys in ordinal order; bootstrap creates exactly these six. */
 export const STAGE_KEYS = [
@@ -43,16 +69,6 @@ export const OBJECT_KINDS = [
   "followup",
 ] as const;
 
-export type CommandVia = "web" | "cli" | "http" | "mcp" | "webmcp" | "import";
-
-export interface MutationContext {
-  project_id: string | null;
-  actor_id: string | null;
-  via: CommandVia;
-  client_request_id: string;
-  base_control_rev?: number;
-}
-
 export type PolicyDecision = { allowed: true } | { allowed: false; reason: string };
 
 /**
@@ -68,17 +84,13 @@ export interface CommandServiceOptions {
   policy: PolicyChecker;
   /** Test seam; defaults to the shared server identifier generator. */
   new_id?: () => string;
+  /** Run/lease timing; omitted -> resolve_run_config() defaults (no env read here). */
+  run_config?: RunConfig;
 }
 
 export interface CommandOutcome {
   result: unknown;
   replayed: boolean;
-}
-
-interface ProjectRow {
-  id: string;
-  control_rev: bigint;
-  status: string;
 }
 
 interface ActorRow {
@@ -92,47 +104,8 @@ interface ResolvedScope {
   actor_id: string;
 }
 
-interface CommandRuntime {
-  db: Db;
-  ctx: MutationContext;
-  payload: unknown;
-  now_ms: number;
-  tx_id: string;
-  request_hash: string;
-  new_id: () => string;
-  project: ProjectRow | null;
-  actor_id: string | null;
-}
-
-interface EventDraft {
-  type: string;
-  payload: unknown;
-  before_rev?: number;
-  after_rev?: number;
-}
-
-interface CommandResult {
-  result: unknown;
-  events: EventDraft[];
-}
-
-interface CommandDefinition {
-  /** mutation_commits.action for this command. */
-  action: string;
-  /** "project" commands require an existing project and actor; bootstrap creates them. */
-  scope: "project" | "bootstrap";
-  rev_bearing: boolean;
-  run(runtime: CommandRuntime): CommandResult;
-}
-
 const VIAS = new Set<string>(["web", "cli", "http", "mcp", "webmcp", "import"]);
 
-function require_well_formed(value: string, field: string): string {
-  if (!value.isWellFormed()) {
-    throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
-  }
-  return value;
-}
 
 function validate_context(ctx: MutationContext): void {
   if (typeof ctx.client_request_id !== "string" || ctx.client_request_id.length === 0) {
@@ -193,30 +166,6 @@ function snapshot_payload(payload: unknown): unknown {
 /** A second parse of the snapshot for the policy: own keys, no shared objects. */
 function copy_snapshot(snapshot: unknown): unknown {
   return JSON.parse(JSON.stringify(snapshot));
-}
-
-function is_record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function require_record(payload: unknown): Record<string, unknown> {
-  if (!is_record(payload)) {
-    throw new ApiError("invalid_payload", "payload must be a JSON object");
-  }
-  return payload;
-}
-
-function require_non_empty_string(payload: Record<string, unknown>, field: string): string {
-  const value = payload[field];
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new ApiError("invalid_payload", `${field} must be a non-empty string`);
-  }
-  // A lone surrogate cannot be stored faithfully in SQLite TEXT: the receipt
-  // would keep the code unit while the column gets U+FFFD. Reject it up front.
-  if (!value.isWellFormed()) {
-    throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
-  }
-  return value;
 }
 
 /** Contexts are flat, but the policy still gets its own copy. */
@@ -295,64 +244,6 @@ function result_project_id(result: unknown): string {
     return result.project_id;
   }
   throw new Error("the command result must include project_id");
-}
-
-function insert_receipt(
-  runtime: CommandRuntime,
-  fields: {
-    project_id: string;
-    actor_id: string;
-    action: string;
-    base_control_rev: number | null;
-    result: unknown;
-  },
-): void {
-  const written = runtime.db.run(
-    `INSERT INTO mutation_commits
-       (id, project_id, actor_id, via, client_request_id, request_hash, action,
-        base_control_rev, result_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    runtime.tx_id,
-    fields.project_id,
-    fields.actor_id,
-    runtime.ctx.via,
-    runtime.ctx.client_request_id,
-    runtime.request_hash,
-    fields.action,
-    fields.base_control_rev,
-    JSON.stringify(fields.result),
-    runtime.now_ms,
-  );
-  if (written.changes !== 1n) {
-    throw new Error("the mutation receipt was not written");
-  }
-}
-
-function write_events(runtime: CommandRuntime, project_id: string, events: EventDraft[]): void {
-  if (events.length === 0) {
-    throw new Error("every command must leave at least one event");
-  }
-  for (const [index, event] of events.entries()) {
-    const written = runtime.db.run(
-      `INSERT INTO events
-         (id, project_id, tx_id, tx_index, tx_size, type, object_id, before_rev,
-          after_rev, payload, schema_version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1, ?)`,
-      runtime.new_id(),
-      project_id,
-      runtime.tx_id,
-      index,
-      events.length,
-      event.type,
-      event.before_rev ?? null,
-      event.after_rev ?? null,
-      JSON.stringify(event.payload ?? {}),
-      runtime.now_ms,
-    );
-    if (written.changes !== 1n) {
-      throw new Error("the event was not written");
-    }
-  }
 }
 
 function run_bootstrap(runtime: CommandRuntime): CommandResult {
@@ -560,6 +451,7 @@ const SET_TOPIC_COMMAND: CommandDefinition = Object.freeze({
 const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, CommandDefinition>([
   ["project.bootstrap", BOOTSTRAP_COMMAND],
   ["project.set_topic", SET_TOPIC_COMMAND],
+  ...RUN_COMMAND_ENTRIES,
 ]);
 
 /**
@@ -660,12 +552,16 @@ export class CommandService {
   readonly #clock: Clock;
   readonly #policy: PolicyChecker;
   readonly #new_id: () => string;
+  readonly #run_config: RunConfig;
 
   constructor(db: Db, options: CommandServiceOptions) {
     this.#db = db;
     this.#clock = options.clock;
     this.#policy = options.policy;
     this.#new_id = options.new_id ?? new_id;
+    // Validate and copy the injected timing once. The service never reads the
+    // ambient environment; a composition point resolves env explicitly.
+    this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
   }
 
   /**
@@ -754,6 +650,7 @@ export class CommandService {
       new_id: this.#new_id,
       project,
       actor_id,
+      run_config: this.#run_config,
     };
     const outcome = definition.run(runtime);
     write_events(runtime, project?.id ?? result_project_id(outcome.result), outcome.events);

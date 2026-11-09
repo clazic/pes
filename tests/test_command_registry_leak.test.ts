@@ -11,9 +11,10 @@ import { FakeClock } from "../scripts/pes_core/clock.ts";
 import { connect, migrate, type Db } from "../scripts/pes_core/db.ts";
 import { COMMANDS, CommandService, type MutationContext } from "../scripts/pes_core/commands.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
+import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
 
-const REAL_NAMES = ["project.bootstrap", "project.set_topic"];
+const REAL_NAMES = [...EXPECTED_COMMAND_NAMES];
 const INJECTED = "synthetic.injected";
 
 function registry_names(): string[] {
@@ -34,7 +35,7 @@ test("forEach: third callback argument is COMMANDS itself, not the internal Map"
   COMMANDS.forEach((_d, _n, map) => {
     seen.push(map);
   });
-  assert.equal(seen.length, 2);
+  assert.equal(seen.length, EXPECTED_COMMAND_NAMES.length);
   for (const map of seen) {
     try {
       assert.strictEqual(map, COMMANDS, "third argument must be the public read-only view");
@@ -50,7 +51,7 @@ test("forEach: thisArg is preserved", () => {
   COMMANDS.forEach(function (this: unknown) {
     thises.push(this);
   }, marker);
-  assert.equal(thises.length, 2);
+  assert.equal(thises.length, EXPECTED_COMMAND_NAMES.length);
   for (const t of thises) assert.strictEqual(t, marker);
 });
 
@@ -78,7 +79,7 @@ test("forEach: the callback argument cannot set/delete/clear, and the registry s
     }
   });
   assert.equal(COMMANDS.has(INJECTED), false);
-  assert.equal(COMMANDS.size, 2);
+  assert.equal(COMMANDS.size, EXPECTED_COMMAND_NAMES.length);
   assert.deepEqual(registry_names(), before);
   assert.deepEqual(before, REAL_NAMES);
   assert.equal(Object.keys(COMMANDS).length, COMMANDS.size, "own keys and size must agree");
@@ -167,7 +168,7 @@ test("other paths: every definition handed out is frozen (entries, values, itera
     ...[...COMMANDS].map((e) => e[1]),
     ...REAL_NAMES.map((n) => COMMANDS.get(n)),
   ]);
-  assert.equal(defs.size, 2, "all paths must hand out the same two definition objects");
+  assert.equal(defs.size, EXPECTED_COMMAND_NAMES.length, "all paths must hand out the same definition objects");
   for (const d of defs) {
     assert.equal(Object.isFrozen(d), true, "definition must be frozen");
     assert.throws(() => {
