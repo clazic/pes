@@ -299,7 +299,11 @@ function optional_actor(
     throw new ApiError("invalid_payload", `${field} must be a non-empty string or null`);
   }
   const actor = runtime.db.get<{ ok: bigint }>(
-    "SELECT 1 AS ok FROM actors a JOIN project_members m ON m.user_id = a.user_id WHERE a.id = ? AND m.project_id = ?",
+    `SELECT 1 AS ok
+     FROM actors a
+     JOIN users u ON u.id = a.user_id
+     JOIN project_members m ON m.user_id = u.id
+     WHERE a.id = ? AND m.project_id = ? AND a.disabled_at IS NULL AND u.disabled_at IS NULL`,
     value,
     project_id,
   );
@@ -1410,14 +1414,13 @@ function run_import_library(runtime: CommandRuntime): CommandResult {
     return skip_library_import(runtime, scope, exact.items);
   }
 
-  // The same library metadata (everything except items) plus an earlier import
-  // whose items are all present here: reuse those items by legacy id and import
-  // only the items that are new.
+  // Within the same library identity (everything except the item list), each
+  // legacy id already imported in this project is reused; only ids that are new
+  // are written. The earlier import bundle does not have to be fully contained.
   const shell = library_shell(library);
   const reused = new Map<string, ImportItem>();
   for (const entry of prior) {
     if (entry.shell !== shell) continue;
-    if (!entry.items.every((item) => seen.has(item.legacy_id))) continue;
     for (const item of entry.items) {
       if (!reused.has(item.legacy_id)) reused.set(item.legacy_id, item);
     }
