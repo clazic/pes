@@ -47,20 +47,36 @@ try {
   });
 } catch (error) {
   // oxlint는 오류 수준 진단이 있어도 JSON을 출력하고 종료 1을 낸다. 출력이 있으면 계속 센다.
+  // 그 밖의 종료 코드(설정 오류 등)나 신호 종료는 예산을 확인할 수 없으므로 실패로 본다.
+  const status = typeof error.status === "number" ? error.status : null;
+  if (error.signal || (status !== 0 && status !== 1)) {
+    console.error(
+      `oxlint 실행이 비정상 종료했다(종료 코드 ${status ?? "없음"}${error.signal ? `, 신호 ${error.signal}` : ""}).`,
+    );
+    if (typeof error.stderr === "string" && error.stderr) process.stderr.write(error.stderr);
+    process.exit(1);
+  }
   output = typeof error.stdout === "string" ? error.stdout : "";
 }
 
-let diagnostics;
+let parsed;
 try {
-  diagnostics = JSON.parse(output).diagnostics ?? [];
+  parsed = JSON.parse(output);
 } catch {
   console.error("oxlint 결과(JSON)를 읽지 못했다.");
   process.exit(1);
 }
 
+if (!Array.isArray(parsed?.diagnostics)) {
+  console.error("oxlint 결과에 diagnostics 배열이 없다.");
+  process.exit(1);
+}
+
+const diagnostics = parsed.diagnostics;
+
 const counts = new Map();
 for (const diagnostic of diagnostics) {
-  const code = diagnostic.code ?? "";
+  const code = diagnostic?.code ?? "";
   counts.set(code, (counts.get(code) ?? 0) + 1);
 }
 
@@ -68,8 +84,16 @@ const failures = [];
 for (const check of checks) {
   const pattern = globToRegExp(check.glob);
   let actual = 0;
+  let matched = 0;
   for (const [code, count] of counts) {
-    if (pattern.test(code)) actual += count;
+    if (pattern.test(code)) {
+      actual += count;
+      matched += 1;
+    }
+  }
+  if (matched === 0) {
+    // 목표가 0인 규칙은 원래 진단이 없을 수 있으므로 실패가 아니라 경고만 낸다.
+    console.error(`경고: '${check.glob}' 글롭과 맞는 규칙 코드가 없다.`);
   }
   const ok = check.op === "=" ? actual === check.target : actual <= check.target;
   if (!ok) failures.push({ ...check, actual });
