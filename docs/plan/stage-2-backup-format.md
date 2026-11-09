@@ -60,7 +60,7 @@
 | `extra_file` | manifest에 없는 파일이 묶음 안에 있음(끊긴 symlink 디렉터리 포함) |
 | `row_count_mismatch` | `rows/`의 표별 행 수와 `table_counts`가 다르거나 rows 파일이 깨짐 |
 
-파일 검사는 `lstatSync`로 한다. 파일을 열기 전에 묶음 루트부터 모든 경로 구성요소(중간 디렉터리 포함)와 `manifest.json`을 `lstat`해, 어느 하나라도 symlink이면 읽지 않고 `path_unsafe`로 보고한다(대상 바이트가 맞아도 마찬가지). 안전 검사를 통과한 파일만 열며, 묶음 안 symlink 디렉터리는 따라 들어가지 않고 `extra_file`로도 보고한다. verify는 `rows/` 파일 바이트만 메모리에 보관한다.
+파일 검사는 `lstatSync`로 한다. 파일을 열기 전에 묶음 루트 아래의 모든 경로 구성요소(중간 디렉터리 포함)와 `manifest.json`을 `lstat`해, 어느 하나라도 symlink이면 읽지 않고 `path_unsafe`로 보고한다(대상 바이트가 맞아도 마찬가지). 안전 검사를 통과한 파일만 열며, 묶음 안 symlink 디렉터리는 따라 들어가지 않고 `extra_file`로도 보고한다. verify는 `rows/` 파일 바이트만 메모리에 보관한다. 사용자가 직접 지정한 `bundle_dir` 자체가 symlink이면 그 대상을 묶음 루트로 따른다(입력 경로는 사용자 책임).
 
 `import_bundle`은 검증을 먼저 한다. 문제가 하나라도 있으면 `BackupError("bundle_invalid")`에 `.problems`를 담고, 행·파일·epoch 어느 것도 쓰지 않는다.
 
