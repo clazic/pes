@@ -23,9 +23,21 @@ npm run dev          # http://127.0.0.1:5173 (개발 서버)
 npm run typecheck    # tsc --noEmit — 0 오류
 npm run lint         # oxlint(기본 + react + jsx-a11y) + @shadcn/lint + oxlint-tailwindcss — 오류 0(경고는 정리 대상). 화면을 고칠 때마다 돌린다(사용자 지시 2026-11-10)
                      # jsx-a11y/prefer-tag-over-role은 끔: role="status"(화면 읽기 지원이 <output>보다 안정) · Card/SidebarGroup처럼 태그를 못 바꾸는 부품의 role이라 일부러 둠
+npm test             # Vitest + Testing Library(jsdom) — 시험 0개로도 통과(--passWithNoTests). 시험은 tester가 쓴다
 npm run build        # typecheck + vite build → dist/
 npm run preview      # http://127.0.0.1:4173 (dist 정적 서빙 확인)
+node scripts/lint-budget.mjs 'react(*)<=17'  # 규칙별 경고 예산 — 모두 지키면 0, 어기면 1, 인자 형식 오류 2
 ```
+
+`npm test`는 `src/**/*.test.ts(x)`를 jsdom에서 돌린다. 아직 시험이 없으므로 `--passWithNoTests`로 통과한다(시험 파일은 tester가 쓴다).
+
+`node scripts/lint-budget.mjs`는 `npx oxlint src --format=json`의 진단을 `code`별로 세어 규칙별 예산을 검사한다. 인자는 하나 이상 넘기고, 글롭의 `*`는 아무 글자와 맞는다(`'react(*)'` = `react(...)` 규칙 전부).
+
+```sh
+node scripts/lint-budget.mjs 'shadcn(no-restyle)<=927' 'react(*)=0'  # =는 정확히 그 수, <=는 그 수 이하일 때 통과
+```
+
+하나라도 어기면 규칙별 실제 수·목표를 찍고 종료 1, 인자 형식이 틀리면 종료 2다.
 
 `node_modules/`·`dist/`는 커밋하지 않는다(`.gitignore`). shadcn 컴포넌트·블록을 더하려면 이 폴더에서 `npx shadcn@4.23.0 add <이름>`(CLI는 생성할 때만 쓰고 의존성에서 뺐다). **이미 있는 파일을 덮어쓸지 물으면 “아니오”** — `button`·`sheet`·`tooltip`·`input`·`breadcrumb` 등은 PES 규칙(초점·`aria-disabled`·한국어)에 맞게 고친 것이다. 새 의존성이 caret(`^`)으로 들어오면 고정 버전으로 바꾼다.
 
