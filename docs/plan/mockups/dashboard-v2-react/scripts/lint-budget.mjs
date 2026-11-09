@@ -38,7 +38,9 @@ function globToRegExp(glob) {
   return new RegExp(`^${escaped}$`);
 }
 
-let output;
+let output = "";
+let oxlintStatus = 0;
+let oxlintStderr = "";
 try {
   output = execSync("npx oxlint src --format=json", {
     cwd: root,
@@ -46,24 +48,26 @@ try {
     maxBuffer: 64 * 1024 * 1024,
   });
 } catch (error) {
-  // oxlint는 오류 수준 진단이 있어도 JSON을 출력하고 종료 1을 낸다. 출력이 있으면 계속 센다.
-  // 그 밖의 종료 코드(설정 오류 등)나 신호 종료는 예산을 확인할 수 없으므로 실패로 본다.
+  // 신호 종료나 실행 실패는 종료 코드 자체가 없다.
   const status = typeof error.status === "number" ? error.status : null;
-  if (error.signal || (status !== 0 && status !== 1)) {
+  if (error.signal || status === null) {
     console.error(
       `oxlint 실행이 비정상 종료했다(종료 코드 ${status ?? "없음"}${error.signal ? `, 신호 ${error.signal}` : ""}).`,
     );
     if (typeof error.stderr === "string" && error.stderr) process.stderr.write(error.stderr);
     process.exit(1);
   }
+  // 경고만 있으면 oxlint는 0으로 끝난다. 0이 아닌 종료는 파서 오류 등이므로 예산 비교 전에 실패로 본다.
+  oxlintStatus = status;
   output = typeof error.stdout === "string" ? error.stdout : "";
+  oxlintStderr = typeof error.stderr === "string" ? error.stderr : "";
 }
 
 let parsed;
 try {
   parsed = JSON.parse(output);
 } catch {
-  console.error("oxlint 결과(JSON)를 읽지 못했다.");
+  console.error(`oxlint 결과(JSON)를 읽지 못했다(종료 코드 ${oxlintStatus}).`);
   process.exit(1);
 }
 
@@ -73,6 +77,20 @@ if (!Array.isArray(parsed?.diagnostics)) {
 }
 
 const diagnostics = parsed.diagnostics;
+const errorDiagnostics = diagnostics.filter((diagnostic) => diagnostic?.severity === "error");
+
+if (oxlintStatus !== 0 || errorDiagnostics.length > 0) {
+  console.error(
+    `oxlint가 오류를 보고해 예산을 확인할 수 없다(종료 코드 ${oxlintStatus}, 오류 진단 ${errorDiagnostics.length}개).`,
+  );
+  for (const diagnostic of errorDiagnostics.slice(0, 10)) {
+    const code = diagnostic?.code ? `${diagnostic.code}: ` : "";
+    console.error(`- ${diagnostic?.filename ?? "?"} ${code}${diagnostic?.message ?? ""}`);
+  }
+  if (errorDiagnostics.length > 10) console.error(`- ... 외 ${errorDiagnostics.length - 10}개`);
+  if (oxlintStderr) process.stderr.write(oxlintStderr);
+  process.exit(1);
+}
 
 const counts = new Map();
 for (const diagnostic of diagnostics) {

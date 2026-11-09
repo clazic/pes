@@ -5,7 +5,7 @@
   "description": "PES 웹 대시보드 v2 — React + Vite + TypeScript + Tailwind CSS + shadcn/ui 시안 (합성 목 데이터만, 네트워크 호출 없음)",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=26"
   },
   "scripts": {
     "dev": "vite",
