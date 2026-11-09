@@ -1317,6 +1317,8 @@ test("an expired lease cannot send: now >= expires_at is a conflict", async () =
 
 interface CorruptCase {
   name: string;
+  /** true when apply() itself runs Go OFF, which blocks the unsent dispatch in the same tx */
+  calls_go_off?: boolean;
   apply(env: Env, other_policy_id: string): void | Promise<void>;
 }
 
@@ -1355,6 +1357,7 @@ const CORRUPT_CASES: CorruptCase[] = [
   },
   {
     name: "pointer targets another project's (allowing) row",
+    calls_go_off: true,
     async apply(env, other) {
       await go_off(env, "cp-off");
       env.db.exec("PRAGMA foreign_keys = OFF");
@@ -1363,6 +1366,7 @@ const CORRUPT_CASES: CorruptCase[] = [
   },
   {
     name: "pointer rewound to an older allowing version",
+    calls_go_off: true,
     async apply(env) {
       const old = policy_row_of_project(env.db, env.project_id).id;
       await go_off(env, "cp-off2");
@@ -1389,6 +1393,9 @@ for (const c of CORRUPT_CASES) {
       const other_policy = current_policy(env.db, p2.project_id).policy_id;
 
       await c.apply(env, other_policy);
+      // state of the dispatch after the damage is set up (Go OFF in apply() already blocks it)
+      const dispatch_state_before = dispatch_row(env.db, prepared).state;
+      assert.equal(dispatch_state_before, c.calls_go_off ? "blocked" : "prepared");
 
       const decision = check_go_allowed(env.db, env.project_id);
       assert.equal(decision.allowed, false);
@@ -1405,7 +1412,11 @@ for (const c of CORRUPT_CASES) {
         "policy_denied",
       );
       assert.equal(state_signature(env.db), before, "a denied command writes nothing");
-      assert.equal(dispatch_row(env.db, prepared).state, "prepared");
+      assert.equal(
+        dispatch_row(env.db, prepared).state,
+        dispatch_state_before,
+        "a denied command does not change the dispatch state",
+      );
 
       // the damage is local to the project
       assert.deepEqual(check_go_allowed(env.db, p2.project_id), { allowed: true });
