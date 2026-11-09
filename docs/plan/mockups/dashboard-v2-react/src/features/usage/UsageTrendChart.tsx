@@ -51,12 +51,12 @@ export function UsageTrendChart({ trend }: { trend: Trend }) {
   const stop = pts.find((p) => p.est != null && p.est >= trend.stop_percent)!;
   const now = pts.find((p) => p.est != null && p.proj != null)!;
   const last = pts[pts.length - 1];
-  const t0 = pts.find((p) => p.note?.includes("t0"));
+  const t0 = pts.find((p) => p.note?.includes("본 숫자"));
   const min = first.m;
   const max = last.m;
   const ticks: number[] = [];
   for (let m = Math.ceil(min / 30) * 30; m <= max; m += 30) ticks.push(m);
-  const summary = `${trend.connection} 5시간 구간 추정 사용률 추이(합성 예시). ${first.t} ${first.est}%${t0 ? `, ${t0.t} 콘솔 기준값 입력으로 ${t0.est}%에 맞춤` : ""}, ${stop.t} ${stop.est}%로 멈춤 문턱 ${trend.stop_percent}% 이상이 되어 보내기 전에 멈춤. 지금 ${now.t} ${now.est}%, 재개 가능 시각 ${last.t}에 ${last.proj}% 예상. 같은 숫자를 아래 표로 볼 수 있습니다.`;
+  const summary = `${trend.connection} 5시간 구간 추정 사용률 추이(합성 예시). ${first.t} ${first.est}%${t0 ? `, ${t0.t} API 회사 화면에서 본 숫자 입력으로 ${t0.est}%에 맞춤` : ""}, ${stop.t} ${stop.est}%로 멈춤 문턱 ${trend.stop_percent}% 이상이 되어 보내기 전에 멈춤. 지금 ${now.t} ${now.est}%, 재개 가능 시각 ${last.t}에 ${last.proj}% 예상. 같은 숫자를 아래 표로 볼 수 있습니다.`;
 
   return (
     <Card className="mt-6 gap-0 px-5" aria-labelledby="trend-t" id="trend">
@@ -134,7 +134,7 @@ export function UsageTrendChart({ trend }: { trend: Trend }) {
         </ChartContainer>
       </figure>
       <Collapsible className="mt-2 border-t border-line pt-2">
-        <CollapsibleTrigger className="group inline-flex min-h-8 items-center gap-1.5 text-[13px] font-semibold">
+        <CollapsibleTrigger className="group inline-flex min-h-8 items-center gap-1.5 text-meta font-semibold">
           <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
           표로 보기 — 그래프와 같은 숫자
         </CollapsibleTrigger>

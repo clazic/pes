@@ -50,10 +50,11 @@
 | 0010 | approver 역할은 6단계에서 결정 | [0010-approver-role-stage6.md](0010-approver-role-stage6.md) | 채택 | 2026-11-05 |
 | 0011 | Linear 내보내기 범위는 1단계 UI 결정 11을 유지 | [0011-linear-scope.md](0011-linear-scope.md) | 채택 | 2026-11-05 |
 | 0012 | 방식 B의 Codex CLI·OpenCode TUI 어댑터를 2단계로 앞당김 | [0012-mode-b-codex-opencode-tui-stage2.md](0012-mode-b-codex-opencode-tui-stage2.md) | 채택 | 2026-11-05 |
-| 0013 | 방식 A는 PES가 Go API를 직접 호출, 모델은 사용자가 선택 | [0013-mode-a-go-subscription-and-model-choice.md](0013-mode-a-go-subscription-and-model-choice.md) | 채택 | 2026-11-05 |
+| 0013 | 방식 A는 PES가 Go API를 직접 호출, 모델은 사용자가 선택 | [0013-mode-a-go-subscription-and-model-choice.md](0013-mode-a-go-subscription-and-model-choice.md) | 채택 — 제공사 고정 부분은 0019가 대체 | 2026-11-05 |
 | 0014 | 방식 B에 Codex 앱·OpenCode 앱 추가 | [0014-mode-b-codex-app-opencode-app.md](0014-mode-b-codex-app-opencode-app.md) | 채택 | 2026-11-05 |
 | 0016 | PES 코어는 TypeScript 단일 언어 | [0016-core-language.md](0016-core-language.md) | 채택 — Node 26 확정 | 2026-11-05 |
 | 0017 | 웹 대시보드 화면은 React + Vite + TypeScript + Tailwind CSS + shadcn/ui | [0017-dashboard-react-vite.md](0017-dashboard-react-vite.md) | 채택(사용자 결정) | 2026-11-05 |
 | 0018 | 로컬 D1 호환 smoke는 miniflare 4 안정판을 직접 고정해 돌린다 | [0018-d1-local-smoke.md](0018-d1-local-smoke.md) | 채택 | 2026-11-08 |
+| 0019 | 방식 A의 AI는 사용자가 직접 등록한 AI 연결을 쓴다(0013 일부 대체) | [0019-ai-connection-registration.md](0019-ai-connection-registration.md) | 채택(사용자 결정) | 2026-11-10 |
 
 **0006**은 `docs/plan/spikes/web0-plan.md`가 WEB0 코어 언어 결정 파일(`0006-web-core-language.md`)로 예약했으나, 8차 결정은 **0016-core-language.md**가 맡는다. 0006은 비워 둔다. **0005**는 `stage-5.md`가 가리키는 `0005-web-platform.md` 이름을 맞춘 것이다. 번호는 배정 순서이며 날짜 순서와 다를 수 있다.

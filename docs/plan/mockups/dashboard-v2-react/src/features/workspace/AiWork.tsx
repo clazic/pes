@@ -15,7 +15,7 @@ function Lane({ title, chip, jobs, empty, note, id }: { title: string; chip: Rea
     <section aria-labelledby={id} className="min-w-0 rounded-xl border border-line bg-surface-soft p-2.5">
       <div className="mb-2 flex items-center justify-between gap-1.5">
         <span className="inline-flex items-center gap-1">
-          <h3 id={id} className="text-[13.5px]">
+          <h3 id={id} className="text-meta">
             {title}
           </h3>
           {note ? (
@@ -26,11 +26,11 @@ function Lane({ title, chip, jobs, empty, note, id }: { title: string; chip: Rea
         </span>
         {chip}
       </div>
-      {jobs.length === 0 ? <p className="text-[12.5px] text-muted-foreground">{empty}</p> : null}
+      {jobs.length === 0 ? <p className="text-caption text-muted-foreground">{empty}</p> : null}
       <div className="space-y-2">
         {jobs.map((j) => (
-          <div key={j.title} className="rounded-lg border border-line bg-surface px-2.5 py-2 text-[12.5px]">
-            <p className="text-[13px] font-semibold text-ink">
+          <div key={j.title} className="rounded-lg border border-line bg-surface px-2.5 py-2 text-caption">
+            <p className="text-meta font-semibold text-ink">
               <span className="mr-1.5 text-xs font-medium text-muted-foreground">{j.time}</span>
               {j.title}
             </p>
@@ -88,7 +88,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
           </>
         }
       />
-      <p className="-mt-1 flex flex-wrap items-center gap-1 text-[12.5px] text-muted-foreground">
+      <p className="-mt-1 flex flex-wrap items-center gap-1 text-caption text-muted-foreground">
         <span id={`${id}-cont-why`}>{resumeWhy ?? "계속할 수 있습니다."}</span>
         <InfoTip label="계속 설명">
           <p>누르면 서버가 최신 정책·질문·폼·기한·한도·rev·담당을 다시 검사합니다. “계속 접수됨” 뒤 실행 쪽이 새 담당(claim)을 잡아야 진행입니다.</p>
@@ -96,7 +96,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
         </InfoTip>
       </p>
       {resume.phase === "confirming" ? (
-        <p role="status" className="mt-1.5 text-[13px]">
+        <p role="status" className="mt-1.5 text-meta">
           <Chip shape="ring" tone="run">
             접수 확인 중
           </Chip>{" "}
@@ -104,7 +104,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
         </p>
       ) : null}
       {resume.phase === "unknown" ? (
-        <p role="status" className="mt-1.5 text-[13px]">
+        <p role="status" className="mt-1.5 text-meta">
           <Chip shape="dotring" tone="unk">
             결과 미확인
           </Chip>{" "}
@@ -150,7 +150,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
               </TableBody>
             </Table>
           ) : (
-            <p className="text-[13px] text-ink-2">아직 실행이 없습니다.</p>
+            <p className="text-meta text-ink-2">아직 실행이 없습니다.</p>
           )}
           <div className="mt-3 grid grid-cols-1 gap-2.5 tab:grid-cols-3" aria-label="작업 타임라인">
             <Lane id={`${id}-done`} title="완료" chip={<Chip shape="circle" tone="ok">{ws.runs.lanes.done.length}</Chip>} jobs={ws.runs.lanes.done} empty="아직 없음" />
@@ -171,9 +171,9 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
                 </InfoTip>
               ) : null}
             </div>
-            {ws.asks.length === 0 ? <p className="mt-1.5 text-[13px] text-muted-foreground">없음</p> : null}
+            {ws.asks.length === 0 ? <p className="mt-1.5 text-meta text-muted-foreground">없음</p> : null}
             {ws.asks.map((a) => (
-              <div key={a.number} className="mt-1.5 text-[13px]">
+              <div key={a.number} className="mt-1.5 text-meta">
                 <p>
                   <strong>
                     {a.number} · {a.who}
@@ -203,7 +203,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
                   <p>{ws.local_permission.note}</p>
                 </InfoTip>
               </div>
-              <p className="mt-1.5 text-[13px]">{ws.local_permission.text}</p>
+              <p className="mt-1.5 text-meta">{ws.local_permission.text}</p>
             </section>
           ) : null}
           {ws.control_scope ? (
@@ -216,7 +216,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
                   <p>{ws.control_scope.note}</p>
                 </InfoTip>
               </div>
-              <p className="mt-1.5 text-[13px]">
+              <p className="mt-1.5 text-meta">
                 <StatusFrom s={ws.control_scope.status} /> {ws.control_scope.text}
               </p>
             </section>
@@ -226,7 +226,7 @@ export function AiWork({ ws, id = "ai" }: { ws: WorkspaceView; id?: string }) {
               <h3 id={`${id}-usage`} className="text-sm">
                 API 사용량
               </h3>
-              <p className="mt-1 text-[13px] text-ink-2">정리·재개 준비는 사용량 화면에서 합니다.</p>
+              <p className="mt-1 text-meta text-ink-2">정리·재개 준비는 사용량 화면에서 합니다.</p>
               <Button asChild size="sm" className="mt-2">
                 <Link to="/usage#blocked">사용량 보기</Link>
               </Button>

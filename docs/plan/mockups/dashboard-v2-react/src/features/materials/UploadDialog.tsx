@@ -63,7 +63,7 @@ function Tree({ items, onToggle }: { items: UploadCandidate[]; onToggle: (path: 
     groups.set(dir, [...(groups.get(dir) ?? []), it]);
   }
   return (
-    <ul className="space-y-2 text-[13px]" aria-label="폴더 안 파일">
+    <ul className="space-y-2 text-meta" aria-label="폴더 안 파일">
       {[...groups.entries()].map(([dir, list]) => (
         <li key={dir}>
           <p className="flex items-center gap-1.5 font-semibold text-ink-2">
@@ -270,7 +270,7 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
                 <Tag key={f}>{f}</Tag>
               ))}
             </div>
-            <p className="flex flex-wrap items-center justify-center gap-1 text-[12.5px] text-muted-foreground">
+            <p className="flex flex-wrap items-center justify-center gap-1 text-caption text-muted-foreground">
               상한: 파일당 {UPLOAD_LIMITS.perFileMB}MB · 한 번에 {UPLOAD_LIMITS.perBatchCount}개 · 총 {UPLOAD_LIMITS.perBatchTotalGB}GB(예시값)
               <InfoTip label="올리기 상한 설명">
                 <p>상한은 예시값이며 사용자 결정이 필요합니다. 폴더 안 상대 경로는 보존하고, 내 컴퓨터의 실제 경로는 보내지 않습니다.</p>
@@ -296,13 +296,13 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
               </Callout>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface-soft px-3 py-2">
-              <div className="flex items-center gap-2 text-[13px]">
+              <div className="flex items-center gap-2 text-meta">
                 <Checkbox id="up-hidden" checked={excludeHidden} onCheckedChange={(c) => setExcludeHidden(c === true)} />
                 <Label htmlFor="up-hidden" className="font-medium">
                   숨김·임시 파일 빼기 <span className="font-normal text-muted-foreground">(.DS_Store · ~$… · Thumbs.db)</span>
                 </Label>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+              <div className="flex flex-wrap items-center gap-2 text-meta">
                 <span className="font-semibold">이 폴더 전체 AI 참조</span>
                 <StateSwitch checked={folderAllow} onLabel="허용" offLabel={denyCount === effective.length ? "금지" : `일부 금지 ${denyCount}`} name="이 폴더 전체 AI 참조" onRequest={(next) => setFolderAccess(next ? "allow" : "deny")} />
               </div>
@@ -315,7 +315,7 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
             <ScrollArea className="max-h-[42vh] rounded-lg border border-line p-3">
               <Tree items={items.map((i) => (excludeHidden || i.verdict !== "hidden" ? i : { ...i, verdict: "ok" as const, note: "숨김 파일 — 포함하기로 함" }))} onToggle={toggleOne} />
             </ScrollArea>
-            <p className="flex flex-wrap items-center gap-1 text-[12.5px] text-muted-foreground">
+            <p className="flex flex-wrap items-center gap-1 text-caption text-muted-foreground">
               AI 참조는 기본 허용 · 파일마다 바꿀 수 있음 · 같은 이름은 새 버전으로
               <InfoTip label="AI 참조 · 새 버전 설명" wide>
                 <p>폴더 스위치로 한꺼번에 바꾸고, 파일마다 다시 바꿀 수 있습니다. “금지”로 올리면 처음부터 금지 정책으로 저장해 허용 구간이 생기지 않게 합니다(준비됨 공개와 처음 정책을 같은 tx — Codex F11). 같은 이름이나 같은 내용은 덮어쓰지 않고 새 버전으로 남깁니다.</p>
@@ -327,7 +327,7 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
         {step === "progress" || step === "done" ? (
           <>
             <div>
-              <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-meta">
                 <span className="font-semibold">
                   {root ? `“${root}” ` : ""}준비됨 {done} · 실패 {failedN} · 건너뜀 {skipped}
                 </span>
@@ -336,7 +336,7 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
               <Progress value={overall} aria-label={`전체 진행 ${overall}%`} />
             </div>
             <ScrollArea className="max-h-[42vh] rounded-lg border border-line">
-              <ul className="divide-y divide-line text-[13px]">
+              <ul className="divide-y divide-line text-meta">
                 {items.map((it) => {
                   const p = progress[it.path];
                   if (!p) return null;
@@ -395,7 +395,7 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
           ) : step === "pick" ? (
             <Button onClick={() => onOpenChange(false)}>취소</Button>
           ) : (
-            <span role="status" className="text-[13px] text-muted-foreground">
+            <span role="status" className="text-meta text-muted-foreground">
               올리는 중…
             </span>
           )}

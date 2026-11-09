@@ -12,8 +12,8 @@ import { Chip, StatusMark } from "./status";
  *
  * - 트랙: 왼쪽 끝 = 사람(나), 오른쪽 끝 = AI. 공(동그라미)이 차례인 쪽에 있다. 차례가 바뀌면 공이 부드럽게 옮겨 간다.
  *   기다림(다른 사람·시각)과 끝남은 가운데. 트랙은 눈으로 보는 그림일 뿐이라 aria-hidden — 뜻은 옆 칩의 글자가 전한다.
- * - 칩: 상태 사전(turn)의 모양 + 글자 + 색 그대로(나의 할 일 · AI가 하는 중 · AI가 하는 중 · 소식 없음 · 기다림 · 끝남).
- * - 움직임은 두 가지뿐: (1) AI가 하는 중이고 소식이 시험값 안(fresh)일 때 공 둘레를 도는 점, (2) 나의 할 일로 바뀌는 순간 한 번 퍼지는 고리.
+ * - 칩: 상태 사전(turn)의 모양 + 글자 + 색 그대로(나의 할 일 · AI 작업 중 · AI 작업 중 · 소식 없음 · 기다림 · 끝남).
+ * - 움직임은 두 가지뿐: (1) AI 작업 중이고 소식이 시험값 안(fresh)일 때 공 둘레를 도는 점, (2) 나의 할 일로 바뀌는 순간 한 번 퍼지는 고리.
  *   소식이 오래되면 점이 멈추고 점선 고리 + “마지막 소식 n분 전”(stage-3 2.6 — 답이 없으면 없다고). 번쩍임·반복 깜박임 없음.
  * - 움직임 줄이기(prefers-reduced-motion)에서는 index.css가 움직임을 모두 끈다 — 모양·글자만으로 같은 뜻.
  * - 전환 알림은 화면 읽기 프로그램에 한 곳(TurnAnnouncer, polite)에서만 — 표시기가 여러 개 있어도 겹쳐 읽지 않는다.
@@ -160,14 +160,14 @@ export function TurnTrack({ turn, size = "sm", className }: { turn: TurnView; si
             <span className="absolute top-0 left-1/2 size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary-ink ring-2 ring-card" />
           </span>
         ) : null}
-        {arrived ? <span className="pes-turn-arrive absolute -inset-[3px] rounded-full border-2 border-primary" /> : null}
+        {arrived ? <span className="pes-turn-arrive absolute inset-[-3px] rounded-full border-2 border-primary" /> : null}
       </span>
     </span>
   );
 }
 
 /**
- * 사이드바 배지·좁은 자리용 작은 표시(10px). AI가 하는 중(소식 있음)이면 고리 위를 점이 돈다.
+ * 사이드바 배지·좁은 자리용 작은 표시(10px). AI 작업 중(소식 있음)이면 고리 위를 점이 돈다.
  * 크기는 바깥 span이 정하고 안의 모양은 size-full!로 따른다 — 사이드바 메뉴 단추의 “안의 svg는 모두 16px” 규칙에 커지지 않게.
  */
 export function TurnMark({ turn, className }: { turn: TurnView; className?: string }) {
@@ -192,8 +192,8 @@ export function TurnMark({ turn, className }: { turn: TurnView; className?: stri
 /**
  * 차례 표시기 한 덩어리:
  *   [트랙] [칩(모양+글자 · 나의 할 일이면 수)]
- *   한 줄 — 먼저 할 일(나의 할 일) · 지금 하는 일(AI가 하는 중) · 기다리는 것(기다림)
- *   경과 · 소식 — AI가 하는 중일 때만(“30분째 · 마지막 소식 18분 전”)
+ *   한 줄 — 먼저 할 일(나의 할 일) · 지금 하는 일(AI 작업 중) · 기다리는 것(기다림)
+ *   경과 · 소식 — AI 작업 중일 때만(“30분째 · 마지막 소식 18분 전”)
  *   [바로 가기] — 나의 할 일일 때만(서버가 준 먼저 할 일의 동작)
  * - size sm: 목록 표·카드·휴대폰 · lg: 작업 공간 지금 할 일 띠
  * - detail=false면 한 줄을 빼고(제목이 이미 말할 때) 경과·소식만 남긴다
@@ -223,11 +223,11 @@ export function TurnIndicator({
     <div data-turn={k} className={cn("flex min-w-0 flex-col gap-0.5", align === "end" && "tab:items-end", className)}>
       <div className={cn("mb-0.5 flex flex-wrap items-center gap-x-2 gap-y-1", align === "end" && "tab:justify-end")}>
         <TurnTrack turn={turn} size={size} />
-        <Chip shape={def.shape} tone={def.tone} className={size === "lg" ? "py-0.5 text-[13px]" : undefined}>
+        <Chip shape={def.shape} tone={def.tone} className={size === "lg" ? "py-0.5 text-meta" : undefined}>
           {turnLabel(turn)}
         </Chip>
       </div>
-      {detail && turn.text ? <p className={cn("min-w-0 text-[12.5px] text-ink", right)}>{turn.text}</p> : null}
+      {detail && turn.text ? <p className={cn("min-w-0 text-caption text-ink", right)}>{turn.text}</p> : null}
       {meta ? <p className={cn("min-w-0 text-xs text-muted-foreground tabular-nums", right)}>{meta}</p> : null}
       {action && k === "you" && turn.action ? (
         <Button asChild size="sm" variant="outline" className="mt-1 self-start">

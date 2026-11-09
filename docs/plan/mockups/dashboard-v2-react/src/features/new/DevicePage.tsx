@@ -21,10 +21,10 @@ export function DevicePage() {
       <div className="grid grid-cols-1 gap-3 desk:grid-cols-2">
         <Card className="gap-0 border-2 border-mode-b-line px-4" aria-labelledby="dev-t">
           <Eyebrow>기기 승인 · 10분 안에</Eyebrow>
-          <h2 id="dev-t" className="flex flex-wrap items-center gap-2 text-[17px]">
+          <h2 id="dev-t" className="flex flex-wrap items-center gap-2 text-title">
             이 기기가 프로젝트를 등록하려고 합니다 <Status of="device" value={state} />
           </h2>
-          <p className="my-1 inline-block w-fit rounded-lg border border-line-strong bg-surface-soft px-3 py-1 font-mono text-[22px] font-semibold tracking-[0.12em]" aria-label="코드 K X R M 4 8 2 1">
+          <p className="my-1 inline-block w-fit rounded-lg border border-line-strong bg-surface-soft px-3 py-1 font-mono text-[18px] font-semibold tracking-[0.12em]" aria-label="코드 K X R M 4 8 2 1">
             KXRM-4821
           </p>
           <KV
@@ -60,10 +60,10 @@ export function DevicePage() {
         </Card>
         {/* 다른 상태 견본(시안) — 지금 장면이 아니므로 시안 설명 상자와 함께 숨김 */}
         <Card className="gap-0 px-5" aria-labelledby="dev-states" data-mock="note">
-          <h2 id="dev-states" className="text-[17px]">
+          <h2 id="dev-states" className="text-title">
             다른 상태
           </h2>
-          <ul className="mt-2 space-y-2 text-[13.5px]">
+          <ul className="mt-2 space-y-2 text-meta">
             <li>
               <Status of="device" value="expired" /> 코드 만료 — “내 컴퓨터에서 다시 요청하세요”
             </li>

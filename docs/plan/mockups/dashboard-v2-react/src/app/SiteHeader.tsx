@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useMatch, useNavigate } from "react-router";
-import { BellIcon, SearchIcon } from "lucide-react";
+import { ArrowLeftIcon, BellIcon, BotIcon, FocusIcon, SearchIcon } from "lucide-react";
 import { useNotifications, useRefreshState, useWorkspace } from "@/api/queries";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
 import { Kbd } from "@/components/pes/bits";
 import { Status, StatusFrom } from "@/components/pes/status";
+import { researchPlaceLabel } from "@/features/research/place";
+import { aiSheet, researchUi, useAiSheet, useIsDesk, useResearchUi } from "@/lib/research-ui";
 import { cn } from "@/lib/utils";
 import { MockDock } from "./MockControls";
 import { ThemeMenu } from "./ThemeMenu";
@@ -29,31 +31,35 @@ export function RefreshChip() {
 
 type Crumb = { label: string; to?: string };
 
-const PAGE_NAME: Record<string, string> = {
-  files: "자료",
-  references: "참고 프로젝트",
-  ai: "AI 작업",
-  settings: "설정",
-  editions: "판",
-};
+/**
+ * 브라우저 탭 · 방문 기록의 이름 = 지금 보는 곳(빵부스러기와 같은 계산). 예: “막힌 것·풀 것 · 지역 돌봄 …(가상) · PES”.
+ * 6차 — 모든 화면이 같은 이름이라 탭·뒤로 가기 목록·화면 읽기에서 구별되지 않던 것을 고침(WCAG 2.4.2).
+ */
+function useDocumentTitle(crumbs: Crumb[], inProject: boolean) {
+  const last = crumbs[crumbs.length - 1]?.label ?? "";
+  const project = inProject && crumbs.length > 1 ? crumbs[0].label : "";
+  const title = [last, project, "PES"].filter(Boolean).join(" · ");
+  React.useEffect(() => {
+    document.title = title;
+  }, [title]);
+}
 
-/** 지금 주소 → 빵부스러기(프로젝트 › 작업 공간 › 화면). 작업 공간 이름은 이미 받은 읽기에서. */
+
+/**
+ * 지금 주소 → 빵부스러기. 관리 공간은 “프로젝트 › 화면”, 연구 공간은 “이 연구 › 지금 보는 곳”(관리 화면 이름을 섞지 않음 — 5차).
+ * 이름은 이미 받은 읽기에서.
+ */
 function useCrumbs(): Crumb[] {
-  const { pathname } = useLocation();
+  const { pathname, search, hash } = useLocation();
   const pm = useMatch("/p/:slug/*");
-  const rm = useMatch("/p/:slug/e/:ed/s/:stage/r/:round");
   const ws = useWorkspace(pm?.params.slug ?? "").data;
   if (pm) {
     const slug = pm.params.slug ?? "";
-    const title = ws && ws.slug === slug ? `${ws.title}(가상)` : "작업 공간";
-    const roundPath = ws ? `/p/${ws.slug}/e/${ws.edition}/s/${ws.current.stage}/r/${ws.current.round}` : `/p/${slug}`;
-    const page = pm.params["*"]?.split("/")[0] ?? "";
-    let last = PAGE_NAME[page];
-    if (!last && rm && ws) {
-      const r = rm.params.round;
-      last = r !== ws.current.round ? `보는 중 ${r === "start" ? "단계 시작" : `R${r}`}` : ws.current.label;
-    }
-    return [{ label: "프로젝트", to: "/" }, { label: title, to: roundPath }, { label: last ?? ws?.current.label ?? "" }];
+    if (!ws || ws.slug !== slug) return [{ label: "연구 공간" }];
+    const place = researchPlaceLabel(ws, pathname, search, hash) ?? "연구 개요";
+    const rm = pathname.match(/\/r\/([^/]+)$/);
+    const past = rm && rm[1] !== ws.current.round ? `보는 중 ${rm[1] === "start" ? "단계 시작" : `R${rm[1]}`}` : null;
+    return [{ label: `${ws.title}(가상)`, to: `/p/${slug}` }, { label: past ?? place }];
   }
   const fixed: Record<string, Crumb[]> = {
     "/": [{ label: "프로젝트" }],
@@ -71,18 +77,25 @@ function useCrumbs(): Crumb[] {
   return fixed[pathname] ?? [{ label: "없는 주소" }];
 }
 
+/**
+ * 알림 미리 보기. 연구 공간에서는 그 프로젝트 알림만(방해 줄이기 — 설계 16.5). 다른 프로젝트 알림은 수만 알리고 모든 알림에서 본다.
+ * 알림 문구 자체에는 프로젝트 이름을 싣지 않는다(4.13) — 거르기는 서버가 준 프로젝트 표시로.
+ */
 function NotificationsMenu() {
   const notes = useNotifications();
   const navigate = useNavigate();
-  const list = notes.data ?? [];
+  const slug = useMatch("/p/:slug/*")?.params.slug ?? null;
+  const all = notes.data ?? [];
+  const list = slug ? all.filter((n) => n.slug === slug) : all;
+  const others = slug ? all.filter((n) => n.slug !== slug && n.unread).length : 0;
   const unread = list.filter((n) => n.unread).length;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative" aria-label={`알림 · 안 읽음 ${unread}건`}>
+        <Button variant="ghost" size="icon" className="relative" aria-label={`알림${slug ? "(이 프로젝트)" : ""} · 안 읽음 ${unread}건`}>
           <BellIcon aria-hidden="true" />
           {unread ? (
-            <span aria-hidden="true" className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums">
+            <span aria-hidden="true" className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-caption leading-none font-semibold text-primary-foreground tabular-nums">
               {unread}
             </span>
           ) : null}
@@ -90,9 +103,10 @@ function NotificationsMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="w-80">
         <DropdownMenuLabel className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>알림 · 안 읽음 {unread}</span>
+          <span>{slug ? "이 프로젝트 알림만" : "알림"} · 안 읽음 {unread}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {list.length === 0 ? <p className="text-xs text-muted-foreground p-2">이 프로젝트의 알림이 없습니다.</p> : null}
         {list.slice(0, 4).map((n) => (
           <DropdownMenuItem key={n.id} onSelect={() => navigate(n.href)} className="items-start gap-2 py-2">
             <span aria-hidden="true" className={cn("mt-1.5 size-2 shrink-0 rounded-full", n.unread ? "bg-primary" : "border border-control")} />
@@ -113,8 +127,9 @@ function NotificationsMenu() {
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
+        {slug && others ? <p className="px-2 pb-1 text-xs text-muted-foreground">다른 프로젝트 안 읽음 {others}건 — 모든 알림에서</p> : null}
         <DropdownMenuItem onSelect={() => navigate("/notifications")} className="justify-center font-medium">
-          알림 모두 보기
+          알림 모두 보기{slug ? "(관리 공간)" : ""}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -125,9 +140,51 @@ function NotificationsMenu() {
  * 머리줄 — shadcn-admin 레이아웃의 머리줄 구조를 참고해 새로 썼다(코드는 가져오지 않음, MIT 저장소).
  * 왼쪽: 사이드바 접기 · 빵부스러기 / 오른쪽: 검색(명령 메뉴 Ctrl/Cmd+K) · 갱신 칩(작업 공간 밖) · 알림 · 테마 · 사용자.
  */
+/** 집중 모드 단추(연구 공간) — 사이드 칸 둘을 접고 가운데만. Esc로 끝낸다. 좁은 화면(900px 미만)에는 두지 않는다. */
+function FocusToggle() {
+  const ui = useResearchUi();
+  return (
+    <Button
+      variant={ui.focus ? "default" : "ghost"}
+      size="sm"
+      aria-pressed={ui.focus}
+      aria-keyshortcuts="Escape"
+      onClick={() => researchUi.set({ focus: !ui.focus })}
+      className="hidden h-9 gap-1.5 px-2.5 tab:inline-flex"
+    >
+      <FocusIcon aria-hidden="true" />
+      <span className="hidden desk:inline">집중 모드</span>
+      <span className="sr-only desk:hidden">집중 모드</span>
+    </Button>
+  );
+}
+
+/** AI 동료 단추 — 넓은 화면은 오른쪽 칸 보이기/숨기기, 좁은 화면은 오른쪽 판 열기 */
+function AiPartnerToggle() {
+  const ui = useResearchUi();
+  const desk = useIsDesk();
+  const sheet = useAiSheet();
+  if (desk) {
+    const on = ui.aiPanel && !ui.focus;
+    return (
+      <Button variant="ghost" size="sm" aria-pressed={on} onClick={() => researchUi.set(ui.focus ? { focus: false, aiPanel: true } : { aiPanel: !ui.aiPanel })} className="h-9 gap-1.5 px-2.5">
+        <BotIcon aria-hidden="true" />
+        <span className="hidden wide:inline">AI 동료</span>
+        <span className="sr-only wide:hidden">AI 동료</span>
+      </Button>
+    );
+  }
+  return (
+    <Button variant="ghost" size="icon" aria-haspopup="dialog" aria-expanded={sheet.open} aria-label="AI 동료 열기" onClick={() => aiSheet.set({ open: true })}>
+      <BotIcon aria-hidden="true" />
+    </Button>
+  );
+}
+
 export function SiteHeader({ onSearch }: { onSearch: () => void }) {
   const crumbs = useCrumbs();
   const inProject = useLocation().pathname.startsWith("/p/");
+  useDocumentTitle(crumbs, inProject);
   return (
     <header
       aria-label="PES 전역 머리줄"
@@ -135,7 +192,14 @@ export function SiteHeader({ onSearch }: { onSearch: () => void }) {
     >
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-auto" />
-      <Breadcrumb aria-label="현재 위치" className="min-w-0 flex-1">
+      {/* 연구 공간 · 좁은 화면: 사이드바가 판으로 숨으므로 “모든 프로젝트”를 머리줄 왼쪽에 하나 둔다(설계 16.2) */}
+      {inProject ? (
+        <Link to="/" className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md px-1.5 text-meta font-medium text-muted-foreground no-underline hover:bg-accent hover:text-foreground tab:hidden" aria-label="모든 프로젝트로 — 관리 공간">
+          <ArrowLeftIcon className="size-4" aria-hidden="true" />
+          <span className="max-[370px]:sr-only">모든 프로젝트</span>
+        </Link>
+      ) : null}
+      <Breadcrumb aria-label="현재 위치" className={cn("min-w-0 flex-1", inProject && "max-tab:invisible max-tab:w-0")}>
         <BreadcrumbList className="flex-nowrap gap-1.5 tab:gap-2">
           {crumbs.map((c, i) => {
             const last = i === crumbs.length - 1;
@@ -171,8 +235,13 @@ export function SiteHeader({ onSearch }: { onSearch: () => void }) {
             <Kbd>K</Kbd>
           </span>
         </Button>
-        {/* 작업 공간 안에서는 프로젝트 머리에 갱신 칩이 있다(설계 3.2) */}
-        {inProject ? null : (
+        {/* 작업 공간 안에서는 프로젝트 머리에 갱신 칩이 있다(설계 3.2). 연구 공간: 집중 모드 · AI 동료(5차) */}
+        {inProject ? (
+          <>
+            <FocusToggle />
+            <AiPartnerToggle />
+          </>
+        ) : (
           <span className="hidden desk:inline-flex">
             <RefreshChip />
           </span>

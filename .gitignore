@@ -29,3 +29,6 @@ secrets*.json
 
 # 큰 대화 기록(로컬에만 보관)
 docs/archive/**/*.jsonl
+
+# impeccable 디자인 평가 기록(도구가 로컬에 쌓는 것, 2026-11-10)
+.impeccable/

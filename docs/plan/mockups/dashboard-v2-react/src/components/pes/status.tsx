@@ -14,7 +14,7 @@ export function StatusMark({ shape, className }: { shape: Shape; className?: str
       height="10"
       aria-hidden="true"
       focusable="false"
-      className={cn("inline-block shrink-0 [forced-color-adjust:auto]", className)}
+      className={cn("inline-block shrink-0 forced-color-adjust-auto", className)}
       fill="currentColor"
     >
       {shape === "circle" && <circle cx="5" cy="5" r="4.5" />}

@@ -108,7 +108,7 @@ export const COMMANDS = {
   "ai_connection.models.refresh": { method: "POST", path: "(미정)", owner: "PR19", status: "미정", humanOnly: true },
   "ai_connection.key.replace": { method: "POST", path: "(미정)", owner: "PR19 · WEB4", status: "미정", humanOnly: true },
   "ai_connection.limits.set": { method: "POST", path: "(미정)", owner: "PR19 · WEB7", status: "미정", humanOnly: true, note: "멈춤 문턱(구독형) · 비용 상한(쓴 만큼 과금, 필수)" },
-  "usage.extra_usage.confirm": { method: "POST", path: "(미정)", owner: "PR19 · WEB7", status: "미정", humanOnly: true, note: "추가 요금(Extra Usage) 꺼짐 확인 기록 — 저장 자리 미정(G1)" },
+  "usage.extra_usage.confirm": { method: "POST", path: "(미정)", owner: "PR19 · WEB7", status: "미정", humanOnly: true, note: "추가 요금 꺼짐 확인 기록 — 저장 자리 미정(G1)" },
   "usage.baseline.set": { method: "POST", path: "(미정)", owner: "PR19", status: "미정", humanOnly: true, note: "다른 앱 사용량 기준점(G2)" },
   "dispatch.settle": { method: "POST", path: "(미정)", owner: "PR19 · WEB7", status: "미정", humanOnly: true, note: "확인 안 된 호출 정리(outbound_dispatches unknown)" },
   reference_attach: { method: "POST", path: "(REF1)", owner: "REF1", status: "계획", humanOnly: true },
@@ -122,6 +122,9 @@ export const COMMANDS = {
   "sync.link.revoke": { method: "DELETE", path: "P/sync-links/{l}", owner: "WEB15", status: "계획" },
   "sync.pause": { method: "POST", path: "(미정)", owner: "WEB15", status: "미정", note: "동기화 일시 중지(sync_links.status='paused')" },
   "sync.conflict.resolve": { method: "POST", path: "P/sync-links/{l}/conflicts/{c}/resolve", owner: "WEB15", status: "계획", humanOnly: true },
+  // 5차(2026-11-08): 연구 공간 — 막힌 것·풀 것 보드 · AI 동료(설계 16절)
+  "problem.resolve": { method: "POST", path: "(미정)", owner: "U3 · U4 · U5 · (새) 막힌 것 보드", status: "미정", note: "막힌 것 하나에 고른 선택지 하나 — 그 종류의 업무 처리(글 수정 제안 · 결정·가정 기록 · 사람→AI 질문 · 실행 넘기기/취소 · 자료 정리)와 해결 기록을 한 tx로. 선택지는 서버가 문제 종류별 닫힌 목록으로 검사(설계 16.4)" },
+  "decision.record": { method: "POST", path: "P/assumptions · P/decisions", owner: "U3", status: "계획", note: "AI가 남긴 가정·결정 제안을 사람이 받아들이거나 버림 — 판단자 · 근거 버전 기록" },
 } as const satisfies Record<string, CommandSpec>;
 
 export type PesCommand = keyof typeof COMMANDS;
@@ -130,7 +133,7 @@ export type PesCommand = keyof typeof COMMANDS;
 export const READS = {
   capabilities: { method: "GET", path: "/api/v1/capabilities", owner: "PR13 · PR14", status: "계획" },
   "projects.list": { method: "GET", path: "(미정)", owner: "PR14 · WEB1", status: "미정", note: "공개 JSON 목록 경로가 2단계 닫힌 목록에 없음(G24)" },
-  workspace: { method: "GET", path: "P/workspace", owner: "U1", status: "계획", note: "지금 할 일은 서버가 계산(G22)" },
+  workspace: { method: "GET", path: "P/workspace", owner: "U1", status: "계획", note: "지금 할 일은 서버가 계산(G22). 5차: 연구 개요(연구 질문·핵심 발견) · 막힌 것·풀 것 · 지금 할 일 순서 · AI 제안도 같은 읽기 묶음(설계 16.6)" },
   changes: { method: "GET", path: "P/changes?cursor=", owner: "PR14", status: "계획" },
   "files.list": { method: "GET", path: "(MAT1)", owner: "MAT1", status: "계획" },
   "usage.summary": { method: "GET", path: "(미정)", owner: "PR19 · WEB7 · WEB12", status: "미정" },
@@ -203,6 +206,10 @@ export type StatusDomain =
   | "device"
   | "turn"
   | "check"
+  | "problem"
+  | "problemState"
+  | "claim"
+  | "proposal"
   | "generic";
 
 /* ───────────── AI 연결 (사용자 결정 2026-11-05: 수동 등록, 특정 서비스 비의존 — 0013 일부 변경 필요) ───────────── */
@@ -214,8 +221,8 @@ export type BillingType = "subscription" | "metered";
 
 /**
  * 구독형 연결의 구간 하나(5시간·주간·월간).
- * 추정 = 콘솔 기준값(t0에 사람이 콘솔에서 본 계정 전체 사용률) + t0 이후 PES가 센 증분 + 아직 정산 안 된 예약.
- * t0 이전 PES 사용은 콘솔 값에 이미 들어 있으므로 다시 더하지 않는다(중복 집계 없음 — Codex F03).
+ * 추정 = API 회사 화면에서 본 숫자(확인한 시각에 사람이 API 회사 화면에서 본 계정 전체 사용률) + 확인한 시각 이후 PES가 센 증분 + 아직 정산 안 된 예약.
+ * 확인한 시각 이전 PES 사용은 그 숫자에 이미 들어 있으므로 다시 더하지 않는다(중복 집계 없음 — Codex F03).
  */
 export interface UsageWindow {
   key: "h5" | "week" | "month";
@@ -255,7 +262,7 @@ export interface AiConnection {
     stop_percent: number;
     windows: UsageWindow[];
     extra_usage: { applicable: boolean; state: "confirmed" | "expiring" | "expired" | "none" | "billing"; last: string | null; by: string | null; valid_until: string | null };
-    /** 콘솔 기준값(t0). 0은 그 구간에서 콘솔이 0을 보여 준 경우에만. “다른 앱 안 씀”은 t0 이후에 대한 선언일 뿐 과거 0의 증거가 아님 */
+    /** API 회사 화면에서 본 숫자. 0은 그 구간에서 API 회사 화면이 0을 보여 준 경우에만. “다른 앱 안 씀”은 확인한 시각 이후에 대한 선언일 뿐 과거 0의 증거가 아님 */
     baseline: { state: "entered" | "stale" | "none" | "not_used"; t0: string | null; h5: number | null; week: number | null; month: number | null; no_other_use_after_t0: boolean };
   };
   /** 쓴 만큼 과금 — 비용 상한 필수(없으면 실행을 시작하지 않음) */
@@ -275,7 +282,7 @@ export type StageView = "approved" | "current_you" | "current_ai" | "current_blo
  * 차례 — 지금 누가 움직일 차례인가(설계 1.3 · 3.3 · 15절, 4차 사용자 결정 2026-11-05).
  * 서버 읽기 묶음이 사람·권한별로 계산해 싣는다(화면이 추측하지 않음 — Codex F08). 목록·작업 공간·사이드바·휴대폰이 같은 값을 쓴다.
  * - you: 나의 할 일 — 지금 이 사람이 할 수 있는 일이 있음(지금 할 일 1~5순위)
- * - ai: AI가 하는 중 — 실행이 담당을 잡고 진행(6순위). 움직임은 fresh(관측 근거가 시험값 안)일 때만(15.3)
+ * - ai: AI 작업 중 — 실행이 담당을 잡고 진행(6순위). 움직임은 fresh(관측 근거가 시험값 안)일 때만(15.3)
  * - waiting: 기다림 — 다른 사람(소유자·API 연결 관리자)이나 시각을 기다림, 내 할 일 아님
  * - done: 끝남 — 판 완료 · 누구의 할 일도 없음
  */
@@ -312,6 +319,8 @@ export interface ProjectCard {
   href: string;
   /** 서버가 읽을 때 계산해 싣는다(시안은 목 클라이언트가 붙임) */
   turn?: TurnView;
+  /** 막힌 것·풀 것 중 아직 열린 수(나의 할 일 · AI 작업 중 · 기다림 모두) — 연구 공간 보드와 같은 계산(5차) */
+  problems_open?: number;
 }
 
 export interface TurnItem {
@@ -327,13 +336,17 @@ export interface TurnItem {
   text: string;
   since: string;
   action: { label: string; href: string; primary?: boolean };
+  /** 연구 공간 “지금 할 일” 순서에서 이 일이 여는 단계(answer · review · sync · refs · resume · blocked · approve · p-<문제>) — 서버가 준다(5차) */
+  step?: string;
+  /** 같은 순위 안 순서(서버: 기한 → 오래된 것) */
+  order?: number;
 }
 
 export interface ProjectsView {
   scene_time: string;
   /** 나의 할 일 — 지금 이 사람이 할 수 있는 일만(서버가 사람·권한별로 계산 — Codex F08). 휴대폰도 같은 순서 */
   turns: TurnItem[];
-  /** 기다리기만 할 수 있는 막힘·다른 사람 차례 — 순위 밖 정보(AI가 하는 중인 프로젝트는 각 카드의 turn이 말함) */
+  /** 기다리기만 할 수 있는 막힘·다른 사람 차례 — 순위 밖 정보(AI 작업 중인 프로젝트는 각 카드의 turn이 말함) */
   waiting: { slug: string; project_title: string; text: string; who: string }[];
   active: ProjectCard[];
   archived_count: number;
@@ -380,6 +393,8 @@ export interface QuestionView {
   default_option?: string;
   allow_comment_as_answer: boolean;
   sent?: { answer: string; by: string; at: string; receipt_no: string };
+  /** 보류(빼기의 한 갈래 — 지우지 않음, 새 폼 버전). 보류한 질문은 답할 질문·필수 수에서 빠진다 */
+  deferred?: { by: string; at: string };
 }
 
 export interface ReflectionRow {
@@ -399,6 +414,8 @@ export interface ResultParagraph {
   text: string;
   highlighted?: boolean;
   cites: Citation[];
+  /** 글 수정 제안(채택 전) — 결과 글은 아직 그대로이고, 채택하면 다음 버전이 된다(U4). 막힌 것을 “고쳐 쓰기”로 풀었을 때 */
+  pending_edit?: string;
 }
 
 export interface RunRow {
@@ -485,6 +502,151 @@ export interface WorkspaceView {
   conflict?: { item: string; pc: string[]; web: string[] };
   /** 차례(15절) — 서버가 목록과 같은 계산으로 싣는다(시안은 목 클라이언트가 읽을 때 붙임) */
   turn?: TurnView;
+
+  /* ── 5차(2026-11-08): 연구 공간(설계 16절) — 같은 읽기 묶음에 실린다. 서버가 계산하고 화면은 그린다 ── */
+  /** 연구 개요: 연구 질문 · 범위 · 핵심 발견 · 다음 마일스톤 */
+  brief: ResearchBrief;
+  /** 막힌 것·풀 것 — 아직 안 풀린 것만(나의 할 일 · AI 작업 중 · 기다림). 해결된 것은 problem_log */
+  problems: ProblemView[];
+  /** 해결 기록(지우지 않음, 최근 것부터) */
+  problem_log: ProblemRecord[];
+  /** AI가 남긴 가정·결정 제안(U3) */
+  proposals: ProposalView[];
+  /** 지난 단계 결과 요약(승인본) — 단계 길에서 다시 보기 */
+  stage_summaries: Partial<Record<StageKey, StageSummary>>;
+  /** 지금 할 일 순서 — 나의 할 일 목록(사람·권한별)에서 이 프로젝트 항목을 단계로 묶은 것 + 다음 마일스톤 */
+  tasks: TaskStep[];
+}
+
+/** 정적 목 자료(작업 공간 읽기의 바탕). 연구 공간 칸은 목 클라이언트가 읽을 때 계산해 붙인다(실제로는 서버). */
+export type WorkspaceCore = Omit<WorkspaceView, "brief" | "problems" | "problem_log" | "proposals" | "stage_summaries" | "tasks">;
+
+/* ───────────── 연구 공간 (5차 — 설계 16절) ───────────── */
+
+/**
+ * 막힌 것·풀 것의 종류. 연구 내용(content) 셋 + 진행(progress) 넷.
+ * 화면 글자·모양은 상태 사전(problem)이 정한다.
+ */
+export type ProblemKind =
+  | "weak_evidence" // 근거 부족한 주장
+  | "conflict_data" // 서로 어긋나는 자료
+  | "verify_failed" // 검증 실패 — 출처가 주장을 뒷받침하지 않음
+  | "required_question" // 답 안 한 필수 질문
+  | "run_stopped" // AI 실행 멈춤(사용량 · 연결 끊김)
+  | "sync_conflict" // 동기화 충돌
+  | "extract_failed"; // 글자 뽑기 실패한 자료
+
+export const PROBLEM_GROUP: Record<ProblemKind, "content" | "progress"> = {
+  weak_evidence: "content",
+  conflict_data: "content",
+  verify_failed: "content",
+  required_question: "progress",
+  run_stopped: "progress",
+  sync_conflict: "progress",
+  extract_failed: "progress",
+};
+
+/** 선택지 하나 — 원인 한 줄 → 선택지 2~3개(추천 표시) → 한 번에 처리(설계 16.4) */
+export interface ProblemOption {
+  id: string;
+  /** 동사로 끝나는 짧은 말(단추 글자로도 씀) */
+  label: string;
+  /** 고르면 무엇이 바뀌는지 한 줄 */
+  effect: string;
+  recommended?: boolean;
+  /** 추천 이유(ⓘ) — 추천은 제안일 뿐 미리 고르지 않는다 */
+  why?: string;
+  /** 이 선택이 쓰는 닫힌 명령 하나 */
+  via: PesCommand;
+  /** 이 화면에서 처리하지 않고 그 자리로 가는 선택(예: 질문으로 가서 답하기) */
+  go?: string;
+  /** 처리 전에 더 받을 것: 메모(필수) · 확인 안 된 호출 정리(근거·이유 — 정리 대화 상자) */
+  needs?: "note" | "settle";
+  owner_only?: boolean;
+  /** 고르면 그 일이 AI에게 넘어감(문제 상태 → AI 작업 중) */
+  to_ai?: boolean;
+}
+
+export interface ProblemView {
+  id: string;
+  kind: ProblemKind;
+  /** 나의 할 일(사람이 고를 차례) · AI 작업 중(사람이 맡김) · 기다림(다른 사람·시각) — 해결됨은 기록으로 옮겨 감 */
+  state: "open" | "ai" | "waiting";
+  title: string;
+  /** 원인 한 줄 */
+  cause: string;
+  /** 관련 위치로 바로 가기(문단 · 자료 · 질문 · 실행) */
+  where: { label: string; href: string };
+  /** 결과 글 문단(0부터) — 그 문단에 표시가 붙는다 */
+  paragraph?: number;
+  /** 문단 안 문제 부분(밑줄) */
+  quote?: string;
+  options: ProblemOption[];
+  /** 누가·언제 찾았나(“AI 점검 · 조사 R2 · 14:05”) */
+  found: string;
+  /** 무엇을 막는가(“단계 승인” · “다음 실행”) */
+  blocks: string[];
+  /** 상태 보충(“AI에게 맡김 15:02 — 내 컴퓨터 AI가 받아야 시작”) */
+  note?: string;
+}
+
+export interface ProblemRecord {
+  id: string;
+  kind: ProblemKind;
+  title: string;
+  /** 고른 것 */
+  choice: string;
+  /** 고른 선택지 id(그 문제 종류의 닫힌 목록 안) */
+  option?: string;
+  by: string;
+  at: string;
+  receipt_no: string;
+  note?: string;
+}
+
+export interface ResearchBrief {
+  /** 연구 질문 */
+  question: string;
+  /** 범위 한 줄 */
+  scope: string;
+  /** 핵심 발견 3~5개(없으면 빈 목록 — 0으로 채우지 않음). problem_id가 있으면 그 문제 상태로 근거 칩을 계산 */
+  findings: { id: string; text: string; basis: StatusRef; where: string; href: string; problem_id?: string }[];
+  /** 다음 마일스톤 — 남은 것은 승인 준비 이유 + 막는 문제로 화면이 센다 */
+  milestone: { title: string; note: string };
+}
+
+export interface StageSummary {
+  /** 승인(누가 · 언제) */
+  approved: string;
+  /** 대표 결과물 */
+  result: string;
+  points: string[];
+  href: string;
+}
+
+export interface ProposalView {
+  id: string;
+  kind: "assumption" | "decision";
+  text: string;
+  basis: string;
+  by: string;
+  at: string;
+  state: StatusRef;
+}
+
+/**
+ * 지금 할 일 순서의 한 단계(설계 16.3). id가 주소의 ?t= 값이다.
+ * counted=true는 나의 할 일 항목(목록 표 · 사이드바 수와 같은 셈), false는 읽기·마일스톤처럼 세지 않는 단계.
+ */
+export interface TaskStep {
+  id: string;
+  kind: "answer" | "review" | "problem" | "sync" | "refs" | "resume" | "blocked" | "approve" | "wait";
+  problem_id?: string;
+  title: string;
+  /** 순서 줄에 쓰는 짧은 말(“질문 2”) */
+  short: string;
+  counted: boolean;
+  status: StatusRef;
 }
 
 /* ───────────── 자료 (MAT1 + 폴더째 올리기) ───────────── */
@@ -554,7 +716,7 @@ export interface UsageView {
   ops: { resource: string; used: string; limit: string; percent: number | null; status: StatusRef }[];
   /**
    * 사용량 추이(시안 2차, 차트 하나) — 연결 하나의 5시간 구간 추정 사용률을 시각별로.
-   * est = 그 시각의 추정(콘솔 기준값 t0 + t0 이후 PES 증분 + 예약), proj = 재개 가능 시각까지의 예상(PES 추정).
+   * est = 그 시각의 추정(API 회사 화면에서 본 숫자 t0 + 확인한 시각 이후 PES 증분 + 예약), proj = 재개 가능 시각까지의 예상(PES 추정).
    * 읽기 경로는 사용량 요약(PR19/WEB7/WEB12)에 붙인다고 가정 — 새 쓰기 없음.
    */
   trend: { connection: string; window: UsageWindow["key"]; stop_percent: number; points: { t: string; est?: number; proj?: number; note?: string }[] };
@@ -576,6 +738,8 @@ export interface NotificationItem {
   delivery: StatusRef;
   href: string;
   unread: boolean;
+  /** 어느 프로젝트의 알림인가 — 화면 글자에는 싣지 않고, 연구 공간의 “이 프로젝트 알림만” 거르기에만 쓴다(5차) */
+  slug?: string;
 }
 
 /* ───────────── 변경 알림 (WEB1 · 설계 3.5) ───────────── */

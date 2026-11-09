@@ -26,7 +26,7 @@ export const SHAPES: { shape: Shape; tone: Tone; name: string; meaning: string }
   { shape: "circle", tone: "ok", name: "채운 원", meaning: "됨 · 켜짐 · 맞춤 · 허용" },
   { shape: "ring", tone: "run", name: "고리", meaning: "진행 중 · 기다리는 중(시스템)" },
   { shape: "diamond", tone: "you", name: "마름모", meaning: "사람 차례 · 나의 할 일" },
-  { shape: "tri", tone: "warn", name: "세모", meaning: "주의 · 부분 · 새 버전 · 다시 확인 필요" },
+  { shape: "tri", tone: "warn", name: "세모", meaning: "주의 · 부분 · 새 버전 · 확인 필요" },
   { shape: "square", tone: "bad", name: "채운 네모", meaning: "막힘 · 실패 · 충돌 · 차단" },
   { shape: "hsquare", tone: "off", name: "빈 네모", meaning: "꺼짐 · 금지 · 보관 · 원본 없음 · 권한 없음" },
   { shape: "dotring", tone: "unk", name: "점선 고리", meaning: "미상 · 확인 안 됨" },
@@ -46,7 +46,7 @@ export const DOMAIN_LABEL: Record<StatusDomain, string> = {
   transfer: "AI가 읽기 칩",
   meter: "API 사용량 계기",
   resetBasis: "재개 가능 시각",
-  extraUsage: "추가 요금(Extra Usage) 꺼짐 확인",
+  extraUsage: "추가 요금 꺼짐 확인",
   baseline: "다른 앱 사용량(기준점)",
   costCap: "비용 상한(쓴 만큼 과금)",
   connTest: "AI 연결 시험",
@@ -64,6 +64,10 @@ export const DOMAIN_LABEL: Record<StatusDomain, string> = {
   device: "기기 승인",
   turn: "차례 · 나의 할 일",
   check: "준비 검사",
+  problem: "막힌 것·풀 것 — 종류",
+  problemState: "막힌 것·풀 것 — 상태",
+  claim: "핵심 발견 — 근거",
+  proposal: "AI 제안(가정·결정)",
   generic: "공통",
 };
 
@@ -145,15 +149,15 @@ export const STATUS: Record<StatusDomain, Record<string, StatusDef>> = {
   extraUsage: {
     confirmed: d("확인됨", "circle", "ok", "유효 기간 안"),
     expiring: d("곧 만료", "tri", "warn", "하루 안에 끝남 · 알림"),
-    expired: d("만료", "square", "bad", "방식 A를 시작하지 않음", "콘솔 확인 후 기록"),
-    none: d("기록 없음", "square", "bad", "방식 A를 시작하지 않음", "콘솔 확인 후 기록"),
-    billing: d("과금 표시 감지", "square", "bad", "응답에 과금 표시 → 즉시 멈춤", "콘솔 확인"),
+    expired: d("만료", "square", "bad", "방식 A를 시작하지 않음", "API 회사 화면 확인 후 기록"),
+    none: d("기록 없음", "square", "bad", "방식 A를 시작하지 않음", "API 회사 화면 확인 후 기록"),
+    billing: d("과금 표시 감지", "square", "bad", "응답에 과금 표시 → 즉시 멈춤", "API 회사 화면 확인"),
   },
   baseline: {
-    entered: d("콘솔 기준값 입력됨", "circle", "ok", "t0에 콘솔에서 본 계정 전체 사용률 · 그 뒤 PES 증분만 더함"),
+    entered: d("API 회사 화면에서 본 숫자 입력됨", "circle", "ok", "확인한 시각에 API 회사 화면에서 본 계정 전체 사용률 · 그 뒤 PES 증분만 더함"),
     stale: d("기준값 오래됨", "tri", "warn", "유효 기간이 지나 다시 적어야 함", "다시 적기"),
     none: d("기준값 없음", "square", "bad", "비어 있으면 방식 A를 시작하지 않음(0으로 두지 않음)", "적기"),
-    not_used: d("t0 이후 다른 앱 안 씀(선언)", "circle", "ok", "t0 이후에 대한 선언 · 과거 사용의 0 증거가 아님"),
+    not_used: d("확인한 시각 이후 다른 앱 안 씀(선언)", "circle", "ok", "확인한 시각 이후에 대한 선언 · 과거 사용의 0 증거가 아님"),
   },
   costCap: {
     set: d("비용 상한 있음", "circle", "ok", "쓴 만큼 과금 연결의 월 상한"),
@@ -227,13 +231,13 @@ export const STATUS: Record<StatusDomain, Record<string, StatusDef>> = {
     failed: d("보내지 못함", "square", "bad", "끊김 · 자동 재전송 없음", "다시 보내기"),
   },
   stage: {
-    pending: d("아직", "dash", "off", "stages.status = pending"),
+    pending: d("시작 전", "dash", "off", "stages.status = pending"),
     asking: d("시작 질문 중", "diamond", "you", "asking"),
     current_you: d("현재 · 나의 할 일", "diamond", "you", "active + 사람 차례"),
-    current_ai: d("현재 · AI가 하는 중", "ring", "run", "active + AI 쪽 차례(실행이 담당을 잡음)"),
+    current_ai: d("현재 · AI 작업 중", "ring", "run", "active + AI 쪽 차례(실행이 담당을 잡음)"),
     current_blocked: d("현재 · 막힘", "square", "bad", "active + 사용량 멈춤 등"),
     approved: d("승인됨", "circle", "ok", "approved"),
-    stale: d("앞 단계 변경 — 다시 확인", "tri", "warn", "앞 단계 다시 열기(stale)", "다시 보기"),
+    stale: d("앞 단계 변경 — 확인 필요", "tri", "warn", "앞 단계 다시 열기(stale)", "다시 보기"),
   },
   reflection: {
     applied: d("적용", "circle", "ok", "결과 버전·적용된 후속의 증거"),
@@ -263,8 +267,8 @@ export const STATUS: Record<StatusDomain, Record<string, StatusDef>> = {
   // 아래 여섯이 나의 할 일의 종류(지금 할 일 순위 3.3). 옛 이름은 화면에 쓰지 않는다(설계 13.1 대응표).
   turn: {
     you: d("나의 할 일", "diamond", "you", "지금 이 사람이 할 수 있는 일이 있음(지금 할 일 1~5순위) — 서버가 사람·권한별로 셈", "바로 가기"),
-    ai: d("AI가 하는 중", "ring", "run", "6순위 · 실행이 담당을 잡고 진행 + 진행 소식이 시험값 안(A: 실행기 사건 · B: 도우미·AI 도구 보고) — 이때만 움직임", "진행 보기"),
-    ai_quiet: d("AI가 하는 중 · 소식 없음", "dotring", "unk", "담당은 유효하지만 마지막 소식이 시험값을 넘음 — 움직이지 않음, 멈췄다고 단정하지 않음(F09 · stage-3 2.6)", "마지막 소식 보기"),
+    ai: d("AI 작업 중", "ring", "run", "6순위 · 실행이 담당을 잡고 진행 + 진행 소식이 시험값 안(A: 실행기 사건 · B: 도우미·AI 도구 보고) — 이때만 움직임", "진행 보기"),
+    ai_quiet: d("AI 작업 중 · 소식 없음", "dotring", "unk", "담당은 유효하지만 마지막 소식이 시험값을 넘음 — 움직이지 않음, 멈췄다고 단정하지 않음(F09 · stage-3 2.6)", "마지막 소식 보기"),
     waiting: d("기다림", "pause", "off", "다른 사람(소유자·API 연결 관리자)이나 시각(재개 가능 시각)을 기다림 — 내 할 일 아님(F08)"),
     done: d("끝남", "circle", "ok", "판 완료 · 누구의 할 일도 없음"),
     blocked: d("막힘", "square", "bad", "1순위"),
@@ -273,6 +277,39 @@ export const STATUS: Record<StatusDomain, Record<string, StatusDef>> = {
     approve: d("승인 대기", "diamond", "you", "3순위"),
     resume: d("계속", "diamond", "you", "4순위"),
     check: d("확인", "tri", "warn", "5순위"),
+    problem: d("풀 것", "tri", "warn", "5순위 · 막힌 것·풀 것 — 연구 내용 문제(근거 부족·자료 어긋남·검증 실패)를 사람이 고름(5차)"),
+  },
+  // 막힌 것·풀 것(설계 16.4, 5차 2026-11-08): 종류 일곱. 연구 내용 셋 + 진행 넷. 상태는 아래 problemState(차례와 같은 말).
+  problem: {
+    weak_evidence: d("근거 부족", "tri", "warn", "주장에 붙은 출처·자료가 없거나 모자람 — AI 점검·사람 첨언", "근거 찾기 · 낮추기 · 빼기"),
+    conflict_data: d("자료 어긋남", "square", "bad", "같은 값을 두 자료가 다르게 말함", "기준 정하기"),
+    verify_failed: d("검증 실패", "square", "bad", "출처 원문이 주장을 뒷받침하지 않음(일부만 포함) — 출처 대조", "좁히기 · 다른 출처"),
+    required_question: d("필수 질문 미응답", "tri", "warn", "필수 질문에 답이 없음 → AI가 다음 일을 정하지 못함", "답하기 · 보류"),
+    run_stopped: d("AI 실행 멈춤", "square", "bad", "사용량 문턱·비용 상한·연결 끊김으로 멈춤(blocked_usage 등)", "정리 · 넘기기"),
+    sync_conflict: d("동기화 충돌", "square", "bad", "같은 파일이 양쪽에서 바뀜(sync_items.state = conflict)", "고르기"),
+    extract_failed: d("글자 뽑기 실패", "square", "bad", "손상·암호 등으로 AI가 읽을 글자가 없음(file_extractions.status = failed)", "다시 올리기 · 없이 진행"),
+  },
+  problemState: {
+    open: d("나의 할 일", "diamond", "you", "사람이 고를 차례 — 나의 할 일 수에 들어감"),
+    ai: d("AI 작업 중", "ring", "run", "사람이 AI에게 맡김 · 결과는 다음 라운드 결과 글에 — 움직이는 표시 없음"),
+    waiting: d("기다림", "pause", "off", "다른 사람이나 시각(재개 가능 시각)을 기다림 — 내 할 일 아님"),
+    resolved: d("해결됨", "circle", "ok", "고른 것 · 누가 · 언제 · 접수 번호가 해결 기록에 남음(지우지 않음)"),
+  },
+  // 핵심 발견의 근거(연구 개요). 근거를 모르면 “확인 안 됨”이지 “근거 있음”이 아니다(P4).
+  claim: {
+    supported: d("근거 있음", "circle", "ok", "출처·자료가 주장을 뒷받침(대조함)"),
+    partial: d("일부만 뒷받침", "tri", "warn", "출처가 주장의 일부만 다룸"),
+    weak: d("근거 부족", "tri", "warn", "붙은 출처·자료가 없음"),
+    conflict: d("자료 어긋남", "square", "bad", "두 자료가 다른 값"),
+    unverified: d("확인 안 됨", "dotring", "unk", "아직 대조하지 않음 · 추정"),
+    pending_edit: d("수정 제안 · 채택 전", "ring", "run", "글 수정 제안을 만듦 — 채택해야 결과 글이 바뀜"),
+    ai: d("AI가 근거 찾는 중", "ring", "run", "사람이 AI에게 맡김"),
+    decided: d("기준 정함", "circle", "ok", "사람이 결정을 기록함(결정 기록)"),
+  },
+  proposal: {
+    proposed: d("판단 전", "dotring", "unk", "AI가 남긴 제안 — 사람이 아직 판단하지 않음. 받아들이거나 버림(나의 할 일에 세지 않음 · 일을 막지 않음)"),
+    accepted: d("받아들임", "circle", "ok", "판단자 · 근거 버전 기록"),
+    rejected: d("버림", "hsquare", "off", "기록은 남음"),
   },
   check: {
     pass: d("통과", "circle", "ok"),

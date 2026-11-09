@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 
 // PES 시안: shadcn 기본 단추를 PES 토큰으로 바꿨다.
@@ -21,15 +21,15 @@ const buttonVariants = cva(
           "text-foreground hover:bg-accent hover:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground",
         destructive:
           "border-bad bg-surface text-bad hover:bg-bad-soft hover:text-bad",
-        link: "h-auto border-0 px-0.5 py-0.5 text-[13px] text-primary-ink underline underline-offset-3 hover:decoration-2 aria-disabled:bg-transparent aria-disabled:text-muted-foreground",
+        link: "h-auto border-0 text-meta text-primary-ink underline underline-offset-3 hover:decoration-2 aria-disabled:bg-transparent aria-disabled:text-muted-foreground p-0.5",
       },
       size: {
         default: "min-h-9 gap-1.5 px-3.5 py-1.5",
-        xs: "min-h-6 gap-1 px-2 text-xs [&_svg:not([class*='size-'])]:size-3",
-        sm: "min-h-8 gap-1 px-2.5 py-1 text-[13px]",
-        lg: "min-h-12 gap-2 px-4 text-[15px]",
+        xs: "min-h-[24px] gap-1 px-2 text-xs [&_svg:not([class*='size-'])]:size-3",
+        sm: "min-h-8 gap-1 px-2.5 py-1 text-meta",
+        lg: "min-h-12 gap-2 px-4 text-meta",
         icon: "size-9",
-        "icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3",
+        "icon-xs": "size-[24px] [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-lg": "size-10",
       },

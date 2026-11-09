@@ -4,6 +4,7 @@ import { ChevronsUpDownIcon, LayoutGridIcon, PlusIcon } from "lucide-react"
 import { useProjects } from "@/api/queries"
 import type { WorkspaceView } from "@/api/types"
 import { TurnMark, turnLabel } from "@/components/pes/turn"
+import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +22,8 @@ import {
 
 /**
  * sidebar-07 블록의 “팀 전환” 자리 → PES 프로젝트 전환.
- * 작업 공간 안이면 그 프로젝트, 밖이면 “PES 연구 작업대”. 목록은 프로젝트 목록 읽기를 그대로 쓴다(새 읽기 없음).
+ * 연구 공간 안이면 그 프로젝트(전환하면 그 프로젝트의 연구 개요로), 관리 공간이면 “PES 대시보드”.
+ * 목록은 프로젝트 목록 읽기를 그대로 쓴다(새 읽기 없음).
  * 단축키(⌘1…)는 두지 않는다 — 한글 입력·화면 읽기 프로그램 단축키와 부딪히지 않게.
  */
 export function TeamSwitcher({ ws }: { ws?: WorkspaceView }) {
@@ -29,7 +31,7 @@ export function TeamSwitcher({ ws }: { ws?: WorkspaceView }) {
   const projects = useProjects()
   const navigate = useNavigate()
   const active = projects.data?.active ?? []
-  const title = ws ? ws.title : "PES 연구 작업대"
+  const title = ws ? ws.title : "PES 대시보드"
   // 작업 공간 안이면 그 프로젝트의 차례를 맨 앞에(4차) — 사이드바 맨 위에서도 지금 누가 움직일 차례인지 보인다
   const sub = ws ? `${ws.turn ? `${turnLabel(ws.turn)} · ` : ""}방식 ${ws.mode} · ${ws.current.label}` : `내 프로젝트 ${active.length}개`
   const go = (to: string) => {
@@ -50,7 +52,7 @@ export function TeamSwitcher({ ws }: { ws?: WorkspaceView }) {
             >
               <div
                 aria-hidden="true"
-                className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-[10.5px] font-semibold tracking-wider text-sidebar-primary-foreground"
+                className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-caption font-semibold tracking-wider text-sidebar-primary-foreground"
               >
                 PES
               </div>
@@ -74,10 +76,10 @@ export function TeamSwitcher({ ws }: { ws?: WorkspaceView }) {
               프로젝트 전환 · 내 프로젝트 {active.length}
             </DropdownMenuLabel>
             {active.map((p) => (
-              <DropdownMenuItem key={p.slug} onSelect={() => go(p.href)} className="gap-2 p-2">
+              <DropdownMenuItem key={p.slug} onSelect={() => go(p.href)} className={cn("gap-2 p-2", ws?.slug === p.slug && "bg-accent/60 font-medium")} aria-current={ws?.slug === p.slug ? "true" : undefined}>
                 <span
                   aria-hidden="true"
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md border text-[11px] font-semibold"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md border text-caption font-semibold"
                 >
                   {p.mode}
                 </span>
@@ -97,14 +99,17 @@ export function TeamSwitcher({ ws }: { ws?: WorkspaceView }) {
               <span aria-hidden="true" className="flex size-6 items-center justify-center rounded-md border">
                 <LayoutGridIcon className="size-4" />
               </span>
-              모든 프로젝트 보기
+              모든 프로젝트(관리 공간)
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => go("/new")} className="gap-2 p-2">
-              <span aria-hidden="true" className="flex size-6 items-center justify-center rounded-md border">
-                <PlusIcon className="size-4" />
-              </span>
-              새 프로젝트
-            </DropdownMenuItem>
+            {/* 연구 공간에서는 관리 동작(새 프로젝트)을 두지 않는다 — 프로젝트 전환과 모든 프로젝트로만(설계 16.2) */}
+            {ws ? null : (
+              <DropdownMenuItem onSelect={() => go("/new")} className="gap-2 p-2">
+                <span aria-hidden="true" className="flex size-6 items-center justify-center rounded-md border">
+                  <PlusIcon className="size-4" />
+                </span>
+                새 프로젝트
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

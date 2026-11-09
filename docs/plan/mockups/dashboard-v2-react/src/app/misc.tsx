@@ -12,7 +12,7 @@ export function OutOfScope({ what, stage }: { what: string; stage: string }) {
 
 export function RouteLoading() {
   return (
-    <p role="status" aria-busy="true" className="m-5 text-[13px] text-ink-2">
+    <p role="status" aria-busy="true" className="m-5 text-meta text-ink-2">
       화면을 불러오는 중…
     </p>
   );

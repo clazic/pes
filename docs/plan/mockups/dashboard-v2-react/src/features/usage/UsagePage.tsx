@@ -7,10 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -18,13 +16,14 @@ import { Anno, CardHead, Hint, KV, ModeBadge, SectionTitle, Tag } from "@/compon
 import { FoldCard, InfoTip, More, MoreList } from "@/components/pes/disclosure";
 import { Callout, LoadError, NowCard, QuietLoading } from "@/components/pes/blocks";
 import { ActionButton, Meter, meterLevel } from "@/components/pes/controls";
-import { Chip, Status, StatusFrom } from "@/components/pes/status";
+import { Status, StatusFrom } from "@/components/pes/status";
 import { STATUS } from "@/components/pes/status-registry";
 import { BILLING_LABEL, KIND_LABEL, STORAGE_LABEL, won } from "@/mocks/connections";
 import { useMockSettings } from "@/lib/mock-settings";
 import { cn } from "@/lib/utils";
 import { StatCard, StatRow } from "@/components/pes/stat-card";
 import { AddConnectionDialog } from "./AddConnectionDialog";
+import { SettleDialog } from "./SettleDialog";
 // 차트(recharts)는 이 화면에서만 쓰고, 그중에서도 따로 불러온다 — 사용량 숫자·계기는 차트 묶음을 기다리지 않고 먼저 그린다.
 const UsageTrendChart = React.lazy(() => import("./UsageTrendChart").then((m) => ({ default: m.UsageTrendChart })));
 
@@ -48,8 +47,8 @@ function Gauge({ w, stop }: { w: UsageWindow; stop: number }) {
       badge={<Status of="meter" value={lv} />}
       footer={
         <div className="w-full">
-          <Meter percent={w.estimated_percent} threshold={stop} label={`${WIN_LABEL[w.key]} 추정 사용률 ${w.estimated_percent}%, 멈춤 문턱 ${stop}%. 콘솔 기준값 ${w.t0_console ?? "없음"}%, t0 이후 PES 증분 ${w.pes_since_t0}%p, 예약 ${w.reserved}%p`} className="mt-1" />
-          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-ink-2">
+          <Meter percent={w.estimated_percent} threshold={stop} label={`${WIN_LABEL[w.key]} 추정 사용률 ${w.estimated_percent}%, 멈춤 문턱 ${stop}%. API 회사 화면에서 본 숫자 ${w.t0_console ?? "없음"}%, 확인한 시각 이후 PES 증분 ${w.pes_since_t0}%p, 예약 ${w.reserved}%p`} className="mt-1" />
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-ink-2">
             <span className="text-muted-foreground">{RESET_LABEL(w)}</span>
             {w.resets.at ? <span className="font-medium text-ink">{w.resets.at}</span> : null}
             <StatusFrom s={{ domain: "resetBasis", value: w.resets.basis === "human" ? "estimate" : w.resets.basis, label: w.resets.basis === "human" ? "사람이 입력" : undefined }} />
@@ -77,7 +76,7 @@ function MeteredSummary({ c }: { c: AiConnection }) {
       footer={
         <div className="w-full">
           <Meter percent={pct} label={`이번 달 추정 비용 ${won(m.spent_estimate.amount)}, 월 비용 상한 ${m.cap ? won(m.cap.amount) : "없음"}, ${pct}%`} compact className="mt-1 mb-2" />
-          <p className="text-[12.5px] text-ink-2">{m.cap ? `상한 ${won(m.cap.amount)} 중 ${pct}%` : "비용 상한 없음 — 시작하지 않음"}</p>
+          <p className="text-caption text-ink-2">{m.cap ? `상한 ${won(m.cap.amount)} 중 ${pct}%` : "비용 상한 없음 — 시작하지 않음"}</p>
         </div>
       }
     />
@@ -124,7 +123,7 @@ function ConnectionCard({ c, manager }: { c: AiConnection; manager: boolean }) {
                   ["계산", "PES가 센 토큰 × 모델 단가"],
                   ["단가 근거", c.models.map((x) => `${x.id}: ${x.price?.text ?? "모름"}`).join(" / ")],
                   ["멈춤", "다음 호출의 예약을 더하면 상한을 넘을 때 보내기 전에 멈춤"],
-                  ["주의", "PES는 제공사 과금을 막을 수 없습니다. 콘솔에서도 한도를 걸고, 이 키는 PES 전용으로 만드세요."],
+                  ["주의", "PES는 제공사 과금을 막을 수 없습니다. API 회사 화면에서도 한도를 걸고, 이 키는 PES 전용으로 만드세요."],
                 ] as [string, string][])
               : []),
           ]}
@@ -134,65 +133,11 @@ function ConnectionCard({ c, manager }: { c: AiConnection; manager: boolean }) {
   );
 }
 
-function SettleDialog({ id, open, onOpenChange, hint }: { id: string; open: boolean; onOpenChange: (o: boolean) => void; hint: string }) {
-  const [outcome, setOutcome] = React.useState<"processed" | "not_processed" | "unverifiable" | "">("");
-  const [evidence, setEvidence] = React.useState("");
-  const [reason, setReason] = React.useState("");
-  const settle = useCommand("dispatch.settle");
-  const opts = [
-    { v: "processed", t: "처리됨으로 정리", h: "콘솔에서 그 시각 요청·사용을 확인함 → 예약을 사용으로 확정" },
-    { v: "not_processed", t: "처리 안 됨으로 정리", h: "콘솔 기록에서 그 요청이 없음을 확인함 → 예약 해제" },
-    { v: "unverifiable", t: "확인 불가 — 그대로 둠", h: "확인할 수 없음 → 예약·차단을 그대로 둠(기록만 남김)" },
-  ] as const;
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>확인 안 된 호출 정리</DialogTitle>
-          <DialogDescription>{hint} PES는 같은 호출을 자동으로 다시 하지 않습니다. 정리한 사람·시각·근거·이유·예약 처리는 지울 수 없는 기록으로 남고 같은 tx에서 바뀝니다.</DialogDescription>
-        </DialogHeader>
-        <RadioGroup value={outcome} onValueChange={(v) => setOutcome(v as typeof outcome)} className="gap-1.5" aria-label="정리 결과">
-          {opts.map((o) => (
-            <label key={o.v} htmlFor={`st-${o.v}`} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2", outcome === o.v ? "border-primary bg-primary-soft" : "border-line")}>
-              <RadioGroupItem id={`st-${o.v}`} value={o.v} className="mt-1" />
-              <span>
-                <strong className="text-[13.5px]">{o.t}</strong>
-                <span className="block text-[12.5px] text-muted-foreground">{o.h}</span>
-              </span>
-            </label>
-          ))}
-        </RadioGroup>
-        <div>
-          <Label htmlFor="st-ev" className="text-[13px] font-semibold">
-            근거 <span className="font-medium text-bad">필수</span>
-          </Label>
-          <Input id="st-ev" className="mt-1" placeholder="예: 콘솔 사용 내역 15:51 요청 없음(상관키 일치 없음)" value={evidence} onChange={(e) => setEvidence(e.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="st-why" className="text-[13px] font-semibold">
-            이유 <span className="font-medium text-bad">필수</span>
-          </Label>
-          <Input id="st-why" className="mt-1" value={reason} onChange={(e) => setReason(e.target.value)} />
-        </div>
-        {settle.phase === "done" ? <Callout tone="ok" role="status"><Chip shape="circle" tone="ok">정리됨</Chip> 접수 번호 {settle.receipt?.receipt_no}</Callout> : null}
-        {settle.error ? <Callout tone="bad" role="alert">{settle.error.message}</Callout> : null}
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>{settle.phase === "done" ? "닫기" : "취소"}</Button>
-          {settle.phase !== "done" ? (
-            <ActionButton variant="default" blockedBy={!outcome ? "정리 결과를 골라 주세요." : !evidence.trim() || !reason.trim() ? "근거와 이유를 적어 주세요." : settle.pending ? "접수 확인 중입니다" : null} onClick={() => outcome && settle.run({ id, outcome, evidence, reason })}>
-              이대로 정리
-            </ActionButton>
-          ) : null}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean }) {
   const s = c.subscription!;
-  const confirm = useCommand("usage.extra_usage.confirm", { successText: (r) => `추가 요금(Extra Usage) 꺼짐 확인 기록 · 접수 번호 ${r.receipt_no}` });
-  const base = useCommand("usage.baseline.set", { successText: (r) => `콘솔 기준값 저장 · 접수 번호 ${r.receipt_no}` });
+  const confirm = useCommand("usage.extra_usage.confirm", { successText: (r) => `추가 요금 꺼짐 확인 기록 · 접수 번호 ${r.receipt_no}` });
+  const base = useCommand("usage.baseline.set", { successText: (r) => `API 회사 화면에서 본 숫자 저장 · 접수 번호 ${r.receipt_no}` });
   const [v, setV] = React.useState({ h5: String(s.baseline.h5 ?? ""), week: String(s.baseline.week ?? ""), month: String(s.baseline.month ?? "") });
   const [t0, setT0] = React.useState("2026-11-05T15:30");
   const [noOther, setNoOther] = React.useState(s.baseline.no_other_use_after_t0);
@@ -204,10 +149,10 @@ function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean })
         <Card id="extra" className="gap-0 px-5" aria-labelledby="ex-t">
           <CardHead
             eyebrow={`방식 A 시작 전 확인 · ${c.name}`}
-            title="추가 요금(Extra Usage) 꺼짐 확인"
+            title="추가 요금 꺼짐 확인"
             aside={
               <InfoTip label="추가 요금 꺼짐 확인 설명" wide>
-                <p>PES는 제공사 콘솔 설정을 직접 볼 수 없습니다. 콘솔에서 추가 요금(종량제 잔액)이 꺼져 있는 것을 본 뒤 눌러 주세요. 확인이 없거나 지나면 방식 A를 시작하지 않습니다. 응답에 과금 표시가 보이면 즉시 멈춥니다.</p>
+                <p>PES는 API 회사 화면 설정을 직접 볼 수 없습니다. API 회사 화면에서 추가 요금(종량제 잔액)이 꺼져 있는 것을 본 뒤 눌러 주세요. 확인이 없거나 지나면 방식 A를 시작하지 않습니다. 응답에 과금 표시가 보이면 즉시 멈춥니다.</p>
                 <p className="text-muted-foreground">유효 7일은 예시값(사용자 결정 질문 1) · 범위: {c.name} 연결 1개(구독 계정 표시 이름만 저장)</p>
               </InfoTip>
             }
@@ -217,7 +162,7 @@ function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean })
           <p className="text-sm text-ink-2">{s.extra_usage.last ? `마지막 확인 ${s.extra_usage.last} · ${s.extra_usage.by} · ${s.extra_usage.valid_until}까지` : "확인 기록 없음"}</p>
           <div className="mt-2.5 flex flex-wrap gap-2">
             <ActionButton variant="default" blockedBy={manager ? null : MANAGER_WHY} onClick={() => confirm.run({ connection_id: c.id })}>
-              콘솔에서 다시 확인함
+              API 회사 화면에서 다시 확인함
             </ActionButton>
             <Button>확인 방법 보기</Button>
           </div>
@@ -226,10 +171,10 @@ function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean })
       <Card id="base" className="gap-0 px-5" aria-labelledby="bs-t">
         <CardHead
           eyebrow="PES가 못 보는 사용량"
-          title="콘솔 기준값(t0)"
+          title="API 회사 화면에서 본 숫자"
           aside={
-            <InfoTip label="콘솔 기준값 설명" wide>
-              <p>확인한 시각(t0)에 제공사 콘솔에서 본 계정 전체 사용률을 적습니다. 추정 = t0 값 + t0 이후 PES가 센 증분 + 예약. t0 이전 PES 사용은 이미 콘솔 값에 들어 있어 다시 더하지 않습니다.</p>
+            <InfoTip label="API 회사 화면에서 본 숫자 설명" wide>
+              <p>확인한 시각에 API 회사 화면에서 본 계정 전체 사용률을 적습니다. 추정 = 그 숫자 + 확인한 시각 이후 PES가 센 증분 + 예약. 확인한 시각 이전 PES 사용은 이미 그 숫자에 들어 있어 다시 더하지 않습니다.</p>
               <p className="text-muted-foreground">비어 있거나 오래되면 방식 A를 시작하지 않습니다. 모르는 값은 0으로 두지 않습니다.</p>
             </InfoTip>
           }
@@ -238,27 +183,27 @@ function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean })
         />
         <div className="grid grid-cols-2 gap-2 tab:grid-cols-4">
           <div className="col-span-2 tab:col-span-1">
-            <Label htmlFor="b-t0" className="text-[13px] font-semibold">
-              확인 시각(t0)
+            <Label htmlFor="b-t0" className="text-meta font-semibold">
+              확인한 시각
             </Label>
             <Input id="b-t0" type="datetime-local" className="mt-1" value={t0} onChange={(e) => setT0(e.target.value)} />
           </div>
           {(["h5", "week", "month"] as const).map((k) => (
             <div key={k}>
-              <Label htmlFor={`b-${k}`} className="text-[13px] font-semibold">
+              <Label htmlFor={`b-${k}`} className="text-meta font-semibold">
                 {WIN_LABEL[k]} %
               </Label>
               <Input id={`b-${k}`} type="number" min={0} max={100} className="mt-1 text-right" value={v[k]} onChange={(e) => setV((p) => ({ ...p, [k]: e.target.value }))} />
             </div>
           ))}
         </div>
-        <div className="mt-2 flex items-start gap-2 text-[13px]">
+        <div className="mt-2 flex items-start gap-2 text-meta">
           <Checkbox id="b-none" checked={noOther} onCheckedChange={(x) => setNoOther(x === true)} className="mt-0.5" />
           <Label htmlFor="b-none" className="block leading-snug font-normal">
-            t0 이후 이 구독을 다른 앱에서 쓰지 않음(선언)
+            확인한 시각 이후 이 구독을 다른 앱에서 쓰지 않음(선언)
           </Label>
           <InfoTip label="선언 설명">
-            <p>과거 사용의 0 증거가 아닙니다. 0은 콘솔이 그 구간에서 0을 보여 줄 때만 적습니다. 선언이 없으면 기준값을 더 자주 묻습니다(사용자 결정 질문 1).</p>
+            <p>과거 사용의 0 증거가 아닙니다. 0은 API 회사 화면이 그 구간에서 0을 보여 줄 때만 적습니다. 선언이 없으면 기준값을 더 자주 묻습니다(사용자 결정 질문 1).</p>
           </InfoTip>
         </div>
         <div className="mt-2.5">
@@ -297,7 +242,7 @@ function Blocked({ u, manager }: { u: UsageView; manager: boolean }) {
         {left.length ? (
           <ul className="mt-1">
             {left.map((c) => (
-              <li key={c.item} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-line py-1.5 text-[13px] last:border-b-0">
+              <li key={c.item} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-line py-1.5 text-meta last:border-b-0">
                 <Status of="check" value="notyet" />
                 <span className="font-semibold">{c.item}</span>
                 <span className="text-ink-2">{c.detail}</span>
@@ -305,7 +250,7 @@ function Blocked({ u, manager }: { u: UsageView; manager: boolean }) {
             ))}
           </ul>
         ) : (
-          <p className="mt-1 text-[13px]">
+          <p className="mt-1 text-meta">
             <Status of="check" value="pass" label="모두 통과" />
           </p>
         )}
@@ -344,6 +289,40 @@ function Blocked({ u, manager }: { u: UsageView; manager: boolean }) {
   );
 }
 
+/**
+ * 맨 위 한 줄 — 돈에 관해 PES가 **확인한 사실만** 말한다(설계 18.6, P4).
+ * PES는 API 회사의 지금 과금을 볼 수 없으므로 “돈이 안 나간다”고 단정하지 않는다.
+ * 경우별 문구를 연결마다 만들고, 가장 급한 것을 앞에 둔다. 연결이 없으면 줄을 그리지 않는다.
+ */
+function MoneyLine({ connections }: { connections: AiConnection[] }) {
+  if (!connections.length) return null;
+  const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
+  const bad: string[] = [];
+  const warn: string[] = [];
+  const ok: string[] = [];
+  for (const c of connections) {
+    const eu = c.subscription?.extra_usage;
+    if (eu?.applicable) {
+      if (eu.state === "billing") bad.push(`${c.name}: 추가 요금이 붙었을 수 있습니다 — 실행을 멈췄습니다`);
+      else if (eu.state === "expired" || eu.state === "none") warn.push(`${c.name}의 추가 요금 꺼짐을 확인하지 않았습니다 — 그 연결로는 실행을 시작하지 않습니다`);
+      else ok.push(`추가 요금 꺼짐 확인이 유효합니다(${c.name} · ${eu.valid_until}까지)`);
+    }
+    if (c.metered) {
+      if (c.metered.state === "missing" || !c.metered.cap) warn.push(`${c.name} 비용 상한이 없습니다 — 실행을 시작하지 않습니다`);
+      else ok.push(`${c.name} 이번 달 약 ${won(c.metered.spent_estimate.amount)}(PES 추정) · 상한 ${won(c.metered.cap.amount)}에서 멈춤`);
+    }
+  }
+  const lines = [...bad, ...warn, ...ok];
+  if (!lines.length) return null;
+  const tone = bad.length ? "bad" : warn.length ? "warn" : "ok";
+  return (
+    <Callout tone={tone} role="status" className="mt-3">
+      <strong>{lines[0]}</strong>
+      {lines.length > 1 ? <span className="text-ink-2"> · {lines.slice(1).join(" · ")}</span> : null}
+    </Callout>
+  );
+}
+
 export function UsagePage() {
   const q = useUsage();
   const settings = useMockSettings();
@@ -367,6 +346,7 @@ export function UsagePage() {
   return (
     <>
       <SectionTitle as="h1" title="사용량" sub={`AI 연결 ${u.connections.length}개 · 모든 수치는 PES 추정`} />
+      <MoneyLine connections={u.connections} />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList variant="line" aria-label="사용량 보기">
           <TabsTrigger value="api">API 사용량</TabsTrigger>
@@ -386,7 +366,7 @@ export function UsagePage() {
                 title={`${sub.name} · 구독형`}
                 aside={
                   <InfoTip label="사용량 추정 방법" wide>
-                    <p>추정 = t0 콘솔 기준값 + t0 이후 PES 증분 + 예약. 세 구간 중 하나라도 문턱에 닿기 전에 새 호출을 멈춥니다.</p>
+                    <p>추정 = API 회사 화면에서 본 숫자 + 확인한 시각 이후 PES 증분 + 예약. 세 구간 중 하나라도 문턱에 닿기 전에 새 호출을 멈춥니다.</p>
                     <p className="text-muted-foreground">제공사의 공식 사용량 조회 방법은 연결마다 다르고 확인되지 않았을 수 있습니다(PR19). 모르는 값은 0으로 쓰지 않고, 주의 색은 문턱 10%p 아래부터 표시만 합니다.</p>
                   </InfoTip>
                 }
@@ -400,7 +380,7 @@ export function UsagePage() {
                 ))}
               </StatRow>
               <Collapsible className="mt-3 rounded-xl border bg-card px-4 py-2 shadow-xs">
-                <CollapsibleTrigger className="group inline-flex items-center gap-1.5 text-[13px] font-semibold">
+                <CollapsibleTrigger className="group inline-flex items-center gap-1.5 text-meta font-semibold">
                   <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
                   구간별 근거 — 표로 보기
                 </CollapsibleTrigger>
@@ -411,8 +391,8 @@ export function UsagePage() {
                       <TableRow>
                         <TableHead scope="col">구간</TableHead>
                         <TableHead scope="col" className="text-right">추정</TableHead>
-                        <TableHead scope="col" className="text-right">콘솔 기준값(t0)</TableHead>
-                        <TableHead scope="col" className="text-right">t0 이후 PES</TableHead>
+                        <TableHead scope="col" className="text-right">API 회사 화면에서 본 숫자</TableHead>
+                        <TableHead scope="col" className="text-right">확인한 시각 이후 PES</TableHead>
                         <TableHead scope="col" className="text-right">예약</TableHead>
                         <TableHead scope="col" className="text-right">문턱</TableHead>
                         <TableHead scope="col">재개·재설정</TableHead>
@@ -439,7 +419,7 @@ export function UsagePage() {
           <React.Suspense
             fallback={
               <Card className="mt-6 h-[360px] justify-center px-5" aria-busy="true">
-                <p role="status" className="text-[13px] text-ink-2">
+                <p role="status" className="text-meta text-ink-2">
                   사용량 추이 그래프를 불러오는 중… 같은 숫자는 위 계기와 “표로 보기”에 있습니다.
                 </p>
               </Card>
@@ -447,7 +427,7 @@ export function UsagePage() {
           >
             <UsageTrendChart trend={u.trend} />
           </React.Suspense>
-          <Anno>제공사의 공식 사용량 조회 방법은 연결마다 다르고 확인되지 않았을 수 있습니다(PR19 확인 대상). 그래서 PES가 호출마다 센 토큰으로 한도 대비 사용률을 추정하고, PES가 못 보는 사용은 사람이 적은 콘솔 기준값(t0)으로만 더합니다. 모르는 값은 0으로 쓰지 않습니다. 주의 색은 문턱 10%p 아래부터이며 표시만 합니다.</Anno>
+          <Anno>제공사의 공식 사용량 조회 방법은 연결마다 다르고 확인되지 않았을 수 있습니다(PR19 확인 대상). 그래서 PES가 호출마다 센 토큰으로 한도 대비 사용률을 추정하고, PES가 못 보는 사용은 사람이 적은 API 회사 화면에서 본 숫자으로만 더합니다. 모르는 값은 0으로 쓰지 않습니다. 주의 색은 문턱 10%p 아래부터이며 표시만 합니다.</Anno>
           {u.blocked ? <Blocked u={u} manager={manager} /> : null}
           <Card id="unknown" className="mt-5 gap-0 px-5" aria-labelledby="uk-t">
             <CardHead
@@ -455,7 +435,7 @@ export function UsagePage() {
               title="API가 처리했는지 모르는 호출"
               aside={
                 <InfoTip label="확인 안 된 호출 설명" wide>
-                  <p>PES는 같은 호출을 자동으로 다시 하지 않습니다. 콘솔 사용 내역을 보고 정리해 주세요. 정리 전까지 예약은 사용량에 남아 있고, 확인할 수 없으면 예약·차단을 그대로 둡니다. 정리는 API 연결 관리자가 합니다.</p>
+                  <p>PES는 같은 호출을 자동으로 다시 하지 않습니다. API 회사 화면의 사용 내역을 보고 정리해 주세요. 정리 전까지 예약은 사용량에 남아 있고, 확인할 수 없으면 예약·차단을 그대로 둡니다. 정리는 API 연결 관리자가 합니다.</p>
                 </InfoTip>
               }
               titleId="uk-t"
@@ -490,7 +470,7 @@ export function UsagePage() {
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-[13px] text-ink-2">정리할 호출이 없습니다.</p>
+              <p className="text-meta text-ink-2">정리할 호출이 없습니다.</p>
             )}
           </Card>
           {sub ? <ExtraAndBaseline c={sub} manager={manager} /> : null}
@@ -506,7 +486,7 @@ export function UsagePage() {
             <FoldCard id="flow" title="멈춤에서 재개까지" meta={`지금 ${u.scene_time} · ${u.flow.length}단계`}>
               <ol className="grid grid-cols-1 gap-2 tab:grid-cols-2 desk:grid-cols-7">
                 {u.flow.map((f) => (
-                  <li key={f.title} aria-current={f.state === "now" ? "step" : undefined} className={cn("min-w-0 rounded-lg border px-2.5 py-2 text-[12.5px]", f.state === "past" && "border-line bg-surface-soft", f.state === "now" && "border-2 border-primary", f.state === "next" && "border-line bg-surface")}>
+                  <li key={f.title} aria-current={f.state === "now" ? "step" : undefined} className={cn("min-w-0 rounded-lg border px-2.5 py-2 text-caption", f.state === "past" && "border-line bg-surface-soft", f.state === "now" && "border-2 border-primary", f.state === "next" && "border-line bg-surface")}>
                     <span className="block font-semibold text-muted-foreground">{f.time}</span>
                     <span className="my-0.5 block font-semibold text-ink">{f.title}</span>
                     {f.body}
@@ -518,12 +498,12 @@ export function UsagePage() {
             <FoldCard title="이번 주 사용량 구성" meta={`주간 추정 ${sub?.subscription?.windows[1]?.estimated_percent ?? "—"}%`}>
               <ol aria-label="사용량 구성">
                 {u.rank.map((r) => (
-                  <li key={r.label} className="grid grid-cols-[minmax(0,1fr)_56px] items-center gap-x-2.5 gap-y-1 py-1.5 text-[13px] tab:grid-cols-[260px_minmax(0,1fr)_56px]">
+                  <li key={r.label} className="grid grid-cols-[minmax(0,1fr)_56px] items-center gap-x-2.5 gap-y-1 py-1.5 text-meta tab:grid-cols-[260px_minmax(0,1fr)_56px]">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span tabIndex={0} className="min-w-0 rounded underline decoration-dotted underline-offset-2">
+                        <button type="button" className="min-w-0 rounded text-left underline decoration-dotted underline-offset-2">
                           {manager || r.external || r.label.startsWith("예약") ? r.label : "다른 프로젝트(이름 비공개)"}
-                        </span>
+                        </button>
                       </TooltipTrigger>
                       <TooltipContent>{r.tip}</TooltipContent>
                     </Tooltip>
@@ -534,7 +514,7 @@ export function UsagePage() {
                   </li>
                 ))}
               </ol>
-              <Hint className="mt-1.5">파란 막대 = t0 이후 PES가 센 실행 · 회색 = 콘솔 기준값(다른 앱 + t0 이전 PES 포함). 값은 막대 끝 숫자.</Hint>
+              <Hint className="mt-1.5">파란 막대 = 확인한 시각 이후 PES가 센 실행 · 회색 = API 회사 화면에서 본 숫자(다른 앱 + 확인한 시각 이전 PES 포함). 값은 막대 끝 숫자.</Hint>
             </FoldCard>
             <FoldCard title="프로젝트별 설정" meta={manager ? undefined : "소유자만 바꿈"}>
               <Table regionLabel="프로젝트별 방식 A 설정" className="min-w-[560px]">
@@ -575,7 +555,7 @@ export function UsagePage() {
               {(["resetBasis", "extraUsage", "baseline", "costCap", "meter", "connTest"] as const).map((dom) => (
                 <Card key={dom} className="gap-0 px-5">
                   <Table>
-                    <TableCaption>{{ resetBasis: "재개 가능 시각의 근거", extraUsage: "추가 요금(Extra Usage) 꺼짐 확인", baseline: "콘솔 기준값", costCap: "비용 상한(쓴 만큼 과금)", meter: "계기 3구간", connTest: "AI 연결 시험" }[dom]}</TableCaption>
+                    <TableCaption>{{ resetBasis: "재개 가능 시각의 근거", extraUsage: "추가 요금 꺼짐 확인", baseline: "API 회사 화면에서 본 숫자", costCap: "비용 상한(쓴 만큼 과금)", meter: "계기 3구간", connTest: "AI 연결 시험" }[dom]}</TableCaption>
                     <TableBody>
                       {Object.entries(STATUS[dom]).map(([val, d]) => (
                         <TableRow key={val}>
@@ -635,7 +615,7 @@ export function UsagePage() {
 
       <AddConnectionDialog open={adding} onOpenChange={setAdding} />
       {settling ? <SettleDialog id={settling.id} open onOpenChange={(o) => !o && setSettling(null)} hint={settling.evidence_hint} /> : null}
-      <p data-mock="note" className="mt-6 text-[12.5px] text-muted-foreground">
+      <p data-mock="note" className="mt-6 text-caption text-muted-foreground">
         이 화면의 연결 이름·주소·수치는 모두 합성 예시입니다. <Link to="/guide">시안 안내</Link>
       </p>
     </>

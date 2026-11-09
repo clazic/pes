@@ -28,13 +28,13 @@ export const USAGE: UsageView = {
     reset: "16:40 PES 추정 · 지나도 저절로 다시 시작하지 않음",
     checks: [
       { item: "AI가 읽기", detail: "허용 · 정책 3번", pass: true },
-      { item: "추가 요금(Extra Usage) 꺼짐 확인", detail: "11-12 09:10까지 유효", pass: true },
-      { item: "콘솔 기준값(t0)", detail: "15:30 입력 · 계정 전체 사용률 · t0 이후 PES 증분만 더함", pass: true },
+      { item: "추가 요금 꺼짐 확인", detail: "11-12 09:10까지 유효", pass: true },
+      { item: "API 회사 화면에서 본 숫자", detail: "15:30 입력 · 계정 전체 사용률 · 확인한 시각 이후 PES 증분만 더함", pass: true },
       { item: "추정 사용량", detail: "5시간 91% — 문턱 90% 아래로 내려가야 함 · 16:40 예상 84%", pass: false },
       { item: "확인 안 된 호출", detail: "1건 — 사람이 정리해야 함", pass: false },
       { item: "AI 연결 · 모델", detail: "연구실 구독 API · deepseek-v4.1-flash · 목록에 있음 · 연결 시험 09:00", pass: true },
-      { item: "필요한 답(서버 판단)", detail: "현재 폼 v1의 필수 답·의견 응답 조건 충족 — PR8 resume_ready가 16:10에 계산", pass: true },
-      { item: "기한 · 실행 기반", detail: "기한 없음 · 실행 기반(결과 v1·폼 v1) 그대로", pass: true },
+      { item: "필요한 답(서버 판단)", detail: "필수 답·의견 응답 조건 충족 — PR8 resume_ready가 16:10에 계산", pass: true },
+      { item: "기한 · 실행 기반", detail: "기한 없음 · 결과와 질문이 멈춘 때 그대로", pass: true },
       { item: "새 담당(claim) 가능", detail: "옛 담당 해제됨 · 계속 접수 뒤 실행기가 새 담당·fence를 잡음", pass: true },
     ],
   },
@@ -45,7 +45,7 @@ export const USAGE: UsageView = {
       at: "15:51",
       what: "응답을 받기 전에 연결이 끊겼습니다. API가 처리했는지 알 수 없습니다.",
       reserve: "최대 출력 8,000토큰 예약 유지(5시간 구간 5%p)",
-      evidence_hint: "제공사 콘솔의 사용 내역에서 15:51 전후 요청이 있는지 봅니다(요청 상관키 pes-r1-2-c31).",
+      evidence_hint: "API 회사 화면의 사용 내역에서 15:51 전후 요청이 있는지 봅니다(요청 상관키 pes-r1-2-c31).",
     },
   ],
   flow: [
@@ -58,9 +58,9 @@ export const USAGE: UsageView = {
     { time: "사람이 누름", title: "계속", body: "서버 재검사 · 새 담당", state: "next" },
   ],
   rank: [
-    { label: "콘솔 기준값(t0 15:30)", value: 58, tip: "t0에 콘솔에서 본 계정 전체 사용률 — 다른 앱 + t0 이전 PES 사용 포함 · PES가 나눌 수 없음", external: true },
-    { label: "청년 주거 · R1-2 (멈춤) · t0 이후", value: 3, tip: "기획 R1 · t0 이후 호출 9회 · 확인 안 된 호출 예약 포함" },
-    { label: "청년 주거 · 검토 R1-r · t0 이후", value: 1, tip: "독립 검토 실행 · 같은 모델" },
+    { label: "API 회사 화면에서 본 숫자(15:30)", value: 58, tip: "확인한 시각에 API 회사 화면에서 본 계정 전체 사용률 — 다른 앱 + 확인한 시각 이전 PES 사용 포함 · PES가 나눌 수 없음", external: true },
+    { label: "청년 주거 · R1-2 (멈춤) · 확인한 시각 이후", value: 3, tip: "기획 R1 · 확인한 시각 이후 호출 9회 · 확인 안 된 호출 예약 포함" },
+    { label: "청년 주거 · 검토 R1-r · 확인한 시각 이후", value: 1, tip: "독립 검토 실행 · 같은 모델" },
     { label: "예약(정산 전)", value: 2, tip: "확인 안 된 호출 1건의 최대 출력 예약" },
   ],
   projects: [
@@ -78,7 +78,7 @@ export const USAGE: UsageView = {
     { resource: "알림 메일(하루)", used: "41", limit: "100", percent: 41, status: { domain: "meter", value: "ok" } },
     { resource: "실시간 연결 요청", used: "미확인", limit: "미확인", percent: null, status: { domain: "notify", value: "unknown", label: "미확인 · 0으로 쓰지 않음" } },
   ],
-  // 합성 추이: 14:30 실행 시작 62% → 15:30 콘솔 기준값(t0) 입력으로 계정 전체 62%에 맞춤 → 15:51 86%(+예약 5%p) → 15:52 91% 멈춤 → 16:40 84% 예상
+  // 합성 추이: 14:30 실행 시작 62% → 15:30 API 회사 화면에서 본 숫자 입력으로 계정 전체 62%에 맞춤 → 15:51 86%(+예약 5%p) → 15:52 91% 멈춤 → 16:40 84% 예상
   trend: {
     connection: "연구실 구독 API",
     window: "h5",
@@ -88,7 +88,7 @@ export const USAGE: UsageView = {
       { t: "14:45", est: 64 },
       { t: "15:00", est: 66 },
       { t: "15:15", est: 66 },
-      { t: "15:30", est: 62, note: "콘솔 기준값(t0) 입력 — PES 추정 66%를 계정 전체 62%로 맞춤" },
+      { t: "15:30", est: 62, note: "API 회사 화면에서 본 숫자 입력 — PES 추정 66%를 계정 전체 62%로 맞춤" },
       { t: "15:40", est: 74 },
       { t: "15:51", est: 86, note: "응답 유실 — 확인 안 된 호출 1건, 예약 5%p 유지" },
       { t: "15:52", est: 91, note: "다음 호출 예약을 더하면 91% ≥ 90% → 보내기 전에 멈춤" },
@@ -120,8 +120,8 @@ export const COMPUTER: ComputerView = {
 
 /** 기본 알림 문구에는 프로젝트 이름·질문 문구·파일 이름을 싣지 않는다(설계 4.13). */
 export const NOTIFICATIONS: NotificationItem[] = [
-  { id: "n1", title: "AI 실행이 멈췄습니다", at: "20분 전", channel: "푸시", delivery: { domain: "notify", value: "sent" }, href: "/usage#blocked", unread: true },
-  { id: "n2", title: "시작 질문이 있습니다", at: "1시간 전", channel: "메일", delivery: { domain: "notify", value: "sent" }, href: "/p/rural-care-access/e/1/s/plan/r/start", unread: true },
-  { id: "n3", title: "답할 질문이 있습니다", at: "2시간 전", channel: "메일과 푸시", delivery: { domain: "notify", value: "unknown", label: "푸시 확인 안 됨 · 메일 보냄" }, href: "/p/dolbom-insight/e/1/s/research/r/2#q-21", unread: true },
-  { id: "n4", title: "동기화 충돌이 있습니다", at: "어제", channel: "메일", delivery: { domain: "notify", value: "sent" }, href: "/p/dolbom-insight/e/1/s/research/r/2#sync", unread: false },
+  { id: "n1", title: "AI 실행이 멈췄습니다", at: "20분 전", channel: "푸시", delivery: { domain: "notify", value: "sent" }, href: "/p/youth-housing/e/1/s/plan/r/1?t=blocked", unread: true, slug: "youth-housing" },
+  { id: "n2", title: "시작 질문이 있습니다", at: "1시간 전", channel: "메일", delivery: { domain: "notify", value: "sent" }, href: "/p/rural-care-access/e/1/s/plan/r/start", unread: true, slug: "rural-care-access" },
+  { id: "n3", title: "답할 질문이 있습니다", at: "2시간 전", channel: "메일과 푸시", delivery: { domain: "notify", value: "unknown", label: "푸시 확인 안 됨 · 메일 보냄" }, href: "/p/dolbom-insight/e/1/s/research/r/2#q-21", unread: true, slug: "dolbom-insight" },
+  { id: "n4", title: "동기화 충돌이 있습니다", at: "어제", channel: "메일", delivery: { domain: "notify", value: "sent" }, href: "/p/dolbom-insight/e/1/s/research/r/2#sync", unread: false, slug: "dolbom-insight" },
 ];

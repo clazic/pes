@@ -1,11 +1,14 @@
 import { MATERIALS } from "@/mocks/materials";
 import { AI_ACTIVITY, PROJECTS } from "@/mocks/projects";
+import { RESEARCH, type ResearchMock } from "@/mocks/research";
 import { COMPUTER, NOTIFICATIONS, USAGE } from "@/mocks/usage";
 import { WORKSPACES } from "@/mocks/workspaces";
-import { mockSettings } from "@/lib/mock-settings";
+import { mockSettings, ROLE_PERSON } from "@/lib/mock-settings";
 import {
   COMMANDS,
   FORMAT_VERSION,
+  PROBLEM_GROUP,
+  STAGE_LABEL,
   type AiConnection,
   type ApiError,
   type ApiErrorCode,
@@ -19,15 +22,52 @@ import {
   type MaterialsView,
   type NotificationItem,
   type PesCommand,
+  type ProblemKind,
+  type ProblemOption,
+  type ProblemView,
   type ProjectsView,
   type QuestionView,
   type Receipt,
   type Role,
+  type StatusRef,
+  type TaskStep,
   type TurnItem,
   type TurnView,
   type UsageView,
+  type WorkspaceCore,
   type WorkspaceView,
 } from "./types";
+
+/** 문제 종류 짧은 이름(나의 할 일 한 줄 · 해결 기록) — 화면 칩 글자는 상태 사전(problem)에서 */
+const KIND_SHORT: Record<ProblemKind, string> = {
+  weak_evidence: "근거 부족",
+  conflict_data: "자료 어긋남",
+  verify_failed: "검증 실패",
+  required_question: "필수 질문",
+  run_stopped: "실행 멈춤",
+  sync_conflict: "동기화 충돌",
+  extract_failed: "글자 뽑기 실패",
+};
+
+/** 같은 순위 안에서는 서버가 준 순서(order — 기한 → 오래된 것), 그다음 들어온 순서 */
+function sortTurns(list: TurnItem[]) {
+  return list
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => a.t.rank - b.t.rank || (a.t.order ?? 99) - (b.t.order ?? 99) || a.i - b.i)
+    .map((x) => x.t);
+}
+
+const roundPathOf = (w: WorkspaceCore) => `/p/${w.slug}/e/${w.edition}/s/${w.current.stage}/r/${w.current.round}`;
+
+/** 글 수정 제안(채택 전) — 고쳐 쓰기 선택지를 고르면 그 문단 아래에 보인다(결과 글은 아직 그대로) */
+const EDIT_PROPOSAL: Record<string, string> = {
+  soften: "이동 거리가 긴 읍·면 지역일수록 신규 인력이 1년 안에 그만두는 경향이 보였다(사례 지역 2곳 면담 · 추정).",
+  remove: "(이 문장을 빼는 제안)",
+  narrow: "가상의 A시·B군 두 사례 지역에서 요양보호사 1인당 이용자 수는 2022년보다 늘었고, 재가 돌봄의 빈 시간대가 저녁에 몰렸다.",
+  official: "표 2 기준으로 2023년 A시 요양보호사는 1,180명이다(공식 통계 — 기관 보고서는 1,240명, 차이는 각주).",
+  report: "기관 보고서 기준으로 2023년 A시 요양보호사는 1,240명이다(공식 통계는 1,180명).",
+  assume: "2023년 A시 요양보호사는 1,180명(공식 통계) 또는 1,240명(기관 보고서)이다 — 차이는 집계 기준일 차이로 본다(가정).",
+};
 
 /** AI 진행 소식(서버가 실행 담당·사건·도우미 보고에서 계산). last_signal이 없으면 아직 AI 소식이 없음 */
 interface AiActivity {
@@ -98,7 +138,13 @@ export interface CommandInputs {
   "device.approve": { code: string; decision: "approve" | "deny" };
   reference_refresh: { slug: string; ref_id: string; mode: "update" | "keep" };
   "thread.create": { slug: string; quote: string; body: string };
-  "question.create": { slug: string; text: string };
+  /** direction=human_to_agent: 사람→AI 질문(U5 — AI 동료 칸의 “AI에게 부탁하기”). 없으면 사람이 폼에 질문을 더함 */
+  "question.create": { slug: string; text: string; direction?: "human_to_agent"; target?: string };
+  /** 질문 빼기의 한 갈래 — 보류(지우지 않음, 새 폼 버전) */
+  "question.revise": { slug: string; question_ids: string[]; action: "defer" };
+  /** 막힌 것 하나에 고른 선택지 하나(설계 16.4) — 선택지는 서버가 그 문제의 닫힌 목록으로 다시 검사 */
+  "problem.resolve": { slug: string; problem_id: string; option_id: string; note?: string };
+  "decision.record": { slug: string; proposal_id: string; verdict: "accept" | "reject" };
 }
 
 type CmdName = keyof CommandInputs;
@@ -148,7 +194,11 @@ function buildStore() {
   const dolbomFiles = clone(MATERIALS.files);
   return {
     projects: clone(PROJECTS) as ProjectsView,
-    workspaces: clone(WORKSPACES) as Record<string, WorkspaceView>,
+    workspaces: clone(WORKSPACES) as Record<string, WorkspaceCore>,
+    /** 연구 공간(5차): 연구 개요 · 연구 내용 문제 · AI 제안 · 지난 단계 요약 · 해결 기록 */
+    research: clone(RESEARCH) as Record<string, ResearchMock>,
+    /** 사람이 “없이 진행”·“넘기기”처럼 정리한 진행 문제(다른 자료에서 계산되는 문제) — 다시 계산해도 나오지 않게 */
+    dismissed: {} as Record<string, Record<string, true>>,
     materials: {
       "dolbom-insight": clone(MATERIALS),
       "youth-housing": minimalMaterials("youth-housing", dolbomFiles.slice(8, 11).map((f, i) => ({ ...f, id: `y${i}`, folder: null }))),
@@ -169,6 +219,9 @@ type Store = ReturnType<typeof buildStore>;
 
 export class MockPesClient {
   private store: Store = buildStore();
+  constructor() {
+    this.initResearchTurns();
+  }
   private receipts = new Map<string, { receipt: Receipt; data: unknown; request: string }>();
   private listeners = new Map<string, Set<(n: ChangeNotice) => void>>();
   private receiptNo = 30;
@@ -201,14 +254,271 @@ export class MockPesClient {
         moved.push({ slug: t.slug, project_title: t.project_title, text, who });
         return false;
       };
-      if (v === "blocked") return move("실행 멈춤 · 사용량 — 소유자(API 연결 관리자)의 정리를 기다림", "김연구");
-      if (v === "check" && t.short.startsWith("동기화")) return move("동기화 충돌 — 고르기는 소유자(편집자 허용은 WEB3에서 정함, 지금은 기본 거부)", "김연구");
-      if (v === "check" && t.short.startsWith("참고")) return move("참고 프로젝트 새 버전 — 갱신·유지는 소유자", "김연구");
+      if (v === "blocked" || t.step === "blocked") return move("실행 멈춤 · 사용량 — 소유자(API 연결 관리자)의 정리를 기다림", "김연구");
+      if (t.step === "sync") return move("동기화 충돌 — 고르기는 소유자(편집자 허용은 WEB3에서 정함, 지금은 기본 거부)", "김연구");
+      if (t.step === "refs") return move("참고 프로젝트 새 버전 — 갱신·유지는 소유자", "김연구");
+      if (t.step?.startsWith("p-")) return move("자료 글자 뽑기 실패 — 다시 올리기·정리는 소유자", "김연구");
       if (v === "resume" || v === "approve") return move(`${t.where} — ${v === "resume" ? "계속" : "승인"}은 소유자가 누릅니다`, "김연구");
       if (role === "reader" && (v === "answer" || v === "start_q")) return move(`${t.where} — 답은 편집자 이상이 보냅니다`, "편집자 이상");
+      if (role === "reader" && t.step === "review") return move(`${t.where} — 결과 글 문제 고르기는 편집자 이상`, "편집자 이상");
       return true;
     });
     return { turns: kept, waiting: [...moved, ...waiting] };
+  }
+
+  /* ───────── 연구 공간(5차 — 설계 16절): 막힌 것·풀 것 · 지금 할 일 순서 ───────── */
+
+  /**
+   * 진행 문제는 이미 있는 자료에서 계산한다 — 같은 사실을 두 곳에 적지 않는다.
+   * 필수 질문 미응답(질문 폼) · AI 실행 멈춤(실행 표 + 확인 안 된 호출) · 동기화 충돌(동기화 표) · 글자 뽑기 실패(자료 표).
+   * 사람이 고르면 원래 명령(submission.create · dispatch.settle · sync.conflict.resolve)이나 problem.resolve로 풀리고, 풀리면 계산에서 빠진다.
+   */
+  private derivedProblems(slug: string): ProblemView[] {
+    const w = this.store.workspaces[slug];
+    if (!w) return [];
+    const rp = roundPathOf(w);
+    const dismissed = this.store.dismissed[slug] ?? {};
+    const out: ProblemView[] = [];
+
+    // 1) 답 안 한 필수 질문 — 라운드마다 하나로 묶는다(질문 수가 많아도 보드가 길어지지 않게)
+    const req = w.form.questions.filter((q) => q.required && !q.sent && !q.deferred);
+    if (req.length) {
+      const one = req.length === 1 ? req[0]! : null;
+      const def = one?.default_option ? one.options.find((o) => o.id === one.default_option)?.label : undefined;
+      const go = `${rp}?t=answer${one ? `#${one.id}` : ""}`;
+      out.push({
+        id: `pq-${w.current.stage}-${w.current.round}`,
+        kind: "required_question",
+        state: "open",
+        title: one ? `필수 질문 ${one.number}에 답이 없습니다` : `필수 질문 ${req.length}개에 답이 없습니다`,
+        cause: one ? `“${one.text}” — 답이 없어 AI가 다음 일을 정하지 못합니다.` : `${req.map((q) => q.number).join(" · ")} — 답이 없으면 ${w.form.round_label} 다음 실행을 시작하지 않습니다.`,
+        where: { label: one ? `질문 ${one.number}` : `${w.form.round_label} 질문`, href: go },
+        found: `질문 폼 v${w.form.version} · 서버 준비 검사`,
+        blocks: ["다음 실행", "단계 승인"],
+        options: [
+          { id: "go", label: "질문으로 가서 답하기", effect: "질문 폼을 엽니다. 초안은 이 탭에만 남습니다.", recommended: true, why: "답은 사람만 정할 수 있습니다.", via: "submission.create", go },
+          ...(def ? [{ id: "default", label: `기본값 ‘${def}’로 답하기`, effect: "기본값을 답으로 보냅니다. 접수 번호가 남고, 나중에 고쳐 보낼 수 있습니다(옛 답은 남음).", via: "submission.create" as const }] : []),
+          { id: "defer", label: one ? "이 질문 보류하기" : `필수 질문 ${req.length}개 보류하기`, effect: "이번 라운드에서 빼고(지우지 않음) 새 폼 버전을 만듭니다. AI는 가정을 적고 이어 가며 다음 라운드에서 다시 묻습니다.", via: "question.revise" },
+        ],
+      });
+    }
+
+    // 2) AI 실행 멈춤(사용량) — 확인 안 된 호출이 남았으면 사람이 풀 일, 정리했으면 시각을 기다림
+    for (const run of w.runs.rows.filter((r) => r.status.value === "blocked_usage")) {
+      const id = `pr-${run.id}`;
+      if (dismissed[id]) continue;
+      const unknown = this.store.usage.unknown_calls.length;
+      const reset = this.store.usage.blocked?.reset ?? "재개 가능 시각 미확인";
+      out.push({
+        id,
+        kind: "run_stopped",
+        state: unknown ? "open" : "waiting",
+        title: `실행 ${run.id} — API 사용량 때문에 멈췄습니다`,
+        cause: unknown
+          ? `5시간 추정 사용률이 멈춤 문턱을 넘었고, 결과를 모르는 호출 ${unknown}건이 남아 있습니다. 정리해야 재개 준비 검사를 통과합니다.`
+          : `확인 안 된 호출은 정리됨 · 재개 가능 시각을 기다립니다(${reset}).`,
+        where: { label: `실행 ${run.id} · ${run.where}`, href: `/p/${slug}/ai#ai-full` },
+        found: `PES 실행기 · ${run.last}`,
+        blocks: ["다음 실행"],
+        note: unknown ? undefined : "기다리기만 할 수 있는 막힘이라 나의 할 일 수에 넣지 않습니다.",
+        options: [
+          { id: "settle", label: "확인 안 된 호출 정리하기", effect: "API 회사 화면에서 본 결과(처리됨 · 처리 안 됨 · 확인 불가)와 근거·이유를 적습니다. 같은 호출을 자동으로 다시 하지 않습니다.", recommended: true, why: "정리해야 재개 준비 검사를 통과합니다. 실행을 넘기거나 취소하지 않으니 같은 모델로 이어 갈 수 있습니다.", via: "dispatch.settle", needs: "settle", owner_only: true },
+          { id: "handoff", label: "방식 B로 넘기기", effect: "새 실행을 만들어 내 컴퓨터 AI가 이어서 합니다(옛 실행은 기록에 남음). API 사용량을 쓰지 않습니다.", via: "problem.resolve", owner_only: true },
+          { id: "cancel", label: "이 실행 취소하기", effect: "실행을 취소합니다. 저장된 결과(연구 설계 초안 v1)는 남습니다.", via: "problem.resolve", owner_only: true },
+        ],
+      });
+    }
+
+    // 3) 동기화 충돌
+    for (const row of w.sync?.rows.filter((r) => r.status.value === "conflict") ?? []) {
+      const c = w.conflict && w.conflict.item === row.item ? w.conflict : undefined;
+      const later = Boolean(row.status.label?.includes("나중에"));
+      out.push({
+        id: `ps-${row.id}`,
+        kind: "sync_conflict",
+        state: "open",
+        title: `${row.item} — 양쪽에서 바뀌었습니다`,
+        cause: c ? `내 컴퓨터 ${c.pc[0]} · 웹 ${c.web[0]}. 어느 쪽도 지우지 않습니다.` : "내 컴퓨터와 웹에서 함께 바뀌었습니다. 어느 쪽도 지우지 않습니다.",
+        where: { label: `내 컴퓨터 연결 · ${w.sync?.folder_label ?? "동기화"}`, href: `/p/${slug}/sync#sync` },
+        found: `도우미 보고 · ${w.sync?.device ?? "내 컴퓨터"}`,
+        blocks: ["이 파일 동기화"],
+        note: later ? "나중에 정하기로 함 — 이 파일만 동기화를 멈췄습니다." : undefined,
+        options: [
+          { id: "web", label: "웹 v3을 내 컴퓨터로 받기", effect: "내 컴퓨터 것은 “충돌 사본”으로 이름을 바꿔 둡니다.", recommended: true, why: "웹 쪽이 더 나중(14:05 · 박검토)에 바뀌었습니다. 어느 쪽을 골라도 지우지 않습니다.", via: "sync.conflict.resolve", owner_only: true },
+          { id: "pc", label: "내 컴퓨터 것을 새 버전(v4)으로 올리기", effect: "웹 v3은 버전 기록에 남습니다.", via: "sync.conflict.resolve", owner_only: true },
+          ...(later ? [] : [{ id: "later", label: "둘 다 두고 나중에 정하기", effect: "정할 때까지 이 파일만 동기화하지 않습니다.", via: "sync.conflict.resolve" as const, owner_only: true }]),
+        ],
+      });
+    }
+
+    // 4) 글자 뽑기 실패한 자료(실패만 — 일부만·지원 안 함은 자료 화면의 지금 할 일)
+    for (const f of this.store.materials[slug]?.files.filter((x) => x.extract.domain === "extract" && x.extract.value === "failed") ?? []) {
+      const id = `px-${f.id}`;
+      if (dismissed[id]) continue;
+      out.push({
+        id,
+        kind: "extract_failed",
+        state: "open",
+        title: `${f.name} — 글자를 뽑지 못했습니다`,
+        cause: `${f.extract_note ?? "글자 뽑기 실패"}. AI가 이 자료를 읽지 못합니다(사람은 열람할 수 있음).`,
+        where: { label: `자료 · ${f.name}`, href: `/p/${slug}/files#${f.id}` },
+        found: `글자 뽑기 · ${f.at}`,
+        blocks: [],
+        options: [
+          { id: "reupload", label: "암호를 풀거나 새 파일로 다시 올리기", effect: "자료 화면에서 같은 이름으로 올리면 새 버전이 됩니다(옛 버전은 남음).", recommended: true, why: "손상·암호가 원인이면 다시 뽑아도 같은 결과입니다.", via: "file_upload", go: `/p/${slug}/files#upload`, owner_only: true },
+          { id: "skip", label: "이 자료 없이 진행하기", effect: "AI는 이 파일을 읽지 않은 채로 진행합니다. 사람은 계속 열람·인용할 수 있습니다.", via: "problem.resolve", owner_only: true },
+          { id: "summary", label: "사람이 요약을 적어 붙이기", effect: "적은 요약을 이 파일의 ‘사람이 적은 글’로 붙여 AI가 그 글만 읽게 합니다.", via: "problem.resolve", needs: "note", owner_only: true },
+        ],
+      });
+    }
+    return out;
+  }
+
+  /** 연구 내용 문제(정적 목 자료) + 진행 문제(계산) — 주소의 {round}를 현재 라운드로 */
+  private problemsFor(slug: string): ProblemView[] {
+    const w = this.store.workspaces[slug];
+    const r = this.store.research[slug];
+    if (!w || !r) return [];
+    const rp = roundPathOf(w);
+    const content = clone(r.content).map((p) => ({ ...p, where: { ...p.where, href: p.where.href.replace("{round}", rp) } }));
+    const all = [...content, ...this.derivedProblems(slug)];
+    const order = { open: 0, ai: 1, waiting: 2 } as const;
+    return all.map((p, i) => ({ p, i })).sort((a, b) => order[a.p.state] - order[b.p.state] || a.i - b.i).map((x) => x.p);
+  }
+
+  /**
+   * 역할별로 본 문제 — 그 사람이 고를 수 있는 선택지가 없으면 “기다림”(나의 할 일 아님, F08).
+   * 서버가 사람·권한별로 계산하는 나의 할 일과 같은 기준이다.
+   */
+  private problemsForRole(slug: string, role: Role): ProblemView[] {
+    return this.problemsFor(slug).map((p) => {
+      if (p.state !== "open") return p;
+      if (role === "reader") return { ...p, state: "waiting" as const, note: "고르기는 편집자 이상 — 읽기 멤버는 볼 수만 있습니다." };
+      const mine = p.options.some((o) => !o.owner_only);
+      if (role === "editor" && !mine) return { ...p, state: "waiting" as const, note: "고르기는 소유자 — 소유자 확인을 기다립니다(김연구)." };
+      return p;
+    });
+  }
+
+  /**
+   * 연구 내용 문제 · 글자 뽑기 실패를 나의 할 일 목록에 맞춘다(한 tx에서 함께 바뀌는 흉내).
+   * 결과 글 문제는 프로젝트마다 한 줄(“결과 글 문제 n건”), 자료 문제는 문제마다 한 줄.
+   */
+  private syncResearchTurns(slug: string) {
+    const w = this.store.workspaces[slug];
+    const r = this.store.research[slug];
+    if (!w || !r) return;
+    const rp = roundPathOf(w);
+    const title = this.store.projects.active.find((p) => p.slug === slug)?.title ?? w.title;
+    const old = this.store.projects.turns.filter((t) => t.slug === slug && (t.step === "review" || t.step?.startsWith("p-")));
+    const list = this.store.projects.turns.filter((t) => !old.includes(t));
+    const open = r.content.filter((p) => p.state === "open");
+    if (open.length) {
+      const kinds = [...new Set(open.map((p) => p.kind))].map((k) => `${KIND_SHORT[k]} ${open.filter((p) => p.kind === k).length}`).join(" · ");
+      const prev = old.find((t) => t.step === "review");
+      list.push({
+        id: `t-review-${slug}`,
+        slug,
+        rank: 5,
+        status: { domain: "turn", value: "problem", label: `풀 것 ${open.length}` },
+        project_title: title,
+        where: `${w.form.round_label} · 결과 글`,
+        short: `결과 글 문제 ${open.length}`,
+        text: kinds,
+        since: prev?.since ?? "14:05부터",
+        action: { label: "풀기", href: `${rp}?t=review` },
+        step: "review",
+        order: 4,
+      });
+    }
+    for (const p of this.derivedProblems(slug).filter((x) => x.kind === "extract_failed" && x.state === "open")) {
+      const prev = old.find((t) => t.step === `p-${p.id}`);
+      list.push({
+        id: `t-${p.id}`,
+        slug,
+        rank: 5,
+        status: { domain: "turn", value: "check" },
+        project_title: title,
+        where: "자료",
+        short: "자료 글자 뽑기 실패",
+        text: p.title,
+        since: prev?.since ?? `${p.found.replace("글자 뽑기 · ", "")}부터`,
+        action: { label: "풀기", href: `${rp}?t=p-${p.id}` },
+        step: `p-${p.id}`,
+        order: 6,
+      });
+    }
+    this.store.projects.turns = sortTurns(list);
+  }
+
+  private initResearchTurns() {
+    for (const slug of Object.keys(this.store.workspaces)) this.syncResearchTurns(slug);
+  }
+
+  /**
+   * 지금 할 일 순서(설계 16.3) — 그 사람의 나의 할 일 목록에서 이 프로젝트 항목을 단계로(같은 수), 그 뒤에 세지 않는 단계
+   * (남은 선택 질문 · 결과 글 읽기 · 다음 마일스톤). 할 일이 하나도 없으면 맨 앞에 “AI 작업 중 / 기다림”.
+   */
+  private tasksFor(slug: string, v: Pick<ProjectsView, "turns" | "waiting">, w: WorkspaceCore, problems: ProblemView[], turn: TurnView): TaskStep[] {
+    const steps: TaskStep[] = [];
+    const add = (s: TaskStep) => {
+      if (!steps.some((x) => x.id === s.id)) steps.push(s);
+    };
+    const contentOpen = problems.filter((p) => PROBLEM_GROUP[p.kind] === "content" && p.state === "open").length;
+    for (const t of v.turns.filter((x) => x.slug === slug)) {
+      const st = t.step ?? "";
+      if (st === "answer") add({ id: "answer", kind: "answer", title: w.current.round === "start" ? "시작 질문에 답하기" : "질문에 답하기", short: `질문 ${w.form.answerable}`, counted: true, status: t.status });
+      else if (st === "review") add({ id: "review", kind: "review", title: "결과 글 문제 풀기", short: `결과 글 문제 ${contentOpen}`, counted: true, status: t.status });
+      else if (st === "sync") add({ id: "sync", kind: "sync", title: "동기화 충돌 고르기", short: "동기화 충돌", counted: true, status: t.status, problem_id: problems.find((p) => p.kind === "sync_conflict")?.id });
+      else if (st === "refs") add({ id: "refs", kind: "refs", title: "참고 프로젝트 새 버전 정하기", short: "참고 새 버전", counted: true, status: t.status });
+      else if (st === "resume") add({ id: "resume", kind: "resume", title: "계속 — AI가 이어서 하기", short: "계속", counted: true, status: t.status });
+      else if (st === "blocked") add({ id: "blocked", kind: "blocked", title: "멈춘 실행 풀기", short: "실행 멈춤", counted: true, status: t.status, problem_id: problems.find((p) => p.kind === "run_stopped")?.id });
+      else if (st === "approve") add({ id: "approve", kind: "approve", title: `${w.approval.stage_label} 단계 승인`, short: `${w.approval.stage_label} 승인`, counted: true, status: t.status });
+      else if (st.startsWith("p-")) add({ id: st, kind: "problem", problem_id: st.slice(2), title: problems.find((p) => p.id === st.slice(2))?.title ?? t.text, short: t.short, counted: true, status: t.status });
+    }
+    if (w.form.answerable > 0 && !steps.some((s) => s.id === "answer")) add({ id: "answer", kind: "answer", title: "남은 질문 보기", short: `질문 ${w.form.answerable}`, counted: false, status: { domain: "question", value: "open", label: "선택 질문" } });
+    if (w.result && !steps.some((s) => s.id === "review")) add({ id: "review", kind: "review", title: "결과 글 읽기", short: "결과 글", counted: false, status: { domain: "generic", value: "readable", label: "읽기" } });
+    if (!steps.some((s) => s.id === "approve")) {
+      const ready = w.approval.reasons.length === 0 && problems.every((p) => !p.blocks.includes("단계 승인"));
+      add({ id: "approve", kind: "approve", title: `${w.approval.stage_label} 단계 승인`, short: `${w.approval.stage_label} 승인`, counted: false, status: ready ? { domain: "turn", value: "approve" } : { domain: "generic", value: "notyet", label: "아직" } });
+    }
+    if (!steps.some((s) => s.counted)) {
+      const ai = turn.side === "ai";
+      steps.unshift({ id: "wait", kind: "wait", title: ai ? "AI 작업 중 — 진행 보기" : "기다림", short: ai ? "AI 작업 중" : "기다림", counted: false, status: ai ? { domain: "turn", value: turn.fresh ? "ai" : "ai_quiet" } : { domain: "turn", value: "waiting" } });
+    }
+    return steps;
+  }
+
+  /** 핵심 발견의 근거 칩 — 문제와 이어진 발견은 그 문제 상태로(해결되면 고른 길로) */
+  private findingsFor(slug: string, problems: ProblemView[]) {
+    const r = this.store.research[slug]!;
+    const w = this.store.workspaces[slug]!;
+    const rp = roundPathOf(w);
+    return r.brief.findings.map((f) => {
+      const href = f.href.replace("{round}", rp);
+      if (!f.problem_id) return { ...f, href };
+      const p = problems.find((x) => x.id === f.problem_id);
+      if (p) {
+        const basis: StatusRef = p.state === "ai" ? { domain: "claim", value: "ai" } : { domain: "problem", value: p.kind };
+        return { ...f, href, basis };
+      }
+      const rec = [...r.log].reverse().find((x) => x.id.startsWith(`rec-${f.problem_id}-`));
+      const o = rec?.option;
+      const basis: StatusRef =
+        o === "keep" ? { domain: "claim", value: "unverified" } : o === "assume" ? { domain: "claim", value: "unverified", label: "가정으로 기록" } : o === "official" || o === "report" ? { domain: "claim", value: "decided" } : { domain: "claim", value: "pending_edit" };
+      return { ...f, href, basis };
+    });
+  }
+
+  private person() {
+    return ROLE_PERSON[mockSettings.get().role];
+  }
+
+  /** 해결 기록 한 줄(지우지 않음). id는 rec-<문제>-<번호> — 핵심 발견이 고른 길을 찾을 때 씀 */
+  private record(slug: string, p: Pick<ProblemView, "id" | "kind" | "title">, choice: string, opts: { option?: string; note?: string; receiptNo?: string } = {}) {
+    const r = this.store.research[slug];
+    if (!r) return;
+    r.log.push({ id: `rec-${p.id}-${r.log.length + 1}`, kind: p.kind, title: p.title, choice, option: opts.option, by: this.person(), at: nowLabel(), receipt_no: opts.receiptNo ?? `${this.receiptNo + 1}`, note: opts.note });
   }
 
   /**
@@ -233,16 +543,30 @@ export class MockPesClient {
     await this.readDelay();
     const v = clone(this.store.projects);
     Object.assign(v, this.viewTurns(mockSettings.get().role));
-    v.active = v.active.map((p) => ({ ...p, turn: this.turnFor(p.slug, v) }));
+    v.active = v.active.map((p) => ({ ...p, turn: this.turnFor(p.slug, v), problems_open: this.problemsFor(p.slug).length }));
     return v;
   }
   async getWorkspace(slug: string): Promise<WorkspaceView> {
     await this.readDelay();
     const w = this.store.workspaces[slug];
-    if (!w) throw apiError("permission_denied", "이 프로젝트를 볼 권한이 없거나 프로젝트가 없습니다.", false);
-    const out = clone(w);
-    out.turn = this.turnFor(slug, this.viewTurns(mockSettings.get().role));
-    return out;
+    const r = this.store.research[slug];
+    if (!w || !r) throw apiError("permission_denied", "이 프로젝트를 볼 권한이 없거나 프로젝트가 없습니다.", false);
+    const role = mockSettings.get().role;
+    const v = this.viewTurns(role);
+    const turn = this.turnFor(slug, v);
+    const problems = this.problemsForRole(slug, role);
+    const core = clone(w);
+    // 연구 공간 칸(5차) — 실제로는 서버가 같은 읽기 묶음에 계산해 싣는다(설계 16.6)
+    return {
+      ...core,
+      turn,
+      brief: { ...clone(r.brief), findings: this.findingsFor(slug, problems) },
+      problems,
+      problem_log: clone(r.log).reverse(),
+      proposals: clone(r.proposals),
+      stage_summaries: clone(r.stage_summaries),
+      tasks: this.tasksFor(slug, v, w, problems, turn),
+    };
   }
 
   /**
@@ -271,17 +595,48 @@ export class MockPesClient {
         short: `${w.form.round_label} 질문 ${w.form.answerable}`,
         text: w.form.required_left ? `필수 ${w.form.required_left}개 남음 · AI는 답을 기다림` : "필수 답 모두 보냄 · 남은 질문은 선택",
         since: wasAnswer ? old.since : "방금",
-        action: { label: "답하기", href: wasAnswer ? old.action.href : `${roundPath}${w.now.action.href.startsWith("#") ? w.now.action.href : "#qpanel"}` },
+        action: { label: "답하기", href: wasAnswer ? old.action.href : `${roundPath}${w.now.action.href.startsWith("#") ? w.now.action.href : "?t=answer"}` },
+        step: "answer",
+        order: old?.order ?? 2,
       };
     } else if (w.now.kind === "resume") {
-      item = { id: old?.id ?? `t-${slug}`, slug, rank: 4, status: { domain: "turn", value: "resume" }, project_title: title, where, short: `${w.form.round_label} 계속`, text: "필수 답 모두 보냄 — 계속을 누르면 AI가 이어서 합니다", since: "방금", action: { label: "계속으로 가기", href: `${roundPath}#ai` } };
+      item = { id: old?.id ?? `t-${slug}`, slug, rank: 4, status: { domain: "turn", value: "resume" }, project_title: title, where, short: `${w.form.round_label} 계속`, text: "필수 답 모두 보냄 — 계속을 누르면 AI가 이어서 합니다", since: "방금", action: { label: "계속으로 가기", href: `${roundPath}?t=resume` }, step: "resume", order: old?.order ?? 2 };
     }
     const next = old ? (item ? list.map((t) => (t === old ? item! : t)) : list.filter((t) => t !== old)) : item ? [...list, item] : list;
-    // 순위대로(같은 순위는 원래 순서)
-    this.store.projects.turns = next
-      .map((t, i) => ({ t, i }))
-      .sort((a, b) => a.t.rank - b.t.rank || a.i - b.i)
-      .map((x) => x.t);
+    // 순위대로(같은 순위는 서버 순서 → 원래 순서)
+    this.store.projects.turns = sortTurns(next);
+  }
+
+  /** 질문 폼이 바뀐 뒤(답 · 보류): 남은 수 · 지금 할 일 · 나의 할 일을 함께 맞춘다(실제로는 같은 tx) */
+  private afterFormChange(slug: string) {
+    const w = this.ws(slug);
+    const open = w.form.questions.filter((q) => !q.sent && !q.deferred);
+    w.form.answerable = open.length;
+    w.form.required_left = open.filter((q) => q.required).length;
+    w.nav_counts.questions = open.length;
+    const answeredCount = w.form.questions.filter((q) => q.sent).length;
+    w.strip = w.strip.map((c) => (c.k === "답 제출" ? { ...c, v: `${answeredCount} / ${w.form.total}` } : c));
+    if (w.form.required_left === 0) {
+      w.now = {
+        rank: 4,
+        kind: "resume",
+        title: "AI가 이어서 하도록 ‘계속’을 눌러 주세요",
+        facts: [`${w.form.round_label} 필수 답 모두 보냄`],
+        detail: `누르면 서버가 질문·폼 버전, 실행 상태${w.mode === "B" ? ", 연결" : ", 사용량"}을 다시 확인합니다.`,
+        action: { label: "계속으로 가기", href: "#ai" },
+        then: w.now.then,
+        for_others: "소유자가 계속을 누르면 이어집니다",
+      };
+      w.runs.continue_reason = "";
+      // 실행은 여전히 사람(계속)을 기다리지만, 기다리는 것이 바뀌었다 — 세 칸이 같은 말을 하게
+      w.ai_card = { ...w.ai_card, line: "필수 답을 받았습니다. 소유자가 ‘계속’을 누르면 이어서 합니다." };
+      w.runs.running_empty = "지금 진행 중인 작업이 없습니다. AI는 ‘계속’을 기다립니다.";
+      w.runs.rows = w.runs.rows.map((r) => (r.selected ? { ...r, last: "필수 답 받음 · ‘계속’ 기다림" } : r));
+    } else {
+      w.now = { ...w.now, title: `${w.form.round_label} 질문 ${w.form.answerable}개에 답해 주세요`, facts: [`필수 ${w.form.required_left}개 남음`, ...(w.now.facts ?? []).filter((f) => !f.startsWith("필수"))] };
+    }
+    w.approval = { ...w.approval, reasons: w.approval.reasons.filter((x) => !(w.form.required_left === 0 && x.startsWith("필수"))) };
+    this.syncTurnItem(slug);
   }
   async getMaterials(slug: string): Promise<MaterialsView> {
     await this.readDelay();
@@ -421,36 +776,50 @@ export class MockPesClient {
         const w = this.ws(input.slug);
         if (mockSettings.get().nextSubmit === "conflict") {
           mockSettings.set({ nextSubmit: "ok" });
-          throw apiError("version_conflict", `그사이 폼이 v${w.form.version + 1}로 바뀌었습니다 — 바뀐 곳을 보고 다시 보내 주세요. 아무것도 접수하지 않았고 초안은 그대로입니다.`, false, { expected_form_version: String(input.form_version), current_form_version: String(w.form.version + 1) });
+          throw apiError("version_conflict", `그사이 질문이 바뀌었습니다 — 바뀐 곳을 보고 다시 보내 주세요. 아무것도 접수하지 않았고 초안은 그대로입니다.`, false, { expected_form_version: String(input.form_version), current_form_version: String(w.form.version + 1) });
         }
+        // 막힌 것 “필수 질문 미응답”이 이 답으로 풀리면 해결 기록에 남긴다(같은 tx)
+        const reqBefore = this.derivedProblems(input.slug).find((p) => p.kind === "required_question");
+        const answeredRequired: string[] = [];
         for (const a of input.answers) {
           const q = w.form.questions.find((x) => x.id === a.question_id);
-          if (q) q.sent = { answer: a.text, by: mockSettings.get().role === "owner" ? "김연구" : "박검토", at: nowLabel(), receipt_no: `R2-S${this.receiptNo + 1}` };
+          if (q) {
+            if (q.required && !q.sent && !q.deferred) answeredRequired.push(q.number);
+            q.sent = { answer: a.text, by: this.person(), at: nowLabel(), receipt_no: `R2-S${this.receiptNo + 1}` };
+          }
         }
-        const open = w.form.questions.filter((q) => !q.sent);
-        w.form.answerable = open.length;
-        w.form.required_left = open.filter((q) => q.required).length;
-        w.nav_counts.questions = open.length;
-        const answeredCount = w.form.questions.filter((q) => q.sent).length;
-        w.strip = w.strip.map((c) => (c.k === "답 제출" ? { ...c, v: `${answeredCount} / ${w.form.total}` } : c));
-        if (w.form.required_left === 0) {
-          w.now = {
-            rank: 4,
-            kind: "resume",
-            title: "AI가 이어서 하도록 ‘계속’을 눌러 주세요",
-            facts: [`${w.form.round_label} 필수 답 모두 보냄`],
-            detail: `누르면 서버가 질문·폼 버전, 실행 상태${w.mode === "B" ? ", 연결" : ", 사용량"}을 다시 확인합니다.`,
-            action: { label: "계속으로 가기", href: "#ai" },
-            then: w.now.then,
-            for_others: "소유자가 계속을 누르면 이어집니다",
-          };
-          w.runs.continue_reason = "";
-        } else {
-          w.now = { ...w.now, title: `${w.form.round_label} 질문 ${w.form.answerable}개에 답해 주세요`, facts: [`필수 ${w.form.required_left}개 남음`, ...(w.now.facts ?? []).filter((f) => !f.startsWith("필수"))] };
-        }
-        this.syncTurnItem(input.slug);
+        if (reqBefore && answeredRequired.length) this.record(input.slug, reqBefore, `답함 — ${answeredRequired.join(" · ")}`, { option: "answer", receiptNo: `R2-S${this.receiptNo + 1}` });
+        this.afterFormChange(input.slug);
         this.emit(input.slug, ["workspace", "projects"]);
         return { accepted: input.answers.length };
+      }
+      case "question.revise": {
+        const input = raw as CommandInputs["question.revise"];
+        const w = this.ws(input.slug);
+        if (mockSettings.get().role === "reader") throw apiError("permission_denied", "읽기 멤버는 질문을 고칠 수 없습니다.", false);
+        const reqBefore = this.derivedProblems(input.slug).find((p) => p.kind === "required_question");
+        const ids = new Set(input.question_ids);
+        const touched = w.form.questions.filter((q) => ids.has(q.id) && !q.sent && !q.deferred);
+        if (!touched.length) throw apiError("version_conflict", "그사이 그 질문이 답되었거나 바뀌었습니다 — 화면을 다시 받았습니다.", false);
+        for (const q of touched) q.deferred = { by: this.person(), at: nowLabel() };
+        w.form.version += 1;
+        if (reqBefore && touched.some((q) => q.required)) this.record(input.slug, reqBefore, `보류 — ${touched.map((q) => q.number).join(" · ")}(새 폼 v${w.form.version})`, { option: "defer" });
+        this.afterFormChange(input.slug);
+        this.emit(input.slug, ["workspace", "projects"]);
+        return { deferred: touched.length, form_version: w.form.version };
+      }
+      case "problem.resolve":
+        return this.resolveProblem(raw as CommandInputs["problem.resolve"]);
+      case "decision.record": {
+        const input = raw as CommandInputs["decision.record"];
+        if (mockSettings.get().role === "reader") throw apiError("permission_denied", "읽기 멤버는 판단을 기록할 수 없습니다.", false);
+        const r = this.store.research[input.slug];
+        const pr = r?.proposals.find((x) => x.id === input.proposal_id);
+        if (!r || !pr) throw apiError("version_conflict", "그 제안이 바뀌었거나 없습니다.", false);
+        if (pr.state.value !== "proposed") throw apiError("version_conflict", "이미 판단한 제안입니다 — 화면을 다시 받았습니다.", false);
+        pr.state = { domain: "proposal", value: input.verdict === "accept" ? "accepted" : "rejected", label: `${input.verdict === "accept" ? "받아들임" : "버림"} · ${this.person()} ${nowLabel()}` };
+        this.emit(input.slug, ["workspace"]);
+        return {};
       }
       case "run.resume":
       case "run.start": {
@@ -463,7 +832,7 @@ export class MockPesClient {
           run.last = `${nowLabel()} 계속 접수 · 새 담당`;
         }
         w.ai_card = { ...w.ai_card, status: run?.status ?? { domain: "run", value: "running" }, line: w.mode === "B" ? "계속 접수됨 — 내 컴퓨터 AI가 받으면 이어집니다." : "같은 모델로 이어 갑니다. 이미 저장된 결과는 다시 만들지 않습니다." };
-        w.now = { rank: 6, kind: "wait", title: "지금은 AI가 하는 중입니다 — 진행 상황 보기", detail: w.mode === "B" ? "내 컴퓨터 AI가 계속을 받으면 진행됩니다. AI가 꺼져 있으면 ‘AI 미접속 · 대기 중’으로 보입니다." : "PES 실행기가 이어서 합니다.", action: { label: "진행 보기", href: "#ai" }, then: [] };
+        w.now = { rank: 6, kind: "wait", title: "지금은 AI 작업 중입니다 — 진행 상황 보기", detail: w.mode === "B" ? "내 컴퓨터 AI가 계속을 받으면 진행됩니다. AI가 꺼져 있으면 ‘AI 미접속 · 대기 중’으로 보입니다." : "PES 실행기가 이어서 합니다.", action: { label: "진행 보기", href: "#ai" }, then: [] };
         w.strip = w.strip.map((c) => (c.k === "실행" ? { ...c, v: w.mode === "B" ? "계속 접수됨" : "진행 중" } : c));
         // 차례가 AI 쪽으로: A는 PES 실행기가 직접 하므로 소식이 바로 있음, B는 내 컴퓨터 AI가 받기 전이라 아직 소식 없음(움직이지 않음)
         this.store.activity[input.slug] =
@@ -519,6 +888,11 @@ export class MockPesClient {
         const input = raw as CommandInputs["sync.conflict.resolve"];
         const w = this.ws(input.slug);
         const row = w.sync?.rows.find((r) => r.item === input.item);
+        const pb = this.derivedProblems(input.slug).find((p) => p.kind === "sync_conflict" && row && p.id === `ps-${row.id}`);
+        if (pb && input.choice !== "later") {
+          const label = pb.options.find((o) => o.id === input.choice)?.label ?? input.choice;
+          this.record(input.slug, pb, label, { option: input.choice, note: input.reason || undefined });
+        }
         if (row) {
           row.status = input.choice === "later" ? { domain: "sync", value: "conflict", label: "충돌 · 나중에 정함(이 파일만 멈춤)" } : { domain: "sync", value: "synced" };
           row.version = input.choice === "pc" ? "내 컴퓨터 것을 v4로 올림 · 웹 v3은 기록에 남음" : input.choice === "web" ? "웹 v3을 받음 · 내 컴퓨터 것은 “충돌 사본”" : "둘 다 그대로";
@@ -550,6 +924,9 @@ export class MockPesClient {
           this.emit("*", ["usage"]);
           return { kept: true };
         }
+        // 연구 공간의 막힌 것 “AI 실행 멈춤”은 사람 몫이 끝나 기다림으로 바뀐다 — 해결 기록에 고른 것을 남긴다
+        const stopped = this.derivedProblems("youth-housing").find((p) => p.kind === "run_stopped" && p.state === "open");
+        if (stopped) this.record("youth-housing", stopped, `확인 안 된 호출 정리 — ${input.outcome === "processed" ? "처리됨(예약을 사용으로)" : "처리 안 됨(예약 해제)"} · 이제 재개 가능 시각을 기다림`, { option: "settle", note: `근거: ${input.evidence}` });
         this.store.usage.unknown_calls = this.store.usage.unknown_calls.filter((u) => u.id !== input.id);
         const sub = this.store.usage.connections.find((c) => c.id === "conn-sub")?.subscription;
         if (sub) {
@@ -581,7 +958,7 @@ export class MockPesClient {
         const c = this.store.usage.connections.find((x) => x.id === input.connection_id);
         if (c?.subscription) {
           c.subscription.baseline = { state: input.no_other_use_after_t0 ? "not_used" : "entered", t0: input.t0, h5: input.h5, week: input.week, month: input.month, no_other_use_after_t0: input.no_other_use_after_t0 };
-          // 추정 다시 계산: 새 t0 값 + (시안에서는 t0 이후 PES 증분 0으로 다시 시작) + 예약
+          // 추정 다시 계산: 새 그 숫자 + (시안에서는 확인한 시각 이후 PES 증분 0으로 다시 시작) + 예약
           c.subscription.windows = c.subscription.windows.map((w) => {
             const v = w.key === "h5" ? input.h5 : w.key === "week" ? input.week : input.month;
             const t0v = v ?? 0;
@@ -596,7 +973,7 @@ export class MockPesClient {
         const okAddress = /^https:\/\//.test(input.endpoint) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(input.endpoint);
         if (!okAddress) throw apiError("connection_test_failed", "주소 형식이 맞지 않습니다. https:// 로 시작하는 주소(내 컴퓨터 모델이면 http://127.0.0.1…)를 넣어 주세요.", false, undefined, "주소 고치기");
         if (!input.key_present && input.kind !== "custom") throw apiError("connection_test_failed", "API 키가 비어 있습니다.", false);
-        if (input.key_present && input.key_length < 8) throw apiError("connection_test_failed", "키가 맞지 않습니다(401). 제공사 콘솔에서 키를 다시 확인해 주세요.", false);
+        if (input.key_present && input.key_length < 8) throw apiError("connection_test_failed", "키가 맞지 않습니다(401). API 회사 화면에서 키를 다시 확인해 주세요.", false);
         return { ok: true, at: nowLabel() };
       }
       case "ai_connection.models.refresh": {
@@ -734,6 +1111,13 @@ export class MockPesClient {
       case "question.create": {
         const input = raw as CommandInputs["question.create"];
         const w = this.ws(input.slug);
+        if (input.direction === "human_to_agent") {
+          // 사람→AI 질문(U5): 접수됨까지가 사실이다. 받음 ≠ 읽음, 답이 오기 전에는 “AI 답변 중”을 보이지 않는다.
+          if (mockSettings.get().role === "reader") throw apiError("permission_denied", "읽기 멤버는 AI에게 부탁할 수 없습니다.", false);
+          this.addAsk(w, input.target ? `[${input.target}] ${input.text}` : input.text);
+          this.emit(input.slug, ["workspace"]);
+          return { number: w.asks[w.asks.length - 1]?.number };
+        }
         w.form.version += 1;
         w.form.total += 1;
         w.form.answerable += 1;
@@ -745,6 +1129,115 @@ export class MockPesClient {
       default:
         return {};
     }
+  }
+
+  /** 사람→AI 질문 하나(U5) — AI 작업의 “AI에게 묻는 질문”에 더한다. 받음 ≠ 읽음, 답이 오기 전에는 답 없음 */
+  private addAsk(w: WorkspaceCore, text: string) {
+    const nums = [...w.form.questions.map((q) => q.number), ...w.asks.map((a) => a.number)].map((x) => Number(x.replace(/\D/g, "")) || 0);
+    const n = Math.max(24, ...nums) + 1;
+    const running = w.runs.rows.some((r) => r.status.value === "running");
+    w.asks.push({
+      number: `Q-${n}`,
+      who: `${this.person()} → AI`,
+      text,
+      steps: [
+        { domain: "ask", value: "received", label: `접수됨 ${nowLabel()}` },
+        w.mode === "B" ? { domain: "ask", value: "no_answer", label: "내 컴퓨터가 아직 받지 않음" } : { domain: "ask", value: "no_answer", label: running ? "실행 중 · 답 없음" : "다음 실행에서 처리 · 답 없음" },
+      ],
+    });
+    w.form.asks_count = w.asks.length;
+  }
+
+  /**
+   * 막힌 것 하나 풀기(problem.resolve, 설계 16.4) — 고른 선택지 하나를 그 종류의 업무 처리로 바꾸고 해결 기록과 함께 한 tx.
+   * 이 명령은 연구 내용 문제 · 실행 넘기기/취소 · 자료 정리만 맡는다. 답하기 · 동기화 고르기 · 호출 정리는 원래 명령을 그대로 쓴다.
+   */
+  private resolveProblem(input: CommandInputs["problem.resolve"]) {
+    const role = mockSettings.get().role;
+    if (role === "reader") throw apiError("permission_denied", "읽기 멤버는 막힌 것을 정할 수 없습니다. 고르기는 편집자 이상입니다.", false);
+    const w = this.ws(input.slug);
+    const r = this.store.research[input.slug];
+    const p = this.problemsFor(input.slug).find((x) => x.id === input.problem_id);
+    if (!r || !p) throw apiError("version_conflict", "그사이 이 문제가 풀렸거나 바뀌었습니다 — 아무것도 바꾸지 않았고 화면을 다시 받았습니다.", false);
+    const opt: ProblemOption | undefined = p.options.find((o) => o.id === input.option_id);
+    if (!opt || opt.via !== "problem.resolve") throw apiError("permission_denied", "이 문제에 없는 선택지입니다 — 서버가 닫힌 목록으로 다시 검사했습니다.", false);
+    if (opt.owner_only && role !== "owner") throw apiError("permission_denied", "이 선택은 소유자만 할 수 있습니다. 서버가 권한을 다시 확인했습니다.", false);
+    if (opt.needs === "note" && !input.note?.trim()) throw apiError("permission_denied", "요약을 적어 주세요 — 빈 요약은 붙이지 않습니다.", false, undefined, "요약 적기");
+    const at = nowLabel();
+
+    if (PROBLEM_GROUP[p.kind] === "content") {
+      const c = r.content.find((x) => x.id === p.id);
+      if (!c) throw apiError("version_conflict", "그사이 이 문제가 바뀌었습니다.", false);
+      if (opt.to_ai) {
+        c.state = "ai";
+        c.note = `${at} ${this.person()}가 AI에게 맡김 — ${w.mode === "B" ? "내 컴퓨터 AI가 받아야 시작합니다" : "다음 실행에서 처리합니다"}. 결과는 다음 결과 글에 붙습니다.`;
+        this.addAsk(w, `${opt.label} — ${p.title}`);
+      } else {
+        r.content = r.content.filter((x) => x.id !== p.id);
+        this.record(input.slug, p, opt.label, { option: opt.id, note: input.note || undefined });
+        const para = p.paragraph !== undefined ? w.result?.paragraphs[p.paragraph] : undefined;
+        if (para && EDIT_PROPOSAL[opt.id]) para.pending_edit = EDIT_PROPOSAL[opt.id];
+        if (opt.id === "official" || opt.id === "report" || opt.id === "assume") {
+          r.proposals.push({
+            id: `pd-${p.id}`,
+            kind: opt.id === "assume" ? "assumption" : "decision",
+            text: opt.id === "assume" ? "2023년 A시 요양보호사 수의 차이는 집계 기준일 차이로 본다" : opt.label,
+            basis: `막힌 것 · ${p.title}`,
+            by: this.person(),
+            at,
+            state: { domain: "proposal", value: "accepted", label: `사람이 정함 · ${at}` },
+          });
+        }
+      }
+      this.syncResearchTurns(input.slug);
+      this.emit(input.slug, ["workspace", "projects"]);
+      return { state: opt.to_ai ? "ai" : "resolved" };
+    }
+
+    if (p.kind === "run_stopped") {
+      const run = w.runs.rows.find((x) => `pr-${x.id}` === p.id);
+      if (run) {
+        run.selected = false;
+        if (opt.id === "handoff") {
+          run.status = { domain: "run", value: "handed_off" };
+          run.last = `${at} 방식 B로 넘김 · 새 실행 ${run.id}-B`;
+          const queued: StatusRef = { domain: "run", value: "queued", label: "넘김 접수 · 내 컴퓨터가 아직 받지 않음" };
+          w.runs.rows.unshift({ id: `${run.id}-B`, where: run.where, runner: "B · 내 컴퓨터 AI", status: queued, started: at, last: "내 컴퓨터 AI가 받으면 시작", selected: true });
+          w.ai_card = { ...w.ai_card, title: `실행 ${run.id}-B · ${run.where}`, status: queued, line: "방식 B로 넘겼습니다. 내 컴퓨터 AI가 받으면 이어집니다(API 사용량을 쓰지 않음)." };
+          this.store.activity[input.slug] = { text: "넘김 접수 · 내 컴퓨터 AI가 아직 받지 않음", since: isoAgo(0), fresh: false };
+        } else {
+          run.status = { domain: "run", value: "cancelled" };
+          run.last = `${at} 사람이 취소 · 저장된 결과는 남음`;
+          w.ai_card = { ...w.ai_card, status: { domain: "run", value: "cancelled" }, line: "실행을 취소했습니다. 저장된 결과(연구 설계 초안 v1)는 남았습니다." };
+        }
+        w.strip = w.strip.map((s) => (s.k === "실행" ? { ...s, v: opt.id === "handoff" ? "넘김 접수" : "취소됨" } : s));
+        w.stages = w.stages.map((s) => (s.view === "current_blocked" ? { ...s, view: "current_you" as const, state_text: opt.id === "handoff" ? "현재 · 넘김 접수" : "현재 · 실행 취소됨" } : s));
+        w.approval = { ...w.approval, reasons: w.approval.reasons.filter((x) => !x.startsWith("실행 멈춤")) };
+      }
+      (this.store.dismissed[input.slug] ??= {})[p.id] = true;
+      this.record(input.slug, p, opt.label, { option: opt.id });
+      this.store.projects.turns = this.store.projects.turns.filter((t) => !(t.slug === input.slug && t.step === "blocked"));
+      this.store.projects.waiting = this.store.projects.waiting.filter((x) => x.slug !== input.slug);
+      this.store.usage.blocked = null;
+      this.store.usage.now = { rank: 6, kind: "wait", title: "지금 멈춘 실행이 없습니다", facts: [`${STAGE_LABEL[w.current.stage]} 실행을 ${opt.id === "handoff" ? "방식 B로 넘김" : "취소함"} · ${at}`], detail: "확인 안 된 호출이 남아 있으면 사용량 예약이 그대로입니다 — 아래 표에서 정리할 수 있습니다.", action: { label: "확인 안 된 호출 보기", href: "#unknown" }, then: [] };
+      this.emit(input.slug, ["workspace", "projects", "usage"]);
+      return { state: "resolved" };
+    }
+
+    if (p.kind === "extract_failed") {
+      (this.store.dismissed[input.slug] ??= {})[p.id] = true;
+      const f = this.store.materials[input.slug]?.files.find((x) => `px-${x.id}` === p.id);
+      if (f && opt.id === "summary") {
+        f.access_note = "사람이 적은 요약만 AI가 읽음";
+        f.extract_note = `${f.extract_note ?? ""} · 사람이 요약을 붙임(${at})`;
+      }
+      if (f && opt.id === "skip") f.extract_note = `${f.extract_note ?? ""} · 없이 진행하기로 함(${at})`;
+      this.record(input.slug, p, opt.label, { option: opt.id, note: input.note || undefined });
+      this.syncResearchTurns(input.slug);
+      this.emit(input.slug, ["workspace", "projects", "files"]);
+      return { state: "resolved" };
+    }
+    throw apiError("permission_denied", "이 문제는 원래 화면의 명령으로 처리합니다.", false);
   }
 
   /* ───────── 시안 조작: AI 쪽 사건 흉내 ───────── */
@@ -772,7 +1265,7 @@ export class MockPesClient {
 
   /**
    * “AI 끝남 → 나의 할 일로 바뀜” 장면 — 장기요양 2판(방식 B · Codex CLI).
-   * ① 바로: 도우미가 방금 진행을 보고 → AI가 하는 중(소식 있음 — 점이 돈다) ② finishMs 뒤: AI가 질문 2개를 올리고 기다림 → 나의 할 일.
+   * ① 바로: 도우미가 방금 진행을 보고 → AI 작업 중(소식 있음 — 점이 돈다) ② finishMs 뒤: AI가 질문 2개를 올리고 기다림 → 나의 할 일.
    * 여러 번 재생할 수 있게 그 프로젝트만 처음 장면으로 되돌린 뒤 시작한다. 변경 알림은 다른 사건과 같은 길(번호 → 바뀐 읽기만).
    * 화면 읽기 알림은 TurnAnnouncer가 한 번만 한다(이 사건에는 human_action을 싣지 않음 — 두 번 읽히지 않게).
    */
@@ -864,12 +1357,14 @@ export class MockPesClient {
       card.foot = [`마지막 활동 ${at} · Codex CLI`, card.foot[1]];
     }
     this.syncTurnItem(slug);
+    this.syncResearchTurns(slug);
     this.emit(slug, ["workspace", "projects"]);
   }
 
   reset() {
     window.clearTimeout(this.demoTimer);
     this.store = buildStore();
+    this.initResearchTurns();
     this.receipts.clear();
     this.emit("*", ["workspace", "projects", "files", "usage", "computer", "notifications"]);
   }

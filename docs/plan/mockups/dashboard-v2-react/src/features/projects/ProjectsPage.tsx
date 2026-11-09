@@ -18,7 +18,7 @@ import { STATUS } from "@/components/pes/status-registry";
 import { elapsedText, TurnIndicator, TurnTrack, turnDef, useNow } from "@/components/pes/turn";
 import { cn } from "@/lib/utils";
 
-/** 화면 말은 상태 사전 한 곳에서(4차): 나의 할 일 · AI가 하는 중 · AI가 읽기 허용/막음 */
+/** 화면 말은 상태 사전 한 곳에서(4차): 나의 할 일 · AI 작업 중 · AI가 읽기 허용/막음 */
 const YOU = turnDef("you").label;
 const AI = turnDef("ai").label;
 const ALLOW = STATUS.transfer.on!.short!;
@@ -28,16 +28,52 @@ function stageLabel(p: ProjectCard) {
   return "단계: " + p.stages.map((s) => `${STAGE_LABEL[s.key]} ${STAGE_MARK[s.view].text}`).join(", ");
 }
 
-/** AI가 하는 중인 프로젝트(서버가 카드마다 계산한 차례) */
+/** AI 작업 중인 프로젝트(서버가 카드마다 계산한 차례) */
 function aiProjects(d: ProjectsView) {
   return d.active.filter((p) => p.turn?.side === "ai");
+}
+
+/** 막힌 것·풀 것 수 — 누르면 그 프로젝트의 보드(연구 공간)로. 관리 공간에서는 수만(5차) */
+function ProblemsLink({ p }: { p: ProjectCard }) {
+  if (!p.problems_open) return null;
+  return (
+    <Link to={`/p/${p.slug}/problems`} className="inline-flex items-center gap-1 rounded-md border border-warn-line bg-warn-soft px-1.5 text-caption leading-[1.7] font-medium text-warn no-underline hover:border-warn">
+      <StatusMark shape="tri" />
+      막힌 것 {p.problems_open}
+      <span className="sr-only"> — 막힌 것·풀 것 보기</span>
+    </Link>
+  );
+}
+
+/** 단계 모양의 뜻 — 모양만 보고 외우지 않게 목록 위에 한 줄로 */
+const LEGEND = (["approved", "current_you", "current_ai", "current_blocked", "stale", "pending"] as const).map((v) => ({
+  v,
+  label: v === "current_you" ? "나의 할 일" : v === "current_ai" ? "AI 작업 중" : v === "current_blocked" ? "막힘" : STAGE_MARK[v].text,
+}));
+function StageLegend() {
+  return (
+    <p aria-label="단계 모양의 뜻" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-2">
+      {LEGEND.map(({ v, label }) => (
+        <span key={v} className="inline-flex items-center gap-1">
+          <StatusMark shape={STAGE_MARK[v].shape} className={cn("size-2.5", STAGE_MARK[v].cls)} />
+          {label}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/** 현재 단계의 상태를 글자로(“나의 할 일” · “막힘” …) — 모양 옆에 뜻을 붙인다 */
+function currentStage(p: ProjectCard) {
+  const cur = p.stages.find((x) => x.view.startsWith("current_") || x.view === "stale");
+  return cur ? { text: STAGE_MARK[cur.view].text.replace(/^현재 · /, ""), cls: STAGE_MARK[cur.view].cls } : null;
 }
 
 function StageMini({ p, compact }: { p: ProjectCard; compact?: boolean }) {
   return (
     <ol aria-label={stageLabel(p)} className={cn("grid grid-cols-6 gap-[3px]", compact && "w-[228px]")}>
       {p.stages.map((s) => (
-        <li key={s.key} aria-hidden="true" className={cn("flex flex-col items-center gap-0.5 rounded-md bg-surface-soft px-0.5 pt-[5px] pb-1 text-center text-[11.5px] font-medium text-ink-2", STAGE_MARK[s.view].cell)}>
+        <li key={s.key} aria-hidden="true" title={`${STAGE_LABEL[s.key]} — ${STAGE_MARK[s.view].text}`} className={cn("flex flex-col items-center gap-0.5 rounded-md bg-surface-soft px-0.5 pt-[5px] pb-1 text-center text-caption font-medium text-ink-2", STAGE_MARK[s.view].cell)}>
           <StatusMark shape={STAGE_MARK[s.view].shape} />
           {STAGE_SHORT[s.key]}
         </li>
@@ -52,17 +88,26 @@ function ProjectCardView({ p }: { p: ProjectCard }) {
     <Card className="flex flex-col gap-2.5 px-5" aria-labelledby={id}>
       <div className="flex flex-wrap gap-x-1.5 gap-y-1">
         <Tag>{p.edition}판</Tag>
-        <ModeBadge mode={p.mode} detail={p.runner_label} />
+        <ModeBadge mode={p.mode} />
         {/* 기본값(허용)은 표의 열과 요약 카드가 말한다 — 카드에는 예외(막음·차단 중)만 */}
         {p.api_transfer.value !== "on" ? <StatusFrom s={p.api_transfer} /> : null}
+        <ProblemsLink p={p} />
       </div>
-      <h3 id={id} className="text-[15px]">
-        <Link to={p.href}>{p.title}</Link>
+      <h3 id={id} className="text-meta">
+        {/* 휴대폰: 연구 공간으로 들어가는 길 — 누름 영역만 위아래로 넓힌다(배치 그대로, 6차) */}
+        <Link to={p.href} className="coarse:inline-block coarse:py-[13px] coarse:my-[-13px]">
+          {p.title}
+        </Link>
       </h3>
       <StageMini p={p} />
+      {currentStage(p) ? (
+        <p className="-mt-1 text-xs text-muted-foreground">
+          현재 {p.current} · <strong className={cn("font-semibold", currentStage(p)!.cls)}>{currentStage(p)!.text}</strong>
+        </p>
+      ) : null}
       {/* 차례 표시기(4차): 공이 사람 쪽이면 나의 할 일 n건 + 바로 가기, AI 쪽이면 지금 하는 일 + 경과 */}
       {p.turn ? <TurnIndicator turn={p.turn} action className="border-t border-line pt-2.5" /> : null}
-      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2.5 gap-y-1 text-[13px]">
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2.5 gap-y-1 text-meta">
         {p.lines.slice(0, 1).map((l) => (
           <React.Fragment key={l.label}>
             <dt className="font-medium text-muted-foreground">{l.label}</dt>
@@ -96,15 +141,16 @@ function Summary({ d }: { d: ProjectsView }) {
   const answers = count(["answer", "start_q"]);
   const approvals = count(["approve", "resume"]);
   const checks = count(["check"]);
+  const problems = count(["problem"]);
   const modeA = d.active.filter((p) => p.mode === "A").length;
   const on = d.active.filter((p) => p.api_transfer.value === "on").length;
   const off = d.active.length - on;
-  const parts = [answers ? `답 ${answers}` : null, approvals ? `승인·계속 ${approvals}` : null, checks ? `확인 ${checks}` : null].filter(Boolean).join(" · ");
+  const parts = [answers ? `답 ${answers}` : null, approvals ? `승인·계속 ${approvals}` : null, problems ? `풀 것 ${problems}` : null, checks ? `확인 ${checks}` : null].filter(Boolean).join(" · ");
   const ai = aiProjects(d);
   const now = useNow();
   const first = ai[0];
   return (
-    <StatRow label="프로젝트 요약" dense>
+    <StatRow label="프로젝트 요약" dense headed>
       <StatCard
         id="sum-turns"
         label={YOU}
@@ -137,12 +183,18 @@ function Summary({ d }: { d: ProjectsView }) {
   );
 }
 
+/** 첫눈에는 순위대로 5개(설계 4.1) — 나머지는 “모두 보기”. 수(제목 · 사이드바 배지)는 언제나 전체를 센다(N26) */
+const TURNS_FIRST = 5;
+
 function TurnsCard({ d }: { d: ProjectsView }) {
   const ai = aiProjects(d);
+  const [all, setAll] = React.useState(false);
+  const rows = all ? d.turns : d.turns.slice(0, TURNS_FIRST);
+  const hidden = d.turns.length - rows.length;
   return (
     <Card id="turns" className="mt-6 gap-0 px-5" aria-labelledby="turns-t">
       <CardHead
-        title={`${YOU} ${d.turns.length}`}
+        title={`${YOU} ${d.turns.length}${hidden ? ` · 앞의 ${rows.length}건` : ""}`}
         titleId="turns-t"
         aside={
           <InfoTip label="나의 할 일 순서 설명">
@@ -169,7 +221,7 @@ function TurnsCard({ d }: { d: ProjectsView }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {d.turns.map((t) => (
+              {rows.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell className="align-middle">
                     <StatusFrom s={t.status} />
@@ -191,8 +243,8 @@ function TurnsCard({ d }: { d: ProjectsView }) {
           </Table>
           {/* 900px 미만: 한 줄씩 쌓기(단추가 화면 밖으로 밀리지 않게) */}
           <ul className="tab:hidden">
-            {d.turns.map((t) => (
-              <li key={t.id} className="grid grid-cols-1 gap-y-1.5 border-b border-line py-3 text-[13px] last:border-b-0">
+            {rows.map((t) => (
+              <li key={t.id} className="grid grid-cols-1 gap-y-1.5 border-b border-line py-3 text-meta last:border-b-0">
                 <span className="justify-self-start">
                   <StatusFrom s={t.status} />
                 </span>
@@ -210,13 +262,20 @@ function TurnsCard({ d }: { d: ProjectsView }) {
               </li>
             ))}
           </ul>
+          {d.turns.length > TURNS_FIRST ? (
+            <div className="border-t border-line py-2">
+              <Button size="sm" variant="ghost" aria-expanded={all} onClick={() => setAll((x) => !x)}>
+                {all ? "앞의 5건만 보기" : `나머지 ${hidden}건 모두 보기`}
+              </Button>
+            </div>
+          ) : null}
         </>
       )}
       {ai.length || d.waiting.length ? (
         <div className="mt-1 border-t border-line pt-3 pb-1">
           <p className="text-xs font-medium text-muted-foreground">기다리는 중 · 내 할 일 아님</p>
-          <ul className="mt-1.5 space-y-2 text-[13px]">
-            {/* AI가 하는 중 — 공이 AI 쪽에 있다(소식이 있으면 점이 돈다) */}
+          <ul className="mt-1.5 space-y-2 text-meta">
+            {/* AI 작업 중 — 공이 AI 쪽에 있다(소식이 있으면 점이 돈다) */}
             {ai.map((p) => (
               <li key={p.slug} className="flex flex-wrap items-start gap-x-3 gap-y-1">
                 <strong className="min-w-0 font-semibold tab:w-[15rem] tab:shrink-0">{p.title}</strong>
@@ -259,15 +318,21 @@ function ProjectsTable({ d, onRetry }: { d: ProjectsView; onRetry: () => void })
           {d.active.map((p) => (
             <TableRow key={p.slug}>
               <TableHead scope="row" className="max-w-[260px]">
-                <Link to={p.href}>{p.title}</Link>
+                <Link to={p.href} className="coarse:inline-block coarse:py-[13px] coarse:my-[-13px]">
+                  {p.title}
+                </Link>
                 <span className="mt-1 flex flex-wrap items-center gap-1 font-normal">
                   <Tag>{p.edition}판</Tag>
-                  <ModeBadge mode={p.mode} detail={p.runner_label} />
+                  <ModeBadge mode={p.mode} />
+                  <ProblemsLink p={p} />
                 </span>
               </TableHead>
               <TableCell>
                 <StageMini p={p} compact />
-                <span className="mt-1 block text-xs text-muted-foreground">현재 {p.current}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  현재 {p.current}
+                  {currentStage(p) ? <strong className={cn("font-semibold", currentStage(p)!.cls)}> · {currentStage(p)!.text}</strong> : null}
+                </span>
               </TableCell>
               <TableCell>{p.turn ? <TurnIndicator turn={p.turn} action /> : null}</TableCell>
               <TableCell>{p.table.ai}</TableCell>
@@ -325,7 +390,7 @@ function ProjectsTable({ d, onRetry }: { d: ProjectsView; onRetry: () => void })
 
 /**
  * 프로젝트 목록(설계 4.1) — shadcn dashboard-01 블록 패턴: 요약 카드 줄 → 나의 할 일 표 → 내 프로젝트/보관됨 + 표/카드 보기.
- * 줄마다 차례 표시기(4차, 설계 15절) — 공이 왼쪽(사람)이면 나의 할 일, 오른쪽(AI)이면 AI가 하는 중.
+ * 줄마다 차례 표시기(4차, 설계 15절) — 공이 왼쪽(사람)이면 나의 할 일, 오른쪽(AI)이면 AI 작업 중.
  * 기본은 표(같은 정보), 카드 보기는 그대로 남긴다.
  */
 export function ProjectsPage() {
@@ -340,7 +405,8 @@ export function ProjectsPage() {
         as="h1"
         title="프로젝트"
         right={
-          <Button asChild variant="default">
+          // 채운 단추는 한 화면에 하나 — 관리 공간의 주 동작은 나의 할 일 첫 줄(6차). 새 프로젝트는 테두리 단추(사이드바에도 있음)
+          <Button asChild>
             <Link to="/new">
               <PlusIcon aria-hidden="true" />새 프로젝트
             </Link>
@@ -367,6 +433,7 @@ export function ProjectsPage() {
             </ToggleGroup>
           </div>
 
+          {tab !== "archived" ? <StageLegend /> : null}
           {tab === "archived" ? (
             <div className="mt-3">
               <EmptyState title="보관된 프로젝트 2개" body="보관된 프로젝트는 읽기 전용입니다. 시안에서는 목록을 그리지 않았습니다." />
@@ -386,11 +453,11 @@ export function ProjectsPage() {
                       읽기 전용
                     </Chip>
                   </div>
-                  <h3 id="legacy-t" className="text-[15px]">
+                  <h3 id="legacy-t" className="text-meta">
                     {l.title}
                   </h3>
-                  <p className="text-[12.5px]">{l.note}</p>
-                  <p className="mt-auto flex items-center justify-between border-t border-line pt-2 text-[12.5px] text-muted-foreground">
+                  <p className="text-caption">{l.note}</p>
+                  <p className="mt-auto flex items-center justify-between border-t border-line pt-2 text-caption text-muted-foreground">
                     <span>옛 화면에서 열기</span>
                     <Button variant="link">옮기기 안내</Button>
                   </p>
@@ -403,11 +470,11 @@ export function ProjectsPage() {
                       불러오지 못함
                     </Chip>
                   </p>
-                  <h3 id="fail-t" className="text-[15px]">
+                  <h3 id="fail-t" className="text-meta">
                     프로젝트 1개
                   </h3>
-                  <p className="text-[12.5px]">이 카드만 읽지 못함 · 마지막으로 받은 시각 {f.last_received}</p>
-                  <p className="mt-auto flex items-center justify-between border-t border-line pt-2 text-[12.5px] text-muted-foreground">
+                  <p className="text-caption">이 카드만 읽지 못함 · 마지막으로 받은 시각 {f.last_received}</p>
+                  <p className="mt-auto flex items-center justify-between border-t border-line pt-2 text-caption text-muted-foreground">
                     <span>오류 번호 {f.code}</span>
                     <Button size="sm" onClick={() => q.refetch()}>
                       다시 시도

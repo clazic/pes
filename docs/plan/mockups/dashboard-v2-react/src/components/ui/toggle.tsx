@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Toggle as TogglePrimitive } from "radix-ui"
 
 // PES 시안: 고른 칸은 바탕색만이 아니라 굵기·테두리도 바뀐다(색만으로 구분하지 않음, 1.4.1). 한 개 고르기(라디오)는 data-state=on.

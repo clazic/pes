@@ -23,7 +23,7 @@ export function MoreTrigger({ label = "자세히", className, openLabel, name }:
     <CollapsibleTrigger
       aria-label={name}
       className={cn(
-        "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12.5px] font-medium text-muted-foreground hover:text-foreground coarse:min-h-10",
+        "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md px-1 text-caption font-medium text-muted-foreground hover:text-foreground coarse:min-h-[44px]",
         className,
       )}
     >
@@ -41,7 +41,7 @@ export function MoreTrigger({ label = "자세히", className, openLabel, name }:
 }
 
 export function MoreContent({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <CollapsibleContent className={cn("text-[12.5px] leading-relaxed text-ink-2", className)}>{children}</CollapsibleContent>;
+  return <CollapsibleContent className={cn("text-caption leading-relaxed text-ink-2", className)}>{children}</CollapsibleContent>;
 }
 
 /** 자세히 — 단추 바로 아래에 펼친다 */
@@ -77,14 +77,14 @@ export function InfoTip({ label, children, className, side = "bottom", align = "
           type="button"
           aria-label={label}
           className={cn(
-            "inline-flex size-6 shrink-0 items-center justify-center rounded-full align-middle text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground coarse:size-9",
+            "inline-flex size-[24px] shrink-0 items-center justify-center rounded-full align-middle text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground coarse:size-[32px]",
             className,
           )}
         >
           <InfoIcon className="size-[15px]" aria-hidden="true" />
         </button>
       </PopoverTrigger>
-      <PopoverContent side={side} align={align} className={cn("gap-1.5 p-3 text-[13px] leading-relaxed", wide ? "w-[min(26rem,calc(100vw-2rem))]" : "w-[min(20rem,calc(100vw-2rem))]")}>
+      <PopoverContent side={side} align={align} className={cn("gap-1.5 p-3 text-meta leading-relaxed", wide ? "w-[min(26rem,calc(100vw-2rem))]" : "w-[min(20rem,calc(100vw-2rem))]")}>
         {children}
       </PopoverContent>
     </Popover>
@@ -98,11 +98,11 @@ export function InfoTip({ label, children, className, side = "bottom", align = "
 export function FoldCard({ title, id, children, defaultOpen, className, as: As = "h2", meta }: { title: React.ReactNode; id?: string; children: React.ReactNode; defaultOpen?: boolean; className?: string; as?: "h2" | "h3"; meta?: React.ReactNode }) {
   return (
     <Collapsible id={id} defaultOpen={defaultOpen} className={cn("group/fold rounded-xl border bg-card text-card-foreground shadow-xs", className)}>
-      <As className={As === "h2" ? "text-base" : "text-[15px]"}>
+      <As className={As === "h2" ? "text-title" : "text-body"}>
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-xl px-5 py-3.5 text-left font-semibold hover:bg-surface-soft">
           <span className="min-w-0">
             {title}
-            {meta ? <span className="ml-2 text-[12.5px] font-normal text-muted-foreground">{meta}</span> : null}
+            {meta ? <span className="ml-2 text-caption font-normal text-muted-foreground">{meta}</span> : null}
           </span>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/fold:rotate-180" aria-hidden="true" />
         </CollapsibleTrigger>

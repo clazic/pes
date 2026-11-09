@@ -21,21 +21,21 @@ const RANK_NAME: Record<NowItem["kind"], string> = {
   wait: "기다림",
 };
 const RANK_EDGE: Record<NowItem["kind"], string> = {
-  blocked: "border-l-bad",
-  answer: "border-l-primary",
-  approve: "border-l-primary",
-  resume: "border-l-primary",
-  check: "border-l-warn",
-  wait: "border-l-ok",
+  blocked: "border-bad-line",
+  answer: "border-primary-line",
+  approve: "border-primary-line",
+  resume: "border-primary-line",
+  check: "border-warn-line",
+  wait: "border-ok-line",
 };
-/** 배너 바탕: 순위 색이 왼쪽에서 아주 옅게 번진다(글자는 언제나 카드 바탕 대비로 계산) */
+/** 배너 바탕: 순위 색을 옅은 바탕 한 면으로 깐다(왼쪽 굵은 띠·번짐 없음 — impeccable side-tab 지적, 11-10). 순위 이름은 머리글 글자로도 보인다. */
 const RANK_BG: Record<NowItem["kind"], string> = {
-  blocked: "from-bad-soft",
-  answer: "from-primary-soft",
-  approve: "from-primary-soft",
-  resume: "from-primary-soft",
-  check: "from-warn-soft",
-  wait: "from-ok-soft",
+  blocked: "bg-bad-soft",
+  answer: "bg-primary-soft",
+  approve: "bg-primary-soft",
+  resume: "bg-primary-soft",
+  check: "bg-warn-soft",
+  wait: "bg-ok-soft",
 };
 
 /** 이 역할이 이 순위의 일을 직접 할 수 없는가(시안 — 실제로는 서버가 사람·권한별로 계산한 지금 할 일을 준다) */
@@ -57,14 +57,14 @@ export function NowCard({ now, context, titleId, className, extraAction, turn }:
   const others = now.for_others && lacksPermission(now.kind, role) ? now.for_others : null;
   const hasMore = Boolean(now.detail || now.hint);
   return (
-    <Card className={cn("gap-0 border-l-4 bg-gradient-to-r to-card to-60% px-5 py-4", RANK_EDGE[now.kind], RANK_BG[now.kind], className)} aria-labelledby={titleId}>
+    <Card className={cn("gap-0 px-5 py-4", RANK_EDGE[now.kind], RANK_BG[now.kind], className)} aria-labelledby={titleId}>
       <MoreRoot>
         <div className="flex flex-col gap-3 tab:flex-row tab:items-start tab:justify-between tab:gap-6">
           <div className="min-w-0">
             <Eyebrow>
               지금 할 일{context ? ` · ${context}` : ""} · {RANK_NAME[now.kind]}
             </Eyebrow>
-            <h2 id={titleId} className="text-lg tracking-tight">
+            <h2 id={titleId} className="text-title tracking-tight">
               {now.title}
             </h2>
             {now.facts?.length ? <p className="mt-1 text-sm text-ink-2">{now.facts.join(" · ")}</p> : null}
@@ -86,7 +86,7 @@ export function NowCard({ now, context, titleId, className, extraAction, turn }:
           </div>
         </div>
         {now.then.length > 0 || hasMore ? (
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-2 text-[13px]">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-2 text-meta">
             {now.then.length > 0 ? <span className="font-medium text-muted-foreground">그다음</span> : null}
             {now.then.map((t) => (
               <Link key={t.label} to={t.href}>
@@ -121,7 +121,7 @@ const STAT_COLS_TRAIL: Record<number, string> = { 2: "tab:grid-cols-[repeat(2,mi
 export function StatBar({ cells, label, className, trailing }: { cells: { k: string; v: React.ReactNode; to?: string }[]; label: string; className?: string; trailing?: React.ReactNode }) {
   const body = (c: { k: string; v: React.ReactNode }) => (
     <>
-      <span className="block text-[12.5px] text-muted-foreground">{c.k}</span>
+      <span className="block text-caption text-muted-foreground">{c.k}</span>
       <span className="mt-0.5 block text-sm font-semibold text-ink">{c.v}</span>
     </>
   );
@@ -149,8 +149,8 @@ export function EmptyState({ title, body, action, eyebrow }: { title: string; bo
   return (
     <div className="rounded-xl border bg-card p-5 shadow-xs">
       {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-      <h3 className="text-base">{title}</h3>
-      <p className="mt-1.5 text-[13px] text-ink-2">{body}</p>
+      <h3 className="text-title">{title}</h3>
+      <p className="mt-1.5 text-meta text-ink-2">{body}</p>
       {action ? <div className="mt-2.5 flex flex-wrap gap-2">{action}</div> : null}
     </div>
   );
@@ -158,7 +158,7 @@ export function EmptyState({ title, body, action, eyebrow }: { title: string; bo
 
 export function LoadError({ what, lastReceived, code, onRetry }: { what: string; lastReceived: string; code: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="rounded-xl border border-bad-line bg-bad-soft p-4 text-[13px]">
+    <div role="alert" className="rounded-xl border border-bad-line bg-bad-soft p-4 text-meta">
       <p>
         <Chip shape="square" tone="bad">
           불러오지 못함
@@ -181,7 +181,7 @@ export function LoadError({ what, lastReceived, code, onRetry }: { what: string;
 /** 끊김 띠(설계 3.6) — 보내기는 “보내지 못함”, 자동 재전송 없음 */
 export function OfflineBanner({ className }: { className?: string }) {
   return (
-    <p role="status" className={cn("flex items-center gap-2 rounded-lg bg-foreground px-3 py-2 text-[13px] font-medium text-background", className)}>
+    <p role="status" className={cn("flex items-center gap-2 rounded-lg bg-foreground px-3 py-2 text-meta font-medium text-background", className)}>
       <WifiOffIcon className="size-4" aria-hidden="true" />
       연결 끊김 — 다시 연결 중. 입력은 이 탭에 남아 있습니다. 끊긴 동안 보낸 것은 자동으로 다시 보내지 않습니다.
     </p>
@@ -197,7 +197,7 @@ export function QuietLoading({ what }: { what: string }) {
   }, []);
   if (!show) return <div aria-busy="true" />;
   return (
-    <p role="status" aria-busy="true" className="rounded-lg border bg-card px-3 py-2 text-[13px] text-ink-2">
+    <p role="status" aria-busy="true" className="rounded-lg border bg-card px-3 py-2 text-meta text-ink-2">
       {what} 불러오는 중… 첫 표시는 서버가 계산한 읽기 묶음 하나로 그립니다.
     </p>
   );
@@ -205,15 +205,15 @@ export function QuietLoading({ what }: { what: string }) {
 
 export function Callout({ tone = "info", children, className, role }: { tone?: "info" | "ok" | "warn" | "bad" | "off"; children: React.ReactNode; className?: string; role?: string }) {
   const toneCls = {
-    info: "border-line border-l-primary bg-surface",
-    ok: "border-ok-line border-l-ok bg-ok-soft",
-    warn: "border-warn-line border-l-warn bg-warn-soft",
-    bad: "border-bad-line border-l-bad bg-bad-soft",
-    off: "border-line border-l-control bg-surface-soft",
+    info: "border-line bg-surface",
+    ok: "border-ok-line bg-ok-soft",
+    warn: "border-warn-line bg-warn-soft",
+    bad: "border-bad-line bg-bad-soft",
+    off: "border-line bg-surface-soft",
   }[tone];
   // shadcn Alert 위에 PES 색을 입힌다. 기본 role은 note(조용함) — 알려야 할 때만 부르는 쪽이 status/alert를 준다.
   return (
-    <Alert role={role ?? "note"} className={cn("block rounded-lg border border-l-4 px-3 py-2.5 text-[13px] text-ink [&_strong]:text-ink", toneCls, className)}>
+    <Alert role={role ?? "note"} className={cn("block rounded-lg border px-3 py-2.5 text-meta text-ink [&_strong]:text-ink", toneCls, className)}>
       {children}
     </Alert>
   );

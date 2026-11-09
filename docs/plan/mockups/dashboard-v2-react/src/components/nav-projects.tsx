@@ -1,98 +1,94 @@
 import {
-  BotIcon,
+  CircleAlertIcon,
+  CompassIcon,
+  EllipsisIcon,
   FileTextIcon,
-  FilesIcon,
-  LayersIcon,
-  Link2Icon,
-  MessageCircleQuestionIcon,
-  SettingsIcon,
   TargetIcon,
 } from "lucide-react"
 
-import { useMatch } from "react-router"
+import { useLocation, useMatch } from "react-router"
 
 import { STAGE_LABEL, type WorkspaceView } from "@/api/types"
 import { NavMain, type NavItem } from "@/components/nav-main"
-import { Tag } from "@/components/pes/bits"
 import { roundKey, STAGE_MARK } from "@/components/pes/stage"
 import { StatusMark } from "@/components/pes/status"
 import { lookup } from "@/components/pes/status-registry"
 import { TurnMark, turnKey, turnLabel } from "@/components/pes/turn"
 
-export type WorkspaceNavKey = "now" | "q" | "result" | "files" | "refs" | "ai" | "editions" | "settings"
+export type WorkspaceNavKey = "overview" | "now" | "problems" | "result" | "files" | "refs" | "ai" | "editions" | "settings" | "sync"
 
 /**
- * sidebar-07 블록의 NavProjects 자리 → PES “작업 공간” 묶음(설계 D4 위쪽 묶음).
- * 지금 할 일 · 질문·답 · 결과물은 라운드 화면 안의 자리(#조각), 나머지는 화면 주소.
- * 아이콘만 남긴 사이드바에서도 숨기지 않는다(이름은 툴팁·화면 읽기 이름으로 남음).
+ * 연구 공간 사이드바(5차, 설계 16.2) — sidebar-07 블록의 NavProjects 자리.
+ * “이 연구”: 연구 개요 · 지금 할 일(이 프로젝트의 차례) · 막힌 것·풀 것 · 결과 글.
+ * “더 보기”: 자료 · 참고 프로젝트 · AI 작업 기록 · 판 · 설정 · 내 컴퓨터 연결(B) — 기존 기능은 지우지 않고 보조 메뉴로 내렸다.
+ * 아이콘만 남긴 사이드바에서도 숨기지 않는다(이름은 툴팁·화면 읽기 이름, 더 보기는 드롭다운).
  */
-export function NavProjects({
-  ws,
-  roundPath,
-  active,
-  onPick,
-  expanded,
-  ariaLabel = "프로젝트 안 이동",
-}: {
-  ws: WorkspaceView
-  roundPath: string
-  active?: WorkspaceNavKey
-  onPick?: (k: WorkspaceNavKey) => void
-  expanded?: boolean
-  ariaLabel?: string
-}) {
+export function ResearchNav({ ws, roundPath, ariaLabel = "이 연구 안 이동" }: { ws: WorkspaceView; roundPath: string; ariaLabel?: string }) {
+  const { pathname, search } = useLocation()
   const base = `/p/${ws.slug}`
-  const q = ws.nav_counts.questions
-  const item = (k: WorkspaceNavKey, rest: Omit<NavItem, "key" | "current" | "onPick">): NavItem => ({
-    key: k,
-    current: active === k ? "page" : undefined,
-    onPick: onPick ? () => onPick(k) : undefined,
-    ...rest,
-  })
-  // 이 프로젝트의 차례(4차): 나의 할 일이면 ◆ + 수(강한 색), AI가 하는 중이면 도는 고리(소식 없으면 점선 고리), 기다림이면 두 줄
-  const t = ws.turn
-  const nowBadge: NavItem["badge"] = t
-    ? turnKey(t) === "you"
-      ? { text: String(t.count ?? 1), icon: <StatusMark shape="diamond" className="size-2" /> }
-      : { icon: <TurnMark turn={t} className="size-2.5" />, quiet: true }
+  const rest = pathname.slice(base.length)
+  const inRound = rest.startsWith("/e/")
+  const t = new URLSearchParams(search).get("t")
+  const page = rest.split("/")[1] ?? ""
+  // 이 프로젝트의 차례(4차): 나의 할 일이면 ◆ + 수(강한 색), AI 작업 중이면 도는 고리(소식 없으면 점선 고리), 기다림이면 두 줄
+  const turn = ws.turn
+  const nowBadge: NavItem["badge"] = turn
+    ? turnKey(turn) === "you"
+      ? { text: String(turn.count ?? 1), icon: <StatusMark shape="diamond" className="size-2" /> }
+      : { icon: <TurnMark turn={turn} className="size-2.5" />, quiet: true }
     : undefined
+  const open = ws.problems.filter((p) => p.state === "open").length
   const items: NavItem[] = [
-    item("now", { title: "지금 할 일", to: `${roundPath}#now-title`, icon: <TargetIcon aria-hidden="true" />, badge: nowBadge, srText: t ? ` · ${turnLabel(t)}` : undefined }),
-    item("q", {
-      title: "질문·답",
-      to: `${roundPath}#qpanel`,
-      icon: <MessageCircleQuestionIcon aria-hidden="true" />,
-      badge: q ? { text: String(q) } : undefined,
-      srText: q ? ` · 남은 질문 ${q}개` : undefined,
-    }),
-    item("result", { title: "결과물", to: `${roundPath}#result`, icon: <FileTextIcon aria-hidden="true" /> }),
-    item("files", {
-      title: "자료",
-      to: `${base}/files`,
-      icon: <FilesIcon aria-hidden="true" />,
-      badge: { text: String(ws.nav_counts.files), quiet: true },
-      srText: ` · ${ws.nav_counts.files}개`,
-    }),
-    item("refs", {
-      title: "참고 프로젝트",
-      to: `${base}/references`,
-      icon: <Link2Icon aria-hidden="true" />,
-      tag: ws.nav_counts.refs_new ? <Tag tone="warn">새 버전</Tag> : undefined,
-      tooltip: ws.nav_counts.refs_new ? "참고 프로젝트 · 새 버전 있음" : undefined,
-    }),
-    item("ai", { title: "AI 작업", to: `${base}/ai`, icon: <BotIcon aria-hidden="true" /> }),
-    item("editions", { title: "판", to: `${base}/editions`, icon: <LayersIcon aria-hidden="true" /> }),
-    item("settings", { title: "설정", to: `${base}/settings`, icon: <SettingsIcon aria-hidden="true" /> }),
+    { key: "overview", title: "연구 개요", to: base, icon: <CompassIcon aria-hidden="true" />, current: rest === "" || rest === "/" ? "page" : undefined },
+    {
+      key: "now",
+      title: "지금 할 일",
+      to: roundPath,
+      icon: <TargetIcon aria-hidden="true" />,
+      badge: nowBadge,
+      srText: turn ? ` · ${turnLabel(turn)}` : undefined,
+      current: inRound && t !== "review" ? "page" : undefined,
+    },
+    {
+      key: "problems",
+      title: "막힌 것·풀 것",
+      to: `${base}/problems`,
+      icon: <CircleAlertIcon aria-hidden="true" />,
+      badge: ws.problems.length ? { text: String(ws.problems.length), quiet: true } : undefined,
+      srText: ` · ${lookup("problemState", "open").label} ${open}건 · 전체 ${ws.problems.length}건`,
+      current: page === "problems" ? "page" : undefined,
+    },
+    ...(ws.result
+      ? [{ key: "result", title: "결과 글", to: `${roundPath}?t=review`, icon: <FileTextIcon aria-hidden="true" />, current: inRound && t === "review" ? ("page" as const) : undefined }]
+      : []),
   ]
-  return <NavMain label="작업 공간" ariaLabel={ariaLabel} items={items} expanded={expanded} />
+  const moreKeys = ["files", "references", "ai", "editions", "settings", "sync"]
+  const more: NavItem = {
+    key: "more",
+    title: "더 보기",
+    icon: <EllipsisIcon aria-hidden="true" />,
+    subNoun: "메뉴",
+    open: moreKeys.includes(page),
+    tooltip: "더 보기 — 자료 · 참고 프로젝트 · AI 작업 기록 · 판 · 설정",
+    items: [
+      { key: "files", title: "자료", to: `${base}/files`, meta: String(ws.nav_counts.files), active: page === "files" },
+      { key: "refs", title: "참고 프로젝트", to: `${base}/references`, meta: ws.nav_counts.refs_new ? "새 버전" : undefined, active: page === "references" },
+      { key: "ai", title: "AI 작업 기록", to: `${base}/ai`, active: page === "ai" },
+      { key: "editions", title: "판", to: `${base}/editions`, active: page === "editions" },
+      { key: "settings", title: "설정", to: `${base}/settings`, active: page === "settings" },
+      ...(ws.mode === "B" ? [{ key: "sync", title: "내 컴퓨터 연결", to: `${base}/sync`, active: page === "sync" }] : []),
+    ],
+  }
+  return <NavMain label="이 연구" ariaLabel={ariaLabel} items={[...items, more]} />
 }
 
 /**
- * 단계·라운드 나무(설계 D4 아래쪽 묶음) — 사이드바와 좁은 화면 “단계·탐색” 보기가 같은 항목을 쓴다.
- * 현재 단계만 라운드(단계 시작 · R1 · R2 …)를 펼친다. 다른 단계는 판 화면으로(4단계 범위).
+ * 연구 흐름 — 6단계 길(설계 16.2): 지금 단계는 라운드(단계 시작 · R1 · R2 …)를 펼치고,
+ * 지난 단계는 결과 요약으로(/p/…/s/<단계>), 앞 단계 변경 — 다시 확인은 세모 + 글자. 아직 단계도 무엇을 하는지 볼 수 있다.
  */
 export function useStageItems(ws: WorkspaceView | undefined): NavItem[] {
   const roundMatch = useMatch("/p/:slug/e/:ed/s/:stage/r/:round")
+  const stageMatch = useMatch("/p/:slug/s/:stage")
   if (!ws) return []
   return ws.stages.map((st) => {
     const mark = STAGE_MARK[st.view]
@@ -104,7 +100,7 @@ export function useStageItems(ws: WorkspaceView | undefined): NavItem[] {
     // 차례 말(현재 · 나의 할 일 등)은 상태 사전에서 — 읽기 묶음이 따로 준 글(승인(2판) 등)이 있으면 그것
     const text = st.state_text ?? lookup("stage", st.view).label
     const base: NavItem = { key: st.key, title: STAGE_LABEL[st.key], icon, meta: text, tooltip: `${STAGE_LABEL[st.key]} · ${text}` }
-    if (!st.rounds) return { ...base, to: `/p/${ws.slug}/editions` }
+    if (!st.rounds) return { ...base, to: `/p/${ws.slug}/s/${st.key}`, current: stageMatch?.params.stage === st.key ? ("page" as const) : undefined }
     return {
       ...base,
       current: "step" as const,

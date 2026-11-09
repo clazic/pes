@@ -19,7 +19,7 @@ export function NewProjectPage() {
         <div className="mt-3 grid grid-cols-1 items-stretch gap-3 tab:grid-cols-2">
           <Card className="gap-2 border-2 border-primary px-5" aria-labelledby="pick-a">
             <Eyebrow>추천</Eyebrow>
-            <h3 id="pick-a" className="flex flex-wrap items-center gap-2 text-base">
+            <h3 id="pick-a" className="flex flex-wrap items-center gap-2 text-title">
               <ModeBadge mode="A" />
               웹에서 바로
             </h3>
@@ -42,7 +42,7 @@ export function NewProjectPage() {
           </Card>
           <Card className="gap-2 px-5" aria-labelledby="pick-b">
             <Eyebrow>다른 방법</Eyebrow>
-            <h3 id="pick-b" className="flex flex-wrap items-center gap-2 text-base">
+            <h3 id="pick-b" className="flex flex-wrap items-center gap-2 text-title">
               <ModeBadge mode="B" />
               내 컴퓨터 AI로 만들고 웹에서 이어 하기
             </h3>

@@ -1,5 +1,6 @@
 import * as React from "react";
-import { FingerprintIcon, MailIcon, MonitorIcon } from "lucide-react";
+import { Link } from "react-router";
+import { ArrowRightIcon, CheckIcon, FingerprintIcon, MailIcon, MonitorIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,8 @@ export interface ConfirmSpec {
   tightening?: boolean;
   danger?: boolean;
   footnote?: React.ReactNode;
+  /** 끝난 뒤 보일 말 — 무엇이 끝났고 무엇이 열렸는지 + 그리로 가는 단추(접수 번호는 작은 글자로) */
+  done?: { title: string; body?: string; action?: { label: string; to: string } };
 }
 
 /**
@@ -98,7 +101,21 @@ export function ConfirmDialog({
           <DialogDescription>대상: {spec.target}</DialogDescription>
         </DialogHeader>
 
-        {phase === "done" && receipt ? (
+        {phase === "done" && receipt && spec.done ? (
+          <div role="status" className="rounded-xl border border-ok-line bg-ok-soft px-3.5 py-3">
+            <p className="flex items-center gap-2 text-title font-semibold">
+              <span aria-hidden="true" className="grid size-6 place-items-center rounded-full border border-ok-line bg-card text-ok">
+                <CheckIcon className="size-3.5" />
+              </span>
+              {spec.done.title}
+            </p>
+            {spec.done.body ? <p className="mt-1.5 text-body text-ink">{spec.done.body}</p> : null}
+            <p className="mt-1.5 text-caption text-muted-foreground">
+              접수 번호 {receipt.receipt_no} · {receipt.committed_at}
+              {receipt.replayed ? " · 같은 요청이라 다시 처리하지 않음" : ""}
+            </p>
+          </div>
+        ) : phase === "done" && receipt ? (
           <Callout tone="ok" role="status">
             <Chip shape="circle" tone="ok">
               접수됨 · {receipt.committed_at}
@@ -109,23 +126,23 @@ export function ConfirmDialog({
         ) : stage === "form" ? (
           <>
             <div>
-              <p className="text-[13px] font-semibold">바뀌는 것</p>
-              <ul className="mt-1 ml-4.5 list-disc space-y-1 text-[13px]">
+              <p className="text-meta font-semibold">바뀌는 것</p>
+              <ul className="mt-1 ml-4.5 list-disc space-y-1 text-body">
                 {spec.changes.map((c, i) => (
                   <li key={i}>{c}</li>
                 ))}
               </ul>
             </div>
             <div>
-              <p className="text-[13px] font-semibold">바뀌지 않는 것</p>
-              <ul className="mt-1 ml-4.5 list-disc space-y-1 text-[13px]">
+              <p className="text-meta font-semibold">바뀌지 않는 것</p>
+              <ul className="mt-1 ml-4.5 list-disc space-y-1 text-body">
                 {spec.unchanged.map((c, i) => (
                   <li key={i}>{c}</li>
                 ))}
               </ul>
             </div>
             <div>
-              <Label htmlFor={`${id}-why`} className="text-[13px] font-semibold">
+              <Label htmlFor={`${id}-why`} className="text-meta font-semibold">
                 {spec.reasonLabel ?? "이유"} <span className="font-normal text-muted-foreground">({spec.reasonRequired ? "필수" : "선택"} — 이력에 남음)</span>
               </Label>
               <Input
@@ -143,28 +160,28 @@ export function ConfirmDialog({
                 </p>
               ) : null}
             </div>
-            {spec.footnote ? <div className="text-[12.5px] text-muted-foreground">{spec.footnote}</div> : null}
+            {spec.footnote ? <div className="text-caption text-muted-foreground">{spec.footnote}</div> : null}
           </>
         ) : (
           <div role="group" aria-labelledby={`${id}-su`} className="rounded-xl border border-line-strong bg-surface-soft p-3.5">
-            <h3 id={`${id}-su`} className="text-[15px]">
+            <h3 id={`${id}-su`} className="text-meta">
               본인 확인이 필요합니다
             </h3>
-            <p className="mt-1.5 text-[13px]">
+            <p className="mt-1.5 text-body">
               이 확인은 <strong>이 요청 한 건</strong>에만 쓰입니다: {spec.target} · {spec.verb}. 내용이 그사이 바뀌면 적용하지 않습니다.
             </p>
             <div className="mt-3 flex flex-col gap-2">
               <Button variant="default" disabled={busy} onClick={() => confirmWith("passkey")}>
                 <FingerprintIcon aria-hidden="true" />
-                패스키로 확인(5단계 웹)
+                패스키로 확인
               </Button>
               <Button disabled={busy} onClick={() => confirmWith("email")}>
                 <MailIcon aria-hidden="true" />
-                메일 링크로 확인(5단계 웹)
+                메일 링크로 확인
               </Button>
               <Button disabled={busy} onClick={() => confirmWith("local_owner")}>
                 <MonitorIcon aria-hidden="true" />
-                이 컴퓨터의 소유자 세션으로 확인(2~4단계 로컬)
+                이 컴퓨터에서 소유자로 확인
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">5분 안에 끝내지 못하면 다시 묻습니다. 적은 이유는 지워지지 않습니다.</p>
@@ -172,7 +189,7 @@ export function ConfirmDialog({
         )}
 
         {phase === "confirming" ? (
-          <p role="status" className="text-[13px]">
+          <p role="status" className="text-meta">
             <Chip shape="ring" tone="run">
               접수 확인 중
             </Chip>{" "}
@@ -198,9 +215,19 @@ export function ConfirmDialog({
 
         <DialogFooter>
           {phase === "done" ? (
-            <Button variant="default" onClick={() => onOpenChange(false)}>
-              닫기
-            </Button>
+            <>
+              <Button variant={spec.done?.action ? "outline" : "default"} onClick={() => onOpenChange(false)}>
+                닫기
+              </Button>
+              {spec.done?.action ? (
+                <Button asChild variant="default">
+                  <Link to={spec.done.action.to} onClick={() => onOpenChange(false)}>
+                    {spec.done.action.label}
+                    <ArrowRightIcon aria-hidden="true" />
+                  </Link>
+                </Button>
+              ) : null}
+            </>
           ) : (
             <>
               <Button disabled={busy} onClick={() => onOpenChange(false)}>
