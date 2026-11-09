@@ -155,3 +155,14 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **입력 영수증**: `applied`는 같은 프로젝트의 `mutation_commits.id`인 `applied_tx_id`가 있을 때만 인정한다. 중복 반영 방지 범위는 **같은 인계 흐름**이다. `parent_run_id` 사슬을 거슬러 뿌리 run을 찾고, 그 뿌리에서 파생된 모든 run(조상·후손·형제)이 이미 `applied`한 입력은 다시 적용하지 않고 `already_applied: true`로 답하며 저장된 `applied_tx_id`를 바꾸지 않는다. 뿌리가 다른 독립 run은 서로 막지 않는다. 인계 뒤 원본 run을 재개하거나 형제 run을 파생해도 같은 흐름에서는 한 번만 반영된다.
 - **영수증·사건**: run 명령의 영수증은 `run_id`·`lease_id`·`fence`를, 사건은 `events.run_id`를 남긴다. 거부·검증 실패는 영수증도 사건도 남기지 않는다.
 - **설정**: `lease_ttl_ms`·`heartbeat_interval_ms`는 `scripts/pes_core/config.ts`에만 있다. 서비스는 `process.env`를 읽지 않는다. API/CLI 같은 합성 지점이 `resolve_run_config(overrides, process.env)`로 env를 명시해 넘기고, 주입된 `RunConfig`가 없으면 서비스는 설정 기본값만 쓴다. 주입값도 생성자에서 `resolve_run_config(overrides, {})`로 검증·복사·동결하며, 잘못된 값은 생성 시점에 거부한다. 우선순위는 주입값 > env > 기본값이며, 양의 안전 정수만 받고 heartbeat가 TTL보다 짧아야 한다.
+
+### 8.4 내용 버전·출처·연결(PR7)
+
+`scripts/pes_core/commands/content.ts`가 `content.*` 8개 명령을 정의하고, `scripts/pes_core/content.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 명령은 8절 실행 순서를 그대로 지나며 한 tx다.
+
+- **append-only**: `object_versions`·`artifact_versions`·`source_versions`·`citations`·`version_relations`·`artifact_components`를 UPDATE/DELETE하는 경로가 없다. 새 내용은 `content.append_version`으로만 쌓고 과거 행은 그대로 둔다.
+- **현재 포인터**: `objects.current_version_id`는 `content.set_current`로만 옮기며 그 객체 자신의 버전만 가리킨다(다른 객체·다른 프로젝트 버전은 `conflict`/`not_found`). 포인터를 옮겨도 `objects.rev`만 1 증가하고 버전 행은 변하지 않는다.
+- **각주**: `citations`는 artifact 버전별 1..n으로 번호를 매기고, 가장 최근 버전(최고 `version_no`)만 새 각주를 받는다. 오래된 버전은 sealed라 `conflict`다. 같은 URL이라도 출처 객체를 합치지 않는다.
+- **출처 사실**: `source_versions`에 확인 시점·발췌·위치·방법·판정·확인 행위자를 저장한다. `verification_state='unreachable'`인 버전에는 발췌를 붙일 수 없다(`invalid_payload`).
+- **연결**: `version_relations`의 from 버전은 그 객체의 최신 버전이어야 하고, 같은 (from,to,kind)는 한 번만 둔다.
+- **library**: `content.import_library`는 한 tx에서 항목·출처·각주를 만들고 원본 JSON을 같은 tx의 `content.library_imported` 사건 payload `original`에 보존한다. 같은 library를 다시 가져오면 업무 행을 만들지 않고 첫 결과를 돌려준다. 파일 바이트 저장은 PR9/11 경계다.
