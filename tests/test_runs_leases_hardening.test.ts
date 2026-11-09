@@ -745,8 +745,8 @@ test("an expired lease can be re-claimed by the same run only when the run is cl
     const b = await claim_new(env, "lr-b");
     assert.equal(env.db.all("SELECT 1 FROM project_leases WHERE project_id = ?", env.p.project_id).length, 1);
     assert.equal(lease_row(env.db, env.p.project_id).run_id, b.run_id);
-    // the displaced run a is still 'running' in the table but has no lease
-    assert.equal(run_status(env.db, a.run_id), "running");
+    // the displaced run a is interrupted by the new claim (SEL-38 r1 decision 2)
+    assert.equal(run_status(env.db, a.run_id), "interrupted");
     await rejects_code(complete(env.service, env.ctx("lr-1"), g(a)), "conflict");
   });
 });
