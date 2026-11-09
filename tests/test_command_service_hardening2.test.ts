@@ -21,6 +21,7 @@ import {
   type PolicyDecision,
 } from "../scripts/pes_core/commands.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
+import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { isolated_home, type IsolatedHome } from "./helpers/isolated_home.ts";
 import { state_signature } from "./helpers/state_signature.ts";
 
@@ -224,15 +225,15 @@ test("registry: a command definition cannot be rewritten in place", async () => 
 });
 
 test("registry: read paths still work (get/has/keys/iteration/size/forEach)", () => {
-  assert.equal(COMMANDS.size, 2);
+  assert.equal(COMMANDS.size, EXPECTED_COMMAND_NAMES.length);
   assert.ok(COMMANDS.get("project.bootstrap"));
   assert.ok(COMMANDS.has("project.set_topic"));
-  assert.deepEqual([...COMMANDS.keys()].sort(), ["project.bootstrap", "project.set_topic"]);
-  assert.equal([...COMMANDS].length, 2);
+  assert.deepEqual([...COMMANDS.keys()].sort(), [...EXPECTED_COMMAND_NAMES]);
+  assert.equal([...COMMANDS].length, EXPECTED_COMMAND_NAMES.length);
   let n = 0;
   COMMANDS.forEach(() => { n += 1; });
-  assert.equal(n, 2);
-  assert.equal(new Map(COMMANDS).size, 2, "a plain Map copy works");
+  assert.equal(n, EXPECTED_COMMAND_NAMES.length);
+  assert.equal(new Map(COMMANDS).size, EXPECTED_COMMAND_NAMES.length, "a plain Map copy works");
 });
 
 // ---------------------------------------------------------------------------

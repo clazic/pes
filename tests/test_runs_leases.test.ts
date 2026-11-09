@@ -642,7 +642,7 @@ test("an input receipt can be 'applied' only with applied_tx_id evidence", async
       a.run_id,
       input.input_version_id,
     );
-    assert.deepEqual(row, { state: "applied", applied_tx_id: input.evidence_tx_id });
+    assert.deepEqual({ ...row }, { state: "applied", applied_tx_id: input.evidence_tx_id });
     const rc = receipt_for(env.db, env.p.project_id, "ap-4");
     assert.ok(rc);
     assert.equal(rc.action, "run.input_receipt_recorded");
