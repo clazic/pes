@@ -17,7 +17,8 @@ import {
   type CommandDefinition,
   type CommandResult,
   type CommandRuntime,
-} from "../commands.ts";
+  type EventDraft,
+} from "./shared.ts";
 import { ApiError } from "../errors.ts";
 
 const CLAIMABLE_RUN_STATUSES = new Set(["queued", "waiting_human", "blocked_usage", "interrupted"]);
@@ -212,6 +213,12 @@ function run_claim(runtime: CommandRuntime): CommandResult {
   let fresh: { mode: string; runtime: string; provider: string; model: string } | null = null;
 
   if (requested_run_id !== undefined) {
+    if (payload.parent_run_id !== undefined || payload.role !== undefined) {
+      throw new ApiError(
+        "invalid_payload",
+        "a resumed claim does not accept parent_run_id or role",
+      );
+    }
     if (typeof requested_run_id !== "string" || requested_run_id.trim().length === 0) {
       throw new ApiError("invalid_payload", "run_id must be a non-empty string");
     }
@@ -265,6 +272,39 @@ function run_claim(runtime: CommandRuntime): CommandResult {
   const previous = read_lease(runtime, scope.project_id);
   if (previous !== undefined && is_live_lease(previous, runtime.now_ms)) {
     throw new ApiError("conflict", "the project already has an active lease");
+  }
+
+  // Replacing an expired lease also ends the displaced run if it is still
+  // running, in the same transaction and with its own event. Finished runs
+  // (succeeded/failed/interrupted/...) are left untouched.
+  const displaced_events: EventDraft[] = [];
+  if (
+    previous !== undefined &&
+    previous.state === "active" &&
+    previous.run_id !== null &&
+    previous.run_id !== run_id
+  ) {
+    const displaced = runtime.db.get<{ status: string }>(
+      "SELECT status FROM runs WHERE project_id = ? AND id = ?",
+      scope.project_id,
+      previous.run_id,
+    );
+    if (displaced !== undefined && displaced.status === "running") {
+      const interrupted = runtime.db.run(
+        "UPDATE runs SET status = 'interrupted', ended_at = ? WHERE project_id = ? AND id = ?",
+        runtime.now_ms,
+        scope.project_id,
+        previous.run_id,
+      );
+      if (interrupted.changes !== 1n) {
+        throw new Error("the displaced run was not interrupted");
+      }
+      displaced_events.push({
+        type: "run.interrupted",
+        run_id: previous.run_id,
+        payload: { reason: "lease_expired" },
+      });
+    }
   }
 
   const fence = previous === undefined ? 1 : Number(previous.fence) + 1;
@@ -370,6 +410,7 @@ function run_claim(runtime: CommandRuntime): CommandResult {
   return {
     result,
     events: [
+      ...displaced_events,
       {
         type: "run.claimed",
         run_id,
