@@ -4,6 +4,14 @@
  * COMMANDS 자신에서 기대값을 뽑지 않는다(그러면 시험이 약해진다).
  */
 export const EXPECTED_COMMAND_NAMES: readonly string[] = [
+  "content.add_artifact",
+  "content.add_citation",
+  "content.add_source",
+  "content.append_version",
+  "content.create_object",
+  "content.import_library",
+  "content.link_relation",
+  "content.set_current",
   "project.bootstrap",
   "project.set_topic",
   "run.claim",

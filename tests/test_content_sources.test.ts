@@ -1,6 +1,12 @@
 // SEL-40 (stage 2 PR7): items / versions / sources / citations / relations / library import,
 // tests written before the implementation.
 //
+// Structure (as of SEL-38 final): the command definitions live in scripts/pes_core/commands/content.ts
+// (shared helpers come from commands/shared.ts); that module exports a frozen CONTENT_COMMAND_ENTRIES
+// array of frozen [name, definition] tuples, which commands.ts spreads into COMMANDS (like RUN_COMMAND_ENTRIES
+// in commands/runs.ts). The expected names of ALL commands are listed once in tests/helpers/command_names.ts.
+// Rows from db.get() are null-prototype objects: assert/strict deepEqual needs { ...row }.
+//
 // Command names (registered in COMMANDS by scripts/pes_core/commands/content.ts; all scope "project",
 // NOT rev-bearing: no base_control_rev is sent). Unknown payload fields are rejected with
 // ApiError "invalid_payload", as is a malformed/missing field. Missing id (or an id of another
@@ -86,6 +92,8 @@ import {
 import { connect, migrate, type Db, type RunResult, type SqlValue } from "../scripts/pes_core/db.ts";
 import { ApiError } from "../scripts/pes_core/errors.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
+import { CONTENT_COMMAND_ENTRIES } from "../scripts/pes_core/commands/content.ts";
+import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { isolated_home, type IsolatedHome } from "./helpers/isolated_home.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
 
@@ -338,6 +346,22 @@ test("the eight content commands are registered, project-scoped, with distinct a
   assert.equal(actions.size, CONTENT_COMMANDS.length);
   const extra = [...COMMANDS.keys()].filter((k) => k.startsWith("content.") && !(CONTENT_COMMANDS as readonly string[]).includes(k));
   assert.deepEqual(extra, [], "the content command set is closed");
+});
+
+test("content command entries are a frozen list of frozen tuples, and COMMANDS hands out those very definitions", () => {
+  assert.equal(Object.isFrozen(CONTENT_COMMAND_ENTRIES), true, "entries array is frozen");
+  assert.deepEqual(CONTENT_COMMAND_ENTRIES.map((e) => e[0]), [...CONTENT_COMMANDS], "names, in order");
+  for (const entry of CONTENT_COMMAND_ENTRIES) {
+    assert.equal(Object.isFrozen(entry), true, `${entry[0]} tuple is frozen`);
+    assert.equal(Object.isFrozen(entry[1]), true, `${entry[0]} definition is frozen`);
+    assert.equal(COMMANDS.get(entry[0]), entry[1], `${entry[0]} in COMMANDS is the exported definition`);
+  }
+  assert.throws(() => (CONTENT_COMMAND_ENTRIES as unknown as unknown[]).push(["x", {}]), TypeError);
+});
+
+test("the full registry lists exactly the expected names, content.* included", () => {
+  assert.deepEqual([...COMMANDS.keys()].sort(), [...EXPECTED_COMMAND_NAMES]);
+  for (const name of CONTENT_COMMANDS) assert.ok(EXPECTED_COMMAND_NAMES.includes(name), `${name} is in the expected list`);
 });
 
 test("the registry has no update/delete/overwrite command for versions, citations, relations or sources, and no table CRUD", () => {
