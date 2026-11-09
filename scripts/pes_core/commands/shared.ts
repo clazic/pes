@@ -7,7 +7,7 @@
 // shares.
 
 import type { RunConfig } from "../config.ts";
-import type { Db } from "../db.ts";
+import type { Db, SqlValue } from "../db.ts";
 import { ApiError } from "../errors.ts";
 
 export type CommandVia = "web" | "cli" | "http" | "mcp" | "webmcp" | "import";
@@ -68,6 +68,20 @@ export function require_well_formed(value: string, field: string): string {
   return value;
 }
 
+/**
+ * The policy checker's view of a transaction: reads only. The object exposes
+ * get/all and no run/exec/prepare, so a checker cannot write through it even
+ * though it is called inside the transaction.
+ */
+export function readonly_db(db: Db): Pick<Db, "get" | "all"> {
+  return Object.freeze({
+    get: <T = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
+      db.get<T>(sql, ...params),
+    all: <T = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
+      db.all<T>(sql, ...params),
+  });
+}
+
 export function is_record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -90,6 +104,45 @@ export function require_non_empty_string(payload: Record<string, unknown>, field
     throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
   }
   return value;
+}
+
+/** Reject a payload key that the command does not define (closed command surface). */
+export function reject_unknown_fields(
+  payload: Record<string, unknown>,
+  allowed: readonly string[],
+): void {
+  const known = new Set(allowed);
+  for (const key of Object.keys(payload)) {
+    if (!known.has(key)) {
+      throw new ApiError("invalid_payload", `unknown field: ${key}`);
+    }
+  }
+}
+
+/**
+ * The command's actor must be a human project member with role "owner". The
+ * service has already checked membership and disabled state; this adds the
+ * kind/role rule that an agent sharing the owner's user must still fail.
+ */
+export function require_human_owner_actor(runtime: CommandRuntime): string {
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  const row = runtime.db.get<{ kind: string; role: string | null }>(
+    `SELECT a.kind AS kind, m.role AS role
+       FROM actors a
+       LEFT JOIN project_members m
+         ON m.project_id = ? AND m.user_id = a.user_id
+      WHERE a.id = ?`,
+    project.id,
+    actor_id,
+  );
+  if (row === undefined || row.kind !== "human" || row.role !== "owner") {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  return actor_id;
 }
 
 export function insert_receipt(

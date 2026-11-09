@@ -18,11 +18,14 @@ import { resolve_run_config, type RunConfig } from "./config.ts";
 import { tx, type Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { new_id } from "./ids.ts";
+import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
 import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
+import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
   is_record,
+  readonly_db,
   require_non_empty_string,
   require_record,
   require_well_formed,
@@ -73,11 +76,19 @@ export const OBJECT_KINDS = [
 export type PolicyDecision = { allowed: true } | { allowed: false; reason: string };
 
 /**
- * PR4 defines the seam only; PR10 supplies the real policy implementation.
+ * The policy seam. The command service calls check() inside the command
+ * transaction, before receipt replay, and hands over a read-only database
+ * handle (get / all only) from that same transaction so a real checker can
+ * read the current project policy without racing another connection.
  * A denial surfaces as ApiError code "policy_denied".
  */
 export interface PolicyChecker {
-  check(ctx: MutationContext, command: string, payload: unknown): PolicyDecision;
+  check(
+    ctx: MutationContext,
+    command: string,
+    payload: unknown,
+    db: Pick<Db, "get" | "all">,
+  ): PolicyDecision;
 }
 
 export interface CommandServiceOptions {
@@ -454,6 +465,8 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ["project.set_topic", SET_TOPIC_COMMAND],
   ...RUN_COMMAND_ENTRIES,
   ...CONTENT_COMMAND_ENTRIES,
+  ...ACTOR_COMMAND_ENTRIES,
+  ...POLICY_COMMAND_ENTRIES,
 ]);
 
 /**
@@ -555,6 +568,7 @@ export class CommandService {
   readonly #policy: PolicyChecker;
   readonly #new_id: () => string;
   readonly #run_config: RunConfig;
+  readonly #read_db: Pick<Db, "get" | "all">;
 
   constructor(db: Db, options: CommandServiceOptions) {
     this.#db = db;
@@ -564,6 +578,7 @@ export class CommandService {
     // Validate and copy the injected timing once. The service never reads the
     // ambient environment; a composition point resolves env explicitly.
     this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
+    this.#read_db = readonly_db(db);
   }
 
   /**
@@ -624,8 +639,15 @@ export class CommandService {
 
     // The checker is external code: give it copies so a mutation cannot move
     // the receipt key or change what the original payload stores, and treat
-    // anything other than an explicit boolean true as a denial.
-    const decision: unknown = this.#policy.check(clone_context(ctx), command, copy_snapshot(payload));
+    // anything other than an explicit boolean true as a denial. It also gets a
+    // read-only handle to this transaction so a real policy reads uncommitted
+    // state without being able to write.
+    const decision: unknown = this.#policy.check(
+      clone_context(ctx),
+      command,
+      copy_snapshot(payload),
+      this.#read_db,
+    );
     if (!policy_allows(decision)) {
       throw new ApiError("policy_denied", policy_denial_reason(decision));
     }

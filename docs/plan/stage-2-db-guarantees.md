@@ -139,7 +139,7 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 
 ### 8.2 후속 확장(예정)
 
-- **PR10**: `PolicyChecker.check`가 tx 안의 읽기 전용 `db`(또는 정책 행 조회 함수)를 받도록 시그니처를 넓혀, `project_policy_versions` 현재 행을 같은 tx에서 읽는다.
+- **PR10(반영)**: `PolicyChecker.check`가 tx 안의 읽기 전용 `db`(또는 정책 행 조회 함수)를 받도록 시그니처를 넓혀, `project_policy_versions` 현재 행을 같은 tx에서 읽는다(8.5).
 - **PR5(반영)**: `EventDraft.run_id`와 영수증의 `run_id`·`lease_id`·`fence`를 더했다(8.3).
 - **PR5 이전 검토**: 새 명령이 영수증을 빠뜨리지 않도록 `run()`이 action을 제외한 영수증 필드를 반환하고 서비스가 쓰는 구조(부트스트랩만 정책 FK 때문에 훅으로 예외)를 검토한다.
 
@@ -172,3 +172,13 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
   - **제목**: 제목이 없거나 문자열이 아니면 `(제목 없음)`으로 저장하고 원래 값(없었으면 null)을 `legacy_extra.title_original`에 둔다.
   - **`archived_at`**: library 가져오기에서 `status:"removed"`인 항목에만 찍는 가져오기 전용 표시다. `append_version`/`add_artifact`로 status를 바꿔도 `archived_at`은 바뀌지 않는다. 버전 상태가 기준이다.
   - **예정**: library 원본을 사건 payload에 두는 것은 D1 행 2MB 한도 때문에 PR9/11의 blob 경계로 옮길 예정이다.
+
+### 8.5 행위자·토큰·전송 정책(PR10)
+
+`scripts/pes_core/commands/actors.ts`·`commands/policy.ts`가 `token.issue`·`token.revoke`·`policy.set`·`dispatch.prepare`·`dispatch.authorize`·`dispatch.mark_sent`·`dispatch.block` 7개 명령을 정의하고, `scripts/pes_core/actors.ts`·`policy.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. `PolicyChecker.check`는 tx 안의 읽기 전용 `get`/`all` 핸들을 4번째 인자로 받고, 정책 검사는 영수증 재생보다 먼저다.
+
+- **토큰**: `token.issue`는 그 프로젝트의 사람 owner만 실행한다. 원문 비밀은 첫 응답에만 있고, 표·사건·영수증(재생 결과 포함)·오류 메시지에는 SHA-256 해시만 남는다. 범위는 프로젝트, 만료는 생성 시각 + 30일이며 `now >= expires_at`이면 만료다. `token.revoke`는 `revoked_at`만 채우고 행을 지우지 않는다. `verify_agent_token`의 어떤 실패든 원문을 되풀이하지 않는 `forbidden`이다.
+- **정책**: `policy.set`은 사람 owner만 실행하고 `project_policy_versions`에 새 행(`policy_rev` + 1)을 append한 뒤 `projects.current_policy_id`를 옮긴다. 이전 정책 행은 바꾸지 않는다. 새 행이 `allow_opencode_go = 0`이면 같은 tx에서 `prepared`·`authorized` 전송을 `blocked`로 바꾸고 `policy.changed` 사건 뒤에 `dispatch.blocked` 사건을 하나씩 남긴다. `sent`·`response`·`adopted`·`failed`·`unknown`·`blocked` 이력은 지우거나 고치지 않으며, 다시 허용해도 차단된 전송은 되살아나지 않는다.
+- **전송**: `dispatch.prepare`·`authorize`·`mark_sent`는 run 명령과 같은 활성·미만료 lease guard(`run_id`·`lease_id`·`fence`)를 지나고, `dispatch.block`만 guard가 없다. `dispatch.mark_sent`는 `sent`와 `sent_at`만 기록하며 `usage_json`·`cost_json`은 NULL로 둔다(모르는 비용을 0으로 저장하지 않는다). 실제 Go 네트워크 호출은 없다.
+- **fail-closed**: 프로젝트 포인터가 NULL이거나 없는 행·다른 프로젝트 행을 가리키거나, 그 프로젝트의 최고 `policy_rev`가 아니거나, `allow_opencode_go`가 정확히 0/1이 아니거나, `mode_a_model`이 `opencode-go/`로 시작하지 않거나, `go_usage_stop_percent`가 50~100 밖이거나, `changed_by_kind`가 `human`이 아니면 정책은 손상이다. `check_go_allowed`는 손상에서도 예외를 던지지 않고 허용하지 않으며, `current_policy`는 `policy_denied`다. Go가 꺼졌거나 정책이 손상되면 `dispatch.prepare`·`authorize`·`mark_sent`는 `policy_denied`이고, `policy.set`·`dispatch.block`·`token.*`·`project.*`·`run.*`는 Go 정책에 막히지 않는다.
+- **기본값**: stage-0 7-1 그대로 `policy_rev` 1, `allow_opencode_go` 켜짐, `mode_a_model` `opencode-go/deepseek-v4.1-flash`, `go_usage_stop_percent` 90이다.
