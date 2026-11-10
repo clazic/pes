@@ -124,7 +124,7 @@ test("one round from the question to the approval, over HTTP only", async () => 
     const applied = assert_ok(
       await call(env, { method: "POST", path: receipts_path, auth: { token: agent.token }, body: { ...guard2, receipts: [{ input_version_id, state: "applied", applied_tx_id: request.tx_id }] } }),
     );
-    assert.deepEqual(applied.accepted, [{ input_version_id, state: "applied", already_applied: false }]);
+    assert.deepEqual(applied.accepted, [{ input_version_id, state: "applied" }]);
 
     const done = assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${queued.run_id}/complete`), auth: { token: agent.token }, body: { ...guard2, status: "succeeded" } }));
     assert.equal(done.status, "succeeded");
@@ -162,7 +162,7 @@ test("one round from the question to the approval, over HTTP only", async () => 
     for (let i = 1; i < all.events.length; i += 1) {
       assert.ok(BigInt(all.events[i].event_seq) > BigInt(all.events[i - 1].event_seq));
     }
-    assert.ok(all.events.every((e: any) => e.type !== "stage.approved" || e.run_id === null), "an approval belongs to no run");
+    assert.ok(all.events.every((e: any) => e.type !== "stage.approved" || !("run_id" in e)), "an approval belongs to no run (the change DTO has only the six documented keys)");
     assert.ok(gap > 0);
   });
 });
