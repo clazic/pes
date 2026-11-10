@@ -330,6 +330,71 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
   return actor_id;
 }
 
+export interface LeaseGuard {
+  run_id: string;
+  lease_id: string;
+  fence: number;
+}
+
+/**
+ * Parse the optional run_id/lease_id/fence triple used by commands that an
+ * agent may run only while it holds the project lease. Absent (or null) means
+ * "no guard"; a partial triple is invalid rather than silently ignored.
+ */
+export function optional_lease_guard(payload: Record<string, unknown>): LeaseGuard | null {
+  const present = (field: string): boolean =>
+    payload[field] !== undefined && payload[field] !== null;
+  const fields = ["run_id", "lease_id", "fence"];
+  const given = fields.filter(present);
+  if (given.length === 0) return null;
+  if (given.length !== fields.length) {
+    throw new ApiError("invalid_payload", "run_id, lease_id and fence must be given together");
+  }
+  const run_id = require_non_empty_string(payload, "run_id");
+  const lease_id = require_non_empty_string(payload, "lease_id");
+  const fence = payload.fence;
+  if (typeof fence !== "number" || !Number.isSafeInteger(fence) || fence < 1) {
+    throw new ApiError("invalid_payload", "fence must be a positive safe integer");
+  }
+  return { run_id, lease_id, fence };
+}
+
+/**
+ * The project's active, unexpired lease with the exact id, fence, run, and
+ * owner. The same rule as the run and dispatch commands (PR5/PR10); a stale
+ * fence or a released/expired lease is a conflict and never revived.
+ */
+export function require_current_lease(runtime: CommandRuntime, guard: LeaseGuard): void {
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new Error("a lease-guarded command must resolve a project and actor first");
+  }
+  const lease = runtime.db.get<{
+    lease_id: string;
+    run_id: string | null;
+    owner_actor_id: string | null;
+    fence: bigint;
+    state: string;
+    expires_at: bigint;
+  }>(
+    `SELECT lease_id, run_id, owner_actor_id, fence, state, expires_at
+       FROM project_leases WHERE project_id = ?`,
+    project.id,
+  );
+  if (
+    lease === undefined ||
+    lease.state !== "active" ||
+    runtime.now_ms >= Number(lease.expires_at) ||
+    lease.lease_id !== guard.lease_id ||
+    Number(lease.fence) !== guard.fence ||
+    lease.run_id !== guard.run_id ||
+    lease.owner_actor_id !== actor_id
+  ) {
+    throw new ApiError("conflict", "the lease is not current");
+  }
+}
+
 export function insert_receipt(
   runtime: CommandRuntime,
   fields: {

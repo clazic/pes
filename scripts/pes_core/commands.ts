@@ -22,6 +22,7 @@ import { new_id } from "./ids.ts";
 import { read_credential_actor } from "./actors.ts";
 import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
 import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
+import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
@@ -478,6 +479,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ["project.set_topic", SET_TOPIC_COMMAND],
   ...RUN_COMMAND_ENTRIES,
   ...CONTENT_COMMAND_ENTRIES,
+  ...EDITION_COMMAND_ENTRIES,
   ...FILE_COMMAND_ENTRIES,
   ...ACTOR_COMMAND_ENTRIES,
   ...POLICY_COMMAND_ENTRIES,
