@@ -14,7 +14,7 @@ import { test } from "node:test";
 
 import { put_ready, disk_path } from "./helpers/blob_env.ts";
 import { make_cli_env, SLUG, with_cli, type CliEnv } from "./helpers/cli_write_env.ts";
-import { baseline_dir, ok, read_lf, run_py, WRITE_ITEMS, write_json } from "./helpers/cli_read_env.ts";
+import { baseline_dir, ok, read_lf, run_py, WRITE_ITEMS, write_json, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, sha256_of } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { assemble_manuscript } from "../scripts/pes_core/report.ts";
@@ -171,6 +171,7 @@ test("S1 64자가 넘는 숫자 토큰(1.2345000…e-20) 뒤의 필드가 사라
     const api = await legacy();
     const mig = await migration();
     const imp = await api.import_project(c.env.service, dir, { owner_actor_id: owner_of(c.env) });
+    expect_staging(imp, dir, "test_cli_read_final1.test.ts#1");
     assert.equal(imp.state, "staging");
     const val = await mig.validate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), source_dir: dir });
     assert.equal(val.ok, true, JSON.stringify(val.report.problems));

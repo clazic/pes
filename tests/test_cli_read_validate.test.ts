@@ -43,7 +43,7 @@ import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult, LEGACY_JSON } from "./helpers/cli_write_env.ts";
-import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike } from "./helpers/cli_read_env.ts";
+import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { copy_fixture, has_problem, migration, with_migration, owner_of, pes_home_of, backup_dir_of, batch_row } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -79,6 +79,7 @@ test("validate_import: v0.15 가 만든 보고서(시각만 다름)는 실제 �
   await with_migration(async (env, api, mig) => {
     const dir = legacy_with_real_reports(env);
     const imp = await api.import_project(env.service, dir, { owner_actor_id: owner_of(env) });
+    expect_staging(imp, dir, "test_cli_read_validate.test.ts#1");
     const out = await mig.validate_import(env.service, imp.batch_id, { owner_actor_id: owner_of(env), source_dir: dir });
     assert.equal(out.ok, true, JSON.stringify(out.report.problems));
     for (const path of ["reports/plan/report.md", "reports/plan/report.html"]) {
@@ -97,6 +98,7 @@ test("validate_import: 옛 보고서와 재생성본이 다르면 문제로 올�
       const dir = legacy_with_real_reports(env);
       writeFileSync(join(dir, "reports", "plan", file), file.endsWith("md") ? "# 사람이 직접 고친 보고서\n" : "<html>손으로 고침</html>\n", "utf8");
       const imp = await api.import_project(env.service, dir, { owner_actor_id: owner_of(env) });
+      expect_staging(imp, dir, "test_cli_read_validate.test.ts#2");
       const out = await mig.validate_import(env.service, imp.batch_id, { owner_actor_id: owner_of(env), source_dir: dir });
       assert.equal(out.ok, false, `${file}: 불일치는 문제`);
       assert.equal(out.state, "staging");
@@ -114,6 +116,7 @@ test("validate_import: 재생성 대상이 아닌 보고서 파일(pdf·eli5)은
     const dir = legacy_with_real_reports(env);
     writeFileSync(join(dir, "reports", "plan", "report.pdf"), "다른 PDF 바이트", "utf8");
     const imp = await api.import_project(env.service, dir, { owner_actor_id: owner_of(env) });
+    expect_staging(imp, dir, "test_cli_read_validate.test.ts#3");
     const out = await mig.validate_import(env.service, imp.batch_id, { owner_actor_id: owner_of(env), source_dir: dir });
     assert.equal(out.ok, true, JSON.stringify(out.report.problems));
     const paths = out.report.regenerated_reports.map((r) => r.path);

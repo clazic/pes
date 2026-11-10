@@ -20,7 +20,7 @@ import { test } from "node:test";
 import { create_edition } from "../scripts/pes_core/editions.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { REPO, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
-import { baseline_dir, read_lf, run_py, write_legacy, type HomeLike } from "./helpers/cli_read_env.ts";
+import { baseline_dir, read_lf, run_py, write_legacy, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -64,6 +64,7 @@ async function import_validate(c: CliEnv, dir: string) {
   const api = await legacy();
   const mig = await migration();
   const imp = await api.import_project(c.env.service, dir, { owner_actor_id: owner_of(c.env) });
+  expect_staging(imp, dir, "test_cli_read_review1.test.ts#1");
   assert.equal(imp.state, "staging");
   const val = await mig.validate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), source_dir: dir });
   return { imp, val, mig };
@@ -254,6 +255,7 @@ test("R6 플래그 켜짐 + 홈 안 legacy: doctor --fix 는 폴더에 아무것
     writeFileSync(join(staged, "project.json"), readFileSync(join(staged, "project.json"), "utf8").replace('"slug": "synthetic-legacy-full"', '"slug": "r6-staged"'), "utf8");
     const api = await legacy();
     const imp = await api.import_project(c.env.service, staged, { owner_actor_id: owner_of(c.env) });
+    expect_staging(imp, staged, "test_cli_read_review1.test.ts#2");
     assert.equal(imp.state, "staging");
     const trees = [tree_digest(plain), tree_digest(staged)];
     const sigs = [c.sig(join(plain, "project.json")), c.sig(join(staged, "project.json"))];

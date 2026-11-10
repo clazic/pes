@@ -18,7 +18,7 @@ import { test } from "node:test";
 
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, PES_PY, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
-import { normalize, PY, plain_json_legacy, read_lf, run_py, shell_words, write_legacy } from "./helpers/cli_read_env.ts";
+import { normalize, PY, plain_json_legacy, read_lf, run_py, shell_words, write_legacy, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
@@ -52,6 +52,7 @@ async function import_full(c: CliEnv, slug = "synthetic-legacy-full") {
   const api = await legacy();
   const mig = await migration();
   const imp = await api.import_project(c.env.service, dir, { owner_actor_id: owner_of(c.env) });
+  expect_staging(imp, dir, "test_cli_read_hardening.test.ts#1");
   assert.equal(imp.state, "staging");
   return { dir, imp, mig, slug };
 }

@@ -43,7 +43,7 @@ import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult, LEGACY_JSON } from "./helpers/cli_write_env.ts";
-import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike } from "./helpers/cli_read_env.ts";
+import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { copy_fixture, has_problem, migration, with_migration, owner_of, pes_home_of, backup_dir_of, batch_row } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -232,6 +232,7 @@ test("pending 은 DB 의 처리 안 한 답을 옛 파일 이름 모양으로 �
     const api = await legacy();
     const mig = await migration();
     const imp = await api.import_project(c.env.service, dir, { owner_actor_id: owner_of(c.env) });
+    expect_staging(imp, dir, "test_cli_read_v015.test.ts#1");
     assert.equal(imp.state, "staging");
     const origin = run_py(c, ["pending", "synthetic-legacy-full"], { ...OFF });
     const origin_names = origin.stdout.trim().split("\n").map((l) => l.trim().split(/[\\/]/).pop());

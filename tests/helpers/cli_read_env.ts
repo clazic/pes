@@ -338,3 +338,24 @@ export function plain_legacy(slug: string): Record<string, unknown> {
 export function folder_of(c: CliEnv, slug: string): string {
   return join(c.env.home.env.PES_HOME as string, slug);
 }
+
+/**
+ * import 직후 배치가 staging 이어야 한다. 아니면(Windows CI 에서 간헐로 failed 배치가 났다) 원인 추적용으로 배치 보고서(문제 항목·parse 오류)와
+ * project.json 의 크기·앞 300바이트를 메시지에 담는다. 단언 자체는 그대로 imp.state === "staging" 이다.
+ */
+export function expect_staging(imp: { state: string; batch_id: string; report: { entries: Array<{ category: string; path: string; key?: string; detail?: unknown }> } }, dir: string, what: string): void {
+  if (imp.state === "staging") return;
+  let head = "(project.json 을 읽지 못함)";
+  try {
+    const bytes = readFileSync(join(dir, "project.json"));
+    head = `크기 ${bytes.byteLength}바이트, 앞 300바이트: ${JSON.stringify(bytes.subarray(0, 300).toString("utf8"))}`;
+  } catch (error) {
+    head = `project.json 읽기 오류: ${String(error)}`;
+  }
+  const entries = imp.report.entries.filter((e) => ["parse_error", "missing_file", "quarantined", "unmapped_input"].includes(e.category));
+  assert.equal(
+    imp.state,
+    "staging",
+    `${what}: import 가 staging 이 아니라 ${imp.state} (배치 ${imp.batch_id})\n배치 보고서 항목 ${imp.report.entries.length}개, 문제 항목: ${JSON.stringify(entries, null, 1)}\n${head}`,
+  );
+}
