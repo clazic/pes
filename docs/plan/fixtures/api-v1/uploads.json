@@ -15,10 +15,10 @@
         "Idempotency-Key": "idem_upload_01J9Z3K7Q2"
       },
       "body": {
-        "filename": "synthetic-figure.png",
+        "original_name": "synthetic-figure.png",
         "media_type": "image/png",
-        "size_bytes": 12345,
-        "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
+        "size": 12345,
+        "sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
       }
     },
     "response": {
@@ -30,6 +30,7 @@
         "format_version": "1.0",
         "request_id": "req_upload_01J9Z3K7QN",
         "data": {
+          "project_id": "prj_01J9Z3K7Q2",
           "blob_id": "blb_01J9Z3K7QG",
           "state": "staging",
           "deduplicated": false
@@ -48,14 +49,14 @@
         "Content-Type": "application/json"
       },
       "body": {
-        "filename": "synthetic-large.bin",
-        "media_type": "application/octet-stream",
-        "size_bytes": 52428800,
-        "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        "original_name": "synthetic-figure.png",
+        "media_type": "image/png",
+        "size": 12345,
+        "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
       }
     },
     "response": {
-      "status": 413,
+      "status": 400,
       "headers": {
         "Content-Type": "application/json"
       },
@@ -63,15 +64,12 @@
         "format_version": "1.0",
         "request_id": "req_upload_err_01J9Z3K7QN",
         "error": {
-          "code": "payload_too_large",
-          "message": "업로드 파일이 허용 크기를 넘었습니다.",
+          "code": "invalid_payload",
+          "message": "요청 내용이 올바르지 않습니다.",
           "retryable": false,
-          "target": "$.body.size_bytes",
-          "details": {
-            "max_bytes": 26214400,
-            "actual_bytes": 52428800
-          },
-          "next_action": "split_or_compress"
+          "target": null,
+          "details": null,
+          "next_action": "fix_request"
         }
       }
     }

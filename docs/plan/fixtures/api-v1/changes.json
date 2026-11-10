@@ -71,9 +71,54 @@
           "retryable": false,
           "target": "$.query.cursor",
           "details": {
-            "database_instance_id": "db_01J9Z3K7Q2",
+            "database_instance_id": "id_01J9Z3K7QZ",
             "cursor_epoch": "1",
-            "current_epoch": "2"
+            "current_epoch": "2",
+            "reason": "epoch_changed",
+            "next_cursor": "cur_01J9Z3K7QZ",
+            "snapshot": {
+              "control_rev": "0",
+              "digest": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+              "stages": [
+                {
+                  "stage_id": "stg_01J9Z3K7Q4",
+                  "key": "plan",
+                  "status": "pending",
+                  "rev": "0"
+                },
+                {
+                  "stage_id": "stg_01J9Z3K7R4",
+                  "key": "research",
+                  "status": "pending",
+                  "rev": "0"
+                },
+                {
+                  "stage_id": "stg_01J9Z3K7S4",
+                  "key": "analyze",
+                  "status": "pending",
+                  "rev": "0"
+                },
+                {
+                  "stage_id": "stg_01J9Z3K7T4",
+                  "key": "write",
+                  "status": "pending",
+                  "rev": "0"
+                },
+                {
+                  "stage_id": "stg_01J9Z3K7V4",
+                  "key": "verify",
+                  "status": "pending",
+                  "rev": "0"
+                },
+                {
+                  "stage_id": "stg_01J9Z3K7W4",
+                  "key": "publish",
+                  "status": "pending",
+                  "rev": "0"
+                }
+              ]
+            },
+            "keep_unsubmitted_answers": true
           },
           "next_action": "resync"
         }

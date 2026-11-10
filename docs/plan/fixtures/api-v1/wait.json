@@ -17,10 +17,7 @@
       "body": {
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
-        "reason": "waiting_human",
-        "question_ids": [
-          "qst_01J9Z3K7QB"
-        ]
+        "reason": "waiting_human"
       }
     },
     "response": {
@@ -32,20 +29,11 @@
         "format_version": "1.0",
         "request_id": "req_wait_01J9Z3K7QN",
         "data": {
-          "run": {
-            "id": "run_01J9Z3K7Q6",
-            "status": "waiting_human"
-          },
-          "lease": {
-            "released": true,
-            "fence": "3"
-          },
-          "waiting": {
-            "since": 1762311660000,
-            "question_ids": [
-              "qst_01J9Z3K7QB"
-            ]
-          }
+          "project_id": "prj_01J9Z3K7Q2",
+          "run_id": "run_01J9Z3K7Q6",
+          "lease_id": "lea_01J9Z3K7QP",
+          "fence": "1",
+          "status": "waiting_human"
         }
       }
     }
@@ -64,10 +52,7 @@
       "body": {
         "lease_id": "lea_01J9Z3K7QX",
         "fence": "3",
-        "reason": "waiting_human",
-        "question_ids": [
-          "qst_01J9Z3K7QB"
-        ]
+        "reason": "waiting_human"
       }
     },
     "response": {
@@ -80,14 +65,11 @@
         "request_id": "req_wait_err_01J9Z3K7QN",
         "error": {
           "code": "conflict",
-          "message": "이 실행의 lease 보유자가 아닙니다.",
+          "message": "현재 상태에서는 처리할 수 없는 요청입니다.",
           "retryable": false,
-          "target": "$.body.lease_id",
-          "details": {
-            "run_id": "run_01J9Z3K7Q6",
-            "current_lease_id": "lea_01J9Z3K7QX"
-          },
-          "next_action": "use_current_lease"
+          "target": null,
+          "details": null,
+          "next_action": "reread_context"
         }
       }
     }

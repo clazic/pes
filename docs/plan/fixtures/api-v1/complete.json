@@ -18,11 +18,7 @@
       "body": {
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
-        "result_version_ids": [
-          "ver_01J9Z3K7QA"
-        ],
-        "status": "succeeded",
-        "summary": "합성 2라운드 결과 제출 완료"
+        "status": "succeeded"
       }
     },
     "response": {
@@ -34,13 +30,11 @@
         "format_version": "1.0",
         "request_id": "req_complete_01J9Z3K7QN",
         "data": {
-          "run": {
-            "id": "run_01J9Z3K7Q6",
-            "status": "succeeded",
-            "completed_at": 1762311700000
-          },
-          "stage_approved": false,
-          "note": "complete는 run 종료일 뿐 라운드 봉인·단계 승인이 아닙니다."
+          "project_id": "prj_01J9Z3K7Q2",
+          "run_id": "run_01J9Z3K7Q6",
+          "lease_id": "lea_01J9Z3K7QP",
+          "fence": "1",
+          "status": "succeeded"
         }
       }
     }
@@ -59,11 +53,7 @@
       "body": {
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
-        "result_version_ids": [
-          "ver_01J9Z3K7QA"
-        ],
-        "status": "succeeded",
-        "summary": "이미 끝난 실행의 합성 재요청"
+        "status": "succeeded"
       }
     },
     "response": {
@@ -76,14 +66,11 @@
         "request_id": "req_complete_err_01J9Z3K7QN",
         "error": {
           "code": "conflict",
-          "message": "이미 끝난 실행입니다.",
+          "message": "현재 상태에서는 처리할 수 없는 요청입니다.",
           "retryable": false,
-          "target": "$.path.run_id",
-          "details": {
-            "run_id": "run_01J9Z3K7Q6",
-            "status": "cancelled"
-          },
-          "next_action": "create_new_run"
+          "target": null,
+          "details": null,
+          "next_action": "reread_context"
         }
       }
     }

@@ -47,7 +47,7 @@
       "body_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z1ioAAAAASUVORK5CYII="
     },
     "response": {
-      "status": 422,
+      "status": 400,
       "headers": {
         "Content-Type": "application/json"
       },
@@ -55,15 +55,12 @@
         "format_version": "1.0",
         "request_id": "req_put_err_01J9Z3K7QN",
         "error": {
-          "code": "hash_mismatch",
-          "message": "업로드한 파일의 SHA-256이 예약할 때와 다릅니다.",
+          "code": "invalid_payload",
+          "message": "요청 내용이 올바르지 않습니다.",
           "retryable": false,
-          "target": "$.headers.X-Content-SHA256",
-          "details": {
-            "expected": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-            "actual": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-          },
-          "next_action": "reupload"
+          "target": null,
+          "details": null,
+          "next_action": "fix_request"
         }
       }
     }

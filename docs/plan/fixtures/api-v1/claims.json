@@ -16,8 +16,7 @@
       },
       "body": {
         "run_id": "run_01J9Z3K7Q6",
-        "expected_control_rev": "12",
-        "lease_ttl_ms": 120000
+        "expected_control_rev": "12"
       }
     },
     "response": {
@@ -29,17 +28,12 @@
         "format_version": "1.0",
         "request_id": "req_claim_01J9Z3K7QN",
         "data": {
-          "run": {
-            "id": "run_01J9Z3K7Q6",
-            "status": "running",
-            "base_control_rev": "12"
-          },
-          "lease": {
-            "lease_id": "lea_01J9Z3K7QP",
-            "fence": "3",
-            "expires_at": 1762311720000
-          },
-          "context_cursor": "cur_01J9Z3K7QK"
+          "project_id": "prj_01J9Z3K7Q2",
+          "run_id": "run_01J9Z3K7Q6",
+          "lease_id": "lea_01J9Z3K7QP",
+          "fence": "1",
+          "expires_at": 1760000120000,
+          "heartbeat_interval_ms": 30000
         }
       }
     }
@@ -56,9 +50,7 @@
         "Idempotency-Key": "idem_claim_busy_01J9Z3K7Q2"
       },
       "body": {
-        "run_id": "run_01J9Z3K7Q6",
-        "expected_control_rev": "12",
-        "lease_ttl_ms": 120000
+        "run_id": "run_01J9Z3K7Q6"
       }
     },
     "response": {
@@ -71,15 +63,11 @@
         "request_id": "req_claim_err_01J9Z3K7QN",
         "error": {
           "code": "conflict",
-          "message": "다른 실행이 프로젝트 실행 담당(lease)을 가지고 있습니다.",
+          "message": "현재 상태에서는 처리할 수 없는 요청입니다.",
           "retryable": false,
-          "target": "$.body.run_id",
-          "details": {
-            "holder_run_id": "run_01J9Z3K7QX",
-            "expires_at": 1762311720000,
-            "retry_after_ms": 15000
-          },
-          "next_action": "retry_after_lease"
+          "target": null,
+          "details": null,
+          "next_action": "reread_context"
         }
       }
     }

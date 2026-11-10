@@ -21,7 +21,7 @@
 | 7 | 실행 | queued run 등록은 별도 가능. **claim·재개 = run 전이 + lease 획득 원자적.** 결과·질문을 저장한 뒤 **명시적 `wait` 명령**으로 `waiting_human` + lease 해제. 입력 조회(long-poll)는 순수 읽기(ack·heartbeat·전이 없음). 재개는 새 claim·새 fence |
 | 8 | 제출 | **작은 원자 묶음**(결과·정확한 출처 버전·입력 영수증·사건). `complete`는 run 종료일 뿐 봉인·승인·다음 단계 전이가 아님 |
 | 9 | 입력 영수증 | seen/ignored는 따로. **applied는 실제 결과 버전 또는 적용된 후속 조치 증거와 같은 트랜잭션**에서만. 인계 뒤 새 run에 같은 입력이 다시 보여도 **기존 적용 여부를 확인해 중복 반영하지 않음** |
-| 10 | 중단·인계 | DB 채택 차단은 즉시 확정, 외부 중단은 pending/confirmed/failed/unknown으로 추적. 연결 끊김 ≠ 취소. 인계는 parent_run_id를 둔 새 run, 강제 인계는 사람만 |
+| 10 | 중단·인계 | DB 채택 차단은 즉시 확정, 외부 중단은 pending/confirmed/failed/unknown으로 추적. 연결 끊김 ≠ 취소. **HTTP 인계(`handoffs`)는 같은 run을 `queued`로 반납할 뿐 새 run을 만들지 않는다**(2026-11-10 SEL-47 결정, 코어 `run.handoff`). 이어받기는 다음 claim이 하고, `parent_run_id`를 둔 새 run은 코어 claim 경로에만 남는다. 강제 인계는 사람만 |
 | 11 | 사람만 | 승인·reopen·판 시작·Go 정책·토큰·멤버·삭제는 **소유자 사람 세션**. 본문의 human_id·via·WebMCP 주석은 증거가 아님 |
 | 12 | 인증 | 에이전트 = **프로젝트 범위 Bearer 토큰(30일 + 회수)**, 사람 = 로컬 세션. actor·via는 서버가 확정. Origin 검사는 유지하되 인증을 대신하지 않음. 2단계에도 로컬 소유자 경로·CSRF 경계 필요. 로그인 UI는 5단계 |
 | 13 | 변경분 | 커서 = `(database_instance_id, cursor_epoch, event_seq)` + **project_id·권한 범위·스캔 상한**을 묶은 서버 검증 불투명 값. epoch가 바뀌면 허용된 snapshot부터 다시 읽음(전체 본문 반환 아님). 공개 tx 단위로 적용, 숨긴 사건도 스캔 커서엔 반영. **커서 무효·재동기화 때도 화면의 미제출 답은 버리지 않음** |
@@ -70,7 +70,7 @@ H = 사람(소유자), E = 프로젝트 토큰의 에이전트(내부 A·외부 
 | 인계 | `POST P/runs/{r}/handoffs` | 현재 담당 E 또는 H(강제 인계는 H만) | 불가 |
 | 결과 제출 | `POST P/runs/{r}/results` | 담당 E | 불가 |
 | 질문 게시 / 수정 | `POST P/questions` / `P/questions/{q}/revisions` | 게시: E(담당 run)·H·**W(제한, 사람→AI 질문만)** / 수정: H·허가된 E | 게시만 가능(중간 위험), 수정 불가 |
-| 답·의견 제출 | `POST P/submissions` | H(E는 자기에게 온 질문만) | 불가(초안은 브라우저 폼) |
+| 답·의견 제출 | `POST P/submissions` | **H만**(에이전트는 403 `human_required`, 2026-11-10 SEL-47 결정. 에이전트는 답을 `inputs`로 읽기만 한다) | 불가(초안은 브라우저 폼) |
 | 입력 기다리기 / 영수증 | `GET P/runs/{r}/inputs?cursor=&wait_ms=` / `POST P/runs/{r}/input-receipts` | E | 불가 |
 | 변경분 | `GET P/changes?cursor=` | H/E/W | 선택 범위 읽기 |
 | 파일 | `POST P/uploads` → `PUT` → `POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | H/E | 불가 |

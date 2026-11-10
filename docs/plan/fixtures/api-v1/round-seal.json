@@ -18,6 +18,13 @@
       },
       "body": {
         "format_version": "1.0",
+        "manifest_blob_id": "blb_01J9Z3K7QM",
+        "versions": [
+          {
+            "object_id": "obj_01J9Z3K7Q9",
+            "version_id": "ver_01J9Z3K7QA"
+          }
+        ],
         "expected_round_rev": "4",
         "snapshot_scope": "round"
       }
@@ -55,6 +62,13 @@
       },
       "body": {
         "format_version": "1.0",
+        "manifest_blob_id": "blb_01J9Z3K7QM",
+        "versions": [
+          {
+            "object_id": "obj_01J9Z3K7Q9",
+            "version_id": "ver_01J9Z3K7QA"
+          }
+        ],
         "expected_round_rev": "4",
         "snapshot_scope": "round"
       }
@@ -69,7 +83,7 @@
         "request_id": "req_seal_err_01J9Z3K7QN",
         "error": {
           "code": "already_sealed",
-          "message": "라운드가 이미 봉인되었습니다.",
+          "message": "이미 봉인된 라운드입니다.",
           "retryable": false,
           "target": "$.path.round_id",
           "details": {

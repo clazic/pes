@@ -358,10 +358,11 @@ def check_error_body(body, label, errors):
     if not isinstance(error.get("retryable"), bool):
         errors.append(f"{label}: error.retryable이 bool이 아니다")
     target = error.get("target")
-    if not isinstance(target, str) or not target.startswith("$"):
-        errors.append(f"{label}: error.target이 JSON 경로가 아니다: {target!r}")
-    if not isinstance(error.get("details"), dict):
-        errors.append(f"{label}: error.details가 객체가 아니다")
+    # target and details are always present; null means "no single field" / "nothing machine-readable".
+    if "target" not in error or (target is not None and (not isinstance(target, str) or not target.startswith("$"))):
+        errors.append(f"{label}: error.target이 JSON 경로나 null이 아니다: {target!r}")
+    if "details" not in error or (error["details"] is not None and not isinstance(error["details"], dict)):
+        errors.append(f"{label}: error.details가 객체나 null이 아니다")
     if not (isinstance(body.get("request_id"), str) or isinstance(body.get("meta"), dict)):
         errors.append(f"{label}: request_id(또는 meta.request_id)가 없다")
 
@@ -415,8 +416,13 @@ def check_fixture(spec, errors):
             elif request_body.get("format_version", FORMAT_VERSION) != FORMAT_VERSION:
                 errors.append(f"{spec['file']}: {case_name}.request.body의 format_version이 {FORMAT_VERSION!r}이 아니다")
 
-    normal_body = data.get("normal", {}).get("response", {}).get("body")
-    check_success_body(normal_body, f"{spec['file']} normal.response.body", errors)
+    normal_response = data.get("normal", {}).get("response", {})
+    if "body_base64" in normal_response:
+        # A raw-bytes success (files content): no JSON envelope, only the bytes.
+        if not isinstance(normal_response["body_base64"], str) or "body" in normal_response:
+            errors.append(f"{spec['file']} normal.response: body_base64는 문자열이고 body와 함께 두지 않는다")
+    else:
+        check_success_body(normal_response.get("body"), f"{spec['file']} normal.response.body", errors)
     error_body = data.get("error", {}).get("response", {}).get("body")
     if not (optional_error and "error" not in data):
         check_error_body(error_body, f"{spec['file']} error.response.body", errors)

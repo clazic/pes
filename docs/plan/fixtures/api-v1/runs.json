@@ -16,15 +16,11 @@
         "Idempotency-Key": "idem_01J9Z3K7QM"
       },
       "body": {
-        "stage_id": "stg_01J9Z3K7Q4",
-        "round_id": "rnd_01J9Z3K7Q5",
+        "actor_id": "act_01J9Z3K7Q7",
         "mode": "A",
-        "role": "worker",
-        "workflow_version": "wf-2026-11-05",
-        "input_version_ids": [
-          "ver_01J9Z3K7QA"
-        ],
-        "note": "합성 2라운드 작업"
+        "runtime": "opencode",
+        "provider": "opencode-go",
+        "model": "opencode-go/deepseek-v4.1-flash"
       }
     },
     "response": {
@@ -36,16 +32,11 @@
         "format_version": "1.0",
         "request_id": "req_run_01J9Z3K7QN",
         "data": {
-          "run": {
-            "id": "run_01J9Z3K7Q6",
-            "status": "queued",
-            "mode": "A",
-            "role": "worker",
-            "actor_id": "act_01J9Z3K7Q7",
-            "model": "opencode-go/deepseek-v4.1-flash",
-            "base_control_rev": "12",
-            "created_at": 1762311600000
-          }
+          "project_id": "prj_01J9Z3K7Q2",
+          "run_id": "run_01J9Z3K7Q6",
+          "actor_id": "act_01J9Z3K7Q7",
+          "status": "queued",
+          "mode": "A"
         }
       }
     }
@@ -63,15 +54,11 @@
         "Idempotency-Key": "idem_run_blocked_01J9Z3K7Q2"
       },
       "body": {
-        "stage_id": "stg_01J9Z3K7Q4",
-        "round_id": "rnd_01J9Z3K7Q5",
+        "actor_id": "act_01J9Z3K7Q7",
         "mode": "A",
-        "role": "worker",
-        "workflow_version": "wf-2026-11-05",
-        "input_version_ids": [
-          "ver_01J9Z3K7QA"
-        ],
-        "note": "정책 꺼짐 상태의 합성 요청"
+        "runtime": "opencode",
+        "provider": "opencode-go",
+        "model": "opencode-go/deepseek-v4.1-flash"
       }
     },
     "response": {
@@ -84,14 +71,10 @@
         "request_id": "req_run_err_01J9Z3K7QN",
         "error": {
           "code": "policy_blocked",
-          "message": "OpenCode Go 전송이 이 프로젝트에서 꺼져 있어 실행을 시작할 수 없습니다.",
+          "message": "프로젝트 정책이 이 요청을 막고 있습니다.",
           "retryable": false,
-          "target": "$.body.mode",
-          "details": {
-            "policy": "opencode_go",
-            "allow": false,
-            "policy_rev": "6"
-          },
+          "target": null,
+          "details": null,
           "next_action": "owner_enable_policy"
         }
       }

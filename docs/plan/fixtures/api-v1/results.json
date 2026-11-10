@@ -18,26 +18,16 @@
       "body": {
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
-        "base_control_rev": "12",
         "results": [
           {
-            "client_ref": "r1",
-            "kind": "artifact",
+            "op": "append_version",
             "object_id": "obj_01J9Z3K7Q9",
-            "base_version_id": "ver_01J9Z3K7QA",
+            "based_on_version_id": "ver_01J9Z3K7QA",
             "title": "2장 합성 정책 분석",
-            "body_md": "## 2. 합성 정책 분석\n\n보강된 합성 본문입니다.",
-            "source_version_ids": [
-              "srcv_01J9Z3K7Q0"
-            ]
+            "body_md": "## 2. 합성 정책 분석\n\n보강된 합성 본문입니다."
           }
         ],
-        "input_receipts": [
-          {
-            "input_version_id": "ver_01J9Z3K7QA",
-            "state": "applied"
-          }
-        ]
+        "expected_control_rev": "12"
       }
     },
     "response": {
@@ -49,15 +39,15 @@
         "format_version": "1.0",
         "request_id": "req_res_01J9Z3K7QN",
         "data": {
-          "object_versions": [
+          "project_id": "prj_01J9Z3K7Q2",
+          "run_id": "run_01J9Z3K7Q6",
+          "results": [
             {
               "object_id": "obj_01J9Z3K7Q9",
-              "version_id": "ver_01J9Z3K7QZ",
-              "version_no": "4"
+              "version_id": "ver_01J9Z3K7QA",
+              "version_no": 2
             }
-          ],
-          "mutation_id": "mut_01J9Z3K7QU",
-          "event_seq": "43"
+          ]
         }
       }
     }
@@ -77,26 +67,16 @@
       "body": {
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
-        "base_control_rev": "12",
         "results": [
           {
-            "client_ref": "r1",
-            "kind": "artifact",
+            "op": "append_version",
             "object_id": "obj_01J9Z3K7Q9",
-            "base_version_id": "ver_stale_01J9Z3K7Q2",
+            "based_on_version_id": "ver_01J9Z3K7QA",
             "title": "2장 합성 정책 분석",
-            "body_md": "## 2. 합성 정책 분석\n\n보강된 합성 본문입니다.",
-            "source_version_ids": [
-              "srcv_01J9Z3K7Q0"
-            ]
+            "body_md": "## 2. 합성 정책 분석\n\n보강된 합성 본문입니다."
           }
         ],
-        "input_receipts": [
-          {
-            "input_version_id": "ver_01J9Z3K7QA",
-            "state": "applied"
-          }
-        ]
+        "expected_control_rev": "12"
       }
     },
     "response": {
@@ -109,13 +89,12 @@
         "request_id": "req_res_err_01J9Z3K7QN",
         "error": {
           "code": "rev_conflict",
-          "message": "요청한 기반 버전이 현재 버전과 다릅니다.",
+          "message": "기준 버전이 현재와 다릅니다.",
           "retryable": false,
-          "target": "$.body.results[0].base_version_id",
+          "target": null,
           "details": {
-            "expected": "ver_stale_01J9Z3K7Q2",
-            "current": "ver_01J9Z3K7QA",
-            "object_id": "obj_01J9Z3K7Q9"
+            "expected": "12",
+            "current": "0"
           },
           "next_action": "reread_context"
         }

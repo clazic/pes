@@ -25,39 +25,75 @@
         "format_version": "1.0",
         "request_id": "req_ctx_01J9Z3K7QN",
         "data": {
-          "project": {
-            "id": "prj_01J9Z3K7Q2",
-            "slug": "synthetic-policy-study",
-            "status": "active",
-            "control_rev": "12"
+          "project_id": "prj_01J9Z3K7Q2",
+          "topic": "합성 파일 주제",
+          "control_rev": "0",
+          "policy": {
+            "policy_id": "pol_01J9Z3K7QR",
+            "policy_rev": "1",
+            "allow_opencode_go": true,
+            "mode_a_model": "opencode-go/deepseek-v4.1-flash",
+            "go_usage_stop_percent": 90
           },
           "edition": {
-            "id": "edt_01J9Z3K7Q3",
-            "edition_no": "2",
-            "status": "active"
+            "edition_id": "edt_01J9Z3K7Q3",
+            "edition_no": "1",
+            "status": "active",
+            "current_stage_id": "stg_01J9Z3K7Q4"
           },
-          "stage": {
-            "id": "stg_01J9Z3K7Q4",
-            "key": "research",
-            "ordinal": 2,
-            "status": "active"
-          },
-          "round": {
-            "id": "rnd_01J9Z3K7Q5",
-            "round_no": "2",
-            "state": "open"
-          },
-          "policy": {
-            "allow_opencode_go": true,
-            "policy_rev": "5"
-          },
-          "digest": "sha256:7f1c2a9d4e5b6a7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
-          "manifest": {
-            "object_count": 12,
-            "version_count": 34,
-            "through_event_seq": "42"
-          },
-          "next_cursor": "cur_01J9Z3K7QK"
+          "stages": [
+            {
+              "stage_id": "stg_01J9Z3K7Q4",
+              "key": "plan",
+              "ordinal": 1,
+              "status": "pending",
+              "rev": "0",
+              "stale_since_event_seq": null
+            },
+            {
+              "stage_id": "stg_01J9Z3K7R4",
+              "key": "research",
+              "ordinal": 2,
+              "status": "pending",
+              "rev": "0",
+              "stale_since_event_seq": null
+            },
+            {
+              "stage_id": "stg_01J9Z3K7S4",
+              "key": "analyze",
+              "ordinal": 3,
+              "status": "pending",
+              "rev": "0",
+              "stale_since_event_seq": null
+            },
+            {
+              "stage_id": "stg_01J9Z3K7T4",
+              "key": "write",
+              "ordinal": 4,
+              "status": "pending",
+              "rev": "0",
+              "stale_since_event_seq": null
+            },
+            {
+              "stage_id": "stg_01J9Z3K7V4",
+              "key": "verify",
+              "ordinal": 5,
+              "status": "pending",
+              "rev": "0",
+              "stale_since_event_seq": null
+            },
+            {
+              "stage_id": "stg_01J9Z3K7W4",
+              "key": "publish",
+              "ordinal": 6,
+              "status": "pending",
+              "rev": "0",
+              "stale_since_event_seq": null
+            }
+          ],
+          "manifest": [],
+          "digest": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+          "lease": null
         }
       }
     }
@@ -76,7 +112,7 @@
       }
     },
     "response": {
-      "status": 404,
+      "status": 401,
       "headers": {
         "Content-Type": "application/json"
       },
@@ -84,14 +120,12 @@
         "format_version": "1.0",
         "request_id": "req_ctx_err_01J9Z3K7QN",
         "error": {
-          "code": "not_found",
-          "message": "프로젝트를 찾을 수 없습니다.",
+          "code": "unauthenticated",
+          "message": "인증이 필요합니다. 올바른 자격으로 다시 요청해 주세요.",
           "retryable": false,
-          "target": "$.path.project_id",
-          "details": {
-            "project_id": "prj_missing_01J9Z3K7Q2"
-          },
-          "next_action": "check_project_id"
+          "target": null,
+          "details": null,
+          "next_action": "authenticate"
         }
       }
     }

@@ -9,7 +9,8 @@ info:
     strings. A successful body is
     {format_version, request_id, data, replayed?}; an error body is
     {format_version, error:{code, message, retryable, target, details,
-    next_action}, request_id}. POST writes require Idempotency-Key.
+    next_action}, request_id}. POST writes require Idempotency-Key. Every
+    request body may carry format_version "1.0" (any other value is 400).
 servers:
   - url: http://127.0.0.1:8760
 components:
@@ -163,6 +164,7 @@ components:
       required: [slug, topic, owner_display_name]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
         topic: { type: string, minLength: 1 }
         owner_display_name: { type: string, minLength: 1 }
@@ -171,6 +173,7 @@ components:
       required: [actor_id, mode, runtime, provider, model]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         actor_id: { type: string, minLength: 1 }
         mode: { type: string, enum: [A, B] }
         runtime: { type: string, minLength: 1 }
@@ -181,6 +184,7 @@ components:
       required: [mode, runtime, provider, model]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         mode: { type: string, enum: [A, B] }
         runtime: { type: string, minLength: 1 }
         provider: { type: string, minLength: 1 }
@@ -191,6 +195,7 @@ components:
       required: [run_id]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         run_id: { type: string, minLength: 1 }
         expected_control_rev: { type: string }
     ClaimBody:
@@ -202,6 +207,7 @@ components:
       required: [lease_id, fence]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         lease_id: { type: string, minLength: 1 }
         fence: { type: string }
         reason: { type: string }
@@ -240,6 +246,7 @@ components:
       required: [lease_id, fence, results]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         lease_id: { type: string, minLength: 1 }
         fence: { type: string }
         expected_control_rev: { type: string }
@@ -252,6 +259,7 @@ components:
       required: [lease_id, fence]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         lease_id: { type: string, minLength: 1 }
         fence: { type: string }
         status: { type: string, enum: [succeeded, failed] }
@@ -260,6 +268,7 @@ components:
       required: [sha256, size, media_type]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         size: { type: integer, minimum: 0 }
         media_type: { type: string, minLength: 1 }
@@ -267,6 +276,8 @@ components:
     UploadComplete:
       type: object
       additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
     FormatVersion:
       type: string
       const: "1.0"
@@ -275,6 +286,7 @@ components:
       required: [slug, topic, owner_display_name, device_label]
       additionalProperties: false
       properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
         slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
         topic: { type: string, minLength: 1 }
         owner_display_name: { type: string, minLength: 1 }
@@ -291,7 +303,7 @@ components:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         lease_id: { type: string, minLength: 1 }
         fence: { type: string }
-        progress: { type: object }
+        progress: { type: object, description: "Checked, not stored" }
     ReleaseBody:
       type: object
       required: [lease_id, fence]
@@ -380,7 +392,10 @@ components:
         round_id: { type: [string, "null"] }
         purpose: { type: string, enum: [stage_start, review, resume] }
         form_key: { type: string, minLength: 1 }
-        direction: { type: string, enum: [agent_to_human, human_to_agent] }
+        direction:
+          type: string
+          const: agent_to_human
+          description: "The core stores every published question as agent_to_human; any other value is 400"
         question: { $ref: "#/components/schemas/QuestionSpec" }
         run_id: { type: string }
         lease_id: { type: string }
@@ -417,16 +432,14 @@ components:
           type: array
           minItems: 1
           items: { $ref: "#/components/schemas/AnswerItem" }
-        submitted_via: { type: string }
-        client_request_id: { type: string }
+        submitted_via: { type: string, description: "Checked, not stored (the server sets via)" }
+        client_request_id: { type: string, description: "Checked, not stored (the Idempotency-Key header is the key)" }
     RoundStartBody:
       type: object
       additionalProperties: false
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
-        purpose: { type: [string, "null"] }
         base_stage_rev: { type: string }
-        question_set_id: { type: [string, "null"] }
     RoundSealBody:
       type: object
       required: [manifest_blob_id, versions]
@@ -773,7 +786,7 @@ paths:
         "409": { description: Blob is not ready or stored bytes do not match }
   /api/v1/project-registrations:
     post:
-      summary: First registration of a project by device approval (owner session only); returns the first token once
+      summary: First registration of a project by device approval (owner session only); returns the first token once (a replay has no token and says token_issued_before true)
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ localSession: [] }]
