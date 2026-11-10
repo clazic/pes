@@ -88,7 +88,7 @@ function ConnectionCard({ c, manager }: { c: AiConnection; manager: boolean }) {
   const test = useCommand("ai_connection.test", { successText: () => "연결 시험 통과" });
   const m = c.metered;
   return (
-    <Card id={`cn-${c.id}-card`} className="gap-0 px-5" aria-labelledby={`cn-${c.id}`}>
+    <Card id={`cn-${c.id}-card`} size="compact" aria-labelledby={`cn-${c.id}`}>
       <CardHead eyebrow={`${KIND_LABEL[c.kind]} · ${BILLING_LABEL[c.billing]}`} title={c.name} titleId={`cn-${c.id}`} right={<StatusFrom s={{ domain: "connTest", value: c.test.state }} />} />
       <KV
         items={[
@@ -146,7 +146,7 @@ function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean })
   return (
     <div className="mt-5 grid grid-cols-1 items-stretch gap-3 desk:grid-cols-2">
       {s.extra_usage.applicable ? (
-        <Card id="extra" className="gap-0 px-5" aria-labelledby="ex-t">
+        <Card id="extra" size="compact" aria-labelledby="ex-t">
           <CardHead
             eyebrow={`방식 A 시작 전 확인 · ${c.name}`}
             title="추가 요금 꺼짐 확인"
@@ -168,7 +168,7 @@ function ExtraAndBaseline({ c, manager }: { c: AiConnection; manager: boolean })
           </div>
         </Card>
       ) : null}
-      <Card id="base" className="gap-0 px-5" aria-labelledby="bs-t">
+      <Card id="base" size="compact" aria-labelledby="bs-t">
         <CardHead
           eyebrow="PES가 못 보는 사용량"
           title="API 회사 화면에서 본 숫자"
@@ -227,7 +227,7 @@ function Blocked({ u, manager }: { u: UsageView; manager: boolean }) {
   const owner = settings.role === "owner";
   const why = !owner ? "계속은 이 프로젝트의 소유자만 누를 수 있습니다." : !all ? "재개 준비 검사를 모두 통과해야 켜집니다." : null;
   return (
-    <Card id="blocked" className="mt-5 gap-0 px-5" aria-labelledby="bl-t">
+    <Card id="blocked" size="compact" aria-labelledby="bl-t">
       <CardHead eyebrow="멈춘 실행" title={`${b.project} · ${b.where} · 실행 ${b.run}`} titleId="bl-t" right={<Status of="run" value="blocked_usage" label="실행 멈춤 · 사용량 문턱" />} />
       <KV
         items={[
@@ -425,11 +425,11 @@ export function UsagePage() {
               </Card>
             }
           >
-            <UsageTrendChart trend={u.trend} />
+            <div className="mt-6"><UsageTrendChart trend={u.trend} /></div>
           </React.Suspense>
           <Anno>제공사의 공식 사용량 조회 방법은 연결마다 다르고 확인되지 않았을 수 있습니다(PR19 확인 대상). 그래서 PES가 호출마다 센 토큰으로 한도 대비 사용률을 추정하고, PES가 못 보는 사용은 사람이 적은 API 회사 화면에서 본 숫자으로만 더합니다. 모르는 값은 0으로 쓰지 않습니다. 주의 색은 문턱 10%p 아래부터이며 표시만 합니다.</Anno>
-          {u.blocked ? <Blocked u={u} manager={manager} /> : null}
-          <Card id="unknown" className="mt-5 gap-0 px-5" aria-labelledby="uk-t">
+          {u.blocked ? <div className="mt-5"><Blocked u={u} manager={manager} /></div> : null}
+          <div className="mt-5"><Card id="unknown" size="compact" aria-labelledby="uk-t">
             <CardHead
               eyebrow={`확인 안 된 호출 ${u.unknown_calls.length}`}
               title="API가 처리했는지 모르는 호출"
@@ -472,7 +472,7 @@ export function UsagePage() {
             ) : (
               <p className="text-meta text-ink-2">정리할 호출이 없습니다.</p>
             )}
-          </Card>
+          </Card></div>
           {sub ? <ExtraAndBaseline c={sub} manager={manager} /> : null}
           <SectionTitle id="connections" title="AI 연결" sub="직접 등록한 API 연결 · 특정 서비스에 묶지 않음" right={<ActionButton variant="default" blockedBy={manager ? null : "AI 연결 추가는 소유자(연결 관리자)만 할 수 있습니다."} onClick={() => setAdding(true)}><PlusIcon aria-hidden="true" />AI 연결 추가</ActionButton>} />
           <div className="grid grid-cols-1 gap-4 desk:grid-cols-2">
@@ -553,7 +553,7 @@ export function UsagePage() {
             <SectionTitle id="states" title="상태 견본" sub="사용량 관련 상태는 근거와 함께 보입니다." />
             <div className="grid grid-cols-1 gap-4 desk:grid-cols-3">
               {(["resetBasis", "extraUsage", "baseline", "costCap", "meter", "connTest"] as const).map((dom) => (
-                <Card key={dom} className="gap-0 px-5">
+                <Card key={dom} size="compact">
                   <Table>
                     <TableCaption>{{ resetBasis: "재개 가능 시각의 근거", extraUsage: "추가 요금 꺼짐 확인", baseline: "API 회사 화면에서 본 숫자", costCap: "비용 상한(쓴 만큼 과금)", meter: "계기 3구간", connTest: "AI 연결 시험" }[dom]}</TableCaption>
                     <TableBody>
@@ -574,7 +574,7 @@ export function UsagePage() {
         </TabsContent>
 
         <TabsContent value="ops">
-          <Card id="ops" className="mt-3 gap-0 px-5" aria-labelledby="ops-t">
+          <div className="mt-3"><Card id="ops" size="compact" aria-labelledby="ops-t">
             <CardHead eyebrow="웹 운영 한도 · 배포 관리자 · 5단계(WEB12)" title="무료 요금제 사용률" titleId="ops-t" right={<Status of="meter" value="ok" label="모두 80% 아래" />} />
             <Table regionLabel="웹 운영 한도" className="min-w-[600px]">
               <TableCaption className="sr-only">웹 운영 한도 사용률</TableCaption>
@@ -609,7 +609,7 @@ export function UsagePage() {
               </TableBody>
             </Table>
             <Anno>80%에서 알리고 90%에서 줄입니다(갱신 간격 늘리기·급하지 않은 알림·백업 미루기·새 실행 막기). “새 실행 막기”는 한도를 지켰다는 증명이 아닙니다. 파일 저장은 무료량을 넘으면 과금되므로 실제 비용이 생기기 전에 사용자에게 묻습니다. 정적 화면(대시보드 앱)은 정적 자산으로 내보내 요청·CPU 한도에 거의 들지 않습니다(0017). 플랫폼 이름과 한도는 WEB0 실측 뒤 확정합니다.</Anno>
-          </Card>
+          </Card></div>
         </TabsContent>
       </Tabs>
 
