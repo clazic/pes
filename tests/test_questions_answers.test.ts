@@ -321,8 +321,8 @@ test("revising a question keeps the old answer, does not carry it over, and asks
     assert.equal(readiness(env, where.round_id).ready, true);
 
     const old_version = { ...question_version(env.db, m1.question_version_id) };
-    const answers_before = JSON.stringify(answer_versions_of(env.db, m1.question_id));
-    const members_before = JSON.stringify(members_of(env.db, set1.set_id));
+    const answers_before = JSON.stringify(answer_versions_of(env.db, m1.question_id), (_k, v) => (typeof v === "bigint" ? `${v}n` : v));
+    const members_before = JSON.stringify(members_of(env.db, set1.set_id), (_k, v) => (typeof v === "bigint" ? `${v}n` : v));
 
     const revised = await revise(env, m1.question_id, {
       text: "합성 질문 1 (고침)",
@@ -338,8 +338,8 @@ test("revising a question keeps the old answer, does not carry it over, and asks
     assert.equal(fresh.required, 1n);
     assert.equal(JSON.parse(fresh.options).length, 4);
     assert.deepEqual({ ...question_version(env.db, m1.question_version_id) }, old_version, "the old version row is untouched");
-    assert.equal(JSON.stringify(answer_versions_of(env.db, m1.question_id)), answers_before, "the old answer is preserved as it was");
-    assert.equal(JSON.stringify(members_of(env.db, set1.set_id)), members_before, "the old set still lists the version the human saw");
+    assert.equal(JSON.stringify(answer_versions_of(env.db, m1.question_id), (_k, v) => (typeof v === "bigint" ? `${v}n` : v)), answers_before, "the old answer is preserved as it was");
+    assert.equal(JSON.stringify(members_of(env.db, set1.set_id), (_k, v) => (typeof v === "bigint" ? `${v}n` : v)), members_before, "the old set still lists the version the human saw");
 
     // the old answer is not inherited
     const r = readiness(env, where.round_id);
