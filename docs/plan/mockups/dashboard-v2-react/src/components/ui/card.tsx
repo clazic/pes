@@ -1,17 +1,43 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-function Card({
-  className,
-  size = "default",
-  ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+type CardSize = "default" | "sm" | "compact" | "flush"
+type CardTone = "default" | "primary" | "ok" | "warn" | "bad"
+type CardVariant = "default" | "metric"
+
+type CardProps = React.ComponentProps<"div"> & {
+  /** compact = 지금 화면의 gap-0 px-5 · flush = 안쪽 여백을 내용이 직접 잡는 카드(요약 카드) */
+  size?: CardSize
+  tone?: CardTone
+  variant?: CardVariant
+}
+
+/** 색 변형 — 화면마다 Card 클래스를 덮어쓰지 않고 뜻으로 고른다. */
+const CARD_TONE: Record<CardTone, string> = {
+  default: "",
+  primary: "border-primary-line bg-primary-soft",
+  ok: "border-ok-line bg-ok-soft",
+  warn: "border-warn-line bg-warn-soft",
+  bad: "border-bad-line bg-bad-soft",
+}
+
+/** 표면 변형 — 요약 카드의 옅은 위쪽 그라데이션. */
+const CARD_VARIANT: Record<CardVariant, string> = {
+  default: "",
+  metric: "bg-linear-to-t from-primary/5 to-card dark:bg-card dark:bg-none",
+}
+
+function Card({ className, size = "default", tone = "default", variant = "default", ...props }: CardProps) {
   return (
     <div
       data-slot="card"
       data-size={size}
+      data-tone={tone}
+      data-variant={variant}
       className={cn(
-        "group/card flex min-w-0 flex-col gap-(--card-spacing) rounded-xl border bg-card py-(--card-spacing) text-sm text-card-foreground shadow-xs [--card-spacing:--spacing(4)] has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        "group/card flex min-w-0 flex-col gap-(--card-spacing) rounded-xl border bg-card py-(--card-spacing) text-sm text-card-foreground shadow-xs [--card-spacing:--spacing(4)] has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=compact]:gap-0 data-[size=compact]:px-5 data-[size=flush]:gap-0 data-[size=flush]:py-0 data-[size=flush]:@container/card *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        CARD_TONE[tone],
+        CARD_VARIANT[variant],
         className
       )}
       {...props}

@@ -31,7 +31,7 @@ export function OverviewPage() {
   return (
     <div className="mt-5 space-y-4">
       {/* 이어서 하기 — 이 화면의 “지금 할 일 1개”(14절) */}
-      <Card className="gap-0 border-primary-line bg-primary-soft px-5 py-4" aria-labelledby="ov-resume">
+      <Card size="compact" tone="primary" aria-labelledby="ov-resume">
         <div className="flex flex-col gap-3 tab:flex-row tab:items-start tab:justify-between tab:gap-6">
           <div className="min-w-0">
             <Eyebrow>{last ? "이어서 하기 · 마지막 위치" : "이어서 하기"}</Eyebrow>
@@ -62,12 +62,12 @@ export function OverviewPage() {
       </Card>
 
       <div className="grid grid-cols-1 items-start gap-4 tab:grid-cols-2">
-        <Card className="gap-0 px-5" aria-labelledby="ov-q">
+        <Card size="compact" aria-labelledby="ov-q">
           <CardHead eyebrow="연구 질문" title={<span className="text-body font-semibold">{ws.brief.question}</span>} titleId="ov-q" />
           <p className="-mt-1 text-meta text-ink-2">{ws.brief.scope}</p>
         </Card>
 
-        <Card className="gap-0 px-5" aria-labelledby="ov-where">
+        <Card size="compact" aria-labelledby="ov-where">
           <CardHead eyebrow="지금 어디까지" title={`${ws.current.label} · ${ws.edition}판`} titleId="ov-where" />
           <ol aria-label="연구 흐름 6단계" className="grid grid-cols-3 gap-1.5 tab:grid-cols-6">
             {ws.stages.map((s) => {
@@ -92,40 +92,42 @@ export function OverviewPage() {
           <p className="mt-2 text-caption text-muted-foreground">지난 단계를 누르면 결과 요약을 다시 봅니다.</p>
         </Card>
 
-        <Card className="gap-0 px-5 tab:col-span-2" aria-labelledby="ov-find">
-          <CardHead
-            eyebrow="핵심 발견"
-            title={ws.brief.findings.length ? `지금까지 ${ws.brief.findings.length}가지` : "아직 발견이 없습니다"}
-            titleId="ov-find"
-            aside={
-              <InfoTip label="핵심 발견 설명">
-                <p>결과 글에서 뽑은 주장과 그 근거 상태입니다. 막힌 것과 이어진 발견은 그 문제가 풀리면 근거 칩이 바뀝니다. 근거를 모르면 “확인 안 됨”으로 둡니다.</p>
-              </InfoTip>
-            }
-          />
-          {ws.brief.findings.length ? (
-            <ol className="divide-y divide-line">
-              {ws.brief.findings.map((f, i) => (
-                <li key={f.id} className="flex flex-col gap-1 py-2.5 first:pt-0 last:pb-0 tab:flex-row tab:items-start tab:justify-between tab:gap-4">
-                  <p className="min-w-0 text-meta leading-relaxed">
-                    <span className="mr-1.5 text-xs font-semibold text-muted-foreground tabular-nums">{i + 1}</span>
-                    {f.text}
-                    <Link to={f.href} className="ml-1.5 text-caption">
-                      {f.where}
-                    </Link>
-                  </p>
-                  <span className="shrink-0">
-                    <StatusFrom s={f.basis} />
-                  </span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="text-meta text-ink-2">{ws.current.stage === "plan" ? "기획 단계라 아직 결과 글에서 뽑은 발견이 없습니다 — 조사 단계부터 생깁니다." : "결과 글이 나오면 여기에 정리됩니다."}</p>
-          )}
-        </Card>
+        <div className="min-w-0 tab:col-span-2">
+          <Card size="compact" aria-labelledby="ov-find">
+            <CardHead
+              eyebrow="핵심 발견"
+              title={ws.brief.findings.length ? `지금까지 ${ws.brief.findings.length}가지` : "아직 발견이 없습니다"}
+              titleId="ov-find"
+              aside={
+                <InfoTip label="핵심 발견 설명">
+                  <p>결과 글에서 뽑은 주장과 그 근거 상태입니다. 막힌 것과 이어진 발견은 그 문제가 풀리면 근거 칩이 바뀝니다. 근거를 모르면 “확인 안 됨”으로 둡니다.</p>
+                </InfoTip>
+              }
+            />
+            {ws.brief.findings.length ? (
+              <ol className="divide-y divide-line">
+                {ws.brief.findings.map((f, i) => (
+                  <li key={f.id} className="flex flex-col gap-1 py-2.5 first:pt-0 last:pb-0 tab:flex-row tab:items-start tab:justify-between tab:gap-4">
+                    <p className="min-w-0 text-meta leading-relaxed">
+                      <span className="mr-1.5 text-xs font-semibold text-muted-foreground tabular-nums">{i + 1}</span>
+                      {f.text}
+                      <Link to={f.href} className="ml-1.5 text-caption">
+                        {f.where}
+                      </Link>
+                    </p>
+                    <span className="shrink-0">
+                      <StatusFrom s={f.basis} />
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-meta text-ink-2">{ws.current.stage === "plan" ? "기획 단계라 아직 결과 글에서 뽑은 발견이 없습니다 — 조사 단계부터 생깁니다." : "결과 글이 나오면 여기에 정리됩니다."}</p>
+            )}
+          </Card>
+        </div>
 
-        <Card className="gap-0 px-5" aria-labelledby="ov-prob">
+        <Card size="compact" aria-labelledby="ov-prob">
           <CardHead eyebrow="남은 문제" title={probs.length ? `막힌 것·풀 것 ${probs.length}건` : "막힌 것이 없습니다"} titleId="ov-prob" />
           {probs.length ? (
             <>
@@ -142,16 +144,18 @@ export function OverviewPage() {
                   </li>
                 ))}
               </ul>
-              <Button asChild size="sm" className="mt-3">
-                <Link to={`/p/${ws.slug}/problems`}>막힌 것·풀 것 보기</Link>
-              </Button>
+              <div className="mt-3 flex flex-col">
+                <Button asChild size="sm">
+                  <Link to={`/p/${ws.slug}/problems`}>막힌 것·풀 것 보기</Link>
+                </Button>
+              </div>
             </>
           ) : (
             <p className="text-meta text-ink-2">문제가 생기면 여기와 막힌 것·풀 것에 올라옵니다.</p>
           )}
         </Card>
 
-        <Card className="gap-0 px-5" aria-labelledby="ov-mile">
+        <Card size="compact" aria-labelledby="ov-mile">
           <CardHead eyebrow="다음 마일스톤" title={ws.brief.milestone.title} titleId="ov-mile" />
           <p className="-mt-1 text-meta text-ink-2">{ws.brief.milestone.note}</p>
           {blockerTotal ? (
@@ -178,9 +182,11 @@ export function OverviewPage() {
               <Status of="check" value="pass" label="남은 것 없음" />
             </p>
           )}
-          <Button asChild size="sm" className="mt-3">
-            <Link to={`${roundPath}?t=approve`}>승인 단계 보기</Link>
-          </Button>
+          <div className="mt-3 flex flex-col">
+            <Button asChild size="sm">
+              <Link to={`${roundPath}?t=approve`}>승인 단계 보기</Link>
+            </Button>
+          </div>
         </Card>
       </div>
       <Anno>
