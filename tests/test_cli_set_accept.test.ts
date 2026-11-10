@@ -67,7 +67,11 @@ function set_ok(e: SetEnv, c: Case, via: "file" | "stdin" = "file"): void {
   const after = e.state();
   const path = field_path(c.target, c.field);
   assert.deepEqual(norm(at_path(after, path)), norm(c.expect), `${what}: 값이 들어갔다`);
-  assert.deepEqual(without(after, path), without(before, path), `${what}: 다른 필드는 그대로다`);
+  // set plan settings 는 옛 스킬처럼 최상위 settings 도 같은 값으로 바꾼다(r1-1 필수 3, leader 결정) — 그 칸도 값으로 확인하고 비교에서 뺀다.
+  const plan_settings = c.target === "plan" && c.field === "settings";
+  if (plan_settings) assert.deepEqual(norm(after.settings), norm(c.expect), `${what}: 최상위 settings 도 같은 값`);
+  const strip = (o: unknown) => (plan_settings ? without(without(o, path), ["settings"]) : without(o, path));
+  assert.deepEqual(strip(after), strip(before), `${what}: 다른 필드는 그대로다`);
   assert.deepEqual(e.listing(), listing, `${what}: 프로젝트 폴더에 새 파일(project.json.tmp 포함)이 없다`);
   assert.ok(!existsSync(join(e.folder, "project.json.tmp")), `${what}: tmp 파일이 남지 않는다`);
 }
