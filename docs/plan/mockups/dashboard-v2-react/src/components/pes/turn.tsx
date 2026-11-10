@@ -60,19 +60,22 @@ function subscribeNow(cb: () => void) {
 /**
  * 그릴 때의 지금 시각(밀리초 보존) — 바깥(시계)에서 읽는 값이라 useSyncExternalStore로 읽는다.
  * 스냅숏 값은 저장해 두고 15초 틱마다 새로 잡는다(매 getSnapshot 호출에서 Date.now를 부르지 않는다).
- * 새 자료로 다시 그릴 때는 그때의 시각을 쓰도록, 지난 스냅숏에서 100ms 넘게 흘렀을 때만 미리 새로 잡는다.
+ * 새 자료로 다시 그린 뒤에는 effect에서 저장값이 오래됐는지 보고, 오래됐으면 새로 잡아 구독자에게 알린다
+ * (렌더 중에는 바깥 값을 바꾸지 않는다).
  */
 let clock = Date.now();
-function refreshClock() {
-  const t = Date.now();
-  if (Math.abs(t - clock) >= 100) clock = t;
-}
 function clockSnapshot() {
   return clock;
 }
 export function useNow() {
-  refreshClock();
-  return React.useSyncExternalStore(subscribeNow, clockSnapshot, clockSnapshot);
+  const now = React.useSyncExternalStore(subscribeNow, clockSnapshot, clockSnapshot);
+  React.useEffect(() => {
+    const t = Date.now();
+    if (Math.abs(t - clock) < 100) return;
+    clock = t;
+    tickListeners.forEach((l) => l());
+  });
+  return now;
 }
 
 function minutesBetween(fromIso: string, now: number) {
