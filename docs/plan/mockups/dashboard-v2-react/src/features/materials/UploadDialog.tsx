@@ -125,14 +125,17 @@ export function UploadDialog({ open, onOpenChange, slug, existing, startMode, on
     folderInput.current?.setAttribute("webkitdirectory", "");
     folderInput.current?.setAttribute("directory", "");
   });
-  React.useEffect(() => {
+  // 열 때마다 처음 단계로 — effect가 아니라 그리기 중 이전 값과 비교해 맞춘다
+  const [wasOpen, setWasOpen] = React.useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
     if (open) {
       setStep("pick");
       setItems([]);
       setProgress({});
       setIsExample(false);
     }
-  }, [open]);
+  }
 
   const accept = (list: { path: string; size: number }[], rootName: string) => {
     const seen = new Set<string>();

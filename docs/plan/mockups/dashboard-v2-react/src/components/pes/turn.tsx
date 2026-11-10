@@ -39,14 +39,13 @@ export function turnLabel(t: TurnView): string {
 
 /* ───────── 경과 시간: 15초마다 다시 그림(글자만 바뀜 — 움직임 아님) ───────── */
 
-let tick = 0;
 let ticker: number | undefined;
 const tickListeners = new Set<() => void>();
 function subscribeNow(cb: () => void) {
   tickListeners.add(cb);
   if (ticker === undefined) {
     ticker = window.setInterval(() => {
-      tick += 1;
+      clock = Date.now();
       tickListeners.forEach((l) => l());
     }, 15000);
   }
@@ -58,10 +57,23 @@ function subscribeNow(cb: () => void) {
     }
   };
 }
-/** 15초마다 다시 그리게 하고, 그릴 때의 지금 시각을 돌려준다(새 자료가 와서 그릴 때도 늦은 시각을 쓰지 않음) */
-export function useNow() {
-  React.useSyncExternalStore(subscribeNow, () => tick, () => tick);
-  return Date.now();
+/**
+ * 그릴 때의 지금 시각(밀리초 보존) — 바깥(시계)에서 읽는 값이라 useSyncExternalStore로 읽는다.
+ * 스냅숏 값은 저장해 두고 15초 틱마다 새로 잡는다(매 getSnapshot 호출에서 Date.now를 부르지 않는다).
+ * 새 입력(자료가 바뀜)이 오면 effect에서 그때의 정확한 시각을 한 번 저장하고 구독자에게 알린다.
+ * 시계 알림 때문에 다시 그려질 때는 입력이 그대로라 effect가 다시 돌지 않는다(멱등, 렌더 중 외부 값 변경 없음).
+ */
+let clock = Date.now();
+function clockSnapshot() {
+  return clock;
+}
+export function useNow(input?: string) {
+  const now = React.useSyncExternalStore(subscribeNow, clockSnapshot, clockSnapshot);
+  React.useEffect(() => {
+    clock = Date.now();
+    tickListeners.forEach((l) => l());
+  }, [input]);
+  return now;
 }
 
 function minutesBetween(fromIso: string, now: number) {
@@ -216,7 +228,8 @@ export function TurnIndicator({
 }) {
   const k = turnKey(turn);
   const def = turnDef(k);
-  const now = useNow();
+  // 경과·소식에 쓰는 입력이 바뀔 때마다 그 정확한 시각으로 다시 센다(같은 입력이면 15초 틱만)
+  const now = useNow(`${turn.side}|${turn.since ?? ""}|${turn.last_signal ?? ""}|${turn.fresh ? "1" : "0"}`);
   const meta = turn.side === "ai" ? [turn.since ? elapsedText(turn.since, now) : null, signalText(turn, now)].filter(Boolean).join(" · ") : "";
   const right = align === "end" && "tab:text-right";
   return (

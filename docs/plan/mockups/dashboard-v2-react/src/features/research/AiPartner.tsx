@@ -19,7 +19,7 @@ const WHOLE = "이 라운드 전체";
 
 /** AI 쪽 경과 · 마지막 소식(글자만 — 15초마다 바뀜, 움직임 아님). 소식이 오래되면 “마지막 소식 n분 전” */
 function AiSignal({ since, last, fresh }: { since?: string; last?: string; fresh: boolean }) {
-  const now = useNow();
+  const now = useNow(`${since ?? ""}|${last ?? ""}|${fresh ? "1" : "0"}`);
   const parts = [since ? elapsedText(since, now) : null, last ? (fresh ? `소식 ${agoText(last, now)}` : `마지막 소식 ${agoText(last, now)}`) : "아직 소식 없음"].filter(Boolean);
   return <p className="text-xs text-muted-foreground tabular-nums">{parts.join(" · ")}</p>;
 }
@@ -45,10 +45,15 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
 
   // 결과 글에서 “AI에게 부탁”을 누르면 그 문단을 부탁할 곳으로
   // (아직 받지 않은 부탁만 — 접힌 칸이 이 부탁으로 펼쳐져 새로 그려져도 받고, 그 뒤 다시 그려질 때는 초점을 빼앗지 않음)
+  // 옛 effect의 [sheet.target, sheet.nonce]와 같은 키를 본다(대상만 바뀌어도 반영)
+  const [seenSheet, setSeenSheet] = React.useState({ target: sheet.target, nonce: sheet.nonce });
+  if (seenSheet.target !== sheet.target || seenSheet.nonce !== sheet.nonce) {
+    setSeenSheet({ target: sheet.target, nonce: sheet.nonce });
+    if (sheet.target && aiSheet.pending(sheet.nonce)) setTarget(sheet.target);
+  }
   React.useEffect(() => {
     const nonce = sheet.nonce;
     if (!aiSheet.pending(nonce)) return;
-    if (sheet.target) setTarget(sheet.target);
     const t = window.setTimeout(() => {
       aiSheet.done(nonce);
       textRef.current?.focus();

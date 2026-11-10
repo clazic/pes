@@ -101,9 +101,12 @@ export function ProblemsPage() {
   const [filter, setFilter] = React.useState<Filter>("all");
   const fromHash = hash.startsWith("#pb-") ? decodeURIComponent(hash.slice(4)) : null;
   const [openId, setOpenId] = React.useState<string | null>(fromHash);
-  React.useEffect(() => {
+  // 해시가 다른 카드를 가리키면 그 카드를 펼친다 — effect가 아니라 그리기 중 이전 값과 비교해 맞춘다(같은 해시로 다시 그려도 사람이 접은 채 유지)
+  const [prevFromHash, setPrevFromHash] = React.useState(fromHash);
+  if (prevFromHash !== fromHash) {
+    setPrevFromHash(fromHash);
     if (fromHash) setOpenId(fromHash);
-  }, [fromHash]);
+  }
 
   const shown = ws.problems.filter((p) => filter === "all" || PROBLEM_GROUP[p.kind] === filter);
   const mine = shown.filter((p) => p.state === "open");

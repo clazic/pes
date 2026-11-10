@@ -31,8 +31,13 @@ const bus = new EventTarget();
 
 export function useDraft(key: string) {
   const [draft, setDraftState] = React.useState<AnswerDraft | null>(() => readDraft(key));
-  React.useEffect(() => {
+  // 키가 바뀌면(다른 질문) 그 키의 초안으로 — effect가 아니라 그리기 중 이전 키와 비교해 맞춘다
+  const [loadedKey, setLoadedKey] = React.useState(key);
+  if (loadedKey !== key) {
+    setLoadedKey(key);
     setDraftState(readDraft(key));
+  }
+  React.useEffect(() => {
     const on = (e: Event) => {
       if ((e as CustomEvent<string>).detail === key) setDraftState(readDraft(key));
     };

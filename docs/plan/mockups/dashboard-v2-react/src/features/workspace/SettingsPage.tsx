@@ -48,11 +48,14 @@ export function SettingsPage() {
   const conns = usage.data?.connections ?? [];
   const [connId, setConnId] = React.useState("conn-sub");
   const conn = conns.find((c) => c.id === connId);
-  const [model, setModel] = React.useState("deepseek-v4.1-flash");
-  React.useEffect(() => {
-    const def = conn?.models.find((m) => m.is_default && m.available);
-    if (def) setModel(def.id);
-  }, [connId, conn]);
+  const defaultModel = conn?.models.find((m) => m.is_default && m.available)?.id;
+  const [model, setModel] = React.useState(() => defaultModel ?? "deepseek-v4.1-flash");
+  // 연결이 바뀌면 그 연결의 기본 모델로 — effect가 아니라 그리기 중 이전 연결과 비교해 맞춘다
+  const [modelConn, setModelConn] = React.useState(conn);
+  if (modelConn !== conn) {
+    setModelConn(conn);
+    if (defaultModel) setModel(defaultModel);
+  }
   const modelDef = conn?.models.find((m) => m.id === model);
   const modelWhy = !conn ? "연결을 고르세요." : conn.billing === "metered" && !conn.metered?.cap ? "이 연결에는 비용 상한이 없어 시작할 수 없습니다." : modelDef?.price?.source === "unknown" ? "이 모델은 단가를 몰라 비용을 셀 수 없습니다 — 단가를 적어야 고를 수 있습니다." : !modelDef?.available ? "지금 목록에 없는 모델입니다." : null;
 
