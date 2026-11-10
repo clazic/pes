@@ -14,6 +14,7 @@ import { read_credential_actor } from "../actors.ts";
 import {
   insert_receipt,
   reject_unknown_fields,
+  require_base_control_rev,
   require_human_owner_actor,
   require_non_empty_string,
   require_record,
@@ -232,6 +233,9 @@ function claim_runtime_scope(runtime: CommandRuntime): {
 
 function run_claim(runtime: CommandRuntime): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
+  // The service has already replayed a matching receipt; this is the in-tx CAS
+  // check for a new attempt. A stale base never reaches a run or lease write.
+  require_base_control_rev(runtime, runtime.ctx.base_control_rev);
   const requested_run_id = payload.run_id;
   let existing: RunRow | null = null;
   let run_id: string;

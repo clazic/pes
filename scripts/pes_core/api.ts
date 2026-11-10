@@ -7,7 +7,7 @@
 // resolve_actor); long-poll sleeps happen after the command transaction has
 // committed, so a held response never keeps a database transaction open.
 
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 import { resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
 import type { Clock } from "./clock.ts";
@@ -126,13 +126,6 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_WAIT_MS = 25_000;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** SQLite INTEGER is signed 64-bit; a larger decimal can never be a real rev. */
-const MAX_SQLITE_INTEGER = 9223372036854775807n;
-
-type RevDecimal =
-  | { kind: "safe"; text: string; value: number }
-  | { kind: "too_precise"; text: string }
-  | { kind: "out_of_sqlite"; text: string };
 
 const ERROR_STATUS: Readonly<Record<string, number>> = Object.freeze({
   unauthenticated: 401,
@@ -155,6 +148,15 @@ function invalid(message: string): never {
 
 function unauthenticated(): never {
   throw new ApiError("unauthenticated", "authentication is required");
+}
+
+/** Constant-time comparison; a length difference is an immediate rejection. */
+function secret_matches(presented: string | undefined, expected: string): boolean {
+  if (typeof presented !== "string") return false;
+  const left = Buffer.from(presented, "utf8");
+  const right = Buffer.from(expected, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
 }
 
 function is_record(value: unknown): value is Record<string, unknown> {
@@ -217,36 +219,13 @@ function parse_fence(value: unknown): number {
 }
 
 /**
- * One decimal revision classifier for both claims and results.
- *
- * - Values at or below Number.MAX_SAFE_INTEGER are exact.
- * - Values above that but within SQLite's signed 64-bit range are accepted only
- *   when a double represents them exactly; otherwise comparing them in JS
- *   would round, so the client must not send them (400 invalid_payload).
- * - Values beyond SQLite's range can never equal a stored rev; claims report
- *   them as a stale revision (409), while results reject them as invalid input.
+ * One decimal revision rule for claims and results: a normalized decimal
+ * string is passed through unchanged and compared as BigInt inside the
+ * command, so values beyond 2^53 and beyond int64 never round. Any other form
+ * is invalid_payload here.
  */
-function classify_rev_decimal(value: unknown): RevDecimal {
-  const text = parse_decimal(value, "expected_control_rev");
-  const parsed = BigInt(text);
-  if (parsed > MAX_SQLITE_INTEGER) return { kind: "out_of_sqlite", text };
-  if (parsed <= BigInt(Number.MAX_SAFE_INTEGER)) {
-    return { kind: "safe", text, value: Number(parsed) };
-  }
-  const as_number = Number(parsed);
-  if (BigInt(as_number) === parsed) {
-    return { kind: "safe", text, value: as_number };
-  }
-  return { kind: "too_precise", text };
-}
-
-/** results.submit takes a Number base rev, so anything beyond the safe range is invalid. */
-function parse_results_rev(value: unknown): number {
-  const parsed = classify_rev_decimal(value);
-  if (parsed.kind !== "safe" || parsed.value > Number.MAX_SAFE_INTEGER) {
-    invalid("expected_control_rev must be a non-negative safe integer decimal string");
-  }
-  return parsed.value;
+function parse_rev_decimal(value: unknown): string {
+  return parse_decimal(value, "expected_control_rev");
 }
 
 function require_mode(body: Record<string, unknown>): "A" | "B" {
@@ -556,7 +535,7 @@ export class ApiApp {
   #auth_project(project: ProjectRow, request: RouteRequest, scope?: string): AuthInfo {
     const session = request.headers["x-pes-session"];
     if (session !== undefined) {
-      if (session !== this.#secret) unauthenticated();
+      if (!secret_matches(session, this.#secret)) unauthenticated();
       return {
         actor_id: this.#owner_actor(project.id),
         kind: "human",
@@ -605,7 +584,7 @@ export class ApiApp {
   }
 
   #require_session(request: RouteRequest): void {
-    if (request.headers["x-pes-session"] !== this.#secret) unauthenticated();
+    if (!secret_matches(request.headers["x-pes-session"], this.#secret)) unauthenticated();
   }
 
   #require_go(project_id: string): void {
@@ -628,7 +607,12 @@ export class ApiApp {
     if (this.#run_mode(project_id, run_id) === "A") this.#require_go(project_id);
   }
 
-  #ctx(project: ProjectRow, auth: AuthInfo, key: string, base?: number): MutationContext {
+  #ctx(
+    project: ProjectRow,
+    auth: AuthInfo,
+    key: string,
+    base?: number | string,
+  ): MutationContext {
     const ctx: MutationContext = {
       project_id: project.id,
       actor_id: auth.actor_id,
@@ -637,20 +621,6 @@ export class ApiApp {
     };
     if (base !== undefined) ctx.base_control_rev = base;
     return ctx;
-  }
-
-  #check_claim_rev(body: Record<string, unknown>, project: ProjectRow): void {
-    if (!Object.hasOwn(body, "expected_control_rev")) return;
-    const parsed = classify_rev_decimal(body.expected_control_rev);
-    if (parsed.kind === "too_precise") {
-      invalid("expected_control_rev must be an exactly representable decimal string");
-    }
-    if (parsed.kind === "out_of_sqlite" || BigInt(parsed.text) !== project.control_rev) {
-      throw new ApiError("rev_conflict", "the control revision is stale", {
-        expected: parsed.text,
-        current: project.control_rev.toString(),
-      });
-    }
   }
 
   #normalize_run_result(result: unknown): unknown {
@@ -845,6 +815,7 @@ export class ApiApp {
     if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
       invalid("mode A requires the opencode-go provider and model prefix");
     }
+    if (mode === "A") this.#require_go(project.id);
     const out = await create_run(this.#service, this.#ctx(project, auth, key), {
       actor_id,
       mode,
@@ -868,7 +839,9 @@ export class ApiApp {
         ? ["run_id", "expected_control_rev"]
         : ["mode", "runtime", "provider", "model", "expected_control_rev"],
     );
-    this.#check_claim_rev(body, project);
+    const base = Object.hasOwn(body, "expected_control_rev")
+      ? parse_rev_decimal(body.expected_control_rev)
+      : undefined;
 
     let payload: Record<string, unknown>;
     if (has_run) {
@@ -886,7 +859,11 @@ export class ApiApp {
       if (mode === "A") this.#require_go(project.id);
       payload = { mode, runtime, provider, model };
     }
-    const out = await run_claim(this.#service, this.#ctx(project, auth, key), payload);
+    const out = await run_claim(
+      this.#service,
+      this.#ctx(project, auth, key, base),
+      payload,
+    );
     return { status: 200, data: this.#normalize_run_result(out.result), replayed: out.replayed };
   }
 
@@ -919,7 +896,7 @@ export class ApiApp {
     if (reason !== undefined) payload.reason = reason;
     const out = await run_wait(this.#service, this.#ctx(project, auth, key), payload);
     const data = this.#normalize_run_result(out.result);
-    if (wait_ms !== undefined && wait_ms > 0) await this.#sleep(wait_ms);
+    if (!out.replayed && wait_ms !== undefined && wait_ms > 0) await this.#sleep(wait_ms);
     return { status: 200, data, replayed: out.replayed };
   }
 
@@ -932,11 +909,13 @@ export class ApiApp {
     const run_id = request.params[1] as string;
     const lease_id = require_text(body, "lease_id");
     const fence = parse_fence(body.fence);
-    let base: number | undefined;
-    if (Object.hasOwn(body, "expected_control_rev")) {
-      base = parse_results_rev(body.expected_control_rev);
+    // Payload shape (including the non-empty list) wins over a stale rev.
+    if (!Array.isArray(body.results) || body.results.length < 1 || body.results.length > 20) {
+      invalid("results must be an array of 1 to 20 items");
     }
-    if (!Array.isArray(body.results)) invalid("results must be an array");
+    const base = Object.hasOwn(body, "expected_control_rev")
+      ? parse_rev_decimal(body.expected_control_rev)
+      : undefined;
     this.#require_go_for_run(project.id, run_id);
 
     const out = await submit_results(this.#service, this.#ctx(project, auth, key, base), {
@@ -984,7 +963,6 @@ export class ApiApp {
   async #upload_put(request: RouteRequest): Promise<HandlerResult> {
     const project = this.#project(request.params[0] as string);
     const auth = this.#auth_project(project, request, "file:write");
-    this.#require_key(request);
     const blob_id = request.params[1] as string;
     const bytes = this.#raw_bytes(request);
     await store_blob(

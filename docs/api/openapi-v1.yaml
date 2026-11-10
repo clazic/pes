@@ -75,6 +75,115 @@ components:
             target: { type: [string, "null"] }
             details: { type: [object, "null"] }
             next_action: { type: [string, "null"] }
+    ProjectCreate:
+      type: object
+      required: [slug, topic, owner_display_name]
+      additionalProperties: false
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        topic: { type: string, minLength: 1 }
+        owner_display_name: { type: string, minLength: 1 }
+    RunCreate:
+      type: object
+      required: [actor_id, mode, runtime, provider, model]
+      additionalProperties: false
+      properties:
+        actor_id: { type: string, minLength: 1 }
+        mode: { type: string, enum: [A, B] }
+        runtime: { type: string, minLength: 1 }
+        provider: { type: string, minLength: 1 }
+        model: { type: string, minLength: 1 }
+    ClaimFresh:
+      type: object
+      required: [mode, runtime, provider, model]
+      additionalProperties: false
+      properties:
+        mode: { type: string, enum: [A, B] }
+        runtime: { type: string, minLength: 1 }
+        provider: { type: string, minLength: 1 }
+        model: { type: string, minLength: 1 }
+        expected_control_rev: { type: string }
+    ClaimResume:
+      type: object
+      required: [run_id]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, minLength: 1 }
+        expected_control_rev: { type: string }
+    ClaimBody:
+      oneOf:
+        - $ref: "#/components/schemas/ClaimFresh"
+        - $ref: "#/components/schemas/ClaimResume"
+    WaitBody:
+      type: object
+      required: [lease_id, fence]
+      additionalProperties: false
+      properties:
+        lease_id: { type: string, minLength: 1 }
+        fence: { type: string }
+        reason: { type: string }
+        wait_ms:
+          type: integer
+          minimum: 0
+          maximum: 25000
+          description: "Response delay only; the real input long-poll is PR14"
+    ResultItem:
+      type: object
+      required: [op, object_id]
+      additionalProperties: false
+      properties:
+        op: { type: string, const: "append_version" }
+        object_id: { type: string, minLength: 1 }
+        based_on_version_id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        question: { type: [string, "null"] }
+        body_md: { type: [string, "null"] }
+        status: { type: string }
+        confidence: { type: [string, "null"] }
+        stats: { type: array }
+        conflicts: { type: array }
+        verify: {}
+        metadata: { type: object }
+        url: { type: string }
+        locator: { type: object }
+        retrieved_at: { type: integer, minimum: 0 }
+        method: { type: string }
+        verification_state: { type: string }
+        quote: { type: [string, "null"] }
+        verified_by_actor_id: { type: [string, "null"] }
+    ResultsBody:
+      type: object
+      required: [lease_id, fence, results]
+      additionalProperties: false
+      properties:
+        lease_id: { type: string, minLength: 1 }
+        fence: { type: string }
+        expected_control_rev: { type: string }
+        results:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/ResultItem" }
+    CompleteBody:
+      type: object
+      required: [lease_id, fence]
+      additionalProperties: false
+      properties:
+        lease_id: { type: string, minLength: 1 }
+        fence: { type: string }
+        status: { type: string, enum: [succeeded, failed] }
+    UploadReserve:
+      type: object
+      required: [sha256, size, media_type]
+      additionalProperties: false
+      properties:
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        size: { type: integer, minimum: 0 }
+        media_type: { type: string, minLength: 1 }
+        original_name: { type: string }
+    UploadComplete:
+      type: object
+      additionalProperties: false
 paths:
   /api/v1/capabilities:
     get:
@@ -96,14 +205,7 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [slug, topic, owner_display_name]
-              additionalProperties: false
-              properties:
-                slug: { type: string }
-                topic: { type: string }
-                owner_display_name: { type: string }
+            schema: { $ref: "#/components/schemas/ProjectCreate" }
       responses:
         "201":
           description: Created
@@ -140,6 +242,11 @@ paths:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunCreate" }
       responses:
         "201":
           description: Queued run
@@ -159,6 +266,11 @@ paths:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClaimBody" }
       responses:
         "200":
           description: Lease
@@ -180,6 +292,11 @@ paths:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitBody" }
       responses:
         "200":
           description: Waiting
@@ -201,6 +318,11 @@ paths:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResultsBody" }
       responses:
         "200":
           description: Submitted versions
@@ -222,6 +344,11 @@ paths:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteBody" }
       responses:
         "200":
           description: Completed run
@@ -242,6 +369,11 @@ paths:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UploadReserve" }
       responses:
         "201":
           description: New staging reservation
@@ -266,6 +398,11 @@ paths:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/BlobId"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
       responses:
         "200":
           description: Bytes stored; the blob is still staging until complete
@@ -285,6 +422,11 @@ paths:
         - $ref: "#/components/parameters/BlobId"
         - $ref: "#/components/parameters/IdempotencyKey"
       security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UploadComplete" }
       responses:
         "200":
           description: Ready or quarantined blob

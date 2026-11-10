@@ -44,6 +44,15 @@ class LocalHTTPServer(ThreadingHTTPServer):
     host 주소를 그대로 쓴다.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The API database is migrated once, lazily, after the first API
+        # request has passed the origin check. A rejected cross-origin request
+        # must not create ~/.pes or the database file.
+        self.api_db_ready = False
+        self.api_db_lock = threading.Lock()
+        self.api_db_error = None
+
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
         host, port = self.server_address[:2]
@@ -128,6 +137,40 @@ def main():
                 "request_id": request_id,
             })
 
+        def _origin_allowed(self):
+            origin = self.headers.get("Origin") or ""
+            return origin == "" or origin in allowed or origin in trusted()
+
+        def _ensure_api_db(self):
+            """Migrate the API database once, on the first accepted API request."""
+            srv = self.server
+            if srv.api_db_ready:
+                return None
+            with srv.api_db_lock:
+                if srv.api_db_ready:
+                    return None
+                if srv.api_db_error is not None:
+                    return srv.api_db_error
+                node = shutil.which("node")
+                if node is None:
+                    srv.api_db_error = ("internal_error", "internal error", 500)
+                    return srv.api_db_error
+                try:
+                    proc = subprocess.run(
+                        [node, str(NODE_BRIDGE), "--migrate"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=60,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    srv.api_db_error = ("schema_not_ready", "the PES database could not be migrated", 503)
+                    return srv.api_db_error
+                if proc.returncode != 0:
+                    srv.api_db_error = ("schema_not_ready", "the PES database could not be migrated", 503)
+                    return srv.api_db_error
+                srv.api_db_ready = True
+                return None
+
         def _api(self, method, path):
             """Pass /api/v1/* to the Node ApiApp and relay its raw response.
 
@@ -141,6 +184,9 @@ def main():
             if length < 0 or length > MAX_API_BODY:
                 return self._api_error("payload_too_large", "the request body is too large", 413)
             body = self.rfile.read(length) if length > 0 else b""
+            migration_error = self._ensure_api_db()
+            if migration_error is not None:
+                return self._api_error(*migration_error)
             node = shutil.which("node")
             if node is None:
                 return self._api_error("internal_error", "internal error", 500)
@@ -210,6 +256,8 @@ def main():
         def do_POST(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
+                if not self._origin_allowed():
+                    return self._api_error("forbidden", "origin is not allowed", 403)
                 return self._api("POST", path)
             d, rest = project_of(path)
             if d is None and path == "/feedback":  # 0.8 이전에 만든 화면: 보낸 페이지 주소로 프로젝트를 찾는다
@@ -279,6 +327,8 @@ def main():
         def do_PUT(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
+                if not self._origin_allowed():
+                    return self._api_error("forbidden", "origin is not allowed", 403)
                 return self._api("PUT", path)
             return self._json(405, {"ok": False})
 

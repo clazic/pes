@@ -17,6 +17,7 @@ import {
   is_record,
   optional_lease_guard,
   reject_unknown_fields,
+  require_base_control_rev,
   require_current_lease,
   require_non_empty_string,
   require_record,
@@ -1021,23 +1022,7 @@ function run_submit_results(runtime: CommandRuntime): CommandResult {
   }
   const scope = content_scope(runtime);
 
-  const base = runtime.ctx.base_control_rev;
-  const project = runtime.project;
-  if (project === null) {
-    throw new Error("result.submit must resolve a project first");
-  }
-  if (base !== undefined) {
-    if (!Number.isSafeInteger(base) || base < 0) {
-      throw new ApiError("invalid_payload", "base_control_rev must be a non-negative safe integer");
-    }
-    if (BigInt(base) !== project.control_rev) {
-      throw new ApiError("rev_conflict", "base_control_rev is stale", {
-        expected: base,
-        actual: Number(project.control_rev),
-      });
-    }
-  }
-
+  // An empty list is a payload error and must win over a stale rev.
   const results = payload.results;
   if (!Array.isArray(results) || results.length < 1 || results.length > 20) {
     throw new ApiError("invalid_payload", "results must be an array of 1 to 20 items");
@@ -1054,6 +1039,7 @@ function run_submit_results(runtime: CommandRuntime): CommandResult {
     return fields;
   });
 
+  const base = require_base_control_rev(runtime, runtime.ctx.base_control_rev);
   require_current_lease(runtime, guard);
   const reserved = new Map<string, number>();
   const previous = new Map<string, AppendPlan>();

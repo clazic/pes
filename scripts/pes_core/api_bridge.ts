@@ -1,16 +1,17 @@
 // Thin Node side of serve.py's /api/v1 boundary (stage 2 PR13).
 //
-// serve.py reads one HTTP request and runs this file once, piping a JSON
-// request in on stdin and relaying the JSON response from stdout. The API
-// contract, credentials, and transactions stay in ApiApp; this file only
-// opens the local database and serializes the response for the Python server.
+// `--migrate` is the one-shot startup entry point serve.py calls before its
+// first API request. A normal invocation reads one HTTP request as JSON on
+// stdin and relays the ApiApp response as JSON on stdout; it never migrates.
+// An unmigrated database is answered with a clear schema_not_ready envelope
+// instead of crashing or silently changing the user's schema.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ApiApp } from "./api.ts";
 import { SystemClock } from "./clock.ts";
-import { connect, migrate } from "./db.ts";
+import { connect, load_migrations, migrate, type Db } from "./db.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 
 interface BridgeInput {
@@ -25,6 +26,8 @@ interface BridgeOutput {
   headers: Record<string, string>;
   body_b64: string;
 }
+
+const FORMAT_VERSION = "1.0";
 
 function local_session_secret(env: Environment): string {
   const from_env = env.PES_LOCAL_SESSION_SECRET;
@@ -43,12 +46,85 @@ function local_session_secret(env: Environment): string {
   return globalThis.crypto.randomUUID();
 }
 
-async function main(): Promise<void> {
-  const input = JSON.parse(readFileSync(0, "utf8")) as BridgeInput;
-  const env = process.env as Environment;
+function newest_schema_version(): bigint {
+  const migrations = load_migrations();
+  if (migrations.length === 0) throw new Error("no database migrations were found");
+  return BigInt(migrations[migrations.length - 1]!.version);
+}
+
+/** True only when db_meta names exactly the newest known schema. */
+function schema_is_current(db: Db): boolean {
+  try {
+    const row = db.get<{ schema_version: bigint }>(
+      "SELECT schema_version FROM db_meta WHERE id = 1",
+    );
+    return row !== undefined && row.schema_version === newest_schema_version();
+  } catch {
+    return false;
+  }
+}
+
+function error_response(
+  status: number,
+  code: string,
+  message: string,
+  request_id: string,
+): BridgeOutput {
+  const body = {
+    format_version: FORMAT_VERSION,
+    error: {
+      code,
+      message,
+      retryable: false,
+      target: null,
+      details: null,
+      next_action: null,
+    },
+    request_id,
+  };
+  return {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-request-id": request_id,
+    },
+    body_b64: Buffer.from(JSON.stringify(body), "utf8").toString("base64"),
+  };
+}
+
+function migrate_only(env: Environment): void {
   const db = connect(db_path(env));
   try {
     migrate(db);
+  } finally {
+    db.close();
+  }
+}
+
+async function main(): Promise<void> {
+  const env = process.env as Environment;
+  if (process.argv.includes("--migrate")) {
+    migrate_only(env);
+    return;
+  }
+
+  const input = JSON.parse(readFileSync(0, "utf8")) as BridgeInput;
+  const request_id = globalThis.crypto.randomUUID();
+  const db = connect(db_path(env));
+  try {
+    if (!schema_is_current(db)) {
+      process.stdout.write(
+        JSON.stringify(
+          error_response(
+            503,
+            "schema_not_ready",
+            "the PES database has not been migrated",
+            request_id,
+          ),
+        ),
+      );
+      return;
+    }
     const app = new ApiApp({
       db,
       clock: new SystemClock(),
