@@ -61,11 +61,13 @@
 //  4  Old approvals (approved_at / status approved) -> approvals(origin 'legacy', assurance
 //     'legacy_unverified', actor_kind 'legacy_unknown', human_user_id NULL); never origin 'new'.
 //  5  carry_over[] -> followups/followup_versions kind 'next_round_task', state 'proposed' (past
-//     acceptance cannot be proven), description = request, target_stage_id = the stage named by `from`,
+//     acceptance cannot be proven), description = request, target_stage_id = the NEXT stage (in the fixed
+//     order plan, research, analyze, write, verify, publish) after the stage that CARRIES the entry,
 //     target_round_id NULL (so it shows in EVERY round of that stage, PR6 open_tasks_for_round),
-//     base_artifact_version_id = the imported version of item `item` of the carrying stage. A
-//     carry_over whose `from` is missing/unknown creates NO followup row; its original text is kept in
-//     the report (or legacy_extra), never dropped.
+//     base_artifact_version_id = the imported version of item `item` of the carrying stage. `from` is NOT
+//     the target (corrected after R1-1 required 4: the skill carries the entry in the approved stage and
+//     processes it "in the next stage's first round"); its original text stays in legacy_extra. A
+//     carry_over held by the last stage (publish) has no next stage: no followup row, kept and reported.
 //  6  Initial policy = ONE project_policy_versions row, policy_rev 1, reason 'legacy default',
 //     allow_opencode_go 1, authored by the owner (human, forced by the schema), tx via 'import',
 //     projects.current_policy_id points at it; editions.settings_json.legacy_extra.policy_default marks it
@@ -518,7 +520,7 @@ test("everything the importer wrote is attributed to legacy_unknown and an impor
 // ---------------------------------------------------------------------------
 // completion 5: carry_over survives as next_round_task and shows up in the next R1
 
-test("carry_over becomes a next_round_task with its request, target, and source item", async () => {
+test("carry_over becomes a next_round_task with its request, the NEXT stage as target, and the carrying item as base (corrected after R1-1 required 4)", async () => {
   await with_legacy(async (env, api) => {
     const result = await run_import(env, api, copy_fixture(env, "full"));
     const rows = env.db.all<{
@@ -540,6 +542,7 @@ test("carry_over becomes a next_round_task with its request, target, and source 
     const item = (scope: string, key: string) =>
       mappings.find((m) => m.legacy_kind === "item" && m.legacy_scope === scope && m.legacy_key === key);
 
+    // plan carries it; the next stage after plan is research
     const from_plan = rows.find((r) => r.description === "다음 단계에서 표를 보강한다");
     assert.ok(from_plan, "plan's carry_over is a follow-up");
     assert.equal(from_plan.kind, "next_round_task");
@@ -548,28 +551,23 @@ test("carry_over becomes a next_round_task with its request, target, and source 
     assert.equal(from_plan.target_round_id, null);
     assert.equal(from_plan.base_artifact_version_id, item("plan", "1")?.new_version_id);
 
+    // research carries it; the next stage after research is analyze
     const from_research = rows.find((r) => r.description === "분석 단계에서 수치를 다시 확인한다");
     assert.ok(from_research, "research's carry_over is a follow-up");
     assert.equal(from_research.kind, "next_round_task");
     assert.equal(from_research.target_stage_id, analyze.id);
     assert.equal(from_research.base_artifact_version_id, item("research", "1")?.new_version_id);
 
-    // a carry_over with no usable target creates no follow-up row (DDL needs a target) but is not lost
-    assert.equal(rows.length, 2);
-    assert.ok(
-      !rows.some((r) => r.description === "대상을 알 수 없는 남은 일"),
-      "no next_round_task without a target stage",
-    );
-    const kept =
-      JSON.stringify(result.report).includes("대상을 알 수 없는 남은 일") ||
-      env.db
-        .all<{ settings_json: string }>("SELECT settings_json FROM stages WHERE project_id = ?", result.project_id)
-        .some((s) => s.settings_json.includes("대상을 알 수 없는 남은 일"));
-    assert.ok(kept, "the original request is kept in the report or legacy_extra");
+    // a carry_over without `from` is no longer special: the target does not depend on `from`
+    const no_from = rows.find((r) => r.description === "대상을 알 수 없는 남은 일");
+    assert.ok(no_from, "the entry without `from` is a follow-up too (target = the stage after plan)");
+    assert.equal(no_from.target_stage_id, research.id);
+    assert.equal(no_from.base_artifact_version_id, item("plan", "2")?.new_version_id);
+    assert.equal(rows.length, 3);
   });
 });
 
-test("the carried-over tasks show up in the target stage's rounds (PR6 open_tasks_for_round)", async () => {
+test("the carried-over tasks show up in the NEXT stage's rounds (PR6 open_tasks_for_round)", async () => {
   await with_legacy(async (env, api) => {
     const result = await run_import(env, api, copy_fixture(env, "full"));
     const pid = result.project_id;
@@ -577,12 +575,14 @@ test("the carried-over tasks show up in the target stage's rounds (PR6 open_task
     const research = stage_of(env.db, pid, "research");
     const analyze = stage_of(env.db, pid, "analyze");
 
+    // research R1 sees both of plan's entries (the one with `from` and the one without)
     const research_rounds = rounds_of(env.db, research.id);
     assert.deepEqual(research_rounds.map((r) => [Number(r.round_no), r.state]), [[1, "open"]]);
     const r1 = open_tasks_for_round(env.db, pid, research_rounds[0]!.id);
-    assert.deepEqual(r1.map((t) => t.description), ["다음 단계에서 표를 보강한다"]);
-    assert.equal(r1[0]!.state, "proposed");
+    assert.deepEqual(r1.map((t) => t.description).sort(), ["다음 단계에서 표를 보강한다", "대상을 알 수 없는 남은 일"].sort());
+    for (const task of r1) assert.equal(task.state, "proposed");
 
+    // analyze shows research's entry in every one of its rounds
     const analyze_rounds = rounds_of(env.db, analyze.id);
     assert.deepEqual(analyze_rounds.map((r) => [Number(r.round_no), r.state]), [[1, "sealed"], [2, "open"]]);
     for (const round of analyze_rounds) {
@@ -590,9 +590,15 @@ test("the carried-over tasks show up in the target stage's rounds (PR6 open_task
       assert.deepEqual(tasks.map((t) => t.description), ["분석 단계에서 수치를 다시 확인한다"]);
     }
 
-    // not shown where it does not belong
+    // not shown in the carrying stage itself
     for (const round of rounds_of(env.db, plan.id)) {
       assert.deepEqual(open_tasks_for_round(env.db, pid, round.id), []);
+    }
+    for (const round of research_rounds) {
+      assert.ok(
+        !open_tasks_for_round(env.db, pid, round.id).some((t) => t.description === "분석 단계에서 수치를 다시 확인한다"),
+        "research's own entry is not a task of research",
+      );
     }
   });
 });
