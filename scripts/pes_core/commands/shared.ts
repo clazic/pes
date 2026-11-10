@@ -89,8 +89,12 @@ export interface CommandResult {
 export interface CommandDefinition {
   /** mutation_commits.action for this command. */
   action: string;
-  /** "project" commands require an existing project and actor; bootstrap creates them. */
-  scope: "project" | "bootstrap";
+  /**
+   * "project" commands require an existing project and actor; bootstrap creates
+   * them; "owner" commands run before a project exists but still require a
+   * human owner actor (legacy import).
+   */
+  scope: "project" | "bootstrap" | "owner";
   rev_bearing: boolean;
   run(runtime: CommandRuntime): CommandResult;
 }

@@ -1,0 +1,4 @@
+{"pes": 1, "topic": "합성 완료 프로젝트", "slug": "synthetic-legacy-complete", "created": "2026-02-01",
+ "current": "publish", "complete": true, "settings": {}, "processed": [],
+ "stages": {"plan": {"status": "approved", "round": 1, "approved_at": "2026-02-01 10:00", "items": []},
+            "publish": {"status": "approved", "round": 1, "approved_at": "2026-02-03 10:00", "items": []}}}

@@ -223,3 +223,20 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **읽기 함수 계약**: `resume_ready`·`validate_submission`은 행위자·멤버십을 스스로 확인하지 않는 읽기 함수다. 이들을 노출하는 API/CLI 층이 프로젝트 멤버십과 행위자를 먼저 확인해야 한다.
 - **stage_start 세트**: `round_id`가 NULL인 stage_start 세트는 어느 라운드에도 속하지 않으므로 `resume_ready`의 라운드 재개 판정 밖이다.
 - **행위자**: `question.publish_set`·`question.revise`는 사람 멤버 또는 활성 lease guard(`run_id`·`lease_id`·`fence`)를 가진 에이전트만, `answer.submit`은 사람만 실행한다. 에이전트는 lease가 있어도 답할 수 없다.
+
+### 8.9 legacy 이전(PR11)
+
+`scripts/pes_core/commands/legacy.ts`가 `legacy.import_project` 하나를 정의하고, `scripts/pes_core/legacy.ts`의 `scan_project`·`import_project`·`map_legacy`·`report_unknown`이 공개 경계다. 이전 폴더는 **읽기만** 하며, 원본 삭제·수정·잠금 파일 생성 경로가 없다.
+
+- **단일 tx·닫힌 명령**: `legacy.import_project`는 프로젝트가 아직 없는 `owner` 범위 명령이다. 실행자는 존재하는 사람 owner actor여야 하고(아니면 `forbidden`, 행 없음), `via='import'`와 한 tx로 프로젝트·owner 멤버·초기 정책(`policy_rev=1`, `reason='legacy default'`)·1판·6단계·라운드·스냅숏·승인·객체·버전·출처·질문·답·제출·스레드·이월·blob·`import_batches`·`legacy_mappings`·사건·영수증을 남긴다. 그 밖의 업무 표 쓰기 SQL은 이 명령 파일에만 있다(blob·`file_policies`·`version_files`는 아래 파일 항목처럼 PR9 정의를 재사용한다).
+- **멱등**: `source_fingerprint`(폴더 manifest의 sha256)가 같으면 기존 배치를 그대로 돌려주고 새 행을 쓰지 않는다. 같은 요청 키의 재실행은 서비스 영수증 재생으로 끝나며, 실패 배치도 `failed`로 재생된다. 원본이 바뀌면 새 지문·새 배치다.
+- **활성화 없음**: 배치는 항상 `staging`(또는 `failed`)이고 프로젝트도 `staging`이다. `complete=true`는 1판을 `completed`로 끝내고 활성 판 포인터를 NULL로 둘 뿐, 프로젝트를 활성화하지 않는다. 검증·활성화는 PR12가 맡는다. `complete=true`인데 publish 단계가 `approved`가 아니면 승인 행을 만들지 않고 판만 `completed`로 두며 `edition.settings_json.legacy_extra.legacy_unverified`로 표시한다(시험 4l 해석, map 59행과 차이).
+- **정직한 표식**: 옛 승인은 `origin='legacy'`·`assurance='legacy_unverified'`·`actor_kind='legacy_unknown'`·`human_user_id=NULL`이고, 모든 이전 객체 버전은 `legacy_unknown` actor가 쓴다. `feedback.who`에서 가짜 사람을 만들지 않으며, 초기 정책 기본값을 과거 동의(결정·가정·답·`new` 승인)로 기록하지 않는다. 미지 값은 `legacy_extra`/`report_blob_id` 보고서에 남긴다.
+- **파일**: blob·`file_policies`·`version_files` 쓰기는 PR9 `commands/files.ts` 명령 정의를 같은 tx 안에서 재사용한다. 예약→저장→완료 순서로 저장소 바이트를 다시 읽어 측정하고, 측정이 예약과 다르면 ready가 아니라 `quarantined`다. `project.json.tmp`는 본 파일과 다르면 격리하고 채택하지 않는다. `.pes-lock`·`.pes-port`·`.pes-server`와 재생성 파일은 manifest의 경로·sha256에만 두고 blob으로 만들지 않으며 fingerprint에서도 제외한다. tx가 늦게 실패해 남은 고아 객체 파일은 `file.gc_orphans`로 정리한다. `map_legacy`·`report_unknown`은 `get`/`all`과 blob 읽기만 하는 읽기 전용이며, 이전 폴더의 절대 경로는 결과·사건·보고서에 남지 않는다.
+- **이월**: `carry_over[]`는 `next_round_task`·`state='proposed'`·`target_round_id=NULL`로 보존한다. `target_stage_id`는 `from`이 아니라 **담은 단계의 다음 단계**(plan→research→analyze→write→verify→publish)이고, `base_artifact_version_id`는 담은 단계 항목의 이전 버전이다. `from` 원문은 `stages.settings_json.legacy_extra.carry_over`에 남긴다. publish처럼 다음 단계가 없으면 행을 만들지 않고 원문을 보고서에 남긴다. 다음 R1 조회는 PR6 `open_tasks_for_round`가 읽는다.
+- **스냅숏·질문·라운드 파일(최종 리뷰 1/2)**:
+  - 정상 스냅숏의 `state.items`는 당시 항목 버전으로 옮기고 그 라운드 `round_contents`가 정확한 버전을 가리킨다. 현재 항목과 canonical record가 같으면 현재 버전을 재사용하고, 다르면 같은 객체의 과거 버전(`version_no` 앞쪽, 현재가 마지막)으로 두며 출처·연결도 그 버전에 붙인다. 깨진 스냅숏은 추측하지 않는다.
+  - 질문 내부 키는 폼·발생 위치로 구분한다. 같은 단계·id·record의 질문만 명시 재사용하고, 내용이 다르면 별도 객체다. 세트 구성원과 `legacy_mappings`는 각 폼의 정확한 버전이다. `review.questions`도 폼으로 색인해 `feedback`의 kind·spec·stage·round로 실제 본 세트를 찾아 답·`__other` 덧붙임을 연결하고 제출에 그 세트를 단다. 찾지 못할 때만 import placeholder를 만든다.
+  - `items[].path`는 안전한 상대 경로만 읽어 `rendered`로 연결하고, 없거나 안전하지 않으면 `missing_file`과 `legacy_extra.missing_paths`로 남긴다(안전하지 않은 경로는 중립화).
+  - `rounds/<stage>-R<n>/qa.json`은 그 라운드 review artifact(`metadata.qa`)다. 결과 JSON은 canonical hash가 항목 record와 같을 때만 `source`로 연결하고, 아니면 원문 blob만 두고 `unmapped_input`으로 보고한다.
+  - 출처·`user_links`의 미지 하위 필드는 `locator.legacy_extra`에 보존하고 JSON 포인터로 `unknown_field`를 남긴다.

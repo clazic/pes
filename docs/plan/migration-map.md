@@ -87,7 +87,7 @@
 | `reports_built` | `artifact_versions.metadata_json.reports_built` | 문자열 그대로 | `legacy_extra.reports_built` | 없으면 NULL | `P:299-302` |
 | `qa[]` | `artifacts.kind='review'` + `metadata_json.qa` | QA 객체 전체를 보존. `round`→`created_in_round_id`, `recorded`→event 시각 | `metadata_json.qa` | 하위 모양이 미확인이므로 열로 쪼개지 않는다 | `P:303-309`, `P:832-889` |
 | `review_log[]` | `artifacts.kind='review'`의 버전 | 항목 하나 = review 버전 하나 | `metadata_json.review_log` | 없으면 만들지 않는다 | `P:310-316` |
-| `carry_over[]` | `followups(kind='next_round_task')` + `followup_versions` | `request`→`description`, `from`→`target_stage_id`, `item`→`legacy_mappings`로 찾은 `base_artifact_version_id` | `metadata_json.legacy_extra.carry_over` | `from` 불명이면 **`next_round_task` 행을 만들지 않고** 원문을 `legacy_extra`·이전 보고서에 보존한다(`DDL` CHECK: next_round_task는 `target_stage_id` 필수). 과거 수락을 증명할 수 없으므로 `state='proposed'` + 표식 | `P:317-342`, `DDL:748-796` |
+| `carry_over[]` | `followups(kind='next_round_task')` + `followup_versions` | `request`→`description`, `target_stage_id`=**담은 단계의 다음 단계**(plan→research→analyze→write→verify→publish), `item`→`legacy_mappings`로 찾은 **담은 단계 항목**의 `base_artifact_version_id` | `stages.settings_json.legacy_extra.carry_over` (원문 `from` 포함) | **`from`은 target이 아니다.** 스키마는 `from` 의미를 정의하지 않았고, 스킬은 승인한 단계에 carry_over를 두고 "다음 단계 R1에서 먼저 처리"한다(`skills/core/SKILL.md:133`, `scripts/pes.py:852`). 다음 단계가 없으면(publish) 행을 만들지 않고 원문을 `legacy_extra`·보고서에 보존한다. 과거 수락을 증명할 수 없으므로 `state='proposed'` + 표식 | `P:317-342`, `DDL:748-796`, `skills/core/SKILL.md:133`, `scripts/pes.py:852` |
 | 그 밖의 단계 키 | 없음 | 열을 만들지 않는다 | `stages.settings_json.legacy_extra.<key>` | 전부 보존, 자동 승격 금지 | `P:344`, `X:307` |
 
 ### 3.1 질문 공통 필드 (`ask/<id>.json`, `review.questions[]`)

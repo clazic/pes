@@ -24,6 +24,7 @@ import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
 import { CONTENT_COMMAND_ENTRIES, RESULT_COMMAND_ENTRIES } from "./commands/content.ts";
 import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
+import { LEGACY_COMMAND_ENTRIES } from "./commands/legacy.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
@@ -493,6 +494,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...RESULT_COMMAND_ENTRIES,
   ...EDITION_COMMAND_ENTRIES,
   ...FILE_COMMAND_ENTRIES,
+  ...LEGACY_COMMAND_ENTRIES,
   ...ACTOR_COMMAND_ENTRIES,
   ...POLICY_COMMAND_ENTRIES,
   ...QUESTION_COMMAND_ENTRIES,
@@ -668,8 +670,23 @@ export class CommandService {
       const scope = this.#resolve_scope(ctx);
       project = scope.project;
       actor_id = scope.actor_id;
-    } else if (ctx.project_id !== null || ctx.actor_id !== null) {
-      throw new ApiError("invalid_payload", "project.bootstrap runs without a project or actor");
+    } else if (definition.scope === "bootstrap") {
+      if (ctx.project_id !== null || ctx.actor_id !== null) {
+        throw new ApiError("invalid_payload", "project.bootstrap runs without a project or actor");
+      }
+    } else {
+      // "owner": no project yet, but the caller must still be a human actor.
+      if (ctx.project_id !== null) {
+        throw new ApiError("invalid_payload", "this command runs without a project");
+      }
+      if (ctx.actor_id === null) {
+        throw new ApiError("forbidden", "a human owner actor is required");
+      }
+      const actor = read_credential_actor(this.#db, ctx.actor_id);
+      if (actor === undefined || actor.kind !== "human") {
+        throw new ApiError("forbidden", "a human owner actor is required");
+      }
+      actor_id = actor.actor_id;
     }
 
     // The checker is external code: give it copies so a mutation cannot move
@@ -761,6 +778,31 @@ export class CommandService {
          ORDER BY created_at, id`,
         ctx.client_request_id,
         definition.action,
+      );
+      if (rows.length === 0) return undefined;
+      const match = rows.find((row) => row.request_hash === hash);
+      if (match === undefined) {
+        throw new ApiError(
+          "idempotency_key_reuse",
+          "client_request_id was already used for a different request",
+        );
+      }
+      return { result: JSON.parse(match.result_json) };
+    }
+
+    if (definition.scope === "owner") {
+      // Owner-scoped commands have no project yet; the same request key from
+      // another actor must never replay this actor's result.
+      if (actor_id === null) {
+        throw new Error("an owner command must resolve its actor first");
+      }
+      const rows = this.#db.all<{ request_hash: string; result_json: string }>(
+        `SELECT request_hash, result_json FROM mutation_commits
+         WHERE client_request_id = ? AND action = ? AND actor_id = ?
+         ORDER BY created_at, id`,
+        ctx.client_request_id,
+        definition.action,
+        actor_id,
       );
       if (rows.length === 0) return undefined;
       const match = rows.find((row) => row.request_hash === hash);

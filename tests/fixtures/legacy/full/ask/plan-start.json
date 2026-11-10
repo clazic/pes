@@ -1,0 +1,6 @@
+{"id": "plan-start", "kind": "stage_start", "stage": "plan", "round": 0, "title": "합성 기획 질문", "inherited": [],
+ "questions": [
+  {"id": "q_scope", "label": "합성 범위", "type": "single", "required": true, "other": true,
+   "options": [{"value": "narrow", "label": "좁게", "recommended": true}, {"value": "wide", "label": "넓게"}]},
+  {"id": "q_note", "label": "합성 메모", "type": "textarea", "required": false, "placeholder": "합성 자리표시"}
+ ]}
