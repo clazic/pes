@@ -45,9 +45,10 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
 
   // 결과 글에서 “AI에게 부탁”을 누르면 그 문단을 부탁할 곳으로
   // (아직 받지 않은 부탁만 — 접힌 칸이 이 부탁으로 펼쳐져 새로 그려져도 받고, 그 뒤 다시 그려질 때는 초점을 빼앗지 않음)
-  const [seenNonce, setSeenNonce] = React.useState(sheet.nonce);
-  if (seenNonce !== sheet.nonce) {
-    setSeenNonce(sheet.nonce);
+  // 옛 effect의 [sheet.target, sheet.nonce]와 같은 키를 본다(대상만 바뀌어도 반영)
+  const [seenSheet, setSeenSheet] = React.useState({ target: sheet.target, nonce: sheet.nonce });
+  if (seenSheet.target !== sheet.target || seenSheet.nonce !== sheet.nonce) {
+    setSeenSheet({ target: sheet.target, nonce: sheet.nonce });
     if (sheet.target && aiSheet.pending(sheet.nonce)) setTarget(sheet.target);
   }
   React.useEffect(() => {
