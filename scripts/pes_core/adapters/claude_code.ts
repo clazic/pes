@@ -22,6 +22,9 @@ export interface ClaudeCodeMcpEntry {
     PES_PROJECT_ID: string;
     PES_API_BASE_URL: string;
     PES_AGENT_TOKEN: "${PES_AGENT_TOKEN}";
+    /** The entry names who is connecting; the server itself guesses nothing (its default is mcp/unknown). */
+    PES_RUNTIME: "claude_code";
+    PES_PROVIDER: "anthropic";
   };
 }
 
@@ -40,6 +43,8 @@ export function claude_code_mcp_entry(input: ClaudeCodeMcpEntryInput): ClaudeCod
       PES_API_BASE_URL: input.api_base_url,
       // by reference: Claude Code expands ${PES_AGENT_TOKEN} from the user's environment when it starts the server
       PES_AGENT_TOKEN: "${PES_AGENT_TOKEN}",
+      PES_RUNTIME: "claude_code",
+      PES_PROVIDER: "anthropic",
     },
   };
 }

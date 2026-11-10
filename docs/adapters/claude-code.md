@@ -34,13 +34,15 @@ Claude Code가 사람이 켠 세션으로 PES의 로컬 API에 일하게 하는 
   "env": {
     "PES_PROJECT_ID": "<프로젝트 id>",
     "PES_API_BASE_URL": "http://127.0.0.1:8760",
-    "PES_AGENT_TOKEN": "${PES_AGENT_TOKEN}"
+    "PES_AGENT_TOKEN": "${PES_AGENT_TOKEN}",
+    "PES_RUNTIME": "claude_code",
+    "PES_PROVIDER": "anthropic"
   }
 }
 ```
 
 - **토큰 받기**: 프로젝트와 기기는 사람의 로컬 세션이 등록한다(`project-registrations`). 받은 기기 토큰을 환경변수 `PES_AGENT_TOKEN`에 두고 값을 채팅에 다시 쓰지 않는다. Claude Code에는 등록·승인·봉인 도구가 없다.
-- **실행 표시**: 새 claim은 `runtime = claude_code`, `provider = anthropic`, 모델은 `PES_MODEL`로 알려 주지 않으면 `unknown`으로 기록된다.
+- **실행 표시**: 연결 항목이 `PES_RUNTIME=claude_code`, `PES_PROVIDER=anthropic`을 명시한다(서버 자체의 기본값은 `mcp`·`unknown`이라 다른 도구가 같은 서버를 쓰다 변수를 빠뜨려도 `claude_code`로 남지 않는다). 모델은 `PES_MODEL`로 알려 주지 않으면 `unknown`으로 기록된다.
 - **한 번에 한 흐름**: `pes_context` → `pes_claim` → `pes_ask` → `pes_wait`(사람이 답함) → `pes_claim`(`run_id`로 이어받기) → `pes_submit` → `pes_complete`. 아래 예시는 시험이 그대로 실행한다.
 
 ```json pes-example

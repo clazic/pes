@@ -505,13 +505,18 @@ export class McpServer {
     const local = invalid("$.arguments.idempotency_key", "idempotency_key(비어 있지 않은 문자열)가 필요합니다.");
     if (spec.name === "pes_claim") {
       const target = typeof args.run_id === "string" ? args.run_id : null;
-      return this.#refuse(local, { method: "POST", rest: "/claims", body: target === null ? this.#fresh_claim_body() : { run_id: target }, key: null }, ["not_found"]);
+      // an empty body (or only the run asked for) is never a valid claim, so the probe cannot create a run or lease
+      return this.#refuse(local, { method: "POST", rest: "/claims", body: target === null ? {} : { run_id: target }, key: null }, ["not_found"]);
     }
     const run = typeof args.run_id === "string" ? args.run_id : (this.#guard?.run_id ?? this.#last_run_id ?? "-");
     return this.#refuse(local, this.#probe_of(spec.name, run, null));
   }
 
-  /** A request of the tool's own route with an empty body: it can only fail, so it can never write. */
+  /**
+   * A request of the tool's own route with an empty body: it can only fail, so it can never write.
+   * Invariant: all ten probes (the nine here and the claim probe in #without_key, whose body is {} or only
+   * {run_id}) fail the route's required-field or Idempotency-Key check in every state of the project.
+   */
   #probe_of(name: ToolName, run: string, key: string | null): { method: string; rest: string; body: unknown; key: string | null } {
     const run_path = encodeURIComponent(run);
     switch (name) {
@@ -661,13 +666,8 @@ export class McpServer {
     if (guard === null) return this.#no_guard("pes_heartbeat", args, key);
     const body: Record<string, unknown> = { lease_id: guard.lease_id, fence: guard.fence };
     if (progress !== undefined) body.progress = progress;
-    const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/heartbeat`, body, key));
-    if (out.ok && progress !== undefined) {
-      // The stored note has the same shape; observed_at defaults to the server clock of this answer.
-      const observed_at = typeof progress.observed_at === "number" ? progress.observed_at : out.data.server_time;
-      return { ok: true, data: { ...out.data, progress: { phase: progress.phase, observed_at } } };
-    }
-    return out;
+    // The API answer carries the stored note (a replay carries the first one), so it is returned as it is.
+    return this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/heartbeat`, body, key));
   }
 
   async #release(args: Record<string, unknown>, key: string): Promise<Outcome> {
@@ -730,8 +730,8 @@ export class McpServer {
         const tx = is_record(found.data) ? found.data.tx_id : undefined;
         // only a result submission is evidence that an input was used; a heartbeat, ask, wait or claim key is not
         const action = is_record(found.data) ? found.data.action : undefined;
-        if (action !== "result.submit") {
-          return local_error("not_found", "그 키는 결과 제출(pes_submit)이 아니어서 입력을 썼다는 증거가 될 수 없습니다.", `$.arguments.receipts`, "reread_context");
+        if (action !== "result.submit" || (is_record(found.data) && found.data.run_id !== guard.run_id)) {
+          return local_error("not_found", "그 키는 이 실행의 결과 제출(pes_submit)이 아니어서 입력을 썼다는 증거가 될 수 없습니다.", `$.arguments.receipts`, "reread_context");
         }
         if (typeof tx !== "string" || tx.length === 0) return local_error("not_found", "그 키로 낸 제출을 찾을 수 없습니다.", `$.arguments.receipts`, "reread_context");
         out.applied_tx_id = tx;
@@ -757,17 +757,35 @@ export interface StdioStreams {
 
 const MAX_LINE_CHARS = 4 * 1024 * 1024;
 
-/** Serve until `input` ends. Messages are handled one at a time, in order. */
+/** Serve until `input` ends (or the peer closes the output). Messages are handled one at a time, in order. */
 export function serve_stdio(server: McpServer, streams: StdioStreams): Promise<void> {
   const { input, output } = streams;
   return new Promise<void>((resolve) => {
     let buffer = "";
     let skipping = false;
+    let closed = false;
+    let finished = false;
     let chain: Promise<void> = Promise.resolve();
     input.setEncoding("utf8");
 
+    const finish = (): void => {
+      if (finished) return;
+      finished = true;
+      void chain.then(() => resolve());
+    };
     const write = (message: Record<string, unknown>): void => {
+      if (closed) return;
       output.write(`${JSON.stringify(message)}\n`);
+    };
+    // The peer closed its end (EPIPE): stop writing and end like an ended input instead of crashing.
+    output.on("error", () => {
+      closed = true;
+      finish();
+    });
+    const too_long = (): void => {
+      chain = chain.then(() => {
+        write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "요청 한 줄이 너무 깁니다." } });
+      });
     };
     const line = (text: string): void => {
       const trimmed = text.replace(/\r$/, "");
@@ -790,6 +808,7 @@ export function serve_stdio(server: McpServer, streams: StdioStreams): Promise<v
     };
 
     input.on("data", (chunk: string | Buffer) => {
+      if (closed) return;
       buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       for (;;) {
         const nl = buffer.indexOf("\n");
@@ -797,7 +816,13 @@ export function serve_stdio(server: McpServer, streams: StdioStreams): Promise<v
         const text = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
         if (skipping) {
+          // the end of a line that was already reported as too long
           skipping = false;
+          continue;
+        }
+        // The limit is per line: a whole oversized line that arrives in one chunk is refused, once, too.
+        if (text.length > MAX_LINE_CHARS) {
+          too_long();
           continue;
         }
         line(text);
@@ -807,19 +832,17 @@ export function serve_stdio(server: McpServer, streams: StdioStreams): Promise<v
         // while the rest of the oversized line is dropped, the error is reported only once
         if (!skipping) {
           skipping = true;
-          chain = chain.then(() => {
-            write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "요청 한 줄이 너무 깁니다." } });
-          });
+          too_long();
         }
       }
     });
     input.on("end", () => {
-      if (!skipping && buffer.length > 0) line(buffer);
+      if (!skipping && !closed && buffer.length > 0) line(buffer);
       buffer = "";
-      void chain.then(() => resolve());
+      finish();
     });
     input.on("error", () => {
-      void chain.then(() => resolve());
+      finish();
     });
   });
 }
@@ -850,8 +873,9 @@ async function main(): Promise<void> {
     project_id,
     token,
     claim_defaults: {
-      runtime: process.env.PES_RUNTIME ?? "claude_code",
-      provider: process.env.PES_PROVIDER ?? "anthropic",
+      // No guess about the tool: an adapter entry names its runtime (PES_RUNTIME, PES_PROVIDER, PES_MODEL).
+      runtime: process.env.PES_RUNTIME ?? "mcp",
+      provider: process.env.PES_PROVIDER ?? "unknown",
       model: process.env.PES_MODEL ?? "unknown",
     },
   });

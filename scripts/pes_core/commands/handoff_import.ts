@@ -65,6 +65,10 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
   reject_unknown_fields(source, IMPORT_FIELDS);
 
   const request_id = require_non_empty_string(source, "request_id");
+  // The import's idempotency key is the bundle's own request id: no other key can bring the same bundle in twice.
+  if (runtime.ctx.client_request_id !== `import-${request_id}`) {
+    throw new ApiError("invalid_payload", "the import must use the idempotency key import-<request_id>");
+  }
   const claimed_tool = optional_claim(source, "claimed_tool");
   const claimed_model = optional_claim(source, "claimed_model");
   const items = parse_result_items(source.results);

@@ -39,7 +39,11 @@
             "fence": "3",
             "expires_at": 1762311770000
           },
-          "server_time": 1762311655000
+          "server_time": 1762311655000,
+          "progress": {
+            "phase": "reading_context",
+            "observed_at": 1762311650000
+          }
         }
       }
     }

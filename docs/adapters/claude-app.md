@@ -37,7 +37,13 @@ Claude 앱이 PES에 직접 접속하는 연결은 검증하지 않았다(아래
 | 출처 표지 | `provenance = {source: manual_import, claimed_tool, claimed_model, verified: false}` — 앱이 말한 도구·모델은 주장일 뿐 믿지 않는다 |
 | 에이전트 claim | 없다(`run.claimed` 사건 없음). 소유자는 이 가져오기가 만든 자기 실행에만 이 경로로 결과를 낸다. 일반 결과 제출 경로는 에이전트 토큰 전용 그대로다 |
 
-거부는 모두 아무것도 쓰지 않는다: `bundle_invalid`, `bundle_hash_mismatch`(묶음 일부가 복사 뒤 바뀜), `bundle_wrong_project`, `bundle_stale`(복사 뒤 프로젝트나 기반 버전이 바뀜 — 다시 복사), `duplicate_import`(같은 묶음을 두 번 — 내용이 달라도), `result_out_of_scope`(묶음에 없는 자료), `attachment_missing`, `attachment_unsupported`. 거부된 묶음은 소모되지 않는다. **`manifest_hash`는 인증이 아니다** — 사고를 잡는 무결성 검사일 뿐이고 아무 권한도 주지 않는다.
+거부는 모두 아무것도 쓰지 않는다: `bundle_invalid`, `bundle_hash_mismatch`(묶음 일부가 복사 뒤 바뀜), `bundle_wrong_project`, `bundle_stale`(복사 뒤 프로젝트나 기반 버전이 바뀜 — 다시 복사), `duplicate_import`(같은 묶음을 두 번 — 내용이 달라도), `result_out_of_scope`(묶음에 없는 자료), `attachment_missing`, `attachment_unsupported`. 이 목록 밖에 PES가 직접 거부하는 경우가 있다(오류 코드 그대로 보인다):
+
+- `conflict` — **승인된 단계**이거나 **봉인된 라운드**이다. 승인과 봉인은 사람의 결정이라 가져오기가 우회하지 못한다. 승인된 단계는 복사 때부터 `conflict`다. 사람이 단계를 다시 열고(봉인된 라운드면 새 라운드를 시작하고) 묶음을 다시 복사한 뒤 가져온다.
+- `invalid_payload` — 한 가져오기가 **같은 자료(object)를 둘 이상** 말한다(한 묶음은 한 자료를 한 번만 고친다). 또는 가져오기 멱등 키가 `import-<request_id>`가 아니다(어댑터는 늘 이 키를 쓴다).
+- `not_found` — 묶음이 말하는 단계·라운드가 이 프로젝트에 없다.
+
+거부된 묶음은 소모되지 않는다. **`manifest_hash`는 인증이 아니다** — 사고를 잡는 무결성 검사일 뿐이고 아무 권한도 주지 않는다.
 
 ## 한계 (아직 안 되는 것)
 

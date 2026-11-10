@@ -1586,7 +1586,10 @@ export class ApiApp {
     if (!Array.isArray(source.results) || source.results.length < 1 || source.results.length > MAX_RESULTS_PER_BATCH) {
       invalid(`${at}.results`);
     }
-    require_text(source, "request_id", at);
+    const request_id = require_text(source, "request_id", at);
+    // One bundle is imported once: its Idempotency-Key is the bundle's own request id, so another key for the
+    // same request_id is refused here instead of importing the bundle a second time.
+    if (key !== `import-${request_id}`) invalid("$.headers.idempotency-key");
     for (const field of ["stage_id", "round_id", "claimed_tool", "claimed_model"]) {
       const value = source[field];
       if (value !== undefined && value !== null && (typeof value !== "string" || value.length === 0 || !value.isWellFormed())) {
@@ -1813,6 +1816,8 @@ export class ApiApp {
           expires_at: Number(result.expires_at),
         },
         server_time: this.#now(),
+        // the stored note, so a replay and the event agree with what was saved
+        ...(is_record(result.progress) ? { progress: result.progress } : {}),
       },
       replayed: out.replayed,
     };
@@ -2213,6 +2218,7 @@ export class ApiApp {
         status,
         operation_id: ACCEPTED_ACTIONS.has(row.action) ? row.id : null,
         tx_id: row.id,
+        run_id: row.run_id,
       },
     };
   }

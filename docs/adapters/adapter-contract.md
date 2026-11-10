@@ -46,11 +46,11 @@
 
 `started`, `stage`, `completed`, `failed`, `waiting`, `scheduled`
 
-`observed_at`(ms)을 생략하면 서버 시계가 채운다. 결과는 `{run_id, lease: {lease_id, fence, expires_at}, progress: {phase, observed_at}, server_time}`이다. 목록 밖 `phase`는 `invalid_payload`(`target: "$.arguments.progress.phase"`)다. 같은 키의 재전송은 새 사건을 만들지 않는다.
+`observed_at`(ms)을 생략하면 명령 시계가 채워 저장한다. 결과는 `{run_id, lease: {lease_id, fence, expires_at}, progress: {phase, observed_at}, server_time}`이고 `progress`는 **저장된 값 그대로**다(재전송이면 처음 값). 사건 `run.heartbeat`의 `progress`와 같다. 목록 밖 `phase`는 `invalid_payload`(`target: "$.arguments.progress.phase"`)다. 같은 키의 재전송은 새 사건을 만들지 않는다.
 
 ### 2.4 영수증과 `applied_by_key`
 
-`pes_receipt`의 `receipts`는 `[{input_version_id, state, reason?, applied_by_key?}]`다. `state`가 `applied`이면 그 입력을 쓴 `pes_submit`의 `idempotency_key`를 `applied_by_key`로 준다. 어댑터가 그 키의 제출 기록을 읽어 API가 요구하는 `applied_tx_id`를 채운다. 모르는 키는 `not_found`이고 아무것도 쓰지 않는다.
+`pes_receipt`의 `receipts`는 `[{input_version_id, state, reason?, applied_by_key?}]`다. `state`가 `applied`이면 그 입력을 쓴 `pes_submit`의 `idempotency_key`를 `applied_by_key`로 준다. 어댑터가 그 키의 제출 기록을 읽어 API가 요구하는 `applied_tx_id`를 채운다. **증거는 결과 제출(`pes_submit`)의 키뿐이다**: heartbeat·ask·wait·claim 같은 다른 도구의 키는 `not_found`다. 또 그 제출은 **이 실행의 것**이어야 한다(같은 에이전트의 다른 실행의 제출 키도 `not_found`). 모르는 키도 `not_found`이고 아무것도 쓰지 않는다.
 
 ## 3. 실행해 보는 예시
 
@@ -123,9 +123,12 @@ MCP 서버는 환경변수로 설정한다.
 | `PES_PROJECT_ID` | 일할 프로젝트 |
 | `PES_API_BASE_URL` | 이 컴퓨터의 PES 서버 주소(루프백 `http://127.0.0.1:…`만 받는다) |
 | `PES_AGENT_TOKEN` | 에이전트 토큰. 설정 파일에는 **참조**(`${PES_AGENT_TOKEN}`)만 적고 값은 사용자의 환경에 둔다 |
-| `PES_RUNTIME`·`PES_PROVIDER`·`PES_MODEL` | 새 claim이 쓰는 실행기 표시. 안 정하면 `claude_code`·`anthropic`·`unknown` (모델은 알 수 없으면 `unknown`) |
+| `PES_RUNTIME`·`PES_PROVIDER`·`PES_MODEL` | 새 claim이 쓰는 실행기 표시. 서버는 도구를 짐작하지 않는다: 안 정하면 `mcp`·`unknown`·`unknown`이다. 연결 항목을 만드는 어댑터가 명시한다(Claude Code: `PES_RUNTIME=claude_code`, `PES_PROVIDER=anthropic`). 모델은 알 수 없으면 `unknown` |
 
-pes link와 pes sync는 도우미(helper)가 이 컴퓨터에서 쓰는 **로컬 계약**이다. 도우미는 AI 도구의 MCP 자격과 **다른 종류**(`helper_device`)의 자격을 갖는다. link 응답에는 에이전트 토큰이 없다. sync는 커서를 요청과 응답 양쪽에 싣고, 같은 커서로 다시 보내면 같은 결과를 준다. 이 두 명령의 CLI 구현은 이 PR의 범위 밖이고, 아래는 계약 문서다(상세한 필드는 구현 PR에서 이 예시와 함께 고친다).
+pes link와 pes sync는 도우미(helper)가 이 컴퓨터에서 쓰는 **로컬 계약**이다. 도우미는 AI 도구의 MCP 자격과 **다른 종류**(`helper_device`)의 자격을 갖는다. link 응답에는 에이전트 토큰이 없다. sync는 커서를 요청과 응답 양쪽에 싣고, 같은 커서로 다시 보내면 같은 결과를 준다. 이 두 명령의 CLI 구현은 이 PR의 범위 밖이다. 아래는 **초안 계약**으로, 이미 있는 API에 이렇게 대응시킨다. 대응이 없는 부분은 구현 PR에서 확정한다.
+
+- **link** — 자격은 사람의 로컬 세션이 `POST /api/v1/project-registrations`(최초 등록)로 발급한다. 그 응답의 기기 토큰이 `helper_device` 자격이며 한 프로젝트에서만 통한다. link 응답에는 토큰 값이 없고 `mcp_credential: reference_only`(설정에는 참조만)다. 같은 `Idempotency-Key`는 같은 답을 되돌려 주되 토큰은 다시 주지 않는다(`token_issued_before`). 오류는 API 코드 그대로(`unauthenticated`, `idempotency_key_reuse`, `invalid_payload`). *확정 전*: 이미 등록된 프로젝트에 기기를 더하는 경로는 이 API에 아직 없고 구현 PR에서 정한다.
+- **sync** — `GET /api/v1/projects/{id}/changes?cursor=`에 대응한다. 커서는 불투명 문자열이고 같은 커서는 같은 결과를 준다(읽기, 멱등). 커서가 이 프로젝트·이 자격의 것이 아니거나 형식이 틀리면 `cursor_invalid`다. DB 인스턴스나 `epoch`가 바뀌면 `cursor_invalid`(`reason`: `database_changed`·`epoch_changed`)로 처음부터 다시 받는다(`cursor: null`). 응답의 `epoch`를 기억해 둔다. *확정 전*: 응답 필드 이름(`events` 개수)은 구현 PR에서 `/changes` 응답에 맞춘다.
 
 ```json pes-link-example
 {
@@ -151,7 +154,11 @@ pes link와 pes sync는 도우미(helper)가 이 컴퓨터에서 쓰는 **로컬
 - **hash는 인증이 아니다.** `manifest_hash`는 복사한 뒤 일부만 바뀐 묶음 같은 사고를 잡는 무결성 검사일 뿐이고, 아무 권한도 주지 않는다. 누가 보냈는지 증명하지 않는다. 권한은 소유자 세션을 PES가 검사해서 얻는다.
 - 가져오기는 소유자의 한 번의 행위다: 소유자 자신의 전달용 실행(`runtime = claude_app_handoff`, `model = unknown`)을 만들고 결과를 붙이고 끝낸다. 에이전트 claim은 없다(`run.claimed` 사건 없음). 영수증의 행위자와 `adopted_by`는 소유자, `via`는 `import`, 출처 표지는 `provenance.verified = false`다. 붙여 넣은 글이 말하는 도구·모델은 **주장**으로만 남고 믿지 않는다.
 - 같은 묶음(요청 ID)은 한 번만 가져온다: 다시 가져오면 내용이 달라도 `duplicate_import`, 행 0개. 거부된 가져오기는 묶음을 쓰지 않은 것이다 — 붙여 넣은 글을 고친 뒤 같은 묶음으로 다시 할 수 있다.
-- 거부 코드: `bundle_invalid`, `bundle_hash_mismatch`, `bundle_wrong_project`, `bundle_stale`(복사한 뒤 `control_rev`나 기반 버전이 바뀜), `duplicate_import`, `result_out_of_scope`, `attachment_missing`, `attachment_unsupported`. PES가 거부하면 API 코드(`unauthenticated`, `forbidden` 등)를 그대로 쓴다.
+- 거부 코드: `bundle_invalid`, `bundle_hash_mismatch`, `bundle_wrong_project`, `bundle_stale`(복사한 뒤 `control_rev`나 기반 버전이 바뀜), `duplicate_import`, `result_out_of_scope`, `attachment_missing`, `attachment_unsupported`. PES가 거부하면 API 코드(`unauthenticated`, `forbidden` 등)를 그대로 쓴다. 특히:
+  - `conflict` — 승인된 단계, 또는 봉인된 라운드(지정한 라운드, 또는 라운드를 안 줬을 때 단계의 현재 라운드). 승인·봉인은 사람의 결정이라 가져오기가 우회하지 못한다. 승인된 단계는 복사도 `conflict`다. 사람이 단계를 다시 열고(봉인이면 새 라운드) 묶음을 다시 복사한다.
+  - `invalid_payload` — 한 가져오기가 같은 자료(object)를 둘 이상 말한다(묶음 하나는 한 자료를 한 번만 고친다). 가져오기 멱등 키가 `import-<request_id>`가 아닌 경우도 같다(`$.headers.idempotency-key`) — 서버가 이 키를 강제해 같은 묶음이 두 번 들어오지 못한다.
+  - 거부는 모두 쓰기 0이다.
+- 묶음의 `base_versions`는 프로젝트 전체의 보조 자료 머리 버전이다(자료가 단계에 묶여 있지 않아 좁히지 못한다 — 한계). 가져올 때 같은 판·같은 단계인지 어댑터가 다시 본다.
 
 ## 7. 미확인과 한계
 

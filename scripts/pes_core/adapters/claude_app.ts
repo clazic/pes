@@ -171,6 +171,10 @@ export class ClaudeAppAdapter {
     if (!is_record(stage) || typeof stage.key !== "string") {
       throw new HandoffError("not_found", "그 단계를 이 프로젝트에서 찾을 수 없습니다.", "reread_context");
     }
+    // Approval is a human decision that an import cannot undo: do not hand out a copy that could never be pasted back.
+    if (stage.status === "approved") {
+      throw new HandoffError("conflict", "그 단계는 승인되어 있어 복사할 수 없습니다. 사람이 단계를 다시 연 뒤 복사해 주세요.", "reopen_stage");
+    }
     const edition = is_record(context.edition) ? context.edition : {};
     const manifest = Array.isArray(context.manifest) ? context.manifest : [];
     const base_versions: BundleBaseVersion[] = [];
@@ -325,6 +329,17 @@ export class ClaudeAppAdapter {
     }
 
     const context = await this.#context();
+    // The bundle's scope must still be this project's: same edition, and the stage is the one the bundle names.
+    const edition = is_record(context.edition) ? context.edition : {};
+    if (String(edition.edition_id) !== bundle.edition_id) {
+      throw new HandoffError("bundle_stale", "묶음을 복사한 뒤 프로젝트의 판이 바뀌었습니다. 묶음을 다시 복사해 주세요.", "export_again");
+    }
+    const stage = (Array.isArray(context.stages) ? context.stages : []).find(
+      (entry) => is_record(entry) && entry.stage_id === bundle.stage_id,
+    );
+    if (!is_record(stage) || stage.key !== bundle.stage_key) {
+      throw new HandoffError("not_found", "묶음이 말하는 단계가 이 프로젝트에 없습니다. 묶음을 다시 복사해 주세요.", "export_again");
+    }
     if (String(context.control_rev) !== bundle.base_control_rev) {
       throw new HandoffError("bundle_stale", "묶음을 복사한 뒤 프로젝트가 바뀌었습니다. 묶음을 다시 복사해 주세요.", "export_again");
     }
@@ -336,6 +351,10 @@ export class ClaudeAppAdapter {
       if (current.get(object_id) !== version_id) {
         throw new HandoffError("bundle_stale", "묶음을 복사한 뒤 자료의 현재 버전이 바뀌었습니다. 묶음을 다시 복사해 주세요.", "export_again", { object_id });
       }
+    }
+
+    if (stage.status === "approved") {
+      throw new HandoffError("conflict", "그 단계는 승인되어 있어 가져올 수 없습니다. 사람이 단계를 다시 연 뒤 다시 복사해 주세요.", "reopen_stage");
     }
 
     const results = pasted.items.map((item) => ({
