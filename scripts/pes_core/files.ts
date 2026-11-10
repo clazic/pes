@@ -8,9 +8,11 @@
 // Rules that matter here:
 // - A blob id is the only public handle. Storage keys, absolute paths and
 //   signed URLs are never accepted in its place and never leave this module.
-// - complete_upload attaches the object store to the command, which re-reads
-//   the stored bytes and compares their measured sha256/size with the
-//   reservation; the caller's numbers are not proof.
+// - complete_upload reads stored bytes only through the objects folder injected
+//   at CommandService construction, and compares their measured sha256/size
+//   with the reservation; the caller's numbers are not proof.
+// - A public wrapper handed a different objects folder refuses before reading
+//   or writing anything.
 // - store_blob only writes a staging blob of the same project, derives the
 //   path from the database storage_key, and refuses every symlink or escape.
 // - gc_orphans deletes rows in one transaction and removes bytes only after it
@@ -30,6 +32,7 @@ import {
 import { isAbsolute, join, resolve } from "node:path";
 
 import type { CommandOutcome, CommandService, MutationContext } from "./commands.ts";
+import { canonical_object_store_dir } from "./commands/shared.ts";
 import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 
@@ -103,9 +106,42 @@ export function sha256_hex(bytes: Uint8Array): string {
 
 function resolve_objects_dir(objects_dir: unknown): string {
   if (typeof objects_dir !== "string" || objects_dir.length === 0 || !isAbsolute(objects_dir)) {
-    throw unsafe("the objects folder must be an absolute path");
+    throw unsafe("the object store path must be absolute");
   }
   return resolve(objects_dir);
+}
+
+/**
+ * The one canonical store for this database, and the store handed to a public
+ * wrapper. A different folder is refused before any read or write. Both
+ * errors carry a fixed message: no absolute path, no store folder.
+ */
+function require_canonical_store(store: FileStore): string {
+  const registered = canonical_object_store_dir(store.db);
+  if (registered === null) {
+    throw new ApiError("conflict", "no canonical object store is configured");
+  }
+  const given = resolve_objects_dir(store.objects_dir);
+  if (given !== registered) {
+    throw new ApiError("conflict", "the object store does not match the service");
+  }
+  return registered;
+}
+
+/** The service is the authority; the store must be its folder and its database's registration. */
+function require_service_store(service: CommandService, store: FileStore): string {
+  const canonical = service.object_store_dir;
+  if (canonical === null) {
+    throw new ApiError("conflict", "no canonical object store is configured");
+  }
+  const given = resolve_objects_dir(store.objects_dir);
+  if (given !== canonical) {
+    throw new ApiError("conflict", "the object store does not match the service");
+  }
+  if (canonical_object_store_dir(store.db) !== canonical) {
+    throw new ApiError("conflict", "the object store does not match the service");
+  }
+  return canonical;
 }
 
 function lstat_or_undefined(path: string): ReturnType<typeof lstatSync> | undefined {
@@ -159,7 +195,7 @@ function ensure_objects_root(objects_dir: string): string {
 }
 
 /** Write bytes to the path derived from storage_key, atomically, without following links. */
-export function write_storage_bytes(
+function write_storage_bytes_inner(
   objects_dir: string,
   project_id: string,
   storage_key: string,
@@ -196,12 +232,33 @@ export function write_storage_bytes(
     writeFileSync(temporary, bytes, { flag: "wx" });
     renameSync(temporary, target);
   } finally {
-    rmSync(temporary, { force: true });
+    // A cleanup failure must not turn a successful rename into an error; a
+    // leftover temp file is swept by a later gc like any other stray file.
+    try {
+      rmSync(temporary, { force: true });
+    } catch {
+      // Best effort.
+    }
+  }
+}
+
+export function write_storage_bytes(
+  objects_dir: string,
+  project_id: string,
+  storage_key: string,
+  bytes: Uint8Array,
+): void {
+  try {
+    write_storage_bytes_inner(objects_dir, project_id, storage_key, bytes);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    // EACCES/ENOSPC/... must not reach a caller with a raw path-bearing message.
+    throw new ApiError("conflict", "the object store is not writable");
   }
 }
 
 /** Read exactly the bytes of a storage_key, refusing missing files and every symlink. */
-export function read_storage_bytes(
+function read_storage_bytes_inner(
   objects_dir: string,
   project_id: string,
   storage_key: string,
@@ -230,6 +287,19 @@ export function read_storage_bytes(
   return new Uint8Array(readFileSync(current));
 }
 
+export function read_storage_bytes(
+  objects_dir: string,
+  project_id: string,
+  storage_key: string,
+): Uint8Array {
+  try {
+    return read_storage_bytes_inner(objects_dir, project_id, storage_key);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("conflict", "the stored file is not readable");
+  }
+}
+
 /** True only for a regular file at a safe storage path (no symlink at any level). */
 export function storage_file_is_regular(
   objects_dir: string,
@@ -256,7 +326,7 @@ export function storage_file_is_regular(
 }
 
 /** Every regular file below this project's folder, without following symlinks. */
-export function scan_project_files(objects_dir: string, project_id: string): ProjectFile[] {
+function scan_project_files_inner(objects_dir: string, project_id: string): ProjectFile[] {
   let root: string;
   try {
     root = resolve_objects_dir(objects_dir);
@@ -296,6 +366,19 @@ export function scan_project_files(objects_dir: string, project_id: string): Pro
   walk(project_dir, "");
   files.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
   return files;
+}
+
+/**
+ * Every regular file below this project's folder, without following symlinks.
+ * Any file-system error (missing folder, EACCES, ...) yields no candidates, so
+ * gc never reports or removes a file it could not inspect.
+ */
+export function scan_project_files(objects_dir: string, project_id: string): ProjectFile[] {
+  try {
+    return scan_project_files_inner(objects_dir, project_id);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -386,9 +469,9 @@ export function reserve_upload(
 }
 
 /**
- * Run complete_upload with the command's own object store attached. The
- * command re-reads and measures the stored bytes, so a caller cannot make a
- * blob ready by supplying its own hash or size.
+ * Run complete_upload on the service's canonical store. The command re-reads
+ * and measures the stored bytes, so a caller cannot make a blob ready by
+ * supplying its own hash or size or by pointing at another folder.
  */
 export async function complete_upload(
   service: CommandService,
@@ -397,9 +480,8 @@ export async function complete_upload(
   input: unknown,
 ): Promise<CommandOutcome> {
   const blob_id = complete_input(input);
-  return service
-    .with_object_store(store.objects_dir)
-    .execute(ctx, "file.complete_upload", { blob_id });
+  require_service_store(service, store);
+  return service.execute(ctx, "file.complete_upload", { blob_id });
 }
 
 export function attach_version(
@@ -431,7 +513,7 @@ export async function gc_orphans(
 ): Promise<CommandOutcome> {
   const grace_ms = gc_input(input);
   const project_id = context_project(ctx);
-  const objects_dir = resolve_objects_dir(store.objects_dir);
+  const objects_dir = require_service_store(service, store);
 
   const blob_keys = new Map<string, string>();
   for (const row of store.db.all<{ id: string; storage_key: string }>(
@@ -441,7 +523,7 @@ export async function gc_orphans(
     blob_keys.set(row.id, row.storage_key);
   }
 
-  const outcome = await service.execute(ctx, "file.gc_orphans", { grace_ms, objects_dir });
+  const outcome = await service.execute(ctx, "file.gc_orphans", { grace_ms });
   if (outcome.replayed) return outcome;
 
   const result = outcome.result as {
@@ -500,6 +582,7 @@ export async function get_blob(
   project_id: string,
   blob_id: string,
 ): Promise<StoredBlob> {
+  const objects_dir = require_canonical_store(store);
   const project = require_safe_id(project_id, "project_id");
   const id = require_safe_id(blob_id, "blob_id");
   const row = store.db.get<BlobRow>(
@@ -512,7 +595,7 @@ export async function get_blob(
   if (row.state !== "ready") {
     throw new ApiError("conflict", "the blob is not ready");
   }
-  const bytes = read_storage_bytes(store.objects_dir, project, row.storage_key);
+  const bytes = read_storage_bytes(objects_dir, project, row.storage_key);
   if (bytes.byteLength !== Number(row.size) || sha256_hex(bytes) !== row.sha256) {
     throw new ApiError("conflict", "the stored bytes do not match the blob");
   }
@@ -528,7 +611,8 @@ export async function get_blob(
 
 /**
  * Write the bytes of a staging blob of this project to the path derived from
- * its database storage_key. No database write happens here.
+ * its database storage_key. The bytes must match the reservation (length and
+ * sha256) before anything touches the disk; no database write happens here.
  */
 export async function store_blob(
   store: FileStore,
@@ -536,11 +620,12 @@ export async function store_blob(
   blob_id: string,
   bytes: Uint8Array,
 ): Promise<void> {
+  const objects_dir = require_canonical_store(store);
   const project = require_safe_id(project_id, "project_id");
   const id = require_safe_id(blob_id, "blob_id");
   if (!(bytes instanceof Uint8Array)) throw invalid("bytes must be a Uint8Array");
-  const row = store.db.get<{ storage_key: string; state: string }>(
-    "SELECT storage_key, state FROM blobs WHERE project_id = ? AND id = ?",
+  const row = store.db.get<{ storage_key: string; state: string; sha256: string; size: bigint }>(
+    "SELECT storage_key, state, sha256, size FROM blobs WHERE project_id = ? AND id = ?",
     project,
     id,
   );
@@ -548,5 +633,11 @@ export async function store_blob(
   if (row.state !== "staging") {
     throw new ApiError("conflict", "only a staging blob takes bytes");
   }
-  write_storage_bytes(store.objects_dir, project, row.storage_key, bytes);
+  if (bytes.byteLength !== Number(row.size)) {
+    throw invalid("the bytes do not match the reservation");
+  }
+  if (sha256_hex(bytes) !== row.sha256) {
+    throw invalid("the bytes do not match the reservation");
+  }
+  write_storage_bytes(objects_dir, project, row.storage_key, bytes);
 }

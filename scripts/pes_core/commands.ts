@@ -28,6 +28,7 @@ import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
   is_record,
+  register_object_store,
   with_readonly_db,
   require_non_empty_string,
   require_record,
@@ -258,7 +259,7 @@ function checked_now_ms(clock: Clock): number {
 function checked_objects_dir(value: unknown): string | null {
   if (value === undefined) return null;
   if (typeof value !== "string" || value.length === 0 || !isAbsolute(value)) {
-    throw new TypeError("objects_dir must be an absolute path");
+    throw new TypeError("the object store path must be absolute");
   }
   return resolve(value);
 }
@@ -592,21 +593,12 @@ export class CommandService {
     // ambient environment; a composition point resolves env explicitly.
     this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
     this.#objects_dir = checked_objects_dir(options.objects_dir);
+    if (this.#objects_dir !== null) register_object_store(db, this.#objects_dir);
   }
 
-  /**
-   * The same database, clock, policy and run configuration with an object
-   * store attached. Public file wrappers use this so the command itself reads
-   * the stored bytes; a service created without a store fails closed.
-   */
-  with_object_store(objects_dir: string): CommandService {
-    return new CommandService(this.#db, {
-      clock: this.#clock,
-      policy: this.#policy,
-      new_id: this.#new_id,
-      run_config: this.#run_config,
-      objects_dir,
-    });
+  /** The objects folder given at construction, or null when none was injected. */
+  get object_store_dir(): string | null {
+    return this.#objects_dir;
   }
 
   /**

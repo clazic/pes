@@ -45,6 +45,23 @@ export interface CommandRuntime {
   objects_dir: string | null;
 }
 
+/**
+ * The one canonical objects folder per database connection. A CommandService
+ * registers the folder it was constructed with; public store wrappers compare
+ * the folder they were handed against this entry and refuse a different one.
+ * The map is keyed by the database object, so a wrapped test handle gets its
+ * own registration without affecting the real connection.
+ */
+const canonical_object_stores = new WeakMap<Db, string>();
+
+export function register_object_store(db: Db, objects_dir: string): void {
+  canonical_object_stores.set(db, objects_dir);
+}
+
+export function canonical_object_store_dir(db: Db): string | null {
+  return canonical_object_stores.get(db) ?? null;
+}
+
 export interface EventDraft {
   type: string;
   payload: unknown;

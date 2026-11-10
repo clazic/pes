@@ -18,11 +18,9 @@
 //   rows are removed only by file.gc_orphans; bytes are deleted by the wrapper
 //   after this transaction commits.
 //
-// file.gc_orphans also receives the objects folder from its public wrapper so
-// the command can report missing ready files and count stale orphan files. The
-// folder is never placed in a result, an event or a receipt.
-
-import { isAbsolute } from "node:path";
+// file.gc_orphans scans the objects folder injected at CommandService
+// construction so the command can report missing ready files and count stale
+// orphan files. The folder is never placed in a result, an event or a receipt.
 
 import { ApiError } from "../errors.ts";
 import {
@@ -48,7 +46,7 @@ const RESERVE_FIELDS = ["sha256", "size", "media_type", "original_name"] as cons
 const COMPLETE_FIELDS = ["blob_id", "sha256", "size"] as const;
 const ATTACH_FIELDS = ["version_id", "blob_id", "role"] as const;
 const QUARANTINE_FIELDS = ["blob_id", "reason"] as const;
-const GC_FIELDS = ["grace_ms", "objects_dir"] as const;
+const GC_FIELDS = ["grace_ms"] as const;
 
 const RESERVED_EVENT = "file.upload_reserved";
 
@@ -486,15 +484,6 @@ function run_quarantine(runtime: CommandRuntime): CommandResult {
 // ---------------------------------------------------------------------------
 // file.gc_orphans
 
-function optional_objects_dir(payload: Record<string, unknown>): string | null {
-  const value = payload.objects_dir;
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "string" || value.length === 0 || !isAbsolute(value)) {
-    return invalid("objects_dir must be an absolute path");
-  }
-  return value;
-}
-
 function reservation_time(
   runtime: CommandRuntime,
   project_id: string,
@@ -516,7 +505,7 @@ function run_gc_orphans(runtime: CommandRuntime): CommandResult {
   reject_unknown_fields(payload, GC_FIELDS);
   const grace_ms = require_size(payload.grace_ms, "grace_ms");
   if (grace_ms < 1) invalid("grace_ms must be a positive safe integer");
-  const objects_dir = optional_objects_dir(payload);
+  const objects_dir = runtime.objects_dir;
   const scope = scope_of(runtime);
   const project_id = scope.project_id;
 
