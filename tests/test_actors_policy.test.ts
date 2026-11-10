@@ -1163,7 +1163,8 @@ test("Go OFF blocks prepared and authorized-unsent dispatches; sent and unknown 
     assert.ok(rc);
     const types = events_of(env.db, rc.id).map((e) => e.type);
     assert.equal(types[0], "policy.changed");
-    assert.deepEqual(types.slice(1), ["dispatch.blocked", "dispatch.blocked"]);
+    // Final-review F1: OFF may add an audit event for the Go run's lease in this same transaction.
+    assert.deepEqual(types.slice(1).filter((t) => t === "dispatch.blocked"), ["dispatch.blocked", "dispatch.blocked"]);
   });
 });
 
@@ -1215,7 +1216,8 @@ test("dispatch.block and non-Go commands are not gated by Go: they fail or succe
       { topic: "OFF 중에도 되는 변경" },
     );
     assert.equal(topic.replayed, false);
-    await release(env.service, env.ctx("off-release"), guard(l));
+    // Final-review F1: OFF revoked the Go run's lease, so the old guard cannot even release it.
+    await rejects_with_api_error(release(env.service, env.ctx("off-release"), guard(l)), "conflict");
     const b = await claim(env.service, env.ctx("off-claim-b"), {
       mode: "B",
       runtime: "synthetic-runtime",
@@ -1241,8 +1243,13 @@ test("re-allowing Go never revives a blocked dispatch", async () => {
       mark_sent(env.service, env.ctx("rv-sent"), { dispatch_id: w.authorized, ...guard(w.lease) }),
       "conflict",
     );
-    // A fresh dispatch is allowed again after the owner re-allows.
-    const fresh = await do_prepare(env, "rv-fresh", w.lease, "rk-fresh");
+    // Final-review F1: the old lease died with OFF; a fresh dispatch needs a new claim after the owner re-allows.
+    await rejects_with_api_error(
+      prepare_dispatch(env.service, env.ctx("rv-old-prep"), prepare_payload(env, w.lease, "rk-fresh")),
+      "conflict",
+    );
+    const lease2 = await claim_go_lease(env, "rv-reclaim", w.lease.run_id);
+    const fresh = await do_prepare(env, "rv-fresh", lease2, "rk-fresh");
     assert.equal(dispatch_row(env.db, fresh).policy_version_id, current_policy(env.db, env.project_id).policy_id);
     assert.equal(current_policy(env.db, env.project_id).policy_rev, 3);
   });
@@ -1641,7 +1648,9 @@ test("a rejected new command (policy, owner, lease) leaves no receipt behind and
     assert.equal(receipt_for(env.db, env.project_id, "ru-key"), undefined);
     assert.equal(state_signature(env.db), before);
     await go_on(env, "ru-on");
-    const ok = await prepare_dispatch(env.service, env.ctx("ru-key"), prepare_payload(env, l, "rk-ru"));
+    // Final-review F1: OFF revoked the old lease, so the retry runs under a new claim.
+    const l2 = await claim_go_lease(env, "ru-reclaim", l.run_id);
+    const ok = await prepare_dispatch(env.service, env.ctx("ru-key"), prepare_payload(env, l2, "rk-ru"));
     assert.equal(ok.replayed, false);
   });
 });

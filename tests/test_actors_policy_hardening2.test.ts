@@ -17,6 +17,7 @@ import type { RunConfig } from "../scripts/pes_core/config.ts";
 import { claim } from "../scripts/pes_core/runs.ts";
 import {
   agent_token_hash,
+  generate_agent_token,
   issue_agent_token,
   resolve_actor,
   verify_agent_token,
@@ -156,6 +157,23 @@ interface Issued {
 async function issue_for(env: Env, key: string, actor_id: string): Promise<Issued> {
   const out = await issue_agent_token(env.service, env.ctx(key), { actor_id, scopes: ["run"] });
   return out.result as Issued;
+}
+
+/** A token row written straight into the table (token.issue refuses ineligible actors since the final review). */
+function plant_token(env: Env, actor_id: string): Issued {
+  const token = generate_agent_token();
+  const token_id = `planted-${actor_id}`;
+  env.db.run(
+    `INSERT INTO agent_tokens (id, project_id, actor_id, scopes, token_hash, created_at, expires_at, revoked_at)
+     VALUES (?, ?, ?, '["run"]', ?, ?, ?, NULL)`,
+    token_id,
+    env.project_id,
+    actor_id,
+    agent_token_hash(token),
+    BigInt(env.clock.now_ms()),
+    BigInt(env.clock.now_ms() + TOKEN_TTL_MS),
+  );
+  return { token, token_id };
 }
 
 function lookup_by_token(env: Env, token: string, now_ms = env.clock.now_ms()) {
@@ -366,7 +384,7 @@ test("R9 a human owner whose user is disabled cannot issue or revoke tokens or s
 test("R10 an agent actor without a user can never act: token or id resolve forbidden, commands forbidden", async () => {
   await with_env(async (env) => {
     env.db.run("INSERT INTO actors (id, kind, display_name) VALUES ('actor-nouser', 'external_agent', '무사용자')");
-    const t = await issue_for(env, "r10-issue", "actor-nouser");
+    const t = plant_token(env, "actor-nouser"); // Final-review R1: token.issue refuses a userless actor
     throws_api_error(() => lookup_by_token(env, t.token), "forbidden");
     throws_api_error(
       () => resolve_actor(env.db, { project_id: env.project_id, actor_id: "actor-nouser" }, env.clock.now_ms()),
@@ -383,7 +401,7 @@ test("R10 an agent actor without a user can never act: token or id resolve forbi
 test("R11 verify_agent_token of a userless actor does not hand out a usable credential (forbidden, like resolve_actor)", async () => {
   await with_env(async (env) => {
     env.db.run("INSERT INTO actors (id, kind, display_name) VALUES ('actor-nouser2', 'external_agent', '무사용자2')");
-    const t = await issue_for(env, "r11-issue", "actor-nouser2");
+    const t = plant_token(env, "actor-nouser2"); // Final-review R1: token.issue refuses a userless actor
     throws_api_error(
       () => verify_agent_token(env.db, t.token, { project_id: env.project_id, now_ms: env.clock.now_ms() }),
       "forbidden",

@@ -17,6 +17,8 @@ import { CommandService, type MutationContext } from "../scripts/pes_core/comman
 import type { RunConfig } from "../scripts/pes_core/config.ts";
 import { claim, release } from "../scripts/pes_core/runs.ts";
 import {
+  agent_token_hash,
+  generate_agent_token,
   issue_agent_token,
   resolve_actor,
   revoke_agent_token,
@@ -314,6 +316,22 @@ async function issue(env: Env, key: string, scopes: string[] = ["run"], actor_id
   const out = await issue_agent_token(env.service, env.ctx(key), { actor_id: actor_id ?? env.agent_id, scopes });
   assert.equal(out.replayed, false);
   return out.result as Issued;
+}
+
+/** A token row written straight into the table (token.issue refuses ineligible actors since the final review). */
+function plant_token(env: Env, actor_id: string): { token: string } {
+  const token = generate_agent_token();
+  env.db.run(
+    `INSERT INTO agent_tokens (id, project_id, actor_id, scopes, token_hash, created_at, expires_at, revoked_at)
+     VALUES (?, ?, ?, '["run"]', ?, ?, ?, NULL)`,
+    `planted-${actor_id}`,
+    env.project_id,
+    actor_id,
+    agent_token_hash(token),
+    BigInt(env.clock.now_ms()),
+    BigInt(env.clock.now_ms() + TOKEN_TTL_MS),
+  );
+  return { token };
 }
 
 function opts(env: Env, now_ms = env.clock.now_ms()) {
@@ -635,9 +653,10 @@ test("H12 an agent whose user is not a member of the project cannot authenticate
     env.db.run("INSERT INTO users (id, display_name, created_at) VALUES ('user-out', '합성 외부', 0)");
     env.db.run("INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-out', 'external_agent', 'user-out', '합성 외부 에이전트')");
     env.db.run("INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-nouser', 'external_agent', NULL, '합성 무사용자')");
-    // issue itself is allowed for these (they exist and are enabled) but never yields access
-    const o = await issue(env, "h12-out", ["run"], "agent-out");
-    const n = await issue(env, "h12-nouser", ["run"], "agent-nouser");
+    // Final-review R1: token.issue refuses these targets now, so plant the token rows directly
+    // to keep testing that verification and resolution never grant access to them.
+    const o = plant_token(env, "agent-out");
+    const n = plant_token(env, "agent-nouser");
     const now_ms = env.clock.now_ms();
     for (const token of [o.token, n.token]) {
       throws_api_error(() => resolve_actor(env.db, { project_id: env.project_id, token }, now_ms), "forbidden");
@@ -809,7 +828,11 @@ test("H18 OFF right after prepare: authorize and mark_sent are denied, the dispa
     assert.deepEqual(dispatch_row(env.db, id), blocked_row);
     // the request_key of the blocked dispatch is still burned; a fresh key works
     await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-reuse"), prepare_payload(env, l, "rk-18")), "conflict");
-    const fresh = await do_prepare(env, "h18-fresh", l, "rk-18b");
+    // Final-review F1: OFF revoked the lease, so a fresh dispatch needs a new claim (new fence).
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-old-prep"), prepare_payload(env, l, "rk-18b")), "conflict");
+    const l2 = await claim_go_lease(env, "h18-reclaim", l.run_id);
+    assert.ok(l2.fence > l.fence);
+    const fresh = await do_prepare(env, "h18-fresh", l2, "rk-18b");
     assert.notEqual(fresh, id);
     assert.equal(dispatch_state(env.db, fresh), "prepared");
     assert.equal(dispatch_row(env.db, fresh).policy_version_id, current_policy(env.db, env.project_id).policy_id);
@@ -895,9 +918,11 @@ test("H21 OFF only touches this project's prepared/authorized dispatches; respon
     const rc = receipt_for(env.db, env.project_id, "h21-off");
     assert.ok(rc);
     const events = events_of(env.db, rc.id);
-    assert.deepEqual(events.map((e) => e.type), ["policy.changed", "dispatch.blocked", "dispatch.blocked"]);
-    assert.deepEqual(events.map((e) => Number(e.tx_index)), [0, 1, 2]);
-    assert.ok(events.every((e) => Number(e.tx_size) === 3));
+    // Final-review F1: OFF also revokes the Go run's lease, which adds an audit event to the same transaction.
+    assert.equal(events[0]!.type, "policy.changed");
+    assert.equal(events.filter((e) => e.type === "dispatch.blocked").length, 2);
+    assert.deepEqual(events.map((e) => Number(e.tx_index)), events.map((_, i) => i));
+    assert.ok(events.every((e) => Number(e.tx_size) === events.length));
     assert.equal(p2.project_id.length > 0, true);
   });
 });
