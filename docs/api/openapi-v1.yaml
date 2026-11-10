@@ -215,6 +215,25 @@ components:
         runtime: { type: string, minLength: 1 }
         provider: { type: string, minLength: 1 }
         model: { type: string, minLength: 1 }
+    RunImport:
+      type: object
+      description: "Explicit hand-off import (owner session only): the owner's own hand-off run, the pasted results and the end of the run in one step. The receipt and the run belong to the owner (a human actor), via is import, provenance.verified is false; there is no claim, lease or fence."
+      required: [import]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        import:
+          type: object
+          required: [results, request_id]
+          additionalProperties: false
+          properties:
+            results: { type: array, minItems: 1, maxItems: 20, items: { type: object } }
+            request_id: { type: string, minLength: 1 }
+            stage_id: { type: string }
+            round_id: { type: string }
+            claimed_tool: { type: string, description: "A claim of the pasted text, never verified" }
+            claimed_model: { type: string, description: "A claim of the pasted text, never verified" }
+            expected_control_rev: { type: string }
     ClaimFresh:
       type: object
       required: [mode, runtime, provider, model]
@@ -339,7 +358,14 @@ components:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         lease_id: { type: string, minLength: 1 }
         fence: { type: string }
-        progress: { type: object, description: "Checked, not stored" }
+        progress:
+          type: object
+          description: "Optional progress note {phase, observed_at?}; observed_at defaults to the server clock. It is stored in the run.heartbeat receipt and event; the answer keeps its keys (run_id, lease, server_time)."
+          additionalProperties: false
+          required: [phase]
+          properties:
+            phase: { type: string, minLength: 1 }
+            observed_at: { type: integer, minimum: 0 }
     ReleaseBody:
       type: object
       required: [lease_id, fence]
@@ -599,7 +625,7 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs:
     post:
-      summary: Owner queues a run for an agent actor (no lease is taken)
+      summary: Owner queues a run for an agent actor (no lease is taken), or imports a pasted hand-off result
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -608,7 +634,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/RunCreate" }
+            schema:
+              oneOf:
+                - { $ref: "#/components/schemas/RunCreate" }
+                - { $ref: "#/components/schemas/RunImport" }
       responses:
         "201":
           description: Queued run
@@ -674,12 +703,12 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs/{r}/results:
     post:
-      summary: Submit 1-20 version appends as one atomic result bundle
+      summary: Submit 1-20 version appends as one atomic result bundle (agent tokens only; an owner session gets 403, an owner import goes through POST /runs)
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/IdempotencyKey"
-      security: [{ agentToken: [] }, { localSession: [] }]
+      security: [{ agentToken: [] }]
       requestBody:
         required: true
         content:
