@@ -1105,3 +1105,39 @@ test("hardening 8c: a reference that climbs out of the source folder ('../x') ne
     assert.deepEqual(readdirSync(parent).sort(), ["outside.png", "src"], "nothing was added next to the source");
   });
 });
+
+// ===========================================================================
+// symlinks inside the source are skipped but never silently (leader request)
+// ===========================================================================
+// Category chosen: the existing 'unmapped_input' (no new category: ReportCategory stays closed).
+// Entry: { category: 'unmapped_input', path: <source-relative path of the link, "/" separators> };
+// a detail such as "symlink" is allowed but not required. The target path is never reported.
+
+test("hardening 9: every symlink in the source (file or folder, inside or outside target, dangling) is not followed and is reported as unmapped_input with its relative path only", async () => {
+  await with_legacy(async (env, api) => {
+    const outside = new_source(env, "sym-outside");
+    writeFileSync(join(outside, "o.json"), "{}", "utf8");
+    mkdirSync(join(outside, "od"), { recursive: true });
+    const dir = copy_fixture(env, "full");
+    const links: Array<[string, string]> = [
+      ["link-in-file.json", join(dir, "library.json")],
+      ["link-in-dir", join(dir, "feedback")],
+      ["shots/link-out-file.png", join(outside, "o.json")],
+      ["link-out-dir", join(outside, "od")],
+      ["rounds/dangling", join(outside, "missing")],
+    ];
+    for (const [name, target] of links) symlinkSync(target, join(dir, name));
+    const result = await run_import(env, api, dir);
+    assert.equal(result.state, "staging");
+    const stored = stored_report(env, batch_row(env.db, result.batch_id));
+    for (const [name] of links) {
+      assert.ok(has_entry(result.report, "unmapped_input", name), `${name} is reported in the result`);
+      assert.ok(has_entry(api.report_unknown(env.db, result.batch_id), "unmapped_input", name), `${name} in report_unknown`);
+      assert.ok(has_entry(stored, "unmapped_input", name), `${name} in the stored blob`);
+    }
+    const text = JSON.stringify(result.report);
+    assert.ok(!text.includes(outside) && !text.includes(env.home.root), "no absolute path or link target is reported");
+    const scanned = api.scan_project(dir).files.map((f) => f.path);
+    for (const [name] of links) assert.ok(!scanned.includes(name), `${name} is not in the manifest`);
+  });
+});
