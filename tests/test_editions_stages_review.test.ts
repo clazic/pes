@@ -2,7 +2,8 @@
 // against the requirements, not the current code: they are expected to FAIL until the code is fixed.
 //  A) stage.approve needs every earlier stage to be approved AND not stale; refusal writes nothing.
 //  B) round.start needs the same condition on earlier stages.
-//  C) stage.reopen also interrupts a later stage's running run (lease released, event with run_id).
+//  C) stage.reopen also ends a later stage's running run as cancelled (lease released, run.invalidated event with run_id;
+//     corrected in the final review: it used to be 'interrupted', which allowed a re-claim, see test_editions_stages_final).
 //  D) an agent may seal / snapshot only for the stage / round its guard's run belongs to.
 //  E) stage.approve, round.seal and stage.reopen refuse an edition that is not active
 //     (a completed edition may still be reopened).
@@ -180,7 +181,7 @@ test("B: round.start is refused when the stage right before is reopened (not app
 // ---------------------------------------------------------------------------
 // C) reopen interrupts a later stage's running run
 
-test("C: reopen releases the lease of a later stage's running run, marks it interrupted and records an event with its run_id; finished runs stay", async () => {
+test("C: reopen releases the lease of a later stage's running run, marks it cancelled and records an event with its run_id; finished runs stay", async () => {
   await with_env(async (env) => {
     const s = stage_ids(env.db, env.p.edition_id);
     const base = add_agent(env);
@@ -198,12 +199,13 @@ test("C: reopen releases the lease of a later stage's running run, marks it inte
     await reopen_stage(env.service, env.ctx("reopen-plan"), { stage_id: s.plan });
 
     const run = env.db.get<{ status: string; ended_at: bigint | null }>("SELECT status, ended_at FROM runs WHERE id = ?", lease.run_id)!;
-    assert.equal(run.status, "interrupted");
+    assert.equal(run.status, "cancelled");
     assert.ok(run.ended_at !== null);
     const l = env.db.get<{ state: string }>("SELECT state FROM project_leases WHERE project_id = ? AND lease_id = ?", env.p.project_id, lease.lease_id)!;
     assert.notEqual(l.state, "active", "the lease is released");
     const receipt = receipt_of(env.db, env.p.project_id, "reopen-plan")!;
-    assert.ok(events_of(env.db, receipt.id).some((e) => e.run_id === lease.run_id), "an event carries the interrupted run_id");
+    const own = events_of(env.db, receipt.id).filter((e) => e.run_id === lease.run_id);
+    assert.deepEqual(own.map((e) => e.type), ["run.invalidated"], "one run.invalidated event carries the run_id, like other unfinished runs");
     assert.deepEqual({ ...env.db.get("SELECT * FROM runs WHERE id = 'run-later-succeeded'")! }, succeeded_before);
     assert.deepEqual({ ...env.db.get("SELECT * FROM runs WHERE id = 'run-later-failed'")! }, failed_before);
 
@@ -219,7 +221,7 @@ test("C: reopen releases the lease of a later stage's running run, marks it inte
   });
 });
 
-test("C: a running run of the reopened stage itself or of an earlier stage is not interrupted", async () => {
+test("C: a running run of the reopened stage itself or of an earlier stage is not touched", async () => {
   await with_env(async (env) => {
     const s = stage_ids(env.db, env.p.edition_id);
     const base = add_agent(env);

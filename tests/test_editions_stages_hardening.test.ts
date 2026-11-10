@@ -594,7 +594,7 @@ test("run invalidation reaches only later stages of this edition; finished runs 
     insert_run(env, "run-later-failed", "failed", s.analyze, null, null);
     insert_run(env, "run-later-blocked", "queued", s.analyze, null, null);
     env.db.run("UPDATE runs SET status = 'blocked_usage', go_block_reason = 'usage_limit', go_blocked_at = 1 WHERE id = 'run-later-blocked'");
-    // (a running run that holds the lease is interrupted by a reopen: see test_editions_stages_review.test.ts)
+    // (a running run that holds the lease is cancelled by a reopen: see test_editions_stages_review.test.ts)
     // a run of another edition
     const ed2 = (await create_edition(env.service, env.ctx("ed-2"), {})).result as { stage_ids: Record<string, string> };
     insert_run(env, "run-other-edition", "queued", ed2.stage_ids.research!, null, null);
