@@ -245,7 +245,12 @@ function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartne
                 </p>
                 {p.state.value === "proposed" && !readOnly ? (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <ActionButton size="xs" variant="outline" blockedBy={decide.pending ? "접수 확인 중입니다" : null} onClick={() => decide.run({ slug: ws.slug, proposal_id: p.id, verdict: "accept" })}>
+                    <ActionButton
+                      size="xs"
+                      variant="outline"
+                      blockedBy={p.kind === "assumption" && role !== "owner" ? "소유자만 가정을 확인할 수 있습니다." : decide.pending ? "접수 확인 중입니다" : null}
+                      onClick={() => decide.run({ slug: ws.slug, proposal_id: p.id, verdict: "accept" })}
+                    >
                       받아들이기
                     </ActionButton>
                     <ActionButton size="xs" variant="ghost" blockedBy={decide.pending ? "접수 확인 중입니다" : null} onClick={() => decide.run({ slug: ws.slug, proposal_id: p.id, verdict: "reject" })}>
