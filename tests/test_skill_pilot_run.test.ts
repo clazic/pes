@@ -16,6 +16,7 @@ import { copyFileSync, existsSync, readFileSync, realpathSync, writeFileSync } f
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { disk_path } from "./helpers/blob_env.ts";
 import { make_cli_env, type CliEnv } from "./helpers/cli_write_env.ts";
 import { mentioned_commands, PES_PY, pes_cmds, REPO, repo_doc } from "./helpers/skill_docs.ts";
 
@@ -34,6 +35,7 @@ interface Ctx {
   spec: string;
   items: string;
   qa: string;
+  summary: string;
 }
 
 /** 문서(core·plan)가 말하는 기획 한 바퀴. 순서는 core 「단계 생명주기」: 시작 질문 → 라운드 → 병합 → 화면 → 독립 검토 → 승인 → 보고서. */
@@ -47,6 +49,8 @@ const PILOT: Step[] = [
   { command: "render", args: () => ["render", SLUG, "plan"] },
   { command: "digest", args: () => ["digest", SLUG, "plan", "--round", "1"] },
   { command: "show", args: () => ["show", SLUG, "plan", "1"] },
+  // SEL-50: 단계 요약은 note 가 아니라 전용 명령 set 으로 (보고서 '1. 요약' 의 재료). 플래그 켜짐에서는 코어 대응이 없으면 분명한 거부도 허용.
+  { command: "set", args: (x) => ["set", SLUG, "plan", "summary", x.summary] },
   { command: "qa-brief", args: () => ["qa-brief", SLUG, "plan"] },
   { command: "qa", args: (x) => ["qa", SLUG, "plan", "--file", x.qa] },
   { command: "note", args: () => ["note", SLUG, "합성 인계 메모"] },
@@ -61,6 +65,8 @@ const ITEMS = [
   { id: 2, kind: "chapter", title: "합성 장", summary: "장 요약", details: "절 구성", order: 1, links: { plan: [1] }, status: "done" },
   { id: 3, kind: "topic", title: "합성 조사 항목", summary: "조사 요약", question: "무엇을 조사하나", links: { plan: [2, 1] }, status: "done" },
 ];
+
+const SUMMARY_TEXT = "합성 파일럿 기획 요약 (근거: 기획 #1·#3)";
 
 const QA = { verdict: "pass", summary: "합성 검토", qc: [], qa: [], spot_checks: [], missed_by_self_review: [], evidence_gaps: [] };
 
@@ -99,7 +105,9 @@ function prepare(c: CliEnv): Ctx {
   writeFileSync(items, JSON.stringify(ITEMS), "utf8");
   const qa = join(root, "pilot-qa.json");
   writeFileSync(qa, JSON.stringify(QA), "utf8");
-  return { c, spec, items, qa };
+  const summary = join(root, "pilot-summary.txt");
+  writeFileSync(summary, SUMMARY_TEXT, "utf8");
+  return { c, spec, items, qa, summary };
 }
 
 // ---------------------------------------------------------------------------
@@ -129,9 +137,19 @@ async function drive(flag: "off" | "on"): Promise<void> {
     const x = prepare(c);
     // core 문서 「여러 프로젝트」: 세션 처음에 정한 ID 를 모든 pes 호출에 PES_OWNER 로 붙인다.
     const extra_flag: Record<string, string | undefined> = { PES_OWNER: "sess-pilot0001", ...(flag === "on" ? { PES_DB_CORE: "1" } : { PES_DB_CORE: undefined }) };
+    let set_accepted = false;
     for (const step of PILOT) {
       const args = step.args(x);
       const res = run_pes(c, args, { ...extra_flag, ...(step.env ?? {}) });
+      if (step.command === "set") {
+        if (flag === "on" && res.status !== 0) {
+          // 코어에 대응 명령이 없으면 분명한 한국어 거부 (DB 경로의 직접 쓰기는 없다) — 열은 계속된다
+          assert.doesNotMatch(res.stderr, /Traceback/, "set 거부는 충돌이 아니다");
+          assert.match(res.stderr + res.stdout, /[가-힣]/, "set 거부는 한국어 이유를 말한다");
+          continue;
+        }
+        set_accepted = true;
+      }
       assert.equal(res.status, 0, `[${flag}] pes ${args.join(" ")} → 종료 ${res.status}\n${res.stderr}${res.stdout}`);
       assert.doesNotMatch(res.stderr, /Traceback|SyntaxError|ModuleNotFoundError|UnicodeEncodeError/, `[${flag}] ${step.command}: 충돌이 아니라 정상 종료여야 한다`);
       if (["status", "digest", "show", "report", "approve"].includes(step.command)) {
@@ -144,6 +162,20 @@ async function drive(flag: "off" | "on"): Promise<void> {
       assert.ok(!existsSync(json), "DB 경로에서는 project.json 을 만들지 않는다 (직접 쓰기 0)");
       const projects = c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects WHERE slug = ?", SLUG);
       assert.equal(projects?.n, 1n, "프로젝트가 DB 에 생겼다");
+      if (set_accepted) {
+        const row = c.env.db.get<{ storage_key: string }>(
+          `SELECT b.storage_key FROM artifacts a
+             JOIN object_versions ov ON ov.object_id = a.object_id
+             JOIN version_files vf ON vf.version_id = ov.id
+             JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
+            WHERE a.project_id = (SELECT id FROM projects WHERE slug = ?) AND a.kind = 'report' AND b.original_name = 'report.md'
+            ORDER BY ov.version_no DESC`,
+          SLUG,
+        );
+        assert.ok(row, "DB 단계 보고서 report.md");
+        const md = normalize(readFileSync(disk_path(c.env, row), "utf8"));
+        assert.ok(md.includes(`## 1. 요약\n\n${SUMMARY_TEXT}`), "[on] 보고서 '요약' 이 set 한 값으로 채워졌다");
+      }
       const actions = c.commits().map((m) => m.action);
       for (const want of ["project.created", "round.started", "round.sealed", "stage.approved"]) {
         assert.ok(actions.includes(want), `영수증 ${want} 이 남아야 한다 (실제: ${actions.join(",")})`);
@@ -152,6 +184,10 @@ async function drive(flag: "off" | "on"): Promise<void> {
       assert.ok(existsSync(json), "플래그 없음(v0.15)에서는 project.json 이 상태다");
       const p = JSON.parse(readFileSync(json, "utf8")) as { stages?: Record<string, { status?: string }> };
       assert.equal(p.stages?.plan?.status, "approved", "기획이 승인됐다");
+      assert.equal(set_accepted, true, "[off] set 이 성공했다");
+      const report = normalize(readFileSync(join(folder, "reports", "plan", "report.md"), "utf8"));
+      assert.ok(report.includes(`## 1. 요약\n\n${SUMMARY_TEXT}`), "[off] 보고서 '요약' 이 note 가 아니라 set 한 값으로 채워졌다");
+      assert.doesNotMatch(report, /\(요약 없음/, "[off] 빈 요약 안내가 없다");
       const projects = c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects WHERE slug = ?", SLUG);
       assert.equal(projects?.n, 0n, "플래그 없이는 DB 를 건드리지 않는다");
     }

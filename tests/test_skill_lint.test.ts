@@ -631,6 +631,13 @@ const ROUTES: Route[] = [
   { route: "인계 메모·상태", files: ["skills/core/SKILL.md"], all: ["note", "status", "digest", "show"] },
   { route: "세션 잠금", files: ["skills/core/SKILL.md"], all: ["lock", "unlock"] },
   { route: "에이전트 작업 경로(context→claim→submit)", files: ["skills/core/SKILL.md"], all: ["context", "claim", "submit"] },
+  // SEL-50: 요약·변경점·남은 일·설정·점검·최종 요약/결론은 전용 명령 set (note·section 우회 금지)
+  { route: "단계 요약·변경점·남은 일·설정·점검 쓰기(set)", files: ["skills/core/SKILL.md"], all: ["set"] },
+  { route: "기획 요약(set)", files: ["skills/plan/SKILL.md"], all: ["set"] },
+  { route: "조사 요약(set)", files: ["skills/research/SKILL.md"], all: ["set"] },
+  { route: "분석 요약(set)", files: ["skills/analyze/SKILL.md"], all: ["set"] },
+  { route: "집필 요약(set)", files: ["skills/write/SKILL.md"], all: ["set"] },
+  { route: "검증 요약(set)", files: ["skills/verify/SKILL.md"], all: ["set"] },
   // 단계별: 결과를 상태로 넘기는 길 — 직접 쓰기 대신 merge 또는 submit
   { route: "기획 항목 입력", files: ["skills/plan/SKILL.md"], all: ["ask-prep", "approve"], each_any: ["merge", "submit"] },
   { route: "조사 결과 병합", files: ["skills/research/SKILL.md"], all: ["ask-prep", "merge", "digest", "approve"] },
