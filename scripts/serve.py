@@ -8,7 +8,9 @@
  - GET /whoami            → {"root": "<홈 폴더>"}  (pes.py 가 같은 홈의 서버인지 확인)
  - POST /<slug>/feedback  {"stage", "round", "kind", "text", "answers", ...}
    → <slug>/feedback/<stage>-R<round>-<시각>.json 저장, <slug>/feedback.log 에 "FEEDBACK <stage> R<round> <kind> <경로>" 한 줄
- - 홈 폴더 자체가 프로젝트면(예전 방식) POST /feedback 도 받는다.
+   (PES_DB_CORE=1 이고 그 프로젝트가 DB 에 있으면: 파일 대신 코어 명령 서비스에 사람 제출 한 번 — feedback.log 줄만 남는다)
+ - 홈 폴더 자체가 프로젝트면(예전 방식) POST /feedback 도 받는다. 0.8 이전 화면의 POST /feedback 은 Referer 로 프로젝트를 찾는다
+   (그 프로젝트가 DB 에 있으면 위와 같이 DB 제출 — 폴더에 쓰지 않는다).
  - 다른 출처(Origin)의 POST 는 거부한다.
 """
 import base64
@@ -36,6 +38,10 @@ DRAIN_LIMIT = 8 * 1024 * 1024
 DRAIN_CHUNK = 64 * 1024
 DRAIN_IO_TIMEOUT = 10
 NODE_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "api_bridge.ts"
+CLI_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "cli_bridge.ts"
+# 같은 주소로 서빙하는 DB 화면 보고서 파일의 종류 (확장자 → Content-Type)
+REPORT_TYPES = {".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8"}
+ROUTE_TTL = 2.0
 
 # 서버가 직접 내는 API 오류의 한국어 message 와 next_action (Node ApiApp 의 봉투와 같은 규칙).
 _API_ERROR_TEXT = {
@@ -281,6 +287,10 @@ class LocalHTTPServer(ThreadingHTTPServer):
     host 주소를 그대로 쓴다.
     """
 
+    # listen() 대기열. Python 3.14 이하의 socketserver 기본값은 5 라서, 같은 순간에 여러 탭·요청이 붙으면
+    # 6번째부터 연결이 거절된다(Windows ECONNREFUSED, macOS ECONNRESET) — 보낸 답이 사라진다. 3.15 기본값과 같은 128.
+    request_queue_size = 128
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # The API database is migrated lazily on the first API request that
@@ -300,11 +310,81 @@ class LocalHTTPServer(ThreadingHTTPServer):
         self.server_port = port
 
 
+def cli_bridge(op, slug=None, args=None, timeout=60):
+    """pes_core/cli_bridge.ts 를 한 번 부른다 (DB 화면 경로 — 자격 없음 = 이 컴퓨터 DB 의 사람 소유자).
+    돌려주는 것: 코어의 답 dict({ok, data} | {ok:false, code, message}). 프로세스가 실패하면 None."""
+    node = shutil.which("node")
+    if node is None:
+        return None
+    request = {"op": op, "slug": slug, "session": None, "token": None, "args": args or {}}
+    try:
+        proc = subprocess.run([node, "--no-warnings", str(CLI_BRIDGE)], input=json.dumps(request).encode("utf-8"),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+        res = json.loads(proc.stdout.decode("utf-8").strip().splitlines()[-1])
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+        return None
+    return res if isinstance(res, dict) and isinstance(res.get("ok"), bool) else None
+
+
+_PES_MODULE = None
+
+
+def pes_module():
+    """scripts/pes.py 를 모듈로 불러 화면 짓기(fill·허브·대시보드)를 한 곳에서 쓴다. PES_DB_CORE=1 일 때만 부른다."""
+    global _PES_MODULE
+    if _PES_MODULE is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("pes_cli", Path(__file__).resolve().parent / "pes.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _PES_MODULE = module
+    return _PES_MODULE
+
+
+MAX_JSON_DEPTH = 200
+SAFE_INT = 2 ** 53 - 1
+
+
+def json_depth_exceeds(value, limit=MAX_JSON_DEPTH):
+    """중첩 깊이가 limit 을 넘는지 — 재귀 없이 센다 (깊은 JSON 이 스택·직렬화를 터뜨리지 않도록 DB 길 입구에서 거른다)."""
+    stack = [(value, 1)]
+    while stack:
+        v, depth = stack.pop()
+        if isinstance(v, (dict, list)):
+            if depth > limit:
+                return True
+            for child in (v.values() if isinstance(v, dict) else v):
+                if isinstance(child, (dict, list)):
+                    stack.append((child, depth + 1))
+    return False
+
+
 def main():
     root = Path(sys.argv[1]).resolve()
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 8760
     allowed = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
     CONFIG = Path.home() / ".pes" / "config.json"
+    db_mode = os.environ.get("PES_DB_CORE") == "1"
+    if db_mode:
+        # 이 서버가 서빙하는 홈이 곧 PES 홈이다. 화면의 읽기·쓰기는 늘 이 컴퓨터 DB 의 사람 소유자 몫이므로 자격 환경변수는 지운다.
+        os.environ["PES_HOME"] = str(root)
+        os.environ.pop("PES_TOKEN", None)
+        os.environ.pop("PES_OWNER", None)
+    routes = {}
+
+    def db_route(slug):
+        """'database'(DB 가 서빙) | 'none'(DB 에 없음·아직 active 아님 → 옛 project.json) | None(DB 를 읽지 못함). 잠깐 기억한다."""
+        if not db_mode or not SLUG.fullmatch(slug or ""):
+            return "none"
+        hit = routes.get(slug)
+        if hit is not None and time.monotonic() - hit[0] < ROUTE_TTL:
+            return hit[1]
+        res = cli_bridge("route", slug)
+        if res is None or not res["ok"]:
+            return None
+        serving = "database" if res["data"].get("serving") == "database" else "none"
+        routes[slug] = (time.monotonic(), serving)
+        return serving
 
     def trusted():
         """~/.pes/config.json 의 trusted_origins (예: Tailscale serve 주소) — 그 주소에서 연 화면도 답을 보낼 수 있다."""
@@ -356,7 +436,11 @@ def main():
                 self.send_header("Connection", "close")
                 self.close_connection = True
             self.end_headers()
-            self.wfile.write(body)
+            self._send_body(body)
+
+        def _send_body(self, body):
+            if not getattr(self, "_head_only", False):  # HEAD: 머리글만 (DB 화면은 GET 과 같은 길이를 알린다)
+                self.wfile.write(body)
 
         def _reject_oversize(self, length, respond):
             """상한을 넘는 본문 거부: 드레인 한도 안이면 남은 본문을 읽어 버린 뒤 413, 넘으면 바로 413 후 닫는다."""
@@ -540,6 +624,93 @@ def main():
         def _is_api_path(self, path):
             return path == "/api/v1" or path.startswith("/api/v1/")
 
+        def _html(self, code, text, content_type="text/html; charset=utf-8"):
+            body = text.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self._send_body(body)
+
+        def _db_down(self):
+            return self._json(503, {"ok": False, "error": "db"})
+
+        def _db_get(self, path):
+            """PES_DB_CORE=1: DB 가 서빙하는 프로젝트의 화면. 처리했으면 그 결과를, 이 길이 아니면 False 를 돌려준다.
+            /api/v1 은 이 앞에서 이미 갈라졌다. 옛 project.json 프로젝트와 정적 파일(ask-*.html 등)은 v0.15 길 그대로다."""
+            parts = [p for p in unquote(path).split("/") if p]
+            if path == "/version":  # 홈 목록: 어느 프로젝트든 바뀌면 커진다
+                res = cli_bridge("version")
+                return self._json(200, {"v": int(res["data"]["v"]) if res is not None and res["ok"] else 0})
+            if not parts or parts == ["index.html"]:  # 홈: 허브 열기·ask 안내·보고서 링크가 /index.html 로도 온다 — 낡은 정적 파일을 내지 않는다
+                if (root / "project.json").exists():  # 예전 방식(홈 폴더 자체가 프로젝트)은 v0.15 길 그대로
+                    return False
+                if (root / "index.html").exists() or any(f.is_dir() for f in root.iterdir()):
+                    try:
+                        return self._html(200, pes_module().db_hub_html(root))
+                    except SystemExit:
+                        return self._db_down()
+                return False
+            slug = parts[0]
+            if not SLUG.fullmatch(slug) or slug in ("ping", "whoami"):
+                return False
+            tail = parts[1:]
+            if tail in (["version"], ["ping"], ["index.html"]) or (tail and tail[0] in ("reports", "out")) or not tail:
+                serving = db_route(slug)
+                if serving is None:
+                    return self._db_down()
+                if serving != "database":
+                    return False
+            else:
+                return False
+            d = root / slug
+            if tail == ["ping"]:
+                return self._json(200, {"ok": True})
+            if tail == ["version"]:
+                res = cli_bridge("version", slug)
+                if res is None or not res["ok"]:
+                    return self._db_down()
+                return self._json(200, {"v": int(res["data"]["v"])})
+            if not tail or tail == ["index.html"]:
+                if not tail:  # 처음 render 전 ask 리다이렉트는 /<slug>/ 에만 — /<slug>/index.html 은 늘 대시보드
+                    base = f"/{slug}/"
+                    if path != base:
+                        return self._redirect(base)
+                    if not (d / "index.html").exists():
+                        asks = sorted(d.glob("ask-*.html"), key=lambda p: p.stat().st_mtime) if d.exists() else []
+                        if asks:
+                            return self._redirect(base + asks[-1].name)
+                try:
+                    return self._html(200, pes_module().db_dashboard_html(d))
+                except SystemExit:
+                    return self._db_down()
+            # 보고서·eli5·최종 보고서: 폴더 파일이 아니라 DB 의 렌더 결과 (같은 주소)
+            res = cli_bridge("report_file", slug, {"path": "/".join(tail)})
+            if res is None:
+                return self._db_down()
+            if not res["ok"]:
+                return self._json(404, {"ok": False}) if res.get("code") == "not_found" else self._db_down()
+            name = res["data"]["name"]
+            body = base64.b64decode(res["data"]["bytes_b64"])
+            ctype = REPORT_TYPES.get(os.path.splitext(name)[1].lower(), "application/octet-stream")
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self._send_body(body)
+            return None
+
+        def do_HEAD(self):
+            if db_mode:  # DB 가 짓는 화면의 HEAD 는 GET 과 같은 머리글(낡은 정적 파일의 길이가 아니다)
+                path = urlsplit(self.path).path
+                if not self._is_api_path(path) and path != "/whoami":
+                    self._head_only = True
+                    handled = self._db_get(path)
+                    if handled is not False:
+                        return handled
+                    self._head_only = False
+            return super().do_HEAD()
+
         def do_GET(self):
             parts = urlsplit(self.path)
             path = parts.path
@@ -547,6 +718,10 @@ def main():
                 return self._api("GET", path, parts.query)
             if path == "/whoami":
                 return self._json(200, {"root": str(root), "single": True}, cors=True)
+            if db_mode:
+                handled = self._db_get(path)
+                if handled is not False:
+                    return handled
             if path == "/version" or path.endswith("/version"):  # 열린 화면이 새 결과를 알아채도록 (index.html·ask-*.html 수정 시각)
                 d0, _ = project_of(path[: -len("version")] or "/")
                 base = d0 if d0 is not None else root
@@ -565,6 +740,34 @@ def main():
                         return self._redirect(base + asks[-1].name)
             return super().do_GET()
 
+        def _db_feedback(self, d, slug, data, stage, rnd, kind, text, answers, origin):
+            """DB 프로젝트의 답: 파일을 쓰지 않고 코어 명령 서비스에 사람 제출 한 번. 알림(feedback.log) 한 줄만 남긴다."""
+            res = cli_bridge("web_feedback", slug, {
+                "stage": stage, "round": rnd, "kind": kind, "text": text, "answers": answers,
+                "spec": str(data.get("spec", ""))[:1024], "set_id": data.get("set_id") if isinstance(data.get("set_id"), str) else None,
+                "via": "html" if origin in allowed else "remote", "origin": origin,
+                "who": self.headers.get("Tailscale-User-Login") or ""})
+            if res is None:
+                return self._db_down()
+            if not res["ok"]:
+                code = res.get("code")
+                if code == "form_revised":
+                    return self._json(409, {"ok": False, "error": "conflict", "message": "질문이 바뀌었습니다 — 화면을 새로 불러온 뒤 다시 보내세요"})
+                if code == "conflict":
+                    return self._db_down()
+                if code in ("invalid_payload", "unknown_command"):
+                    return self._json(400, {"ok": False})
+                if code == "not_found":
+                    return self._json(404, {"ok": False})
+                return self._db_down()
+            name = res["data"]["name"]
+            d.mkdir(parents=True, exist_ok=True)
+            with FEEDBACK_LOG_LOCK:
+                with (d / "feedback.log").open("a", encoding="utf-8") as f:
+                    f.write(f"FEEDBACK {res['data'].get('stage') or stage} R{rnd} {kind} {name}\n")  # 폴더에 파일이 없다: 읽을 이름 (pes pending <프로젝트> --show <이름>)
+            v = res["data"].get("v")
+            return self._json(200, {"ok": True, "file": name, **({"v": v} if isinstance(v, int) else {})})
+
         def do_POST(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
@@ -572,6 +775,25 @@ def main():
                     return self._api_error("forbidden", "origin is not allowed", 403)
                 return self._api("POST", path, urlsplit(self.path).query)
             d, rest = project_of(path)
+            db_slug = None
+            if db_mode:
+                # 답을 받을 프로젝트를 먼저 정한다: '/<slug>/feedback' 은 그 slug, 호환 별칭 '/feedback'(0.8 이전 화면)은
+                # 보낸 페이지 주소(Referer)의 첫 칸. 그다음 DB 서빙 여부를 이 한 곳에서 본다 — DB 프로젝트면 별칭이어도
+                # 같은 명령 서비스로 제출하고(폴더에 project.json 이 남아 있어도) feedback 폴더에는 쓰지 않는다.
+                pp = [p for p in unquote(path).split("/") if p]
+                cand = None
+                if len(pp) == 2 and pp[1] == "feedback" and SLUG.fullmatch(pp[0]):
+                    cand = pp[0]
+                elif path == "/feedback" and not (root / "project.json").exists():
+                    rp = [p for p in unquote(urlsplit(self.headers.get("Referer") or "").path).split("/") if p]
+                    if rp and SLUG.fullmatch(rp[0]):
+                        cand = rp[0]
+                if cand is not None:
+                    serving = db_route(cand)
+                    if serving is None:
+                        return self._db_down()
+                    if serving == "database":
+                        db_slug, d, rest = cand, root / cand, ["feedback"]
             if d is None and path == "/feedback":  # 0.8 이전에 만든 화면: 보낸 페이지 주소로 프로젝트를 찾는다
                 d, _ = project_of(urlsplit(self.headers.get("Referer") or "").path)
                 rest = ["feedback"]
@@ -596,6 +818,11 @@ def main():
                 return self._json(400, {"ok": False, "error": "kind"})
             if not text and not answers:
                 return self._json(400, {"ok": False, "error": "empty"})
+            if db_slug is not None:
+                # DB 길: 코어(자바스크립트 숫자·JSON 파서)가 같은 값을 보도록 입구에서 거른다. 알림 줄·처리 대기 이름·DB 가 한 round 를 말해야 한다.
+                if abs(rnd) > SAFE_INT or json_depth_exceeds(data):
+                    return self._json(400, {"ok": False, "error": "invalid"})
+                return self._db_feedback(d, db_slug, data, stage, rnd, kind, text, answers, origin)
             fb_dir = d / "feedback"
             fb_dir.mkdir(exist_ok=True)
             ts = time.strftime("%Y%m%d-%H%M%S")

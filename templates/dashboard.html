@@ -307,6 +307,7 @@ const STG = (D.stages || []).map(s => ({...s, label: ({analyze:'분석-종합',p
 const LBL = Object.fromEntries(STG.map(s => [s.key, s.label]));
 const esc = QF.esc;
 const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : null;
+const safeRel = p => { const t = String(p || '').trim(), c = t.replace(/[\u0000-\u0020\u007f]/g, ''); return safeUrl(c) || (c && !/^[a-z][a-z0-9+.-]*:|^[\\/]{2}/i.test(c)) ? t : null; };
 const STATUS_TXT = { pending: '대기', asking: '시작 질문 중', active: '진행 중', approved: '승인됨' };
 const KIND_TXT = { rq: '연구 질문', chapter: '목차', topic: '조사 항목', issue: '쟁점', table: '비교표', insight: '시사점', section: '원고', claim: '주장', output: '산출물', schedule: '일정' };
 
@@ -540,8 +541,8 @@ function itemCard(it) {
       ${(it.conflicts || []).map(c => `<div class="conflict">⚠ ${inline(c)}</div>`).join('')}
       ${statsHtml(it.stats)}
       ${it.details ? `<details ${SEL === 'write' ? 'open' : ''}><summary>${SEL === 'write' ? '원고' : '상세 내용'}</summary><div class="details-md">${md(it.details)}</div></details>` : ''}
-      ${it.path ? `<div><a href="${esc(it.path)}" target="_blank">${esc(it.path)}</a></div>` : ''}
-      ${(it.shots || []).length ? `<div class="shots">${it.shots.map(p => `<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" alt="스크린샷"></a>`).join('')}</div>` : ''}
+      ${it.path ? `<div>${safeRel(it.path) ? `<a href="${esc(safeRel(it.path))}" target="_blank" rel="noopener">${esc(it.path)}</a>` : esc(it.path)}</div>` : ''}
+      ${(it.shots || []).filter(safeRel).length ? `<div class="shots">${it.shots.filter(safeRel).map(p => `<a href="${esc(safeRel(p))}" target="_blank" rel="noopener"><img src="${esc(safeRel(p))}" alt="스크린샷"></a>`).join('')}</div>` : ''}
       ${sourcesHtml(it.sources)}${verifyHtml(it.verify)}
     </div>${fb}</article>`;
 }

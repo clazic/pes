@@ -1,0 +1,107 @@
+<!-- PES_DB_CORE=1 대시보드 보강: 초안 보존(sessionStorage) · 서버 영수증 뒤에만 성공 표시 · 충돌 안내 · 실행 중 run / Go 전송 상태 글자 표시.
+     템플릿(dashboard.html)은 v0.15 그대로다. -->
+<style>
+  #runbox ul { margin: 8px 0 0; padding-left: 20px; }
+  #runbox li { margin: 4px 0; }
+</style>
+<script>
+(() => {
+  // ---- 자기 제출은 '새 결과'가 아니다: 영수증의 v(커밋 뒤 커서)까지는 이 탭이 이미 아는 값으로 본다 ----
+  let own = 0, floor = null;
+  const realFetch = window.fetch.bind(window);
+  realFetch('version', { cache: 'no-store' }).then(r => r.json()).then(j => { if (typeof j.v === 'number' && floor === null) floor = j.v; }).catch(() => {});
+  window.fetch = async (url, init) => {
+    const r = await realFetch(url, init);
+    if (String(url) !== 'version' || own === 0 || !r.ok) return r;
+    try {
+      const j = await r.clone().json();
+      if (typeof j.v === 'number' && j.v <= own && floor !== null && floor <= j.v) return new Response(JSON.stringify({ v: floor }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (e) {}
+    return r;
+  };
+  const seen = j => { if (typeof j.v === 'number' && j.v > own) own = j.v; };
+
+  // ---- 서버 영수증: {ok:true, file} 을 받은 뒤에만 성공이다. 충돌(409)은 따로 안내하고 클립보드로 넘기지 않는다 ----
+  const CONFLICT = '보낼 수 없습니다(충돌): 그동안 질문이 바뀌었습니다. 입력한 내용은 그대로 남아 있습니다 — 화면을 새로 불러와 다시 보내 주세요.';
+  const baseToast = toast, baseCopy = copy;
+  let conflict = false;
+  toast = m => baseToast(conflict && /^보내기 실패/.test(m) ? CONFLICT : m);
+  copy = async text => { if (conflict) { conflict = false; return; } return baseCopy(text); };
+  post = async body => {
+    conflict = false;
+    // AI 점검 답에는 화면이 보인 폼의 판(form_key·set_id)을 싣는다 — 그 뒤 폼이 개정됐으면 서버가 409 로 거절한다
+    const rv = body && body.kind === 'review' ? RV() : null;
+    if (rv && typeof rv.set_id === 'string') { body.set_id = rv.set_id; if (typeof rv.form_key === 'string') body.spec = rv.form_key; }
+    // 영수증 뒤에 지울 초안은 보내기 시작한 그 단계·그 내용뿐이다 (응답을 기다리는 동안 탭을 바꾸거나 더 입력해도 그것은 남는다)
+    const k = key(body && typeof body.stage === 'string' ? body.stage : SEL);
+    let sentDraft = null;
+    try { sentDraft = sessionStorage.getItem(k); } catch (e) {}
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal });
+      let j = null;
+      try { j = await r.json(); } catch (e) {}
+      if (r.status === 409) { conflict = true; throw new Error('conflict'); }
+      if (!r.ok || !j || j.ok !== true || typeof j.file !== 'string') throw new Error('no receipt');
+      seen(j);
+      clearDraft(k, sentDraft);
+    } finally { clearTimeout(timer); }
+  };
+
+  // ---- 초안: 이 탭(sessionStorage)에 단계별로 둔다. 화면을 다시 그려도, 새로 불러와도 입력 중이던 것이 남는다 ----
+  const key = (stage = SEL) => 'pes-draft:' + location.pathname + ':' + stage;
+  const fields = () => [...document.querySelectorAll('#app textarea, #app input')].filter(el => el.id !== 'preview');
+  const ident = el => el.id ? '#' + el.id : el.dataset.act ? 'fb:' + (el.closest('.fb')?.dataset.id ?? '') + ':' + el.dataset.act : el.dataset.sug ? 'sug:' + el.dataset.sug
+    : el.dataset.q ? 'q:' + el.dataset.q + ':' + (el.type === 'text' || el.type === 'textarea' ? '' : el.value) : el.dataset.qo ? 'qo:' + el.dataset.qo : null;
+  function saveDraft() {
+    try {
+      const state = {};
+      for (const el of fields()) { const id = ident(el); if (id) state[id] = el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value; }
+      sessionStorage.setItem(key(), JSON.stringify(state));
+    } catch (e) {}
+  }
+  function clearDraft(k, sentDraft) {
+    try { if (sentDraft !== null && sessionStorage.getItem(k) === sentDraft) sessionStorage.removeItem(k); } catch (e) {}
+  }
+  function restoreDraft() {
+    let state = null;
+    try { state = JSON.parse(sessionStorage.getItem(key()) || 'null'); } catch (e) {}
+    if (!state) return;
+    for (const el of fields()) {
+      const id = ident(el);
+      if (!id || !(id in state)) continue;
+      if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!state[id]; else el.value = state[id];
+    }
+    const r = RV(); if (r) QF.applyShow(document.getElementById('rvbox'), r.questions);
+    refresh();
+  }
+  document.addEventListener('input', saveDraft, true);
+  document.addEventListener('change', saveDraft, true);
+
+  // ---- 실행 중인 run · Go 전송 상태 (읽기 전용 글자 표시) ----
+  const RUN = { running: '실행 중', queued: '시작을 기다리는 중', waiting_human: '사람의 답을 기다리는 중', blocked_usage: '사용량 한도로 멈춰 기다리는 중' };
+  const SEND = {
+    prepared: '전송 준비 중', authorized: '전송 중 — 보내는 중입니다', sent: '전송 중 — 응답을 기다리는 중입니다',
+    unknown: '결과 확인 불가 — 보냈지만 응답을 확인하지 못했습니다. 같은 요청을 다시 보내기 전에 결과를 확인하세요',
+    blocked: '전송이 막혔습니다 — 정책에 따라 보내지 않았습니다',
+  };
+  function runBox() {
+    document.getElementById('runbox')?.remove();
+    const runs = D.runs || [], sends = D.dispatches || [];
+    const app = document.getElementById('app');
+    if (!app || (!runs.length && !sends.length)) return;
+    const li = t => `<li>${esc(t)}</li>`;
+    const html = `<section class="box" id="runbox"><h2>작업 상태</h2>
+      <div class="meta">Claude 실행과 외부 전송의 현재 상태입니다. 보기만 하며, 여기서 바꿀 것은 없습니다.</div><ul>${
+        runs.map(r => li(`작업 ${RUN[r.status] || r.status}${r.model ? ' · ' + r.model : ''}${r.started ? ' · 시작 ' + r.started : ''}`)).join('')}${
+        sends.map(s => li(`${s.provider} ${SEND[s.state] || s.state}${s.reason ? ' (' + s.reason + ')' : ''}`)).join('')}</ul></section>`;
+    const anchor = app.querySelector('.pipeline') || app.firstElementChild;
+    if (anchor) anchor.insertAdjacentHTML('afterend', html); else app.insertAdjacentHTML('afterbegin', html);
+  }
+
+  const baseRender = render;
+  render = () => { baseRender(); runBox(); restoreDraft(); };
+  render();
+})();
+</script>

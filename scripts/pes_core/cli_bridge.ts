@@ -43,9 +43,10 @@ import { connect, connect_read_only, load_migrations, migrate, probe_database, t
 import { approve_stage, reopen_stage, seal_round, start_round } from "./editions.ts";
 import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
-import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex } from "./files.ts";
+import { FORM_REVISED } from "./commands/records.ts";
+import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex, write_storage_bytes } from "./files.ts";
 import { serving_path } from "./migration.ts";
-import { build_project_view, not_a_report_sql, rendered_files } from "./legacy_view.ts";
+import { build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -1551,6 +1552,39 @@ function find_report_object(
   return row === undefined ? undefined : { ...row };
 }
 
+/**
+ * The stored file of a report the v0.15 project registered in stages.<stage>.reports, found by its exact registered path
+ * on the current version of the imported report object of that stage (active edition). Only a version with exactly one
+ * rendered, stored file answers; nothing else (no other path, no file on disk) is looked at.
+ */
+function migrated_report_key(s: Session, project: ProjectInfo, stage: StageInfo, path: string): string | null {
+  const rows = s.db.all<{ version_id: string }>(
+    `SELECT o.current_version_id AS version_id
+       FROM objects o
+       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = 'report' AND o.edition_id = ? AND a.stage_id = ?
+        AND json_extract(v.metadata_json, '$.role') IS NULL
+        AND json_extract(v.metadata_json, '$.legacy_extra.report.path') = ?
+      ORDER BY o.display_no`,
+    project.id,
+    stage.edition_id,
+    stage.id,
+    path,
+  );
+  for (const row of rows) {
+    const files = s.db.all<{ storage_key: string | null }>(
+      `SELECT b.storage_key AS storage_key
+         FROM version_files vf JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
+        WHERE vf.project_id = ? AND vf.version_id = ? AND vf.role = 'rendered'`,
+      project.id,
+      row.version_id,
+    );
+    if (files.length === 1 && typeof files[0]!.storage_key === "string") return files[0]!.storage_key;
+  }
+  return null;
+}
+
 /** Current versions of the stage's real items (the same set render seals, minus removed ones). */
 function item_versions(s: Session, project: ProjectInfo, stage: StageInfo): string[] {
   return s.db
@@ -1768,18 +1802,312 @@ async function output_run(s: Session, req: Request, web: boolean): Promise<Recor
 const assemble_op: Handler = (s, req) => output_run(s, req, false);
 const web_op: Handler = (s, req) => output_run(s, req, true);
 
+// screens (stage 2 PR18) ----------------------------------------------------
+
+/** The database change cursor the screens poll: the newest commit of the project. Only a write makes it larger. */
+function change_cursor(s: Session, project: ProjectInfo): number {
+  const row = s.db.get<{ n: bigint | null }>("SELECT max(rowid) AS n FROM mutation_commits WHERE project_id = ?", project.id);
+  return Number(row?.n ?? 0n);
+}
+
+/** Everything the dashboard page embeds that comes from the database (pes.py `build_index`'s data, minus the labels and the ask list). */
+const screen: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const view = build_project_view(s.db, project.id, s.objects);
+  // Only report links that open: a stage report entry is listed when its path resolves to a stored file (a report this
+  // DB generated, or an imported registered report with its rendered file). Files the import left to be generated again
+  // (md/html/eli5, out/) appear after `pes report`/`pes web` make them.
+  for (const key of STAGE_KEYS) {
+    const st = (view.project.stages as Record<string, Record<string, unknown>> | undefined)?.[key];
+    if (st === undefined || !Array.isArray(st.reports)) continue;
+    st.reports = st.reports.filter((entry: unknown) => {
+      const path = is_record(entry) ? entry.path : undefined;
+      return typeof path === "string" && report_storage_key(s, project, path) !== null;
+    });
+  }
+  const lease = s.lease(project);
+  const last = s.db.get<{ at: bigint | null }>("SELECT max(created_at) AS at FROM mutation_commits WHERE project_id = ?", project.id);
+  return {
+    project: view.project,
+    pending: view.pending,
+    feedback: view.feedback,
+    snapshots: build_snapshots(s.db, project.id, s.objects),
+    outputs: output_names(s.db, project.id).filter((path) => report_storage_key(s, project, path) !== null),
+    runs: s.db
+      .all<{ id: string; status: string; mode: string; runtime: string; model: string; started_at: bigint | null }>(
+        `SELECT id, status, mode, runtime, model, started_at FROM runs
+          WHERE project_id = ? AND status IN ('queued', 'running', 'waiting_human', 'blocked_usage') ORDER BY rowid`,
+        project.id,
+      )
+      .map((row) => ({ id: row.id, status: row.status, mode: row.mode, runtime: row.runtime, model: row.model, started: row.started_at === null ? "" : local_stamp(Number(row.started_at)) })),
+    dispatches: s.db
+      .all<{ id: string; state: string; provider: string; unknown_reason: string | null }>(
+        `SELECT id, state, provider, unknown_reason FROM outbound_dispatches
+          WHERE project_id = ? AND state IN ('prepared', 'authorized', 'sent', 'unknown', 'blocked') ORDER BY rowid`,
+        project.id,
+      )
+      .map((row) => ({ id: row.id, state: row.state, provider: row.provider, reason: row.unknown_reason ?? "" })),
+    lock: lease === null ? null : { owner: lease.session ?? `agent-run:${lease.run_id}`, since: local_stamp(lease.heartbeat_at) },
+    updated: local_stamp(Number(last?.at ?? 0n)),
+    cursor: change_cursor(s, project),
+  };
+};
+
+const version: Handler = async (s, req) => {
+  if (req.slug === undefined) {
+    // the home list: any project's change
+    const row = s.db.get<{ n: bigint | null }>("SELECT max(rowid) AS n FROM mutation_commits");
+    return { v: Number(row?.n ?? 0n) };
+  }
+  const project = served_project(s, req);
+  return { v: change_cursor(s, project) };
+};
+
+/**
+ * The stored file behind one report URL path (reports/<stage>/<name> or out/<name>), or null. The screen lists a report
+ * link only when this finds its file, and report_file serves exactly this — so every link the dashboard shows opens.
+ */
+function report_storage_key(s: Session, project: ProjectInfo, path: string): string | null {
+  const parts = path.split("/");
+  if (parts.some((part) => part.length === 0)) return null;
+  if (parts.length === 3 && parts[0] === "reports" && STAGE_KEYS.includes(parts[1] as string)) {
+    const stage = s.stage(project, parts[1]);
+    const found = find_report_object(s, project, "stage_report", stage, stage.edition_id);
+    // a report this DB generated: its current version's files, and only those (the dashboard lists the same set)
+    if (found !== undefined) return rendered_files(s.db, project.id, found.version_id).find((entry) => entry.name === parts[2])?.storage_key ?? null;
+    // no generated report for the stage yet: a report the v0.15 project registered (PR11 import keeps its entry as
+    // metadata.legacy_extra.report and the file as the version's one rendered blob) — the exact registered path only
+    return migrated_report_key(s, project, stage, path);
+  }
+  if (parts.length === 2 && parts[0] === "out" && project.active_edition_id !== null) {
+    const found = find_report_object(s, project, "final_output", null, project.active_edition_id);
+    return found === undefined ? null : (rendered_files(s.db, project.id, found.version_id).find((entry) => entry.name === parts[1])?.storage_key ?? null);
+  }
+  return null;
+}
+
+/** One rendered report file (reports/<stage>/<name> or out/<name>) from the database, base64. */
+const report_file: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const path = text_arg(req.args ?? {}, "path");
+  const parts = path.split("/");
+  const is_report_path =
+    (parts.length === 3 && parts[0] === "reports" && STAGE_KEYS.includes(parts[1] as string)) ||
+    (parts.length === 2 && parts[0] === "out" && project.active_edition_id !== null);
+  if (!is_report_path) throw new Refusal("not_found", "보고서 경로가 아닙니다");
+  const storage_key = report_storage_key(s, project, path);
+  if (storage_key === null) throw new Refusal("not_found", "보고서 파일이 없습니다");
+  const bytes = read_storage_bytes(s.objects, project.id, storage_key);
+  return { name: parts[parts.length - 1] as string, bytes_b64: Buffer.from(bytes).toString("base64") };
+};
+
+/**
+ * The raw text of received answers by the name `pending` printed (what v0.15 kept in feedback/<name>.json). A screen answer
+ * or an imported one is its raw blob; an answer that came through the API has no raw file, so it is shown as a JSON document
+ * built from its submission row and answer versions (name `submission-<id>.json`, the name `pending` gives it).
+ */
+const answer_texts: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const raw = (req.args ?? {}).names;
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 200 || raw.some((n) => typeof n !== "string" || n.length === 0 || n.length > 200)) {
+    throw new Refusal("invalid_payload", "읽을 답의 이름이 필요합니다", 2);
+  }
+  const answers: Array<{ name: string; text: string }> = [];
+  for (const name of raw as string[]) {
+    const row = s.db.get<{ storage_key: string | null }>(
+      `SELECT b.storage_key AS storage_key FROM submissions s
+         JOIN blobs b ON b.project_id = s.project_id AND b.id = s.raw_blob_id
+        WHERE s.project_id = ? AND b.original_name = ? ORDER BY s.rowid LIMIT 1`,
+      project.id,
+      name,
+    );
+    if (row !== undefined && row.storage_key !== null) {
+      answers.push({ name, text: new TextDecoder().decode(read_storage_bytes(s.objects, project.id, row.storage_key)) });
+      continue;
+    }
+    const bare = name.match(/^submission-(.+)\.json$/);
+    const sub =
+      bare === null
+        ? undefined
+        : s.db.get<{ id: string; set_id: string | null; received_at: bigint; via: string }>(
+            "SELECT id, set_id, received_at, via FROM submissions WHERE project_id = ? AND id = ? AND raw_blob_id IS NULL",
+            project.id,
+            bare[1],
+          );
+    if (sub === undefined) throw new Refusal("not_found", `받은 답이 없습니다: ${name}`, 2);
+    const values = s.db.all<{ question_id: string; state: string; value: string }>(
+      `SELECT av.question_id AS question_id, av.state AS state, av.value AS value
+         FROM answers a JOIN answer_versions av ON av.project_id = a.project_id AND av.object_id = a.object_id
+        WHERE a.project_id = ? AND a.submission_id = ? ORDER BY av.rowid`,
+      project.id,
+      sub.id,
+    );
+    const doc = {
+      submission_id: sub.id,
+      set_id: sub.set_id,
+      via: sub.via,
+      time: local_stamp(Number(sub.received_at)),
+      answers: values.map((v) => ({ question_id: v.question_id, state: v.state, value: parse_json_value(v.value) })),
+    };
+    answers.push({ name, text: JSON.stringify(doc, null, 1) });
+  }
+  return { answers };
+};
+
+function parse_json_value(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/** The longest form key `pes ask` publishes (canonical: lower-case a-z0-9 and "-", no "-" at either end). */
+const FORM_KEY_MAX = 80;
+/** How much of a screen's raw spec is read to find its canonical form key (longer cannot name a published form). */
+const SPEC_RAW_MAX = 1024;
+
+const WEB_KINDS = new Set(["feedback", "review", "stage_start", "approve", "resume", "reopen"]);
+
+/** `YYYYMMDD-HHMMSS` in local time (what time.strftime("%Y%m%d-%H%M%S") gave the v0.15 answer file). */
+function file_stamp(ms: number): string {
+  const d = new Date(ms);
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+}
+
+/**
+ * An answer the human sent from the local screen. v0.15 wrote feedback/<stage>-R<round>-<time>.json; now that
+ * record is the raw file of one submission (CommandService input.record_chat with `web`), one commit and nothing else on disk.
+ * A form that was revised since the page was opened (its question set is no longer the newest) is refused with `conflict`.
+ */
+const web_feedback: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const auth = s.auth(project, undefined, null); // the project's human owner; no lease is taken (the screen never blocks on Claude's lock)
+  const args = req.args ?? {};
+  const kind = typeof args.kind === "string" ? args.kind : "feedback";
+  if (!WEB_KINDS.has(kind)) throw new Refusal("invalid_payload", "kind");
+  const requested = typeof args.stage === "string" && STAGE_KEYS.includes(args.stage) ? args.stage : undefined;
+  const stage = s.stage(project, requested);
+  const round = typeof args.round === "number" && Number.isSafeInteger(args.round) ? args.round : 0;
+  const text = typeof args.text === "string" ? args.text.trim() : "";
+  const answers = is_record(args.answers) ? args.answers : {};
+  const raw_spec = typeof args.spec === "string" ? args.spec.slice(0, SPEC_RAW_MAX) : "";
+  const spec = raw_spec.slice(0, FORM_KEY_MAX); // the record keeps v0.15's 80-character spec
+
+  // which question set (form version) this answer belongs to. The form key is the canonical form of the whole spec
+  // (what `pes ask` published, at most FORM_KEY_MAX characters) — never of a cut spec, whose canonical form could be another key.
+  let set_id: string | null = null;
+  const form_key = raw_spec.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "");
+  const checked = kind !== "approve" && kind !== "reopen" && kind !== "feedback";
+  const named_set = typeof args.set_id === "string" && args.set_id.length > 0 ? args.set_id : null;
+  if (checked && form_key.length === 0 && named_set !== null) {
+    // a page that names its form version but no usable form key is not an old unmarked page: the version decides
+    const row = s.db.get<{ id: string }>("SELECT id FROM question_sets WHERE project_id = ? AND stage_id = ? AND id = ?", project.id, stage.id, named_set);
+    if (row === undefined) throw new Refusal("not_found", "질문 폼의 판을 찾을 수 없습니다");
+    set_id = row.id;
+  }
+  if (form_key.length > 0 && checked) {
+    const sets = s.db.all<{ id: string }>(
+      "SELECT id FROM question_sets WHERE project_id = ? AND stage_id = ? AND form_key = ? ORDER BY version_no",
+      project.id,
+      stage.id,
+      form_key,
+    );
+    const named = named_set;
+    if (sets.length === 0 && named !== null) {
+      // the page names a form version, but this form key has none: the form cannot be checked, so the answer is not taken silently
+      throw new Refusal("form_revised", "질문이 바뀌었습니다 — 화면을 새로 불러온 뒤 다시 보내세요");
+    }
+    if (sets.length > 0) {
+      if (named !== null) {
+        if (!sets.some((row) => row.id === named)) throw new Refusal("not_found", "질문 폼의 판을 찾을 수 없습니다");
+        set_id = named;
+      } else if (sets.length > 1) {
+        // a page that does not say which version it showed cannot be tied to one of several
+        throw new Refusal("form_revised", "질문이 바뀌었습니다 — 화면을 새로 불러온 뒤 다시 보내세요");
+      } else {
+        set_id = (sets[0] as { id: string }).id;
+      }
+    }
+  }
+
+  const now = s.now();
+  const stamp = file_stamp(now);
+  const doc: Record<string, unknown> = {
+    stage: stage.key,
+    round,
+    time: stamp,
+    kind,
+    text,
+    answers,
+    spec,
+    via: args.via === "remote" ? "remote" : "html",
+    origin: typeof args.origin === "string" ? args.origin : "",
+    who: typeof args.who === "string" ? args.who : "",
+    id: randomUUID(),
+  };
+  if (set_id !== null) doc.set_id = set_id;
+  const bytes = utf8(JSON.stringify(doc, null, 1));
+  const sha = sha256_hex(bytes);
+  const known = s.db.get("SELECT 1 AS ok FROM blobs WHERE project_id = ? AND sha256 = ? AND size = ?", project.id, sha, bytes.byteLength) !== undefined;
+  if (!known) {
+    s.fresh_files.push({ project_id: project.id, storage_key: `${project.id}/${sha}` });
+    write_storage_bytes(s.objects, project.id, `${project.id}/${sha}`, bytes);
+  }
+  const ctx: MutationContext = { ...s.ctx(project, auth), via: "web", client_request_id: `web-${randomUUID()}` };
+  // The file name is chosen inside the unit (BEGIN IMMEDIATE): concurrent requests in the same second each see the names
+  // the earlier ones committed and take the next -k suffix, so a name clash is never reported as a changed form.
+  const out = await s.unit(async () => {
+    let name = "";
+    for (let k = 1; ; k += 1) {
+      name = `${stage.key}-R${round}-${stamp}${k === 1 ? "" : `-${k}`}.json`;
+      const used =
+        s.db.get("SELECT 1 AS ok FROM blobs WHERE project_id = ? AND original_name = ?", project.id, name) !== undefined ||
+        s.db.get(
+          `SELECT 1 AS ok FROM submissions s JOIN blobs b ON b.project_id = s.project_id AND b.id = s.raw_blob_id
+            WHERE s.project_id = ? AND b.original_name = ?`,
+          project.id,
+          name,
+        ) !== undefined;
+      if (!used) break;
+    }
+    try {
+      const done = await record_chat(s.service, ctx, {
+        stage: stage.key,
+        text: text.length > 0 ? text : JSON.stringify(answers),
+        kind,
+        web: { name, sha256: sha, size: bytes.byteLength, set_id },
+      });
+      return { name, done };
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "conflict" && error.message === FORM_REVISED) {
+        throw new Refusal("form_revised", "질문이 바뀌었습니다 — 화면을 새로 불러온 뒤 다시 보내세요");
+      }
+      throw error;
+    }
+  });
+  // v: the change cursor right after this commit — the screen that sent the answer raises its own baseline to it
+  return { name: out.name, stage: stage.key, submission_id: result_of(out.done).submission_id, set_id, v: change_cursor(s, project) };
+};
+
 function in_unit(handler: Handler): Handler {
   return (s, req) => s.unit(() => handler(s, req));
 }
 
 /** Operations that only read: they use a read-only connection and change nothing on disk. */
-const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "live_locks", "overview", "context", "qa-data"]);
+const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
 
 const HANDLERS: Record<string, Handler> = {
   slugs,
   active_slugs,
   route,
   read_project,
+  screen,
+  version,
+  report_file,
+  answer_texts,
+  web_feedback,
   report: in_unit(report),
   assemble: in_unit(assemble_op),
   web: in_unit(web_op),

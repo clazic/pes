@@ -13,6 +13,7 @@
     "lint:skills": "node scripts/lint_skills.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/node": "26.6.6",
     "typescript": "7.0.2"
   }

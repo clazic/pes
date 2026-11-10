@@ -9,6 +9,8 @@
 // wrappers are in scripts/pes_core/records.ts (one service.execute each).
 
 import { ApiError } from "../errors.ts";
+import { read_storage_bytes, sha256_hex } from "../files.ts";
+import { insert_ready_blob } from "./files.ts";
 import {
   artifact_digest_fields,
   content_digest,
@@ -32,6 +34,10 @@ import {
 } from "./shared.ts";
 
 const MAX_TEXT = 100_000;
+/** A screen answer's text may be as long as the HTTP body allows (v0.15 took it); only the body limit bounds it. */
+const MAX_WEB_TEXT = 262_144;
+/** ApiError message when the answer's form was revised; the bridge turns exactly this conflict into the screen's 409. */
+export const FORM_REVISED = "the form was revised after this answer was written";
 const MAX_MARK_NAMES = 200;
 const MAX_NAME = 200;
 
@@ -49,12 +55,12 @@ function scope_of(runtime: CommandRuntime): Scope {
   return { project_id: project.id, actor_id };
 }
 
-function require_text(payload: Record<string, unknown>, field: string): string {
+function require_text(payload: Record<string, unknown>, field: string, max = MAX_TEXT): string {
   const text = require_non_empty_string(payload, field);
   if (text.trim().length === 0) {
     throw new ApiError("invalid_payload", `${field} must not be blank`);
   }
-  if (text.length > MAX_TEXT) {
+  if (text.length > max) {
     throw new ApiError("invalid_payload", `${field} is too long`);
   }
   return text;
@@ -192,10 +198,11 @@ function run_add_note(runtime: CommandRuntime): CommandResult {
 
 function run_record_chat(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage", "text", "kind"]);
-  const text = require_text(payload, "text");
+  reject_unknown_fields(payload, ["stage", "text", "kind", "web"]);
+  const text = require_text(payload, "text", payload.web === undefined ? MAX_TEXT : MAX_WEB_TEXT);
   const kind = payload.kind === undefined ? "feedback" : require_non_empty_string(payload, "kind");
   if (kind.length > 64) throw new ApiError("invalid_payload", "kind is too long");
+  if (payload.web !== undefined) return run_web_submission(runtime, payload, kind);
   const scope = scope_of(runtime);
   const stage = resolve_stage_key(runtime, scope.project_id, payload.stage);
   const ids = new_ids(runtime);
@@ -236,6 +243,117 @@ function run_record_chat(runtime: CommandRuntime): CommandResult {
         payload: { ...ids, stage: stage.key, round_no: stage.latest_round_no, kind },
       },
     ],
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// input.record_chat with `web`: an answer the human sent from the local screen (stage 2 PR18)
+//
+// The screen's POST body, as v0.15 saved it in feedback/<name>.json, is the submission's raw file: the bridge stages
+// the bytes in the object store first, this command adds the blob row (ready), and one submissions row (via the
+// context's channel, 'web') that points at it. That row is what `pending`, the dashboard's "received answers" and
+// the report's decision section read. No note artifact is written: the submission itself is the pending item.
+
+const SHA256 = /^[0-9a-f]{64}$/;
+
+function run_web_submission(runtime: CommandRuntime, payload: Record<string, unknown>, kind: string): CommandResult {
+  const web = require_record(payload.web);
+  reject_unknown_fields(web, ["name", "sha256", "size", "set_id"]);
+  const name = require_non_empty_string(web, "name");
+  if (name.length > MAX_NAME || !name.isWellFormed() || /[\\/\0]/.test(name)) {
+    throw new ApiError("invalid_payload", "name must be a plain file name");
+  }
+  const sha256 = require_non_empty_string(web, "sha256");
+  if (!SHA256.test(sha256)) throw new ApiError("invalid_payload", "sha256 must be 64 hex digits");
+  const size = web.size;
+  if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) {
+    throw new ApiError("invalid_payload", "size must be a non-negative integer");
+  }
+  const set_id = web.set_id === undefined || web.set_id === null ? null : require_non_empty_string(web, "set_id");
+  const scope = scope_of(runtime);
+  const stage = resolve_stage_key(runtime, scope.project_id, payload.stage);
+  if (runtime.objects_dir === null) throw new ApiError("conflict", "no object store is configured");
+
+  // the bytes the bridge staged must be exactly the ones named
+  const storage_key = `${scope.project_id}/${sha256}`;
+  let bytes: Uint8Array;
+  try {
+    bytes = read_storage_bytes(runtime.objects_dir, scope.project_id, storage_key);
+  } catch {
+    throw new ApiError("conflict", "the submitted file is not in the object store");
+  }
+  if (bytes.byteLength !== size || sha256_hex(bytes) !== sha256) {
+    throw new ApiError("invalid_payload", "the submitted bytes do not match sha256/size");
+  }
+
+  if (set_id !== null) {
+    const set = runtime.db.get<{ stage_id: string; form_key: string; version_no: bigint }>(
+      "SELECT stage_id, form_key, version_no FROM question_sets WHERE project_id = ? AND id = ?",
+      scope.project_id,
+      set_id,
+    );
+    if (set === undefined || set.stage_id !== stage.id) throw new ApiError("not_found", "question set not found");
+    const newest = runtime.db.get<{ n: bigint | null }>(
+      "SELECT MAX(version_no) AS n FROM question_sets WHERE project_id = ? AND stage_id = ? AND form_key = ?",
+      scope.project_id,
+      set.stage_id,
+      set.form_key,
+    );
+    if (Number(newest?.n ?? 0n) !== Number(set.version_no)) {
+      throw new ApiError("conflict", FORM_REVISED);
+    }
+  }
+  const taken = runtime.db.get<{ ok: bigint }>(
+    `SELECT 1 AS ok FROM submissions s JOIN blobs b ON b.project_id = s.project_id AND b.id = s.raw_blob_id
+      WHERE s.project_id = ? AND b.original_name = ?`,
+    scope.project_id,
+    name,
+  );
+  if (taken !== undefined) throw new ApiError("conflict", "an answer with this file name already exists");
+
+  const submission_id = runtime.new_id();
+  const result = {
+    project_id: scope.project_id,
+    submission_id,
+    name,
+    stage_id: stage.id,
+    set_id,
+    round_no: stage.latest_round_no,
+    kind,
+    web: true,
+  };
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    action: "input.chat_recorded",
+    base_control_rev: null,
+    result,
+  });
+  const blob = insert_ready_blob(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    sha256,
+    size,
+    media_type: "application/json",
+    original_name: name,
+  });
+  const submission = runtime.db.run(
+    `INSERT INTO submissions (id, project_id, actor_id, drafted_by_actor_id, set_id, received_at, via, raw_blob_id, tx_id)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+    submission_id,
+    scope.project_id,
+    scope.actor_id,
+    set_id,
+    runtime.now_ms,
+    runtime.ctx.via,
+    blob.blob_id,
+    runtime.tx_id,
+  );
+  if (submission.changes !== 1n) throw new Error("the submission was not written");
+  return {
+    result,
+    events: [{ type: "input.chat_recorded", payload: { submission_id, name, stage: stage.key, round_no: stage.latest_round_no, kind, set_id, web: true } }],
   };
 }
 

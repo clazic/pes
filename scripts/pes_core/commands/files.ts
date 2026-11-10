@@ -187,6 +187,43 @@ function find_version(runtime: CommandRuntime, project_id: string, version_id: s
 }
 
 // ---------------------------------------------------------------------------
+// A ready blob written inside another command's transaction (input.record_chat with `web`, PR18)
+
+/**
+ * Add a blob row that is already `ready` (its bytes are in the object store and were measured by the caller).
+ * Used only by the one command that stores a screen answer's raw file in the same commit as its submission;
+ * every blob table write stays in this module. Returns the existing blob id when the project already has these bytes.
+ */
+export function insert_ready_blob(
+  runtime: CommandRuntime,
+  fields: { project_id: string; actor_id: string; sha256: string; size: number; media_type: string; original_name: string },
+): { blob_id: string; created: boolean } {
+  const known = runtime.db.get<{ id: string }>(
+    "SELECT id FROM blobs WHERE project_id = ? AND sha256 = ? AND size = ?",
+    fields.project_id,
+    fields.sha256,
+    fields.size,
+  );
+  if (known !== undefined) return { blob_id: known.id, created: false };
+  const blob_id = runtime.new_id();
+  const written = runtime.db.run(
+    `INSERT INTO blobs
+       (id, project_id, storage_key, sha256, size, media_type, original_name, state, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?)`,
+    blob_id,
+    fields.project_id,
+    `${fields.project_id}/${fields.sha256}`,
+    fields.sha256,
+    fields.size,
+    fields.media_type,
+    fields.original_name,
+    fields.actor_id,
+  );
+  if (written.changes !== 1n) throw new Error("the blob was not recorded");
+  return { blob_id, created: true };
+}
+
+// ---------------------------------------------------------------------------
 // file.reserve_upload
 
 function run_reserve_upload(runtime: CommandRuntime): CommandResult {

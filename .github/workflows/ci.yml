@@ -86,3 +86,44 @@ jobs:
 
       - name: Run tests (shard ${{ matrix.shard }}/8)
         run: node --test --test-shard=${{ matrix.shard }}/8 "tests/**/*.test.ts"
+
+  browser:
+    name: ${{ matrix.os }} / Playwright (Chromium)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Install development dependencies
+        run: npm ci
+
+      # 브라우저를 못 받으면 시험을 건너뛰지 않고 잡을 실패시킨다 (CI 계약: 화면 스모크는 Windows·macOS 에서 늘 돈다).
+      - name: Install Chromium
+        run: npx playwright install chromium
+
+      - name: Run browser smoke
+        run: npx playwright test
