@@ -13,7 +13,7 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 - 요청에 주제가 있으면 `topic` 질문 삭제, `inherited`에 주제.
 - `project.library`가 없으면 `library` 질문 삭제. 있으면 inherited에 "기존 조사: 항목 N개(R{round}까지)".
 - 형식이 연구보고서가 아닐 법하면 `research_type`·`team` 삭제.
-- 답은 `p.settings`와 `stages.plan.settings`에 저장.
+- 답은 PES가 받아 기록한다. 받은 답을 `pending`·`context`로 읽어 기획 결정(주제·목적·독자·형식·범위)으로 삼는다.
 
 ## R1에 만드는 것 (항목 kind)
 
@@ -27,7 +27,7 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 - 각 topic은 최소 한 chapter와 연결한다. chapter마다 근거가 될 topic이 있어야 한다.
 - **참고자료(library)가 있으면** 항목을 하나씩 대조해 겹치는 topic에 `"reuse": <library id>`를 단다. 그 topic의 summary 첫 줄에 "기존 조사 #N 재사용 — 보완할 점: …"을 적는다. 기획에 맞지 않는 library 항목은 쓰지 않는다(이유를 changes에 한 줄).
 - 기획 단계에서는 새 조사를 하지 않는다. 필요하면 주제 파악용 빠른 검색만(출처는 sources에).
-- 항목은 Python으로 `stages.plan.items`에 직접 쓴다 (merge 불필요). `updated_round`, `depth`를 맞춘다.
+- 항목은 제안 파일(JSON 배열: 항목마다 `kind`·`title`·`summary`·`question`·`links`·`reuse` 등)로 쓰고 `merge <dir> plan <파일>`로 넘긴다 (토큰을 가진 작업자는 `claim` → `submit`). `updated_round`·`depth`는 PES가 맞춘다.
 
 ## AI 점검 초점
 
@@ -41,8 +41,8 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
-1. topic마다 question·links가 있는지 확인. `p.settings`에 기획 결정 정리.
-2. `stages.plan.summary`에 기획 요약 3~5줄 (연구 질문·장 수·조사 항목 수·재사용 수).
+1. topic마다 question·links가 있는지 확인(`show <dir> plan --fields question,links`). 기획 결정은 받은 답에서 읽은 대로 정리한다.
+2. 기획 요약 3~5줄 (연구 질문·장 수·조사 항목 수·재사용 수)을 `note`로 남긴다.
 3. `approve <dir> plan` → 조사 항목이 생성된다(재사용 항목은 status=deepen과 보완 요청이 붙는다).
 4. 바로 pes:research의 시작 질문으로 이어간다.
 

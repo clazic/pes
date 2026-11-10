@@ -18,13 +18,13 @@ description: PES 검증 단계 — 원고에서 수치·법령 조문·핵심 �
 2. claim 항목: title=주장 문장(원문 그대로), links.write=[section], sources=그 문장의 각주 출처, `question`=확인할 점(값·기준일·조문 번호).
 3. 장별로 묶어 `pes:verifier` 서브에이전트에 넘긴다 (한 메시지에 여러 개). **결론이나 기대하는 답을 주지 않는다** — 주장 + 출처 URL + 기준일만.
 4. 법령 인용은 korean-law `legal_analysis --mode verify_citations`로도 확인한다 (asof=today면 현행 기준).
-5. 결과 병합: `merge <dir> verify <파일들>` → claim의 `verdict`(supported|partial|unsupported), `verify`(근거·원문 발췌), confidence.
+5. 결과 병합: 제안 파일을 `merge <dir> verify <파일들>`로 넘긴다 → claim의 `verdict`(supported|partial|unsupported), `verify`(근거·원문 발췌), confidence. 토큰을 가진 작업자는 `claim` → `submit`.
 
 ## 처리
 
 - supported: done.
 - partial: 점검 질문 — 표현을 출처에 맞게 고칠지 (고칠 문장 제안을 선택지에).
-- unsupported: settings.unsupported에 따라 점검 질문(재조사 / 완화 / 삭제). 재조사를 고르면 `reopen <dir> research`로 해당 조사 항목에 revise를 걸지 묻고, 완화·삭제면 write section을 직접 고친다(그 section에 request 기록, `assemble` 다시).
+- unsupported: settings.unsupported에 따라 점검 질문(재조사 / 완화 / 삭제). 재조사를 고르면 `reopen <dir> research`로 해당 조사 항목에 revise를 걸지 묻고(`merge`), 완화·삭제면 고친 write section을 제안 파일에 담아 `merge <dir> write`로 넘긴다(그 section의 `request`에 이유를 적고, `assemble` 다시).
 - 원고를 고치면 write 단계 snapshot이 남도록 `render <dir> write`도 한 번 실행.
 
 ## AI 점검 초점
@@ -38,7 +38,7 @@ description: PES 검증 단계 — 원고에서 수치·법령 조문·핵심 �
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
 1. unsupported 0개 또는 사용자가 남기기로 정한 것만 남았는지.
-2. `assemble` 다시 → `stages.verify.summary`: 판정 수(supported/partial/unsupported), 고친 문장 수.
+2. `assemble` 다시 → 판정 수(supported/partial/unsupported)와 고친 문장 수를 검증 단계 요약(`note`)으로 남긴다.
 3. `approve <dir> verify` → pes:publish.
 
 ## 단계 보고서
@@ -47,4 +47,4 @@ description: PES 검증 단계 — 원고에서 수치·법령 조문·핵심 �
 
 ## 토큰
 
-서브에이전트 결과는 `<dir>/rounds/verify-R<n>/<id>.json`에 쓰게 하고(지시문에 [결과 파일]), 메인은 `merge` 후 `digest <dir> verify --round <n>`으로 점검한다.
+서브에이전트 결과는 제안 파일 `<dir>/rounds/verify-R<n>/<id>.json`에 쓰게 하고(지시문에 [결과 파일]), 메인은 `merge` 후 `digest <dir> verify --round <n>`으로 점검한다.

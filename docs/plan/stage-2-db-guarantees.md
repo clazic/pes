@@ -321,3 +321,12 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **렌더 파일의 이름은 버전이 기록한다**: blob은 프로젝트·sha256·크기로 공유되고 처음 올린 이름만 남으므로, 보고서·조립본 버전은 `metadata.files = [{name, sha256, size}]`로 각 파일의 이 버전 안 이름을 남기고, `web`의 조립본 재사용과 단계 보고서 등록 목록은 그 기록으로 그 버전의 `rendered` 연결에서 파일을 찾는다(기록이 없는 이전해 온 버전만 blob 이름). 새 표·마이그레이션은 없다.
 - **숫자 토큰은 길이 제한 없이 읽는다**: `parse_legacy_json`은 JSON 숫자 토큰 전체를 읽고, 끝까지 읽었는지 확인한다.
 - **알려진 한계**: DB에 저장된 숫자는 `12.0`이 `12`로 남는다(JSON 정수와 구분하지 않음; 통계 값은 이전 때 남긴 표시로 되살리지만 `-0.0`은 `0.0`으로 보인다). DB 읽기의 `settings`·`history`·`suggestions`는 이전해 온 값과 `merge`의 `open_questions`만 되살린다(AI 점검 질문 `review`는 이전해 온 요약만). `reports` 등록 목록은 보고서 객체의 현재 버전 파일에서 만든다. `hub`·`open`이 띄우는 화면은 PR18 몫이다.
+
+### 8.14 스킬·에이전트·명령 문서의 직접 쓰기 제거(PR17)
+
+스킬(`skills/*/SKILL.md`)·서브에이전트 지침(`agents/*.md`)·명령(`commands/*.md`)은 업무 상태를 바꾸는 방법으로 pes 명령(`merge`·`submit`·`ask`·`note`·`qa`·`round-start`·`render`·`approve`·`mark`·`chat` 등)만 말한다. 코드 변경은 없고 새 코어 명령도 없다(등록표 불변). `pes` CLI는 `PES_DB_CORE` 플래그와 무관하게 같은 명령이라 문서는 플래그를 말하지 않는다.
+
+- **`npm run lint:skills`**(`scripts/lint_skills.ts`): 위 문서와 `docs/adapters/*.md`의 **코드 블록·인라인 코드**에서 (가) `project.json` 쓰기(Python `write_text`·`json.dump`·`open(…, "w")`, 셸 리다이렉트·`tee`·`sed -i`·`cp`/`mv` 도착지, PowerShell `Set-Content`·`Out-File`, Node `writeFile*`), (나) 업무 표를 바꾸는 SQL(`INSERT`·`UPDATE … SET`·`DELETE FROM`·`DROP/ALTER TABLE`), (다) 잠금 파일(`.pes-lock`) 만들기·지우기·옮기기를 막는다. 산문 문장·읽기·이름만 적은 언급·자식 제안 파일(`rounds/` 결과 JSON, 질문 명세, `eli5.json`, `cover.json`)은 막지 않는다. 검사 대상 밖(`tests/`·`scripts/`·`docs/plan/`·README)과 신뢰 서비스(`scripts/pes_core`)의 SQL은 보지 않는다. 위반은 `경로:줄: [규칙] 설명`으로 모두 찍고 종료 코드 1이다.
+- **Claude 전용 표기**(`anthropic-skills:*`·`AskUserQuestion`·`Agent`/`Task` 도구 표기)는 `docs/adapters/{claude-code,claude-app,opencode}.md`에만 둔다. 어댑터 노트의 예외는 이 표기뿐이고 직접 쓰기 규칙은 어댑터에도 적용된다. `${CLAUDE_PLUGIN_ROOT}`·`mcp__*`·`WebSearch`/`WebFetch`·`pes:*` 이름은 플러그인 동작이라 막지 않는다. 어댑터 노트는 이름의 대응과 **한계**를 적을 뿐 변환 지원을 주장하지 않는다.
+- **지금 전용 쓰기 명령이 없는 것**: 라운드 변경점·단계 요약·남은 일(`carry_over`)·시작 질문 설정값·기획 요약(`executive_summary`)·결론. 문서는 이것들을 상태에 직접 쓰라고 하지 않고, 변경점·요약은 `note`로, 설정값은 받은 답(`pending`·`context`)에서 읽도록 하며, 요약·결론 원고는 `요약`·`결론` section 항목으로 `merge`하도록 적었다. 전용 명령은 이후 PR의 몫이다.
+- **연구 절차는 그대로**: 조사 항목·출처 원문 확인·독립 검토(reviewer)·검증(verifier)·승인 전 마무리는 문장만 다듬었고 단계는 바뀌지 않았다(시험이 필수 절차 목록으로 고정).

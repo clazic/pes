@@ -13,6 +13,8 @@ description: PES 분석·종합 단계 — 조사 결과를 비교 축(지역·�
 
 ## 라운드에서 만드는 것
 
+항목은 제안 파일(JSON)로 쓰고 `merge <dir> analyze <파일…>`로 넘긴다 (토큰을 가진 작업자는 `claim` → `submit`). 상태 파일을 직접 고치지 않는다.
+
 | kind | 내용 | 필수 |
 |---|---|---|
 | `issue` 쟁점 | 연구 질문에 답하는 핵심 판단 하나. summary=판단 2~3줄, details=근거 정리 | links.research=[근거 항목], links.plan=[관련 rq·chapter] |
@@ -21,9 +23,9 @@ description: PES 분석·종합 단계 — 조사 결과를 비교 축(지역·�
 
 - **새 사실을 만들지 않는다.** 조사 항목에 없는 수치가 필요하면 그 조사 항목에 revise를 걸고 reopen 여부를 점검 질문으로 묻는다.
 - 통계 가공(증감률·비율·순위)은 kosis(`--change`, `--ratio`, `--sort`)로 다시 뽑거나, 조사 항목 수치에서 계산했다면 표 아래에 계산 방법을 적는다.
-- 차트가 필요하면 dataviz 스킬을 읽고 `shots/<id>-chart.png`(또는 svg)로 저장해 항목 shots에.
+- 차트가 필요하면 차트 작성 지침(dataviz 스킬이 있는 환경이면 그것)을 읽고 `shots/<id>-chart.png`(또는 svg)로 저장해 항목 shots에 담아 `merge`한다.
 - 연구 질문(rq)마다 최소 하나의 issue가 있어야 한다.
-- 항목이 많으면 비교 축별로 pes:researcher 대신 일반 서브에이전트에 "이 조사 항목들만 보고 표를 만들라"고 맡겨도 된다(근거 항목 본문을 함께 넘긴다).
+- 항목이 많으면 비교 축별로 pes:researcher 대신 별도 지침이 없는 일반 서브에이전트에 "이 조사 항목들만 보고 표를 만들라"고 맡겨도 된다(근거 항목 본문을 함께 넘긴다).
 
 ## AI 점검 초점
 
@@ -38,7 +40,7 @@ description: PES 분석·종합 단계 — 조사 결과를 비교 축(지역·�
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
 1. 모든 issue·table에 links.research가 있는지, 모든 rq에 issue가 있는지 확인.
-2. `stages.analyze.summary`: 핵심 쟁점 3~5줄.
+2. 핵심 쟁점 3~5줄을 `note`로 남긴다.
 3. `approve <dir> analyze` → pes:write.
 
 ## 단계 보고서

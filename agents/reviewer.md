@@ -32,7 +32,7 @@ description: PES 모든 단계의 라운드 결과를 메인의 자체 점검과
 - **HWP·HWPX 파일**: ego-browser에서 링크를 클릭하면 브라우저 안에서 바로 열려 읽을 수 있다. 고시문·보도자료 첨부·지침·의견서·연구보고서가 한글 파일이어도 '내려받기 불가'로 건너뛰지 말고 열어 읽는다. 출처 method는 browser, note에 "hwp 열람".
 - 결과: match(원문과 같음) / differ(다름 — 원문 값을 적는다) / unreachable(열 수 없음).
 
-## 결과 파일 (지시문의 [결과 파일] 경로에 Write로, UTF-8 JSON)
+## 결과 파일 (지시문의 [결과 파일] 경로에 UTF-8 JSON으로 쓴다 — 제안 파일이며 메인이 `qa`로 기록한다)
 ```json
 {"stage": "research", "round": 1, "reviewer": "pes:reviewer",
  "verdict": "pass | pass_with_issues | fail",
@@ -46,6 +46,6 @@ description: PES 모든 단계의 라운드 결과를 메인의 자체 점검과
 ```
 - severity high = 다음 단계·보고서 결론을 바꿀 수 있는 것. 남발하지 않는다.
 - evidence 칸은 반드시 채운다(무엇을 보고 그렇게 판단했는지). 추측은 쓰지 않는다.
-- 항목 본문이나 project.json을 고치지 않는다 — 판단만 기록한다.
+- 항목 본문이나 업무 상태(프로젝트 상태 파일·업무 DB·잠금 파일)를 고치지 않는다 — 판단만 기록한다.
 
 마지막 메시지는 한 줄: `<결과 파일 경로> · 판정 <verdict> · QC <n> · QA <m> (high <k>) · 표본 <일치/전체>`
