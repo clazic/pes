@@ -107,7 +107,7 @@ test("N3b a key spent on the same command for ANOTHER run is 409 idempotency_key
       const key = `synthetic-n3b-${action}-key`;
       // The key is spent on run one (held by agent one), which that call then releases / ends.
       const lease_one = await run_for_b(env, one);
-      assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${lease_one.run_id}/${action}`), auth: { token: one.token }, body, key }));
+      assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${lease_one.run_id}/${action}`), auth: { token: one.token }, body, key }), action === "interrupt" ? 202 : 200);
       // Run two is another run (held by agent two): the same key on the same action is a reuse, not a replay.
       const lease_two = await run_for_b(env, two);
       const before = state_signature(env.db);
@@ -121,7 +121,7 @@ test("N3b a key spent on the same command for ANOTHER run is 409 idempotency_key
       }
       assert.equal(env.db.get<{ status: string }>("SELECT status FROM runs WHERE id = ?", lease_two.run_id)?.status, "running", `${action}: run two untouched`);
       // Free the project for the next round: run two ends with its own key.
-      assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${lease_two.run_id}/interrupt`), auth: { token: two.token }, body: { reason: "합성 정리" }, key: `synthetic-n3b-end-${action}` }));
+      assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${lease_two.run_id}/interrupt`), auth: { token: two.token }, body: { reason: "합성 정리" }, key: `synthetic-n3b-end-${action}` }), 202);
     }
   });
 });
