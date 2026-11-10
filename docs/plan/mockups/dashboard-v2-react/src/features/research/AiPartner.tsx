@@ -19,7 +19,7 @@ const WHOLE = "이 라운드 전체";
 
 /** AI 쪽 경과 · 마지막 소식(글자만 — 15초마다 바뀜, 움직임 아님). 소식이 오래되면 “마지막 소식 n분 전” */
 function AiSignal({ since, last, fresh }: { since?: string; last?: string; fresh: boolean }) {
-  const now = useNow();
+  const now = useNow(`${since ?? ""}|${last ?? ""}|${fresh ? "1" : "0"}`);
   const parts = [since ? elapsedText(since, now) : null, last ? (fresh ? `소식 ${agoText(last, now)}` : `마지막 소식 ${agoText(last, now)}`) : "아직 소식 없음"].filter(Boolean);
   return <p className="text-xs text-muted-foreground tabular-nums">{parts.join(" · ")}</p>;
 }

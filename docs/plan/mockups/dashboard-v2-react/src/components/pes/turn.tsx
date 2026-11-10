@@ -60,21 +60,19 @@ function subscribeNow(cb: () => void) {
 /**
  * 그릴 때의 지금 시각(밀리초 보존) — 바깥(시계)에서 읽는 값이라 useSyncExternalStore로 읽는다.
  * 스냅숏 값은 저장해 두고 15초 틱마다 새로 잡는다(매 getSnapshot 호출에서 Date.now를 부르지 않는다).
- * 새 자료로 다시 그린 뒤에는 effect에서 저장값이 오래됐는지 보고, 오래됐으면 새로 잡아 구독자에게 알린다
- * (렌더 중에는 바깥 값을 바꾸지 않는다).
+ * 새 입력(자료가 바뀜)이 오면 effect에서 그때의 정확한 시각을 한 번 저장하고 구독자에게 알린다.
+ * 시계 알림 때문에 다시 그려질 때는 입력이 그대로라 effect가 다시 돌지 않는다(멱등, 렌더 중 외부 값 변경 없음).
  */
 let clock = Date.now();
 function clockSnapshot() {
   return clock;
 }
-export function useNow() {
+export function useNow(input?: string) {
   const now = React.useSyncExternalStore(subscribeNow, clockSnapshot, clockSnapshot);
   React.useEffect(() => {
-    const t = Date.now();
-    if (Math.abs(t - clock) < 100) return;
-    clock = t;
+    clock = Date.now();
     tickListeners.forEach((l) => l());
-  });
+  }, [input]);
   return now;
 }
 
@@ -230,7 +228,8 @@ export function TurnIndicator({
 }) {
   const k = turnKey(turn);
   const def = turnDef(k);
-  const now = useNow();
+  // 경과·소식에 쓰는 입력이 바뀔 때마다 그 정확한 시각으로 다시 센다(같은 입력이면 15초 틱만)
+  const now = useNow(`${turn.side}|${turn.since ?? ""}|${turn.last_signal ?? ""}|${turn.fresh ? "1" : "0"}`);
   const meta = turn.side === "ai" ? [turn.since ? elapsedText(turn.since, now) : null, signalText(turn, now)].filter(Boolean).join(" · ") : "";
   const right = align === "end" && "tab:text-right";
   return (
