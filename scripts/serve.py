@@ -29,6 +29,8 @@ from urllib.parse import unquote, urlsplit
 
 MAX_BODY = 256 * 1024
 MAX_API_BODY = 2 * MAX_BODY
+# 쿼리스트링 상한(서명된 cursor 와 limit·wait_ms 가 들어가기에 넉넉하고, 브리지 stdin 이 부풀지 않게 하는 값).
+MAX_API_QUERY = 2048
 # 상한을 넘는 본문이라도 이 크기 안이면 읽어 버린 뒤 413 을 보낸다(보내는 중인 클라이언트가 끊기지 않게).
 DRAIN_LIMIT = 8 * 1024 * 1024
 DRAIN_CHUNK = 64 * 1024
@@ -38,6 +40,7 @@ NODE_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "api_bridge.ts"
 # 서버가 직접 내는 API 오류의 한국어 message 와 next_action (Node ApiApp 의 봉투와 같은 규칙).
 _API_ERROR_TEXT = {
     "forbidden": ("이 요청은 허용되지 않습니다.", "use_owner_session"),
+    "invalid_payload": ("요청 내용이 올바르지 않습니다.", "fix_request"),
     "payload_too_large": ("요청 본문이 너무 큽니다.", "fix_request"),
     "internal_error": ("서버 안에서 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"),
     "schema_not_ready": ("PES 데이터베이스가 아직 준비되지 않았습니다.", "migrate_database"),
@@ -286,7 +289,7 @@ def main():
             self.send_header("Location", to)
             self.end_headers()
 
-        def _api_error(self, code, message, status, close=False, details=None, extra_headers=None):
+        def _api_error(self, code, message, status, close=False, details=None, extra_headers=None, target=None):
             # 봉투는 Node 쪽 ApiApp 과 같다: 한국어 message, retryable(503·429 만 true),
             # next_action 은 늘 문자열. 영어 message 인자는 기록용이라 응답에 싣지 않는다.
             ko, next_action = _API_ERROR_TEXT.get(code, _API_ERROR_TEXT["internal_error"])
@@ -297,7 +300,7 @@ def main():
                     "code": code,
                     "message": ko,
                     "retryable": status in (429, 503),
-                    "target": None,
+                    "target": target,
                     "details": details,
                     "next_action": next_action,
                 },
@@ -346,11 +349,27 @@ def main():
                 srv.api_db_ready = True
                 return None
 
-        def _api(self, method, path):
+        def _api_query(self, query):
+            """쿼리스트링 검사: 길이 상한과 올바른 퍼센트 인코딩(UTF-8). 문제가 있으면 400 봉투를 돌려준다."""
+            if query == "":
+                return None
+            bad = len(query) > MAX_API_QUERY or any(not (0x21 <= ord(c) <= 0x7E) for c in query)
+            if not bad:
+                try:
+                    unquote(query, errors="strict")
+                except UnicodeDecodeError:
+                    bad = True
+            if bad:
+                return self._api_error("invalid_payload", "the query string is invalid", 400, target="$.query")
+            return None
+
+        def _api(self, method, path, query=""):
             """Pass /api/v1/* to the Node ApiApp and relay its raw response.
 
             The Python server keeps its static-file and feedback duties; the API
             contract, credentials, transactions, and envelopes live in Node.
+            `path` 는 경로만이다(요청 예산 키·라우트 판정에 쓴다). `query` 는 브리지·ApiApp 이
+            받는 `경로?쿼리` 형식으로 이어 붙여 넘길 뿐 예산 키에는 들어가지 않는다.
             """
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -360,6 +379,10 @@ def main():
                 return self._reject_oversize(length, lambda: self._api_error(
                     "payload_too_large", "the request body is too large", 413, close=True))
             body = self.rfile.read(length) if length > 0 else b""
+            if query != "":
+                refused = self._api_query(query)
+                if refused is not None:
+                    return refused
             migration_error = self._ensure_api_db()
             if migration_error is not None:
                 return self._api_error(*migration_error)
@@ -376,7 +399,7 @@ def main():
                     extra_headers={"retry-after": str(max(1, math.ceil(retry_after_ms / 1000)))})
             request = {
                 "method": method,
-                "path": path,
+                "path": f"{path}?{query}" if query != "" else path,
                 "headers": headers_in,
                 "body_b64": base64.b64encode(body).decode("ascii"),
             }
@@ -418,9 +441,10 @@ def main():
             return path == "/api/v1" or path.startswith("/api/v1/")
 
         def do_GET(self):
-            path = urlsplit(self.path).path
+            parts = urlsplit(self.path)
+            path = parts.path
             if self._is_api_path(path):
-                return self._api("GET", path)
+                return self._api("GET", path, parts.query)
             if path == "/whoami":
                 return self._json(200, {"root": str(root), "single": True}, cors=True)
             if path == "/version" or path.endswith("/version"):  # 열린 화면이 새 결과를 알아채도록 (index.html·ask-*.html 수정 시각)
@@ -446,7 +470,7 @@ def main():
             if self._is_api_path(path):
                 if not self._origin_allowed():
                     return self._api_error("forbidden", "origin is not allowed", 403)
-                return self._api("POST", path)
+                return self._api("POST", path, urlsplit(self.path).query)
             d, rest = project_of(path)
             if d is None and path == "/feedback":  # 0.8 이전에 만든 화면: 보낸 페이지 주소로 프로젝트를 찾는다
                 d, _ = project_of(urlsplit(self.headers.get("Referer") or "").path)
@@ -517,19 +541,19 @@ def main():
             if self._is_api_path(path):
                 if not self._origin_allowed():
                     return self._api_error("forbidden", "origin is not allowed", 403)
-                return self._api("PUT", path)
+                return self._api("PUT", path, urlsplit(self.path).query)
             return self._json(405, {"ok": False})
 
         def do_DELETE(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
-                return self._api("DELETE", path)
+                return self._api("DELETE", path, urlsplit(self.path).query)
             return self.send_error(501, "Unsupported method ('DELETE')")
 
         def do_PATCH(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
-                return self._api("PATCH", path)
+                return self._api("PATCH", path, urlsplit(self.path).query)
             return self.send_error(501, "Unsupported method ('PATCH')")
 
     srv = LocalHTTPServer(("127.0.0.1", port), H)

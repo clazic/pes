@@ -1102,6 +1102,7 @@ export class ApiApp {
             request_body_max_bytes: MAX_BODY_BYTES,
             results_per_submit: MAX_RESULTS_PER_BATCH,
             list_max_items: LIST_MAX_ITEMS,
+            min_poll_interval_ms: MIN_POLL_INTERVAL_MS,
             agent_requests_per_minute: AGENT_REQUESTS_PER_MINUTE,
           },
           error_codes: [...ERROR_CODES],
