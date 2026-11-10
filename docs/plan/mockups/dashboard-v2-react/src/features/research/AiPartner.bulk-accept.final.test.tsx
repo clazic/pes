@@ -170,7 +170,9 @@ describe("F3 닫은 뒤 초점 — body 로 새지 않는다", () => {
   });
 
   it("부분 실패 뒤 [닫기]하면(열기 단추가 남음) 초점이 열기 단추로 돌아온다", async () => {
-    seedThree(); // pp1 + a1 a2 a3 → a2 만 실패하면 판단 전 가정 2개(pp1, a2)가 남아 단추가 있다
+    // pp1 + a1 a2 a3 모두 묶음 대상(4개). a2 만 실패하면 최종 판단 전 가정은 a2 한 건이다.
+    // 이 시험은 갱신이 도착하기 전의 일시 상태(남은 단추·초점)만 본다 — 최종 상태는 아래 ‘갱신 뒤’ 시험이 확인한다.
+    seedThree();
     failAssumption("a2");
     await open();
     const opener = await screen.findByRole("button", { name: BULK(4) });
@@ -181,8 +183,55 @@ describe("F3 닫은 뒤 초점 — body 로 새지 않는다", () => {
     await screen.findByText("4개 중 3개 받아들임 · 1개 실패", {}, T);
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    const remaining = await screen.findByRole("button", { name: BULK(2) });
+    // 갱신 전 일시 상태: 아직 목록이 낡아 일괄 단추가 남아 있을 수 있다(이 단추는 최종 상태가 아니다)
+    // 마지막 목록 갱신이 끝나면 최종 잔여는 a2 한 건이라 일괄 단추(2개 이상일 때만)는 사라진다
+    await waitFor(() => expect(screen.queryByRole("button", { name: /모두 받아들이기/ })).not.toBeInTheDocument(), T);
+    expect(pendingIds("assumption")).toEqual(["a2"]);
+    // 초점은 body 로 빠지지 않고 제안 제목에 있다
+    const heading = screen.getByRole("heading", { name: PROPOSAL_HEADING });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+
+  it("부분 성공 직후 닫아도, 늦게 온 목록 갱신으로 열기 단추가 사라지면 초점이 제안 제목으로 간다(body 로 빠지지 않음)", async () => {
+    onlyThree(); // pp1 은 이미 판단됨, a1 a2 a3 만 대상
+    failAssumption("a2");
+    await open();
+    const opener = await screen.findByRole("button", { name: BULK(3) });
+    opener.focus();
+    fireEvent.click(opener);
+    const dlg = await screen.findByRole("dialog");
+    go(dlg, 3);
+    await screen.findByText("3개 중 2개 받아들임 · 1개 실패", {}, T);
+    // 결과가 보이는 즉시 닫는다(마지막 workspace 갱신이 아직 오기 전일 수 있다)
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "닫기" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // 갱신이 끝날 때까지 기다린다: 서버 기준 잔여 a2 한 건이면 일괄 단추(2개 이상)는 사라진다
+    await waitFor(() => expect(screen.queryByRole("button", { name: /모두 받아들이기/ })).not.toBeInTheDocument(), T);
+    expect(pendingIds("assumption")).toEqual(["a2"]);
+    const heading = screen.getByRole("heading", { name: PROPOSAL_HEADING });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(document.activeElement?.tagName).not.toBe("BODY");
+  });
+
+  it("부분 성공 뒤 갱신 뒤에도 판단 전 가정이 2개 이상이라 열기 단추가 남으면 초점이 그 열기 단추에 남는다", async () => {
+    onlyThree();
+    failAssumption("a2");
+    await open();
+    const opener = await screen.findByRole("button", { name: BULK(3) });
+    opener.focus();
+    fireEvent.click(opener);
+    const dlg = await screen.findByRole("dialog");
+    go(dlg, 3);
+    // 보내는 동안 다른 곳에서 새 가정이 생긴다(이 대화 상자의 3개에는 들어 있지 않다)
+    addProposal({ id: "a4", kind: "assumption", text: "넷째 가정", basis: "자료 목록 v4" });
+    await screen.findByText("3개 중 2개 받아들임 · 1개 실패", {}, T);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "닫기" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // 마지막 갱신 뒤 최종 잔여는 a2·a4 두 건 → 일괄 단추가 남는다
+    await waitFor(() => expect(pendingIds("assumption")).toEqual(["a2", "a4"]), T);
+    const remaining = await screen.findByRole("button", { name: BULK(2) }, T);
     await waitFor(() => expect(document.activeElement).toBe(remaining));
+    expect(spy.keysOf("a4")).toHaveLength(0);
   });
 });
 
