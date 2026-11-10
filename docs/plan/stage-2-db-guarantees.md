@@ -183,3 +183,13 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **fail-closed**: 프로젝트 포인터가 NULL이거나 없는 행·다른 프로젝트 행을 가리키거나, 그 프로젝트의 최고 `policy_rev`가 아니거나, `allow_opencode_go`가 정확히 0/1이 아니거나, `mode_a_model`이 `opencode-go/`로 시작하지 않거나, `go_usage_stop_percent`가 50~100 밖이거나, `changed_by_kind`가 `human`이 아니면 정책은 손상이다. `check_go_allowed`는 손상에서도 예외를 던지지 않고 허용하지 않으며, `current_policy`는 `policy_denied`다. Go가 꺼졌거나 정책이 손상되면 `dispatch.prepare`·`authorize`·`mark_sent`는 `policy_denied`이고, `dispatch.block`·`token.*`·`project.*`·`run.*`는 Go 정책에 막히지 않는다. 정상적으로 꺼진 정책에서는 `policy.set`도 실행되지만, **정책이 손상된 경우 `policy.set`도 현재 정책을 먼저 읽기 때문에 `policy_denied`(fail-closed)다.** 손상 복구 절차(사람 전용 복구 명령 등)는 이 PR에 없고 수동 조치·후속 결정으로 남긴다.
 - **운영 조립(후속 필수)**: 정책 checker(`DbPolicyChecker`)·토큰 인증(`verify_agent_token`/`resolve_actor`)·scope 집행의 운영 조립은 후속 API/CLI PR에서 필수로 연결한다. 이 PR은 부품과 계약만 제공한다.
 - **기본값**: stage-0 7-1 그대로 `policy_rev` 1, `allow_opencode_go` 켜짐, `mode_a_model` `opencode-go/deepseek-v4.1-flash`, `go_usage_stop_percent` 90이다.
+
+### 8.6 결과물·객체 저장(PR9)
+
+`scripts/pes_core/commands/files.ts`가 `file.reserve_upload`·`file.complete_upload`·`file.attach_version`·`file.quarantine`·`file.gc_orphans` 5개 명령을 정의하고, `scripts/pes_core/files.ts`의 공개 함수가 각각 `CommandService.execute` 한 번만 호출한다. `blobs`·`file_policies`·`version_files`의 INSERT/UPDATE/DELETE는 `commands/files.ts`에만 있다.
+
+- **id와 경로**: 공개 결과의 blob 식별자는 서버가 만든 id 하나뿐이다. `storage_key`는 `project_id/sha256`으로 서버가 계산하며, 호출자가 경로·서명 URL·storage_key를 id 대신 넘기면 `invalid_payload`/`not_found`다. 경로는 결과·사건·영수증에 남기지 않는다.
+- **staging → ready**: `reserve_upload`는 같은 프로젝트에서 `(sha256, size)`가 같은 기존 행을 재사용하고(다른 프로젝트면 별도 행·별도 파일), `complete_upload`는 저장소의 실제 바이트를 다시 읽어 sha256·size를 계산해 예약값과 비교한다. 맞을 때만 `ready`로 바꾸고, 불일치는 `quarantined`로 두어 ready가 되지 않는다. `store_blob`은 `staging` blob에만 쓰고 임시 파일+rename으로 실패 잔여물을 남기지 않는다.
+- **계보와 정책**: `attach_version`은 `ready` blob만 받아 `version_files`에 (version, blob, role) 한 행을 만든다. blob마다 `file_policies` 한 행을 만들어 모든 버전·role이 공유하며, 같은 (version, blob, role)은 `conflict`다.
+- **격리·gc**: 연결된 ready blob은 격리·삭제하지 않는다. `gc_orphans`는 한 tx에서 참조 없는 `staging`/`quarantined` 행(예약 tx 시각 기준 grace 초과)을 지우고, 참조 없는 오래된 파일과 그 blob 파일은 tx 커밋 뒤에 지운다. tx가 실패하면 디스크를 건드리지 않고, 삭제가 실패하면 다음 gc가 DB와 디스크를 맞춘다. 파일이 없는 `ready` blob은 지우지 않고 `missing_file_blob_ids`로 보고한다.
+- **경로 안전**: `storage_key`는 objects 폴더 아래 이 프로젝트 폴더로만 풀린다. 절대 경로·`..`·드라이브 문자·역슬래시와 objects 폴더·프로젝트 폴더·대상 파일의 symlink는 읽기·쓰기 모두 거부한다.
