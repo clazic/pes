@@ -16,6 +16,11 @@ export interface MockSettings {
   /** 다음 변경분 읽기에서 커서 무효를 흉내 */
   resyncNext: boolean;
   /**
+   * UI7-4b 시험용: 이 제안 id 의 decision.record(verdict accept) 한 건을 버전 충돌로 거절한다(저장소 불변).
+   * null 이면 끔. reset() 은 null 로 되돌린다.
+   */
+  failAssumption: string | null;
+  /**
    * 점선 “시안 설명” 상자 보이기. 3차 정리(정보 밀도)부터 기본은 숨김 — 머리줄 “시안” 단추의 판에서 켠다.
    * (예전 필드 notes: "show"|"hide"는 읽지 않는다 — 탭에 남은 옛 값이 새 기본을 덮지 않게)
    */
@@ -23,7 +28,7 @@ export interface MockSettings {
 }
 
 const KEY = "pes-mock-settings";
-const DEFAULTS: MockSettings = { role: "owner", network: "normal", nextSubmit: "ok", channel: "live", resyncNext: false, showNotes: false };
+const DEFAULTS: MockSettings = { role: "owner", network: "normal", nextSubmit: "ok", channel: "live", resyncNext: false, failAssumption: null, showNotes: false };
 
 function read(): MockSettings {
   try {

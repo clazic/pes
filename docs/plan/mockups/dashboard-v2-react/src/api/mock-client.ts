@@ -812,11 +812,20 @@ export class MockPesClient {
         return this.resolveProblem(raw as CommandInputs["problem.resolve"]);
       case "decision.record": {
         const input = raw as CommandInputs["decision.record"];
-        if (mockSettings.get().role === "reader") throw apiError("permission_denied", "읽기 멤버는 판단을 기록할 수 없습니다.", false);
+        const role = mockSettings.get().role;
+        if (role === "reader") throw apiError("permission_denied", "읽기 멤버는 판단을 기록할 수 없습니다.", false);
         const r = this.store.research[input.slug];
         const pr = r?.proposals.find((x) => x.id === input.proposal_id);
         if (!r || !pr) throw apiError("version_conflict", "그 제안이 바뀌었거나 없습니다.", false);
-        if (pr.state.value !== "proposed") throw apiError("version_conflict", "이미 판단한 제안입니다 — 화면을 다시 받았습니다.", false);
+        // 가정 확인(accept)은 소유자만 — 편집자는 확정 전이라 기본 거부(권한표 · 18.10)
+        if (input.verdict === "accept" && pr.kind === "assumption" && role !== "owner") {
+          throw apiError("permission_denied", "소유자만 가정을 확인할 수 있습니다. 서버가 권한을 다시 확인했습니다.", false);
+        }
+        if (pr.state.value !== "proposed") throw apiError("already_judged", "이미 판단한 제안입니다 — 화면을 다시 받았습니다.", false);
+        // UI7-4b 시험용: 고른 제안 한 건을 버전 충돌로 거절한다(저장소는 그대로 — 판단 전 유지)
+        if (input.verdict === "accept" && mockSettings.get().failAssumption === input.proposal_id) {
+          throw apiError("version_conflict", "그사이 제안이 바뀌었습니다 — 버전 충돌입니다.", false);
+        }
         pr.state = { domain: "proposal", value: input.verdict === "accept" ? "accepted" : "rejected", label: `${input.verdict === "accept" ? "받아들임" : "버림"} · ${this.person()} ${nowLabel()}` };
         this.emit(input.slug, ["workspace"]);
         return {};
