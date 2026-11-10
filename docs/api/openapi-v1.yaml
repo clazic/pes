@@ -61,6 +61,54 @@ components:
           description: Comma-separated list of methods allowed on this path
           schema: { type: string }
   schemas:
+    VersionRead:
+      type: object
+      required: [format_version, request_id, data]
+      properties:
+        format_version: { type: string, const: "1.0" }
+        request_id: { type: string }
+        data:
+          type: object
+          required: [project_id, object_id, kind, version_id, version_no, is_current, content_hash, content, files]
+          properties:
+            project_id: { type: string }
+            object_id: { type: string }
+            kind: { type: string }
+            version_id: { type: string }
+            version_no: { type: integer }
+            is_current: { type: boolean }
+            content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+            content:
+              oneOf:
+                - $ref: "#/components/schemas/ArtifactContent"
+                - $ref: "#/components/schemas/SourceContent"
+                - { type: "null" }
+            files:
+              type: array
+              items:
+                type: object
+                required: [blob_id, role]
+                properties:
+                  blob_id: { type: string }
+                  role: { type: string }
+    ArtifactContent:
+      type: object
+      required: [title, summary, body_md]
+      properties:
+        title: { type: string }
+        summary: { type: string }
+        body_md: { type: [string, "null"] }
+    SourceContent:
+      type: object
+      required: [title, url, quote, locator, source_kind, method, verification_state]
+      properties:
+        title: { type: string }
+        url: { type: [string, "null"] }
+        quote: { type: [string, "null"] }
+        locator: { type: object }
+        source_kind: { type: string }
+        method: { type: string }
+        verification_state: { type: string }
     Success:
       type: object
       required: [format_version, request_id, data]
@@ -251,8 +299,11 @@ paths:
       description: |
         data = {project_id, object_id, kind, version_id, version_no (integer),
         is_current (true when objects.current_version_id points at it),
-        content_hash (64 hex), files:[{blob_id, role}]}. A project, object, and
-        version that do not belong together are 404.
+        content_hash (64 hex), content, files:[{blob_id, role}]}. A project, object, and
+        version that do not belong together are 404. content is the version's own
+        stored text (the value at that version, not the current one). Agent
+        (non-human) requests omit files whose AI access is denied; the human
+        owner sees them.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/ObjectId"
@@ -265,7 +316,7 @@ paths:
           description: Version
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Success" }
+              schema: { $ref: "#/components/schemas/VersionRead" }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
         "404": { description: Unknown project, object, or version, or a mismatched pair }

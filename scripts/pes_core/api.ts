@@ -701,6 +701,57 @@ export class ApiApp {
     return { status: 200, data };
   }
 
+  #version_content(project_id: string, kind: string, version_id: string): unknown {
+    if (kind === "artifact") {
+      const row = this.#db.get<{ title: string; summary: string; body_md: string | null }>(
+        `SELECT title, summary, body_md FROM artifact_versions
+          WHERE project_id = ? AND version_id = ?`,
+        project_id,
+        version_id,
+      );
+      return row === undefined
+        ? null
+        : { title: row.title, summary: row.summary, body_md: row.body_md };
+    }
+    if (kind === "source") {
+      const row = this.#db.get<{
+        title: string;
+        url: string | null;
+        quote: string | null;
+        locator: string;
+        method: string;
+        verification_state: string;
+        source_kind: string | null;
+      }>(
+        `SELECT sv.title AS title, sv.url AS url, sv.quote AS quote, sv.locator AS locator,
+                sv.method AS method, sv.verification_state AS verification_state,
+                s.kind AS source_kind
+           FROM source_versions sv
+           LEFT JOIN sources s ON s.project_id = sv.project_id AND s.object_id = sv.object_id
+          WHERE sv.project_id = ? AND sv.version_id = ?`,
+        project_id,
+        version_id,
+      );
+      if (row === undefined) return null;
+      let locator: unknown = {};
+      try {
+        locator = JSON.parse(row.locator);
+      } catch {
+        locator = {};
+      }
+      return {
+        title: row.title,
+        url: row.url,
+        quote: row.quote,
+        locator,
+        source_kind: row.source_kind,
+        method: row.method,
+        verification_state: row.verification_state,
+      };
+    }
+    return null;
+  }
+
   async #version_read(request: RouteRequest): Promise<HandlerResult> {
     const data = read_tx(this.#db, () => {
       const project = this.#project(request.params[0] as string);
@@ -733,6 +784,7 @@ export class ApiApp {
         project.id,
         version_id,
       );
+      const visible = auth.kind === "human" ? files : files.filter((f) => !this.#blob_denied(project.id, f.blob_id));
       return {
         project_id: project.id,
         object_id: row.object_id,
@@ -741,7 +793,8 @@ export class ApiApp {
         version_no: Number(row.version_no),
         is_current: Number(row.is_current) === 1,
         content_hash: row.content_hash,
-        files: files.map((file) => ({ blob_id: file.blob_id, role: file.role })),
+        content: this.#version_content(project.id, row.kind, version_id),
+        files: visible.map((file) => ({ blob_id: file.blob_id, role: file.role })),
       };
     });
     return { status: 200, data };
@@ -1051,10 +1104,32 @@ export class ApiApp {
     return { status: 200, data: out.result, replayed: out.replayed };
   }
 
+  /** A deny in the current policy or in the latest history row blocks AI access. */
+  #blob_denied(project_id: string, blob_id: string): boolean {
+    const row = this.#db.get<{ current: string; latest: string | null }>(
+      `SELECT p.ai_access AS current,
+              (SELECT a.ai_access FROM file_ai_access_versions a
+                WHERE a.project_id = p.project_id AND a.file_policy_id = p.id
+                ORDER BY a.rev DESC LIMIT 1) AS latest
+         FROM file_policies p WHERE p.project_id = ? AND p.blob_id = ?`,
+      project_id,
+      blob_id,
+    );
+    // No policy row means no deny was ever recorded (an unattached blob).
+    if (row === undefined) return false;
+    return row.current === "deny" || row.latest === "deny";
+  }
+
   async #file_read(request: RouteRequest): Promise<HandlerResult> {
-    const project = this.#project(request.params[0] as string);
-    const auth = this.#auth_project(project, request, "file:read");
-    if (auth.kind === "internal_ai") this.#require_go(project.id);
+    const project = read_tx(this.#db, () => {
+      const found = this.#project(request.params[0] as string);
+      const auth = this.#auth_project(found, request, "file:read");
+      if (auth.kind === "internal_ai") this.#require_go(found.id);
+      if (auth.kind !== "human" && this.#blob_denied(found.id, request.params[1] as string)) {
+        throw new ApiError("forbidden", "AI access to this file is denied");
+      }
+      return found;
+    });
     const blob = await get_blob(
       { db: this.#db, objects_dir: this.#objects_dir },
       project.id,
