@@ -59,7 +59,7 @@ export function UsageTrendChart({ trend }: { trend: Trend }) {
   const summary = `${trend.connection} 5시간 구간 추정 사용률 추이(합성 예시). ${first.t} ${first.est}%${t0 ? `, ${t0.t} API 회사 화면에서 본 숫자 입력으로 ${t0.est}%에 맞춤` : ""}, ${stop.t} ${stop.est}%로 멈춤 문턱 ${trend.stop_percent}% 이상이 되어 보내기 전에 멈춤. 지금 ${now.t} ${now.est}%, 재개 가능 시각 ${last.t}에 ${last.proj}% 예상. 같은 숫자를 아래 표로 볼 수 있습니다.`;
 
   return (
-    <Card className="mt-6 gap-0 px-5" aria-labelledby="trend-t" id="trend">
+    <Card size="compact" aria-labelledby="trend-t" id="trend">
       <CardHead
         eyebrow={`사용량 추이 · ${trend.connection}`}
         title="5시간 구간 추정 사용률 · 오늘"

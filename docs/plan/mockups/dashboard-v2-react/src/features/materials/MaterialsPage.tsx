@@ -323,7 +323,7 @@ export function MaterialsPage() {
             </Callout>
           ) : null}
 
-          <Card className="gap-0 px-5">
+          <Card size="compact">
             <FilesTable m={m} filter={filter} query={query} onAccess={(files, next, folder) => files.length && setPending({ files, next, folder })} />
             {m.failed_upload ? (
               <Callout tone="bad" className="mt-2.5">
@@ -333,7 +333,7 @@ export function MaterialsPage() {
           </Card>
 
           <div className="mt-3.5 grid grid-cols-1 items-start gap-3.5 wide:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-            <Card id="preview" className="gap-0 px-5" aria-labelledby="pv-t">
+            <Card id="preview" size="compact" aria-labelledby="pv-t">
               <CardHead
                 eyebrow="글자 뽑기 미리보기"
                 title="선행연구 요약(가상).pdf"
@@ -399,7 +399,7 @@ export function MaterialsPage() {
             </Card>
 
             <section className="space-y-3" id="off" aria-label="AI 참조 이력과 효과">
-              <Card className="gap-0 px-5">
+              <Card size="compact">
                 <Table regionLabel="AI 참조 이력">
                   <TableCaption>AI 참조 이력 · 내부 검토 의견(가상).docx (지울 수 없음)</TableCaption>
                   <TableHeader>
@@ -438,7 +438,7 @@ export function MaterialsPage() {
               </Card>
               {/* 권한 없는 사람용 안내는 그 역할로 볼 때만(14절) — 소유자에게는 시안 설명 상자로만 견본을 둔다 */}
               {!editor ? (
-                <Card className="gap-0 px-5" data-mock="note">
+                <Card size="compact" data-mock="note">
                   <h3 className="text-sm">견본 · 편집자(박검토)에게 보이는 모습</h3>
                   <p className="mt-2">
                     <StateSwitch checked onLabel="허용" offLabel="금지" name="AI 참조(견본): 2024 지역별 돌봄 인력 현황" blockedBy="AI 참조는 소유자만 바꿀 수 있습니다." />
@@ -450,7 +450,7 @@ export function MaterialsPage() {
           </div>
         </TabsContent>
         <TabsContent value="ref">
-          <Card className="mt-3 gap-0 px-5" aria-labelledby="fr-t">
+          <div className="mt-3"><Card size="compact" aria-labelledby="fr-t">
             <CardHead eyebrow="참고 프로젝트에서 온 자료 · 읽기 전용" title="원본 프로젝트의 스위치를 따릅니다" titleId="fr-t" right={<span className="text-xs font-medium text-muted-foreground">이 화면에서 바꿀 수 없음</span>} />
             <Table regionLabel="참고 프로젝트 자료" className="min-w-[680px]">
               <TableCaption className="sr-only">참고 프로젝트에서 온 자료</TableCaption>
@@ -478,7 +478,7 @@ export function MaterialsPage() {
                 ))}
               </TableBody>
             </Table>
-          </Card>
+          </Card></div>
         </TabsContent>
       </Tabs>
 
@@ -487,7 +487,7 @@ export function MaterialsPage() {
       <SectionTitle title="자료 상태 견본" sub="올리기 · 글자 뽑기 · AI 참조는 서로 다른 사실이라 따로 표시합니다." />
       <div className="grid grid-cols-1 gap-3 tab:grid-cols-3">
         {(["upload", "extract", "aiAccess"] as const).map((dom) => (
-          <Card key={dom} className="gap-0 px-5">
+          <Card key={dom} size="compact">
             <Table>
               <TableCaption>{{ upload: "올리기", extract: "글자 뽑기", aiAccess: "AI 참조" }[dom]}</TableCaption>
               <TableBody>

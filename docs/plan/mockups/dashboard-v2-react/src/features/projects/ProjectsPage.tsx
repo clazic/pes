@@ -192,7 +192,7 @@ function TurnsCard({ d }: { d: ProjectsView }) {
   const rows = all ? d.turns : d.turns.slice(0, TURNS_FIRST);
   const hidden = d.turns.length - rows.length;
   return (
-    <Card id="turns" className="mt-6 gap-0 px-5" aria-labelledby="turns-t">
+    <Card id="turns" size="compact" aria-labelledby="turns-t">
       <CardHead
         title={`${YOU} ${d.turns.length}${hidden ? ` · 앞의 ${rows.length}건` : ""}`}
         titleId="turns-t"
@@ -299,7 +299,7 @@ function TurnsCard({ d }: { d: ProjectsView }) {
 /** 표 보기(기본) — 카드와 같은 정보: 판·방식·단계·차례(차례 표시기)·AI·내 컴퓨터/사용량/참고·AI가 읽기·마지막 활동·알림 */
 function ProjectsTable({ d, onRetry }: { d: ProjectsView; onRetry: () => void }) {
   return (
-    <Card className="mt-3 gap-0 px-5" id="table">
+    <Card size="compact" id="table">
       <Table regionLabel="프로젝트 표" className="min-w-[1040px]">
         <TableCaption className="sr-only">프로젝트 표 (카드와 같은 정보)</TableCaption>
         <TableHeader>
@@ -418,7 +418,7 @@ export function ProjectsPage() {
       {q.data ? (
         <>
           <Summary d={q.data} />
-          <TurnsCard d={q.data} />
+          <div className="mt-6"><TurnsCard d={q.data} /></div>
 
           <div className="mt-8 flex flex-wrap items-center justify-between gap-2" id="cards">
             <Tabs value={tab} onValueChange={setTab}>
@@ -439,7 +439,7 @@ export function ProjectsPage() {
               <EmptyState title="보관된 프로젝트 2개" body="보관된 프로젝트는 읽기 전용입니다. 시안에서는 목록을 그리지 않았습니다." />
             </div>
           ) : view === "table" ? (
-            <ProjectsTable d={q.data} onRetry={() => q.refetch()} />
+            <div className="mt-3"><ProjectsTable d={q.data} onRetry={() => q.refetch()} /></div>
           ) : (
             <section aria-label="프로젝트 카드" className="mt-3 grid grid-cols-1 items-stretch gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-3">
               {q.data.active.map((p) => (
