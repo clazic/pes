@@ -338,7 +338,9 @@ def merge_user_links(it, links):
     """user_links 목록 추가 규칙: url(파일 경로)이 같은 줄은 주어진 칸(status·memo·added)만 고치고, 새 url 은 뒤에 붙인다."""
     if not isinstance(links, list):
         return
-    cur = it.setdefault("user_links", [])
+    cur = it.get("user_links")
+    if not isinstance(cur, list):  # 손으로 고친 파일의 null 등 — 빈 목록으로 본다
+        cur = it["user_links"] = []
     for x in links:
         if not isinstance(x, dict) or not x.get("url"):
             continue
@@ -358,8 +360,14 @@ def cmd_merge(args):
     for f in args[2:]:
         raw = json.loads(Path(f).read_text(encoding="utf-8"))
         for r in (raw if isinstance(raw, list) else [raw]):
+            if not isinstance(r, dict):
+                die(f"merge: 결과 항목은 JSON 객체여야 합니다: {f}", 2)
+            if "user_links" in r and not isinstance(r["user_links"], list):
+                die(f"merge: user_links 는 객체 목록이어야 합니다 (#{r.get('id')}): {f} — 아무것도 바꾸지 않았습니다", 2)
             iid = r.get("id")
             it = items.get(iid)
+            if it is None and bool(set(r) & {"status", "request", "user_links"}) and set(r) <= MERGE_CONTROL_KEYS:
+                die(f"merge: 없는 항목 #{iid} 에 상태·요청만 담은 제안입니다 — `show <dir> {s}`로 번호를 확인하세요. 아무것도 바꾸지 않았습니다", 2)
             if it is None:
                 iid = iid if iid is not None else max([0] + list(items)) + 1
                 it = blank_item(iid, r.get("title", f"항목 {iid}"))

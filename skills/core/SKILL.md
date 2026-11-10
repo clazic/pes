@@ -228,7 +228,7 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 | kind=reopen | 다시 열기 절차 (6) |
 | 모호할 때만 | 다음 라운드 점검 질문으로 되묻는다 (채팅으로 묻지 않는다) |
 
-항목에 거는 status·request와 새 항목은 모두 제안 파일에 담아 `merge`로 넘긴다 — 상태 파일을 열어 고치지 않는다. 예: `{"id": 3, "status": "deepen", "request": "2023년 이후 자료 보완"}` (상태·요청만 담은 제안이라 depth는 그대로). 요청을 지울 때는 `"request": ""`.
+항목에 거는 status·request와 새 항목은 모두 제안 파일에 담아 `merge`로 넘긴다 — 상태 파일을 열어 고치지 않는다. 예: `{"id": 3, "status": "deepen", "request": "2023년 이후 자료 보완"}` (상태·요청만 담은 제안이라 depth는 그대로). 요청을 지울 때는 `"request": ""`. 이런 제안의 id는 `show`로 확인한 번호만 쓴다 — 없는 번호면 PES가 거부하고 아무것도 바꾸지 않는다.
 
 ## 공통 작업 규칙
 

@@ -653,7 +653,8 @@ async function hand_over_plan(
     research.id,
   );
   for (const row of existing) {
-    const links = (parse_json_field(row.metadata_json, {}) as Record<string, unknown>).links;
+    const row_meta = parse_json_field(row.metadata_json, {}) as Record<string, unknown>;
+    const links = row_meta.links ?? (is_record(row_meta.legacy_extra) ? row_meta.legacy_extra.links : undefined);
     const from_plan = is_record(links) ? links.plan : undefined;
     if (Array.isArray(from_plan)) for (const id of from_plan) linked.add(String(id));
   }
@@ -662,30 +663,36 @@ async function hand_over_plan(
   for (const topic of topics) {
     if (topic.status === "removed") continue;
     const meta = parse_json_field(topic.metadata_json, {}) as Record<string, unknown>;
+    // An item merged here keeps legacy_id/legacy_kind/links/reuse in metadata; one imported from a
+    // v0.15 file keeps them in legacy_extra (legacy_id, kind_original, links, reuse_original).
+    const extra: Record<string, unknown> = is_record(meta.legacy_extra) ? meta.legacy_extra : {};
+    const topic_id = meta.legacy_id ?? extra.legacy_id;
     // The old rule looked at the item's own kind: only a plan item given as "topic".
-    if (meta.legacy_kind !== "topic") continue;
-    if (meta.legacy_id === undefined || meta.legacy_id === null || linked.has(String(meta.legacy_id))) continue;
-    const topic_links = is_record(meta.links) && Array.isArray(meta.links.plan) ? meta.links.plan : [];
+    if ((meta.legacy_kind ?? extra.kind_original) !== "topic") continue;
+    if (topic_id === undefined || topic_id === null || linked.has(String(topic_id))) continue;
+    const own_links = meta.links ?? extra.links;
+    const topic_links = is_record(own_links) && Array.isArray(own_links.plan) ? own_links.plan : [];
     // reuse = an imported library item's id: the new research item carries its content and is to be completed (deepen).
-    const lib = find_library_item(s, project, meta.reuse);
+    const reuse = meta.reuse !== undefined && meta.reuse !== null && meta.reuse !== "" ? meta.reuse : extra.reuse_original;
+    const lib = find_library_item(s, project, reuse);
     next_id += 1;
     const created = await create_object(s.service, s.ctx(project, auth), {
       kind: "artifact",
       edition_id: research.edition_id,
     });
     const links: Record<string, unknown[]> = {
-      plan: [meta.legacy_id, ...topic_links.filter((id) => String(id) !== String(meta.legacy_id))],
+      plan: [topic_id, ...topic_links.filter((id) => String(id) !== String(topic_id))],
     };
     const metadata: Record<string, unknown> = { legacy_id: next_id, legacy_kind: "topic", depth: 0, stage: "research", links };
     if (lib !== undefined) {
-      links.library = [meta.reuse];
+      links.library = [reuse];
       metadata.request =
-        `기존 조사(라이브러리 #${String(meta.reuse)}) 재사용 — 기획의 조사 질문에 맞게 보완하고, ` +
+        `기존 조사(라이브러리 #${String(reuse)}) 재사용 — 기획의 조사 질문에 맞게 보완하고, ` +
         "원문 미확인 출처와 충돌(⚠)은 다시 확인";
-      const extra = (parse_json_field(lib.metadata_json, {}) as Record<string, unknown>).legacy_extra;
-      if (is_record(extra) && Array.isArray(extra.shots)) metadata.shots = extra.shots;
+      const lib_extra = (parse_json_field(lib.metadata_json, {}) as Record<string, unknown>).legacy_extra;
+      if (is_record(lib_extra) && Array.isArray(lib_extra.shots)) metadata.shots = lib_extra.shots;
       // a confidence the old file wrote outside high/medium/low ("중간") stays as written, like the old copy
-      if (is_record(extra) && "confidence" in extra) metadata.legacy_extra = { confidence_original: extra.confidence };
+      if (is_record(lib_extra) && "confidence" in lib_extra) metadata.legacy_extra = { confidence_original: lib_extra.confidence };
     }
     const added = await add_artifact(s.service, s.ctx(project, auth), {
       object_id: String(result_of(created).object_id),
@@ -719,7 +726,7 @@ async function hand_over_plan(
         });
       }
     }
-    linked.add(String(meta.legacy_id));
+    linked.add(String(topic_id));
     made += 1;
   }
   return made;
@@ -907,7 +914,7 @@ function parse_json_field(text: string, fallback: unknown): unknown {
 /** Highest numeric legacy id among a stage's items (0 when none): the old CLI's `max(items) + 1`. */
 function max_legacy_id(s: Session, project: ProjectInfo, stage: StageInfo): number {
   const rows = s.db.all<{ legacy_id: unknown }>(
-    `SELECT json_extract(v.metadata_json, '$.legacy_id') AS legacy_id
+    `SELECT COALESCE(json_extract(v.metadata_json, '$.legacy_id'), json_extract(v.metadata_json, '$.legacy_extra.legacy_id')) AS legacy_id
        FROM objects o
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
@@ -1014,6 +1021,9 @@ const merge: Handler = async (s, req) => {
         throw new Refusal("invalid_payload", `알 수 없는 status 값입니다: ${String(given_status)}`, 2);
       }
     }
+    if ("user_links" in raw && !Array.isArray(raw.user_links)) {
+      throw new Refusal("invalid_payload", `user_links 는 객체 목록이어야 합니다 (#${String(raw.id)})`, 2);
+    }
     const given_confidence = raw.confidence;
     if (given_confidence !== undefined && given_confidence !== null && given_confidence !== "") {
       if (typeof given_confidence !== "string" || !CONFIDENCES.includes(given_confidence)) {
@@ -1035,6 +1045,14 @@ const merge: Handler = async (s, req) => {
       next_id = legacy_id;
     }
     const prev = find_previous(s, project, stage, legacy_id);
+    if (prev === undefined && is_control_only(raw)) {
+      // a status/request-only proposal for an id that is not there is a typo, not a new item (the unit rolls back)
+      throw new Refusal(
+        "invalid_payload",
+        `없는 항목 #${String(raw.id ?? "")} 에 상태·요청만 담은 제안입니다 — show 로 번호를 확인하세요`,
+        2,
+      );
+    }
     const prev_meta = prev === undefined ? {} : (parse_json_field(prev.metadata_json, {}) as Record<string, unknown>);
     const prev_fields: Partial<PrevArtifact> = prev ?? {};
     // A proposal that only carries status/request/user_links (deepen, revise, remove, a user's link) is a
