@@ -224,7 +224,7 @@ export function read_cursor(secret: string, text: string): CursorBody | null {
 // ---------------------------------------------------------------------------
 // request budgets (in memory, per process)
 
-const WINDOW_MS = 60_000;
+export const WINDOW_MS = 60_000;
 
 export class Budgets {
   readonly #hits = new Map<string, number[]>();
@@ -265,4 +265,20 @@ export class Budgets {
   clear_poll(key: string): void {
     this.#polls.delete(key);
   }
+}
+
+const BUDGETS_OF_DB = new WeakMap<object, Budgets>();
+
+/**
+ * One budget per open database handle: ApiApp instances built over the same handle in one process share it,
+ * so a rebuilt ApiApp does not reset the minute window. Across processes (the serve.py bridge starts one per
+ * request) serve.py applies the same limits itself.
+ */
+export function budgets_for(db: object): Budgets {
+  let budgets = BUDGETS_OF_DB.get(db);
+  if (budgets === undefined) {
+    budgets = new Budgets();
+    BUDGETS_OF_DB.set(db, budgets);
+  }
+  return budgets;
 }

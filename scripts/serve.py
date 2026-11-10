@@ -12,10 +12,12 @@
  - 다른 출처(Origin)의 POST 는 거부한다.
 """
 import base64
+import hashlib
 import json
 import os
 import re
 import shutil
+import math
 import socketserver
 import subprocess
 import sys
@@ -39,7 +41,132 @@ _API_ERROR_TEXT = {
     "payload_too_large": ("요청 본문이 너무 큽니다.", "fix_request"),
     "internal_error": ("서버 안에서 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"),
     "schema_not_ready": ("PES 데이터베이스가 아직 준비되지 않았습니다.", "migrate_database"),
+    "rate_limited": ("요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.", "retry_after"),
 }
+# 상주 프로세스인 이 서버만 요청 예산을 기억한다(브리지는 요청마다 새 Node 프로세스다).
+# 한도 숫자와 제어·poll 경로는 Node ApiApp.budget_policy() 가 한곳에서 정해 `--limits` 로 내준다.
+_API_PROJECT_PATH = re.compile(r"/api/v1/projects/[^/]+/.*")
+_BEARER = re.compile(r"\s*bearer\s+(.*?)\s*", re.IGNORECASE | re.DOTALL)
+_BUDGET_MAX_KEYS = 20000
+
+
+def _route_pattern(template):
+    """"GET /api/v1/projects/{id}/x" -> (method, compiled path regex)."""
+    method, path = template.split(" ", 1)
+    parts = re.split(r"\{[a-z_]+\}", path)
+    return method, re.compile("[^/]+".join(re.escape(part) for part in parts))
+
+
+def _digest(value):
+    # 자격 원문은 저장하지 않고 sha256 만 키로 쓴다.
+    return hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+class ApiBudget:
+    """자격(Authorization 또는 x-pes-session)의 sha256 단위 요청 예산과 inputs 최소 poll 간격."""
+
+    def __init__(self, policy):
+        self.window_ms = int(policy["window_ms"])
+        self.agent = int(policy["agent_requests_per_minute"])
+        self.agent_control = int(policy["agent_control_requests_per_minute"])
+        self.owner = int(policy["owner_requests_per_minute"])
+        self.poll_gap_ms = int(policy["min_poll_interval_ms"])
+        self.control_routes = [_route_pattern(t) for t in policy["control_routes"]]
+        self.poll_routes = [_route_pattern(t) for t in policy["poll_routes"]]
+        self.refund_codes = set(policy["refund_codes"])
+        self._hits = {}
+        self._polls = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _now():
+        return int(time.monotonic() * 1000)
+
+    @staticmethod
+    def _matches(routes, method, path):
+        return any(m == method and r.fullmatch(path) for m, r in routes)
+
+    def _credential(self, headers):
+        session = headers.get("x-pes-session")
+        if session:
+            return "session", _digest(session)
+        auth = headers.get("authorization")
+        if auth:
+            bearer = _BEARER.fullmatch(auth)
+            return "token", _digest(bearer.group(1) if bearer else auth)
+        return None
+
+    def _prune(self, now):
+        if len(self._hits) > _BUDGET_MAX_KEYS:
+            for key in [k for k, hits in self._hits.items() if not hits or hits[-1] <= now - self.window_ms]:
+                del self._hits[key]
+            if len(self._hits) > _BUDGET_MAX_KEYS:
+                oldest = sorted(self._hits, key=lambda k: self._hits[k][-1])
+                for key in oldest[: len(self._hits) - _BUDGET_MAX_KEYS // 2]:
+                    del self._hits[key]
+        if len(self._polls) > _BUDGET_MAX_KEYS:
+            for key in [k for k, at in self._polls.items() if at + self.poll_gap_ms <= now]:
+                del self._polls[key]
+            if len(self._polls) > _BUDGET_MAX_KEYS:
+                self._polls.clear()
+
+    def admit(self, method, path, headers):
+        """Returns (ticket, rejection). rejection is (scope, retry_after_ms); ticket is passed to settle()."""
+        if not _API_PROJECT_PATH.fullmatch(path):
+            return None, None
+        cred = self._credential(headers)
+        if cred is None:
+            return None, None
+        kind, digest = cred
+        if kind == "session":
+            scope, limit, key = "session", self.owner, f"session:{digest}"
+        else:
+            scope = "control" if self._matches(self.control_routes, method, path) else "general"
+            limit = self.agent_control if scope == "control" else self.agent
+            key = f"token:{digest}:{scope}"
+        now = self._now()
+        with self._lock:
+            self._prune(now)
+            hits = [at for at in self._hits.get(key, []) if at > now - self.window_ms]
+            if len(hits) >= limit:
+                self._hits[key] = hits
+                return None, (scope, min(self.window_ms, max(1, hits[0] + self.window_ms - now)))
+            hits.append(now)
+            self._hits[key] = hits
+            poll_key = None
+            if kind == "token" and self._matches(self.poll_routes, method, path):
+                poll_key = f"{digest}:{path}"
+                last = self._polls.get(poll_key)
+                if last is not None and last + self.poll_gap_ms - now > 0:
+                    return None, ("poll", min(self.poll_gap_ms, last + self.poll_gap_ms - now))
+        return (key, now, poll_key), None
+
+    def settle(self, ticket, status, payload):
+        """Give the slot back for a request refused over its own input; note empty polls."""
+        if ticket is None:
+            return
+        key, at, poll_key = ticket
+        code, inputs = None, None
+        if status >= 400 or poll_key is not None:
+            try:
+                doc = json.loads(payload.decode("utf-8"))
+                if status >= 400:
+                    code = doc["error"]["code"]
+                else:
+                    inputs = doc["data"]["inputs"]
+            except (UnicodeDecodeError, ValueError, KeyError, TypeError):
+                pass
+        with self._lock:
+            if code in self.refund_codes:
+                hits = self._hits.get(key)
+                if hits and at in hits:
+                    hits.remove(at)
+            if poll_key is not None and status == 200:
+                if isinstance(inputs, list) and len(inputs) == 0:
+                    self._polls[poll_key] = self._now()
+                else:
+                    self._polls.pop(poll_key, None)
+
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 # feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
@@ -64,6 +191,7 @@ class LocalHTTPServer(ThreadingHTTPServer):
         # ~/.pes or the database file. Only a successful migrate is cached.
         self.api_db_ready = False
         self.api_db_lock = threading.Lock()
+        self.api_budget = None
 
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
@@ -114,7 +242,7 @@ def main():
             self.send_header("Cache-Control", "no-store")
             super().end_headers()
 
-        def _json(self, code, obj, cors=False, close=False):
+        def _json(self, code, obj, cors=False, close=False, extra_headers=None):
             body = json.dumps(obj, ensure_ascii=False).encode()
             self.send_response(code)
             o = self.headers.get("Origin") or ""
@@ -122,6 +250,8 @@ def main():
                 self.send_header("Access-Control-Allow-Origin", o)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             if close:
                 self.send_header("Connection", "close")
                 self.close_connection = True
@@ -156,8 +286,8 @@ def main():
             self.send_header("Location", to)
             self.end_headers()
 
-        def _api_error(self, code, message, status, close=False):
-            # 봉투는 Node 쪽 ApiApp 과 같다: 한국어 message, retryable(503 만 true),
+        def _api_error(self, code, message, status, close=False, details=None, extra_headers=None):
+            # 봉투는 Node 쪽 ApiApp 과 같다: 한국어 message, retryable(503·429 만 true),
             # next_action 은 늘 문자열. 영어 message 인자는 기록용이라 응답에 싣지 않는다.
             ko, next_action = _API_ERROR_TEXT.get(code, _API_ERROR_TEXT["internal_error"])
             request_id = f"serve-{time.time_ns()}"
@@ -166,13 +296,13 @@ def main():
                 "error": {
                     "code": code,
                     "message": ko,
-                    "retryable": status == 503,
+                    "retryable": status in (429, 503),
                     "target": None,
-                    "details": None,
+                    "details": details,
                     "next_action": next_action,
                 },
                 "request_id": request_id,
-            }, close=close)
+            }, close=close, extra_headers={"x-request-id": request_id, **(extra_headers or {})})
 
         def _origin_allowed(self):
             origin = self.headers.get("Origin") or ""
@@ -201,6 +331,18 @@ def main():
                     return failed
                 if proc.returncode != 0:
                     return failed
+                try:
+                    limits = subprocess.run(
+                        [node, str(NODE_BRIDGE), "--limits"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=60,
+                    )
+                    if limits.returncode != 0:
+                        return failed
+                    srv.api_budget = ApiBudget(json.loads(limits.stdout.decode("utf-8")))
+                except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+                    return failed
                 srv.api_db_ready = True
                 return None
 
@@ -224,10 +366,18 @@ def main():
             node = shutil.which("node")
             if node is None:
                 return self._api_error("internal_error", "internal error", 500)
+            headers_in = {name.lower(): value for name, value in self.headers.items()}
+            ticket, rejected = self.server.api_budget.admit(method, path, headers_in)
+            if rejected is not None:
+                scope, retry_after_ms = rejected
+                return self._api_error(
+                    "rate_limited", "too many requests", 429,
+                    details={"retry_after_ms": retry_after_ms, "scope": scope},
+                    extra_headers={"retry-after": str(max(1, math.ceil(retry_after_ms / 1000)))})
             request = {
                 "method": method,
                 "path": path,
-                "headers": {name.lower(): value for name, value in self.headers.items()},
+                "headers": headers_in,
                 "body_b64": base64.b64encode(body).decode("ascii"),
             }
             try:
@@ -249,6 +399,7 @@ def main():
                 payload = base64.b64decode(response.get("body_b64") or "")
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 return self._api_error("internal_error", "internal error", 500)
+            self.server.api_budget.settle(ticket, status, payload)
             self.send_response(status)
             for name, value in headers.items():
                 if name.lower() in ("content-length", "connection", "transfer-encoding"):

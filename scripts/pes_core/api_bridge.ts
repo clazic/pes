@@ -1,5 +1,6 @@
 // Thin Node side of serve.py's /api/v1 boundary (stage 2 PR13).
 //
+// `--limits` prints the request-budget policy (limits, control and poll routes) once for serve.py.
 // `--migrate` is the one-shot startup entry point serve.py calls before its
 // first API request. A normal invocation reads one HTTP request as JSON on
 // stdin and relays the ApiApp response as JSON on stdout; it never migrates.
@@ -106,6 +107,22 @@ async function main(): Promise<void> {
   const env = process.env as Environment;
   if (process.argv.includes("--migrate")) {
     migrate_only(env);
+    return;
+  }
+
+  if (process.argv.includes("--limits")) {
+    const db = connect(db_path(env));
+    try {
+      const app = new ApiApp({
+        db,
+        clock: new SystemClock(),
+        objects_dir: objects_dir(env),
+        local_session_secret: globalThis.crypto.randomUUID(),
+      });
+      process.stdout.write(JSON.stringify(app.budget_policy()));
+    } finally {
+      db.close();
+    }
     return;
   }
 

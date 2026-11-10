@@ -68,6 +68,8 @@ import {
 } from "./runs.ts";
 import {
   Budgets,
+  WINDOW_MS,
+  budgets_for,
   ERROR_CODES,
   ERROR_STATUS,
   Fail,
@@ -215,6 +217,8 @@ const AGENT_REQUESTS_PER_MINUTE = 60;
 const AGENT_CONTROL_REQUESTS_PER_MINUTE = 120;
 const OWNER_REQUESTS_PER_MINUTE = 600;
 const LIST_MAX_ITEMS = 100;
+/** A request refused for its own malformed input was not served: it does not use up the budget. */
+const REFUNDED_CODES: readonly string[] = ["invalid_payload", "validation_failed", "payload_too_large", "cursor_invalid"];
 const MAX_RESULTS_PER_BATCH = 20;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -444,7 +448,7 @@ export class ApiApp {
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #new_id: () => string;
   readonly #service: CommandService;
-  readonly #budgets = new Budgets();
+  readonly #budgets: Budgets;
   readonly #table: RouteSpec[];
   readonly #patterns: RegExp[];
 
@@ -459,6 +463,7 @@ export class ApiApp {
       throw new TypeError("objects_dir must be a non-empty string");
     }
     this.#db = options.db;
+    this.#budgets = budgets_for(options.db);
     this.#clock = options.clock;
     this.#objects_dir = options.objects_dir;
     this.#secret = options.local_session_secret;
@@ -698,10 +703,7 @@ export class ApiApp {
       return await op.act(request, project, auth);
     } catch (error) {
       // A request refused for its own malformed input was not served: it does not use up the budget.
-      if (
-        error instanceof Fail &&
-        ["invalid_payload", "validation_failed", "payload_too_large", "cursor_invalid"].includes(error.code)
-      ) {
+      if (error instanceof Fail && REFUNDED_CODES.includes(error.code)) {
         refund();
       }
       throw error;
@@ -1014,9 +1016,14 @@ export class ApiApp {
     };
   }
 
-  #lease_lost(project_id: string, fence_text: string): Fail {
+  /** The current lease is shown only to the actor that holds it; anyone else learns nothing about it. */
+  #lease_lost(project_id: string, fence_text: string, auth: AuthInfo): Fail {
     const lease = lease_info(this.#db, project_id);
-    const live = lease !== undefined && lease.state === "active" && this.#now() < Number(lease.expires_at);
+    const live =
+      lease !== undefined &&
+      lease.state === "active" &&
+      this.#now() < Number(lease.expires_at) &&
+      lease.owner_actor_id === auth.actor_id;
     return new Fail("lease_lost", {
       target: "$.body.fence",
       details: {
@@ -1100,6 +1107,26 @@ export class ApiApp {
           error_codes: [...ERROR_CODES],
         },
       },
+    };
+  }
+
+  /**
+   * The request-budget rules in one serializable value. serve.py (the one long-lived process) applies them
+   * before it hands a request to the per-request bridge, so the numbers and the control/poll routes live
+   * here only.
+   */
+  budget_policy(): Record<string, unknown> {
+    const templates = (match: (spec: RouteSpec) => boolean): string[] =>
+      this.#table.filter((spec) => spec.kind === "project" && match(spec)).map((spec) => `${spec.method} ${spec.path}`);
+    return {
+      window_ms: WINDOW_MS,
+      agent_requests_per_minute: AGENT_REQUESTS_PER_MINUTE,
+      agent_control_requests_per_minute: AGENT_CONTROL_REQUESTS_PER_MINUTE,
+      owner_requests_per_minute: OWNER_REQUESTS_PER_MINUTE,
+      min_poll_interval_ms: MIN_POLL_INTERVAL_MS,
+      control_routes: templates((spec) => spec.op?.bucket === "control"),
+      poll_routes: templates((spec) => spec.operation === "runs.inputs"),
+      refund_codes: [...REFUNDED_CODES],
     };
   }
 
@@ -1608,11 +1635,12 @@ export class ApiApp {
         invalid("$.body.progress.observed_at");
       }
     }
+    if (run_info(this.#db, project.id, run_id) === undefined) throw new Fail("not_found");
     const out = await this.#exec(
       () => run_heartbeat(this.#service, this.#ctx(project, auth, key), { run_id, lease_id, fence }),
       (error) => {
         const failure = fail_from(error);
-        return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence)) : failure;
+        return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence), auth) : failure;
       },
     );
     const result = result_record(out.result);
@@ -1638,11 +1666,12 @@ export class ApiApp {
     const run_id = request.params[1] as string;
     const lease_id = require_text(body, "lease_id");
     const fence = parse_fence(body.fence);
+    if (run_info(this.#db, project.id, run_id) === undefined) throw new Fail("not_found");
     const out = await this.#exec(
       () => run_release(this.#service, this.#ctx(project, auth, key), { run_id, lease_id, fence }),
       (error) => {
         const failure = fail_from(error);
-        return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence)) : failure;
+        return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence), auth) : failure;
       },
     );
     return { status: 200, data: { run_id, status: result_record(out.result).status }, replayed: out.replayed };
@@ -1900,7 +1929,7 @@ export class ApiApp {
         }),
       (error) => {
         const failure = fail_from(error);
-        return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence)) : failure;
+        return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence), auth) : failure;
       },
     );
     const accepted = (result_record(out.result).accepted as Array<Record<string, unknown>>) ?? [];
@@ -1934,7 +1963,11 @@ export class ApiApp {
   }
 
   async #request_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
-    const row = request_receipt(this.#db, project.id, request.params[1] as string, auth.session ? null : auth.actor_id);
+    const key = request.params[1] as string;
+    // Keys belong to (actor, key): the owner's own receipt comes first, any other receipt only when there is none.
+    const row =
+      request_receipt(this.#db, project.id, key, auth.actor_id) ??
+      (auth.session ? request_receipt(this.#db, project.id, key, null) : undefined);
     if (row === undefined) throw new Fail("not_found");
     const result = JSON.parse(row.result_json) as Record<string, unknown>;
     const status = ACCEPTED_ACTIONS.has(row.action)
