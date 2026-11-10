@@ -467,7 +467,7 @@ function AfterCreate({ d, receipt }: { d: Draft; receipt: string }) {
   const [retried, setRetried] = React.useState(false);
   const failed = d.files.length > 1 && !retried;
   return (
-    <Card className="gap-0 px-5" aria-labelledby="done-t">
+    <Card size="compact" aria-labelledby="done-t">
       <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <h2 id="done-t" className="text-title">
           만들기를 누른 뒤

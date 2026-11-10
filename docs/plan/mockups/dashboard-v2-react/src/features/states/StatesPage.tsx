@@ -48,7 +48,7 @@ export function StatesPage() {
     <>
       <SectionTitle as="h1" title="상태 견본" sub="같은 상태는 어느 화면에서나 같은 모양·글자·색으로 보입니다. 색만으로 구분하지 않습니다." />
 
-      <Card className="gap-0 px-5" aria-labelledby="shape-t">
+      <Card size="compact" aria-labelledby="shape-t">
         <h2 id="shape-t" className="text-title">
           상태 표기 — 모양 9가지 + 글자 + 색
         </h2>
@@ -67,25 +67,27 @@ export function StatesPage() {
         </More>
       </Card>
 
-      <Card className="mt-4 gap-0 px-5" aria-labelledby="turn-t">
-        <h2 id="turn-t" className="text-title">
-          차례 표시기 — 지금 누가 움직일 차례인가
-        </h2>
-        <p className="mt-1 text-meta text-ink-2">왼쪽 끝은 사람, 오른쪽 끝은 AI. 공이 있는 쪽이 차례입니다. 목록 줄 · 작업 공간 띠 · 사이드바 배지 · 휴대폰이 같은 표시를 씁니다.</p>
-        <ul className="mt-3 grid grid-cols-1 gap-3 tab:grid-cols-2 desk:grid-cols-3">
-          {turnSamples(base).map((s) => (
-            <li key={s.title} className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
-              <TurnIndicator turn={s.turn} action />
-              <p className="mt-auto border-t border-line pt-1.5 text-caption text-muted-foreground">지키는 것: {s.keep}</p>
-            </li>
-          ))}
-        </ul>
-        <More className="mt-2" label="움직임 규칙">
-          <p>움직임은 셋뿐입니다 — 차례가 바뀔 때 공이 옮겨 가는 것(0.5초), AI 작업 중이고 소식이 시험값 안일 때 공 둘레를 도는 점(1.8초에 한 바퀴), 나의 할 일로 바뀌는 순간 한 번 퍼지는 고리. 깜박이거나 번쩍이지 않습니다.</p>
-          <p>움직임 줄이기(운영체제 설정)에서는 셋 다 멈추고, 모양과 글자만으로 같은 뜻을 전합니다. 소식이 오래되면 점이 멈추고 “소식 없음 · 마지막 소식 n분 전”이 됩니다(방식 B에서 AI가 일하는 척 보이지 않게 — stage-3 2.6).</p>
-          <p>화면 읽기 프로그램에는 나의 할 일이 생길 때(→ 나의 할 일)와 끝날 때만 한 번 조용히 알립니다. 경과 시간이 바뀌는 것은 읽지 않습니다.</p>
-        </More>
-      </Card>
+      <div className="mt-4">
+        <Card size="compact" aria-labelledby="turn-t">
+          <h2 id="turn-t" className="text-title">
+            차례 표시기 — 지금 누가 움직일 차례인가
+          </h2>
+          <p className="mt-1 text-meta text-ink-2">왼쪽 끝은 사람, 오른쪽 끝은 AI. 공이 있는 쪽이 차례입니다. 목록 줄 · 작업 공간 띠 · 사이드바 배지 · 휴대폰이 같은 표시를 씁니다.</p>
+          <ul className="mt-3 grid grid-cols-1 gap-3 tab:grid-cols-2 desk:grid-cols-3">
+            {turnSamples(base).map((s) => (
+              <li key={s.title} className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
+                <TurnIndicator turn={s.turn} action />
+                <p className="mt-auto border-t border-line pt-1.5 text-caption text-muted-foreground">지키는 것: {s.keep}</p>
+              </li>
+            ))}
+          </ul>
+          <More className="mt-2" label="움직임 규칙">
+            <p>움직임은 셋뿐입니다 — 차례가 바뀔 때 공이 옮겨 가는 것(0.5초), AI 작업 중이고 소식이 시험값 안일 때 공 둘레를 도는 점(1.8초에 한 바퀴), 나의 할 일로 바뀌는 순간 한 번 퍼지는 고리. 깜박이거나 번쩍이지 않습니다.</p>
+            <p>움직임 줄이기(운영체제 설정)에서는 셋 다 멈추고, 모양과 글자만으로 같은 뜻을 전합니다. 소식이 오래되면 점이 멈추고 “소식 없음 · 마지막 소식 n분 전”이 됩니다(방식 B에서 AI가 일하는 척 보이지 않게 — stage-3 2.6).</p>
+            <p>화면 읽기 프로그램에는 나의 할 일이 생길 때(→ 나의 할 일)와 끝날 때만 한 번 조용히 알립니다. 경과 시간이 바뀌는 것은 읽지 않습니다.</p>
+          </More>
+        </Card>
+      </div>
 
       <SectionTitle title="공통 화면 상태 — 실제 컴포넌트" sub="빈 · 로딩 · 오류 · 권한 없음 · 끊김 · 충돌 · 차단 · 미상 · 접수 확인 중 · 결과 미확인 · 옛 형식" />
       <div className="grid grid-cols-1 items-stretch gap-3 tab:grid-cols-2 desk:grid-cols-3">
@@ -167,7 +169,7 @@ export function StatesPage() {
       <SectionTitle title="상태 사전 전체(설계 6절 상태 총표)" sub="화면은 이 사전 밖의 상태 이름을 만들지 않습니다. 근거 열의 영어 코드는 개발자용입니다." />
       <div className="grid grid-cols-1 gap-3 desk:grid-cols-2">
         {domains.map((dom) => (
-          <Card key={dom} className="gap-0 px-5">
+          <Card key={dom} size="compact">
             <Table regionLabel={`${DOMAIN_LABEL[dom]} 상태`}>
               <TableCaption>{DOMAIN_LABEL[dom]}</TableCaption>
               <TableHeader>

@@ -59,7 +59,7 @@ export function DevicePage() {
           </div>
         </Card>
         {/* 다른 상태 견본(시안) — 지금 장면이 아니므로 시안 설명 상자와 함께 숨김 */}
-        <Card className="gap-0 px-5" aria-labelledby="dev-states" data-mock="note">
+        <Card size="compact" aria-labelledby="dev-states" data-mock="note">
           <h2 id="dev-states" className="text-title">
             다른 상태
           </h2>

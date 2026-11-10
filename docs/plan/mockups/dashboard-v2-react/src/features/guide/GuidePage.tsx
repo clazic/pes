@@ -41,7 +41,7 @@ export function GuidePage() {
         5차(2026-11-08, 두 공간): <strong>관리 공간</strong>(모아 보기 — 목록 · 나의 할 일 · 내 컴퓨터 · 사용량 · 알림 · 새 프로젝트)과 <strong>연구 공간</strong>(프로젝트 하나 — 연구 개요 · 지금 할 일 · 막힌 것·풀 것 · 결과 글 · AI 동료 · 집중 모드)으로 나눴습니다. 연구 공간에는 관리용 전역 메뉴가 없고 “모든 프로젝트”와 프로젝트 전환만 있습니다. 설계 16절.{" "}
         2차(테마 적용): 앱 셸은 shadcn 공식 <strong>sidebar-07</strong> 블록(아이콘만 남기고 접힘 — 머리줄 왼쪽 단추 또는 Ctrl/Cmd+B, 900px 아래는 Sheet)과 shadcn-admin 구조를 참고한 머리줄(빵부스러기 · 명령 찾기 · 알림 · 테마 · 사용자)입니다. 프로젝트 목록·사용량은 <strong>dashboard-01</strong> 패턴(요약 카드 줄 + 표, 사용량 추이 차트 하나), 작업 공간은 문서 중심입니다. 머리줄의 팔레트 단추에서 tweakcn 테마 4개(Modern Minimal · Vercel · Graphite · Clean Slate, Apache-2.0) × 밝게/어둡게/시스템 따라를 바꿔 볼 수 있고, 고른 값은 이 브라우저에만 남습니다. 글꼴은 어느 테마든 Pretendard입니다. 설계 12.9절.
       </Anno>
-      <Card className="gap-0 px-5">
+      <Card size="compact">
         <Table regionLabel="화면 목록" className="min-w-[720px]">
           <TableCaption>화면 {SCREENS.length}개 — 주소 · 정적 시안 대응 · 설계 절</TableCaption>
           <TableHeader>
@@ -101,7 +101,7 @@ export function GuidePage() {
           { title: "쓰기", rows: COMMANDS },
           { title: "읽기", rows: READS },
         ].map((g) => (
-          <Card key={g.title} className="gap-0 px-5">
+          <Card key={g.title} size="compact">
             <Table regionLabel={`${g.title} 명령`}>
               <TableCaption>{g.title}</TableCaption>
               <TableHeader>

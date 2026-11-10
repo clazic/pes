@@ -31,7 +31,7 @@ export function ComputerPage() {
           </span>
         }
       />
-      <Card className="gap-0 px-5">
+      <Card size="compact">
         <Table regionLabel="기기 목록" className="min-w-[640px]">
           <TableCaption>기기</TableCaption>
           <TableHeader>
@@ -72,7 +72,7 @@ export function ComputerPage() {
         </Table>
       </Card>
       <div className="mt-3 grid grid-cols-1 gap-3 desk:grid-cols-2">
-        <Card className="gap-0 px-5">
+        <Card size="compact">
           <Table regionLabel="프로젝트별 연결">
             <TableCaption>프로젝트별 연결</TableCaption>
             <TableHeader>
@@ -98,7 +98,7 @@ export function ComputerPage() {
             </TableBody>
           </Table>
         </Card>
-        <Card className="gap-0 px-5">
+        <Card size="compact">
           <Table regionLabel="기기 승인 기록">
             <TableCaption>기기 승인 기록</TableCaption>
             <TableHeader>
