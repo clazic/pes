@@ -35,14 +35,17 @@ import {
   append_version,
   create_object,
   import_library,
+  link_relation,
   set_current,
   submit_results,
 } from "./content.ts";
-import { connect, load_migrations, migrate, type Db } from "./db.ts";
+import { connect, connect_read_only, load_migrations, migrate, probe_database, type Db } from "./db.ts";
 import { approve_stage, reopen_stage, seal_round, start_round } from "./editions.ts";
 import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
-import { complete_upload, reserve_upload, store_blob, sha256_hex } from "./files.ts";
+import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex } from "./files.ts";
+import { serving_path } from "./migration.ts";
+import { build_project_view, not_a_report_sql, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -54,6 +57,7 @@ import {
   record_qa,
   record_qa_brief,
 } from "./records.ts";
+import { assemble_manuscript, final_report_html, local_stamp, REPORT_NAME, stage_report, type Dict } from "./report.ts";
 import { claim, complete, heartbeat, interrupt, wait } from "./runs.ts";
 
 interface Request {
@@ -97,6 +101,7 @@ interface ProjectInfo {
   topic: string;
   owner_user_id: string;
   active_edition_id: string | null;
+  status: string;
 }
 
 interface Auth {
@@ -142,12 +147,15 @@ class Session {
   readonly clock = new SystemClock();
   readonly service: CommandService;
   readonly objects: string;
+  /** Object files this run wrote; they are removed again when the run fails (the rows roll back). */
+  readonly fresh_files: Array<{ project_id: string; storage_key: string }> = [];
 
-  constructor(env: Environment, db: Db) {
+  /** `writable` false: a read-only command — the objects folder is not created (nothing on disk changes). */
+  constructor(env: Environment, db: Db, writable = true) {
     this.env = env;
     this.db = new UnitOfWorkDb(db);
     this.objects = objects_dir(env);
-    mkdirSync(this.objects, { recursive: true });
+    if (writable) mkdirSync(this.objects, { recursive: true });
     this.service = new CommandService(this.db, {
       clock: this.clock,
       policy: new DbPolicyChecker(),
@@ -158,6 +166,15 @@ class Session {
 
   now(): number {
     return this.clock.now_ms();
+  }
+
+  /** After a failed run: delete the object files it wrote unless a committed blob row now claims them. */
+  discard_fresh_files(): void {
+    for (const file of this.fresh_files) {
+      const claimed = this.db.get("SELECT 1 AS ok FROM blobs WHERE storage_key = ?", file.storage_key);
+      if (claimed === undefined) delete_storage_file(this.objects, file.project_id, file.storage_key);
+    }
+    this.fresh_files.length = 0;
   }
 
   unit<T>(fn: () => Promise<T>): Promise<T> {
@@ -180,7 +197,7 @@ class Session {
       throw new Refusal("invalid_payload", "프로젝트 이름이 필요합니다", 2);
     }
     const row = this.db.get<ProjectInfo>(
-      "SELECT id, slug, topic, owner_user_id, active_edition_id FROM projects WHERE slug = ?",
+      "SELECT id, slug, topic, owner_user_id, active_edition_id, status FROM projects WHERE slug = ?",
       slug,
     );
     if (row === undefined) {
@@ -394,6 +411,13 @@ async function write_auth(
   req: Request,
 ): Promise<{ project: ProjectInfo; auth: Auth; guard: Record<string, unknown> }> {
   const project = s.project(req.slug);
+  // A project that is not active yet (still being migrated) is served from project.json: no writes here.
+  if (project.status !== "active") {
+    throw new Refusal(
+      "conflict",
+      `이전이 끝나지 않은 프로젝트입니다: ${project.slug} — 옛 project.json 프로젝트는 이전을 마쳐 활성화하기 전에는 쓸 수 없습니다`,
+    );
+  }
   const auth = s.auth(project, req.token, WRITE_SCOPE);
   const guard = await s.lock_check(project, auth, req.session);
   return { project, auth, guard };
@@ -408,7 +432,7 @@ const live_locks: Handler = async (s) => {
   const rows = s.db.all<{ slug: string; id: string }>("SELECT slug, id FROM projects");
   const locks: Record<string, string> = {};
   for (const row of rows) {
-    const lease = s.lease({ id: row.id, slug: row.slug, topic: "", owner_user_id: "", active_edition_id: null });
+    const lease = s.lease({ id: row.id, slug: row.slug, topic: "", owner_user_id: "", active_edition_id: null, status: "active" });
     // An agent's lease carries no session label; it still makes the project busy.
     if (lease !== null) locks[row.slug] = lease.session ?? `agent-run:${lease.run_id}`;
   }
@@ -489,13 +513,23 @@ interface VersionRef {
  * enter this stage's snapshot.
  */
 function manifest_versions(s: Session, project: ProjectInfo, stage: StageInfo): VersionRef[] {
+  return manifest_parts(s, project, stage).all;
+}
+
+function manifest_parts(
+  s: Session,
+  project: ProjectInfo,
+  stage: StageInfo,
+): { all: VersionRef[]; items: number } {
   const artifacts = s.db.all<VersionRef>(
     `SELECT o.id AS object_id, o.current_version_id AS version_id
        FROM objects o
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions cv ON cv.project_id = o.project_id AND cv.version_id = o.current_version_id
       WHERE o.project_id = ? AND o.edition_id = ? AND a.stage_id = ?
         AND o.kind = 'artifact' AND a.kind NOT IN ('note', 'review')
         AND o.archived_at IS NULL AND o.current_version_id IS NOT NULL
+        AND ${not_a_report_sql("cv")}
       ORDER BY o.display_no`,
     project.id,
     stage.edition_id,
@@ -520,7 +554,7 @@ function manifest_versions(s: Session, project: ProjectInfo, stage: StageInfo): 
     stage.edition_id,
     stage.id,
   );
-  return [...artifacts, ...sources].map((row) => ({ ...row }));
+  return { all: [...artifacts, ...sources].map((row) => ({ ...row })), items: artifacts.length };
 }
 
 const render: Handler = async (s, req) => {
@@ -534,7 +568,8 @@ const render: Handler = async (s, req) => {
   if (round === undefined) {
     throw new Refusal("conflict", "열린 라운드가 없습니다 — round-start 먼저");
   }
-  const versions = manifest_versions(s, project, stage);
+  const parts = manifest_parts(s, project, stage);
+  const versions = parts.all;
   if (versions.length === 0) {
     throw new Refusal("conflict", "봉인할 항목이 없습니다 — 결과를 먼저 병합하세요");
   }
@@ -569,6 +604,7 @@ const render: Handler = async (s, req) => {
     round_id: round.id,
     round_no: Number(round.round_no),
     versions: versions.length,
+    items: parts.items,
   };
 };
 
@@ -874,6 +910,13 @@ function union_links(current: unknown, incoming: Record<string, unknown>): Recor
 
 const CONFIDENCES = ["high", "medium", "low"];
 
+/** What the old source dictionary carried besides title/url/method (the importer keeps the same four keys in the locator). */
+function source_locator(src: Record<string, unknown>): Record<string, unknown> {
+  const locator: Record<string, unknown> = {};
+  for (const key of ["date", "note", "orgId", "tblId"]) if (src[key] !== undefined) locator[key] = src[key];
+  return locator;
+}
+
 const merge: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const args = req.args ?? {};
@@ -1032,7 +1075,7 @@ const merge: Handler = async (s, req) => {
         canonical_locator: url,
         title,
         url,
-        locator: {},
+        locator: source_locator(src),
         method,
         verification_state: verified ? "verified" : "unverified",
         quote,
@@ -1086,6 +1129,7 @@ const qa_data: Handler = async (s, req) => {
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
       WHERE o.project_id = ? AND a.stage_id = ? AND o.kind = 'artifact'
         AND a.kind NOT IN ('note', 'review') AND v.status <> 'removed'
+        AND ${not_a_report_sql("v")}
       ORDER BY o.display_no`,
     project.id,
     stage.id,
@@ -1308,12 +1352,316 @@ const complete_op: Handler = async (s, req) => {
  * heartbeat and the command(s) commit together or not at all, so a refused
  * write leaves no lease behind.
  */
+// reads: routing, the legacy-shaped view, doctor -------------------------------
+
+/** Which path serves a project: the database only once it is active (PR12 serving_path), else project.json. */
+const route: Handler = async (s, req) => {
+  if (typeof req.slug !== "string" || req.slug.length === 0) {
+    throw new Refusal("invalid_payload", "프로젝트 이름이 필요합니다", 2);
+  }
+  const row = s.db.get<{ id: string }>("SELECT id FROM projects WHERE slug = ?", req.slug);
+  if (row === undefined) return { serving: "none" };
+  return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy" };
+};
+
+const active_slugs: Handler = async (s) => {
+  const rows = s.db.all<{ slug: string }>("SELECT slug FROM projects WHERE status = 'active' ORDER BY slug");
+  return { slugs: rows.map((row) => row.slug) };
+};
+
+function served_project(s: Session, req: Request): ProjectInfo {
+  const project = s.project(req.slug);
+  if (project.status !== "active") {
+    throw new Refusal("conflict", `이전이 끝나지 않은 프로젝트입니다: ${project.slug} — project.json 으로 읽습니다`);
+  }
+  s.auth(project, req.token, null);
+  return project;
+}
+
+const read_project: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const view = build_project_view(s.db, project.id, s.objects);
+  const lease = s.lease(project);
+  const last = s.db.get<{ at: bigint | null }>("SELECT max(created_at) AS at FROM mutation_commits WHERE project_id = ?", project.id);
+  return {
+    project: view.project,
+    pending: view.pending,
+    lock: lease === null ? null : { owner: lease.session ?? `agent-run:${lease.run_id}`, since: local_stamp(lease.heartbeat_at) },
+    updated: local_stamp(Number(last?.at ?? 0n)),
+  };
+};
+
+// reports: new versions of a report / output artifact --------------------------
+
+interface RenderedFile {
+  name: string;
+  media_type: string;
+  bytes: Uint8Array;
+}
+
+/** A rendered file's bytes: UTF-8 with LF line ends on every platform (a CR from any input is not kept). */
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text.replace(/\r\n?/g, "\n"));
+
+/** The artifact object of one report role (stage report of a stage, or the project's final output), if it exists. */
+function find_report_object(
+  s: Session,
+  project: ProjectInfo,
+  role: "stage_report" | "final_output",
+  stage: StageInfo | null,
+  edition_id: string,
+): { object_id: string; version_id: string } | undefined {
+  const row = s.db.get<{ object_id: string; version_id: string }>(
+    `SELECT o.id AS object_id, o.current_version_id AS version_id
+       FROM objects o
+       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = ? AND o.edition_id = ?
+        AND ((? IS NULL AND a.stage_id IS NULL) OR a.stage_id = ?)
+        AND json_extract(v.metadata_json, '$.role') = ?
+      ORDER BY o.display_no
+      LIMIT 1`,
+    project.id,
+    role === "stage_report" ? "report" : "output",
+    edition_id,
+    stage === null ? null : stage.id,
+    stage === null ? null : stage.id,
+    role,
+  );
+  return row === undefined ? undefined : { ...row };
+}
+
+/** Current versions of the stage's real items (the same set render seals, minus removed ones). */
+function item_versions(s: Session, project: ProjectInfo, stage: StageInfo): string[] {
+  return s.db
+    .all<{ version_id: string }>(
+      `SELECT o.current_version_id AS version_id
+         FROM objects o
+         JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+         JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.edition_id = ? AND a.stage_id = ? AND o.kind = 'artifact'
+          AND a.kind NOT IN ('note', 'review') AND o.archived_at IS NULL AND v.status <> 'removed'
+          AND ${not_a_report_sql("v")}
+        ORDER BY o.display_no`,
+      project.id,
+      stage.edition_id,
+      stage.id,
+    )
+    .map((row) => row.version_id);
+}
+
+/**
+ * One report run: append a version to the report object (create it the first time), point it at the
+ * item versions it was written from, and attach the rendered files. All in one unit.
+ */
+async function write_report_version(
+  s: Session,
+  project: ProjectInfo,
+  auth: Auth,
+  input: {
+    role: "stage_report" | "final_output";
+    stage: StageInfo | null;
+    edition_id: string;
+    title: string;
+    metadata: Record<string, unknown>;
+    derived_from: string[];
+    files: RenderedFile[];
+  },
+): Promise<Record<string, unknown>> {
+  return s.unit(async () => {
+    const existing = find_report_object(s, project, input.role, input.stage, input.edition_id);
+    const fields = {
+      title: input.title,
+      summary: "",
+      question: null,
+      body_md: null,
+      status: "done",
+      confidence: null,
+      stats: [],
+      conflicts: [],
+      verify: null,
+      // each file's name in this version (the shared blob keeps only its first upload name)
+      metadata: {
+        ...input.metadata,
+        role: input.role,
+        files: input.files.map((file) => ({ name: file.name, sha256: sha256_hex(file.bytes), size: file.bytes.byteLength })),
+      },
+    };
+    let object_id: string;
+    let version_id: string;
+    let version_no: number;
+    if (existing === undefined) {
+      const created = await create_object(s.service, s.ctx(project, auth), { kind: "artifact", edition_id: input.edition_id });
+      object_id = String(result_of(created).object_id);
+      const added = await add_artifact(s.service, s.ctx(project, auth), {
+        object_id,
+        artifact_kind: input.role === "stage_report" ? "report" : "output",
+        stage_id: input.stage === null ? null : input.stage.id,
+        ...fields,
+      });
+      version_id = String(result_of(added).version_id);
+      version_no = Number(result_of(added).version_no);
+    } else {
+      object_id = existing.object_id;
+      const appended = await append_version(s.service, s.ctx(project, auth), {
+        object_id,
+        based_on_version_id: existing.version_id,
+        ...fields,
+      });
+      version_id = String(result_of(appended).version_id);
+      version_no = Number(result_of(appended).version_no);
+      await set_current(s.service, s.ctx(project, auth), { object_id, version_id });
+    }
+    for (const target of input.derived_from) {
+      await link_relation(s.service, s.ctx(project, auth), { from_version_id: version_id, to_version_id: target, kind: "derived_from" });
+    }
+    const stored: Array<{ name: string; blob_id: string }> = [];
+    for (const file of input.files) {
+      const known_before =
+        s.db.get("SELECT 1 AS ok FROM blobs WHERE project_id = ? AND sha256 = ? AND size = ?", project.id, sha256_hex(file.bytes), file.bytes.byteLength) !== undefined;
+      const reserved = result_of(
+        await reserve_upload(s.service, s.ctx(project, auth), {
+          sha256: sha256_hex(file.bytes),
+          size: file.bytes.byteLength,
+          media_type: file.media_type,
+          original_name: file.name,
+        }),
+      );
+      const blob_id = String(reserved.blob_id);
+      if (reserved.state !== "ready") {
+        if (!known_before) s.fresh_files.push({ project_id: project.id, storage_key: `${project.id}/${sha256_hex(file.bytes)}` });
+        await store_blob({ db: s.db, objects_dir: s.objects }, project.id, blob_id, file.bytes);
+        await complete_upload(s.service, { db: s.db, objects_dir: s.objects }, s.ctx(project, auth), { blob_id });
+      }
+      await attach_version(s.service, s.ctx(project, auth), { version_id, blob_id, role: "rendered" });
+      stored.push({ name: file.name, blob_id });
+    }
+    return { object_id, version_id, version_no, files: stored };
+  });
+}
+
+const report: Handler = async (s, req) => {
+  const { project, auth } = await write_auth(s, req);
+  const stage = s.stage(project, req.args?.stage);
+  const view = build_project_view(s.db, project.id, s.objects);
+  const eli5 = is_record(req.args?.eli5) ? (req.args?.eli5 as Dict) : null;
+  const built = local_stamp(s.now());
+  // The report says which version it is, so every run writes distinct bytes (a rerun within the same minute too).
+  const next = s.db.get<{ n: bigint | null }>(
+    `SELECT max(ov.version_no) AS n FROM object_versions ov JOIN artifacts a ON a.project_id = ov.project_id AND a.object_id = ov.object_id
+      WHERE ov.project_id = ? AND a.kind = 'report' AND a.stage_id = ?
+        AND json_extract((SELECT metadata_json FROM artifact_versions av WHERE av.project_id = ov.project_id AND av.version_id = ov.id), '$.role') = 'stage_report'`,
+    project.id,
+    stage.id,
+  );
+  const made = stage_report(view.project, stage.key, view.feedback, built, eli5, Number(next?.n ?? 0n) + 1);
+  const files: RenderedFile[] = [
+    { name: "report.md", media_type: "text/markdown", bytes: utf8(made.markdown) },
+    { name: "report.html", media_type: "text/html", bytes: utf8(made.html) },
+  ];
+  if (made.eli5_html !== null) files.push({ name: "eli5.html", media_type: "text/html", bytes: utf8(made.eli5_html) });
+  const out = await write_report_version(s, project, auth, {
+    role: "stage_report",
+    stage,
+    edition_id: stage.edition_id,
+    title: `${REPORT_NAME[stage.key] ?? stage.key}`,
+    metadata: { stage: stage.key, round: (view.project.stages[stage.key] as Dict).round, built },
+    derived_from: item_versions(s, project, stage),
+    files,
+  });
+  const formats = (view.project.settings as Dict | undefined)?.stage_reports;
+  return { ...out, stage: stage.key, name: REPORT_NAME[stage.key], formats: Array.isArray(formats) && formats.length > 0 ? formats : ["md", "html", "eli5"], eli5: made.eli5_html !== null };
+};
+
+/** The bytes of one rendered file (by name) of an output version, or undefined. */
+function rendered_bytes(s: Session, project: ProjectInfo, version_id: string, name: string): Uint8Array | undefined {
+  const row = rendered_files(s.db, project.id, version_id).find((file) => file.name === name);
+  return row === undefined || row.storage_key === null ? undefined : read_storage_bytes(s.objects, project.id, row.storage_key);
+}
+
+async function output_run(s: Session, req: Request, web: boolean): Promise<Record<string, unknown>> {
+  const { project, auth } = await write_auth(s, req);
+  const args = req.args ?? {};
+  const write = s.stage(project, "write");
+  const existing = find_report_object(s, project, "final_output", null, write.edition_id);
+  const assemble_now = !web || existing === undefined || args.assemble === true;
+  const built = local_stamp(s.now());
+  let markdown: Uint8Array;
+  let sources_json: Uint8Array;
+  let sections = 0;
+  let footnotes = 0;
+  let warnings: string[] = [];
+  let derived: string[] = [];
+  if (assemble_now) {
+    const view = build_project_view(s.db, project.id, s.objects);
+    const asm = assemble_manuscript(view.project);
+    markdown = utf8(asm.markdown);
+    sources_json = utf8(JSON.stringify(asm.sources, null, 1));
+    sections = asm.sections;
+    footnotes = asm.footnotes;
+    warnings = asm.warnings;
+    derived = item_versions(s, project, write);
+  } else {
+    const found = existing as { object_id: string; version_id: string };
+    const md = rendered_bytes(s, project, found.version_id, "report.md");
+    const src = rendered_bytes(s, project, found.version_id, "sources.json");
+    if (md === undefined) throw new Refusal("conflict", "조립본(report.md)을 찾을 수 없습니다 — web --assemble 로 다시 조립하세요");
+    markdown = md;
+    sources_json = src ?? utf8("[]");
+    derived = [found.version_id]; // the new version builds on the assembly it reuses
+  }
+  const files: RenderedFile[] = [
+    { name: "report.md", media_type: "text/markdown", bytes: markdown },
+    { name: "sources.json", media_type: "application/json", bytes: sources_json },
+  ];
+  let sources: unknown[] = [];
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(sources_json));
+    if (Array.isArray(parsed)) sources = parsed;
+  } catch {
+    sources = [];
+  }
+  if (web) {
+    const html = final_report_html({
+      topic: project.topic,
+      markdown: new TextDecoder().decode(markdown),
+      appendix: typeof args.appendix === "string" ? args.appendix : null,
+      sources,
+      cover: is_record(args.cover) ? (args.cover as Dict) : {},
+      built,
+    });
+    files.push({ name: "report.html", media_type: "text/html", bytes: utf8(html) });
+  }
+  const out = await write_report_version(s, project, auth, {
+    role: "final_output",
+    stage: null,
+    edition_id: write.edition_id,
+    title: "최종 보고서",
+    metadata: { built, assembled: assemble_now, web },
+    derived_from: derived,
+    files,
+  });
+  const verified = sources.filter((x) => is_record(x) && x.verified === true).length;
+  return { ...out, sections, footnotes, warnings, sources: sources.length, verified };
+}
+
+const assemble_op: Handler = (s, req) => output_run(s, req, false);
+const web_op: Handler = (s, req) => output_run(s, req, true);
+
 function in_unit(handler: Handler): Handler {
   return (s, req) => s.unit(() => handler(s, req));
 }
 
+/** Operations that only read: they use a read-only connection and change nothing on disk. */
+const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "live_locks", "overview", "context", "qa-data"]);
+
 const HANDLERS: Record<string, Handler> = {
   slugs,
+  active_slugs,
+  route,
+  read_project,
+  report: in_unit(report),
+  assemble: in_unit(assemble_op),
+  web: in_unit(web_op),
   live_locks,
   overview,
   init,
@@ -1371,6 +1719,10 @@ async function main(): Promise<void> {
     if (request[field] === null) delete request[field];
   }
   if (request.args === null) delete request.args;
+  if (request.op === "db_status") {
+    reply({ ok: true, data: probe_database(db_path(env)) });
+    return;
+  }
   const handler = HANDLERS[request.op];
   if (handler === undefined) {
     reply({ ok: false, code: "unknown_command", message: `알 수 없는 작업: ${String(request.op)}`, exit: 1 });
@@ -1379,8 +1731,12 @@ async function main(): Promise<void> {
   const file = db_path(env);
   const creating = request.op === "init";
   if (!creating && !existsSync(file)) {
-    if (request.op === "slugs" || request.op === "live_locks") {
+    if (request.op === "slugs" || request.op === "live_locks" || request.op === "active_slugs") {
       reply({ ok: true, data: { slugs: [], locks: {} } });
+      return;
+    }
+    if (request.op === "route") {
+      reply({ ok: true, data: { serving: "none" } });
       return;
     }
     reply({
@@ -1392,17 +1748,24 @@ async function main(): Promise<void> {
     return;
   }
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
-  const db = connect(file);
+  const read_only = READ_ONLY_OPS.has(request.op);
+  const db = read_only ? connect_read_only(file) : connect(file);
+  let session: Session | undefined;
   try {
     if (creating) migrate(db);
     else if (!schema_is_current(db)) {
       reply({ ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 });
       return;
     }
-    const session = new Session(env, db);
+    session = new Session(env, db, !read_only);
     const data = await handler(session, request);
     reply({ ok: true, data });
   } catch (error) {
+    try {
+      session?.discard_fresh_files();
+    } catch {
+      // best effort: the next gc removes an orphan file
+    }
     if (error instanceof Refusal) {
       reply({ ok: false, code: error.code, message: error.message, exit: error.exit });
     } else if (error instanceof ApiError) {

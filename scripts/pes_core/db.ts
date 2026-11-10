@@ -8,7 +8,7 @@
 //   is touched.
 // - SQLite version and JSON function support are checked at connect time.
 
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -229,6 +229,27 @@ export function connect(path: string, options: ConnectOptions = {}): SqliteDb {
   }
 }
 
+/**
+ * A query-only connection to an existing database file, for commands that only read (status, list,
+ * doctor, ...). Unlike connect() it creates no folder and does not switch the journal mode, and any
+ * write through it fails (PRAGMA query_only). It is not opened with SQLite's read-only flag: on a WAL
+ * database a read-only handle leaves a -shm file behind, while a normal handle's -wal/-shm are removed
+ * again when the last connection closes, so the database folder stays as it was.
+ */
+export function connect_read_only(path: string): SqliteDb {
+  const db = new SqliteDb(path);
+  try {
+    db.exec("PRAGMA query_only = ON");
+    assert_foreign_keys(db);
+    assert_busy_timeout(db);
+    assert_sqlite_runtime(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
 const active_transactions = new WeakSet<Db>();
 
 function is_thenable(value: unknown): boolean {
@@ -410,4 +431,41 @@ export function migrate(db: Db, options: MigrateOptions = {}): MigrateResult {
     db.prepare("UPDATE db_meta SET schema_version = ? WHERE id = 1").run(newest_version);
     return { applied: true, schema_version: newest_version };
   });
+}
+
+/**
+ * What doctor reports about the database file, without migrating or writing anything:
+ * opened read-only, a quick integrity check, the schema version and the project count.
+ */
+export function probe_database(file: string): Record<string, unknown> {
+  if (!existsSync(file)) return { state: "missing" };
+  let handle: DatabaseSync | undefined;
+  try {
+    handle = new DatabaseSync(file, { readOnly: true });
+    const check = handle.prepare("PRAGMA quick_check").all() as Array<Record<string, unknown>>;
+    const verdict = check.length > 0 ? String(Object.values(check[0]!)[0]) : "ok";
+    if (verdict !== "ok") return { state: "broken", message: `무결성 검사 실패: ${verdict.slice(0, 120)}` };
+    let schema_current = false;
+    let projects = 0;
+    try {
+      const migrations = load_migrations();
+      const newest = BigInt(migrations[migrations.length - 1]!.version);
+      const row = handle.prepare("SELECT schema_version FROM db_meta WHERE id = 1").get() as { schema_version?: number | bigint } | undefined;
+      schema_current = row !== undefined && BigInt(row.schema_version ?? -1) === newest;
+      const count = handle.prepare("SELECT count(*) AS n FROM projects").get() as { n?: number | bigint } | undefined;
+      projects = Number(count?.n ?? 0);
+    } catch {
+      schema_current = false;
+    }
+    return { state: "ok", schema_current, projects };
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    return { state: "broken", message: text.slice(0, 160) };
+  } finally {
+    try {
+      handle?.close();
+    } catch {
+      // closing a handle that never opened
+    }
+  }
 }

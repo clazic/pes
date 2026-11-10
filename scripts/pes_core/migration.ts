@@ -25,6 +25,7 @@ import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { read_storage_bytes, sha256_hex } from "./files.ts";
 import { new_id } from "./ids.ts";
+import { feedback_entries, normalize_project, parse_legacy_json, stage_report, without_report_time, type Dict, type FeedbackEntry } from "./report.ts";
 import {
   build_validation_plan,
   is_regenerable_source_path,
@@ -77,10 +78,10 @@ export interface ValidationReport {
   problems: ValidationProblem[];
   regenerated_reports: RegeneratedReport[];
   /**
-   * "provisional": the regeneration is a structural stand-in used until the real
-   * report generator exists (PR16). A mismatch is only reported and is not final.
+   * PR16: the regeneration uses the real report generator (report.ts), so a
+   * difference is a `reports_regeneration` problem. "generator" names that format.
    */
-  regeneration_format: "provisional";
+  regeneration_format: "generator";
 }
 
 export interface ValidateOptions {
@@ -634,7 +635,7 @@ export function build_validation_report(db: ReadDb, input: ValidationInput): Val
     checked: out.checked,
     problems: out.problems,
     regenerated_reports: regenerated,
-    regeneration_format: "provisional",
+    regeneration_format: "generator",
   };
 }
 
@@ -1659,35 +1660,45 @@ function check_unprocessed_answers(
 }
 
 // ---------------------------------------------------------------------------
-// report regeneration (reported, never a problem)
+// report regeneration (PR16: the real generator; a difference is a problem)
 //
-// The old tool rebuilt reports/<stage>/report.md and report.html from
-// project.json. Until the TypeScript report generator exists (PR16) this is a
-// structural regeneration from the same plan: topic, stage, then each item's
-// title, summary and details. It will usually not equal a report the old tool
-// wrote, and that is only reported.
+// The old tool rebuilt reports/<stage>/report.md and report.html from project.json
+// (and feedback/*.json). report.ts is the port of that generator: the report is
+// regenerated from the very files the import read and compared with the report the
+// old tool left behind. The "작성 <시각>" line and the page's built time are not
+// compared. Other report files (pdf, eli5, docx ...) are not regenerated.
 
 const REPORT_PATH = /^reports\/([a-z0-9_-]+)\/report\.(md|html)$/;
 
-function regenerate_markdown(plan: ImportPlan, stage_key: LegacyStageKey): string {
-  const lines: string[] = [`# ${plan.project.topic}`, "", `## ${stage_key}`, ""];
-  for (const row of plan.objects) {
-    if (row.kind !== "artifact" || row.artifact === undefined) continue;
-    if (row.artifact.stage_key !== stage_key || row.artifact.status === "removed") continue;
-    lines.push(`### ${row.artifact.title}`, "");
-    if (row.artifact.summary.length > 0) lines.push(row.artifact.summary, "");
-    if (row.artifact.body_md !== null && row.artifact.body_md.length > 0) lines.push(row.artifact.body_md, "");
+function legacy_project_from_bytes(bytes: Map<string, Uint8Array>): Dict | null {
+  const raw = bytes.get("project.json");
+  if (raw === undefined) return null;
+  try {
+    const parsed: unknown = parse_legacy_json(new TextDecoder().decode(raw));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    let library: Dict | null = null;
+    const library_bytes = bytes.get("library.json");
+    if (library_bytes !== undefined) {
+      try {
+        const lib: unknown = parse_legacy_json(new TextDecoder().decode(library_bytes));
+        if (lib !== null && typeof lib === "object" && !Array.isArray(lib)) library = lib as Dict;
+      } catch {
+        library = null;
+      }
+    }
+    return normalize_project(parsed as Dict, library);
+  } catch {
+    return null;
   }
-  return `${lines.join("\n")}\n`;
 }
 
-function escape_html(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function regenerate_html(plan: ImportPlan, stage_key: LegacyStageKey): string {
-  const markdown = regenerate_markdown(plan, stage_key);
-  return `<!doctype html>\n<html lang="ko"><head><meta charset="utf-8"><title>${escape_html(plan.project.topic)}</title></head><body><pre>${escape_html(markdown)}</pre></body></html>\n`;
+function legacy_feedback(bytes: Map<string, Uint8Array>, processed: ReadonlySet<string>): FeedbackEntry[] {
+  const files: Array<{ name: string; text: string }> = [];
+  for (const [path, content] of bytes) {
+    if (!/^feedback\/[^/]+\.json$/.test(path)) continue;
+    files.push({ name: path.slice("feedback/".length), text: new TextDecoder().decode(content) });
+  }
+  return feedback_entries(files, processed);
 }
 
 function check_reports(
@@ -1697,14 +1708,26 @@ function check_reports(
   regenerated: RegeneratedReport[],
 ): void {
   const stages = new Set<string>(LEGACY_STAGE_KEYS);
+  let project: Dict | null | undefined;
+  let feedback: FeedbackEntry[] = [];
   for (const file of plan.manifest_files) {
     const match = file.path.match(REPORT_PATH);
     if (match === null || !stages.has(match[1]!)) continue;
     const original = bytes.get(file.path);
     if (original === undefined) continue;
+    if (project === undefined) {
+      project = legacy_project_from_bytes(bytes);
+      if (project !== null) feedback = legacy_feedback(bytes, new Set(Array.isArray(project.processed) ? project.processed.filter((n: unknown): n is string => typeof n === "string") : []));
+    }
     const stage_key = match[1] as LegacyStageKey;
-    const text = match[2] === "md" ? regenerate_markdown(plan, stage_key) : regenerate_html(plan, stage_key);
     out.checked.reports_regeneration += 1;
-    regenerated.push({ path: file.path, matches: new TextDecoder().decode(original) === text });
+    let matches = false;
+    if (project !== null) {
+      const made = stage_report(project, stage_key, feedback, "0000-00-00 00:00");
+      const text = match[2] === "md" ? made.markdown : made.html;
+      matches = without_report_time(new TextDecoder().decode(original)) === without_report_time(text);
+    }
+    regenerated.push({ path: file.path, matches });
+    if (!matches) out.add("reports_regeneration", file.path, { problem: "differs_from_regenerated" });
   }
 }

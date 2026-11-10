@@ -9,8 +9,7 @@
 //  - clean import            -> ok=true, batch validated (project stays staging)
 //  - any problem             -> NO throw, ok=false, problems listed, batch cannot be validated:
 //                               staging stays staging; a validated batch that now fails goes back to staging
-//  - regenerated reports differ from the original text -> REPORTED (regenerated_reports[].matches=false),
-//                               never a problem
+//  - regenerated reports differ from the original text -> a `reports_regeneration` problem (PR16; before: reported only)
 //  - failed / activated batch -> ApiError "conflict" (nothing to validate)
 //
 // Transition table (schema values only; the schema has no 'rolled_back'):
@@ -116,18 +115,21 @@ test("regenerated reports are compared with the original and the differences are
   });
 });
 
-test("a hand-edited original report differs from the regenerated one: reported as matches=false, still validated", async () => {
+test("a hand-edited original report differs from the regenerated one (PR16): a reports_regeneration problem, ok=false, not validated", async () => {
   await with_migration(async (env, legacy, mig) => {
     const dir = copy_fixture(env, "full");
     writeFileSync(join(dir, "reports", "plan", "report.md"), "# 사람이 직접 고친 보고서\n", "utf8");
     const imp = await run_import(env, legacy, dir);
     assert.equal(imp.state, "staging");
     const out = await validate(env, mig, imp.batch_id, dir);
-    assert.equal(out.ok, true, "a hand-edited report is kept as the original blob and only reported");
+    assert.equal(out.ok, false, "PR16: a report that differs from the real generator's output is a problem");
+    assert.equal(out.state, "staging");
+    assert.ok(has_problem(out.report, "reports_regeneration"), JSON.stringify(out.report.problems));
+    assert.equal(out.report.problems.find((p) => p.check === "reports_regeneration")?.path, "reports/plan/report.md");
     const entry = out.report.regenerated_reports.find((r) => r.path === "reports/plan/report.md");
     assert.ok(entry, "the edited report is listed");
     assert.equal(entry.matches, false, "the difference is reported");
-    assert.equal(batch_row(env.db, imp.batch_id).state, "validated");
+    assert.equal(batch_row(env.db, imp.batch_id).state, "staging");
   });
 });
 

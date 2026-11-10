@@ -266,13 +266,13 @@ test("S4a a submission the plan does not have is reported as a counts problem; t
 // ---------------------------------------------------------------------------
 // S4b
 
-test("S4b the report regeneration result is marked as a provisional format (until PR16 brings the real generator)", async () => {
+test("S4b (PR16) the real generator replaced the provisional one: the 'provisional' mark is gone", async () => {
   await with_migration(async (env, legacy, mig) => {
     const s = await stage(env, legacy, "full");
     const out = await validate(env, mig, s.imp.batch_id, s.dir);
     assert.ok(out.report.regenerated_reports.length >= 1);
     const mark = (out.report as unknown as Record<string, unknown>).regeneration_format;
-    assert.equal(mark, "provisional", "report.regeneration_format tells the reader these comparisons are not final");
+    assert.notEqual(mark, "provisional", "PR16: the comparison uses the real report generator, so it is no longer marked provisional");
   });
 });
 
