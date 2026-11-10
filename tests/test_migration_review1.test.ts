@@ -13,7 +13,7 @@
 //  S4b the regenerated reports carry the "provisional format" mark. KEY CHOSEN BY THESE TESTS:
 //      `report.regeneration_format === "provisional"` (on ValidationReport, next to
 //      `regenerated_reports`); PR16 replaces the generator and may then drop or change the value.
-//  S5  a pes_home that does not match the parent of the service's objects_dir is refused
+//  S5  (removed — see the note at the S5 section)
 //  S6  importing an already validated / activated source again: the replayed answer shows the
 //      CURRENT batch state
 
@@ -277,38 +277,10 @@ test("S4b the report regeneration result is marked as a provisional format (unti
 });
 
 // ---------------------------------------------------------------------------
-// S5
+// S5 (removed by leader): the service only knows objects_dir, which has no fixed relation to the PES home
+// (stage-2 2.7), so it cannot tell a right pes_home from a wrong one. The calling layer (PR14 API / CLI) must fill
+// pes_home from its settings; docs/plan/stage-2-db-guarantees.md 8.10 says so.
 
-test("S5 a pes_home that does not match the parent of the service's objects folder is refused; nothing is written", async () => {
-  await with_migration(async (env, legacy, mig) => {
-    const v = await validated(env, legacy, mig, "full");
-    const wrong_home = join(env.home.root, "some-other-pes-home");
-    mkdirSync(wrong_home, { recursive: true });
-    const target = backup_dir_of(env, "s5-wrong-home");
-    const before = state_signature(env.db);
-
-    const error = await rejects_api(
-      mig.activate_import(env.service, v.imp.batch_id, {
-        owner_actor_id: owner_of(env),
-        backup_dir: target,
-        pes_home: wrong_home,
-      }),
-      "invalid_payload",
-      "conflict",
-      "forbidden",
-    );
-    assert.ok(error instanceof ApiError);
-    assert.equal(state_signature(env.db), before, "no state change");
-    assert.equal(existsSync(target), false, "no backup folder");
-    assert.equal(project_status(env.db, v.imp.project_id), "staging");
-
-    // The right home still works.
-    const act = await mig.activate_import(env.service, v.imp.batch_id, activate_opts(env, "s5-right-home"));
-    assert.equal(act.state, "activated");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // S6
 
 test("S6 importing the same source again reports the batch's CURRENT state (validated, then activated)", async () => {
