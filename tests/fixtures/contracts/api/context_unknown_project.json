@@ -1,0 +1,31 @@
+{
+  "name": "context_unknown_project",
+  "description": "없는 프로젝트는 404 not_found.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/no-such-project/context",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 404,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "not_found",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

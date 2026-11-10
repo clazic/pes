@@ -1,0 +1,55 @@
+{
+  "name": "error_policy_denied",
+  "description": "Go가 꺼져 있으면 A 방식 claim은 403 policy_denied, 재시도 표시 없음.",
+  "agents": {
+    "agent": {
+      "kind": "internal_ai",
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "before": [
+        "go_off"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/claims",
+        "auth": "agent:agent",
+        "body": {
+          "mode": "A",
+          "runtime": "builtin",
+          "provider": "opencode-go",
+          "model": "opencode-go/deepseek-v4.1-flash"
+        }
+      },
+      "expect": {
+        "status": 403,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "policy_denied",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        },
+        "headers_absent": [
+          "Retry-After"
+        ]
+      }
+    }
+  ]
+}

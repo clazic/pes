@@ -1,0 +1,47 @@
+{
+  "name": "files_reserve_ok",
+  "description": "파일 예약은 staging blob을 만든다(바이트는 아직 없음). 다운로드 URL은 응답에 없다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/uploads",
+        "auth": "agent:agent",
+        "body": {
+          "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          "size": 5,
+          "media_type": "application/octet-stream"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "blob_id": "$string",
+            "state": "staging",
+            "deduplicated": false,
+            "$absent": [
+              "url",
+              "download_url",
+              "storage_key"
+            ]
+          },
+          "replayed": false
+        }
+      }
+    }
+  ]
+}

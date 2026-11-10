@@ -1,0 +1,62 @@
+{
+  "name": "error_unknown_route",
+  "description": "닫힌 명령 표면: 모르는 경로는 404 not_found.",
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/sql",
+        "auth": "owner",
+        "body": {
+          "query": "select 1"
+        }
+      },
+      "expect": {
+        "status": 404,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "not_found",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/commands",
+        "auth": "owner",
+        "body": {
+          "command": "content.add_source"
+        }
+      },
+      "expect": {
+        "status": 404,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "not_found",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

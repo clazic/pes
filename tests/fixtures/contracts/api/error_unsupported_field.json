@@ -1,0 +1,49 @@
+{
+  "name": "error_unsupported_field",
+  "description": "미지원 필드는 거부한다: 400 invalid_payload.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/claims",
+        "auth": "agent:agent",
+        "body": {
+          "mode": "B",
+          "runtime": "synthetic-runtime",
+          "provider": "synthetic",
+          "model": "synthetic-model",
+          "unknown_flag": true
+        }
+      },
+      "expect": {
+        "status": 400,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "invalid_payload",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

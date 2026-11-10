@@ -1,0 +1,45 @@
+{
+  "name": "claim_fresh_ok",
+  "description": "run_id 없이 claim하면 run과 lease가 한 번에 생긴다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/claims",
+        "auth": "agent:agent",
+        "body": {
+          "mode": "B",
+          "runtime": "synthetic-runtime",
+          "provider": "synthetic",
+          "model": "synthetic-model"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "run_id": "$string",
+            "lease_id": "$string",
+            "fence": "1",
+            "expires_at": "$int",
+            "heartbeat_interval_ms": "$int"
+          },
+          "replayed": false
+        }
+      }
+    }
+  ]
+}

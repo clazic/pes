@@ -1,0 +1,62 @@
+{
+  "name": "context_agent_ok",
+  "description": "context:read 토큰의 에이전트도 같은 맥락을 읽는다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "agent:agent"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "project_id": "${project}",
+            "topic": "$string",
+            "control_rev": "$dec",
+            "policy": {
+              "policy_rev": "$dec",
+              "allow_opencode_go": true
+            },
+            "edition": {
+              "edition_id": "$string",
+              "edition_no": "$dec",
+              "status": "active"
+            },
+            "stages": {
+              "$array_of": {
+                "stage_id": "$string",
+                "key": "$string",
+                "ordinal": "$int"
+              },
+              "min": 6,
+              "max": 6
+            },
+            "lease": "$null",
+            "manifest": {
+              "$array_of": {
+                "object_id": "$string",
+                "version_id": "$string"
+              }
+            },
+            "digest": "$hex64"
+          }
+        }
+      }
+    }
+  ]
+}

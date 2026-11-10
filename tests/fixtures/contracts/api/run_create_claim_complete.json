@@ -1,0 +1,122 @@
+{
+  "name": "run_create_claim_complete",
+  "description": "한 run의 최소 경로: 소유자가 run을 만들고, 에이전트가 claim하고, complete로 끝낸다. complete는 승인이 아니다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/runs",
+        "auth": "owner",
+        "body": {
+          "actor_id": "${agent:agent.actor_id}",
+          "mode": "B",
+          "runtime": "synthetic-runtime",
+          "provider": "synthetic",
+          "model": "synthetic-model"
+        }
+      },
+      "save": {
+        "run": "data.run_id"
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "run_id": "$string",
+            "status": "queued",
+            "actor_id": "${agent:agent.actor_id}",
+            "mode": "B"
+          },
+          "replayed": false
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/claims",
+        "auth": "agent:agent",
+        "body": {
+          "run_id": "${run}"
+        }
+      },
+      "save": {
+        "lease": "data.lease_id",
+        "fence": "data.fence"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "run_id": "${run}",
+            "lease_id": "$string",
+            "fence": "$dec",
+            "expires_at": "$int",
+            "heartbeat_interval_ms": "$int"
+          },
+          "replayed": false
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "agent:agent"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "lease": {
+              "run_id": "${run}",
+              "lease_id": "${lease}",
+              "fence": "${fence}"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/runs/${run}/complete",
+        "auth": "agent:agent",
+        "body": {
+          "lease_id": "${lease}",
+          "fence": "${fence}",
+          "status": "succeeded"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "run_id": "${run}",
+            "status": "succeeded"
+          },
+          "replayed": false
+        }
+      }
+    }
+  ]
+}

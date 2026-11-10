@@ -1,0 +1,44 @@
+{
+  "name": "error_scope_forbidden",
+  "description": "토큰은 맞지만 범위(run:claim)가 없으면 403 forbidden.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/claims",
+        "auth": "agent:agent",
+        "body": {
+          "mode": "B",
+          "runtime": "synthetic-runtime",
+          "provider": "synthetic",
+          "model": "synthetic-model"
+        }
+      },
+      "expect": {
+        "status": 403,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "forbidden",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}
