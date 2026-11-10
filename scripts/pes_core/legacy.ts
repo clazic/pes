@@ -3079,7 +3079,7 @@ function build_project(ctx: BuildContext): void {
 
   // File mappings for recognised inputs (the source manifest always lists all files).
   for (const file of ctx.plan.manifest_files) {
-    if (file.path === "project.json.tmp") continue;
+    if (is_project_tmp(file.path)) continue;
     const classification = classify_file(file.path);
     if (classification.unmapped) {
       plan_entry_category(ctx.entries, "unmapped_input", file.path);
@@ -3175,12 +3175,17 @@ function build_failed_project(ctx: BuildContext): void {
   }
 }
 
+/** `project.json.tmp`(옛 저장 흔적)와 프로세스별 임시 이름 `project.json.tmp.<pid>`. */
+function is_project_tmp(path: string): boolean {
+  return path === "project.json.tmp" || /^project\.json\.tmp\.\d+$/.test(path);
+}
+
 function add_blobs(ctx: BuildContext): void {
   const project_json_bytes = ctx.bytes.get("project.json");
   for (const file of ctx.plan.manifest_files) {
     const bytes = ctx.bytes.get(file.path);
     if (bytes === undefined) continue;
-    if (file.path === "project.json.tmp") {
+    if (is_project_tmp(file.path)) {
       const same =
         project_json_bytes !== undefined &&
         project_json_bytes.byteLength === bytes.byteLength &&

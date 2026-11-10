@@ -156,9 +156,14 @@ def save(d: Path, p: dict):
         blob = json.dumps(lib, ensure_ascii=False, indent=1)
         if not lf.exists() or lf.read_text(encoding="utf-8") != blob:
             lf.write_text(blob, encoding="utf-8")
-    tmp = d / "project.json.tmp"
-    tmp.write_text(json.dumps(q, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(d / "project.json")
+    # 프로세스마다 다른 임시 이름 — 동시에 저장해도 서로의 임시 파일을 덮거나 지우지 않는다 (옛 이름 project.json.tmp 흔적은 저장 뒤 치운다)
+    tmp = d / f"project.json.tmp.{os.getpid()}"
+    try:
+        tmp.write_text(json.dumps(q, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(d / "project.json")
+    finally:
+        tmp.unlink(missing_ok=True)
+    (d / "project.json.tmp").unlink(missing_ok=True)
 
 
 def stage_arg(s):
@@ -744,25 +749,65 @@ SET_USAGE = ("사용법: set <dir> <단계> <필드> <파일|->  (필드: " + "�
 
 
 def set_parse_check(kind, field, raw):
-    """값 파일의 내용을 필드 형식에 맞게 해석한다. 맞지 않으면 한국어 이유로 거부한다."""
+    """값 파일의 내용을 필드 형식에 맞게 해석한다. 맞지 않으면 한국어 이유로 거부한다 (아무것도 쓰기 전에)."""
     if kind == "text":
-        text = raw.replace("\r\n", "\n").rstrip()
-        if not text:
+        value = raw.replace("\r\n", "\n").rstrip()
+        if not value:
             die(f"set: {field} 값이 비어 있습니다 — 텍스트를 담은 파일을 주세요", 2)
-        return text
+    else:
+        def bad_const(name):
+            raise ValueError(f"{name} 는 JSON 값이 아닙니다")
 
-    def bad_const(name):
-        raise ValueError(name)
-    try:
-        value = json.loads(raw, parse_constant=bad_const)
-    except ValueError as e:
-        die(f"set: {field} 값이 올바른 JSON 이 아닙니다 ({e})", 2)
-    shape = {"str_list": ("문자열 배열", lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v)),
-             "obj_list": ("객체 배열", lambda v: isinstance(v, list) and all(isinstance(x, dict) for x in v)),
-             "object": ("JSON 객체", lambda v: isinstance(v, dict))}[kind]
-    if not shape[1](value):
-        die(f"set: {field} 값은 {shape[0]}이어야 합니다", 2)
+        def bad_float(text):
+            x = float(text)
+            if x in (float("inf"), float("-inf")):
+                raise ValueError(f"{text} 는 너무 큰 수입니다")
+            return x
+        try:
+            value = json.loads(raw, parse_constant=bad_const, parse_float=bad_float)
+        except RecursionError:
+            die(f"set: {field} 값이 너무 깊게 중첩돼 있습니다", 2)
+        except ValueError as e:
+            die(f"set: {field} 값이 올바른 JSON 이 아닙니다 ({e})", 2)
+        shape = {"str_list": ("문자열 배열", lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v)),
+                 "obj_list": ("객체 배열", lambda v: isinstance(v, list) and all(isinstance(x, dict) for x in v)),
+                 "object": ("JSON 객체", lambda v: isinstance(v, dict))}[kind]
+        if not shape[1](value):
+            die(f"set: {field} 값은 {shape[0]}이어야 합니다", 2)
+    try:  # 저장 형식(UTF-8 JSON)으로 쓸 수 있는지 미리 본다: 짝 없는 서로게이트·너무 깊은 구조는 여기서 거부
+        json.dumps(value, ensure_ascii=False, indent=1).encode("utf-8")
+    except (UnicodeEncodeError, RecursionError, ValueError, OverflowError) as e:
+        die(f"set: {field} 값을 UTF-8 JSON 으로 저장할 수 없습니다 (짝 없는 문자·너무 깊은 구조 등)", 2)
     return value
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def short_write_lock(d: Path):
+    """읽기-수정-쓰기를 한 번에 하나만 하게 하는 아주 짧은 잠금 (`set` 전용; 세션 잠금 .pes-lock 과 다르다). 끝나면 지운다."""
+    lock = d / ".project.json.lock"
+    deadline = time.time() + 30
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 60:  # 죽은 프로세스가 남긴 흔적
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                die("set: 다른 set 이 아직 저장 중입니다 — 잠시 뒤 다시 하세요", 3)
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def cmd_set(args):
@@ -778,13 +823,19 @@ def cmd_set(args):
     if field not in kinds:
         die(f"set: {target} 에서 쓸 수 있는 필드는 {', '.join(kinds)} 뿐입니다: {field!r}", 2)
     try:
-        raw = sys.stdin.buffer.read().decode("utf-8") if src == "-" else Path(src).read_bytes().decode("utf-8")
+        raw = (sys.stdin.buffer.read() if src == "-" else Path(src).read_bytes()).decode("utf-8-sig")  # Windows 도구가 붙인 BOM 은 값이 아니다
     except (OSError, UnicodeDecodeError) as e:
         die(f"set: 값을 읽지 못했습니다 ({src}): {e}", 2)
     value = set_parse_check(kinds[field], field, raw)
-    p = load(d)
-    (p if target == "project" else p["stages"][target])[field] = value
-    save(d, p)
+    if not (d / "project.json").exists():
+        die(f"project.json 없음: {d}")
+    with short_write_lock(d):
+        try:
+            p = load(d)
+        except (ValueError, OSError, AttributeError, TypeError) as e:
+            die(f"set: {d.name} 의 project.json 을 읽지 못했습니다 — 파일이 깨졌거나 JSON 이 아닙니다 ({type(e).__name__}). 아무것도 바꾸지 않았습니다", 2)
+        (p if target == "project" else p["stages"][target])[field] = value
+        save(d, p)
     print(f"{'프로젝트' if target == 'project' else LABEL[target]} {field} 저장")
 
 
@@ -1870,8 +1921,10 @@ def doctor_project(R, d: Path):
            and re.match(r"(project|library)[ _-].+\.json$|(project|library) \(\d+\)\.json$", x.name)]
     if dup:
         R.add(tag, "bad", "클라우드 동기화 충돌 사본", ", ".join(dup) + " — 두 컴퓨터에서 동시에 고친 흔적. 어느 쪽이 최신인지 확인 후 사본을 정리 (README 「OneDrive」)")
-    if (d / "project.json.tmp").exists():
-        R.add(tag, "warn", "저장 중 끊긴 임시 파일", "project.json.tmp", fix=lambda: (d / "project.json.tmp").unlink(missing_ok=True))
+    stale_tmp = sorted(d.glob("project.json.tmp*"))
+    if stale_tmp:
+        R.add(tag, "warn", "저장 중 끊긴 임시 파일", ", ".join(x.name for x in stale_tmp),
+              fix=lambda: [x.unlink(missing_ok=True) for x in stale_tmp])
     # 단계 일관성
     cur = p.get("current")
     if cur not in KEYS:
