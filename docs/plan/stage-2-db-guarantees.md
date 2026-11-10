@@ -298,5 +298,6 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **`lock --force`**: 사람 소유자는 에이전트가 쥔 활성 lease도 가져온다(`run.interrupt` + 새 claim, fence +1). 잠금 조회·interrupt·claim이 한 단위이고 세션 ID 길이(200자 이하)는 바꾸기 전에 검사하므로, 새 claim이 거부되면 옛 run·lease·영수증이 그대로다(`lock`·`unlock` 모두 한 단위). `run.interrupt`는 lease 보유자 본인 또는 사람 프로젝트 소유자만 정확한 run·lease·fence로 부를 수 있고, 남의 run을 끊은 영수증은 run을 칼럼이 아니라 result에 적는다(영수증의 run은 같은 actor의 run이어야 하는 외래 키). 에이전트 토큰의 `--force`는 계속 거부된다.
 - **`init --slug`**: DB의 슬러그와 이후 명령이 쓰는 폴더 이름이 같아야 프로젝트를 다시 찾을 수 있으므로 `--slug`가 폴더 이름과 다르면 종료 2로 거부하고 프로젝트도 폴더도 만들지 않는다.
 - **`init --import`**: DB 쪽 검사(중복 이름·참고자료 거부 사유)를 먼저 하고, 통과한 뒤에야 프로젝트 폴더와 `library/shots`를 만든다. 거부되면 폴더에 아무것도 남지 않는다. 브리지의 `init`도 프로젝트 생성과 참고자료 가져오기가 한 단위다.
+- **출력 인코딩**: `pes.py`는 시작할 때 stdout·stderr를 UTF-8(`errors=replace`)로 바꾼다(Python 3.9 호환, 이미 UTF-8이면 그대로, stdin은 건드리지 않음). Windows 파이프·리디렉션의 기본 cp1252에서 한글 `print`가 죽던 문제(v0.15·DB 경로 모두)를 막는다. `python -I`는 `PYTHONIOENCODING`을 무시하므로 환경 변수에 기대지 않는다.
 - **오류 출력**: 브리지가 JSON이 아닌 값·`null`·배열·숫자·`data` 없는 `{ok:true}`를 내거나, `submit`·`merge`·`qa`·`ask`의 입력 파일이 없거나 깨졌거나 객체가 아니면 파이썬 스택 대신 한국어 오류 한 줄과 0이 아닌 종료 코드로 끝나고 아무것도 쓰지 않는다.
 - **이번 PR의 알려진 한계**: 기획 항목의 `reuse`(옛 라이브러리 재사용 표시)는 `merge`가 보존하지 않아 인계 때 라이브러리 내용을 복사하지 않는다. 항목의 `open_questions`는 단계 제안(`suggestions`)으로 모으지 않고 메타데이터에만 남긴다.

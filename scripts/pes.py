@@ -2277,7 +2277,21 @@ CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock,
         "context": cmd_context, "claim": cmd_claim, "submit": cmd_submit, "wait": cmd_wait, "complete": cmd_complete}
 
+def _utf8_stdio():
+    """stdout·stderr 를 UTF-8 로. Windows 파이프·리디렉션은 기본 cp1252 라 한글 print 가 UnicodeEncodeError 로 죽는다.
+    `python -I` 는 PYTHONIOENCODING 을 무시하므로 환경 변수에 기대지 않고 여기서 직접 바꾼다. stdin 은 건드리지 않는다."""
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", None) or "").lower().replace("_", "-")
+        if enc in ("utf-8", "utf8"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv=None):
+    _utf8_stdio()
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) == 1 and args[0] in ("list", "hub", "home", "doctor", "stop", "remote"):
         args.append("--")
