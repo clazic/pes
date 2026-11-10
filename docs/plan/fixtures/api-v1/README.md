@@ -117,6 +117,7 @@
 9. 상태 코드는 `200`(조회·명령 성공), `201`(생성), `202`(영속 접수), `400`(잘못된 커서·요청), `401`(인증), `403`(권한·정책), `404`(없음), `409`(충돌·상태), `410`(만료), `413`(크기), `422`(검증)을 쓴다.
 10. PR13 경로의 요청 본문은 코드가 기준이다(2026-11-10 SEL-47 R2): `runs`는 `{actor_id, mode, runtime, provider, model}`, `claims`는 `{run_id, expected_control_rev?}` 또는 `{mode, runtime, provider, model, expected_control_rev?}`, `results`는 `{lease_id, fence, expected_control_rev?, results:[{op:"append_version", object_id, based_on_version_id, title, …}]}`, `wait`는 `{lease_id, fence, reason?, wait_ms?}`, `complete`는 `{lease_id, fence, status}`. 질문의 `type`은 코어 이름(`single`·`multi`·`text`·`textarea`·`number`·`scale`·`file`; 기타 입력은 답 항목의 `other` 필드), `importance`는 `high|normal|low`다. 라운드 봉인은 ready 상태의 manifest blob(`manifest_blob_id`)과 `versions`가 필수다. 에이전트가 질문을 게시할 때는 담당 run의 `run_id`·`lease_id`·`fence`를 함께 보낸다(없으면 403).
 11. 받기만 하고 저장하지 않는 필드: `heartbeat`의 `progress`, `submissions`의 `submitted_via`·`client_request_id`(멱등 키는 헤더가 진짜). 저장하지 않으면 결과가 달라지는 값 — `questions`의 `direction: "human_to_agent"`, `rounds`의 `purpose`·`question_set_id` — 은 400으로 거부한다.
+12. 인계(`handoffs.json`)는 같은 run을 `queued`로 되돌린다. `target_actor_id`·`target_mode`는 생략하거나 그 run의 actor·mode와 같아야 하며(정상 사례의 `act_…`는 그 run의 actor 자리표시자), 다르면 400 `invalid_payload`다. 입력(`inputs.json`) 항목의 `object_id`는 답 object이고 답 본문은 `versions.json` 경로(`/objects/{object_id}/versions/{input_version_id}`)의 `content`(`question_version_id`·`value`·`state`·`comment`)로 읽는다.
 
 ## 3. 6절 동작별 파일
 

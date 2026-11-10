@@ -208,6 +208,15 @@ interface RouteSpec {
   op?: Op;
 }
 
+/** A JSON column (checked json_valid by the schema); a damaged value reads as null. */
+function parse_json_or_null(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 const FORMAT_VERSION = "1.0";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_WAIT_MS = 25_000;
@@ -1245,6 +1254,74 @@ export class ApiApp {
         verification_state: row.verification_state,
       };
     }
+    if (kind === "answer") {
+      const row = this.#db.get<{ question_id: string; question_version_id: string; value: string; state: string }>(
+        `SELECT question_id, question_version_id, value, state FROM answer_versions
+          WHERE project_id = ? AND version_id = ?`,
+        project_id,
+        version_id,
+      );
+      if (row === undefined) return null;
+      // The comment sent with this answer version: the message of the same submission (same transaction)
+      // on the question version's comment thread, at its current version.
+      const comment = this.#db.get<{ body_md: string }>(
+        `SELECT mv.body_md AS body_md
+           FROM object_versions ov
+           JOIN submissions s ON s.project_id = ov.project_id AND s.tx_id = ov.tx_id
+           JOIN messages m ON m.project_id = s.project_id AND m.submission_id = s.id
+           JOIN threads t ON t.project_id = m.project_id AND t.object_id = m.thread_id
+           JOIN objects mo ON mo.project_id = m.project_id AND mo.id = m.object_id
+           JOIN message_versions mv ON mv.project_id = m.project_id AND mv.version_id = mo.current_version_id
+          WHERE ov.project_id = ? AND ov.id = ?
+            AND t.context_kind = 'question_comment'
+            AND t.target_object_id = ? AND t.target_version_id = ?
+          ORDER BY m.rowid
+          LIMIT 1`,
+        project_id,
+        version_id,
+        row.question_id,
+        row.question_version_id,
+      );
+      return {
+        question_version_id: row.question_version_id,
+        value: parse_json_or_null(row.value),
+        state: row.state,
+        comment: comment?.body_md ?? null,
+      };
+    }
+    if (kind === "question") {
+      const row = this.#db.get<{
+        text: string;
+        type: string;
+        state: string;
+        importance: string;
+        required: bigint;
+        allow_comment_as_answer: bigint;
+        default_value: string;
+        options: string;
+        show_if: string;
+        help: string | null;
+      }>(
+        `SELECT text, type, state, importance, required, allow_comment_as_answer,
+                default_value, options, show_if, help
+           FROM question_versions WHERE project_id = ? AND version_id = ?`,
+        project_id,
+        version_id,
+      );
+      if (row === undefined) return null;
+      return {
+        text: row.text,
+        type: row.type,
+        state: row.state,
+        importance: row.importance,
+        required: Number(row.required) === 1,
+        allow_comment_as_answer: Number(row.allow_comment_as_answer) === 1,
+        default_value: parse_json_or_null(row.default_value),
+        options: parse_json_or_null(row.options) ?? [],
+        show_if: parse_json_or_null(row.show_if),
+        help: row.help,
+      };
+    }
     return null;
   }
 
@@ -1704,15 +1781,43 @@ export class ApiApp {
     };
   }
 
+  /**
+   * The receipt this request replays, if any. A key already spent on another command, or on the same command
+   * for another run, is not a replay: 409 idempotency_key_reuse, before anything is written.
+   */
+  #lease_replay(project: ProjectRow, auth: AuthInfo, key: string | null, action: string, run_id: string): ReceiptRow | undefined {
+    if (key === null) return undefined;
+    const prior = receipt_of_request(this.#db, project.id, auth.actor_id, key);
+    if (prior === undefined) return undefined;
+    let target: unknown = null;
+    try {
+      const result: unknown = JSON.parse(prior.result_json);
+      if (is_record(result)) target = result.run_id;
+    } catch {
+      target = null;
+    }
+    if (prior.action !== action || target !== run_id || prior.lease_id === null || prior.fence === null) {
+      throw new Fail("idempotency_key_reuse", { target: "$.headers.idempotency-key" });
+    }
+    return prior;
+  }
+
   async #handoffs(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const run_id = request.params[1] as string;
     const run = run_info(this.#db, project.id, run_id);
     if (run === undefined) throw new Fail("not_found");
     const lease = this.#live_lease_of_run(project.id, run_id);
-    const replaying =
-      request.key !== null &&
-      receipt_of_request(this.#db, project.id, auth.actor_id, request.key) !== undefined;
-    if (!replaying && !auth.session && (lease === undefined || lease.owner_actor_id !== auth.actor_id)) {
+    const holder = auth.session || (lease !== undefined && lease.owner_actor_id === auth.actor_id);
+    let replaying = false;
+    if (!holder && request.key !== null) {
+      // A stranger's foreign key is just forbidden; only a true replay of its own handoff passes.
+      try {
+        replaying = this.#lease_replay(project, auth, request.key, "run.handed_off", run_id) !== undefined;
+      } catch {
+        replaying = false;
+      }
+    }
+    if (!replaying && !holder) {
       throw new Fail("forbidden", {
         target: "$.path.run_id",
         next_action: "use_current_holder",
@@ -1722,22 +1827,26 @@ export class ApiApp {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
     reject_unknown(body, ["target_mode", "target_actor_id", "reason", "include_pending_inputs"]);
-    const target_mode = require_mode(body, "target_mode");
+    const target_mode = body.target_mode === undefined || body.target_mode === null ? undefined : require_mode(body, "target_mode");
     const target_actor_id = optional_text(body, "target_actor_id");
     const reason = optional_text(body, "reason");
     if (body.include_pending_inputs !== undefined && typeof body.include_pending_inputs !== "boolean") {
       invalid_field("include_pending_inputs");
     }
-    const prior = receipt_of_request(this.#db, project.id, auth.actor_id, key);
-    if (prior === undefined && lease === undefined) throw new Fail("conflict");
-    const fence_value =
-      prior?.fence !== null && prior?.fence !== undefined ? prior.fence : (lease as { fence: bigint }).fence;
+    // A handoff gives the SAME run back to the queue: its actor and mode do not change, so a target that
+    // names another actor or mode could never take effect and is refused rather than answered with a false 200.
+    if (target_actor_id !== undefined && target_actor_id !== run.actor_id) invalid_field("target_actor_id");
+    if (target_mode !== undefined && target_mode !== run.mode) invalid_field("target_mode");
+    const prior = this.#lease_replay(project, auth, key, "run.handed_off", run_id);
+    const guard = prior ?? lease;
+    if (guard === undefined || guard.lease_id === null || guard.fence === null) throw new Fail("conflict");
+    const fence_value = guard.fence;
     const payload: Record<string, unknown> = {
       run_id,
-      lease_id: prior?.lease_id ?? (lease as { lease_id: string }).lease_id,
+      lease_id: guard.lease_id,
       fence: Number(fence_value),
-      target_mode,
     };
+    if (target_mode !== undefined) payload.target_mode = target_mode;
     if (target_actor_id !== undefined) payload.target_actor_id = target_actor_id;
     if (reason !== undefined) payload.reason = reason;
     if (body.include_pending_inputs !== undefined) payload.include_pending_inputs = body.include_pending_inputs;
@@ -1751,7 +1860,7 @@ export class ApiApp {
         status: "queued",
         lease: { released: true, fence: String(fence_value) },
         pending_input_count: pending_input_count(this.#db, project.id, run_id, run.actor_id),
-        target_mode,
+        target_mode: target_mode ?? run.mode,
         target_actor_id: target_actor_id ?? null,
       },
       replayed: out.replayed,
@@ -1766,7 +1875,7 @@ export class ApiApp {
     reject_unknown(body, ["reason", "mode"]);
     const reason = optional_text(body, "reason");
     if (body.mode !== undefined && body.mode !== "graceful") invalid_field("mode");
-    const prior = receipt_of_request(this.#db, project.id, auth.actor_id, key);
+    const prior = this.#lease_replay(project, auth, key, "run.interrupted", run_id);
     const lease = this.#live_lease_of_run(project.id, run_id);
     if (prior === undefined && TERMINAL_RUN_STATUSES.has(run.status)) {
       throw new Fail("run_terminal", {
@@ -1774,12 +1883,13 @@ export class ApiApp {
         details: { run_id, status: run.status },
       });
     }
-    if (prior === undefined && lease === undefined) throw new Fail("conflict");
     // A replay names the lease the first request used, so the stored receipt matches.
+    const guard = prior ?? lease;
+    if (guard === undefined || guard.lease_id === null || guard.fence === null) throw new Fail("conflict");
     const payload: Record<string, unknown> = {
       run_id,
-      lease_id: prior?.lease_id ?? (lease as { lease_id: string }).lease_id,
-      fence: prior?.fence !== null && prior?.fence !== undefined ? Number(prior.fence) : Number((lease as { fence: bigint }).fence),
+      lease_id: guard.lease_id,
+      fence: Number(guard.fence),
     };
     if (reason !== undefined) payload.reason = reason;
     const out = await this.#exec(() =>
@@ -1825,40 +1935,61 @@ export class ApiApp {
 
   async #inputs(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const run_id = request.params[1] as string;
-    const run = run_info(this.#db, project.id, run_id);
-    if (run === undefined) throw new Fail("not_found");
-    if (run.actor_id !== auth.actor_id) {
-      throw new Fail("forbidden", { target: "$.path.run_id", details: { actor_kind: auth.kind } });
-    }
     const wait_ms = this.#query_limit(request, "wait_ms", 0, MAX_WAIT_MS, 0);
     const scope = `run:${run_id}:${auth.actor_id}`;
-    const meta = db_meta(this.#db);
-    let after = 0n;
-    if (request.query.has("cursor")) {
-      const given = read_cursor(this.#secret, request.query.get("cursor") as string);
-      if (given === null || given.p !== project.id || given.s !== scope || given.d !== meta.database_instance_id) {
-        throw new Fail("cursor_invalid", { target: "$.query.cursor" });
-      }
-      if (given.e !== meta.cursor_epoch) {
-        throw new Fail("cursor_invalid", {
-          target: "$.query.cursor",
-          details: { reason: "epoch_changed", current_epoch: meta.cursor_epoch },
-        });
-      }
-      after = BigInt(given.q);
-    }
+    const given = request.query.has("cursor") ? read_cursor(this.#secret, request.query.get("cursor") as string) : undefined;
+    const op = this.#table.find((spec) => spec.operation === "runs.inputs")?.op as Op;
+    /**
+     * One short read transaction per look at the inputs. Inside it the caller is checked again (token, actor,
+     * membership, scope), the run must still be the caller's, a mode A run (a Go destination) needs Go ON
+     * whoever calls, and the cursor is checked against the database metadata of that same boundary. So a
+     * credential revoked or a Go policy turned OFF while the request waited ends that request like a new one.
+     */
+    const at_boundary = (read_page: boolean) =>
+      read_tx(this.#db, () => {
+        const current = this.#project(project.id);
+        const now_auth = this.#bind(current, this.#credential(request, current.id), op);
+        if (now_auth.actor_id !== auth.actor_id) throw new Fail("unauthenticated");
+        if (now_auth.kind === "internal_ai") this.#require_go(current.id);
+        const run = run_info(this.#db, current.id, run_id);
+        if (run === undefined) throw new Fail("not_found");
+        if (run.actor_id !== now_auth.actor_id) {
+          throw new Fail("forbidden", { target: "$.path.run_id", details: { actor_kind: now_auth.kind } });
+        }
+        if (run.mode === "A") this.#require_go(current.id);
+        const meta = db_meta(this.#db);
+        let after = 0n;
+        if (given !== undefined) {
+          if (given === null || given.p !== current.id || given.s !== scope || given.d !== meta.database_instance_id) {
+            throw new Fail("cursor_invalid", { target: "$.query.cursor" });
+          }
+          if (given.e !== meta.cursor_epoch) {
+            throw new Fail("cursor_invalid", {
+              target: "$.query.cursor",
+              details: { reason: "epoch_changed", current_epoch: meta.cursor_epoch },
+            });
+          }
+          after = BigInt(given.q);
+        }
+        const page = read_page
+          ? inputs_page(this.#db, current.id, run_id, run.actor_id, after, LIST_MAX_ITEMS)
+          : { items: [], has_more: false };
+        return { meta, after, page };
+      });
+
+    // The caller, run, Go policy and cursor are checked before the poll budget is spent.
+    at_boundary(false);
     const poll_key = `${auth.token_id}:${run_id}`;
     const wait = this.#budgets.poll_wait(poll_key, MIN_POLL_INTERVAL_MS, this.#now());
     if (wait !== null) this.#rate_limited(wait, "poll");
 
-    const read = () =>
-      read_tx(this.#db, () => inputs_page(this.#db, project.id, run_id, run.actor_id, after, LIST_MAX_ITEMS));
-    let page = read();
-    if (page.items.length === 0 && wait_ms > 0) {
+    let seen = at_boundary(true);
+    if (seen.page.items.length === 0 && wait_ms > 0) {
       // No transaction is open while the request waits.
       await this.#sleep(wait_ms);
-      page = read();
+      seen = at_boundary(true);
     }
+    const { meta, after, page } = seen;
     if (page.items.length === 0) this.#budgets.mark_empty_poll(poll_key, this.#now());
     else this.#budgets.clear_poll(poll_key);
     const last = page.items.length === 0 ? after : page.items[page.items.length - 1]!.pos;
@@ -1867,6 +1998,7 @@ export class ApiApp {
       data: {
         inputs: page.items.map((item) => ({
           input_version_id: item.input_version_id,
+          object_id: item.object_id,
           kind: "answer",
           question_id: item.question_id,
           available_at: item.available_at,

@@ -48,6 +48,7 @@ _API_ERROR_TEXT = {
 }
 # 상주 프로세스인 이 서버만 요청 예산을 기억한다(브리지는 요청마다 새 Node 프로세스다).
 # 한도 숫자와 제어·poll 경로는 Node ApiApp.budget_policy() 가 한곳에서 정해 `--limits` 로 내준다.
+_API_PATH = re.compile(r"/api/v1(/.*)?")
 _API_PROJECT_PATH = re.compile(r"/api/v1/projects/[^/]+/.*")
 _BEARER = re.compile(r"\s*bearer\s+(.*?)\s*", re.IGNORECASE | re.DOTALL)
 _BUDGET_MAX_KEYS = 20000
@@ -66,7 +67,12 @@ def _digest(value):
 
 
 class ApiBudget:
-    """자격(Authorization 또는 x-pes-session)의 sha256 단위 요청 예산과 inputs 최소 poll 간격."""
+    """자격(Authorization 또는 x-pes-session)의 sha256 단위 요청 예산과 inputs 최소 poll 간격.
+
+    모든 /api/v1 요청(프로젝트 밖 경로 포함)이 예산을 거친다. 자격이 없거나 아직 한 번도 통과(401 이 아닌
+    프로젝트 경로 응답)하지 않은 자격의 요청은 서버 전체에 하나뿐인 거친 버킷도 함께 쓴다. 그래서 매번 다른
+    가짜 자격을 보내도 Node 를 띄우는 횟수는 거친 상한을 넘지 않는다. 한도 숫자는 budget_policy() 한 곳에서 온다.
+    """
 
     def __init__(self, policy):
         self.window_ms = int(policy["window_ms"])
@@ -74,13 +80,15 @@ class ApiBudget:
         self.agent_control = int(policy["agent_control_requests_per_minute"])
         self.owner = int(policy["owner_requests_per_minute"])
         self.poll_gap_ms = int(policy["min_poll_interval_ms"])
-        # 자격 없는 요청 전체, 그리고 자격마다 환불된(형식이 틀린) 요청이 함께 쓰는 거친 상한.
+        # 자격 없는·검증 안 된 자격의 요청 전체, 그리고 자격마다 환불된(형식이 틀린) 요청이 쓰는 거친 상한.
         self.coarse = int(policy["coarse_requests_per_minute"])
         self.control_routes = [_route_pattern(t) for t in policy["control_routes"]]
         self.poll_routes = [_route_pattern(t) for t in policy["poll_routes"]]
         self.refund_codes = set(policy["refund_codes"])
         self._hits = {}
         self._polls = {}
+        # 프로젝트 경로에서 401 이 아닌 응답을 받은 자격 digest -> 마지막으로 본 시각.
+        self._verified = {}
         self._lock = threading.Lock()
 
     @staticmethod
@@ -101,6 +109,15 @@ class ApiBudget:
             return "token", _digest(bearer.group(1) if bearer else auth)
         return None
 
+    def _window(self, key, now):
+        """`key` 의 창 안 시각만 남겨 저장하고 돌려준다. Caller holds the lock."""
+        hits = [at for at in self._hits.get(key, []) if at > now - self.window_ms]
+        if hits:
+            self._hits[key] = hits
+        else:
+            self._hits.pop(key, None)
+        return hits
+
     def _prune(self, now):
         if len(self._hits) > _BUDGET_MAX_KEYS:
             for key in [k for k, hits in self._hits.items() if not hits or hits[-1] <= now - self.window_ms]:
@@ -114,63 +131,61 @@ class ApiBudget:
                 del self._polls[key]
             if len(self._polls) > _BUDGET_MAX_KEYS:
                 self._polls.clear()
+        if len(self._verified) > _BUDGET_MAX_KEYS:
+            oldest = sorted(self._verified, key=self._verified.get)
+            for digest in oldest[: len(self._verified) - _BUDGET_MAX_KEYS // 2]:
+                del self._verified[digest]
 
     def admit(self, method, path, headers):
         """Returns (ticket, rejection). rejection is (scope, retry_after_ms); ticket is passed to settle()."""
-        if not _API_PROJECT_PATH.fullmatch(path):
+        if not _API_PATH.fullmatch(path):
             return None, None
         cred = self._credential(headers)
         now = self._now()
-        if cred is None:
-            # 자격이 없는 요청은 결국 401 이지만 요청마다 Node 를 띄우므로 전체 거친 버킷 하나로 묶는다.
-            with self._lock:
-                self._prune(now)
-                rejection = self._take("anon", self.coarse, "coarse", now)
-            return None, rejection
-        kind, digest = cred
-        with self._lock:
-            # 환불받은 요청도 자격마다 거친 상한까지만 공짜다.
-            refunds = [at for at in self._hits.get(f"refund:{digest}", []) if at > now - self.window_ms]
-            if len(refunds) >= self.coarse:
-                self._hits[f"refund:{digest}"] = refunds
-                return None, ("refund", min(self.window_ms, max(1, refunds[0] + self.window_ms - now)))
-        if kind == "session":
-            scope, limit, key = "session", self.owner, f"session:{digest}"
-        else:
-            scope = "control" if self._matches(self.control_routes, method, path) else "general"
-            limit = self.agent_control if scope == "control" else self.agent
-            key = f"token:{digest}:{scope}"
         with self._lock:
             self._prune(now)
-            hits = [at for at in self._hits.get(key, []) if at > now - self.window_ms]
-            if len(hits) >= limit:
-                self._hits[key] = hits
-                return None, (scope, min(self.window_ms, max(1, hits[0] + self.window_ms - now)))
-            hits.append(now)
-            self._hits[key] = hits
+            if cred is None or cred[1] not in self._verified:
+                # 자격이 없거나 검증 안 된 자격: 결국 401 일 수 있지만 요청마다 Node 를 띄우므로 서버 전체 버킷 하나로 묶는다.
+                rejection = self._take("unverified", self.coarse, "coarse", now)
+                if rejection is not None or cred is None:
+                    return None, rejection
+            kind, digest = cred
+            # 환불받은 요청도 자격마다 거친 상한까지만 공짜다 (창 밖 환불 시각은 매번 버린다).
+            refunds = self._window(f"refund:{digest}", now)
+            if len(refunds) >= self.coarse:
+                return None, ("refund", min(self.window_ms, max(1, refunds[0] + self.window_ms - now)))
+            if kind == "session":
+                scope, limit, key = "session", self.owner, f"session:{digest}"
+            else:
+                scope = "control" if self._matches(self.control_routes, method, path) else "general"
+                limit = self.agent_control if scope == "control" else self.agent
+                key = f"token:{digest}:{scope}"
+            rejection = self._take(key, limit, scope, now)
+            if rejection is not None:
+                return None, rejection
             poll_key = None
             if kind == "token" and self._matches(self.poll_routes, method, path):
                 poll_key = f"{digest}:{path}"
                 last = self._polls.get(poll_key)
                 if last is not None and last + self.poll_gap_ms - now > 0:
                     return None, ("poll", min(self.poll_gap_ms, last + self.poll_gap_ms - now))
-        return (key, now, poll_key, digest), None
+        project = bool(_API_PROJECT_PATH.fullmatch(path))
+        return (key, now, poll_key, digest, project), None
 
     def _take(self, key, limit, scope, now):
         """Count one hit on `key`; returns the rejection (scope, retry_after_ms) when full. Caller holds the lock."""
-        hits = [at for at in self._hits.get(key, []) if at > now - self.window_ms]
+        hits = self._window(key, now)
         if len(hits) >= limit:
-            self._hits[key] = hits
             return scope, min(self.window_ms, max(1, hits[0] + self.window_ms - now))
         hits.append(now)
         self._hits[key] = hits
         return None
 
     def settle(self, ticket, status, payload):
-        """Give the slot back for a request refused over its own input; note empty polls."""
+        """Give the slot back for a request refused over its own input; note empty polls and proven credentials."""
         if ticket is None:
             return
-        key, at, poll_key, digest = ticket
+        key, at, poll_key, digest, project = ticket
         code, inputs = None, None
         if status >= 400 or poll_key is not None:
             try:
@@ -182,14 +197,22 @@ class ApiBudget:
             except (UnicodeDecodeError, ValueError, KeyError, TypeError):
                 pass
         with self._lock:
+            now = self._now()
+            if project and status != 401 and status < 500:
+                # 프로젝트 경로는 인증을 먼저 본다(인증 뒤 404): 401 이 아니면 살아 있는 자격이다.
+                self._verified[digest] = now
+            elif status == 401:
+                self._verified.pop(digest, None)
             if code in self.refund_codes:
                 hits = self._hits.get(key)
                 if hits and at in hits:
                     hits.remove(at)
-                    self._hits.setdefault(f"refund:{digest}", []).append(at)
+                    refunds = self._window(f"refund:{digest}", now)
+                    refunds.append(at)
+                    self._hits[f"refund:{digest}"] = refunds
             if poll_key is not None and status == 200:
                 if isinstance(inputs, list) and len(inputs) == 0:
-                    self._polls[poll_key] = self._now()
+                    self._polls[poll_key] = now
                 else:
                     self._polls.pop(poll_key, None)
 

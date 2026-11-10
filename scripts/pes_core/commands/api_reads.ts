@@ -137,6 +137,8 @@ export function lease_info(db: Db, project_id: string): LeaseInfo | undefined {
 
 export interface InputRow {
   input_version_id: string;
+  /** the answer object the version belongs to (read it at objects/{object_id}/versions/{input_version_id}) */
+  object_id: string;
   question_id: string;
   available_at: number;
   state: string;
@@ -154,12 +156,13 @@ export function inputs_page(
 ): { items: InputRow[]; has_more: boolean } {
   const rows = db.all<{
     input_version_id: string;
+    object_id: string;
     question_id: string;
     created_at: bigint;
     receipt_state: string | null;
     pos: bigint;
   }>(
-    `SELECT av.version_id AS input_version_id, av.question_id AS question_id,
+    `SELECT av.version_id AS input_version_id, av.object_id AS object_id, av.question_id AS question_id,
             ov.created_at AS created_at, r.state AS receipt_state, av.rowid AS pos
        FROM answer_versions av
        JOIN questions q ON q.project_id = av.project_id AND q.object_id = av.question_id
@@ -178,6 +181,7 @@ export function inputs_page(
   );
   const items = rows.slice(0, limit).map((row) => ({
     input_version_id: row.input_version_id,
+    object_id: row.object_id,
     question_id: row.question_id,
     available_at: Number(row.created_at),
     state: row.receipt_state ?? "new",

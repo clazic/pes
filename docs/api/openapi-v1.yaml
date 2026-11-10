@@ -108,6 +108,8 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/ArtifactContent"
                 - $ref: "#/components/schemas/SourceContent"
+                - $ref: "#/components/schemas/AnswerContent"
+                - $ref: "#/components/schemas/QuestionContent"
                 - { type: "null" }
             files:
               type: array
@@ -135,6 +137,40 @@ components:
         source_kind: { type: string }
         method: { type: string }
         verification_state: { type: string }
+    AnswerContent:
+      type: object
+      description: An answer version. state is the answer version's own state (not a run's input receipt state).
+      required: [question_version_id, value, state, comment]
+      properties:
+        question_version_id: { type: string }
+        value: {}
+        state: { type: string, enum: [submitted, skipped, withdrawn] }
+        comment: { type: [string, "null"] }
+    QuestionContent:
+      type: object
+      required: [text, type, state, importance, required, allow_comment_as_answer, default_value, options, show_if, help]
+      properties:
+        text: { type: string }
+        type: { type: string, enum: [single, multi, text, textarea, number, scale, file] }
+        state: { type: string }
+        importance: { type: string, enum: [high, normal, low] }
+        required: { type: boolean }
+        allow_comment_as_answer: { type: boolean }
+        default_value: {}
+        options: { type: array }
+        show_if: {}
+        help: { type: [string, "null"] }
+    InputItem:
+      type: object
+      description: One answer to the run's own question; read its content at objects/{object_id}/versions/{input_version_id}.
+      required: [input_version_id, object_id, kind, question_id, available_at, state]
+      properties:
+        input_version_id: { type: string }
+        object_id: { type: string, description: The answer object }
+        kind: { type: string, enum: [answer] }
+        question_id: { type: string }
+        available_at: { type: integer }
+        state: { type: string, enum: [new, seen, applied, ignored] }
     Success:
       type: object
       required: [format_version, request_id, data]
@@ -314,7 +350,9 @@ components:
         fence: { type: string }
     HandoffBody:
       type: object
-      required: [target_mode]
+      description: >-
+        The same run goes back to the queue, so its actor and mode do not change. target_actor_id and target_mode
+        may be omitted or name the run's own actor and mode; anything else is 400 invalid_payload and writes nothing.
       additionalProperties: false
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
@@ -862,7 +900,7 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs/{r}/inputs:
     get:
-      summary: Answers to the run's own questions; long-poll with wait_ms (the response waits after the read, holding no transaction)
+      summary: Answers to the run's own questions (items are InputItem); long-poll with wait_ms (no transaction is held while waiting; the caller, the run and, for a mode A run, the Go policy are checked again in each read)
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RunId"
