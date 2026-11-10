@@ -493,6 +493,16 @@ export function drop_prepared_import(owner_actor_id: string, fingerprint: string
 // ---------------------------------------------------------------------------
 // Small helpers
 
+/** Assign an own, enumerable key even when it is "__proto__". */
+function set_own(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+/** Keep an unknown key; a key that collides with an importer mark is stored as original_<key>. */
+function keep_unknown(target: Record<string, unknown>, key: string, value: unknown): void {
+  set_own(target, Object.hasOwn(target, key) ? `original_${key}` : key, value);
+}
+
 function is_record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -887,6 +897,7 @@ interface BuildContext {
   forms: FormRef[];
   question_reuse: Map<string, { object_key: string; version_key: string }>;
   item_digest: Map<string, string>;
+  item_versions: Map<string, Map<string, string>>;
   object_rows: Map<string, PlanObjectRow>;
   bytes: Map<string, Uint8Array>;
   parsed: Map<string, unknown>;
@@ -1364,7 +1375,7 @@ function item_core(
   if ("shots" in raw) metadata_extra.shots = raw.shots;
   for (const field of Object.keys(raw)) {
     if (KNOWN_ITEM_KEYS.has(field)) continue;
-    metadata_extra[field] = raw[field];
+    keep_unknown(metadata_extra, field, raw[field]);
     plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/${field}`);
   }
   if (raw.request !== undefined) {
@@ -1449,7 +1460,7 @@ function item_extras(
     }
     for (const field of Object.keys(source)) {
       if (KNOWN_SOURCE_KEYS.has(field)) continue;
-      legacy_extra[field] = source[field];
+      keep_unknown(legacy_extra, field, source[field]);
       plan_entry_category(
         ctx.entries,
         "unknown_field",
@@ -1500,7 +1511,7 @@ function item_extras(
         if (status !== null) locator.user_status = status;
         for (const field of Object.keys(link)) {
           if (KNOWN_USER_LINK_KEYS.has(field)) continue;
-          legacy_extra[field] = link[field];
+          keep_unknown(legacy_extra, field, link[field]);
           plan_entry_category(
             ctx.entries,
             "unknown_field",
@@ -2784,7 +2795,8 @@ function build_snapshot_items(ctx: BuildContext): void {
         // The item no longer exists in project.json: its latest snapshot record is the object.
         const latest = seen[seen.length - 1]!;
         const key = item_key(stage_key, legacy_id);
-        const created = add_artifact(ctx, make_input(latest, key, latest.round_key));
+        // Not in the current project.json: the person removed it, so it stays archived.
+        const created = add_artifact(ctx, { ...make_input(latest, key, latest.round_key), archived: true });
         scope_map.set(legacy_id, created);
         ctx.item_digest.set(`${stage_key}|${legacy_id}`, latest.digest);
         ctx.plan.mappings.push({
@@ -2801,6 +2813,7 @@ function build_snapshot_items(ctx: BuildContext): void {
         current = created;
       }
       const object_key = current.object_key;
+      ctx.item_versions.set(`${stage_key}|${legacy_id}`, versions);
       for (const entry of seen) {
         if (!versions.has(entry.digest)) {
           add_old(entry, object_key, `old${(ctx.object_rows.get(object_key)?.earlier?.length ?? 0) + 1}`);
@@ -2878,8 +2891,13 @@ function build_round_files(ctx: BuildContext): void {
     }
     const result_id = name.slice(0, -".json".length);
     const item = ctx.items.get(stage_key)?.get(result_id);
-    if (item !== undefined && ctx.item_digest.get(`${stage_key}|${result_id}`) === digest(parsed)) {
-      add_file(ctx, item.version_key, path, "source");
+    const matched_version =
+      item === undefined
+        ? undefined
+        : ctx.item_versions.get(`${stage_key}|${result_id}`)?.get(digest(parsed)) ??
+          (ctx.item_digest.get(`${stage_key}|${result_id}`) === digest(parsed) ? item.version_key : undefined);
+    if (matched_version !== undefined) {
+      add_file(ctx, matched_version, path, "source");
     } else {
       plan_entry_category(ctx.entries, "unmapped_input", path);
     }
@@ -3168,6 +3186,7 @@ function build_plan(dir: string): PreparedImport {
     forms: [],
     question_reuse: new Map(),
     item_digest: new Map(),
+    item_versions: new Map(),
     object_rows: new Map(),
     items: new Map(),
     questions: new Map(),

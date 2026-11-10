@@ -595,19 +595,20 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
     );
   }
 
-  function insert_object_version(row: PlanObjectRow, object_id: string, version: PlanObjectRow["version"], version_id: string): void {
+  function insert_object_version(row: PlanObjectRow, object_id: string, version: PlanObjectRow["version"], version_id: string, based_on: string | null): void {
     const created_in_round_id =
       version.created_in_round_key === null ? null : round_ids.get(version.created_in_round_key) ?? null;
     runtime.db.run(
       `INSERT INTO object_versions
          (id, project_id, object_id, kind, version_no, based_on_version_id, created_in_round_id,
           actor_id, run_id, tx_id, content_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
       version_id,
       project_id,
       object_id,
       row.kind,
       version.version_no,
+      based_on,
       created_in_round_id,
       legacy_actor_id,
       runtime.tx_id,
@@ -639,9 +640,9 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
       const old_id = runtime.new_id();
       earlier_ids.push(old_id);
       version_ids.set(old.version.key, old_id);
-      insert_object_version(row, object_id, old.version, old_id);
+      insert_object_version(row, object_id, old.version, old_id, earlier_ids.length > 1 ? earlier_ids[earlier_ids.length - 2]! : null);
     }
-    insert_object_version(row, object_id, row.version, version_id);
+    insert_object_version(row, object_id, row.version, version_id, earlier_ids.length > 0 ? earlier_ids[earlier_ids.length - 1]! : null);
     runtime.db.run(
       "UPDATE objects SET current_version_id = ? WHERE project_id = ? AND id = ?",
       version_id,
