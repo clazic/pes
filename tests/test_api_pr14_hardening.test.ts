@@ -1,7 +1,8 @@
 /**
  * SEL-47 PR14 — HTTP API, 보강 모드 (tester). Gaps found by reading the implementation, not the issue text.
- * A test whose title starts with "DEFECT?" fails on purpose: the implementation looks wrong there and the
- * reason is in the comment above it.
+ * Several of these were first written as "DEFECT?" probes that failed against the first implementation
+ * (commit c842035). They were fixed in 4aa6f4c / 2c4a88c and are now plain regression tests that pass: the
+ * comment above each one says which behaviour it pins and what it looked like before.
  *
  *   1. human session vs agent token (credential matrix on every human-only route, session + token together)
  *   2. project.register (key reuse across commands, hostile slugs, the raw token appears nowhere)
@@ -280,11 +281,11 @@ test("changes: round.start leaves two events in one transaction; limit=1 never s
 // ---------------------------------------------------------------------------
 // 4. run lifecycle
 
-// DEFECT? lease_lost hands the project's CURRENT live lease_id and fence to whoever sent the failing
-// request (api.ts #lease_lost reads project_leases without checking the caller). The project has one lease,
-// so any other agent — one that never held it — learns the holder's lease_id by sending a heartbeat,
-// release, or input-receipts with a made-up lease.
-test("DEFECT? lease_lost to a caller who is not the holder does not reveal the holder's lease_id or fence", async () => {
+// Regression (fixed in 4aa6f4c): lease_lost used to hand the project's CURRENT live lease_id and fence to
+// whoever sent the failing request (api.ts #lease_lost read project_leases without checking the caller), so
+// any other agent that never held the lease learned the holder's lease_id by sending a heartbeat, release,
+// or input-receipts with a made-up lease. Now only the holder is told.
+test("lease_lost to a caller who is not the holder does not reveal the holder's lease_id or fence", async () => {
   await with_api(async (env) => {
     const holder = await make_agent(env, "holder");
     const other = await make_agent(env, "outsider");
@@ -387,10 +388,10 @@ test("operations: the id of a receipt that is not an interrupt or cancel is 404 
   });
 });
 
-// DEFECT? GET requests/{key} for the owner session looks up the key WITHOUT an actor filter and takes the
-// first row. Idempotency keys belong to (actor, key); when an agent used the same key text earlier, the
-// owner asking about their own request is shown the agent's receipt.
-test("DEFECT? the owner's request lookup returns the owner's own receipt when an agent used the same key text first", async () => {
+// Regression (fixed in 4aa6f4c): GET requests/{key} for the owner session used to look the key up WITHOUT an
+// actor filter and take the first row. Idempotency keys belong to (actor, key); when an agent used the same
+// key text earlier, the owner asking about their own request was shown the agent's receipt.
+test("the owner's request lookup returns the owner's own receipt when an agent used the same key text first", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "samekey");
     assert_ok(await call(env, { method: "POST", path: P(env, "/claims"), auth: { token: agent.token }, key: "same-key-text", body: { mode: "B", runtime: "r", provider: "p", model: "m" } }));
@@ -411,10 +412,12 @@ test("DEFECT? the owner's request lookup returns the owner's own receipt when an
 // ---------------------------------------------------------------------------
 // 5. request budgets
 
-// DEFECT? The budget lives in an ApiApp field. api_bridge.ts builds a new ApiApp for every request (one
-// process per request), so the documented 60 requests per minute per token (capabilities, stage-1-api.md)
-// is never enforced on the only deployed path. The same holds for the minimum poll interval.
-test("DEFECT? a token's budget survives a new ApiApp over the same database (the bridge builds one per request)", async () => {
+// Regression (fixed in 4aa6f4c): the budget used to live in an ApiApp field while api_bridge.ts builds a new
+// ApiApp for every request (one process per request), so the documented 60 requests per minute per token was
+// never enforced on the only deployed path; the same held for the minimum poll interval. These two tests
+// restart the ApiApp over the same database between calls. The per-credential budget that serve.py applies
+// before the bridge is pinned in tests/test_serve_api_limits.py.
+test("a token's budget survives a new ApiApp over the same database (the bridge builds one per request)", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "burst");
     let limited = 0;
@@ -427,7 +430,7 @@ test("DEFECT? a token's budget survives a new ApiApp over the same database (the
   });
 });
 
-test("DEFECT? the minimum poll interval for inputs survives a new ApiApp over the same database", async () => {
+test("the minimum poll interval for inputs survives a new ApiApp over the same database", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "poller");
     const lease = await agent_claims(env, agent);
