@@ -12,6 +12,8 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -366,14 +368,19 @@ test("hardening 2d: the same source re-imported after a failed (rolled back) att
     const dir = copy_fixture(env, "full");
     const counts_before = table_counts(env.db);
     // The importer cannot create the content-addressed folders -> the transaction must roll back as a whole.
-    chmodSync(env.objects, 0o555);
+    // Platform-independent injection (chmod does not block writes on Windows): move the object store aside and put a
+    // regular FILE of the same name in its place, so creating anything below it fails with ENOTDIR/EEXIST everywhere.
+    const aside = `${env.objects}.aside`;
+    renameSync(env.objects, aside);
+    writeFileSync(env.objects, "not a folder");
     let threw = false;
     try {
       await run_import(env, api, dir);
     } catch {
       threw = true;
     } finally {
-      chmodSync(env.objects, 0o755);
+      rmSync(env.objects, { force: true });
+      renameSync(aside, env.objects);
     }
     assert.equal(threw, true, "the unwritable object store makes the import fail loudly");
     assert.deepEqual(table_counts(env.db), counts_before, "a failed attempt leaves no row behind");
