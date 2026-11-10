@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -406,4 +406,77 @@ test("R7c 새 판에서 조립 없이 web 을 하면 옛 판의 조립본을 재
     const text = readFileSync(disk_path(c.env, md[0]!), "utf8");
     assert.match(text, /새 판 장/);
     assert.doesNotMatch(text, /옛 판 장/, "옛 판의 조립본 내용이 섞이지 않는다");
+  }));
+
+// ---------------------------------------------------------------------------
+// 4b · Python str(float) 표기
+
+test("R4b stats 값 5e-05·1e16·-0.0·12.0 은 v0.15 표기와 같다: 검증 일치, DB 보고서도 같은 표기 (-0.0 만 DB 경유 시 0.0 — 8.13 알려진 한계)", () =>
+  with_cli(async (c) => {
+    const tokens = [["__A__", "5e-05", "작은 값"], ["__B__", "1e16", "큰 값"], ["__C__", "-0.0", "음의 영"], ["__D__", "12.0", "정수형 실수"], ["__E__", "0.1", "소수"]] as const;
+    const dir = legacy_home_with_real_report(c, "r4b-floats", (text) => {
+      const p = JSON.parse(text);
+      p.stages.plan.items[0].stats = tokens.map(([ph, , name]) => ({ name, value: ph, unit: "%", period: "2025", method: "추정" }));
+      let out = JSON.stringify(p);
+      for (const [ph, raw] of tokens) out = out.replace(`"${ph}"`, raw);
+      return out;
+    });
+    const original = readFileSync(join(dir, "reports", "plan", "report.md"), "utf8");
+    const line = (md: string, name: string) => md.split("\n").find((l) => l.startsWith(`| ${name} |`));
+    const expected: Record<string, string> = {};
+    for (const [, , name] of tokens) {
+      const l = line(original, name);
+      assert.ok(l, `v0.15 보고서의 ${name} 줄`);
+      expected[name] = l;
+    }
+    assert.match(expected["작은 값"]!, /\| 5e-05 % \|/);
+    assert.match(expected["큰 값"]!, /\| 1e\+16 % \|/, "v0.15: Python str(1e16) = 1e+16");
+    assert.match(expected["음의 영"]!, /\| -0\.0 % \|/);
+    assert.match(expected["정수형 실수"]!, /\| 12\.0 % \|/);
+    const { imp, val, mig } = await import_validate(c, dir);
+    assert.equal(val.ok, true, JSON.stringify(val.report.problems));
+    assert.equal(matches(val, "reports/plan/report.md"), true);
+    assert.equal(matches(val, "reports/plan/report.html"), true);
+    await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, "r4b"), pes_home: pes_home_of(c.env) });
+    ok(run_py(c, ["report", "r4b-floats", "plan"]), "report (DB)");
+    const md = c.env.db
+      .all<{ storage_key: string }>(
+        `SELECT b.storage_key AS storage_key FROM version_files vf JOIN blobs b ON b.id = vf.blob_id
+          JOIN artifacts a ON a.object_id = (SELECT object_id FROM object_versions WHERE id = vf.version_id)
+         WHERE a.kind = 'report' AND b.original_name = 'report.md' ORDER BY vf.rowid DESC`,
+      )
+      .map((r) => readFileSync(disk_path(c.env, r), "utf8"))[0];
+    assert.ok(md, "DB 보고서 마크다운");
+    for (const [, , name] of tokens) {
+      const want = name === "음의 영" ? expected[name]!.replace("-0.0", "0.0") : expected[name]!;
+      assert.equal(line(md, name), want, `${name}: DB 보고서 표기`);
+    }
+  }));
+
+// ---------------------------------------------------------------------------
+// 3d · CRLF 템플릿
+
+test("R3d 템플릿이 CRLF 로 체크아웃돼 있어도(Windows autocrlf) DB 모드 렌더 파일(report.md·report.html·assemble·web)에 \\r 이 없다", () =>
+  with_cli(async (c) => {
+    // scripts·templates·questions 사본을 만들고 templates 를 CRLF 로 바꾼다. 사본의 pes.py 가 사본의 코어(cli_bridge·report.ts)와 템플릿을 쓴다.
+    const copy = join(c.env.home.root, "crlf-copy");
+    for (const name of ["scripts", "templates", "questions"]) cpSync(join(REPO, name), join(copy, name), { recursive: true });
+    cpSync(join(REPO, "package.json"), join(copy, "package.json"));
+    const templates = join(copy, "templates");
+    const crlf = readdirSync(templates).filter((f) => f.endsWith(".html"));
+    assert.ok(crlf.length >= 5);
+    for (const f of crlf) writeFileSync(join(templates, f), readFileSync(join(templates, f), "utf8").replace(/\r?\n/g, "\r\n"));
+    assert.ok(readFileSync(join(templates, "stage-report.html"), "utf8").includes("\r\n"), "사본 템플릿은 CRLF");
+    assert.ok(!readFileSync(join(REPO, "templates", "stage-report.html"), "utf8").includes("\r\n") || process.platform === "win32", "원본 저장소 템플릿은 건드리지 않았다");
+    const script = join(copy, "scripts", "pes.py");
+    const run = (args: string[]) => ok(run_py(c, args, { script }), args.join(" "));
+    run(["round-start", SLUG, "plan"]);
+    run(["merge", SLUG, "plan", write_json(c, "r3d-p.json", [{ id: 1, kind: "topic", title: "항목", summary: "요약\r\n둘째 줄", status: "done", sources: [{ title: "출처", url: "https://example.invalid/a", method: "law" }] }])]);
+    run(["merge", SLUG, "write", write_json(c, "r3d-w.json", [{ id: 1, kind: "section", title: "1장", status: "done", details: "본문\r\n줄 [^1]", sources: [{ title: "출처", url: "https://example.invalid/a", method: "law" }] }])]);
+    run(["report", SLUG, "plan"]);
+    run(["web", SLUG, "--assemble"]);
+    const rows = c.env.db.all<{ original_name: string; storage_key: string }>("SELECT DISTINCT b.original_name AS original_name, b.storage_key AS storage_key FROM version_files vf JOIN blobs b ON b.id = vf.blob_id WHERE vf.role = 'rendered'");
+    const names = rows.map((r) => r.original_name).sort();
+    assert.ok(names.includes("report.html") && names.includes("report.md") && names.includes("sources.json"), `렌더 파일: ${names}`);
+    for (const row of rows) assert.ok(!readFileSync(disk_path(c.env, row), "utf8").includes("\r"), `${row.original_name}: CRLF 템플릿·입력에도 \\r 이 없다`);
   }));
