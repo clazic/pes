@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { export_project } from "../scripts/pes_core/backup.ts";
-import { delete_project_file, scan_project_files, sweep_project_files_strict } from "../scripts/pes_core/files.ts";
+import { delete_project_file, delete_storage_file, scan_project_files, sweep_project_files_strict } from "../scripts/pes_core/files.ts";
 import {
   activated,
   cursor_epoch,
@@ -186,15 +186,18 @@ test("F3b an object-less bundle and an objects root that is a regular file: rest
   });
 });
 
-test("F3b an object-less bundle and an objects root that does not exist (lstat fails): restore is refused; database and cursor unchanged", async () => {
+test("F3b an object-less bundle and an objects root that does not exist (ENOENT = missing): restore succeeds; nothing but a real directory may appear at the root", async () => {
   await with_migration(async (env, _legacy, mig) => {
     const { project_id, bundle } = await empty_bundle(env, "f3b-missing");
     const moved = swap_root(env, () => undefined);
     try {
-      const before = snap(env);
-      await rejects_any(mig.restore_project(env.service, restore_opts(env, project_id, bundle)));
-      assert_snap(env, before, "F3b missing");
-      assert.equal(existsSync(env.objects), false, "no store was created on the way");
+      const before = cursor_epoch(env.db);
+      const out = await mig.restore_project(env.service, restore_opts(env, project_id, bundle));
+      assert.equal(out.project_id, project_id);
+      assert.equal(out.cursor_epoch_after, (before + 1n).toString());
+      if (existsSync(env.objects)) {
+        assert.equal(lstatSync(env.objects).isDirectory(), true, "if the root exists it is a real directory");
+      }
     } finally {
       rmSync(env.objects, { recursive: true, force: true });
       renameSync(moved, env.objects);
@@ -244,6 +247,35 @@ test("F3c a bundle with objects and an objects root that is a regular file: rest
   });
 });
 
+test("F3c a bundle with objects and an objects root that does not exist (ENOENT = missing): restore succeeds, the root is recreated and the files match", async () => {
+  await with_migration(async (env, legacy, mig) => {
+    const a = await activated(env, legacy, mig, "full", "f3c-missing");
+    const id = a.imp.project_id;
+    await write_topic(env, id, "F3c 루트 없음 쓰기", "f3c-w3");
+    const files_before = object_files(env, id);
+    assert.ok(Object.keys(files_before).length > 0, "the bundle has objects");
+    const moved = swap_root(env, () => undefined);
+    try {
+      assert.equal(existsSync(env.objects), false, "the root is gone");
+      const before = cursor_epoch(env.db);
+      const out = await mig.restore_project(env.service, restore_opts(env, id, a.act.backup_dir));
+      assert.equal(out.project_id, id);
+      assert.equal(out.cursor_epoch_after, (before + 1n).toString());
+      assert.equal(existsSync(env.objects), true, "the root was recreated");
+      assert.equal(lstatSync(env.objects).isDirectory(), true, "as a real directory");
+      assert.equal(lstatSync(env.objects).isSymbolicLink(), false);
+      const files_after = object_files(env, id);
+      assert.ok(Object.keys(files_after).length > 0, "objects are back on disk");
+      for (const [key, value] of Object.entries(files_after)) {
+        assert.equal(files_before[key], value, `restored file matches the pre-restore bytes: ${key}`);
+      }
+    } finally {
+      rmSync(env.objects, { recursive: true, force: true });
+      renameSync(moved, env.objects);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // (d) sweep_project_files_strict called directly
 
@@ -265,16 +297,34 @@ test("F3d sweep_project_files_strict with a root that is a symlink: deletes noth
   });
 });
 
-test("F3d sweep_project_files_strict with a root that is a regular file or missing: reports a failure, changes nothing", async () => {
+test("F3d sweep_project_files_strict with a root that is a regular file: reports a failure, changes nothing", async () => {
   await with_migration(async (env) => {
     const id = env.p.project_id;
     const file_root = join(env.home.root, "synthetic-root-file");
     writeFileSync(file_root, "synthetic");
     assert.ok(sweep_project_files_strict(file_root, id, new Set()).length > 0, "a file root fails");
     assert.equal(readFileSync(file_root, "utf8"), "synthetic");
+  });
+});
+
+test("F3d sweep_project_files_strict with a root that does not exist (ENOENT = missing): nothing to delete, empty keep set is fine and the root is not created", async () => {
+  await with_migration(async (env) => {
+    const id = env.p.project_id;
     const missing = join(env.home.root, "synthetic-root-missing");
-    assert.ok(sweep_project_files_strict(missing, id, new Set()).length > 0, "a missing root fails");
+    assert.deepEqual(sweep_project_files_strict(missing, id, new Set()), [], "a missing root with nothing to keep is clean");
     assert.equal(existsSync(missing), false, "and is not created");
+    // A key that should be kept but whose root is gone is out of line, still without creating anything.
+    assert.ok(sweep_project_files_strict(missing, id, new Set([`${id}/x.bin`])).length > 0, "a kept file that is not there is reported");
+    assert.equal(existsSync(missing), false, "still not created");
+  });
+});
+
+test("F3d the project folder missing under a real root: empty keep set is clean, a kept file is reported", async () => {
+  await with_migration(async (env) => {
+    const id = env.p.project_id;
+    rmSync(join(env.objects, id), { recursive: true, force: true });
+    assert.deepEqual(sweep_project_files_strict(env.objects, id, new Set()), []);
+    assert.ok(sweep_project_files_strict(env.objects, id, new Set([`${id}/x.bin`])).length > 0);
   });
 });
 
@@ -356,5 +406,23 @@ test("F3g scan_project_files + delete_project_file and sweep_project_files_stric
     assert.equal(readFileSync(root, "utf8"), "synthetic");
     assert.ok(sweep_project_files_strict(root, id, new Set()).length > 0);
     assert.equal(readFileSync(root, "utf8"), "synthetic");
+  });
+});
+
+test("F3h delete_storage_file follows the same root rule: a symlink root deletes nothing outside, a regular-file root is left alone", link_opts, async () => {
+  await with_migration(async (env) => {
+    const id = env.p.project_id;
+    const outside = make_outside(env, id);
+    const outside_before = outside.snapshot();
+    const link = join(env.home.root, "synthetic-root-link-h");
+    symlinkSync(outside.dir, link, "dir");
+    delete_storage_file(link, id, `${id}/must-remain.txt`);
+    assert_outside_intact(outside, outside_before, "F3h link root");
+    assert.equal(lstatSync(link).isSymbolicLink(), true, "the link is left as it is");
+
+    const file_root = join(env.home.root, "synthetic-root-file-h");
+    writeFileSync(file_root, "synthetic");
+    delete_storage_file(file_root, id, `${id}/x.bin`);
+    assert.equal(readFileSync(file_root, "utf8"), "synthetic");
   });
 });
