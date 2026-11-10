@@ -74,6 +74,8 @@ class ApiBudget:
         self.agent_control = int(policy["agent_control_requests_per_minute"])
         self.owner = int(policy["owner_requests_per_minute"])
         self.poll_gap_ms = int(policy["min_poll_interval_ms"])
+        # 자격 없는 요청 전체, 그리고 자격마다 환불된(형식이 틀린) 요청이 함께 쓰는 거친 상한.
+        self.coarse = int(policy["coarse_requests_per_minute"])
         self.control_routes = [_route_pattern(t) for t in policy["control_routes"]]
         self.poll_routes = [_route_pattern(t) for t in policy["poll_routes"]]
         self.refund_codes = set(policy["refund_codes"])
@@ -118,16 +120,26 @@ class ApiBudget:
         if not _API_PROJECT_PATH.fullmatch(path):
             return None, None
         cred = self._credential(headers)
+        now = self._now()
         if cred is None:
-            return None, None
+            # 자격이 없는 요청은 결국 401 이지만 요청마다 Node 를 띄우므로 전체 거친 버킷 하나로 묶는다.
+            with self._lock:
+                self._prune(now)
+                rejection = self._take("anon", self.coarse, "coarse", now)
+            return None, rejection
         kind, digest = cred
+        with self._lock:
+            # 환불받은 요청도 자격마다 거친 상한까지만 공짜다.
+            refunds = [at for at in self._hits.get(f"refund:{digest}", []) if at > now - self.window_ms]
+            if len(refunds) >= self.coarse:
+                self._hits[f"refund:{digest}"] = refunds
+                return None, ("refund", min(self.window_ms, max(1, refunds[0] + self.window_ms - now)))
         if kind == "session":
             scope, limit, key = "session", self.owner, f"session:{digest}"
         else:
             scope = "control" if self._matches(self.control_routes, method, path) else "general"
             limit = self.agent_control if scope == "control" else self.agent
             key = f"token:{digest}:{scope}"
-        now = self._now()
         with self._lock:
             self._prune(now)
             hits = [at for at in self._hits.get(key, []) if at > now - self.window_ms]
@@ -142,13 +154,23 @@ class ApiBudget:
                 last = self._polls.get(poll_key)
                 if last is not None and last + self.poll_gap_ms - now > 0:
                     return None, ("poll", min(self.poll_gap_ms, last + self.poll_gap_ms - now))
-        return (key, now, poll_key), None
+        return (key, now, poll_key, digest), None
+
+    def _take(self, key, limit, scope, now):
+        """Count one hit on `key`; returns the rejection (scope, retry_after_ms) when full. Caller holds the lock."""
+        hits = [at for at in self._hits.get(key, []) if at > now - self.window_ms]
+        if len(hits) >= limit:
+            self._hits[key] = hits
+            return scope, min(self.window_ms, max(1, hits[0] + self.window_ms - now))
+        hits.append(now)
+        self._hits[key] = hits
+        return None
 
     def settle(self, ticket, status, payload):
         """Give the slot back for a request refused over its own input; note empty polls."""
         if ticket is None:
             return
-        key, at, poll_key = ticket
+        key, at, poll_key, digest = ticket
         code, inputs = None, None
         if status >= 400 or poll_key is not None:
             try:
@@ -164,6 +186,7 @@ class ApiBudget:
                 hits = self._hits.get(key)
                 if hits and at in hits:
                     hits.remove(at)
+                    self._hits.setdefault(f"refund:{digest}", []).append(at)
             if poll_key is not None and status == 200:
                 if isinstance(inputs, list) and len(inputs) == 0:
                     self._polls[poll_key] = self._now()
@@ -547,12 +570,16 @@ def main():
         def do_DELETE(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
+                if not self._origin_allowed():
+                    return self._api_error("forbidden", "origin is not allowed", 403)
                 return self._api("DELETE", path, urlsplit(self.path).query)
             return self.send_error(501, "Unsupported method ('DELETE')")
 
         def do_PATCH(self):
             path = urlsplit(self.path).path
             if self._is_api_path(path):
+                if not self._origin_allowed():
+                    return self._api_error("forbidden", "origin is not allowed", 403)
                 return self._api("PATCH", path, urlsplit(self.path).query)
             return self.send_error(501, "Unsupported method ('PATCH')")
 

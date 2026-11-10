@@ -391,8 +391,10 @@ export function is_human_owner_actor(runtime: CommandRuntime): boolean {
   try {
     require_human_owner_actor(runtime);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // Only "not a human owner" means false; a database error must surface.
+    if (error instanceof ApiError && error.code === "forbidden") return false;
+    throw error;
   }
 }
 

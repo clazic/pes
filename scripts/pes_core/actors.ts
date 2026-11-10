@@ -16,6 +16,9 @@ import { ApiError } from "./errors.ts";
 /** Project token lifetime: exactly 30 days in milliseconds. */
 export const AGENT_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** The scopes a project agent token can carry (one list for the API, register and issue). */
+export const AGENT_SCOPE_NAMES = ["context:read", "run:claim", "run:submit", "file:write", "file:read"] as const;
+
 const TOKEN_PREFIX = "pes_";
 const MAX_PRESENTED_TOKEN_LENGTH = 4096;
 

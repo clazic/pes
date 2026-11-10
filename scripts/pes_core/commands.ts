@@ -27,7 +27,7 @@ import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { LEGACY_COMMAND_ENTRIES } from "./commands/legacy.ts";
 import { MIGRATION_COMMAND_ENTRIES } from "./commands/migration.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
-import { make_register_command } from "./commands/projects.ts";
+import { make_register_command, type BuildHooks, type Created } from "./commands/projects.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
@@ -282,25 +282,6 @@ function result_project_id(result: unknown): string {
     return result.project_id;
   }
   throw new Error("the command result must include project_id");
-}
-
-interface Created {
-  project_id: string;
-  owner_user_id: string;
-  owner_actor_id: string;
-  edition_id: string;
-  policy_id: string;
-}
-
-interface BuildHooks {
-  action: string;
-  event_type: string;
-  /** Extra fields stored in the receipt result and returned. */
-  stored_extra: Record<string, unknown>;
-  /** Event payload additions. */
-  event_extra: Record<string, unknown>;
-  /** Runs after the project is active, inside the same transaction. */
-  after(created: Created): void;
 }
 
 function build_project(runtime: CommandRuntime, hooks: BuildHooks): CommandResult {

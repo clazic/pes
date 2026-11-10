@@ -350,18 +350,6 @@ export function stage_view(
   );
 }
 
-export function round_view(
-  db: Db,
-  project_id: string,
-  round_id: string,
-): { id: string; state: string; stage_id: string; round_no: bigint } | undefined {
-  return db.get<{ id: string; state: string; stage_id: string; round_no: bigint }>(
-    "SELECT id, state, stage_id, round_no FROM rounds WHERE project_id = ? AND id = ?",
-    project_id,
-    round_id,
-  );
-}
-
 export function snapshot_through_seq(db: Db, project_id: string, snapshot_id: string): bigint | null {
   return (
     db.get<{ through_event_seq: bigint | null }>(
@@ -370,14 +358,4 @@ export function snapshot_through_seq(db: Db, project_id: string, snapshot_id: st
       snapshot_id,
     )?.through_event_seq ?? null
   );
-}
-
-export function run_actor_member(db: Db, project_id: string, actor_id: string): boolean {
-  const row = db.get<{ ok: bigint }>(
-    `SELECT 1 AS ok FROM actors a JOIN project_members m ON m.user_id = a.user_id
-      WHERE a.id = ? AND m.project_id = ?`,
-    actor_id,
-    project_id,
-  );
-  return row !== undefined;
 }

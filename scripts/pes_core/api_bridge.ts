@@ -7,7 +7,8 @@
 // An unmigrated database is answered with a clear schema_not_ready envelope
 // instead of crashing or silently changing the user's schema.
 
-import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ApiApp } from "./api.ts";
@@ -30,6 +31,14 @@ interface BridgeOutput {
 
 const FORMAT_VERSION = "1.0";
 
+const SECRET_FILE = "local_session_secret";
+
+/**
+ * The local session secret also keys cursor HMACs, so it must be the same in
+ * every bridge process. Order: PES_LOCAL_SESSION_SECRET, then
+ * ~/.pes/config.json local_session_secret, then a persistent 0600 file under
+ * ~/.pes created once on first need. The secret text is never logged.
+ */
 function local_session_secret(env: Environment): string {
   const from_env = env.PES_LOCAL_SESSION_SECRET;
   if (typeof from_env === "string" && from_env.length > 0) return from_env;
@@ -41,10 +50,40 @@ function local_session_secret(env: Environment): string {
       return config.local_session_secret;
     }
   } catch {
-    // No local config yet; a per-process secret still keeps unauthenticated
-    // and token requests working until PR14 installs the human-session model.
+    // No readable config: fall through to the persistent secret file.
   }
-  return globalThis.crypto.randomUUID();
+  return persistent_secret(pes_dir(env));
+}
+
+function read_secret(path: string): string | null {
+  try {
+    const text = readFileSync(path, "utf8").trim();
+    return text.length >= 16 && !text.includes("\n") ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistent_secret(dir: string): string {
+  const path = join(dir, SECRET_FILE);
+  const existing = read_secret(path);
+  if (existing !== null) return existing;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const secret = randomBytes(32).toString("base64url");
+  const temp = join(dir, `.${SECRET_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  writeFileSync(temp, `${secret}\n`, { mode: 0o600, flag: "wx" });
+  try {
+    // link() refuses to replace an existing file, so two first requests agree
+    // on whichever secret was published first.
+    linkSync(temp, path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  } finally {
+    unlinkSync(temp);
+  }
+  const published = read_secret(path);
+  if (published === null) throw new Error("the local session secret file is unreadable or malformed");
+  return published;
 }
 
 function newest_schema_version(): bigint {

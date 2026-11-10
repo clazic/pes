@@ -341,6 +341,7 @@ function require_earlier_stages_approved(
   runtime: CommandRuntime,
   project_id: string,
   stage: StageRow,
+  details?: Record<string, unknown>,
 ): void {
   const earlier = runtime.db.get<{ ok: bigint }>(
     `SELECT 1 AS ok FROM stages
@@ -352,7 +353,7 @@ function require_earlier_stages_approved(
     Number(stage.ordinal),
   );
   if (earlier !== undefined) {
-    throw new ApiError("conflict", "an earlier stage is not approved");
+    throw new ApiError("conflict", "an earlier stage is not approved", details);
   }
 }
 
@@ -558,7 +559,12 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the stage already has an open round");
   }
 
-  require_earlier_stages_approved(runtime, project.id, stage);
+  // A stage whose earlier stages are not all approved cannot be the active one yet.
+  require_earlier_stages_approved(runtime, project.id, stage, {
+    reason: "stage_not_active",
+    stage_id,
+    stage_status: stage.status,
+  });
 
   const base = runtime.db.get<{ sealed_snapshot_id: string | null }>(
     `SELECT sealed_snapshot_id FROM rounds

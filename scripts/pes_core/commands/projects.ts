@@ -7,10 +7,11 @@
 // project. The raw token is returned once and never stored in the receipt.
 
 import {
+  AGENT_SCOPE_NAMES,
   AGENT_TOKEN_TTL_MS,
-  agent_token_hash,
   generate_agent_token,
 } from "../actors.ts";
+import { insert_agent_token } from "./actors.ts";
 import { ApiError } from "../errors.ts";
 import {
   reject_unknown_fields,
@@ -21,13 +22,6 @@ import {
   type CommandRuntime,
 } from "./shared.ts";
 
-export const AGENT_SCOPE_NAMES: readonly string[] = [
-  "context:read",
-  "run:claim",
-  "run:submit",
-  "file:write",
-  "file:read",
-];
 
 export interface Created {
   project_id: string;
@@ -60,7 +54,7 @@ function run_register(runtime: CommandRuntime, build: BuildProject): CommandResu
       throw new ApiError("invalid_payload", "scopes must be a non-empty array");
     }
     for (const scope of given) {
-      if (typeof scope !== "string" || !AGENT_SCOPE_NAMES.includes(scope)) {
+      if (typeof scope !== "string" || !(AGENT_SCOPE_NAMES as readonly string[]).includes(scope)) {
         throw new ApiError("invalid_payload", "scopes contains an unknown scope");
       }
     }
@@ -87,18 +81,15 @@ function run_register(runtime: CommandRuntime, build: BuildProject): CommandResu
         created.owner_user_id,
         device_label,
       );
-      runtime.db.run(
-        `INSERT INTO agent_tokens
-           (id, project_id, actor_id, scopes, token_hash, created_at, expires_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-        token_id,
-        created.project_id,
-        device_actor_id,
-        JSON.stringify(scopes),
-        agent_token_hash(token),
-        runtime.now_ms,
+      insert_agent_token(runtime.db, {
+        id: token_id,
+        project_id: created.project_id,
+        actor_id: device_actor_id,
+        scopes,
+        token,
+        created_at: runtime.now_ms,
         expires_at,
-      );
+      });
     },
   });
   // The receipt keeps the hash-free result; only the caller sees the token.

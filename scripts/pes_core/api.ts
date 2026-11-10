@@ -13,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 
-import { resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
+import { AGENT_SCOPE_NAMES, resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
 import { register_project } from "./bootstrap.ts";
 import type { Clock } from "./clock.ts";
 import { COMMANDS, CommandService, type CommandOutcome, type MutationContext } from "./commands.ts";
@@ -32,7 +32,6 @@ import {
   question_state,
   receipt_of_request,
   request_receipt,
-  round_view,
   run_info,
   snapshot_through_seq,
   stage_view,
@@ -222,7 +221,7 @@ const REFUNDED_CODES: readonly string[] = ["invalid_payload", "validation_failed
 const MAX_RESULTS_PER_BATCH = 20;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const SCOPES = ["context:read", "run:claim", "run:submit", "file:write", "file:read"] as const;
+const SCOPES = AGENT_SCOPE_NAMES;
 const QUESTION_TYPES = ["single", "multi", "text", "textarea", "number", "scale", "file"];
 const QUESTION_PURPOSES = ["stage_start", "review", "resume"];
 const QUESTION_FIELDS = [
@@ -299,17 +298,13 @@ function json_safe(value: unknown): unknown {
 }
 
 /**
- * Reject a body key outside `allowed`. PR14 routes also take an optional
- * "format_version": "1.0"; PR13 routes (`allow_format` false) do not.
+ * Reject a body key outside `allowed`. Every route also takes an optional
+ * "format_version": "1.0" (any other value is a 400 on $.body.format_version).
  */
-function reject_unknown(
-  body: Record<string, unknown>,
-  allowed: readonly string[],
-  allow_format = false,
-): void {
+function reject_unknown(body: Record<string, unknown>, allowed: readonly string[]): void {
   const known = new Set(allowed);
   for (const key of Object.keys(body)) {
-    if (allow_format && key === "format_version") {
+    if (key === "format_version") {
       if (body[key] !== FORMAT_VERSION) invalid("$.body.format_version");
       continue;
     }
@@ -1076,6 +1071,15 @@ export class ApiApp {
       if (spec.kind === "global" && spec.operation !== "capabilities.get") human_only.push(label);
       if (spec.op !== undefined && ["human", "owner", "session"].includes(spec.op.who)) human_only.push(label);
     }
+    const limits = {
+      max_body_bytes: MAX_BODY_BYTES,
+      max_results_per_batch: MAX_RESULTS_PER_BATCH,
+      list_max_items: LIST_MAX_ITEMS,
+      long_poll_max_ms: MAX_WAIT_MS,
+      min_poll_interval_ms: MIN_POLL_INTERVAL_MS,
+      agent_requests_per_minute: AGENT_REQUESTS_PER_MINUTE,
+      owner_requests_per_minute: OWNER_REQUESTS_PER_MINUTE,
+    };
     return {
       status: 200,
       data: {
@@ -1086,24 +1090,17 @@ export class ApiApp {
         unsupported,
         scopes: [...SCOPES],
         human_only,
-        limits: {
-          max_body_bytes: MAX_BODY_BYTES,
-          max_results_per_batch: MAX_RESULTS_PER_BATCH,
-          list_max_items: LIST_MAX_ITEMS,
-          long_poll_max_ms: MAX_WAIT_MS,
-          min_poll_interval_ms: MIN_POLL_INTERVAL_MS,
-          agent_requests_per_minute: AGENT_REQUESTS_PER_MINUTE,
-          owner_requests_per_minute: OWNER_REQUESTS_PER_MINUTE,
-        },
+        limits,
         capabilities: {
           operations,
+          // The document form (fixtures/api-v1/capabilities.json) renames a few keys of the same numbers.
           limits: {
-            long_poll_max_ms: MAX_WAIT_MS,
-            request_body_max_bytes: MAX_BODY_BYTES,
-            results_per_submit: MAX_RESULTS_PER_BATCH,
-            list_max_items: LIST_MAX_ITEMS,
-            min_poll_interval_ms: MIN_POLL_INTERVAL_MS,
-            agent_requests_per_minute: AGENT_REQUESTS_PER_MINUTE,
+            long_poll_max_ms: limits.long_poll_max_ms,
+            request_body_max_bytes: limits.max_body_bytes,
+            results_per_submit: limits.max_results_per_batch,
+            list_max_items: limits.list_max_items,
+            min_poll_interval_ms: limits.min_poll_interval_ms,
+            agent_requests_per_minute: limits.agent_requests_per_minute,
           },
           error_codes: [...ERROR_CODES],
         },
@@ -1124,6 +1121,8 @@ export class ApiApp {
       agent_requests_per_minute: AGENT_REQUESTS_PER_MINUTE,
       agent_control_requests_per_minute: AGENT_CONTROL_REQUESTS_PER_MINUTE,
       owner_requests_per_minute: OWNER_REQUESTS_PER_MINUTE,
+      // Shared by all credential-less requests, and per credential by refunded (malformed) requests.
+      coarse_requests_per_minute: AGENT_REQUESTS_PER_MINUTE * 5,
       min_poll_interval_ms: MIN_POLL_INTERVAL_MS,
       control_routes: templates((spec) => spec.op?.bucket === "control"),
       poll_routes: templates((spec) => spec.operation === "runs.inputs"),
@@ -1182,7 +1181,12 @@ export class ApiApp {
         payload,
       ),
     );
-    return { status: 201, data: out.result, replayed: out.replayed };
+    // A replay never repeats the raw token; say so, so a client that lost the
+    // first response knows to ask the owner for a new device token.
+    const data = out.replayed
+      ? { ...result_record(out.result), token_issued_before: true }
+      : out.result;
+    return { status: 201, data, replayed: out.replayed };
   }
 
   // -------------------------------------------------------------------------
@@ -1618,7 +1622,7 @@ export class ApiApp {
   async #heartbeat(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["lease_id", "fence", "progress"], true);
+    reject_unknown(body, ["lease_id", "fence", "progress"]);
     const run_id = request.params[1] as string;
     const lease_id = require_text(body, "lease_id");
     const fence = parse_fence(body.fence);
@@ -1663,7 +1667,7 @@ export class ApiApp {
   async #release(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["lease_id", "fence"], true);
+    reject_unknown(body, ["lease_id", "fence"]);
     const run_id = request.params[1] as string;
     const lease_id = require_text(body, "lease_id");
     const fence = parse_fence(body.fence);
@@ -1717,7 +1721,7 @@ export class ApiApp {
     }
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["target_mode", "target_actor_id", "reason", "include_pending_inputs"], true);
+    reject_unknown(body, ["target_mode", "target_actor_id", "reason", "include_pending_inputs"]);
     const target_mode = require_mode(body, "target_mode");
     const target_actor_id = optional_text(body, "target_actor_id");
     const reason = optional_text(body, "reason");
@@ -1759,7 +1763,7 @@ export class ApiApp {
     const run = this.#own_run_or_owner(project, auth, run_id);
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["reason", "mode"], true);
+    reject_unknown(body, ["reason", "mode"]);
     const reason = optional_text(body, "reason");
     if (body.mode !== undefined && body.mode !== "graceful") invalid_field("mode");
     const prior = receipt_of_request(this.#db, project.id, auth.actor_id, key);
@@ -1795,7 +1799,7 @@ export class ApiApp {
     this.#own_run_or_owner(project, auth, run_id);
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["reason", "confirm"], true);
+    reject_unknown(body, ["reason", "confirm"]);
     const reason = optional_text(body, "reason");
     if (body.confirm !== true) invalid_field("confirm");
     const payload: Record<string, unknown> = { run_id };
@@ -1890,7 +1894,7 @@ export class ApiApp {
     }
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["lease_id", "fence", "receipts"], true);
+    reject_unknown(body, ["lease_id", "fence", "receipts"]);
     const lease_id = require_text(body, "lease_id");
     const fence = parse_fence(body.fence);
     const list = body.receipts;
@@ -1964,7 +1968,12 @@ export class ApiApp {
   }
 
   async #request_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
-    const key = request.params[1] as string;
+    let key: string;
+    try {
+      key = decodeURIComponent(request.params[1] as string);
+    } catch {
+      throw new Fail("not_found");
+    }
     // Keys belong to (actor, key): the owner's own receipt comes first, any other receipt only when there is none.
     const row =
       request_receipt(this.#db, project.id, key, auth.actor_id) ??
@@ -1997,15 +2006,14 @@ export class ApiApp {
     const body = this.#json_body(request);
     reject_unknown(
       body,
-      ["stage_id", "round_id", "purpose", "question", "direction", "form_key", "run_id", "lease_id", "fence"],
-      true,
-    );
+      ["stage_id", "round_id", "purpose", "question", "direction", "form_key", "run_id", "lease_id", "fence"]);
     const stage_id = require_text(body, "stage_id");
     const round_id = optional_text(body, "round_id") ?? null;
     if (typeof body.purpose !== "string" || !QUESTION_PURPOSES.includes(body.purpose)) invalid_field("purpose");
-    if (body.direction !== undefined && body.direction !== "agent_to_human" && body.direction !== "human_to_agent") {
-      invalid_field("direction");
-    }
+    // The core stores every published question as agent_to_human (asked by
+    // the caller, no intended actor). Anything else would be dropped, so it
+    // is refused instead of answered with a false success.
+    if (body.direction !== undefined && body.direction !== "agent_to_human") invalid_field("direction");
     const form_key = body.form_key === undefined ? "main" : require_text(body, "form_key");
     const guard = this.#guard_fields(body);
     const question = check_question(body.question, false);
@@ -2040,7 +2048,7 @@ export class ApiApp {
   async #question_revise(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["base_version_id", "question", "run_id", "lease_id", "fence"], true);
+    reject_unknown(body, ["base_version_id", "question", "run_id", "lease_id", "fence"]);
     const base_version_id = require_text(body, "base_version_id");
     const guard = this.#guard_fields(body);
     const question = check_question(body.question, true);
@@ -2072,7 +2080,7 @@ export class ApiApp {
   async #submissions(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["set_id", "answers", "submitted_via", "client_request_id"], true);
+    reject_unknown(body, ["set_id", "answers", "submitted_via", "client_request_id"]);
     const set_id = require_text(body, "set_id");
     const answers = body.answers;
     if (!Array.isArray(answers) || answers.length < 1) invalid_field("answers");
@@ -2147,9 +2155,9 @@ export class ApiApp {
   async #round_start(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["purpose", "base_stage_rev", "question_set_id"], true);
-    if (body.purpose !== undefined && body.purpose !== null) require_text(body, "purpose");
-    if (body.question_set_id !== undefined && body.question_set_id !== null) require_text(body, "question_set_id");
+    // round.start stores neither a purpose nor a question-set link; accepting
+    // them would drop them silently, so they are refused.
+    reject_unknown(body, ["base_stage_rev"]);
     const base_stage_rev = optional_decimal(body, "base_stage_rev");
     const stage_id = request.params[1] as string;
     const payload: Record<string, unknown> = { stage_id };
@@ -2178,9 +2186,7 @@ export class ApiApp {
     const body = this.#json_body(request);
     reject_unknown(
       body,
-      ["manifest_blob_id", "versions", "run_id", "lease_id", "fence", "snapshot_scope", "expected_round_rev"],
-      true,
-    );
+      ["manifest_blob_id", "versions", "run_id", "lease_id", "fence", "snapshot_scope", "expected_round_rev"]);
     const manifest_blob_id = require_text(body, "manifest_blob_id");
     if (!Array.isArray(body.versions)) invalid_field("versions");
     if (body.snapshot_scope !== undefined && body.snapshot_scope !== "round") invalid_field("snapshot_scope");
@@ -2213,7 +2219,7 @@ export class ApiApp {
   async #stage_approve(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["snapshot_id", "expected_stage_rev", "confirm"], true);
+    reject_unknown(body, ["snapshot_id", "expected_stage_rev", "confirm"]);
     const snapshot_id = require_text(body, "snapshot_id");
     if (body.confirm !== undefined && body.confirm !== "owner") invalid_field("confirm");
     const expected = optional_decimal(body, "expected_stage_rev");
@@ -2243,7 +2249,7 @@ export class ApiApp {
   async #stage_reopen(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["reason", "expected_stage_rev"], true);
+    reject_unknown(body, ["reason", "expected_stage_rev"]);
     const reason = optional_text(body, "reason");
     const expected = optional_decimal(body, "expected_stage_rev");
     const stage_id = request.params[1] as string;
@@ -2277,9 +2283,7 @@ export class ApiApp {
     const body = this.#json_body(request);
     reject_unknown(
       body,
-      ["reason", "allow_opencode_go", "go_usage_stop_percent", "mode_a_model", "expected_policy_rev"],
-      true,
-    );
+      ["reason", "allow_opencode_go", "go_usage_stop_percent", "mode_a_model", "expected_policy_rev"]);
     const payload: Record<string, unknown> = { reason: require_text(body, "reason") };
     if (body.allow_opencode_go !== undefined) {
       if (typeof body.allow_opencode_go !== "boolean") invalid_field("allow_opencode_go");
@@ -2318,7 +2322,9 @@ export class ApiApp {
   async #uploads_reserve(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    const out = await this.#exec(() => reserve_upload(this.#service, this.#ctx(project, auth, key), body));
+    reject_unknown(body, ["sha256", "size", "media_type", "original_name"]);
+    const { format_version: _format, ...payload } = body;
+    const out = await this.#exec(() => reserve_upload(this.#service, this.#ctx(project, auth, key), payload));
     const data = is_record(out.result) ? out.result : {};
     const status = data.deduplicated === true ? 200 : 201;
     return { status, data, replayed: out.replayed };

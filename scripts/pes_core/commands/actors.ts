@@ -11,6 +11,7 @@ import {
   generate_agent_token,
   read_credential_actor,
 } from "../actors.ts";
+import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import {
   insert_receipt,
@@ -22,6 +23,25 @@ import {
   type CommandResult,
   type CommandRuntime,
 } from "./shared.ts";
+
+/** Store one agent token by its hash only (the raw token is never written). */
+export function insert_agent_token(
+  db: Db,
+  row: { id: string; project_id: string; actor_id: string; scopes: readonly string[]; token: string; created_at: number; expires_at: number },
+): void {
+  db.run(
+    `INSERT INTO agent_tokens
+       (id, project_id, actor_id, scopes, token_hash, created_at, expires_at, revoked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+    row.id,
+    row.project_id,
+    row.actor_id,
+    JSON.stringify(row.scopes),
+    agent_token_hash(row.token),
+    row.created_at,
+    row.expires_at,
+  );
+}
 
 const TOKEN_ISSUE_FIELDS = ["actor_id", "scopes"] as const;
 const TOKEN_REVOKE_FIELDS = ["token_id"] as const;
@@ -108,18 +128,15 @@ function run_token_issue(runtime: CommandRuntime): CommandResult {
   const token = generate_agent_token();
   const expires_at = runtime.now_ms + AGENT_TOKEN_TTL_MS;
 
-  runtime.db.run(
-    `INSERT INTO agent_tokens
-       (id, project_id, actor_id, scopes, token_hash, created_at, expires_at, revoked_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-    token_id,
-    scope.project_id,
-    target.id,
-    JSON.stringify(scopes),
-    agent_token_hash(token),
-    runtime.now_ms,
+  insert_agent_token(runtime.db, {
+    id: token_id,
+    project_id: scope.project_id,
+    actor_id: target.id,
+    scopes,
+    token,
+    created_at: runtime.now_ms,
     expires_at,
-  );
+  });
 
   // The raw token is returned to the caller but never written to the receipt.
   const result = {
