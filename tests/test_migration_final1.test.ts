@@ -11,7 +11,7 @@
 //      (a) a file overwritten after validate: activate is refused, nothing changes
 //      (b) a bundle whose manifest and files agree but differ from the blobs row: restore is refused,
 //          database, files and cursor are unchanged
-//  S1  a restore that cannot remove a file outside the bundle is NOT a success: ApiError conflict whose
+//  S1  a restore that cannot remove an entry outside the bundle is NOT a success: ApiError conflict whose
 //      details carry rows_restored and failed_files (the file's storage key)
 //
 // The state changes use a deferred-foreign-key transaction (PRAGMA defer_foreign_keys) so the changed
@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -485,35 +485,21 @@ test("F2b a bundle whose object has the right size but other bytes (blobs row ha
 // ---------------------------------------------------------------------------
 // S1: a restore that cannot remove a file outside the bundle
 
-test("S1 a file outside the bundle that cannot be removed: conflict with rows_restored and the file in failed_files (not a success)", async (t) => {
+test("S1 an entry outside the bundle that cannot be removed: conflict with rows_restored and its storage key in failed_files (not a success)", async () => {
   await with_migration(async (env, legacy, mig) => {
     const a = await activated(env, legacy, mig, "full", "s1-extra");
     const id = a.imp.project_id;
     await write_topic(env, id, "S1 활성화 뒤 쓰기", "s1-w1");
 
-    // A file the bundle does not have, in its own sub folder that cannot be changed.
-    const sub = join(env.objects, id, "synthetic-locked");
-    mkdirSync(sub, { recursive: true });
-    const extra = join(sub, "extra.bin");
-    writeFileSync(extra, "synthetic leftover");
-    const extra_key = `${id}/synthetic-locked/extra.bin`;
-    chmodSync(sub, 0o555);
-    // Where the platform (Windows, a root user) does not honour this, nothing can block the removal.
-    let honoured = false;
+    // Platform independent block: the place of a leftover file is a NON-EMPTY FOLDER of the same name,
+    // so unlinking it fails on every OS (EISDIR / EPERM). The bundle has nothing at this key.
+    const extra = join(env.objects, id, "synthetic-extra.bin");
+    const extra_key = `${id}/synthetic-extra.bin`;
+    mkdirSync(extra, { recursive: true });
+    writeFileSync(join(extra, "inner"), "synthetic leftover");
     try {
-      writeFileSync(join(sub, "probe"), "x");
-      rmSync(join(sub, "probe"), { force: true });
-    } catch {
-      honoured = true;
-    }
-    try {
-      if (!honoured) {
-        t.skip("this platform/user ignores a read-only folder; the removal cannot be blocked");
-        return;
-      }
       const epoch_before = cursor_epoch(env.db);
       const error = await rejects_api(mig.restore_project(env.service, restore_opts(env, id, a.act.backup_dir)), "conflict");
-      assert.ok(error instanceof ApiError);
       const details = error.details as Record<string, unknown> | undefined;
       assert.ok(details && typeof details === "object", "the conflict carries details");
       assert.equal(details.rows_restored, true, "the rows were restored (the commit happened)");
@@ -522,10 +508,9 @@ test("S1 a file outside the bundle that cannot be removed: conflict with rows_re
       assert.equal(details.cursor_epoch_before, epoch_before.toString());
       assert.equal(details.cursor_epoch_after, (epoch_before + 1n).toString());
       assert.ok(Array.isArray(details.lost_writes) && (details.lost_writes as unknown[]).length === 1);
-      assert.ok(existsSync(extra), "the file is still there: nothing pretends it was removed");
+      assert.ok(existsSync(extra), "the entry is still there: nothing pretends it was removed");
     } finally {
-      chmodSync(sub, 0o755);
-      rmSync(sub, { recursive: true, force: true });
+      rmSync(extra, { recursive: true, force: true });
     }
   });
 });
