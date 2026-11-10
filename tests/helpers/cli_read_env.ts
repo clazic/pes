@@ -11,9 +11,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import { PES_PY, REPO, SLUG, type CliEnv, type CliResult } from "./cli_write_env.ts";
 
@@ -71,6 +71,41 @@ export interface RunOptions {
   extra?: Record<string, string | undefined>;
   cwd?: string;
   timeout?: number;
+  /** Exact PATH for the child. `doctor` defaults to doctor_path() (a narrow PATH, see below) unless this is given. */
+  path?: string;
+}
+
+/** A file named `name` (plus PATHEXT extensions on Windows) in the caller's real PATH; no `which`, no shell. */
+export function find_on_path(name: string): string | undefined {
+  const raw = process.env.PATH ?? process.env.Path ?? "";
+  const exts = process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").toLowerCase().split(";").filter(Boolean)] : [""];
+  for (const dir of raw.split(delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const file = join(dir, name + ext);
+      if (existsSync(file)) return file;
+    }
+  }
+  return undefined;
+}
+
+let narrow_cache: string | undefined;
+
+/**
+ * The PATH the doctor tests run with: the folders of python, node, tail and grep (doctor needs them) and of the
+ * owner-lookup tool (lsof on macOS, ss on Linux, netstat on Windows) — and nothing else. External CLIs the doctor probes
+ * (ego-browser, kosis, vworld, korean-law) are therefore "not installed", so a doctor run starts no slow tool processes.
+ * The rows for those tools keep their form; only their value (missing) is fixed by this PATH.
+ */
+export function doctor_path(): string {
+  if (narrow_cache !== undefined) return narrow_cache;
+  const tools = [process.platform === "darwin" ? "lsof" : process.platform === "win32" ? "netstat" : "ss", "tail", "grep"];
+  const dirs = new Set<string>([dirname(PY), dirname(process.execPath)]);
+  for (const tool of tools) {
+    const found = find_on_path(tool);
+    if (found !== undefined) dirs.add(dirname(found));
+  }
+  narrow_cache = [...dirs].join(delimiter);
+  return narrow_cache;
 }
 
 /** Anything that carries an isolated home: a CliEnv, or `{ env: { home } }` around a bare isolated_home(). */
@@ -87,6 +122,11 @@ export function run_py(c: HomeLike, args: string[], opts: RunOptions = {}): CliR
     PES_DB_CORE: "flag" in opts ? opts.flag : "1",
     ...opts.extra,
   };
+  const narrow = opts.path ?? (args[0] === "doctor" ? doctor_path() : undefined);
+  if (narrow !== undefined) {
+    for (const key of Object.keys(child)) if (key.toLowerCase() === "path") delete child[key]; // Windows: Path / PATH
+    child.PATH = narrow;
+  }
   for (const key of Object.keys(child)) if (child[key] === undefined) delete child[key];
   assert.equal(child.HOME, c.env.home.env.HOME, "the CLI runs in the isolated HOME");
   assert.equal(child.USERPROFILE, c.env.home.env.HOME);
