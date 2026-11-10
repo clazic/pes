@@ -9,6 +9,7 @@
 import type { RunConfig } from "../config.ts";
 import type { Db, SqlValue } from "../db.ts";
 import { ApiError } from "../errors.ts";
+import { read_credential_actor } from "../actors.ts";
 
 export type CommandVia = "web" | "cli" | "http" | "mcp" | "webmcp" | "import";
 
@@ -130,23 +131,16 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
   if (project === null || actor_id === null) {
     throw new ApiError("forbidden", "a human project owner is required");
   }
-  const row = runtime.db.get<{ kind: string; role: string | null; user_disabled_at: bigint | null }>(
-    `SELECT a.kind AS kind, m.role AS role, u.disabled_at AS user_disabled_at
-       FROM actors a
-       LEFT JOIN project_members m
-         ON m.project_id = ? AND m.user_id = a.user_id
-       LEFT JOIN users u
-         ON u.id = a.user_id
-      WHERE a.id = ?`,
+  const actor = read_credential_actor(runtime.db, actor_id);
+  if (actor === undefined || actor.kind !== "human") {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  const member = runtime.db.get<{ role: string }>(
+    "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
     project.id,
-    actor_id,
+    actor.user_id,
   );
-  if (
-    row === undefined ||
-    row.kind !== "human" ||
-    row.role !== "owner" ||
-    row.user_disabled_at !== null
-  ) {
+  if (member === undefined || member.role !== "owner") {
     throw new ApiError("forbidden", "a human project owner is required");
   }
   return actor_id;

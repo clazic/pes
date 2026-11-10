@@ -47,13 +47,6 @@ export interface VerifiedToken {
   scopes: string[];
 }
 
-interface ActorRow {
-  id: string;
-  kind: string;
-  user_id: string | null;
-  disabled_at: bigint | null;
-}
-
 interface TokenRow {
   id: string;
   project_id: string;
@@ -63,9 +56,27 @@ interface TokenRow {
   revoked_at: bigint | null;
 }
 
+interface CredentialActorRow {
+  id: string;
+  kind: string;
+  user_id: string;
+  disabled_at: bigint | null;
+  user_disabled_at: bigint | null;
+}
+
+export interface CredentialActor {
+  actor_id: string;
+  kind: string;
+  user_id: string;
+}
+
 function invalid_token(): never {
   // Deliberately carries no token text and no table/column names.
   throw new ApiError("forbidden", "the agent token is not valid");
+}
+
+function invalid_payload(message: string): never {
+  throw new ApiError("invalid_payload", message);
 }
 
 function forbidden_actor(): never {
@@ -75,9 +86,43 @@ function forbidden_actor(): never {
 /** Caller-supplied clock values must be a non-negative safe integer before BigInt(). */
 function require_now_ms(now_ms: unknown): number {
   if (typeof now_ms !== "number" || !Number.isSafeInteger(now_ms) || now_ms < 0) {
-    throw new ApiError("invalid_payload", "now_ms must be a non-negative safe integer");
+    return invalid_payload("now_ms must be a non-negative safe integer");
   }
   return now_ms;
+}
+
+function require_token_options(options: unknown): TokenOptions {
+  if (options === null || typeof options !== "object" || Array.isArray(options)) {
+    return invalid_payload("token options must be an object");
+  }
+  const record = options as Record<string, unknown>;
+  const project_id = record.project_id;
+  if (typeof project_id !== "string" || project_id.length === 0) {
+    return invalid_payload("project_id must be a non-empty string");
+  }
+  return { project_id, now_ms: require_now_ms(record.now_ms) };
+}
+
+/**
+ * The one actor-credential rule shared by token verification, actor
+ * resolution, the command service scope check, and the human-owner check:
+ * the actor must exist, be enabled, belong to an existing user, and that user
+ * must be enabled. A userless agent actor can never authenticate.
+ */
+export function read_credential_actor(db: ReadDb, actor_id: string): CredentialActor | undefined {
+  if (typeof actor_id !== "string" || actor_id.length === 0) return undefined;
+  const row = db.get<CredentialActorRow>(
+    `SELECT a.id AS id, a.kind AS kind, a.user_id AS user_id,
+            a.disabled_at AS disabled_at, u.disabled_at AS user_disabled_at
+       FROM actors a
+       JOIN users u ON u.id = a.user_id
+      WHERE a.id = ?`,
+    actor_id,
+  );
+  if (row === undefined || row.disabled_at !== null || row.user_disabled_at !== null) {
+    return undefined;
+  }
+  return { actor_id: row.id, kind: row.kind, user_id: row.user_id };
 }
 
 /** Fresh random secret. Only the return value of token.issue carries the raw text. */
@@ -96,7 +141,7 @@ export function agent_token_hash(token: string): string {
  * wrong project, disabled actor, or broken scopes JSON.
  */
 export function verify_agent_token(db: ReadDb, token: unknown, options: TokenOptions): VerifiedToken {
-  const now_ms = require_now_ms(options.now_ms);
+  const checked = require_token_options(options);
   if (
     typeof token !== "string" ||
     token.length === 0 ||
@@ -111,25 +156,14 @@ export function verify_agent_token(db: ReadDb, token: unknown, options: TokenOpt
     agent_token_hash(token),
   );
   if (row === undefined) return invalid_token();
-  if (row.project_id !== options.project_id) return invalid_token();
+  if (row.project_id !== checked.project_id) return invalid_token();
   if (row.revoked_at !== null) return invalid_token();
   if (row.expires_at === null || typeof row.expires_at !== "bigint") return invalid_token();
-  if (BigInt(now_ms) >= row.expires_at) return invalid_token();
+  if (BigInt(checked.now_ms) >= row.expires_at) return invalid_token();
 
-  const actor = db.get<{ disabled_at: bigint | null; user_id: string | null }>(
-    "SELECT disabled_at, user_id FROM actors WHERE id = ?",
-    row.actor_id,
-  );
-  if (actor === undefined || actor.disabled_at !== null) return invalid_token();
-  // A token of an actor whose user is disabled is dead even while the actor row
-  // itself is still enabled.
-  if (actor.user_id !== null) {
-    const user = db.get<{ disabled_at: bigint | null }>(
-      "SELECT disabled_at FROM users WHERE id = ?",
-      actor.user_id,
-    );
-    if (user === undefined || user.disabled_at !== null) return invalid_token();
-  }
+  // Same actor rule as resolve_actor and the command service: disabled actor,
+  // disabled user, or no user at all -> no usable credential.
+  if (read_credential_actor(db, row.actor_id) === undefined) return invalid_token();
 
   let parsed: unknown;
   try {
@@ -186,17 +220,8 @@ export function resolve_actor(db: ReadDb, lookup: ActorLookup, now_ms: number): 
     token_id = verified.token_id;
   }
 
-  const actor = db.get<ActorRow>(
-    "SELECT id, kind, user_id, disabled_at FROM actors WHERE id = ?",
-    actor_id,
-  );
-  if (actor === undefined || actor.disabled_at !== null) return forbidden_actor();
-  if (actor.user_id === null) return forbidden_actor();
-  const user = db.get<{ disabled_at: bigint | null }>(
-    "SELECT disabled_at FROM users WHERE id = ?",
-    actor.user_id,
-  );
-  if (user === undefined || user.disabled_at !== null) return forbidden_actor();
+  const actor = read_credential_actor(db, actor_id);
+  if (actor === undefined) return forbidden_actor();
   const member = db.get<{ role: string }>(
     "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
     project_id,
@@ -204,7 +229,7 @@ export function resolve_actor(db: ReadDb, lookup: ActorLookup, now_ms: number): 
   );
   if (member === undefined) return forbidden_actor();
   return {
-    actor_id: actor.id,
+    actor_id: actor.actor_id,
     kind: actor.kind,
     user_id: actor.user_id,
     membership_role: member.role,
