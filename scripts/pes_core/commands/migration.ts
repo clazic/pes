@@ -19,19 +19,21 @@
 
 import { read_credential_actor } from "../actors.ts";
 import {
+  assert_objects_match_blob_rows,
   BackupError,
   export_project_in_tx,
   foreign_keys_hold,
+  prepare_project_restore,
   replace_project_rows_in_tx,
   verify_bundle,
   type PreparedProjectRestore,
 } from "../backup.ts";
 import { ApiError } from "../errors.ts";
 import {
-  delete_project_file,
   read_storage_bytes,
-  scan_project_files,
+  sha256_hex,
   stage_storage_bytes,
+  sweep_project_files_strict,
   type StagedStorageFile,
 } from "../files.ts";
 import {
@@ -215,6 +217,32 @@ function assert_unchanged_since_validation(runtime: CommandRuntime, project_id: 
   }
 }
 
+/**
+ * Every object file of the project must be the bytes its blobs row names
+ * (sha256 and size). Checked before anything is written, so a file changed or
+ * damaged after validation refuses the activation without a backup folder.
+ */
+function assert_files_match_blob_rows(runtime: CommandRuntime, objects_dir: string, project_id: string): void {
+  const rows = runtime.db.all<{ storage_key: string; sha256: string; size: bigint }>(
+    "SELECT storage_key, sha256, size FROM blobs WHERE project_id = ? ORDER BY storage_key",
+    project_id,
+  );
+  for (const row of rows) {
+    let bytes: Uint8Array;
+    try {
+      bytes = read_storage_bytes(objects_dir, project_id, row.storage_key);
+    } catch {
+      throw new ApiError("conflict", "an object file of the project cannot be read; validate the import again");
+    }
+    if (BigInt(bytes.byteLength) !== BigInt(row.size) || sha256_hex(bytes) !== row.sha256) {
+      throw new ApiError(
+        "conflict",
+        "an object file of the project differs from its blobs row; validate the import again",
+      );
+    }
+  }
+}
+
 function run_activate_import(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   reject_unknown_fields(payload, ["batch_id", "backup_dir", "pes_home"]);
@@ -232,6 +260,7 @@ function run_activate_import(runtime: CommandRuntime): CommandResult {
   const objects_dir = require_objects_dir(runtime);
   assert_backup_location(backup_dir, pes_home, objects_dir);
   assert_unchanged_since_validation(runtime, project.id);
+  assert_files_match_blob_rows(runtime, objects_dir, project.id);
 
   // The backup comes first and is read from this very transaction: it shows the
   // project exactly as it is before the state changes. If it cannot be written
@@ -246,6 +275,17 @@ function run_activate_import(runtime: CommandRuntime): CommandResult {
   }
   if (!verify_bundle(backup_dir).ok) {
     throw new ApiError("conflict", "the pre-activation backup did not verify");
+  }
+  // The manifest only proves the bundle agrees with itself. The recovery point
+  // must also hold the bytes the blobs rows name (a file changed between the
+  // check above and the export would otherwise be backed up as if it were good).
+  try {
+    assert_objects_match_blob_rows(prepare_project_restore(backup_dir));
+  } catch (error) {
+    if (error instanceof BackupError) {
+      throw new ApiError("conflict", "the pre-activation backup does not match the blobs rows");
+    }
+    throw error;
   }
 
   set_batch_state(runtime, batch, "validated", "activated");
@@ -407,9 +447,11 @@ function stage_object_files(
           failed.push(file.storage_key);
         }
       }
-      // Files written after the bundle (and stray temporary files) are not part of it.
-      for (const file of scan_project_files(objects_dir, project_id)) {
-        if (!keep.has(file.key)) delete_project_file(objects_dir, project_id, file);
+      // Files written after the bundle (and stray temporary files) are not part of
+      // it. Unlike gc this sweep hides nothing: an entry it cannot remove, or a
+      // folder/link that should not be in the store, is reported as not restored.
+      for (const key of sweep_project_files_strict(objects_dir, project_id, keep)) {
+        if (!failed.includes(key)) failed.push(key);
       }
       return failed;
     },
@@ -445,6 +487,14 @@ function run_restore_project(runtime: CommandRuntime): CommandResult {
   }
   const objects_dir = require_objects_dir(runtime);
   assert_restorable_keys(prepared, project_id);
+  try {
+    assert_objects_match_blob_rows(prepared);
+  } catch (error) {
+    if (error instanceof BackupError) {
+      throw new ApiError("invalid_payload", "the bundle's object files differ from its blobs rows");
+    }
+    throw error;
+  }
 
   // What the restore takes away: commits that exist now but not in the bundle.
   const bundle_commits = new Set(prepared.commit_ids);

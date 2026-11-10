@@ -346,7 +346,7 @@ export async function restore_project(
       // the files, and then reports no loss of its own.
       throw new ApiError(
         "conflict",
-        `the project rows were restored, but ${failed.length} object file(s) could not be put in place; run the same restore again to finish`,
+        `the project rows were restored, but ${failed.length} object file(s) could not be put in place or removed; run the same restore again to finish`,
         {
           rows_restored: true,
           failed_files: failed,
@@ -730,7 +730,7 @@ function check_content(
     object_by_id,
   });
   check_bodies(db, input, out, plan_object_id, version_by_id);
-  check_links(db, input, out, version_id_of);
+  check_links(db, input, out, { plan_object_id, version_id_of, blob_of_path });
   check_footnotes(db, input, out, version_id_of);
   check_files(db, input, out, { blobs, blob_by_id, blob_of_path, version_id_of });
   check_unprocessed_answers(db, input, out, blob_of_path);
@@ -1131,14 +1131,17 @@ function check_bodies(
 // ---------------------------------------------------------------------------
 // links
 
-function check_links(
-  db: ReadDb,
-  input: ValidationInput,
-  out: Collector,
-  version_id_of: (key: string) => string | undefined,
-): void {
+interface LinkLookups {
+  plan_object_id: Map<string, string | undefined>;
+  version_id_of: (key: string) => string | undefined;
+  blob_of_path: (path: string) => BlobRef | undefined;
+}
+
+function check_links(db: ReadDb, input: ValidationInput, out: Collector, lookups: LinkLookups): void {
   const plan = input.prepared.plan;
   const pid = input.project_id;
+  const version_id_of = lookups.version_id_of;
+  check_planned_links(db, input, out, lookups);
   const relation_rows = db.all<{ from_version_id: string; to_version_id: string; kind: string }>(
     "SELECT from_version_id, to_version_id, kind FROM version_relations WHERE project_id = ?",
     pid,
@@ -1206,6 +1209,245 @@ function check_links(
     if (examined_sql !== null) out.checked.links += count_of(db, examined_sql, pid);
     const broken = count_of(db, broken_sql, pid);
     if (broken > 0) out.add("links", label, { broken });
+  }
+}
+
+/**
+ * Every link the source plan names must point at the object, version, round,
+ * stage or submission the plan key resolves to; that a target merely exists is
+ * not enough (another valid question, thread or stage would pass that).
+ * A plan key that does not resolve compares as "missing", never as a match.
+ */
+function check_planned_links(db: ReadDb, input: ValidationInput, out: Collector, lookups: LinkLookups): void {
+  const plan = input.prepared.plan;
+  const pid = input.project_id;
+  const MISSING = "\u0000missing";
+  const object_of = (key: string): string => lookups.plan_object_id.get(key) ?? `${MISSING}:${key}`;
+  const version_of = (key: string): string => lookups.version_id_of(key) ?? `${MISSING}:${key}`;
+  const optional_version = (key: string | null): string | null => (key === null ? null : version_of(key));
+  const link = (path: string, problem: string, same: boolean): void => {
+    out.checked.links += 1;
+    if (!same) out.add("links", path, { problem });
+  };
+
+  // stages and rounds by their plan keys
+  const stage_id = new Map<string, string>();
+  for (const row of db.all<{ id: string; key: string }>("SELECT id, key FROM stages WHERE project_id = ?", pid)) {
+    stage_id.set(row.key, row.id);
+  }
+  const stage_of = (key: string): string => stage_id.get(key) ?? `${MISSING}:${key}`;
+  const round_id = new Map<string, string>();
+  for (const row of db.all<{ id: string; key: string; round_no: bigint }>(
+    `SELECT r.id, s.key, r.round_no FROM rounds r JOIN stages s ON s.project_id = r.project_id AND s.id = r.stage_id
+      WHERE r.project_id = ?`,
+    pid,
+  )) {
+    round_id.set(`${row.key}:${num(row.round_no)}`, row.id);
+  }
+  const round_of = (key: string): string => round_id.get(key) ?? `${MISSING}:${key}`;
+
+  // submissions by the blob of their raw file (a plan submission key is that file)
+  const submissions_by_blob = new Map<string, Set<string>>();
+  for (const row of db.all<{ id: string; raw_blob_id: string | null }>(
+    "SELECT id, raw_blob_id FROM submissions WHERE project_id = ?",
+    pid,
+  )) {
+    if (row.raw_blob_id === null) continue;
+    const ids = submissions_by_blob.get(row.raw_blob_id) ?? new Set<string>();
+    ids.add(row.id);
+    submissions_by_blob.set(row.raw_blob_id, ids);
+  }
+  const submission_path = new Map(plan.submissions.map((entry) => [entry.key, entry.raw_blob_path]));
+  // The importer writes a submission only when its raw file was read; a link to
+  // one that was not written stays empty (as the importer leaves it).
+  const submission_matches = (key: string | null, actual: string | null): boolean => {
+    const path = key === null ? undefined : submission_path.get(key);
+    const written = path !== undefined && input.prepared.bytes.has(path);
+    if (!written) return actual === null;
+    const blob = lookups.blob_of_path(path);
+    if (blob === undefined || actual === null) return false;
+    return submissions_by_blob.get(blob.id)?.has(actual) ?? false;
+  };
+
+  const answers = new Map(
+    db
+      .all<{ object_id: string; question_id: string; submission_id: string | null }>(
+        "SELECT object_id, question_id, submission_id FROM answers WHERE project_id = ?",
+        pid,
+      )
+      .map((row) => [row.object_id, row]),
+  );
+  const answer_versions = new Map(
+    db
+      .all<{ version_id: string; object_id: string; question_id: string; question_version_id: string }>(
+        "SELECT version_id, object_id, question_id, question_version_id FROM answer_versions WHERE project_id = ?",
+        pid,
+      )
+      .map((row) => [row.version_id, row]),
+  );
+  const threads = new Map(
+    db
+      .all<{ object_id: string; target_object_id: string; target_version_id: string | null; context_kind: string }>(
+        "SELECT object_id, target_object_id, target_version_id, context_kind FROM threads WHERE project_id = ?",
+        pid,
+      )
+      .map((row) => [row.object_id, row]),
+  );
+  const messages = new Map(
+    db
+      .all<{ object_id: string; thread_id: string; submission_id: string | null }>(
+        "SELECT object_id, thread_id, submission_id FROM messages WHERE project_id = ?",
+        pid,
+      )
+      .map((row) => [row.object_id, row]),
+  );
+  const message_versions = new Map(
+    db
+      .all<{ version_id: string; object_id: string; thread_id: string }>(
+        "SELECT version_id, object_id, thread_id FROM message_versions WHERE project_id = ?",
+        pid,
+      )
+      .map((row) => [row.version_id, row]),
+  );
+  const followup_versions = new Map(
+    db
+      .all<{
+        version_id: string;
+        object_id: string;
+        target_stage_id: string | null;
+        base_artifact_version_id: string | null;
+      }>(
+        "SELECT version_id, object_id, target_stage_id, base_artifact_version_id FROM followup_versions WHERE project_id = ?",
+        pid,
+      )
+      .map((row) => [row.version_id, row]),
+  );
+
+  for (const row of plan.objects) {
+    const object_id = object_of(row.key);
+    const version_id = version_of(row.version.key);
+    if (row.answer !== undefined) {
+      const answer = row.answer;
+      const stored = answers.get(object_id);
+      link(`answers/${row.key}/question`, "answer_question_differs", stored?.question_id === object_of(answer.question_key));
+      link(
+        `answers/${row.key}/submission`,
+        "answer_submission_differs",
+        stored !== undefined && submission_matches(answer.submission_key, stored.submission_id),
+      );
+      const version = answer_versions.get(version_id);
+      link(
+        `answer_versions/${row.key}/question`,
+        "answer_version_question_differs",
+        version !== undefined &&
+          version.object_id === object_id &&
+          version.question_id === object_of(answer.question_key) &&
+          version.question_version_id === version_of(answer.question_version_key),
+      );
+    } else if (row.thread !== undefined) {
+      const thread = row.thread;
+      const stored = threads.get(object_id);
+      link(
+        `threads/${row.key}/target`,
+        "thread_target_differs",
+        stored !== undefined &&
+          stored.target_object_id === object_of(thread.target_object_key) &&
+          stored.target_version_id === optional_version(thread.target_version_key) &&
+          stored.context_kind === thread.context_kind,
+      );
+    } else if (row.message !== undefined) {
+      const message = row.message;
+      const stored = messages.get(object_id);
+      const thread_id = object_of(message.thread_key);
+      link(`messages/${row.key}/thread`, "message_thread_differs", stored?.thread_id === thread_id);
+      link(
+        `messages/${row.key}/submission`,
+        "message_submission_differs",
+        stored !== undefined && submission_matches(message.submission_key, stored.submission_id),
+      );
+      const version = message_versions.get(version_id);
+      link(
+        `message_versions/${row.key}/thread`,
+        "message_version_thread_differs",
+        version !== undefined && version.object_id === object_id && version.thread_id === thread_id,
+      );
+    } else if (row.followup !== undefined) {
+      const followup = row.followup;
+      const version = followup_versions.get(version_id);
+      link(
+        `followup_versions/${row.key}/target`,
+        "followup_target_differs",
+        version !== undefined &&
+          version.object_id === object_id &&
+          version.target_stage_id === (followup.target_stage_key === null ? null : stage_of(followup.target_stage_key)) &&
+          version.base_artifact_version_id === optional_version(followup.base_version_key),
+      );
+    }
+  }
+
+  // round contents: the same (round, object, version, position, role) rows, no more, no less
+  const expected_contents = new Map<string, number>();
+  for (const content of plan.round_contents) {
+    const key = JSON.stringify([
+      round_of(content.round_key),
+      object_of(content.object_key),
+      version_of(content.version_key),
+      content.position,
+      content.role,
+    ]);
+    expected_contents.set(key, (expected_contents.get(key) ?? 0) + 1);
+  }
+  const actual_contents = new Map<string, number>();
+  for (const row of db.all<{ round_id: string; object_id: string; version_id: string; position: bigint; role: string }>(
+    "SELECT round_id, object_id, version_id, position, role FROM round_contents WHERE project_id = ?",
+    pid,
+  )) {
+    const key = JSON.stringify([row.round_id, row.object_id, row.version_id, num(row.position), row.role]);
+    actual_contents.set(key, (actual_contents.get(key) ?? 0) + 1);
+  }
+  for (const [key, count] of expected_contents) {
+    link("round_contents", "round_content_differs", actual_contents.get(key) === count);
+  }
+  for (const key of actual_contents.keys()) {
+    if (!expected_contents.has(key)) link("round_contents", "round_content_unexpected", false);
+  }
+
+  // question sets: each plan set is there (stage, round, form, version) with exactly its members
+  const sets = db.all<{
+    id: string;
+    stage_id: string;
+    round_id: string | null;
+    purpose: string;
+    form_key: string;
+    version_no: bigint;
+  }>("SELECT id, stage_id, round_id, purpose, form_key, version_no FROM question_sets WHERE project_id = ?", pid);
+  const members_of = new Map<string, string[]>();
+  for (const row of db.all<{ set_id: string; question_id: string; question_version_id: string; position: bigint }>(
+    "SELECT set_id, question_id, question_version_id, position FROM question_set_members WHERE project_id = ?",
+    pid,
+  )) {
+    const list = members_of.get(row.set_id) ?? [];
+    list.push(JSON.stringify([row.question_id, row.question_version_id, num(row.position)]));
+    members_of.set(row.set_id, list);
+  }
+  const used_sets = new Set<string>();
+  for (const set of plan.question_sets) {
+    const wanted_members = set.members
+      .map((member) => JSON.stringify([object_of(member.question_key), version_of(member.question_version_key), member.position]))
+      .sort();
+    const wanted_round = set.round_key === null ? null : round_of(set.round_key);
+    const found = sets.find(
+      (row) =>
+        !used_sets.has(row.id) &&
+        row.stage_id === stage_of(set.stage_key) &&
+        row.round_id === wanted_round &&
+        row.purpose === set.purpose &&
+        row.form_key === set.form_key &&
+        num(row.version_no) === set.version_no &&
+        JSON.stringify([...(members_of.get(row.id) ?? [])].sort()) === JSON.stringify(wanted_members),
+    );
+    if (found !== undefined) used_sets.add(found.id);
+    link(`question_sets/${set.key}`, "question_set_differs", found !== undefined);
   }
 }
 

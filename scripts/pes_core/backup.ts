@@ -1519,6 +1519,49 @@ export function prepare_project_restore(bundle_dir: string): PreparedProjectRest
 }
 
 /**
+ * Stricter than verify_bundle (PR12): every object file of a prepared bundle
+ * must be the bytes its own blobs row names (sha256 and size), not only the
+ * bytes the manifest lists. A manifest rewritten to match other bytes passes
+ * verify_bundle; it does not pass this. Throws BackupError("bundle_invalid")
+ * listing every object that differs. Reads nothing; changes nothing.
+ */
+export function assert_objects_match_blob_rows(prepared: PreparedProjectRestore): void {
+  const blobs = prepared.tables.find((table) => table.name === "blobs");
+  const expected = new Map<string, { sha256: unknown; size: unknown }>();
+  if (blobs !== undefined) {
+    const key_index = blobs.columns.findIndex((column) => column.name === "storage_key");
+    const sha_index = blobs.columns.findIndex((column) => column.name === "sha256");
+    const size_index = blobs.columns.findIndex((column) => column.name === "size");
+    if (key_index < 0 || sha_index < 0 || size_index < 0) {
+      throw invalid_row("blobs table lacks storage_key, sha256 or size");
+    }
+    for (const row of blobs.rows) {
+      const key = row[key_index];
+      if (typeof key === "string") expected.set(key, { sha256: row[sha_index], size: row[size_index] });
+    }
+  }
+  const problems: BundleProblem[] = [];
+  for (const object of prepared.objects) {
+    const path = `objects/${object.storage_key}`;
+    const row = expected.get(object.storage_key);
+    if (row === undefined) {
+      problems.push({ code: "extra_file", path, message: `object file has no blobs row: ${object.storage_key}` });
+      continue;
+    }
+    const size = row.size;
+    const size_text = typeof size === "string" || typeof size === "number" || typeof size === "bigint" ? String(size) : "";
+    if (size_text !== String(object.bytes.byteLength)) {
+      problems.push({ code: "size_mismatch", path, message: `object size differs from its blobs row: ${object.storage_key}` });
+    } else if (row.sha256 !== sha256_hex(object.bytes)) {
+      problems.push({ code: "hash_mismatch", path, message: `object hash differs from its blobs row: ${object.storage_key}` });
+    }
+  }
+  if (problems.length > 0) {
+    throw new BackupError("bundle_invalid", "object files differ from their blobs rows", problems);
+  }
+}
+
+/**
  * Replace the rows of one project with the bundle's rows. The caller holds the
  * write transaction. Other projects are never touched; users and actors are
  * neither compared nor replaced: an existing row stays exactly as it is now

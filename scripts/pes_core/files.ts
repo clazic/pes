@@ -28,6 +28,7 @@ import {
   renameSync,
   rmSync,
   rmdirSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -493,6 +494,85 @@ export function scan_project_files(objects_dir: string, project_id: string): Pro
   } catch {
     return [];
   }
+}
+
+/**
+ * Restore only (PR12): make this project's folder hold nothing but `keep`
+ * (storage keys `<project_id>/...`), and say what could not be done. Unlike gc
+ * (scan_project_files + delete_project_file, best effort) nothing is hidden:
+ * - a regular file outside `keep` is removed; a removal that fails is reported;
+ * - a folder that leads to no kept key, a symlink or any other entry outside
+ *   `keep` is an abnormal state of the store: it is reported and left as it is
+ *   (never removed recursively, never followed);
+ * - a folder that cannot be read is reported.
+ * Returns the storage keys that are still out of line (empty = done).
+ */
+export function sweep_project_files_strict(
+  objects_dir: string,
+  project_id: string,
+  keep: ReadonlySet<string>,
+): string[] {
+  const failed: string[] = [];
+  let root: string;
+  try {
+    root = resolve_objects_dir(objects_dir);
+  } catch {
+    return [project_id];
+  }
+  const project_dir = join(root, project_id);
+  const project_stat = lstat_or_undefined(project_dir);
+  if (project_stat === undefined) return keep.size === 0 ? [] : [project_id];
+  if (project_stat.isSymbolicLink() || !project_stat.isDirectory()) return [project_id];
+
+  // Folders that lead to a kept file (relative to the project folder).
+  const kept_dirs = new Set<string>();
+  for (const key of keep) {
+    const parts = key.split("/").slice(1, -1);
+    for (let index = 1; index <= parts.length; index += 1) kept_dirs.add(parts.slice(0, index).join("/"));
+  }
+
+  const walk = (directory: string, prefix: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      failed.push(prefix === "" ? project_id : `${project_id}/${prefix}`);
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(directory, entry.name);
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      const key = `${project_id}/${relative}`;
+      let stat: ReturnType<typeof lstatSync>;
+      try {
+        stat = lstatSync(full);
+      } catch {
+        failed.push(key);
+        continue;
+      }
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        if (kept_dirs.has(relative)) walk(full, relative);
+        else failed.push(key);
+        continue;
+      }
+      if (keep.has(key)) {
+        if (!stat.isFile() || stat.isSymbolicLink()) failed.push(key);
+        continue;
+      }
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        failed.push(key);
+        continue;
+      }
+      try {
+        unlinkSync(full);
+      } catch {
+        failed.push(key);
+      }
+    }
+  };
+  walk(project_dir, "");
+  failed.sort();
+  return failed;
 }
 
 /**
