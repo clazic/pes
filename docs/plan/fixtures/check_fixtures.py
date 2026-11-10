@@ -164,7 +164,7 @@ SPECS = [
         "file": "uploads-put.json",
         "operation": "uploads.put",
         "method": "PUT",
-        "path": "/api/v1/uploads/{upload_id}",
+        "path": "/api/v1/projects/{project_id}/uploads/{blob_id}",
         "doc_fragments": ["PUT"],
         "inferred": True,
     },
@@ -332,13 +332,11 @@ def check_success_body(body, label, errors):
         errors.append(f"{label}: format_version이 {FORMAT_VERSION!r}이 아니다")
     if not isinstance(body.get("data"), dict):
         errors.append(f"{label}: data 객체가 없다")
-    meta = body.get("meta")
-    if not isinstance(meta, dict):
-        errors.append(f"{label}: meta 객체가 없다")
-    else:
-        request_id = meta.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            errors.append(f"{label}: meta.request_id가 비어 있다")
+    request_id = body.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        errors.append(f"{label}: 최상위 request_id가 비어 있다")
+    if "meta" in body:
+        errors.append(f"{label}: meta는 쓰지 않는다(request_id는 최상위)")
 
 
 def check_error_body(body, label, errors):
@@ -379,7 +377,10 @@ def check_fixture(spec, errors):
         errors.append(f"{spec['file']}: JSON 문법 오류: {exc}")
         return
 
+    optional_error = spec["operation"] == "capabilities.get"  # 열려 있어 오류 예제가 없다
     for key in ("operation", "method", "path", "auth", "normal", "error"):
+        if key == "error" and optional_error:
+            continue
         if key not in data:
             errors.append(f"{spec['file']}: {key}가 없다")
     if data.get("operation") != spec["operation"]:
@@ -391,6 +392,8 @@ def check_fixture(spec, errors):
 
     for case_name in ("normal", "error"):
         case = data.get(case_name)
+        if case is None and case_name == "error" and optional_error:
+            continue
         if not isinstance(case, dict):
             errors.append(f"{spec['file']}: {case_name} 객체가 없다")
             continue
@@ -409,13 +412,14 @@ def check_fixture(spec, errors):
         if request_body is not None:
             if not isinstance(request_body, dict):
                 errors.append(f"{spec['file']}: {case_name}.request.body가 객체가 아니다")
-            elif request_body.get("format_version") != FORMAT_VERSION:
+            elif request_body.get("format_version", FORMAT_VERSION) != FORMAT_VERSION:
                 errors.append(f"{spec['file']}: {case_name}.request.body의 format_version이 {FORMAT_VERSION!r}이 아니다")
 
     normal_body = data.get("normal", {}).get("response", {}).get("body")
     check_success_body(normal_body, f"{spec['file']} normal.response.body", errors)
     error_body = data.get("error", {}).get("response", {}).get("body")
-    check_error_body(error_body, f"{spec['file']} error.response.body", errors)
+    if not (optional_error and "error" not in data):
+        check_error_body(error_body, f"{spec['file']} error.response.body", errors)
 
     replay = data.get("replay")
     if replay is not None:

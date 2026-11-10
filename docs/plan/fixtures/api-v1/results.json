@@ -16,7 +16,6 @@
         "Idempotency-Key": "idem_01J9Z3K7QM"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
         "base_control_rev": "12",
@@ -42,12 +41,13 @@
       }
     },
     "response": {
-      "status": 201,
+      "status": 200,
       "headers": {
         "Content-Type": "application/json"
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_res_01J9Z3K7QN",
         "data": {
           "object_versions": [
             {
@@ -58,9 +58,6 @@
           ],
           "mutation_id": "mut_01J9Z3K7QU",
           "event_seq": "43"
-        },
-        "meta": {
-          "request_id": "req_res_01J9Z3K7QN"
         }
       }
     }
@@ -78,7 +75,6 @@
         "Idempotency-Key": "idem_res_conflict_01J9Z3K7Q2"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
         "base_control_rev": "12",
@@ -139,7 +135,6 @@
         "Idempotency-Key": "idem_01J9Z3K7QM"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
         "base_control_rev": "12",
@@ -165,12 +160,13 @@
       }
     },
     "response": {
-      "status": 201,
+      "status": 200,
       "headers": {
         "Content-Type": "application/json"
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_res_01J9Z3K7QN",
         "data": {
           "object_versions": [
             {
@@ -182,9 +178,6 @@
           "mutation_id": "mut_01J9Z3K7QU",
           "event_seq": "43",
           "replayed": true
-        },
-        "meta": {
-          "request_id": "req_res_01J9Z3K7QN"
         }
       }
     }

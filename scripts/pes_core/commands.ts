@@ -27,6 +27,7 @@ import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { LEGACY_COMMAND_ENTRIES } from "./commands/legacy.ts";
 import { MIGRATION_COMMAND_ENTRIES } from "./commands/migration.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
+import { make_register_command } from "./commands/projects.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
@@ -283,7 +284,26 @@ function result_project_id(result: unknown): string {
   throw new Error("the command result must include project_id");
 }
 
-function run_bootstrap(runtime: CommandRuntime): CommandResult {
+interface Created {
+  project_id: string;
+  owner_user_id: string;
+  owner_actor_id: string;
+  edition_id: string;
+  policy_id: string;
+}
+
+interface BuildHooks {
+  action: string;
+  event_type: string;
+  /** Extra fields stored in the receipt result and returned. */
+  stored_extra: Record<string, unknown>;
+  /** Event payload additions. */
+  event_extra: Record<string, unknown>;
+  /** Runs after the project is active, inside the same transaction. */
+  after(created: Created): void;
+}
+
+function build_project(runtime: CommandRuntime, hooks: BuildHooks): CommandResult {
   const payload = require_record(runtime.payload);
   const slug = require_non_empty_string(payload, "slug");
   const topic = require_non_empty_string(payload, "topic");
@@ -360,11 +380,12 @@ function run_bootstrap(runtime: CommandRuntime): CommandResult {
     tx_id: runtime.tx_id,
     stage_ids,
     counter_namespaces: [...OBJECT_KINDS],
+    ...hooks.stored_extra,
   };
   insert_receipt(runtime, {
     project_id,
     actor_id: owner_actor_id,
-    action: "project.created",
+    action: hooks.action,
     base_control_rev: null,
     result,
   });
@@ -404,11 +425,13 @@ function run_bootstrap(runtime: CommandRuntime): CommandResult {
     throw new Error("bootstrap failed to activate the project");
   }
 
+  hooks.after({ project_id, owner_user_id, owner_actor_id, edition_id, policy_id });
+
   return {
     result,
     events: [
       {
-        type: "project.created",
+        type: hooks.event_type,
         payload: {
           slug,
           topic,
@@ -416,10 +439,22 @@ function run_bootstrap(runtime: CommandRuntime): CommandResult {
           owner_actor_id,
           edition_id,
           policy_id,
+          ...hooks.event_extra,
         },
       },
     ],
   };
+}
+
+
+function run_bootstrap(runtime: CommandRuntime): CommandResult {
+  return build_project(runtime, {
+    action: "project.created",
+    event_type: "project.created",
+    stored_extra: {},
+    event_extra: {},
+    after: () => undefined,
+  });
 }
 
 function run_set_topic(runtime: CommandRuntime): CommandResult {
@@ -484,6 +519,8 @@ const SET_TOPIC_COMMAND: CommandDefinition = Object.freeze({
   run: run_set_topic,
 });
 
+const REGISTER_COMMAND: CommandDefinition = make_register_command(build_project);
+
 /**
  * The service reads commands from this private table. It is not exported, so
  * changing the exported view (or bypassing it) cannot affect execution.
@@ -491,6 +528,7 @@ const SET_TOPIC_COMMAND: CommandDefinition = Object.freeze({
 const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, CommandDefinition>([
   ["project.bootstrap", BOOTSTRAP_COMMAND],
   ["project.set_topic", SET_TOPIC_COMMAND],
+  ["project.register", REGISTER_COMMAND],
   ...RUN_COMMAND_ENTRIES,
   ...CONTENT_COMMAND_ENTRIES,
   ...RESULT_COMMAND_ENTRIES,

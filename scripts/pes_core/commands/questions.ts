@@ -76,6 +76,7 @@ const OPTION_FIELDS = new Set(["value", "label", "recommended"]);
 
 const REVISE_FIELDS = [
   "question_id",
+  "base_version_id",
   "text",
   "type",
   "required",
@@ -91,7 +92,13 @@ const REVISE_FIELDS = [
 ] as const;
 
 const SUBMIT_FIELDS = ["set_id", "answers"] as const;
-const ANSWER_ITEM_FIELDS = new Set(["question_id", "value", "other", "used_default"]);
+const ANSWER_ITEM_FIELDS = new Set([
+  "question_id",
+  "question_version_id",
+  "value",
+  "other",
+  "used_default",
+]);
 
 function invalid_payload(message: string): never {
   throw new ApiError("invalid_payload", message);
@@ -826,6 +833,16 @@ function run_revise(runtime: CommandRuntime): CommandResult {
     throw new ApiError("not_found", "question not found");
   }
 
+  if (has_own(payload, "base_version_id")) {
+    const base = require_non_empty_string(payload, "base_version_id");
+    if (base !== current_version.current_version_id) {
+      throw new ApiError("rev_conflict", "the question version is stale", {
+        expected: base,
+        current: current_version.current_version_id,
+      });
+    }
+  }
+
   const text = has_own(payload, "text")
     ? require_non_empty_string(payload, "text")
     : row.text;
@@ -945,6 +962,8 @@ function run_revise(runtime: CommandRuntime): CommandResult {
 export interface SubmissionError {
   question_id: string | null;
   code: string;
+  /** Extra machine-readable facts for the HTTP layer; validate_submission drops them. */
+  details?: Record<string, unknown>;
 }
 
 export interface PlannedAnswer {
@@ -970,8 +989,15 @@ export type SubmissionPreparation =
   | { ok: true; plan: SubmissionPlan }
   | { ok: false; errors: SubmissionError[] };
 
-function problem(question_id: string | null, code: string): SubmissionPreparation {
-  return { ok: false, errors: [{ question_id, code }] };
+function problem(
+  question_id: string | null,
+  code: string,
+  details?: Record<string, unknown>,
+): SubmissionPreparation {
+  return {
+    ok: false,
+    errors: [details === undefined ? { question_id, code } : { question_id, code, details }],
+  };
 }
 
 function item_question_id(record: Record<string, unknown>): string | null {
@@ -1171,8 +1197,19 @@ export function prepare_submission(
     if (current === undefined || current.current_version_id === null) {
       return problem(question_id, "conflict");
     }
-    if (current.current_version_id !== member.question_version_id) {
-      return problem(question_id, "conflict");
+    // The form pins the version it showed. A pinned version that is the current
+    // one is accepted even when the set still lists an older version of it;
+    // without a pin the set's own version must still be current.
+    const pinned =
+      typeof raw.question_version_id === "string" ? raw.question_version_id : null;
+    const effective_version = pinned ?? member.question_version_id;
+    if (effective_version !== current.current_version_id) {
+      return problem(question_id, "conflict", {
+        reason: "question_version_changed",
+        question_id,
+        expected: effective_version,
+        current: current.current_version_id,
+      });
     }
 
     const version = db.get<QuestionVersionRow>(
@@ -1181,7 +1218,7 @@ export function prepare_submission(
         WHERE project_id = ? AND object_id = ? AND version_id = ?`,
       project_id,
       question_id,
-      member.question_version_id,
+      effective_version,
     );
     if (version === undefined) return problem(question_id, "conflict");
     if (version.state !== "open") return problem(question_id, "conflict");
@@ -1211,7 +1248,11 @@ export function prepare_submission(
     }
     if (has_value) {
       if (!value_matches_type(raw.value, version.type, version.options)) {
-        return problem(question_id, "invalid_payload");
+        return problem(question_id, "invalid_payload", {
+          reason: "value_not_allowed",
+          field: "value",
+          question_id,
+        });
       }
       if (Number(version.required) === 1) {
         if (typeof raw.value === "string" && raw.value.trim().length === 0) {
@@ -1247,7 +1288,7 @@ export function prepare_submission(
 
     items.push({
       question_id,
-      question_version_id: member.question_version_id,
+      question_version_id: effective_version,
       has_value,
       value: raw.value,
       used_default: used_default ? 1 : 0,
@@ -1297,7 +1338,11 @@ function run_submit_answers(runtime: CommandRuntime): CommandResult {
 
   const prepared = prepare_submission(runtime.db, project.id, payload);
   if (!prepared.ok) {
-    throw new ApiError(prepared.errors[0]!.code, "the submission is not valid");
+    throw new ApiError(
+      prepared.errors[0]!.code,
+      "the submission is not valid",
+      prepared.errors[0]!.details,
+    );
   }
   const plan = prepared.plan;
 

@@ -34,6 +34,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_export_01J9Z3K7QN",
         "data": {
           "export_job": {
             "id": "exp_01J9Z3K7Q2",
@@ -43,9 +44,6 @@
             "preview_hash": "sha256:2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a"
           },
           "operation_id": "op_01J9Z3K7Q2"
-        },
-        "meta": {
-          "request_id": "req_export_01J9Z3K7QN"
         }
       }
     }

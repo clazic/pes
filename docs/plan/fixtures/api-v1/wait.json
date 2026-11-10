@@ -15,7 +15,6 @@
         "Content-Type": "application/json"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
         "reason": "waiting_human",
@@ -31,6 +30,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_wait_01J9Z3K7QN",
         "data": {
           "run": {
             "id": "run_01J9Z3K7Q6",
@@ -46,9 +46,6 @@
               "qst_01J9Z3K7QB"
             ]
           }
-        },
-        "meta": {
-          "request_id": "req_wait_01J9Z3K7QN"
         }
       }
     }
@@ -65,7 +62,6 @@
         "Content-Type": "application/json"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QX",
         "fence": "3",
         "reason": "waiting_human",
@@ -83,7 +79,7 @@
         "format_version": "1.0",
         "request_id": "req_wait_err_01J9Z3K7QN",
         "error": {
-          "code": "not_lease_holder",
+          "code": "conflict",
           "message": "이 실행의 lease 보유자가 아닙니다.",
           "retryable": false,
           "target": "$.body.lease_id",

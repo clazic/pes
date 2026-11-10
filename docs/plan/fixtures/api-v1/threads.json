@@ -38,6 +38,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_thread_01J9Z3K7QN",
         "data": {
           "thread": {
             "id": "thr_01J9Z3K7QH",
@@ -49,9 +50,6 @@
             "id": "msg_01J9Z3K7Q2",
             "version_no": "1"
           }
-        },
-        "meta": {
-          "request_id": "req_thread_01J9Z3K7QN"
         }
       }
     }

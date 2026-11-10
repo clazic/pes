@@ -69,7 +69,10 @@ export function validate_submission(
   }
   const prepared = prepare_submission(db, ctx.project_id, input);
   if (prepared.ok) return { ok: true, errors: [] };
-  return { ok: false, errors: prepared.errors };
+  return {
+    ok: false,
+    errors: prepared.errors.map((e) => ({ question_id: e.question_id, code: e.code })),
+  };
 }
 
 interface RequiredQuestionRow {

@@ -16,7 +16,6 @@
         "Idempotency-Key": "idem_complete_01J9Z3K7Q2"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
         "result_version_ids": [
@@ -33,6 +32,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_complete_01J9Z3K7QN",
         "data": {
           "run": {
             "id": "run_01J9Z3K7Q6",
@@ -41,9 +41,6 @@
           },
           "stage_approved": false,
           "note": "complete는 run 종료일 뿐 라운드 봉인·단계 승인이 아닙니다."
-        },
-        "meta": {
-          "request_id": "req_complete_01J9Z3K7QN"
         }
       }
     }
@@ -60,7 +57,6 @@
         "Content-Type": "application/json"
       },
       "body": {
-        "format_version": "1.0",
         "lease_id": "lea_01J9Z3K7QP",
         "fence": "3",
         "result_version_ids": [
@@ -79,7 +75,7 @@
         "format_version": "1.0",
         "request_id": "req_complete_err_01J9Z3K7QN",
         "error": {
-          "code": "run_terminal",
+          "code": "conflict",
           "message": "이미 끝난 실행입니다.",
           "retryable": false,
           "target": "$.path.run_id",

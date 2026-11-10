@@ -27,6 +27,7 @@ import {
   optional_lease_guard,
   reject_unknown_fields,
   require_current_lease,
+  optional_rev,
   require_human_owner_actor,
   require_non_empty_string,
   require_record,
@@ -51,6 +52,7 @@ interface StageRow {
   edition_id: string;
   ordinal: bigint;
   status: string;
+  rev: bigint;
   current_round_id: string | null;
   approved_snapshot_id: string | null;
   stale_since_event_seq: bigint | null;
@@ -266,7 +268,7 @@ function read_stage(
   stage_id: string,
 ): StageRow {
   const stage = runtime.db.get<StageRow>(
-    `SELECT id, edition_id, ordinal, status, current_round_id, approved_snapshot_id,
+    `SELECT id, edition_id, ordinal, status, rev, current_round_id, approved_snapshot_id,
             stale_since_event_seq
        FROM stages WHERE project_id = ? AND id = ?`,
     project_id,
@@ -276,6 +278,18 @@ function read_stage(
     throw new ApiError("not_found", "stage not found");
   }
   return stage;
+}
+
+/** Optional CAS on the stage's own rev (HTTP expected_stage_rev / base_stage_rev). */
+function check_stage_rev(stage: StageRow, expected: bigint | null): void {
+  if (expected !== null && expected !== stage.rev) {
+    throw new ApiError("conflict", "the stage revision is stale", {
+      reason: "stale_stage",
+      expected: expected.toString(),
+      current_rev: stage.rev.toString(),
+      stage_status: stage.status,
+    });
+  }
 }
 
 function read_round(
@@ -500,10 +514,12 @@ function run_edition_create(runtime: CommandRuntime): CommandResult {
 
 function run_round_start(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage_id"]);
+  reject_unknown_fields(payload, ["stage_id", "base_stage_rev"]);
   const project = command_project(runtime);
   const stage_id = require_non_empty_string(payload, "stage_id");
+  const base_stage_rev = optional_rev(payload, "base_stage_rev");
   const stage = read_stage(runtime, project.id, stage_id);
+  check_stage_rev(stage, base_stage_rev);
 
   const active = runtime.db.get<{ active_edition_id: string | null }>(
     "SELECT active_edition_id FROM projects WHERE id = ?",
@@ -527,7 +543,11 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the edition is not active");
   }
   if (stage.status === "approved" && stage.stale_since_event_seq === null) {
-    throw new ApiError("conflict", "the stage is already approved");
+    throw new ApiError("conflict", "the stage is already approved", {
+      reason: "stage_not_active",
+      stage_id,
+      stage_status: stage.status,
+    });
   }
   const open = runtime.db.get<{ ok: bigint }>(
     "SELECT 1 AS ok FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'",
@@ -607,6 +627,11 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
           base_snapshot_id,
         },
       },
+      {
+        // The stage's own change (status active, rev + 1) is a separate fact for readers of the feed.
+        type: "stage.activated",
+        payload: { stage_id, round_id, stage_status: "active" },
+      },
     ],
   };
 }
@@ -623,14 +648,37 @@ function run_round_seal(runtime: CommandRuntime): CommandResult {
     "run_id",
     "lease_id",
     "fence",
+    "expected_round_rev",
   ]);
   const project = command_project(runtime);
   const { guard } = member_actor_with_guard(runtime, payload);
   const round_id = require_non_empty_string(payload, "round_id");
   const manifest_blob_id = require_non_empty_string(payload, "manifest_blob_id");
+  const expected_round_rev = optional_rev(payload, "expected_round_rev");
   const round = read_round(runtime, project.id, round_id);
   if (round.state !== "open") {
+    if (round.state === "sealed") {
+      throw new ApiError("conflict", "the round is not open", {
+        reason: "already_sealed",
+        round_id,
+        state: round.state,
+        snapshot_id: round.sealed_snapshot_id,
+      });
+    }
     throw new ApiError("conflict", "the round is not open");
+  }
+  if (expected_round_rev !== null) {
+    const current = runtime.db.get<{ rev: bigint }>(
+      "SELECT rev FROM rounds WHERE project_id = ? AND id = ?",
+      project.id,
+      round_id,
+    );
+    if (current !== undefined && current.rev !== expected_round_rev) {
+      throw new ApiError("rev_conflict", "the round revision is stale", {
+        expected: expected_round_rev.toString(),
+        current: current.rev.toString(),
+      });
+    }
   }
   const edition = runtime.db.get<{ status: string }>(
     "SELECT status FROM editions WHERE project_id = ? AND id = ?",
@@ -735,13 +783,15 @@ function run_round_seal(runtime: CommandRuntime): CommandResult {
 function run_stage_approve(runtime: CommandRuntime): CommandResult {
   require_human_owner_actor(runtime);
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage_id", "snapshot_id", "note"]);
+  reject_unknown_fields(payload, ["stage_id", "snapshot_id", "note", "expected_stage_rev"]);
   const project = command_project(runtime);
   const actor = command_actor(runtime);
   const stage_id = require_non_empty_string(payload, "stage_id");
   const snapshot_id = require_non_empty_string(payload, "snapshot_id");
   const note = optional_text(payload, "note");
+  const expected_stage_rev = optional_rev(payload, "expected_stage_rev");
   const stage = read_stage(runtime, project.id, stage_id);
+  check_stage_rev(stage, expected_stage_rev);
 
   const edition = runtime.db.get<{ status: string }>(
     "SELECT status FROM editions WHERE project_id = ? AND id = ?",
@@ -891,11 +941,13 @@ function run_stage_approve(runtime: CommandRuntime): CommandResult {
 function run_stage_reopen(runtime: CommandRuntime): CommandResult {
   require_human_owner_actor(runtime);
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage_id", "reason"]);
+  reject_unknown_fields(payload, ["stage_id", "reason", "expected_stage_rev"]);
   const project = command_project(runtime);
   const stage_id = require_non_empty_string(payload, "stage_id");
   const reason = optional_text(payload, "reason");
+  const expected_stage_rev = optional_rev(payload, "expected_stage_rev");
   const stage = read_stage(runtime, project.id, stage_id);
+  check_stage_rev(stage, expected_stage_rev);
   if (stage.status !== "approved") {
     throw new ApiError("conflict", "the stage is not approved");
   }

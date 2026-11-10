@@ -13,6 +13,8 @@ import type { Clock } from "./clock.ts";
 import {
   CommandService,
   OBJECT_KINDS,
+  type CommandOutcome,
+  type MutationContext,
   STAGE_KEYS,
   type PolicyChecker,
   type StageKey,
@@ -83,4 +85,17 @@ export function bootstrap_project(
     },
   );
   return outcome.result as BootstrapResult;
+}
+
+/**
+ * First registration of a project by device approval (stage 2 PR14): the same
+ * project/owner/policy/edition as bootstrap plus the approved device actor and
+ * its first token, in one command. One service.execute call; no SQL here.
+ */
+export function register_project(
+  service: CommandService,
+  ctx: MutationContext,
+  input: unknown,
+): Promise<CommandOutcome> {
+  return service.execute(ctx, "project.register", input);
 }

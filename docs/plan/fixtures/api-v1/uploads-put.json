@@ -1,17 +1,19 @@
 {
   "operation": "uploads.put",
   "method": "PUT",
-  "path": "/api/v1/uploads/{upload_id}",
-  "auth": "upload_token",
+  "path": "/api/v1/projects/{project_id}/uploads/{blob_id}",
+  "auth": "human_or_agent",
   "normal": {
     "request": {
       "path_params": {
-        "upload_id": "upl_01J9Z3K7QG"
+        "project_id": "prj_01J9Z3K7Q2",
+        "blob_id": "blb_01J9Z3K7QG"
       },
       "headers": {
         "Content-Type": "image/png",
         "X-Content-SHA256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-        "Content-Length": "12345"
+        "Content-Length": "12345",
+        "Authorization": "Bearer ${PES_AGENT_TOKEN}"
       },
       "body_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z1ioAAAAASUVORK5CYII="
     },
@@ -22,14 +24,11 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_put_01J9Z3K7QN",
         "data": {
-          "upload_id": "upl_01J9Z3K7QG",
-          "state": "uploaded",
-          "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-          "size_bytes": 12345
-        },
-        "meta": {
-          "request_id": "req_put_01J9Z3K7QN"
+          "project_id": "prj_01J9Z3K7Q2",
+          "blob_id": "blb_01J9Z3K7QG",
+          "state": "staging"
         }
       }
     }
@@ -37,7 +36,8 @@
   "error": {
     "request": {
       "path_params": {
-        "upload_id": "upl_01J9Z3K7QG"
+        "project_id": "prj_01J9Z3K7Q2",
+        "blob_id": "blb_01J9Z3K7QG"
       },
       "headers": {
         "Content-Type": "image/png",

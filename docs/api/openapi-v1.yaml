@@ -48,6 +48,31 @@ components:
       in: path
       required: true
       schema: { type: string }
+    OperationId:
+      name: op
+      in: path
+      required: true
+      schema: { type: string }
+    RequestKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string }
+    QuestionId:
+      name: q
+      in: path
+      required: true
+      schema: { type: string }
+    StageId:
+      name: s
+      in: path
+      required: true
+      schema: { type: string }
+    RoundId:
+      name: rd
+      in: path
+      required: true
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -242,6 +267,206 @@ components:
     UploadComplete:
       type: object
       additionalProperties: false
+    FormatVersion:
+      type: string
+      const: "1.0"
+    RegisterBody:
+      type: object
+      required: [slug, topic, owner_display_name, device_label]
+      additionalProperties: false
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        topic: { type: string, minLength: 1 }
+        owner_display_name: { type: string, minLength: 1 }
+        device_label: { type: string, minLength: 1 }
+        scopes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [context:read, run:claim, run:submit, file:write, file:read] }
+    HeartbeatBody:
+      type: object
+      required: [lease_id, fence]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        lease_id: { type: string, minLength: 1 }
+        fence: { type: string }
+        progress: { type: object }
+    ReleaseBody:
+      type: object
+      required: [lease_id, fence]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        lease_id: { type: string, minLength: 1 }
+        fence: { type: string }
+    HandoffBody:
+      type: object
+      required: [target_mode]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        target_mode: { type: string, enum: [A, B] }
+        target_actor_id: { type: string, minLength: 1 }
+        reason: { type: string, minLength: 1 }
+        include_pending_inputs: { type: boolean }
+    InterruptBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        reason: { type: string, minLength: 1 }
+        mode: { type: string, enum: [graceful] }
+    CancelBody:
+      type: object
+      required: [confirm]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        reason: { type: string, minLength: 1 }
+        confirm: { type: boolean, const: true }
+    ReceiptItem:
+      type: object
+      required: [input_version_id, state]
+      additionalProperties: false
+      properties:
+        input_version_id: { type: string, minLength: 1 }
+        state: { type: string, enum: [seen, applied, ignored] }
+        reason: { type: string }
+        applied_tx_id: { type: string }
+    InputReceiptsBody:
+      type: object
+      required: [lease_id, fence, receipts]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        lease_id: { type: string, minLength: 1 }
+        fence: { type: string }
+        receipts:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: "#/components/schemas/ReceiptItem" }
+    QuestionOption:
+      type: object
+      required: [value, label]
+      additionalProperties: false
+      properties:
+        value: { type: string, minLength: 1 }
+        label: { type: string }
+        recommended: { type: boolean }
+    QuestionSpec:
+      type: object
+      additionalProperties: false
+      properties:
+        text: { type: string, minLength: 1 }
+        type: { type: string, enum: [single, multi, text, textarea, number, scale, file] }
+        required: { type: boolean }
+        allow_comment_as_answer: { type: boolean }
+        default_value: {}
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionOption" }
+        show_if: {}
+        help: { type: [string, "null"] }
+        importance: { type: string, enum: [high, normal, low] }
+    QuestionPublishBody:
+      type: object
+      required: [stage_id, purpose, question]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        stage_id: { type: string, minLength: 1 }
+        round_id: { type: [string, "null"] }
+        purpose: { type: string, enum: [stage_start, review, resume] }
+        form_key: { type: string, minLength: 1 }
+        direction: { type: string, enum: [agent_to_human, human_to_agent] }
+        question: { $ref: "#/components/schemas/QuestionSpec" }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    QuestionReviseBody:
+      type: object
+      required: [base_version_id, question]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        question: { $ref: "#/components/schemas/QuestionSpec" }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    AnswerItem:
+      type: object
+      required: [question_id]
+      additionalProperties: false
+      properties:
+        question_id: { type: string, minLength: 1 }
+        question_version_id: { type: string, minLength: 1 }
+        value: {}
+        comment: { type: [string, "null"] }
+        used_default: { type: boolean }
+    SubmissionBody:
+      type: object
+      required: [set_id, answers]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        set_id: { type: string, minLength: 1 }
+        answers:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AnswerItem" }
+        submitted_via: { type: string }
+        client_request_id: { type: string }
+    RoundStartBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        purpose: { type: [string, "null"] }
+        base_stage_rev: { type: string }
+        question_set_id: { type: [string, "null"] }
+    RoundSealBody:
+      type: object
+      required: [manifest_blob_id, versions]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        manifest_blob_id: { type: string, minLength: 1 }
+        versions: { type: array }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+        snapshot_scope: { type: string, enum: [round] }
+        expected_round_rev: { type: string }
+    StageApproveBody:
+      type: object
+      required: [snapshot_id]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        snapshot_id: { type: string, minLength: 1 }
+        expected_stage_rev: { type: string }
+        confirm: { type: string, enum: [owner] }
+    StageReopenBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        reason: { type: string, minLength: 1 }
+        expected_stage_rev: { type: string }
+    PolicyRevisionBody:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        reason: { type: string, minLength: 1 }
+        allow_opencode_go: { type: boolean }
+        go_usage_stop_percent: { type: integer, minimum: 50, maximum: 100 }
+        mode_a_model: { type: string, minLength: 1 }
+        expected_policy_rev: { type: string }
 paths:
   /api/v1/capabilities:
     get:
@@ -546,3 +771,476 @@ paths:
         "404": { description: Unknown blob in this project }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
         "409": { description: Blob is not ready or stored bytes do not match }
+  /api/v1/project-registrations:
+    post:
+      summary: First registration of a project by device approval (owner session only); returns the first token once
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/changes:
+    get:
+      summary: Change feed after an opaque cursor (whole transactions, ascending event_seq)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "410": { description: Cursor expired; resync }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/operations/{op}:
+    get:
+      summary: Read an accepted (202) operation; the owner and the asker only
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/OperationId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "404": { description: Unknown project or target }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/requests/{key}:
+    get:
+      summary: Look up a finished request by its Idempotency-Key
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RequestKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "404": { description: Unknown project or target }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/inputs:
+    get:
+      summary: Answers to the run's own questions; long-poll with wait_ms (the response waits after the read, holding no transaction)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+      security: [{ agentToken: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/heartbeat:
+    post:
+      summary: Extend the lease (not the token)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HeartbeatBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/release:
+    post:
+      summary: Give the run back to the queue and drop the lease
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReleaseBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/handoffs:
+    post:
+      summary: Return the same run to the queue (lease holder or owner); no child run is made
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HandoffBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/interrupt:
+    post:
+      summary: Interrupt a running run; 202 means the database already changed
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterruptBody" }
+      responses:
+        "202":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/cancel:
+    post:
+      summary: Cancel a run (owner, or the run's own actor); 202 means the database already changed
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelBody" }
+      responses:
+        "202":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/runs/{r}/input-receipts:
+    post:
+      summary: Record seen/applied/ignored for 1-20 inputs, all or nothing
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InputReceiptsBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions:
+    post:
+      summary: Publish one question as a new question set
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionPublishBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/revisions:
+    post:
+      summary: Append a question version (earlier answers stay)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionReviseBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/submissions:
+    post:
+      summary: Submit answers and comments (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmissionBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/stages/{s}/rounds:
+    post:
+      summary: Start a round on a stage
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoundStartBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/rounds/{rd}/seal:
+    post:
+      summary: Seal a round (owner, or an agent holding the lease); sealing is not approving
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RoundId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoundSealBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/stages/{s}/approve:
+    post:
+      summary: Approve a sealed stage (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StageApproveBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/stages/{s}/reopen:
+    post:
+      summary: Reopen an approved stage (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StageReopenBody" }
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/policies/opencode-go/revisions:
+    post:
+      summary: Append an OpenCode Go policy revision (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PolicyRevisionBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }

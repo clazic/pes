@@ -30,6 +30,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_round_01J9Z3K7QN",
         "data": {
           "round": {
             "id": "rnd_01J9Z3K7Q5",
@@ -37,9 +38,6 @@
             "state": "open",
             "stage_id": "stg_01J9Z3K7Q4"
           }
-        },
-        "meta": {
-          "request_id": "req_round_01J9Z3K7QN"
         }
       }
     }

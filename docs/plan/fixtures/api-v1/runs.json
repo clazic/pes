@@ -16,7 +16,6 @@
         "Idempotency-Key": "idem_01J9Z3K7QM"
       },
       "body": {
-        "format_version": "1.0",
         "stage_id": "stg_01J9Z3K7Q4",
         "round_id": "rnd_01J9Z3K7Q5",
         "mode": "A",
@@ -35,6 +34,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_run_01J9Z3K7QN",
         "data": {
           "run": {
             "id": "run_01J9Z3K7Q6",
@@ -46,9 +46,6 @@
             "base_control_rev": "12",
             "created_at": 1762311600000
           }
-        },
-        "meta": {
-          "request_id": "req_run_01J9Z3K7QN"
         }
       }
     }
@@ -66,7 +63,6 @@
         "Idempotency-Key": "idem_run_blocked_01J9Z3K7Q2"
       },
       "body": {
-        "format_version": "1.0",
         "stage_id": "stg_01J9Z3K7Q4",
         "round_id": "rnd_01J9Z3K7Q5",
         "mode": "A",

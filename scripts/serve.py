@@ -32,6 +32,14 @@ DRAIN_LIMIT = 8 * 1024 * 1024
 DRAIN_CHUNK = 64 * 1024
 DRAIN_IO_TIMEOUT = 10
 NODE_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "api_bridge.ts"
+
+# 서버가 직접 내는 API 오류의 한국어 message 와 next_action (Node ApiApp 의 봉투와 같은 규칙).
+_API_ERROR_TEXT = {
+    "forbidden": ("이 요청은 허용되지 않습니다.", "use_owner_session"),
+    "payload_too_large": ("요청 본문이 너무 큽니다.", "fix_request"),
+    "internal_error": ("서버 안에서 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"),
+    "schema_not_ready": ("PES 데이터베이스가 아직 준비되지 않았습니다.", "migrate_database"),
+}
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 # feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
@@ -149,16 +157,19 @@ def main():
             self.end_headers()
 
         def _api_error(self, code, message, status, close=False):
+            # 봉투는 Node 쪽 ApiApp 과 같다: 한국어 message, retryable(503 만 true),
+            # next_action 은 늘 문자열. 영어 message 인자는 기록용이라 응답에 싣지 않는다.
+            ko, next_action = _API_ERROR_TEXT.get(code, _API_ERROR_TEXT["internal_error"])
             request_id = f"serve-{time.time_ns()}"
             return self._json(status, {
                 "format_version": "1.0",
                 "error": {
                     "code": code,
-                    "message": message,
-                    "retryable": False,
+                    "message": ko,
+                    "retryable": status == 503,
                     "target": None,
                     "details": None,
-                    "next_action": None,
+                    "next_action": next_action,
                 },
                 "request_id": request_id,
             }, close=close)

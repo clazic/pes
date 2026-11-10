@@ -69,16 +69,17 @@ function error_response(
   code: string,
   message: string,
   request_id: string,
+  next_action: string,
 ): BridgeOutput {
   const body = {
     format_version: FORMAT_VERSION,
     error: {
       code,
       message,
-      retryable: false,
+      retryable: status === 503,
       target: null,
       details: null,
-      next_action: null,
+      next_action: next_action,
     },
     request_id,
   };
@@ -118,8 +119,9 @@ async function main(): Promise<void> {
           error_response(
             503,
             "schema_not_ready",
-            "the PES database has not been migrated",
+            "PES 데이터베이스가 아직 마이그레이션되지 않았습니다.",
             request_id,
+            "migrate_database",
           ),
         ),
       );

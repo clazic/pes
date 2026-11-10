@@ -30,6 +30,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_edition_01J9Z3K7QN",
         "data": {
           "edition": {
             "id": "edt_01J9Z3K7QZ",
@@ -38,9 +39,6 @@
             "parent_edition_id": "edt_01J9Z3K7Q3"
           },
           "active_edition_id": "edt_01J9Z3K7Q3"
-        },
-        "meta": {
-          "request_id": "req_edition_01J9Z3K7QN"
         }
       }
     }

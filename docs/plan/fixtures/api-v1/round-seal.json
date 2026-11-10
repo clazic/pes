@@ -29,6 +29,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_seal_01J9Z3K7QN",
         "data": {
           "round": {
             "id": "rnd_01J9Z3K7Q5",
@@ -36,9 +37,6 @@
             "sealed_snapshot_id": "snp_01J9Z3K7Q2",
             "through_event_seq": "50"
           }
-        },
-        "meta": {
-          "request_id": "req_seal_01J9Z3K7QN"
         }
       }
     }

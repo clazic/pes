@@ -15,7 +15,6 @@
         "Idempotency-Key": "idem_upload_01J9Z3K7Q2"
       },
       "body": {
-        "format_version": "1.0",
         "filename": "synthetic-figure.png",
         "media_type": "image/png",
         "size_bytes": 12345,
@@ -29,16 +28,11 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_upload_01J9Z3K7QN",
         "data": {
-          "upload": {
-            "id": "upl_01J9Z3K7QG",
-            "state": "staging",
-            "put_url": "/api/v1/uploads/upl_01J9Z3K7QG",
-            "expires_at": 1762312300000
-          }
-        },
-        "meta": {
-          "request_id": "req_upload_01J9Z3K7QN"
+          "blob_id": "blb_01J9Z3K7QG",
+          "state": "staging",
+          "deduplicated": false
         }
       }
     }
@@ -54,7 +48,6 @@
         "Content-Type": "application/json"
       },
       "body": {
-        "format_version": "1.0",
         "filename": "synthetic-large.bin",
         "media_type": "application/octet-stream",
         "size_bytes": 52428800,

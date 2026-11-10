@@ -29,6 +29,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_apply_01J9Z3K7QN",
         "data": {
           "followup": {
             "id": "fup_01J9Z3K7QJ",
@@ -40,9 +41,6 @@
             "id": "thr_01J9Z3K7QH",
             "state": "resolved"
           }
-        },
-        "meta": {
-          "request_id": "req_apply_01J9Z3K7QN"
         }
       }
     }
