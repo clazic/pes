@@ -485,9 +485,19 @@ test("report: 쓰기는 PR9 경계(content.append_version 과 file.reserve_uploa
     const added = c.commits_since(n);
     const actions = added.map((m) => m.action);
     // 영수증 action 은 명령 이름이 아니라 definition.action(사건 이름)이다: content.append_version → content.version_appended 등.
-    for (const want of ["content.version_appended", "file.upload_reserved", "file.upload_completed", "file.version_attached"]) {
+    // 첫 실행은 report artifact 를 만든다(content.artifact_added, 버전 1개 — 첫 report 시험과 같은 계약).
+    for (const want of ["content.artifact_added", "file.upload_reserved", "file.upload_completed", "file.version_attached"]) {
       assert.ok(actions.includes(want), `${want} 영수증: [${actions}]`);
     }
+    // 두 번째 실행은 같은 객체에 새 버전을 쌓는다(content.version_appended) — 덮어쓰기 없음.
+    const n2 = c.commits().length;
+    ok(run_py(c, ["report", SLUG, "plan"]), "report 2");
+    const again = c.commits_since(n2).map((m) => m.action);
+    for (const want of ["content.version_appended", "file.upload_reserved", "file.upload_completed", "file.version_attached"]) {
+      assert.ok(again.includes(want), `두 번째 실행 ${want} 영수증: [${again}]`);
+    }
+    assert.ok(!again.includes("content.artifact_added"), `두 번째 실행은 새 객체를 만들지 않는다: [${again}]`);
+    assert.ok(again.every((a) => a.startsWith("content.") || a.startsWith("file.")), `report 는 content.*·file.* 만 쓴다: [${again}]`);
     assert.ok(actions.every((a) => a.startsWith("content.") || a.startsWith("file.")), `report 는 content.*·file.* 만 쓴다: [${actions}]`);
     assert.ok(added.every((m) => m.via === "cli" && m.actor_id === c.env.p.actor_id), "사람 소유자의 cli 영수증");
     const blobs = c.env.db.all<{ state: string }>("SELECT state FROM blobs WHERE project_id = ? AND original_name IN ('report.md','report.html')", c.env.p.project_id);
