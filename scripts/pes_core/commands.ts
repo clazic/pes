@@ -12,6 +12,7 @@
 // There is no table CRUD and no arbitrary SQL command in the registry.
 
 import { createHash } from "node:crypto";
+import { isAbsolute, resolve } from "node:path";
 
 import type { Clock } from "./clock.ts";
 import { resolve_run_config, type RunConfig } from "./config.ts";
@@ -100,6 +101,12 @@ export interface CommandServiceOptions {
   new_id?: () => string;
   /** Run/lease timing; omitted -> resolve_run_config() defaults (no env read here). */
   run_config?: RunConfig;
+  /**
+   * Absolute objects folder for commands that read stored bytes (PR9). A
+   * service without one still runs every other command; file.complete_upload
+   * fails closed instead of trusting caller-supplied hashes.
+   */
+  objects_dir?: string;
 }
 
 export interface CommandOutcome {
@@ -245,6 +252,15 @@ function checked_now_ms(clock: Clock): number {
     throw new TypeError("clock.now_ms() must return a non-negative safe integer");
   }
   return value;
+}
+
+/** An injected objects folder must already be an absolute path; it is resolved once. */
+function checked_objects_dir(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || value.length === 0 || !isAbsolute(value)) {
+    throw new TypeError("objects_dir must be an absolute path");
+  }
+  return resolve(value);
 }
 
 function result_project_id(result: unknown): string {
@@ -565,6 +581,7 @@ export class CommandService {
   readonly #policy: PolicyChecker;
   readonly #new_id: () => string;
   readonly #run_config: RunConfig;
+  readonly #objects_dir: string | null;
 
   constructor(db: Db, options: CommandServiceOptions) {
     this.#db = db;
@@ -574,6 +591,22 @@ export class CommandService {
     // Validate and copy the injected timing once. The service never reads the
     // ambient environment; a composition point resolves env explicitly.
     this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
+    this.#objects_dir = checked_objects_dir(options.objects_dir);
+  }
+
+  /**
+   * The same database, clock, policy and run configuration with an object
+   * store attached. Public file wrappers use this so the command itself reads
+   * the stored bytes; a service created without a store fails closed.
+   */
+  with_object_store(objects_dir: string): CommandService {
+    return new CommandService(this.#db, {
+      clock: this.#clock,
+      policy: this.#policy,
+      new_id: this.#new_id,
+      run_config: this.#run_config,
+      objects_dir,
+    });
   }
 
   /**
@@ -667,6 +700,7 @@ export class CommandService {
       project,
       actor_id,
       run_config: this.#run_config,
+      objects_dir: this.#objects_dir,
     };
     const outcome = definition.run(runtime);
     write_events(runtime, project?.id ?? result_project_id(outcome.result), outcome.events);

@@ -38,6 +38,11 @@ export interface CommandRuntime {
   project: ProjectRow | null;
   actor_id: string | null;
   run_config: RunConfig;
+  /**
+   * Absolute objects folder when the caller attached a store, or null. File
+   * commands that need stored bytes fail closed when it is null.
+   */
+  objects_dir: string | null;
 }
 
 export interface EventDraft {

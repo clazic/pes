@@ -8,8 +8,9 @@
 // Rules that matter here:
 // - A blob id is the only public handle. Storage keys, absolute paths and
 //   signed URLs are never accepted in its place and never leave this module.
-// - complete_upload re-reads the stored bytes and hashes them; the declared
-//   sha256/size in the database are only compared, never trusted.
+// - complete_upload attaches the object store to the command, which re-reads
+//   the stored bytes and compares their measured sha256/size with the
+//   reservation; the caller's numbers are not proof.
 // - store_blob only writes a staging blob of the same project, derives the
 //   path from the database storage_key, and refuses every symlink or escape.
 // - gc_orphans deletes rows in one transaction and removes bytes only after it
@@ -256,13 +257,15 @@ export function storage_file_is_regular(
 
 /** Every regular file below this project's folder, without following symlinks. */
 export function scan_project_files(objects_dir: string, project_id: string): ProjectFile[] {
-  let project_dir: string;
+  let root: string;
   try {
-    const root = resolve_objects_dir(objects_dir);
-    project_dir = join(root, project_id);
+    root = resolve_objects_dir(objects_dir);
   } catch {
     return [];
   }
+  const root_stat = lstat_or_undefined(root);
+  if (root_stat === undefined || root_stat.isSymbolicLink() || !root_stat.isDirectory()) return [];
+  const project_dir = join(root, project_id);
   const stat = lstat_or_undefined(project_dir);
   if (stat === undefined || stat.isSymbolicLink() || !stat.isDirectory()) return [];
 
@@ -295,12 +298,23 @@ export function scan_project_files(objects_dir: string, project_id: string): Pro
   return files;
 }
 
-/** Remove one file returned by scan_project_files if it is still a regular file. */
-export function delete_project_file(file: ProjectFile): void {
+/**
+ * Remove one file returned by scan_project_files. The objects root, the
+ * project folder and every intermediate directory are re-checked with lstat
+ * so a symlink that appeared after the scan is never followed.
+ */
+export function delete_project_file(
+  objects_dir: string,
+  project_id: string,
+  file: ProjectFile,
+): void {
+  if (!storage_file_is_regular(objects_dir, project_id, file.key)) return;
   try {
-    const stat = lstatSync(file.path);
+    const root = resolve_objects_dir(objects_dir);
+    const target = join(root, ...file.key.split("/"));
+    const stat = lstatSync(target);
     if (stat.isSymbolicLink() || !stat.isFile()) return;
-    rmSync(file.path, { force: true });
+    rmSync(target, { force: true });
   } catch {
     // Best effort; the next gc reconciles the DB and the disk.
   }
@@ -372,8 +386,9 @@ export function reserve_upload(
 }
 
 /**
- * Read the stored bytes, measure them again, and hand the measurement to the
- * single complete_upload transaction. The caller's numbers are never used.
+ * Run complete_upload with the command's own object store attached. The
+ * command re-reads and measures the stored bytes, so a caller cannot make a
+ * blob ready by supplying its own hash or size.
  */
 export async function complete_upload(
   service: CommandService,
@@ -381,32 +396,10 @@ export async function complete_upload(
   ctx: MutationContext,
   input: unknown,
 ): Promise<CommandOutcome> {
-  const project_id = context_project(ctx);
   const blob_id = complete_input(input);
-  const row = store.db.get<Pick<BlobRow, "sha256" | "size" | "storage_key" | "state">>(
-    "SELECT sha256, size, storage_key, state FROM blobs WHERE project_id = ? AND id = ?",
-    project_id,
-    blob_id,
-  );
-  if (row === undefined) not_found("blob not found");
-
-  let observed_sha256: string;
-  let observed_size: number;
-  if (row.state === "staging") {
-    const bytes = read_storage_bytes(store.objects_dir, project_id, row.storage_key);
-    observed_sha256 = sha256_hex(bytes);
-    observed_size = bytes.byteLength;
-  } else {
-    // A ready blob was once completed with exactly its declared values, so
-    // replaying the same request uses them without opening the file again.
-    observed_sha256 = row.sha256;
-    observed_size = Number(row.size);
-  }
-  return service.execute(ctx, "file.complete_upload", {
-    blob_id,
-    sha256: observed_sha256,
-    size: observed_size,
-  });
+  return service
+    .with_object_store(store.objects_dir)
+    .execute(ctx, "file.complete_upload", { blob_id });
 }
 
 export function attach_version(
@@ -484,7 +477,7 @@ export async function gc_orphans(
   }
   for (const file of scan_project_files(objects_dir, project_id)) {
     if (claimed.has(file.key)) continue;
-    if (now_ms - file.mtime_ms > grace_ms) delete_project_file(file);
+    if (now_ms - file.mtime_ms > grace_ms) delete_project_file(objects_dir, project_id, file);
   }
   return outcome;
 }

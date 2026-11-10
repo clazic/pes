@@ -9,8 +9,9 @@
 // Rules:
 // - storage_key is computed here from the project id and sha256; a caller never
 //   supplies a path, URL or key.
-// - A blob moves staging -> ready only after the public wrapper has re-read the
-//   stored bytes and measured them. A mismatch quarantines it instead.
+// - A blob moves staging -> ready only after the command has re-read the
+//   stored bytes from its injected object store and measured them. A mismatch
+//   quarantines it instead, and a command without a store fails closed.
 // - The same (project, sha256, size) is one blobs row; lineage stays in
 //   version_files, one row per (version, blob, role).
 // - A linked ready blob is never quarantined or deleted. Orphan/quarantined
@@ -25,8 +26,10 @@ import { isAbsolute } from "node:path";
 
 import { ApiError } from "../errors.ts";
 import {
+  read_storage_bytes,
   require_safe_id,
   scan_project_files,
+  sha256_hex,
   storage_file_is_regular,
 } from "../files.ts";
 import {
@@ -89,6 +92,23 @@ function require_sha256(payload: Record<string, unknown>): string {
     return invalid("sha256 must be 64 lowercase hexadecimal characters");
   }
   return value;
+}
+
+/** An optional caller claim. It can only force quarantine, never make a blob ready. */
+function optional_sha256(payload: Record<string, unknown>): string | null {
+  const value = payload.sha256;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !SHA256_HEX.test(value)) {
+    return invalid("sha256 must be 64 lowercase hexadecimal characters");
+  }
+  return value;
+}
+
+/** An optional caller claim, checked the same way as optional_sha256. */
+function optional_size(payload: Record<string, unknown>): number | null {
+  const value = payload.size;
+  if (value === undefined || value === null) return null;
+  return require_size(value, "size");
 }
 
 function require_size(value: unknown, field: string): number {
@@ -213,26 +233,14 @@ function run_reserve_upload(runtime: CommandRuntime): CommandResult {
 // ---------------------------------------------------------------------------
 // file.complete_upload
 
-function run_complete_upload(runtime: CommandRuntime): CommandResult {
-  const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, COMPLETE_FIELDS);
-  const blob_id = require_blob_id(payload);
-  const observed_sha256 = require_sha256(payload);
-  const observed_size = require_size(payload.size, "size");
-  const scope = scope_of(runtime);
-
-  const blob = read_blob(runtime, scope.project_id, blob_id);
-  if (blob === undefined) {
-    throw new ApiError("not_found", "blob not found");
-  }
-  if (blob.state !== "staging") {
-    throw new ApiError("conflict", "the blob is not staging");
-  }
-
-  const matches = blob.sha256 === observed_sha256 && Number(blob.size) === observed_size;
-  const next_state = matches ? "ready" : "quarantined";
+function write_complete_state(
+  runtime: CommandRuntime,
+  scope: FileScope,
+  blob_id: string,
+  next_state: "ready" | "quarantined",
+  reason: string | null,
+): CommandResult {
   const result = { project_id: scope.project_id, blob_id, state: next_state };
-
   insert_receipt(runtime, {
     project_id: scope.project_id,
     actor_id: scope.actor_id,
@@ -254,18 +262,63 @@ function run_complete_upload(runtime: CommandRuntime): CommandResult {
     result,
     events: [
       {
-        type: matches ? "file.upload_completed" : "file.upload_quarantined",
-        payload: {
-          blob_id,
-          state: next_state,
-          declared_sha256: blob.sha256,
-          declared_size: Number(blob.size),
-          observed_sha256,
-          observed_size,
-        },
+        type: next_state === "ready" ? "file.upload_completed" : "file.upload_quarantined",
+        payload:
+          reason === null
+            ? { blob_id, state: next_state }
+            : { blob_id, state: next_state, reason },
       },
     ],
   };
+}
+
+function run_complete_upload(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, COMPLETE_FIELDS);
+  const blob_id = require_blob_id(payload);
+  const claimed_sha256 = optional_sha256(payload);
+  const claimed_size = optional_size(payload);
+  const scope = scope_of(runtime);
+
+  const blob = read_blob(runtime, scope.project_id, blob_id);
+  if (blob === undefined) {
+    throw new ApiError("not_found", "blob not found");
+  }
+  if (blob.state !== "staging") {
+    throw new ApiError("conflict", "the blob is not staging");
+  }
+
+  // A caller-supplied hash or size is an untrusted claim. It can only force
+  // quarantine; stored bytes are still measured below before anything is ready.
+  if (
+    (claimed_sha256 !== null && claimed_sha256 !== blob.sha256) ||
+    (claimed_size !== null && claimed_size !== Number(blob.size))
+  ) {
+    return write_complete_state(runtime, scope, blob_id, "quarantined", "claim_mismatch");
+  }
+
+  const objects_dir = runtime.objects_dir;
+  if (objects_dir === null) {
+    // Fail closed: without the store the command cannot verify the bytes, so it
+    // must not let a caller's numbers make the blob ready.
+    throw new ApiError("conflict", "no object store is configured for file.complete_upload");
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = read_storage_bytes(objects_dir, scope.project_id, blob.storage_key);
+  } catch {
+    throw new ApiError("conflict", "the stored bytes of the blob are not readable");
+  }
+  const observed_sha256 = sha256_hex(bytes);
+  const observed_size = bytes.byteLength;
+  const matches = observed_sha256 === blob.sha256 && observed_size === Number(blob.size);
+  return write_complete_state(
+    runtime,
+    scope,
+    blob_id,
+    matches ? "ready" : "quarantined",
+    matches ? null : "stored_bytes_mismatch",
+  );
 }
 
 // ---------------------------------------------------------------------------
