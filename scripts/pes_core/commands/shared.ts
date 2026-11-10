@@ -135,6 +135,52 @@ export function assert_single_read_statement(sql: unknown): void {
   if (!/^(select|with)(?![A-Za-z0-9_$])/i.test(trimmed)) {
     throw new Error("the policy checker handle accepts only SELECT/WITH statements");
   }
+  if (/^with(?![A-Za-z0-9_$])/i.test(trimmed)) {
+    assert_with_ends_in_select(trimmed);
+  }
+}
+
+/**
+ * A WITH statement is read-only only when the statement after the CTE list is
+ * a SELECT. Walk the text at parenthesis depth 0: the first
+ * SELECT/INSERT/UPDATE/DELETE/REPLACE/VALUES keyword there is the final one.
+ */
+function assert_with_ends_in_select(code: string): void {
+  let depth = 0;
+  const word = /[A-Za-z_][A-Za-z0-9_$]*/y;
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === "(") {
+      depth += 1;
+      i += 1;
+    } else if (ch === ")") {
+      depth -= 1;
+      i += 1;
+    } else if (/[A-Za-z_]/.test(ch)) {
+      word.lastIndex = i;
+      const match = word.exec(code);
+      const text = (match === null ? ch : match[0]).toLowerCase();
+      i += text.length;
+      if (depth === 0 && ["select", "insert", "update", "delete", "replace", "values"].includes(text)) {
+        if (text !== "select") {
+          throw new Error("a WITH statement must end in a SELECT for the policy checker handle");
+        }
+        return;
+      }
+    } else {
+      i += 1;
+    }
+  }
+  throw new Error("a WITH statement must end in a SELECT for the policy checker handle");
+}
+
+function restore_query_only(db: Db, previous: bigint): void {
+  try {
+    db.exec(`PRAGMA query_only = ${previous === 0n ? "OFF" : "ON"}`);
+  } catch {
+    // nothing more can be done; the next command re-checks the guard
+  }
 }
 
 export interface ReadonlyDbHandle extends Pick<Db, "get" | "all"> {}
@@ -160,23 +206,36 @@ export function with_readonly_db<T>(db: Db, fn: (handle: ReadonlyDbHandle) => T)
       guarded(sql, () => db.all<R>(sql, ...params)),
   });
 
-  let previous: bigint | null = null;
+  // Fail closed: the statement check alone is not read-only (WITH ... UPDATE
+  // was once let through), so the checker never runs unless query_only can be
+  // read, set, and read back as ON.
+  const unavailable = (): never => {
+    throw new ApiError("policy_denied", "the read-only database guard is not available");
+  };
+  let previous: bigint;
   try {
-    const row = db.get<{ query_only: bigint }>("PRAGMA query_only");
-    previous = row === undefined ? null : BigInt(row.query_only);
+    const row = db.get<{ query_only: bigint | number }>("PRAGMA query_only");
+    if (row === undefined) return unavailable();
+    previous = BigInt(row.query_only);
   } catch {
-    previous = null; // not a SQLite connection: the statement check still applies
+    return unavailable();
   }
-  if (previous !== null) {
+  let engaged = false;
+  try {
     db.exec("PRAGMA query_only = ON");
+    engaged = true;
+    const after = db.get<{ query_only: bigint | number }>("PRAGMA query_only");
+    if (after === undefined || BigInt(after.query_only) !== 1n) return unavailable();
+  } catch {
+    open = false;
+    if (engaged || previous === 0n) restore_query_only(db, previous);
+    return unavailable();
   }
   try {
     return fn(handle);
   } finally {
     open = false;
-    if (previous !== null) {
-      db.exec(`PRAGMA query_only = ${previous === 0n ? "OFF" : "ON"}`);
-    }
+    restore_query_only(db, previous);
   }
 }
 
