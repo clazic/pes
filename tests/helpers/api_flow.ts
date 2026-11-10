@@ -174,3 +174,40 @@ export function doc_operations(): Array<{ operation: string; route: string }> {
   }
   return out;
 }
+
+/**
+ * DOCUMENT FIXES FOR THE IMPLEMENTER (leader decision on D1~D12): the merged PR13 routes and the merged core
+ * are the reference. Where docs/plan/fixtures/api-v1 or its README disagree, the implementer edits the
+ * DOCUMENTS in this PR (the tests were never changed to follow them). Listed file by file:
+ *
+ *  D1  README.md 2절 1번 (success envelope)            {format_version, data, meta:{request_id}}
+ *        -> {format_version, request_id, data, replayed?}  (request_id at the top level, like errors;
+ *        `replayed` only on POST). In EVERY *.json: `normal.response.body.meta.request_id` -> top-level
+ *        `request_id`, drop `meta`; `replay.response` likewise (results.json). README section 1 example too.
+ *  D2  README.md 2절 5번 and 3절 table                 `idempotency_key_reused` -> `idempotency_key_reuse`.
+ *  D3  capabilities.json error: code `unauthorized` -> `unauthenticated`, target/next_action kept. context.json
+ *        error `project_not_found` -> `not_found`; versions.json error `version_not_found` -> `not_found`
+ *        (also the README 3절 table cells for capability·context·versions). capabilities.json `auth`: `any`
+ *        stays, and its `error` example (401) is removed (capabilities is open; no credential is needed).
+ *  D5  claims.json normal status 201 -> 200 (POST P/claims is 200, `run_id` + `lease` + `replayed`);
+ *        results.json normal status 201 -> 200 and its replay status 200; wait.json error `not_lease_holder`
+ *        -> `conflict` (details kept); claims.json error `lease_held` -> `conflict` (retryable false,
+ *        next_action stays `retry_after_lease` only if the implementation keeps details.retry_after_ms);
+ *        complete.json / cancel.json error `run_terminal` stays for cancel/interrupt (PR14) and becomes
+ *        `conflict` for complete (PR13). Request bodies: README 2절 2번 text "format_version in bodies" ->
+ *        PR13 routes reject unknown fields, so remove `format_version` from the PR13 request examples
+ *        (claims, results, wait, complete, runs, uploads, uploads-complete) and from README 1절's example;
+ *        PR14 routes (this PR) accept an optional `"format_version": "1.0"`, any other value is 400.
+ *  D6  uploads-put.json: path `PUT /api/v1/uploads/{upload_id}` (+auth upload_token) ->
+ *        `PUT /api/v1/projects/{project_id}/uploads/{blob_id}` with the agent/owner credential; uploads.json
+ *        response `upload.put_url` -> the PR13 reserve answer (blob_id, state, deduplicated); README 2절 8번 text
+ *        and 3절 table row for uploads.
+ *  D9  handoffs.json normal.response: 201 {parent_run_id,new_run_id,...} -> 200 {run_id, status:"queued",
+ *        lease:{released:true, fence}, pending_input_count, target_mode, target_actor_id}; request body
+ *        {target_mode, target_actor_id, reason, include_pending_inputs} stays; the error example stays.
+ *  (D4, D7, D8, D10, D11, D12 need no document edit besides what the tests already follow: D7 questions.json
+ *   types are the core's `single` ... and `comment` maps to the core `other`; D8 round-seal.json request gains
+ *   `manifest_blob_id` + `versions` beside expected_round_rev/snapshot_scope; D10 stage-1-api.md 6절 row
+ *   "답·의견 제출" says E cannot submit; D11 interrupt.json normal.response gains nothing; D12 none.)
+ */
+export const DOCUMENT_FIXES_FOR_IMPLEMENTER = "see the comment above";

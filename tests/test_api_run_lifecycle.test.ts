@@ -16,8 +16,9 @@
  *        the owner session (a human may hand off any run; that is the "forced" case). Anyone else: 403
  *        `forbidden`, target "$.path.run_id", next_action "use_current_holder", details {allowed:
  *        "current_lease_holder_or_owner", actor_id}.
- *        -> 201 {parent_run_id, new_run_id, status:"queued", lease:{released:true, fence}, pending_input_count}
- *        (a NEW run whose parent_run_id is the old one; the old lease is gone). `/handoff` singular is 404.
+ *        -> 200 {run_id, status:"queued", lease:{released:true, fence}, pending_input_count, target_mode,
+ *        target_actor_id|null}: the core run.handoff — the SAME run goes back to the queue, no child run is
+ *        made (no new_run_id / parent_run_id) and the old lease is gone. `/handoff` singular is 404.
  *     POST P/runs/{r}/interrupt   {reason?, mode?:"graceful"}   -> 202
  *        {operation_id, run_id, state:"pending", accepted:true}
  *     POST P/runs/{r}/cancel      {reason?, confirm: true}      -> 202
@@ -46,6 +47,8 @@
  *        403 `input_not_visible` (target "$.body.receipts[i].input_version_id", next_action
  *        "check_run_targets", details {run_id, reason:"not_in_run_targets"}); applied without applied_tx_id is 400;
  *        a stale lease is 409 `lease_lost`.
+ *
+ * Document edits the implementer must make (D1~D12): see DOCUMENT_FIXES_FOR_IMPLEMENTER in tests/helpers/api_flow.ts.
  *
  * The 429/min-interval rules are in test_api_errors_capabilities.test.ts; everything here keeps the fake
  * clock moving past the poll gap announced by capabilities (limits.min_poll_interval_ms).
@@ -206,7 +209,7 @@ test("release returns the run to the queue and drops the lease; the old lease is
   });
 });
 
-test("handoffs: the holder or the owner creates a child run (201); anyone else is 403; singular /handoff is not a route", async () => {
+test("handoffs: the holder or the owner returns the same run to the queue (200); anyone else is 403; singular /handoff is not a route", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "hander");
     const target = await make_agent(env, "handee");
@@ -227,26 +230,27 @@ test("handoffs: the holder or the owner creates a child run (201); anyone else i
     assert_final_error(await call(env, { method: "POST", path, body }), 401, "unauthenticated");
     assert.equal(state_signature(env.db), sig);
 
-    const handed = assert_ok(await call(env, { method: "POST", path, auth: { token: agent.token }, body }), 201);
-    assert.equal(handed.parent_run_id, lease.run_id);
-    assert.equal(typeof handed.new_run_id, "string");
-    assert.notEqual(handed.new_run_id, lease.run_id);
+    const runs_before = table_counts(env.db).runs;
+    const handed = assert_ok(await call(env, { method: "POST", path, auth: { token: agent.token }, body }), 200);
+    assert.equal(handed.run_id, lease.run_id);
     assert.equal(handed.status, "queued");
     assert.equal(handed.lease.released, true);
     assert.equal(handed.lease.fence, lease.fence);
     assert.ok(Number.isSafeInteger(handed.pending_input_count) && handed.pending_input_count >= 0);
-    const child = env.db.get<{ parent_run_id: string; status: string; actor_id: string }>("SELECT parent_run_id, status, actor_id FROM runs WHERE id = ?", handed.new_run_id);
-    assert.equal(child?.parent_run_id, lease.run_id);
-    assert.equal(child?.status, "queued");
-    assert.equal(child?.actor_id, target.actor_id);
-    assert.notEqual(env.db.get<{ status: string }>("SELECT status FROM runs WHERE id = ?", lease.run_id)?.status, "running");
+    assert.equal(handed.target_mode, "B");
+    assert.equal(handed.target_actor_id, target.actor_id);
+    assert.equal(handed.new_run_id, undefined);
+    assert.equal(handed.parent_run_id, undefined);
+    assert.equal(table_counts(env.db).runs, runs_before, "no child run is made");
+    assert.equal(env.db.get<{ status: string }>("SELECT status FROM runs WHERE id = ?", lease.run_id)?.status, "queued");
     assert.equal(assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: "owner" })).lease, null);
     assert_final_error(await call(env, { method: "POST", path: P(env, `/runs/${lease.run_id}/heartbeat`), auth: { token: agent.token }, body: guard(lease) }), 409, "lease_lost");
 
     // The owner (a human) may hand off a run that another agent holds.
     const held = await agent_claims(env, target);
-    const forced = assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${held.run_id}/handoffs`), auth: "owner", body: { target_mode: "B", target_actor_id: agent.actor_id, reason: "합성 강제 인계" } }), 201);
-    assert.equal(forced.parent_run_id, held.run_id);
+    const forced = assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${held.run_id}/handoffs`), auth: "owner", body: { target_mode: "B", target_actor_id: agent.actor_id, reason: "합성 강제 인계" } }), 200);
+    assert.equal(forced.run_id, held.run_id);
+    assert.equal(forced.status, "queued");
     assert.equal(assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: "owner" })).lease, null);
   });
 });
