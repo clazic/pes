@@ -339,6 +339,9 @@ export function build_project_view(
       const value = get(field);
       if (value !== undefined && value !== null && value !== "") item[field] = value;
     }
+    // written by a DB-path merge (an imported item's reuse/user_links stay where the importer put them)
+    if (meta.reuse !== undefined && meta.reuse !== null && meta.reuse !== "") item.reuse = meta.reuse;
+    if (Array.isArray(meta.user_links)) item.user_links = meta.user_links;
     const open = meta.open_questions;
     if (Array.isArray(open) && stage_key !== null) {
       const list = suggestions.get(stage_key) ?? [];

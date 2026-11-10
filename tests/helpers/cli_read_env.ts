@@ -71,6 +71,8 @@ export interface RunOptions {
   extra?: Record<string, string | undefined>;
   cwd?: string;
   timeout?: number;
+  /** Text sent to the child's stdin (UTF-8). Default: nothing. */
+  input?: string;
   /** Exact PATH for the child. `doctor` defaults to doctor_path() (a narrow PATH, see below) unless this is given. */
   path?: string;
 }
@@ -136,6 +138,7 @@ export function run_py(c: HomeLike, args: string[], opts: RunOptions = {}): CliR
     cwd: opts.cwd ?? c.env.home.root,
     encoding: "utf8",
     timeout: opts.timeout ?? 60_000,
+    ...(opts.input !== undefined ? { input: opts.input } : {}),
   });
   if (result.error !== undefined) throw result.error;
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };

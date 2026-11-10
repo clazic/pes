@@ -81,7 +81,9 @@ test("4.3 배정표: 쓰기 19 + 읽기 13 = 32, pes.py CMDS와 같고 새 5개�
   const source = readFileSync(PES_PY, "utf8");
   const block = source.slice(source.indexOf("CMDS = {"), source.indexOf("def main("));
   const cmds = [...block.matchAll(/"([a-z-]+)":\s*cmd_/g)].map((m) => m[1]!).sort();
-  assert.deepEqual(cmds, [...WRITE_19, ...READ_13, ...NEW_5].sort(), "CMDS는 32개 + context·claim·submit·wait·complete");
+  // PR17(SEL-50): 스킬의 project.json 직접 편집을 대체하는 화이트리스트 쓰기 명령 set 이 더해진다(4.3 표의 PR15·16 칸 밖).
+  const PR17_ADDED = ["set"];
+  assert.deepEqual(cmds, [...WRITE_19, ...READ_13, ...NEW_5, ...PR17_ADDED].sort(), "CMDS는 32개 + context·claim·submit·wait·complete + PR17 set");
   // 읽기 13개는 PR16 몫: 이 PR의 영수증 표에 없다.
   for (const name of READ_13) assert.equal(RECEIPT[name], undefined, `${name}은 PR16 몫`);
 });

@@ -162,13 +162,15 @@ def test_merge_assigns_item_id_when_result_has_none(cli, tmp_path):
     assert items[1]["title"] == "번호 없는 항목"
 
 
-def test_merge_does_not_copy_plan_only_reuse_field(cli, tmp_path):
+def test_merge_keeps_plan_reuse_field(cli, tmp_path):
+    # PR17(SEL-50): 스킬이 project.json 을 직접 고치지 않고 merge 로 넘기므로, merge 가 reuse 를 보존해야
+    # approve plan 의 library 재사용이 산다(1차 리뷰 필수 2, leader 결정). 예전에는 버리는 동작을 고정했었다.
     project = _init(cli, tmp_path)
     _merge(cli, tmp_path, project, "plan", [
         {"id": 1, "title": "주제", "kind": "topic", "reuse": 5},
     ], name="reuse")
     item = _project_json(project)["stages"]["plan"]["items"][0]
-    assert "reuse" not in item
+    assert item.get("reuse") == 5
 
 
 def test_merge_write_section_preserves_source_order(cli, tmp_path):

@@ -620,7 +620,7 @@ async function hand_over_plan(
   auth: Auth,
   plan: StageInfo,
   snapshot_id: string,
-): Promise<number> {
+): Promise<{ made: number; reused: number }> {
   const research = s.stage(project, "research");
   const topics = s.db.all<{
     title: string;
@@ -653,49 +653,110 @@ async function hand_over_plan(
     research.id,
   );
   for (const row of existing) {
-    const links = (parse_json_field(row.metadata_json, {}) as Record<string, unknown>).links;
+    const row_meta = parse_json_field(row.metadata_json, {}) as Record<string, unknown>;
+    const links = row_meta.links ?? (is_record(row_meta.legacy_extra) ? row_meta.legacy_extra.links : undefined);
     const from_plan = is_record(links) ? links.plan : undefined;
     if (Array.isArray(from_plan)) for (const id of from_plan) linked.add(String(id));
   }
   let next_id = max_legacy_id(s, project, research);
   let made = 0;
+  let reused = 0;
   for (const topic of topics) {
     if (topic.status === "removed") continue;
     const meta = parse_json_field(topic.metadata_json, {}) as Record<string, unknown>;
+    // An item merged here keeps legacy_id/legacy_kind/links/reuse in metadata; one imported from a
+    // v0.15 file keeps them in legacy_extra (legacy_id, kind_original, links, reuse_original).
+    const extra: Record<string, unknown> = is_record(meta.legacy_extra) ? meta.legacy_extra : {};
+    const topic_id = meta.legacy_id ?? extra.legacy_id;
     // The old rule looked at the item's own kind: only a plan item given as "topic".
-    if (meta.legacy_kind !== "topic") continue;
-    if (meta.legacy_id === undefined || meta.legacy_id === null || linked.has(String(meta.legacy_id))) continue;
-    const topic_links = is_record(meta.links) && Array.isArray(meta.links.plan) ? meta.links.plan : [];
+    if ((meta.legacy_kind ?? extra.kind_original) !== "topic") continue;
+    if (topic_id === undefined || topic_id === null || linked.has(String(topic_id))) continue;
+    const own_links = meta.links ?? extra.links;
+    const topic_links = is_record(own_links) && Array.isArray(own_links.plan) ? own_links.plan : [];
+    // reuse = an imported library item's id: the new research item carries its content and is to be completed (deepen).
+    const reuse = meta.reuse !== undefined && meta.reuse !== null && meta.reuse !== "" ? meta.reuse : extra.reuse_original;
+    const lib = find_library_item(s, project, reuse);
     next_id += 1;
     const created = await create_object(s.service, s.ctx(project, auth), {
       kind: "artifact",
       edition_id: research.edition_id,
     });
-    await add_artifact(s.service, s.ctx(project, auth), {
+    const links: Record<string, unknown[]> = {
+      plan: [topic_id, ...topic_links.filter((id) => String(id) !== String(topic_id))],
+    };
+    const metadata: Record<string, unknown> = { legacy_id: next_id, legacy_kind: "topic", depth: 0, stage: "research", links };
+    if (lib !== undefined) {
+      reused += 1;
+      links.library = [reuse];
+      metadata.request =
+        `기존 조사(라이브러리 #${String(reuse)}) 재사용 — 기획의 조사 질문에 맞게 보완하고, ` +
+        "원문 미확인 출처와 충돌(⚠)은 다시 확인";
+      const lib_extra = (parse_json_field(lib.metadata_json, {}) as Record<string, unknown>).legacy_extra;
+      if (is_record(lib_extra) && Array.isArray(lib_extra.shots)) metadata.shots = lib_extra.shots;
+      // a confidence the old file wrote outside high/medium/low ("중간") stays as written, like the old copy
+      // (init --import keeps it as legacy_extra.confidence, a whole v0.15 project import as legacy_extra.confidence_original)
+      if (is_record(lib_extra) && "confidence_original" in lib_extra) {
+        metadata.legacy_extra = { confidence_original: lib_extra.confidence_original };
+      } else if (is_record(lib_extra) && "confidence" in lib_extra) {
+        metadata.legacy_extra = { confidence_original: lib_extra.confidence };
+      }
+    }
+    const added = await add_artifact(s.service, s.ctx(project, auth), {
       object_id: String(result_of(created).object_id),
       artifact_kind: "topic",
       stage_id: research.id,
       title: topic.title,
-      summary: "",
+      summary: lib?.summary ?? "",
       question: topic.question || topic.summary || "",
-      body_md: null,
-      status: "new",
-      confidence: null,
-      stats: [],
-      conflicts: [],
+      body_md: lib?.body_md ?? null,
+      status: lib !== undefined ? "deepen" : "new",
+      confidence: lib?.confidence ?? null,
+      stats: lib !== undefined ? parse_json_field(lib.stats, []) : [],
+      conflicts: lib !== undefined ? parse_json_field(lib.conflicts, []) : [],
       verify: null,
-      metadata: {
-        legacy_id: next_id,
-        legacy_kind: "topic",
-        depth: 0,
-        stage: "research",
-        links: { plan: [meta.legacy_id, ...topic_links.filter((id) => String(id) !== String(meta.legacy_id))] },
-      },
+      metadata,
     });
-    linked.add(String(meta.legacy_id));
+    if (lib !== undefined) {
+      const version_id = String(result_of(added).version_id);
+      const cites = s.db.all<{ source_version_id: string; quote: string | null; locator: string }>(
+        `SELECT source_version_id, quote, locator FROM citations
+          WHERE project_id = ? AND artifact_version_id = ? ORDER BY citation_no`,
+        project.id,
+        lib.version_id,
+      );
+      for (const c of cites) {
+        await add_citation(s.service, s.ctx(project, auth), {
+          artifact_version_id: version_id,
+          source_version_id: c.source_version_id,
+          quote: c.quote,
+          locator: parse_json_field(c.locator, {}),
+        });
+      }
+    }
+    linked.add(String(topic_id));
     made += 1;
   }
-  return made;
+  return { made, reused };
+}
+
+/** An imported library item (an artifact outside every stage) by its old id, as `handoff_plan` looked it up. */
+function find_library_item(s: Session, project: ProjectInfo, reuse: unknown): PrevArtifact | undefined {
+  if (reuse === undefined || reuse === null || reuse === "") return undefined;
+  if (typeof reuse !== "number" && typeof reuse !== "string") return undefined;
+  return s.db.get<PrevArtifact>(
+    `SELECT o.id AS object_id, v.version_id AS version_id, v.title AS title, v.question AS question,
+            v.summary AS summary, v.body_md AS body_md, v.status AS status, v.confidence AS confidence,
+            v.stats AS stats, v.conflicts AS conflicts, v.verify AS verify, v.metadata_json AS metadata_json
+       FROM objects o
+       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+      WHERE o.project_id = ? AND a.stage_id IS NULL AND o.kind = 'artifact'
+        AND a.kind NOT IN ('note', 'review', 'report', 'output')
+        AND json_extract(v.metadata_json, '$.legacy_extra.legacy_id') = ?
+      LIMIT 1`,
+    project.id,
+    reuse,
+  );
 }
 
 const approve: Handler = async (s, req) => {
@@ -712,7 +773,7 @@ const approve: Handler = async (s, req) => {
   if (round === undefined || round.state !== "sealed" || round.sealed_snapshot_id === null) {
     throw new Refusal("conflict", "봉인된 라운드가 없어 승인할 수 없습니다 — render 먼저");
   }
-  let made: number | null = null;
+  let made: { made: number; reused: number } | null = null;
   const out = await s.unit(async () => {
     const approved = await approve_stage(s.service, s.ctx(project, auth), {
       stage_id: stage.id,
@@ -733,7 +794,8 @@ const approve: Handler = async (s, req) => {
     );
     next = row === undefined ? null : { ...row };
   }
-  return { next, complete: result.edition_completed === true, handed_over: made };
+  const done = made as { made: number; reused: number } | null;
+  return { next, complete: result.edition_completed === true, handed_over: done === null ? null : done.made, reused: done === null ? null : done.reused };
 };
 
 const reopen: Handler = async (s, req) => {
@@ -836,7 +898,7 @@ function find_previous(s: Session, project: ProjectInfo, stage: StageInfo, legac
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
       WHERE o.project_id = ? AND a.stage_id = ? AND o.kind = 'artifact' AND a.kind NOT IN ('note', 'review')
-        AND json_extract(v.metadata_json, '$.legacy_id') = ?
+        AND COALESCE(json_extract(v.metadata_json, '$.legacy_id'), json_extract(v.metadata_json, '$.legacy_extra.legacy_id')) = ?
       LIMIT 1`,
     project.id,
     stage.id,
@@ -860,7 +922,7 @@ function parse_json_field(text: string, fallback: unknown): unknown {
 /** Highest numeric legacy id among a stage's items (0 when none): the old CLI's `max(items) + 1`. */
 function max_legacy_id(s: Session, project: ProjectInfo, stage: StageInfo): number {
   const rows = s.db.all<{ legacy_id: unknown }>(
-    `SELECT json_extract(v.metadata_json, '$.legacy_id') AS legacy_id
+    `SELECT COALESCE(json_extract(v.metadata_json, '$.legacy_id'), json_extract(v.metadata_json, '$.legacy_extra.legacy_id')) AS legacy_id
        FROM objects o
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
@@ -908,6 +970,37 @@ function union_links(current: unknown, incoming: Record<string, unknown>): Recor
   return out;
 }
 
+/** Keys of a control-only proposal (status/request/user_links and the id they apply to). */
+const CONTROL_KEYS = new Set(["id", "status", "request", "user_links"]);
+
+function is_control_only(raw: Record<string, unknown>): boolean {
+  const keys = Object.keys(raw);
+  return keys.every((k) => CONTROL_KEYS.has(k)) && keys.some((k) => k !== "id");
+}
+
+/**
+ * user_links (links the user handed in, with a todo/done/failed status): a link whose url is already
+ * there only gets the fields given (status, memo, added); a new url is appended with status "todo".
+ */
+function merge_user_links(current: unknown, incoming: unknown[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = Array.isArray(current)
+    ? current.filter(is_record).map((x) => ({ ...x }))
+    : [];
+  for (const x of incoming) {
+    if (!is_record(x) || typeof x.url !== "string" || x.url.length === 0) continue;
+    const old = out.find((u) => u.url === x.url);
+    if (old === undefined) {
+      const added: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(x)) if (v !== undefined && v !== null) added[k] = v;
+      if (typeof added.status !== "string" || added.status.length === 0) added.status = "todo";
+      out.push(added);
+    } else {
+      for (const [k, v] of Object.entries(x)) if (v !== undefined && v !== null && v !== "") old[k] = v;
+    }
+  }
+  return out;
+}
+
 const CONFIDENCES = ["high", "medium", "low"];
 
 /** What the old source dictionary carried besides title/url/method (the importer keeps the same four keys in the locator). */
@@ -936,6 +1029,9 @@ const merge: Handler = async (s, req) => {
         throw new Refusal("invalid_payload", `알 수 없는 status 값입니다: ${String(given_status)}`, 2);
       }
     }
+    if ("user_links" in raw && !Array.isArray(raw.user_links)) {
+      throw new Refusal("invalid_payload", `user_links 는 객체 목록이어야 합니다 (#${String(raw.id)})`, 2);
+    }
     const given_confidence = raw.confidence;
     if (given_confidence !== undefined && given_confidence !== null && given_confidence !== "") {
       if (typeof given_confidence !== "string" || !CONFIDENCES.includes(given_confidence)) {
@@ -957,22 +1053,47 @@ const merge: Handler = async (s, req) => {
       next_id = legacy_id;
     }
     const prev = find_previous(s, project, stage, legacy_id);
+    if (prev === undefined && is_control_only(raw)) {
+      // a status/request-only proposal for an id that is not there is a typo, not a new item (the unit rolls back)
+      throw new Refusal(
+        "invalid_payload",
+        `없는 항목 #${String(raw.id ?? "")} 에 상태·요청만 담은 제안입니다 — show 로 번호를 확인하세요`,
+        2,
+      );
+    }
     const prev_meta = prev === undefined ? {} : (parse_json_field(prev.metadata_json, {}) as Record<string, unknown>);
     const prev_fields: Partial<PrevArtifact> = prev ?? {};
-    const status = typeof raw.status === "string" && raw.status.length > 0 ? raw.status : "done";
+    // A proposal that only carries status/request/user_links (deepen, revise, remove, a user's link) is a
+    // control change, not merged content: like the old direct edit it neither raises depth nor turns the item "done".
+    const control_only = is_control_only(raw);
+    const given = typeof raw.status === "string" && raw.status.length > 0 ? raw.status : null;
+    const status = given ?? (control_only ? prev?.status ?? "new" : "done");
+    // An item imported from a v0.15 file keeps its old values in legacy_extra (kind_original, depth,
+    // links, shots, status_original, confidence_original); the first merge carries them over here.
+    const prev_extra: Record<string, unknown> = is_record(prev_meta.legacy_extra) ? { ...prev_meta.legacy_extra } : {};
+    // the old view prefers status_original/confidence_original: drop them once this merge sets a new value
+    if (given !== null || !control_only) delete prev_extra.status_original;
+    if (typeof raw.confidence === "string" && raw.confidence.length > 0) delete prev_extra.confidence_original;
+    const prev_kind = prev_meta.legacy_kind ?? prev_extra.kind_original;
     const metadata: Record<string, unknown> = {
       ...prev_meta,
-      legacy_id: legacy_id ?? prev_meta.legacy_id ?? null,
-      legacy_kind: typeof raw.kind === "string" ? raw.kind : prev_meta.legacy_kind ?? "",
-      depth: Number(prev_meta.depth ?? 0) + 1,
+      legacy_id: legacy_id ?? prev_meta.legacy_id ?? prev_extra.legacy_id ?? null,
+      legacy_kind: typeof raw.kind === "string" ? raw.kind : typeof prev_kind === "string" ? prev_kind : "",
+      depth: Number(prev_meta.depth ?? prev_extra.depth ?? 0) + (control_only ? 0 : 1),
       stage: stage.key,
     };
-    for (const key of ["order", "verdict", "path", "open_questions", "request"]) {
+    if (prev_meta.links === undefined && is_record(prev_extra.links)) metadata.links = prev_extra.links;
+    if (prev_meta.shots === undefined && Array.isArray(prev_extra.shots)) metadata.shots = prev_extra.shots;
+    if (prev_meta.legacy_extra !== undefined) metadata.legacy_extra = prev_extra;
+    for (const key of ["order", "verdict", "path", "open_questions", "reuse", "model"]) {
       if (raw[key] !== undefined && raw[key] !== null && raw[key] !== "") metadata[key] = raw[key];
     }
+    // request: overwritten only when given; an empty string clears it.
+    if (typeof raw.request === "string") metadata.request = raw.request;
+    if (Array.isArray(raw.user_links)) metadata.user_links = merge_user_links(prev_meta.user_links, raw.user_links);
     // shots and links accumulate across rounds like the old merge (no duplicates).
-    if (Array.isArray(raw.shots) && raw.shots.length > 0) metadata.shots = union_json(prev_meta.shots, raw.shots);
-    if (is_record(raw.links) && Object.keys(raw.links).length > 0) metadata.links = union_links(prev_meta.links, raw.links);
+    if (Array.isArray(raw.shots) && raw.shots.length > 0) metadata.shots = union_json(metadata.shots, raw.shots);
+    if (is_record(raw.links) && Object.keys(raw.links).length > 0) metadata.links = union_links(metadata.links, raw.links);
     const confidence =
       typeof raw.confidence === "string" && raw.confidence.length > 0 ? raw.confidence : prev_fields.confidence ?? null;
     const fields: Record<string, unknown> = {
@@ -1123,7 +1244,7 @@ const qa_data: Handler = async (s, req) => {
     `SELECT o.id AS object_id, o.display_no AS display_no, a.kind AS kind, v.title AS title,
             v.status AS status, v.summary AS summary, v.confidence AS confidence,
             (SELECT count(*) FROM citations c WHERE c.project_id = v.project_id AND c.artifact_version_id = v.version_id) AS sources,
-            json_extract(v.metadata_json, '$.legacy_id') AS legacy_id
+            COALESCE(json_extract(v.metadata_json, '$.legacy_id'), json_extract(v.metadata_json, '$.legacy_extra.legacy_id')) AS legacy_id
        FROM objects o
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id

@@ -25,9 +25,9 @@ description: PES 집필 단계 — 기획 목차대로 장·절 원고(section �
 
 - order=chapter: 라운드마다 장 1~2개씩. draft: R1에 전체 초안, 이후 장별 수정.
 - 장이 3개 이상이면 장마다 `pes:writer` 서브에이전트를 한 메시지에 함께 보낸다. 넘길 것: 전체 목차, 이 장의 chapter 항목, 근거 issue·table·insight 본문, 근거 조사 항목의 summary와 sources, 문체 규칙, 다른 장 제목(겹치지 않게).
-- 결과 병합: `merge <dir> write <파일들>` (section의 details·sources·links).
+- 결과 병합: 제안 파일을 `merge <dir> write <파일들>`로 넘긴다 (section의 details·sources·links).
 - 렌더 전 `assemble <dir>`로 `out/report.md`를 갱신한다.
-- 요약(settings.summary=one)은 마지막 라운드에서 `p.executive_summary`에, 결론은 `p.conclusion`에. 요약·결론에는 각주를 달지 않는다(번호를 매길 출처가 없음 — 근거는 본문 장에서).
+- 요약(settings.summary=one)은 마지막 라운드에서 `set <dir> project executive_summary <파일>`로, 결론은 `set <dir> project conclusion <파일>`로 쓴다 (텍스트). 요약·결론에는 각주를 달지 않는다(번호를 매길 출처가 없음 — 근거는 본문 장에서).
 
 ## AI 점검 초점
 
@@ -42,7 +42,7 @@ description: PES 집필 단계 — 기획 목차대로 장·절 원고(section �
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
 1. 모든 chapter에 section, 모든 section에 links.analyze와 sources가 있는지.
-2. `assemble` → `stages.write.summary`에 장 수·분량·각주 수.
+2. `assemble` → 장 수·분량·각주 수를 `set <dir> write summary <파일>`로 쓰는 단계 요약에 적는다.
 3. `approve <dir> write` → pes:verify.
 
 ## 단계 보고서
@@ -51,4 +51,4 @@ description: PES 집필 단계 — 기획 목차대로 장·절 원고(section �
 
 ## 토큰
 
-서브에이전트 결과는 `<dir>/rounds/write-R<n>/<id>.json`에 쓰게 하고(지시문에 [결과 파일]), 메인은 `merge` 후 `digest <dir> write --round <n>`으로 점검한다.
+서브에이전트 결과는 제안 파일 `<dir>/rounds/write-R<n>/<id>.json`에 쓰게 하고(지시문에 [결과 파일]), 메인은 `merge` 후 `digest <dir> write --round <n>`으로 점검한다.

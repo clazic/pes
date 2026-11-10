@@ -19,7 +19,11 @@
   chat <dir> <stage> "텍스트" [kind]    채팅으로 받은 지시를 답 파일로 기록 (처리 완료로)
   digest <dir> <stage> [--round N]     AI 점검용 압축 요약 (항목별 요약 첫 줄·수치·충돌·신뢰도·출처 확인율·남은 질문)
   show <dir> <stage> [id...] [--fields a,b]  필요한 항목·필드만 보기 (project.json 을 통째로 읽지 않는다)
+                                       (--fields 가 changes·carry_over·settings·review 뿐이고 id 가 없으면 단계 값을 보여 준다)
   note <dir> "메모"                     인계 메모 추가 (대화에서 나온 결정·선호 — 새 세션이 먼저 읽는다)
+  set <dir> <stage> <field> <file|->   단계 필드 하나를 통째로 바꾼다 (허용: summary·changes·carry_over·settings·review — 값은 파일 또는 `-`(표준 입력);
+                                       summary 는 텍스트, changes 는 문자열 배열, carry_over 는 객체 배열, settings·review 는 JSON 객체)
+  set <dir> project <field> <file|->   프로젝트 필드 하나를 바꾼다 (허용: executive_summary·conclusion — 텍스트). 허용 밖 필드는 거부
   report <dir> <stage>                 단계 보고서: reports/<stage>/report.md·report.html 생성, eli5.json 이 있으면
                                        eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
   assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리) + out/sources.json
@@ -153,9 +157,14 @@ def save(d: Path, p: dict):
         blob = json.dumps(lib, ensure_ascii=False, indent=1)
         if not lf.exists() or lf.read_text(encoding="utf-8") != blob:
             lf.write_text(blob, encoding="utf-8")
-    tmp = d / "project.json.tmp"
-    tmp.write_text(json.dumps(q, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(d / "project.json")
+    # 프로세스마다 다른 임시 이름 — 동시에 저장해도 서로의 임시 파일을 덮거나 지우지 않는다 (옛 이름 project.json.tmp 흔적은 저장 뒤 치운다)
+    tmp = d / f"project.json.tmp.{os.getpid()}"
+    try:
+        tmp.write_text(json.dumps(q, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(d / "project.json")
+    finally:
+        tmp.unlink(missing_ok=True)
+    (d / "project.json.tmp").unlink(missing_ok=True)
 
 
 def stage_arg(s):
@@ -321,6 +330,27 @@ def norm_text(s):
     return re.sub(r"<br\s*/?>", "\n", s)
 
 
+# 상태·요청만 담은 제안(심화·수정·삭제·원문 확인·사용자 링크 지시)의 키 — 이것만 있으면 내용 병합이 아니다
+MERGE_CONTROL_KEYS = {"id", "status", "request", "user_links"}
+
+
+def merge_user_links(it, links):
+    """user_links 목록 추가 규칙: url(파일 경로)이 같은 줄은 주어진 칸(status·memo·added)만 고치고, 새 url 은 뒤에 붙인다."""
+    if not isinstance(links, list):
+        return
+    cur = it.get("user_links")
+    if not isinstance(cur, list):  # 손으로 고친 파일의 null 등 — 빈 목록으로 본다
+        cur = it["user_links"] = []
+    for x in links:
+        if not isinstance(x, dict) or not x.get("url"):
+            continue
+        old = next((u for u in cur if isinstance(u, dict) and u.get("url") == x["url"]), None)
+        if old is None:
+            cur.append({k: v for k, v in x.items() if v is not None} | ({} if x.get("status") else {"status": "todo"}))
+        else:
+            old.update({k: v for k, v in x.items() if v not in (None, "")})
+
+
 def cmd_merge(args):
     d, s = pdir(args[0]), stage_arg(args[1])
     p = load(d)
@@ -330,16 +360,29 @@ def cmd_merge(args):
     for f in args[2:]:
         raw = json.loads(Path(f).read_text(encoding="utf-8"))
         for r in (raw if isinstance(raw, list) else [raw]):
+            if not isinstance(r, dict):
+                die(f"merge: 결과 항목은 JSON 객체여야 합니다: {f}", 2)
+            if "user_links" in r and not isinstance(r["user_links"], list):
+                die(f"merge: user_links 는 객체 목록이어야 합니다 (#{r.get('id')}): {f} — 아무것도 바꾸지 않았습니다", 2)
             iid = r.get("id")
             it = items.get(iid)
+            if it is None and bool(set(r) & {"status", "request", "user_links"}) and set(r) <= MERGE_CONTROL_KEYS:
+                die(f"merge: 없는 항목 #{iid} 에 상태·요청만 담은 제안입니다 — `show <dir> {s}`로 번호를 확인하세요. 아무것도 바꾸지 않았습니다", 2)
             if it is None:
                 iid = iid if iid is not None else max([0] + list(items)) + 1
                 it = blank_item(iid, r.get("title", f"항목 {iid}"))
                 st["items"].append(it)
                 items[iid] = it
+            control_only = bool(set(r) & {"status", "request", "user_links"}) and set(r) <= MERGE_CONTROL_KEYS  # 상태·요청만 바꾸는 제안 (옛 직접 편집과 같게 depth 를 올리지 않는다)
             for k in ("title", "kind", "question", "summary", "details", "confidence", "verify", "order", "verdict", "path"):
                 if k in r and r[k] not in (None, ""):
                     it[k] = norm_text(r[k])
+            if "request" in r and r["request"] is not None:  # 있을 때만 덮어쓴다 — 빈 문자열이면 비운다
+                it["request"] = norm_text(r["request"]) if r["request"] != "" else ""
+            for k in ("reuse", "model"):  # 기획 topic 의 참고자료 재사용(library id)·조사 모델
+                if k in r and r[k] not in (None, ""):
+                    it[k] = r[k]
+            merge_user_links(it, r.get("user_links"))
             if s == "write" or it.get("kind") == "section":
                 # 원고의 각주 [^k] 는 sources 의 순서(k번째)를 가리킨다 — 중복 제거·누적하면 번호가 밀리므로 통째로 바꾼다
                 if r.get("sources") is not None:
@@ -366,9 +409,13 @@ def cmd_merge(args):
                         cur.append(x)
             for q in r.get("open_questions") or []:
                 st["suggestions"].append(f"[#{iid}] {q}")
-            it["status"] = r.get("status", "done")
-            it["depth"] = it.get("depth", 0) + 1
-            it["updated_round"] = st["round"]
+            if control_only:
+                if r.get("status") not in (None, ""):
+                    it["status"] = r["status"]
+            else:
+                it["status"] = r.get("status", "done")
+                it["depth"] = it.get("depth", 0) + 1
+                it["updated_round"] = st["round"]
             n += 1
     save(d, p)
     print(f"{LABEL[s]}: {n}건 병합")
@@ -705,6 +752,10 @@ def cmd_show(args):
     show_items(load(d), s, args)
 
 
+# show --fields 로 단계 자체의 값을 읽는 필드 (항목 필드와 이름이 겹치지 않는 것 — summary 는 항목 요약이다)
+SHOW_STAGE_FIELDS = {"changes", "carry_over", "settings", "review"}
+
+
 def show_items(p, s, args):
     rest = args[2:]
     fields = None
@@ -714,6 +765,10 @@ def show_items(p, s, args):
         rest = rest[:k] + rest[k + 2:]
     ids = {int(x) for x in rest if x.isdigit()}
     st = p["stages"][s]
+    if fields and not ids and set(fields) <= SHOW_STAGE_FIELDS:
+        # 단계 필드 보기 (set 이 통째로 바꾸므로, 덧붙이기 전에 지금 값을 읽는다)
+        print(json.dumps({k: st.get(k) for k in fields}, ensure_ascii=False, indent=1))
+        return
     if not ids and not fields:
         print(json.dumps({k: v for k, v in st.items() if k != "items"} | {"items": [f"#{i['id']} {i['title']} [{i.get('kind')}/{i.get('status')}]" for i in st["items"]]}, ensure_ascii=False, indent=1))
         return
@@ -731,6 +786,107 @@ def cmd_note(args):
     p["notes"].append({"time": now(), "stage": p.get("current"), "text": " ".join(args[1:]).strip()})
     save(d, p)
     print(f"인계 메모 {len(p['notes'])}개")
+
+
+# ---------- set: 허용 필드 화이트리스트 ----------
+SET_STAGE_FIELDS = {"summary": "text", "changes": "str_list", "carry_over": "obj_list", "settings": "object", "review": "object"}
+SET_PROJECT_FIELDS = {"executive_summary": "text", "conclusion": "text"}
+SET_USAGE = ("사용법: set <dir> <단계> <필드> <파일|->  (필드: " + "·".join(SET_STAGE_FIELDS) + ")\n"
+             "        set <dir> project <필드> <파일|->  (필드: " + "·".join(SET_PROJECT_FIELDS) + ")")
+
+
+def set_parse_check(kind, field, raw):
+    """값 파일의 내용을 필드 형식에 맞게 해석한다. 맞지 않으면 한국어 이유로 거부한다 (아무것도 쓰기 전에)."""
+    if kind == "text":
+        value = raw.replace("\r\n", "\n").rstrip()
+        if not value:
+            die(f"set: {field} 값이 비어 있습니다 — 텍스트를 담은 파일을 주세요", 2)
+    else:
+        def bad_const(name):
+            raise ValueError(f"{name} 는 JSON 값이 아닙니다")
+
+        def bad_float(text):
+            x = float(text)
+            if x in (float("inf"), float("-inf")):
+                raise ValueError(f"{text} 는 너무 큰 수입니다")
+            return x
+        try:
+            value = json.loads(raw, parse_constant=bad_const, parse_float=bad_float)
+        except RecursionError:
+            die(f"set: {field} 값이 너무 깊게 중첩돼 있습니다", 2)
+        except ValueError as e:
+            die(f"set: {field} 값이 올바른 JSON 이 아닙니다 ({e})", 2)
+        shape = {"str_list": ("문자열 배열", lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v)),
+                 "obj_list": ("객체 배열", lambda v: isinstance(v, list) and all(isinstance(x, dict) for x in v)),
+                 "object": ("JSON 객체", lambda v: isinstance(v, dict))}[kind]
+        if not shape[1](value):
+            die(f"set: {field} 값은 {shape[0]}이어야 합니다", 2)
+    try:  # 저장 형식(UTF-8 JSON)으로 쓸 수 있는지 미리 본다: 짝 없는 서로게이트·너무 깊은 구조는 여기서 거부
+        json.dumps(value, ensure_ascii=False, indent=1).encode("utf-8")
+    except (UnicodeEncodeError, RecursionError, ValueError, OverflowError) as e:
+        die(f"set: {field} 값을 UTF-8 JSON 으로 저장할 수 없습니다 (짝 없는 문자·너무 깊은 구조 등)", 2)
+    return value
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def short_write_lock(d: Path):
+    """읽기-수정-쓰기를 한 번에 하나만 하게 하는 아주 짧은 잠금 (`set` 전용; 세션 잠금 .pes-lock 과 다르다). 끝나면 지운다."""
+    lock = d / ".project.json.lock"
+    deadline = time.time() + 30
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 60:  # 죽은 프로세스가 남긴 흔적
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                die("set: 다른 set 이 아직 저장 중입니다 — 잠시 뒤 다시 하세요", 3)
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def cmd_set(args):
+    if len(args) != 4:
+        die("set: 인자가 맞지 않습니다\n" + SET_USAGE, 2)
+    d, target, field, src = pdir(args[0]), args[1], args[2], args[3]
+    if target == "project":
+        kinds = SET_PROJECT_FIELDS
+    elif target in KEYS:
+        kinds = SET_STAGE_FIELDS
+    else:
+        die(f"set: 대상은 단계 이름({', '.join(KEYS)}) 또는 project 여야 합니다: {target!r}\n" + SET_USAGE, 2)
+    if field not in kinds:
+        die(f"set: {target} 에서 쓸 수 있는 필드는 {', '.join(kinds)} 뿐입니다: {field!r}", 2)
+    try:
+        raw = (sys.stdin.buffer.read() if src == "-" else Path(src).read_bytes()).decode("utf-8-sig")  # Windows 도구가 붙인 BOM 은 값이 아니다
+    except (OSError, UnicodeDecodeError) as e:
+        die(f"set: 값을 읽지 못했습니다 ({src}): {e}", 2)
+    value = set_parse_check(kinds[field], field, raw)
+    if not (d / "project.json").exists():
+        die(f"project.json 없음: {d}")
+    with short_write_lock(d):
+        try:
+            p = load(d)
+        except (ValueError, OSError, AttributeError, TypeError) as e:
+            die(f"set: {d.name} 의 project.json 을 읽지 못했습니다 — 파일이 깨졌거나 JSON 이 아닙니다 ({type(e).__name__}). 아무것도 바꾸지 않았습니다", 2)
+        (p if target == "project" else p["stages"][target])[field] = value
+        if target == "plan" and field == "settings":
+            # 기획 답은 프로젝트 설정에도 둔다 (옛 문서의 두 곳 쓰기) — 보고서 형식(stage_reports)·qa-brief 의 기획 답·승인 창이 읽는다
+            p["settings"] = value
+        save(d, p)
+    print(f"{'프로젝트' if target == 'project' else LABEL[target]} {field} 저장")
 
 
 # ---------- 단계 보고서 ----------
@@ -1815,8 +1971,10 @@ def doctor_project(R, d: Path):
            and re.match(r"(project|library)[ _-].+\.json$|(project|library) \(\d+\)\.json$", x.name)]
     if dup:
         R.add(tag, "bad", "클라우드 동기화 충돌 사본", ", ".join(dup) + " — 두 컴퓨터에서 동시에 고친 흔적. 어느 쪽이 최신인지 확인 후 사본을 정리 (README 「OneDrive」)")
-    if (d / "project.json.tmp").exists():
-        R.add(tag, "warn", "저장 중 끊긴 임시 파일", "project.json.tmp", fix=lambda: (d / "project.json.tmp").unlink(missing_ok=True))
+    stale_tmp = sorted(d.glob("project.json.tmp*"))
+    if stale_tmp:
+        R.add(tag, "warn", "저장 중 끊긴 임시 파일", ", ".join(x.name for x in stale_tmp),
+              fix=lambda: [x.unlink(missing_ok=True) for x in stale_tmp])
     # 단계 일관성
     cur = p.get("current")
     if cur not in KEYS:
@@ -2104,6 +2262,11 @@ def db_slugs():
         return set()
 
 
+def db_set(args):
+    die("set: PES_DB_CORE=1 에서는 아직 쓸 수 없습니다 — 단계 요약·변경점·남은 일·설정·점검과 최종 요약·결론에 대응하는 DB 명령이 아직 없습니다 "
+        "(DB 는 바뀌지 않았습니다). 플래그 없이(v0.15) 쓰거나 이후 PR 을 기다리세요", 2)
+
+
 def db_name(arg) -> str:
     d = pdir(arg)
     if d.parent != pes_home():
@@ -2225,7 +2388,7 @@ def db_merge(args):
             if not isinstance(r, dict):
                 die(f"결과 항목은 JSON 객체여야 합니다: {f}", 2)
             r = dict(r)
-            for k in ("title", "kind", "question", "summary", "details", "confidence", "verify", "order", "verdict", "path"):
+            for k in ("title", "kind", "question", "summary", "details", "confidence", "verify", "order", "verdict", "path", "request"):
                 if k in r and r[k] not in (None, ""):
                     r[k] = norm_text(r[k])
             results.append(r)
@@ -2246,8 +2409,8 @@ def db_approve(args):
     data = bridge("approve", d.name, {"stage": s})
     msg = [f"{LABEL[s]} 승인"]
     if s == "plan" and isinstance(data.get("handed_over"), int):
-        # v0.15 handoff_plan 과 같은 줄. 기존 조사 재사용(라이브러리)은 DB 경로에 아직 없어 0개다.
-        msg.append(f"조사 항목 {data['handed_over']}개 생성 (기존 조사 재사용 0개)")
+        # v0.15 handoff_plan 과 같은 줄 (reuse 로 참고자료를 이어받은 항목 수 포함)
+        msg.append(f"조사 항목 {data['handed_over']}개 생성 (기존 조사 재사용 {data.get('reused') or 0}개)")
     if data.get("next"):
         nxt = data["next"]
         msg.append(f"다음 단계: {LABEL[nxt['key']]} (상태 {nxt['status']})")
@@ -2592,12 +2755,12 @@ def dbr_web(args):
 
 
 DB_PROJECT_WRITES = {"ask-prep", "ask", "round-start", "merge", "render", "approve", "reopen", "mark", "chat", "note",
-                     "qa-brief", "qa", "lock", "unlock", "report", "assemble", "web"}
+                     "qa-brief", "qa", "lock", "unlock", "report", "assemble", "web", "set"}
 
 DB_CMDS = {"init": db_init, "ask-prep": db_ask_prep, "ask": db_ask, "round-start": db_round_start, "merge": db_merge,
            "render": db_render, "approve": db_approve, "reopen": db_reopen, "mark": db_mark, "chat": db_chat,
            "note": db_note, "qa-brief": db_qa_brief, "qa": db_qa, "serve": db_serve, "stop": db_stop,
-           "home": db_home, "lock": db_lock, "unlock": db_unlock,
+           "home": db_home, "lock": db_lock, "unlock": db_unlock, "set": db_set,
            "status": dbr_status, "pending": dbr_pending, "digest": dbr_digest, "show": dbr_show,
            "report": dbr_report, "assemble": dbr_assemble, "web": dbr_web}
 
@@ -2677,7 +2840,7 @@ def cmd_complete(args):
 CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start": cmd_round_start,
         "merge": cmd_merge, "render": cmd_render, "approve": cmd_approve, "reopen": cmd_reopen,
         "status": cmd_status, "pending": cmd_pending, "mark": cmd_mark, "chat": cmd_chat,
-        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
+        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "set": cmd_set, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock,
         "context": cmd_context, "claim": cmd_claim, "submit": cmd_submit, "wait": cmd_wait, "complete": cmd_complete}
 

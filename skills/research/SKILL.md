@@ -14,23 +14,23 @@ description: PES 조사 단계 — 기획에서 넘어온 조사 항목을 서�
 4. vworld: 키까지 있으면 `vworld_install` 질문 삭제. **없으면 설치하지 말고 시작 질문의 `vworld_install`로 묻는다**
 5. 결과를 질문 desc에 반영 ("설치 필요", "API 키 필요").
 
-`ask-prep <dir> research` → 다듬기(기획에서 정해진 범위를 inherited로) → 답을 `stages.research.settings`에.
+`ask-prep <dir> research` → 다듬기(기획에서 정해진 범위를 inherited로) → 받은 답(도구·통계·법령 범위·병렬·모델)은 `pending`이 알려 준 답 파일(`feedback/*.json`)의 answers를 읽어 `set <dir> research settings <파일>`로 저장한다.
 
 ## 사용자 제공 링크·자료
 
 - 출처: 시작 질문 `user_links`(settings) 또는 대시보드 '추가 요청'의 `조사 링크: 주소 | 항목 | 메모` 줄.
-- 줄마다 파싱해 항목의 `user_links`에 `{"url": 주소 또는 파일 경로, "memo": …, "added": 날짜, "status": "todo"}`로 넣는다. 항목 번호가 없으면 내용(제목·메모·주소 도메인)에 맞는 항목에 배정하고, 맞는 항목이 없으면 새 항목(new)으로 만든다. 배정 결과를 changes에 한 줄.
-- 링크가 붙은 항목은 그 라운드의 할 일이 된다(done이면 deepen으로, request에 "사용자 제공 링크 확인").
-- 서브에이전트 지시문 [사용자 제공 링크]에 넣는다 — **반드시 열어 읽고**(웹은 ego-browser, 로컬 파일은 Read/pdf 스킬), sources에 `note: "사용자 제공"`과 실제 method로 남긴다. 열 수 없으면(로그인·삭제·권한) open_questions에 "사용자 제공 링크 열지 못함: 주소 — 이유".
-- 병합 후 user_links의 status를 done/failed로 바꾸고, failed는 AI 점검 질문(weak)으로 물어 다른 주소나 파일을 받는다.
+- 줄마다 파싱해 항목의 `user_links`에 `{"url": 주소 또는 파일 경로, "memo": …, "added": 날짜, "status": "todo"}`로 넣는다(제안 파일 `{"id": N, "user_links": [...]}`을 `merge` — 같은 url은 한 번만 들어간다). 항목 번호가 없으면 내용(제목·메모·주소 도메인)에 맞는 항목에 배정하고, 맞는 항목이 없으면 새 항목(new)으로 만든다. 배정 결과를 변경점에 한 줄(`show <dir> research --fields changes`로 읽은 줄에 더해 `set <dir> research changes <파일>`).
+- 링크가 붙은 항목은 그 라운드의 할 일이 된다: 같은 제안에 `request` "사용자 제공 링크 확인: 주소 | 메모"를 적고 done이면 `status` deepen으로 담는다.
+- 서브에이전트 지시문 [사용자 제공 링크]에 넣는다 — **반드시 열어 읽고**(웹은 ego-browser, 로컬 파일은 파일·PDF를 읽는 도구), sources에 `note: "사용자 제공"`과 실제 method로 남긴다. 열 수 없으면(로그인·삭제·권한) open_questions에 "사용자 제공 링크 열지 못함: 주소 — 이유".
+- 병합 후 user_links의 status를 done/failed로 바꾼다: 결과의 sources(note "사용자 제공")와 open_questions로 열었는지 보고 `{"id": N, "user_links": [{"url": 주소, "status": "done"}]}`(열지 못했으면 `"failed"`)을 `merge`한다(url이 같으면 status만 바뀐다, depth는 그대로). failed는 AI 점검 질문(weak)으로 물어 다른 주소나 파일을 받는다.
 - http(s)가 아니고 존재하지 않는 경로면 처리하지 않고 점검 질문으로 확인한다.
 
 ## 라운드
 
 - 할 일 항목(new·deepen·revise·browser)만 조사. status=deepen + links.library가 있는 항목은 **기존 내용을 이어받아** 기획의 question에 맞게 보완하고, 원문 미확인 출처와 conflicts를 다시 확인한다.
 - parallel=auto: 할 일 항목이 2개 이상이면 항목당 `pes:researcher` 서브에이전트 1개, 한 번에 최대 5개, **한 메시지에 함께** 보낸다. sequential이면 메인이 직접. max면 + 승인 전 `pes:verifier`.
-- 서브에이전트는 결과를 `<dir>/rounds/research-R<n>/<id>.json`에 쓰고 한 줄만 돌려준다 → `merge <dir> research <dir>/rounds/research-R<n>/*.json` → **`digest <dir> research --round <n>`으로** 항목 사이 충돌을 찾아 conflicts에 기록 → changes → AI 점검 → render. 결과 파일 본문을 통째로 읽지 않는다(필요한 항목만 `show`).
-- **조사 모델** (settings.model): `mixed`(기본) = 기존 조사를 이어받는 항목(status=deepen이고 links.library 있음)과 단순 수집·원문 확인은 `model: "sonnet"`, 새 조사·법령 해석·판단이 많은 항목(울산 진단·정책 대안 등)과 revise는 `model: "opus"`. `opus`·`sonnet`이면 전부 그것. Agent 호출의 model 인자로 정하고, 항목에 `"model"` 필드로 남긴다(changes에 모델별 항목 수 한 줄).
+- 서브에이전트는 결과를 제안 파일 `<dir>/rounds/research-R<n>/<id>.json`에 쓰고 한 줄만 돌려준다 → `merge <dir> research <dir>/rounds/research-R<n>/*.json` → **`digest <dir> research --round <n>`으로** 항목 사이 충돌을 찾아 conflicts에 기록(해당 항목의 `conflicts`를 제안 파일에 담아 `merge`) → 변경점(`set <dir> research changes`) → AI 점검(`set <dir> research review`) → render. 결과 파일 본문을 통째로 읽지 않는다(필요한 항목만 `show`).
+- **조사 모델** (settings.model): 설정 값 `sonnet`은 가벼운 모델, `opus`는 강한 모델을 고르는 이름이다(환경별 실제 모델은 어댑터 노트). `mixed`(기본) = 기존 조사를 이어받는 항목(status=deepen이고 links.library 있음)과 단순 수집·원문 확인은 가벼운 모델(`"model": "sonnet"`), 새 조사·법령 해석·판단이 많은 항목(울산 진단·정책 대안 등)과 revise는 강한 모델(`"model": "opus"`). 설정이 `opus`·`sonnet`이면 전부 그것. 서브에이전트를 띄울 때 모델로 정하고, 결과 제안 파일에 `"model"` 필드로 남긴다(`merge`가 보존; 변경점에 모델별 항목 수 한 줄).
 - 실패한 항목은 그 항목만 재시도하거나 status=failed로 두고 알린다.
 
 ### 서브에이전트 지시문 (대화 맥락을 모른다 — 빠짐없이)
@@ -68,7 +68,7 @@ description: PES 조사 단계 — 기획에서 넘어온 조사 항목을 서�
 
 ### 법령 (korean-law)
 ```bash
-L="$($PES which korean-law)"   # LAW_OC·NODE_EXTRA_CA_CERTS는 Claude Code 설정(env)에서 온다
+L="$($PES which korean-law)"   # LAW_OC·NODE_EXTRA_CA_CERTS는 실행 환경의 환경변수에서 온다
 $L "민간임대주택에 관한 특별법 제22조"      # 조문
 $L search_law --query "<법령명>"            # lawId·MST
 $L get_law_text --mst <MST> --jo "부칙"     # 부칙
@@ -76,7 +76,7 @@ $L help <도구>                              # search_all, search_decisions, le
 ```
 - 법령 항목이 있는 라운드는 승인 전 `legal_analysis --mode verify_citations`로 인용 조문을 검증해 verify에 남긴다. 출처 method=`law`.
 - MCP(`mcp__korean-law__*`)가 있으면 써도 된다.
-- 없으면 설치: `npm install --ignore-scripts --omit=optional -g korean-law-mcp` (인증서 오류가 나면 `--cafile "$NODE_EXTRA_CA_CERTS"`). `LAW_OC`는 사용자가 줄 때만 Claude Code 설정(`~/.claude/settings.json`의 env)에 등록하고 원문을 채팅에 다시 쓰지 않는다. 키 발급: https://open.law.go.kr
+- 없으면 설치: `npm install --ignore-scripts --omit=optional -g korean-law-mcp` (인증서 오류가 나면 `--cafile "$NODE_EXTRA_CA_CERTS"`). `LAW_OC`는 사용자가 줄 때만 실행 환경 설정의 환경변수로 등록하고(환경별 위치는 어댑터 노트) 원문을 채팅에 다시 쓰지 않는다. 키 발급: https://open.law.go.kr
 
 ### 공간정보 (vworld)
 ```bash
@@ -104,7 +104,7 @@ $V staticmap "<x,y>" --zoom 14 --size 800,600 -o <dir>/shots/<id>-1.png
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
 1. parallel=max면 pes:verifier로 핵심 주장 검증. 법령 인용 verify_citations.
-2. 남은 conflicts·원문 미확인 비율을 `stages.research.summary`에 정직하게 적는다.
+2. 남은 conflicts·원문 미확인 비율을 단계 요약에 정직하게 적는다 (`set <dir> research summary <파일>`).
 3. `approve <dir> research` → pes:analyze 시작 질문.
 
 ## 단계 보고서
