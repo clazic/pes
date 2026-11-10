@@ -68,6 +68,14 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
   const claimed_tool = optional_claim(source, "claimed_tool");
   const claimed_model = optional_claim(source, "claimed_model");
   const items = parse_result_items(source.results);
+  // One bundle names an object once: two versions of one object in a single paste would chain on each other.
+  const seen_objects = new Set<unknown>();
+  for (const item of items) {
+    if (seen_objects.has(item.object_id)) {
+      throw new ApiError("invalid_payload", "a hand-off import may name each object only once");
+    }
+    seen_objects.add(item.object_id);
+  }
 
   // A stale copy never reaches a write: the base is checked in this transaction.
   const base = require_base_control_rev(runtime, runtime.ctx.base_control_rev);
@@ -82,26 +90,46 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
 
   let stage_id: string | null = null;
   let round_id: string | null = null;
+  let stage_current_round: string | null = null;
   if (source.stage_id !== undefined && source.stage_id !== null) {
     stage_id = require_non_empty_string(source, "stage_id");
-    const stage = runtime.db.get<{ id: string }>(
-      "SELECT id FROM stages WHERE project_id = ? AND edition_id = ? AND id = ?",
+    const stage = runtime.db.get<{ id: string; status: string; current_round_id: string | null }>(
+      "SELECT id, status, current_round_id FROM stages WHERE project_id = ? AND edition_id = ? AND id = ?",
       project.id,
       edition.active_edition_id,
       stage_id,
     );
     if (stage === undefined) throw new ApiError("not_found", "the stage is not part of the active edition");
+    // Approval is a human decision: an import never writes into an approved stage (reopen it first).
+    if (stage.status === "approved") {
+      throw new ApiError("conflict", "the stage is approved; reopen it before importing a result");
+    }
+    stage_current_round = stage.current_round_id;
   }
   if (source.round_id !== undefined && source.round_id !== null) {
     if (stage_id === null) throw new ApiError("invalid_payload", "round_id needs stage_id");
     round_id = require_non_empty_string(source, "round_id");
-    const round = runtime.db.get<{ id: string }>(
-      "SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
+    const round = runtime.db.get<{ id: string; state: string }>(
+      "SELECT id, state FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
       project.id,
       stage_id,
       round_id,
     );
     if (round === undefined) throw new ApiError("not_found", "the round does not belong to the stage");
+    // Sealing is a human decision: a sealed round takes no import.
+    if (round.state !== "open") {
+      throw new ApiError("conflict", "the round is sealed; an import cannot write into it");
+    }
+  } else if (stage_current_round !== null) {
+    const current = runtime.db.get<{ state: string }>(
+      "SELECT state FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
+      project.id,
+      stage_id,
+      stage_current_round,
+    );
+    if (current !== undefined && current.state !== "open") {
+      throw new ApiError("conflict", "the stage's round is sealed; an import cannot write into it");
+    }
   }
 
   const plans = plan_result_items(runtime, items);

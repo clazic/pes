@@ -290,6 +290,10 @@ export class McpServer {
       return this.#rpc_error(id, -32600, "올바른 JSON-RPC 요청이 아닙니다.");
     }
     const has_id = Object.hasOwn(message, "id");
+    // A JSON-RPC id is a string, a number or null. Anything else is an invalid request and is never echoed.
+    if (has_id && message.id !== null && typeof message.id !== "string" && typeof message.id !== "number") {
+      return this.#rpc_error(null, -32600, "id는 문자열, 숫자 또는 null이어야 합니다.");
+    }
     const id = has_id ? (message.id as string | number | null) : null;
     const method = message.method;
     const params = message.params;
@@ -724,6 +728,11 @@ export class McpServer {
         const found = await this.#send("GET", `/requests/${encodeURIComponent(item.applied_by_key as string)}`, undefined, null);
         if (!found.ok) return { ok: false, error: { ...found.error } };
         const tx = is_record(found.data) ? found.data.tx_id : undefined;
+        // only a result submission is evidence that an input was used; a heartbeat, ask, wait or claim key is not
+        const action = is_record(found.data) ? found.data.action : undefined;
+        if (action !== "result.submit") {
+          return local_error("not_found", "그 키는 결과 제출(pes_submit)이 아니어서 입력을 썼다는 증거가 될 수 없습니다.", `$.arguments.receipts`, "reread_context");
+        }
         if (typeof tx !== "string" || tx.length === 0) return local_error("not_found", "그 키로 낸 제출을 찾을 수 없습니다.", `$.arguments.receipts`, "reread_context");
         out.applied_tx_id = tx;
       }
@@ -795,10 +804,13 @@ export function serve_stdio(server: McpServer, streams: StdioStreams): Promise<v
       }
       if (buffer.length > MAX_LINE_CHARS) {
         buffer = "";
-        skipping = true;
-        chain = chain.then(() => {
-          write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "요청 한 줄이 너무 깁니다." } });
-        });
+        // while the rest of the oversized line is dropped, the error is reported only once
+        if (!skipping) {
+          skipping = true;
+          chain = chain.then(() => {
+            write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "요청 한 줄이 너무 깁니다." } });
+          });
+        }
       }
     });
     input.on("end", () => {
