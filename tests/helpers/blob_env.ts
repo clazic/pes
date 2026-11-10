@@ -3,8 +3,8 @@
 // ~/.pes or ~/pes-projects.
 
 import assert from "node:assert/strict";
-import { lstatSync, mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { FakeClock } from "../../scripts/pes_core/clock.ts";
 import {
@@ -81,11 +81,12 @@ export async function make_env(): Promise<Env> {
   migrate(db);
   const clock = new FakeClock(START_MS);
   const policy = new FakePolicy();
-  const service = new CommandService(db, { clock, policy });
-  const p = await bootstrap(service, "setup-p", "synthetic-files");
-  policy.calls = 0;
   const objects = objects_dir(home.env);
   mkdirSync(objects, { recursive: true });
+  // The objects folder given here is the service's one canonical store (SEL-42 review 1).
+  const service = new CommandService(db, { clock, policy, objects_dir: objects });
+  const p = await bootstrap(service, "setup-p", "synthetic-files");
+  policy.calls = 0;
   return {
     home,
     db,
@@ -96,7 +97,7 @@ export async function make_env(): Promise<Env> {
     objects,
     p,
     ctx: (key) => ctx_for(p, key),
-    with_db: (wrapped) => new CommandService(wrapped, { clock, policy }),
+    with_db: (wrapped) => new CommandService(wrapped, { clock, policy, objects_dir: objects }),
     close() {
       db.close();
       home.cleanup();
@@ -212,6 +213,18 @@ export function blob_row_must(db: Db, id: string): BlobRow {
 /** Disk location of a blob: computed from the DB storage_key only. */
 export function disk_path(env: Env, row: Pick<BlobRow, "storage_key">): string {
   return join(env.objects, ...row.storage_key.split("/"));
+}
+
+/**
+ * Put bytes at a blob's storage location without going through store_blob, the way an outside
+ * process (or an old, unchecked writer) could. store_blob itself refuses bytes that do not match
+ * the reservation, so tests that need mismatching bytes on disk must plant them like this.
+ */
+export function plant_bytes(env: Env, row: Pick<BlobRow, "storage_key">, bytes: Uint8Array): string {
+  const path = disk_path(env, row);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, bytes);
+  return path;
 }
 
 export function exists_on_disk(path: string): boolean {

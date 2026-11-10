@@ -115,6 +115,7 @@ import {
   list_files,
   more_version,
   new_artifact,
+  plant_bytes,
   put_ready,
   put_staging,
   receipts,
@@ -179,11 +180,8 @@ function write_orphan_file(env: Env, label: string, mtime_ms: number): string {
 /** Try the declared/stored mismatch path; return the final row. Accepts "rejected" or "quarantined". */
 async function upload_mismatch(env: Env, declared: Uint8Array, stored: Uint8Array, key: string) {
   const r = await reserve(env, declared, `${key}-r`);
-  try {
-    await store_blob(env.store, env.p.project_id, r.blob_id, stored);
-  } catch (error) {
-    assert.ok(error instanceof Error);
-  }
+  // store_blob refuses mismatching bytes (SEL-42 review 1), so plant them as an outside writer would.
+  plant_bytes(env, blob_row_must(env.db, r.blob_id), stored);
   try {
     const out = (await complete(env, r.blob_id, `${key}-c`)).result as CompleteResult;
     assert.notEqual(out.state, "ready");

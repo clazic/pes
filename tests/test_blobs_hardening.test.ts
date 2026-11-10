@@ -41,6 +41,7 @@ import {
   exists_on_disk,
   list_files,
   new_artifact,
+  plant_bytes,
   put_ready,
   put_staging,
   reserve,
@@ -113,7 +114,7 @@ test("direct file.complete_upload with the reserved sha256/size never makes a bl
     const evil = flipped(declared);
     assert.equal(evil.byteLength, declared.byteLength);
     const r = await reserve(env, declared, "d2-r");
-    await store_blob(env.store, env.p.project_id, r.blob_id, evil);
+    plant_bytes(env, blob_row_must(env.db, r.blob_id), evil);
     await env.service
       .execute(env.ctx("d2-c"), "file.complete_upload", {
         blob_id: r.blob_id,
@@ -619,7 +620,7 @@ test("a quarantined mismatch is collected by gc and the same honest bytes can th
     const declared = bytes_of("fresh-declared", 16);
     const evil = flipped(declared);
     const r = await reserve(env, declared, "f-r");
-    await store_blob(env.store, env.p.project_id, r.blob_id, evil);
+    plant_bytes(env, blob_row_must(env.db, r.blob_id), evil);
     const done = await complete(env, r.blob_id, "f-c").then(
       (o) => (o.result as CompleteResult).state,
       () => "rejected",
@@ -759,8 +760,12 @@ test("a direct file.gc_orphans with an objects_dir elsewhere never deletes files
       mkdirSync(dirname(victim), { recursive: true });
       writeFileSync(victim, "x");
       set_mtime(victim, env.clock.now_ms() - 10 * GRACE);
-      await env.service.execute(env.ctx("dg-1"), "file.gc_orphans", { grace_ms: GRACE, objects_dir: outside });
-      assert.ok(existsSync(victim), "the command only counts; byte deletion is the wrapper's job inside its own store");
+      // SEL-42 review 1: the command takes no objects_dir at all; only the injected store is scanned.
+      await rejects_api(
+        env.service.execute(env.ctx("dg-1"), "file.gc_orphans", { grace_ms: GRACE, objects_dir: outside }),
+        "invalid_payload",
+      );
+      assert.ok(existsSync(victim), "a gc payload naming another folder is refused and deletes nothing there");
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
