@@ -127,7 +127,10 @@ const youth: ResearchMock = {
     milestone: { title: "기획 단계 승인", note: "멈춘 실행을 풀고 결과물이 다 나오면 승인할 수 있습니다." },
   },
   content: [],
-  proposals: [{ id: "py1", kind: "assumption", text: "지원 기간은 12개월로 본다(수급 기간이 다른 사람은 따로 표시)", basis: "연구 설계 초안 v1", by: "PES 실행기 · deepseek-v4.1-flash", at: "15:40", state: { domain: "proposal", value: "proposed" } }],
+  proposals: [
+    { id: "py1", kind: "assumption", text: "지원 기간은 12개월로 본다(수급 기간이 다른 사람은 따로 표시)", basis: "연구 설계 초안 v1", by: "PES 실행기 · deepseek-v4.1-flash", at: "15:40", state: { domain: "proposal", value: "proposed" } },
+    { id: "py2", kind: "assumption", text: "지원 전 3개월의 주거비를 기준선으로 삼는다(이사한 사람은 같은 집 기준으로 다시 계산)", basis: "연구 설계 초안 v1 · 자료 점검 15:44", by: "PES 실행기 · deepseek-v4.1-flash", at: "15:42", state: { domain: "proposal", value: "proposed" } },
+  ],
   stage_summaries: {},
   log: [],
 };
