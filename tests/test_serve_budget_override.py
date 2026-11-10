@@ -83,6 +83,21 @@ def _run_serve(isolated_home, tmp_path, value):
             proc.communicate()
 
 
+def _load_serve():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("serve_under_test", SERVE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)   # main() 은 __main__ 일 때만 돈다
+    return module
+
+
+def _validate(serve, value, defaults=DEFAULTS):
+    """serve.py 가 시작 때 하는 검사와 같은 순서: 파싱 -> 기본값과 견주기."""
+    override = serve._parse_budget_override(value)
+    return serve._apply_budget_override(dict(defaults, control_routes=[], poll_routes=[], refund_codes=[]), override)
+
+
+# 단위 시험: 잘못된 값 18종이 ValueError(변수 이름이 든 메시지)로 거절된다. 서버 프로세스까지 띄우는 시험은 아래 대표 2종만.
 BAD = [
     pytest.param("not json", id="json-아님"),
     pytest.param("[1, 2]", id="배열"),
@@ -106,7 +121,34 @@ BAD = [
 
 
 @pytest.mark.parametrize("value", BAD)
-def test_an_invalid_override_stops_the_server_with_a_message(isolated_home, tmp_path, value):
+def test_an_invalid_override_is_refused_with_a_message(value):
+    serve = _load_serve()
+    with pytest.raises(ValueError) as caught:
+        _validate(serve, value)
+    assert ENV_NAME in str(caught.value), str(caught.value)
+
+
+def test_valid_overrides_only_narrow_and_the_rest_stays_the_default():
+    serve = _load_serve()
+    assert serve._parse_budget_override(None) is None
+    # 변수가 없거나 빈 객체면 정책이 그대로다.
+    base = dict(DEFAULTS, control_routes=[], poll_routes=[], refund_codes=[])
+    assert serve._apply_budget_override(base, None) == base
+    assert serve._apply_budget_override(base, serve._parse_budget_override("{}")) == base
+    # 기본값과 같은 값은 받는다. 줄인 키만 바뀐다.
+    assert _validate(serve, json.dumps(DEFAULTS)) == base
+    narrowed = _validate(serve, '{"agent_requests_per_minute": 3, "window_ms": 2000}')
+    assert narrowed["agent_requests_per_minute"] == 3 and narrowed["window_ms"] == 2000
+    for key in DEFAULTS:
+        if key not in ("agent_requests_per_minute", "window_ms"):
+            assert narrowed[key] == DEFAULTS[key], key
+
+
+@pytest.mark.parametrize("value", [
+    pytest.param('{"unknown_limit": 3}', id="모르는-키"),
+    pytest.param('{"agent_requests_per_minute": 61}', id="기본값-초과"),
+])
+def test_an_invalid_override_stops_the_server_process(isolated_home, tmp_path, value):
     code, output = _run_serve(isolated_home, tmp_path, value)
     assert code is not None, "잘못된 값인데 서버가 계속 떠 있다 (조용히 무시했다)"
     assert code != 0, output
@@ -114,9 +156,8 @@ def test_an_invalid_override_stops_the_server_with_a_message(isolated_home, tmp_
     assert "serving" not in output, output
 
 
-@pytest.mark.parametrize("value", [json.dumps(DEFAULTS), '{"agent_requests_per_minute": 1}', "{}"])
-def test_a_valid_override_lets_the_server_start(isolated_home, tmp_path, monkeypatch, value):
-    monkeypatch.setenv(ENV_NAME, value)
+def test_a_valid_override_lets_the_server_start(isolated_home, tmp_path, monkeypatch):
+    monkeypatch.setenv(ENV_NAME, '{"agent_requests_per_minute": 1}')
     server = Server(_make_home(isolated_home), tmp_path)
     try:
         server.start()   # 준비 확인(/whoami)까지 통과해야 한다

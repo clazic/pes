@@ -20,6 +20,7 @@ import sys
 
 import pytest
 
+from serve_budget import start_shared_server
 from test_serve import Server, _make_home
 
 SECRET = "synthetic-final-session-secret"
@@ -78,6 +79,16 @@ def api_server(isolated_home, tmp_path, monkeypatch):
         instance.stop()
 
 
+@pytest.fixture(scope="module")
+def shared_api(tmp_path_factory):
+    """F1·F5 시험이 서버 하나를 나눠 쓴다. 시험마다 자기 slug 의 새 프로젝트·자기 멱등 키·자기 blob 을 쓰므로 서로 섞이지 않는다."""
+    server, home = start_shared_server(tmp_path_factory, SECRET)
+    try:
+        yield server, home
+    finally:
+        server.stop()
+
+
 def _reserve(server, project, sha, size, media_type, key):
     return _json_call(
         server, "POST", f"/api/v1/projects/{project}/uploads",
@@ -97,8 +108,9 @@ def _put_and_complete(server, project, blob_id, payload, media_type, tag):
 # ---------------------------------------------------------------------------
 # F1
 
-def test_f1_reserving_a_crlf_media_type_is_400_over_real_http(api_server):
-    project = _create_project(api_server)
+def test_f1_reserving_a_crlf_media_type_is_400_over_real_http(shared_api):
+    api_server, isolated_home = shared_api
+    project = _create_project(api_server, "synthetic-f1-reserve")
     payload = b"synthetic f1 bytes"
     status, data, _ = _reserve(api_server, project, hashlib.sha256(payload).hexdigest(), len(payload), PROBE, "f1-reserve")
     assert status == 400, data
@@ -108,8 +120,9 @@ def test_f1_reserving_a_crlf_media_type_is_400_over_real_http(api_server):
     assert status == 201, data
 
 
-def test_f1_an_already_stored_crlf_media_type_never_becomes_a_response_header(api_server, isolated_home):
-    project = _create_project(api_server)
+def test_f1_an_already_stored_crlf_media_type_never_becomes_a_response_header(shared_api):
+    api_server, isolated_home = shared_api
+    project = _create_project(api_server, "synthetic-f1-stored")
     payload = b"synthetic f1 stored bytes"
     status, data, _ = _reserve(api_server, project, hashlib.sha256(payload).hexdigest(), len(payload), "text/plain", "f1s-reserve")
     assert status == 201, data
@@ -137,7 +150,8 @@ def test_f1_an_already_stored_crlf_media_type_never_becomes_a_response_header(ap
 # ---------------------------------------------------------------------------
 # F5
 
-def test_f5_an_empty_file_round_trips_through_serve(api_server):
+def test_f5_an_empty_file_round_trips_through_serve(shared_api):
+    api_server, isolated_home = shared_api
     project = _create_project(api_server, "synthetic-empty")
     status, data, _ = _reserve(api_server, project, EMPTY_SHA256, 0, "application/octet-stream", "f5-reserve")
     assert status == 201, data
@@ -161,7 +175,8 @@ def test_f5_an_empty_file_round_trips_through_serve(api_server):
     assert lengths == ["0"]
 
 
-def test_f5_a_non_empty_size_mismatch_with_an_empty_put_is_still_rejected(api_server):
+def test_f5_a_non_empty_size_mismatch_with_an_empty_put_is_still_rejected(shared_api):
+    api_server, isolated_home = shared_api
     """빈 PUT 을 받아들이는 고침이 '내용이 모자란 PUT' 까지 받아들이면 안 된다."""
     project = _create_project(api_server, "synthetic-short")
     payload = b"not empty"
