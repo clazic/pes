@@ -151,7 +151,7 @@ def test_f1_an_already_stored_crlf_media_type_never_becomes_a_response_header(sh
 # F5
 
 def test_f5_an_empty_file_round_trips_through_serve(shared_api):
-    api_server, isolated_home = shared_api
+    api_server, _ = shared_api
     project = _create_project(api_server, "synthetic-empty")
     status, data, _ = _reserve(api_server, project, EMPTY_SHA256, 0, "application/octet-stream", "f5-reserve")
     assert status == 201, data
@@ -176,8 +176,8 @@ def test_f5_an_empty_file_round_trips_through_serve(shared_api):
 
 
 def test_f5_a_non_empty_size_mismatch_with_an_empty_put_is_still_rejected(shared_api):
-    api_server, isolated_home = shared_api
     """빈 PUT 을 받아들이는 고침이 '내용이 모자란 PUT' 까지 받아들이면 안 된다."""
+    api_server, _ = shared_api
     project = _create_project(api_server, "synthetic-short")
     payload = b"not empty"
     status, data, _ = _reserve(api_server, project, hashlib.sha256(payload).hexdigest(), len(payload), "application/octet-stream", "f5m-reserve")

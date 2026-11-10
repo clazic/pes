@@ -23,7 +23,6 @@ import pytest
 
 from conftest import ROOT
 from serve_budget import start_shared_server
-from test_serve import Server, _make_home
 
 SECRET = "synthetic-limits-session-secret"
 P_ROOT = "/api/v1/projects"
@@ -126,26 +125,15 @@ class Env:
         return doc["data"]["run_id"]
 
 
-@pytest.fixture
-def env(isolated_home, tmp_path, monkeypatch):
-    monkeypatch.setenv("PES_LOCAL_SESSION_SECRET", SECRET)
-    instance = Server(_make_home(isolated_home), tmp_path)
-    try:
-        instance.start()
-        yield Env(instance, isolated_home)
-    finally:
-        instance.stop()
-
-
 @pytest.fixture(scope="module")
 def shared_env(tmp_path_factory):
-    """서버와 프로젝트 하나를 이 파일의 시험이 나눠 쓴다. 에이전트 한도(분당 6)와 poll 간격(500ms)만 조였다.
+    """서버와 프로젝트 하나를 이 파일의 시험이 나눠 쓴다. 에이전트 한도(분당 6)만 조였다(poll 간격은 기본 1000ms).
 
     시험마다 새 에이전트 토큰·새 run 을 쓰므로 예산·poll 간격(자격 sha256 단위)은 시험끼리 섞이지 않는다. 거친 버킷(300)·
     소유자 세션(600)·제어(120)는 기본값 그대로라 이 파일 전체가 써도 차지 않고, 그 한도에 닿는 시험은 이 파일에 없다
     (거친 버킷을 채우는 시험은 r1_3·r1_regression 의 자기 서버). 서버 로그 시험은 공유 로그 전체를 보므로 더 엄격해질 뿐이다.
     """
-    override = {"agent_requests_per_minute": 6, "min_poll_interval_ms": 500}
+    override = {"agent_requests_per_minute": 6}
     server, home = start_shared_server(tmp_path_factory, SECRET, override)
     try:
         yield Env(server, home, override)
@@ -272,13 +260,15 @@ def test_a_poll_refusal_leaves_the_next_allowed_time_where_it_was(shared_env):
 # ---------------------------------------------------------------------------
 # (3) 쿼리스트링 전달
 
-def test_changes_limit_and_cursor_reach_the_api(env):
+def test_changes_limit_and_cursor_reach_the_api(shared_env):
+    env = shared_env   # 공유 프로젝트의 사건 전체를 읽고 견주므로 개수에 의존하지 않는다 (한 쪽 100건 안에 다 들어올 때만 성립 — 아래에서 확인).
     agent = env.make_agent("pager")
     env.owner_creates_run(agent)
     status, doc, _ = _call(env.server, "GET", f"{env.P}/changes", "owner")
     assert status == 200
     everything = doc["data"]["events"]
     assert len(everything) >= 3, everything
+    assert doc["data"]["has_more"] is False, "공유 프로젝트의 사건이 한 쪽을 넘었다: 전체와 견주는 가정이 깨졌다"
 
     status, doc, _ = _call(env.server, "GET", f"{env.P}/changes?limit=1", "owner")
     assert status == 200, doc
@@ -348,7 +338,7 @@ def test_inputs_wait_ms_and_cursor_reach_the_api(shared_env):
 
     # 거절된 요청은 poll 간격을 쓰지 않으므로 바로 이어서 빈 poll 을 보내도 된다.
     # 입력이 없을 때 wait_ms 만큼 기다렸다가 돌려준다 (기다림 없이 즉시 오면 쿼리가 안 전달된 것).
-    wait_ms = 1200
+    wait_ms = 600
     started = time.monotonic()
     status, doc, _ = _call(shared_env.server, "GET", f"{path}?wait_ms={wait_ms}", agent["token"])
     elapsed = time.monotonic() - started

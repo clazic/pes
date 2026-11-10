@@ -1,8 +1,10 @@
 """SEL-47: 시험 전용 조이기 변수 PES_API_BUDGET_TEST_OVERRIDE (serve.py).
 
   - 변수가 없으면 기본 한도 그대로다 (api_bridge.ts --limits 출력 = ApiApp.budget_policy 로 확인, 요청을 퍼붓지 않는다).
-  - 모르는 키·양의 정수 아님·0 이하·기본값 초과·JSON 아님이면 서버가 뜨지 않고 오류 메시지와 함께 종료한다.
-  - 올바른 값(기본값 이하)은 실제로 적용된다: agent 한도와 창(window_ms)이 줄어든다.
+  - 받는 키는 개수 4종(agent·control·owner·coarse)뿐이다. window_ms·min_poll_interval_ms 는 줄이면 한도가 풀리므로
+    모르는 키와 같이 거절된다.
+  - 모르는 키·양의 정수 아님·0 이하·기본값 초과·JSON 아님이면 서버가 뜨지 않고 오류 메시지와 함께 종료한다 (종료 코드 2).
+  - 올바른 값(기본값 이하)은 실제로 적용된다: agent 한도가 줄어든다 (sleep 없이 확인).
 
 모든 프로세스는 conftest 의 격리 HOME/PES_HOME 에서만 실행한다. 합성 자료만 쓴다.
 """
@@ -11,12 +13,11 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 
 import pytest
 
 from conftest import ROOT
-from serve_budget import ENV_NAME
+from serve_budget import ENV_NAME, TIGHT
 from test_serve import Server, _free_port, _make_home
 from test_serve_api_r1_regression import SCOPES, _bootstrap, _get
 
@@ -33,6 +34,9 @@ DEFAULTS = {
     "coarse_requests_per_minute": 300,
     "min_poll_interval_ms": 1000,
 }
+
+
+COUNT_DEFAULTS = {key: value for key, value in DEFAULTS.items() if key.endswith("_per_minute")}
 
 
 def _child_env(isolated_home, value):
@@ -97,7 +101,7 @@ def _validate(serve, value, defaults=DEFAULTS):
     return serve._apply_budget_override(dict(defaults, control_routes=[], poll_routes=[], refund_codes=[]), override)
 
 
-# 단위 시험: 잘못된 값 18종이 ValueError(변수 이름이 든 메시지)로 거절된다. 서버 프로세스까지 띄우는 시험은 아래 대표 2종만.
+# 단위 시험: 잘못된 값이 ValueError(변수 이름이 든 메시지)로 거절된다. 서버 프로세스까지 띄우는 시험은 아래 대표 2종만.
 BAD = [
     pytest.param("not json", id="json-아님"),
     pytest.param("[1, 2]", id="배열"),
@@ -110,7 +114,13 @@ BAD = [
     pytest.param('{"agent_requests_per_minute": 2.5}', id="소수"),
     pytest.param('{"agent_requests_per_minute": true}', id="불리언"),
     pytest.param('{"agent_requests_per_minute": null}', id="null"),
+    pytest.param('{"window_ms": 2000}', id="window_ms-줄이기도-거절"),
+    pytest.param('{"window_ms": 60000}', id="window_ms-기본값과-같아도-거절"),
     pytest.param('{"window_ms": 60001}', id="window_ms-기본값-초과"),
+    pytest.param('{"min_poll_interval_ms": 500}', id="poll-줄이기도-거절"),
+    pytest.param('{"min_poll_interval_ms": 1000}', id="poll-기본값과-같아도-거절"),
+    pytest.param('{"window_ms": 2000, "min_poll_interval_ms": 500}', id="두-키-함께"),
+    pytest.param('{"agent_requests_per_minute": 3, "window_ms": 2000}', id="개수-키-옆-window_ms"),
     pytest.param('{"agent_requests_per_minute": 61}', id="agent-기본값-초과"),
     pytest.param('{"agent_control_requests_per_minute": 121}', id="control-기본값-초과"),
     pytest.param('{"owner_requests_per_minute": 601}', id="owner-기본값-초과"),
@@ -135,23 +145,34 @@ def test_valid_overrides_only_narrow_and_the_rest_stays_the_default():
     base = dict(DEFAULTS, control_routes=[], poll_routes=[], refund_codes=[])
     assert serve._apply_budget_override(base, None) == base
     assert serve._apply_budget_override(base, serve._parse_budget_override("{}")) == base
-    # 기본값과 같은 값은 받는다. 줄인 키만 바뀐다.
-    assert _validate(serve, json.dumps(DEFAULTS)) == base
-    narrowed = _validate(serve, '{"agent_requests_per_minute": 3, "window_ms": 2000}')
-    assert narrowed["agent_requests_per_minute"] == 3 and narrowed["window_ms"] == 2000
+    # 기본값과 같은 값은 받는다. 줄인 키만 바뀐다. 창·poll 간격은 어떤 경우에도 그대로다.
+    assert _validate(serve, json.dumps(COUNT_DEFAULTS)) == base
+    narrowed = _validate(serve, '{"agent_requests_per_minute": 3, "coarse_requests_per_minute": 50}')
+    assert narrowed["agent_requests_per_minute"] == 3 and narrowed["coarse_requests_per_minute"] == 50
     for key in DEFAULTS:
-        if key not in ("agent_requests_per_minute", "window_ms"):
+        if key not in ("agent_requests_per_minute", "coarse_requests_per_minute"):
             assert narrowed[key] == DEFAULTS[key], key
+
+
+def test_the_window_and_the_poll_gap_cannot_be_overridden_at_all():
+    """줄이면 한도가 풀리는 두 키: 받는 키 목록에 없고, 시작 때 하는 검사(파싱 -> 적용)에서 ValueError 로 거절된다."""
+    serve = _load_serve()
+    for key in ("window_ms", "min_poll_interval_ms"):
+        assert key not in serve._BUDGET_OVERRIDE_KEYS, key
+        with pytest.raises(ValueError) as caught:
+            _validate(serve, json.dumps({key: 1}))
+        assert key in str(caught.value) and ENV_NAME in str(caught.value), str(caught.value)
 
 
 @pytest.mark.parametrize("value", [
     pytest.param('{"unknown_limit": 3}', id="모르는-키"),
     pytest.param('{"agent_requests_per_minute": 61}', id="기본값-초과"),
+    pytest.param('{"window_ms": 2000, "min_poll_interval_ms": 500}', id="window_ms-poll-두-키"),
 ])
 def test_an_invalid_override_stops_the_server_process(isolated_home, tmp_path, value):
     code, output = _run_serve(isolated_home, tmp_path, value)
     assert code is not None, "잘못된 값인데 서버가 계속 떠 있다 (조용히 무시했다)"
-    assert code != 0, output
+    assert code == 2, output
     assert ENV_NAME in output, output   # 어떤 변수가 문제인지 알려 준다
     assert "serving" not in output, output
 
@@ -175,18 +196,18 @@ def test_without_the_variable_the_server_serves_with_the_default_budget(isolated
         status, doc, _, _ = _get(server, "/api/v1/capabilities")
         assert status == 200
         assert int(doc["data"]["capabilities"]["limits"]["agent_requests_per_minute"]) == DEFAULTS["agent_requests_per_minute"]
-        # 기본 한도라면 3번째 요청이 429 가 아니다 (조이기가 새어 들어오지 않았다).
-        for i in range(4):
+        # 조임 값(TIGHT agent)보다 많이 보내도 모두 200: 기본 한도라서 조이기가 새어 들어오지 않았다.
+        for i in range(TIGHT["agent_requests_per_minute"] + 2):
             status, _, text, _ = _get(server, f"/api/v1/projects/{boot['project_id']}/context", boot["token"])
             assert status == 200, (i, text)
     finally:
         server.stop()
 
 
-def test_an_override_narrows_the_agent_limit_and_the_window(isolated_home, tmp_path, monkeypatch):
+def test_an_override_narrows_the_agent_limit(isolated_home, tmp_path, monkeypatch):
     monkeypatch.delenv("PES_LOCAL_SESSION_SECRET", raising=False)
     boot = _bootstrap(isolated_home, "synthetic-ovr2")
-    monkeypatch.setenv(ENV_NAME, json.dumps({"agent_requests_per_minute": 3, "window_ms": 2000}))
+    monkeypatch.setenv(ENV_NAME, json.dumps({"agent_requests_per_minute": 3}))
     server = Server(_make_home(isolated_home), tmp_path)
     try:
         server.start()
@@ -197,10 +218,10 @@ def test_an_override_narrows_the_agent_limit_and_the_window(isolated_home, tmp_p
         status, doc, _, headers = _get(server, path, boot["token"])
         assert status == 429, doc
         assert doc["error"]["code"] == "rate_limited" and doc["error"]["details"]["scope"] == "general"
-        # 창이 2초로 줄었으니 재시도 대기는 2초를 넘지 않는다 (기본 창이면 최대 60초).
-        assert 0 < doc["error"]["details"]["retry_after_ms"] <= 2000, doc
-        time.sleep(2.4)
-        status, _, text, _ = _get(server, path, boot["token"])
-        assert status == 200, text
+        # 창은 기본(60초) 그대로라 대기는 최대 60초다. 기다려 풀리는 것은 보지 않는다 (sleep 없음).
+        assert 0 < doc["error"]["details"]["retry_after_ms"] <= 60000, doc
+        # 한 번 더 보내도 같은 창 안에서는 계속 거절된다.
+        status, doc, _, _ = _get(server, path, boot["token"])
+        assert status == 429, doc
     finally:
         server.stop()

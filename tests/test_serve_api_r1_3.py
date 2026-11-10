@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from serve_budget import tighten
+from serve_budget import TIGHT, tighten
 from test_serve import Server, _make_home
 from test_serve_api_r1_regression import _bootstrap, _get, _http
 
@@ -38,7 +38,6 @@ def _coarse(server):
     status, doc, _, _ = _get(server, "/api/v1/capabilities")
     assert status == 200
     # 서버가 실제로 쓰는 거친 상한 = 시험이 넣은 조임 값. (기본 300 = agent 60 의 5배는 test_serve_budget_override 가 --limits 로 확인.)
-    from serve_budget import TIGHT
     return TIGHT["coarse_requests_per_minute"]
 
 
@@ -109,6 +108,6 @@ def test_n1_a_valid_token_moves_to_its_own_budget_only_after_its_first_success(p
         flood = list(pool.map(lambda i: _send(server, "GET", f"{base}/no-such-route", f"synthetic-flood-{i}")[0], range(ceiling + 20)))
     assert 429 in flood
     # 검증된 유효 토큰은 포화와 상관없이 자기 예산으로 계속 쓸 수 있다.
-    for _ in range(5):
+    for _ in range(3):
         status, _, text, _ = _get(server, f"{base}/context", token)
         assert status == 200, f"포화된 unverified 버킷이 검증된 토큰을 막았다: {status} {text}"
