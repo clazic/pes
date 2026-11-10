@@ -31,6 +31,7 @@ import {
   require_current_lease,
   require_non_empty_string,
   require_record,
+  resolve_stage_key,
   type CommandDefinition,
   type CommandResult,
   type CommandRuntime,
@@ -1627,8 +1628,52 @@ function definition(
   return Object.freeze({ action, scope: "project", rev_bearing: false, run });
 }
 
+/**
+ * Record that a question-form draft was prepared from the bank for a stage.
+ * The draft text itself stays a working file the agent edits; this leaves the
+ * receipt and event only. It publishes nothing and fills in no answer.
+ */
+function run_prepare_draft(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, ["stage", "bank_key"]);
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new Error("question.prepare_draft must resolve a project and actor first");
+  }
+  const bank_key = require_non_empty_string(payload, "bank_key");
+  if (bank_key.length > 64 || !/^[A-Za-z0-9_-]+$/.test(bank_key)) {
+    return invalid_payload("bank_key must be a short plain key");
+  }
+  const stage = resolve_stage_key(runtime, project.id, payload.stage);
+  const result = {
+    project_id: project.id,
+    stage_id: stage.id,
+    stage: stage.key,
+    bank_key,
+    round_no: stage.latest_round_no,
+  };
+  insert_receipt(runtime, {
+    project_id: project.id,
+    actor_id,
+    action: "question.draft_prepared",
+    base_control_rev: null,
+    result,
+  });
+  return {
+    result,
+    events: [
+      {
+        type: "question.draft_prepared",
+        payload: { stage: stage.key, stage_id: stage.id, bank_key, round_no: stage.latest_round_no },
+      },
+    ],
+  };
+}
+
 const QUESTION_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> = [
   ["question.publish_set", definition("question.set_published", run_publish_set)],
+  ["question.prepare_draft", definition("question.draft_prepared", run_prepare_draft)],
   ["question.revise", definition("question.revised", run_revise)],
   ["answer.submit", definition("answer.submitted", run_submit_answers)],
 ];

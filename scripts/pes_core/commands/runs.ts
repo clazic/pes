@@ -287,6 +287,12 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     run_id = runtime.new_id();
   }
 
+  // The CLI lock records which Claude session holds the project; the ref is a
+  // label for that, never a credential.
+  const external_session_ref = optional_string(payload, "external_session_ref");
+  if (external_session_ref !== null && external_session_ref.length > 200) {
+    throw new ApiError("invalid_payload", "external_session_ref is too long");
+  }
   const role = payload.role;
   if (role !== undefined && role !== "worker" && role !== "reviewer") {
     throw new ApiError("invalid_payload", 'role must be "worker" or "reviewer"');
@@ -367,8 +373,8 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     const written = runtime.db.run(
       `INSERT INTO runs
          (id, project_id, edition_id, actor_id, mode, runtime, provider, model, role,
-          status, parent_run_id, base_control_rev, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL)`,
+          status, parent_run_id, base_control_rev, started_at, ended_at, external_session_ref)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL, ?)`,
       run_id,
       scope.project_id,
       edition.active_edition_id,
@@ -381,6 +387,7 @@ function run_claim(runtime: CommandRuntime): CommandResult {
       parent_run_id,
       Number(scope.control_rev),
       runtime.now_ms,
+      external_session_ref,
     );
     if (written.changes !== 1n) {
       throw new Error("the run was not created");

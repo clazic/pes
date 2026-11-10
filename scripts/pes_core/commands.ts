@@ -29,6 +29,7 @@ import { MIGRATION_COMMAND_ENTRIES } from "./commands/migration.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { make_register_command, type BuildHooks, type Created } from "./commands/projects.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
+import { RECORD_COMMAND_ENTRIES } from "./commands/records.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
@@ -520,6 +521,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...ACTOR_COMMAND_ENTRIES,
   ...POLICY_COMMAND_ENTRIES,
   ...QUESTION_COMMAND_ENTRIES,
+  ...RECORD_COMMAND_ENTRIES,
 ]);
 
 /**

@@ -216,17 +216,11 @@ def cmd_init(args):
         print(f"참고자료로 가져옴: 항목 {len(p['library']['items'])}개 (R{p['library']['round']}까지, {p['library']['source']})")
 
 
-def import_library(d: Path, src: Path) -> dict:
+def library_dict(src: Path) -> dict:
     st_file = src / "state.json"
     if not st_file.exists():
         die(f"가져올 state.json 없음: {st_file}")
     st = json.loads(st_file.read_text(encoding="utf-8"))
-    shots_src = src / "shots"
-    if shots_src.exists():
-        dst = d / "library" / "shots"
-        dst.parent.mkdir(exist_ok=True)
-        if not dst.exists():
-            shutil.copytree(shots_src, dst)
     items = []
     for it in st.get("items", []):
         if it.get("status") == "removed":
@@ -237,6 +231,21 @@ def import_library(d: Path, src: Path) -> dict:
     return {"source": str(src), "imported": now(), "round": st.get("round"), "topic": st.get("topic"),
             "settings": st.get("settings", {}), "items": items,
             "suggestions": st.get("suggestions", []), "warnings": st.get("warnings", [])}
+
+
+def copy_library_shots(d: Path, src: Path) -> None:
+    shots_src = src / "shots"
+    if shots_src.exists():
+        dst = d / "library" / "shots"
+        dst.parent.mkdir(exist_ok=True)
+        if not dst.exists():
+            shutil.copytree(shots_src, dst)
+
+
+def import_library(d: Path, src: Path) -> dict:
+    lib = library_dict(src)
+    copy_library_shots(d, src)
+    return lib
 
 
 # ---------- 질문 폼 ----------
@@ -1765,11 +1774,508 @@ def cmd_unlock(args):
     print("잠금 해제")
 
 
+# ---------- DB 쓰기 경로 (PES_DB_CORE=1 일 때만) ----------
+# 개발 플래그. 꺼져 있으면 위의 v0.15 동작(project.json·.pes-lock 직접 쓰기)이 그대로다.
+# 켜져 있으면 쓰기 명령은 project.json 을 쓰지 않고, scripts/pes_core/cli_bridge.ts(Node)를 프로세스로 불러
+# 코어 명령 서비스를 지난다. Python 은 TypeScript 를 import 하지 않고 JSON 한 쌍으로만 주고받는다.
+# 자격: PES_TOKEN 없음 = 이 컴퓨터 DB 의 사람 소유자, PES_TOKEN=<에이전트 토큰> = 그 에이전트. PES_OWNER 는 잠금 표지일 뿐 자격이 아니다.
+BRIDGE = Path(__file__).resolve().parent / "pes_core" / "cli_bridge.ts"
+ASK_PURPOSES = {"stage_start", "review", "resume"}
+NEW_QUESTION_TYPES = {"single", "multi", "text", "textarea", "number", "scale", "file"}
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def db_core() -> bool:
+    return os.environ.get("PES_DB_CORE") == "1"
+
+
+def need_db_core(name):
+    if not db_core():
+        die(f"{name}: PES_DB_CORE=1 일 때만 쓸 수 있는 명령입니다 (개발 플래그 — 2단계 DB 경로)", 2)
+
+
+def bridge(op, slug=None, args=None):
+    """cli_bridge.ts 를 한 번 실행한다. 실패하면 메시지를 내고 종료 코드(기본 1)로 끝낸다."""
+    node = shutil.which("node")
+    if node is None:
+        die("node 를 찾을 수 없습니다 — Node 26 이상이 필요합니다", 1)
+    req = {"op": op, "slug": slug, "session": os.environ.get("PES_OWNER") or None,
+           "token": os.environ.get("PES_TOKEN") or None, "args": args or {}}
+    try:
+        proc = subprocess.run([node, "--no-warnings", str(BRIDGE)], input=json.dumps(req).encode("utf-8"),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        die(f"코어를 실행하지 못했습니다: {e}", 1)
+    try:
+        res = json.loads(proc.stdout.decode("utf-8").strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        die("코어가 올바른 답을 주지 않았습니다" + (": " + proc.stderr.decode("utf-8", "replace").strip()[-300:] if proc.stderr else ""), 1)
+    if not isinstance(res, dict) or not isinstance(res.get("ok"), bool):
+        die("코어가 올바른 답을 주지 않았습니다 (형식이 맞지 않음)", 1)
+    if not res["ok"]:
+        if res.get("code") == "internal_error" and proc.stderr:
+            print(proc.stderr.decode("utf-8", "replace").strip()[:600], file=sys.stderr)
+        try:
+            code = int(res.get("exit") or 1)
+        except (TypeError, ValueError):
+            code = 1
+        die(str(res.get("message") or "실패"), code)
+    if not isinstance(res.get("data"), dict):
+        die("코어가 올바른 답을 주지 않았습니다 (결과가 없음)", 1)
+    return res["data"]
+
+
+def read_json_file(path, what="입력 파일"):
+    """JSON 파일을 읽는다. 없거나 깨졌으면 스택 추적 대신 한국어 오류 한 줄로 끝낸다."""
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        die(f"{what}이 없습니다: {path}", 2)
+    except (OSError, UnicodeDecodeError) as e:
+        die(f"{what}을 읽지 못했습니다: {path} ({e.__class__.__name__})", 2)
+    except ValueError as e:
+        die(f"{what}이 올바른 JSON이 아닙니다: {path} ({e})", 2)
+
+
+def db_slugs():
+    try:
+        return set(bridge("slugs").get("slugs") or [])
+    except SystemExit:
+        return set()
+
+
+def db_name(arg) -> str:
+    return pdir(arg).name
+
+
+def db_init(args):
+    if not args:
+        die("사용: init <dir> --topic 주제 [--slug s] [--import 폴더]")
+    d = pdir(args[0])
+    opt = {}
+    rest = args[1:]
+    while rest:
+        k = rest.pop(0)
+        if k in ("--topic", "--slug", "--import") and rest:
+            opt[k[2:]] = rest.pop(0)
+        else:
+            die(f"알 수 없는 인자: {k}")
+    if (d / "project.json").exists():
+        die(f"이미 프로젝트가 있습니다: {d}/project.json  (이어하기는 ask-prep {d} resume)", 2)
+    if not opt.get("topic"):
+        die("--topic 필요")
+    slug = opt.get("slug") or d.name
+    if not SLUG_RE.match(slug):
+        die("프로젝트 이름은 소문자·숫자·하이픈(1~64자)만 쓸 수 있습니다", 2)
+    if slug != d.name:
+        # 이후 명령은 프로젝트를 폴더 이름으로 찾는다 — 이름이 다르면 만든 프로젝트를 다시 찾을 수 없다.
+        die(f"--slug({slug})는 폴더 이름({d.name})과 같아야 합니다 — 폴더 이름으로 프로젝트를 찾습니다", 2)
+    lib = None
+    if opt.get("import"):
+        lib = library_dict(pdir(opt["import"]))
+    # DB 쪽 검사(중복 이름·참고자료 거부 사유)를 먼저 하고, 통과한 뒤에야 폴더와 참고자료 파일을 만든다.
+    data = bridge("init", None, {"slug": slug, "topic": opt["topic"], "library": lib})
+    d.mkdir(parents=True, exist_ok=True)
+    if opt.get("import"):
+        copy_library_shots(d, pdir(opt["import"]))
+    for sub in ("feedback", "ask", "snapshots", "shots", "out"):
+        (d / sub).mkdir(exist_ok=True)
+    (d / "feedback.log").touch()
+    print(d)
+    if lib:
+        print(f"참고자료로 가져옴: 항목 {len(lib['items'])}개 (R{lib['round']}까지, {lib['source']})")
+
+
+def legacy_question(q: dict) -> dict:
+    """옛 질문 은행 항목 -> question.publish_set 의 새 질문. 답은 채우지 않는다(추천 표시만 옵션에 남긴다)."""
+    qt = q.get("type") if q.get("type") in NEW_QUESTION_TYPES else "text"
+    opts = []
+    for o in q.get("options") or []:
+        if isinstance(o, dict) and o.get("value") not in (None, ""):
+            item = {"value": str(o["value"]), "label": str(o.get("label") or o["value"])}
+            if o.get("recommended"):
+                item["recommended"] = True
+            opts.append(item)
+        elif isinstance(o, str) and o:
+            opts.append({"value": o, "label": o})
+    out = {"text": str(q.get("label") or q.get("id") or "질문"), "type": qt, "required": bool(q.get("required")),
+           "allow_comment_as_answer": bool(q.get("other"))}
+    if opts:
+        out["options"] = opts
+    helptext = q.get("help") or q.get("desc")
+    if isinstance(helptext, str) and helptext:
+        out["help"] = helptext
+    if isinstance(q.get("show_if"), dict):
+        out["show_if"] = q["show_if"]
+    return out
+
+
+def db_ask_prep(args):
+    d, which = pdir(args[0]), args[1]
+    src = QB / f"{which}.json"
+    if not src.exists():
+        die(f"질문 은행 없음: {src}")
+    spec = read_json_file(src, "질문 은행")
+    bank_key = re.sub(r"[^A-Za-z0-9_-]", "-", str(spec.get("id", which)))[:64] or which
+    bridge("ask-prep", d.name, {"stage": which if which in KEYS else None, "bank_key": bank_key})
+    (d / "ask").mkdir(parents=True, exist_ok=True)
+    out = d / "ask" / f"{spec.get('id', which)}.json"
+    if not out.exists():
+        out.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(out)
+
+
+def db_ask(args):
+    d, spec_path = pdir(args[0]), pdir(args[1])
+    spec = strip_private(read_json_file(spec_path, "질문 폼 파일"))
+    if not isinstance(spec, dict):
+        die(f"질문 폼 파일은 JSON 객체여야 합니다: {spec_path}", 2)
+    sid = re.sub(r"[^a-z0-9-]", "-", str(spec.get("id") or spec.get("stage") or "ask").lower()).strip("-") or "ask"
+    stage = spec.get("stage") if spec.get("stage") in KEYS else None
+    purpose = spec.get("kind") if spec.get("kind") in ASK_PURPOSES else "stage_start"
+    questions = [legacy_question(q) for q in spec.get("questions") or [] if isinstance(q, dict)]
+    if not questions:
+        die("질문 폼에 질문이 없습니다", 2)
+    bridge("ask", d.name, {"stage": stage, "purpose": purpose, "form_key": sid, "questions": questions})
+    ov = bridge("overview", d.name)
+    status = {x["key"]: x["status"] for x in ov["stages"]}
+    data = {"spec": spec, "topic": ov["topic"], "built": now(),
+            "stages": [{"key": k, "label": v, "status": status.get(k, "pending")} for k, v in STAGES]}
+    out = d / f"ask-{sid}.html"
+    d.mkdir(parents=True, exist_ok=True)
+    out.write_text(fill(TPL / "ask.html", spec.get("title", "질문"), data), encoding="utf-8")
+    print(out)
+
+
+def db_round_start(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    data = bridge("round-start", d.name, {"stage": s})
+    print(f"{LABEL[s]} R{data['round_no']} 시작")
+
+
+def db_merge(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    results = []
+    for f in args[2:]:
+        raw = read_json_file(f, "병합할 결과 파일")
+        for r in (raw if isinstance(raw, list) else [raw]):
+            if not isinstance(r, dict):
+                die(f"결과 항목은 JSON 객체여야 합니다: {f}", 2)
+            r = dict(r)
+            for k in ("title", "kind", "question", "summary", "details", "confidence", "verify", "order", "verdict", "path"):
+                if k in r and r[k] not in (None, ""):
+                    r[k] = norm_text(r[k])
+            results.append(r)
+    data = bridge("merge", d.name, {"stage": s, "results": results})
+    print(f"{LABEL[s]}: {data['merged']}건 병합")
+
+
+def db_render(args):
+    d = pdir(args[0])
+    s = stage_arg(args[1]) if len(args) > 1 else None
+    data = bridge("render", d.name, {"stage": s})
+    st = data.get("stage") or s
+    print(f"{LABEL[st]} R{data['round_no']} 봉인: 스냅샷 {str(data['snapshot_id'])[:8]} (항목 {data['versions']}개)")
+
+
+def db_approve(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    data = bridge("approve", d.name, {"stage": s})
+    msg = [f"{LABEL[s]} 승인"]
+    if s == "plan" and isinstance(data.get("handed_over"), int):
+        # v0.15 handoff_plan 과 같은 줄. 기존 조사 재사용(라이브러리)은 DB 경로에 아직 없어 0개다.
+        msg.append(f"조사 항목 {data['handed_over']}개 생성 (기존 조사 재사용 0개)")
+    if data.get("next"):
+        nxt = data["next"]
+        msg.append(f"다음 단계: {LABEL[nxt['key']]} (상태 {nxt['status']})")
+    elif data.get("complete"):
+        msg.append("모든 단계 완료")
+    msg.append(f"단계 보고서를 만드세요: report {d} {s}")
+    msg.append(f"대화에서 나온 결정·선호가 DB 에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run {d.name}`로 이어집니다.")
+    print("\n".join(msg))
+
+
+def db_reopen(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    data = bridge("reopen", d.name, {"stage": s})
+    marked = [LABEL[k] for k in data.get("marked") or []]
+    print(f"{LABEL[s]} 다시 열림" + (f" · 다시 확인 필요 표시: {', '.join(marked)}" if marked else ""))
+
+
+def db_mark(args):
+    d = pdir(args[0])
+    names = [Path(f).name for f in args[1:]]
+    if not names:
+        die("사용: mark <dir> <feedback 파일...>")
+    bridge("mark", d.name, {"names": names})
+    print(f"처리 완료 표시 {len(args) - 1}개")
+
+
+def db_chat(args):
+    d, s, text = pdir(args[0]), stage_arg(args[1]), args[2]
+    kind = args[3] if len(args) > 3 else "feedback"
+    data = bridge("chat", d.name, {"stage": s, "text": text, "kind": kind})
+    print(f"채팅 입력 기록: {data['object_id']}")
+
+
+def db_note(args):
+    d = pdir(args[0])
+    text = " ".join(args[1:]).strip()
+    if not text:
+        die("사용: note <dir> \"메모\"")
+    data = bridge("note", d.name, {"text": text})
+    print(f"인계 메모 {data['note_count']}개")
+
+
+def db_qa_brief(args):
+    """독립 검토 지시문을 DB(qa.record_brief)에 기록하고, 읽기 편하게 rounds/<stage>-R<n>/qa-brief.md 에도 쓴다."""
+    d, s = pdir(args[0]), stage_arg(args[1])
+    info = bridge("qa-data", d.name, {"stage": s})
+    rnd = info["round_no"]
+    rd = d / "rounds" / f"{s}-R{rnd}"
+    lines = [f"[{LABEL[s]} R{rnd}] 항목 {len(info['items'])}개"]
+    for it in info["items"]:
+        lines.append(f"\n#{it['id']} {it['title']} [{it.get('kind')}/{it.get('status')}] 신뢰도 {it.get('confidence') or '-'} · 출처 {it.get('sources')}")
+        if it.get("summary"):
+            lines.append("  요약: " + first_line(it["summary"], 300))
+    basis = [f"- 주제: {info['topic']}"] + [f"- 인계 메모: {first_line(n, 300)}" for n in info.get("notes") or []]
+    text = f"""[검토 대상] {info['topic']} — {LABEL[s]} 단계 R{rnd} 결과 (프로젝트 {d.name})
+[단계 목적] {STAGE_GOAL.get(s, '')}
+[읽을 것]
+{chr(10).join(lines)}
+[기준 — 사용자가 정한 것]
+""" + "\n".join(basis) + f"""
+[결과 파일] {rd / 'qa.json'}
+pes:reviewer 형식대로 QC·QA·표본 대조(3~5개)를 하고 결과 파일에 쓴 뒤 한 줄만 돌려준다. 프로젝트 상태 파일은 고치지 않는다.
+"""
+    bridge("qa-brief", d.name, {"stage": s, "text": text})
+    rd.mkdir(parents=True, exist_ok=True)
+    f = rd / "qa-brief.md"
+    f.write_text(text, encoding="utf-8")
+    print(f)
+
+
+def db_qa(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    info = bridge("qa-data", d.name, {"stage": s})
+    rnd = info["round_no"]
+    f = Path(args[args.index("--file") + 1]) if "--file" in args else d / "rounds" / f"{s}-R{rnd}" / "qa.json"
+    if not f.exists():
+        die(f"검토 결과 없음: {f} — qa-brief 로 지시문을 만들고 pes:reviewer 를 먼저 돌리세요")
+    q = read_json_file(f, "검토 결과 파일")
+    if not isinstance(q, dict):
+        die(f"검토 결과는 JSON 객체여야 합니다: {f}", 2)
+    q["round"] = int(q.get("round") or rnd)
+    q["recorded"] = now()
+    bridge("qa", d.name, {"stage": s, "qa": q})
+    fs = (q.get("qc") or []) + (q.get("qa") or [])
+    hi = [x for x in fs if x.get("severity") == "high"]
+    sc = q.get("spot_checks") or []
+    print(f"{LABEL[s]} R{q['round']} 독립 검토: {q.get('verdict')} · QC {len(q.get('qc') or [])} · QA {len(q.get('qa') or [])} · high {len(hi)}"
+          f" · 표본 일치 {sum(1 for x in sc if x.get('result') == 'match')}/{len(sc)} · 자체 점검이 놓친 것 {len(q.get('missed_by_self_review') or [])}")
+    for x in hi:
+        print(f"  [{x.get('id')}] #{x.get('item')} {x.get('finding')}")
+
+
+def db_lock(args):
+    d = pdir(args[0])
+    me = os.environ.get("PES_OWNER", "")
+    if not me:
+        die("PES_OWNER 환경변수(이 세션 ID)가 필요합니다", 2)
+    bridge("lock", d.name, {"force": "--force" in args})
+    print(f"잠금: {d.name} (세션 {me[:8]}…)")
+
+
+def db_unlock(args):
+    d = pdir(args[0])
+    bridge("unlock", d.name, {"force": "--force" in args})
+    print("잠금 해제")
+
+
+def db_serve(args):
+    d = pdir(args[0])
+    if (d / "project.json").exists():
+        return cmd_serve(args)  # 이전 전의 옛 프로젝트: 읽기만 하는 옛 경로
+    bridge("overview", d.name)  # DB 에 있는 프로젝트인지 확인 (없으면 거부)
+    root = d.parent
+    stop_legacy(d)
+    if (root / ".pes-hub").exists() or not (root / "index.html").exists():
+        build_hub(root)
+    port = ensure_server(root)
+    print(f"http://127.0.0.1:{port}/{d.name}/")
+
+
+def db_stop(args):
+    args = [a for a in args if a != "--"]
+    d = pdir(args[0]) if args else pes_home()
+    if args and ((d / "project.json").exists() or d.name in db_slugs()):
+        root = d.parent
+        stop_legacy(d)
+    else:
+        root = d
+    stop_server(root, old=True)
+    print(f"서버 종료 ({root} — 이 홈의 모든 프로젝트 화면이 함께 꺼집니다)")
+
+
+def db_project_dirs(root: Path):
+    """PES 홈 아래 프로젝트 폴더: project.json 이 있는 옛 프로젝트 + DB 에 있는 프로젝트."""
+    if not root.exists():
+        return []
+    slugs = db_slugs()
+    return sorted(f for f in root.iterdir() if f.is_dir() and ((f / "project.json").exists() or f.name in slugs))
+
+
+def db_home(args):
+    """pes home: 프로젝트 폴더와 화면 서버만 옮긴다. DB(~/.pes/pes.db)·객체 폴더는 건드리지 않는다."""
+    args = [a for a in args if a != "--"]
+    cur = pes_home()
+    if not args or args[0].startswith("--"):
+        src = "PES_HOME 환경변수" if os.environ.get("PES_HOME") else ("설정 파일 " + str(CONFIG) if CONFIG.exists() else "기본값")
+        print(f"PES 홈: {cur}  ({src}) · 프로젝트 {len(db_project_dirs(cur))}개")
+        return
+    new = Path(args[0]).expanduser().resolve()
+    old = Path(args[args.index("--from") + 1]).expanduser().resolve() if "--from" in args else cur
+    force = "--force" in args
+    if new == old:
+        print(f"이미 PES 홈입니다: {new}")
+        return
+    if new.is_relative_to(old) or old.is_relative_to(new):
+        die("새 폴더와 옛 폴더가 서로 안에 들어 있으면 옮길 수 없습니다")
+    projects = db_project_dirs(old)
+    clash = [d.name for d in projects if (new / d.name).exists()]
+    if clash:
+        die(f"새 폴더에 같은 이름이 이미 있습니다: {', '.join(clash)} — 아무것도 옮기지 않았습니다")
+    me = os.environ.get("PES_OWNER", "")
+    locks = (bridge("live_locks") or {}).get("locks") or {}
+    busy = [d.name for d in projects
+            if (lambda x: x and x["live"] and x.get("owner") != me)(lock_info(d)) or (d.name in locks and locks[d.name] != me)]
+    if busy and not force:
+        die(f"다른 Claude 세션이 쓰는 프로젝트가 있습니다: {', '.join(busy)} — 그 세션을 닫고 다시 하거나 --force", 3)
+    hub_on = any(whoami(pt) == str(old) for pt in HUB_PORTS)
+    for d in projects:
+        stop_legacy(d)
+    if old.exists():
+        stop_server(old, old=True)
+    new.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for d in projects:
+        shutil.move(str(d), str(new / d.name))
+        moved.append(d.name)
+        lg = new / d.name / "feedback.log"
+        if lg.exists():
+            lg.write_text(lg.read_text(encoding="utf-8").replace(str(d), str(new / d.name)), encoding="utf-8")
+        for junk in (".pes-port", ".pes-server"):
+            (new / d.name / junk).unlink(missing_ok=True)
+    for junk in ("index.html", ".pes-hub", ".pes-hub.out", ".pes-hub-server"):
+        (old / junk).unlink(missing_ok=True) if old.exists() else None
+    if old.exists():
+        for junk in (".DS_Store", "Thumbs.db", "desktop.ini"):
+            (old / junk).unlink(missing_ok=True)
+        if not any(old.iterdir()):
+            old.rmdir()
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    cfg = {}
+    try:
+        cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    cfg["home"] = str(new)
+    CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"PES 홈 변경: {old} → {new}  (프로젝트 {len(moved)}개 이동{': ' + ', '.join(moved) if moved else ''})")
+    if os.environ.get("PES_HOME") and Path(os.environ["PES_HOME"]).expanduser().resolve() != new:
+        print("주의: PES_HOME 환경변수가 설정 파일보다 우선합니다 — 환경변수도 바꾸거나 지우세요")
+    for name in moved:  # 옛 project.json 프로젝트만 화면을 다시 만든다 (DB 프로젝트의 화면은 PR16·18 몫)
+        if (new / name / "project.json").exists():
+            build_index(new / name, load(new / name))
+    if hub_on:
+        cmd_hub([str(new)])
+    print("Monitor 가 옛 경로의 feedback.log 를 보고 있었다면 새 경로로 다시 거세요.")
+
+
+DB_CMDS = {"init": db_init, "ask-prep": db_ask_prep, "ask": db_ask, "round-start": db_round_start, "merge": db_merge,
+           "render": db_render, "approve": db_approve, "reopen": db_reopen, "mark": db_mark, "chat": db_chat,
+           "note": db_note, "qa-brief": db_qa_brief, "qa": db_qa, "serve": db_serve, "stop": db_stop,
+           "home": db_home, "lock": db_lock, "unlock": db_unlock}
+
+
+# ---------- 새 CLI 명령 5개 (PES_DB_CORE=1 전용): 에이전트가 PES_TOKEN 으로 쓴다 ----------
+def _opts(args, names):
+    """--이름 값 쌍을 모은다 (이름 목록 밖은 거부)."""
+    out, rest = {}, list(args)
+    while rest:
+        k = rest.pop(0)
+        if k.startswith("--") and k[2:] in names and rest:
+            out[k[2:]] = rest.pop(0)
+        else:
+            die(f"알 수 없는 인자: {k}", 2)
+    return out
+
+
+def _guard(opt):
+    for k in ("run", "lease", "fence"):
+        if k not in opt:
+            die(f"--{k} 필요 (claim 결과의 run_id·lease_id·fence)", 2)
+    try:
+        fence = int(opt["fence"])
+    except ValueError:
+        die("--fence 는 정수여야 합니다", 2)
+    return {"run_id": opt["run"], "lease_id": opt["lease"], "fence": fence}
+
+
+def _print_json(data):
+    print(json.dumps(data, ensure_ascii=False))
+
+
+def cmd_context(args):
+    need_db_core("context")
+    _print_json(bridge("context", db_name(args[0])))
+
+
+def cmd_claim(args):
+    need_db_core("claim")
+    opt = _opts(args[1:], {"run", "mode", "runtime", "provider", "model"})
+    a = {k: opt[k] for k in ("mode", "runtime", "provider", "model") if k in opt}
+    if "run" in opt:
+        a = {"run_id": opt["run"]}
+    _print_json(bridge("claim", db_name(args[0]), a))
+
+
+def cmd_submit(args):
+    need_db_core("submit")
+    opt = _opts(args[1:], {"run", "lease", "fence", "file"})
+    if "file" not in opt:
+        die("--file <결과.json> 필요", 2)
+    raw = read_json_file(opt["file"], "결과 파일")
+    results = raw.get("results") if isinstance(raw, dict) else raw
+    a = _guard(opt)
+    a["results"] = results
+    _print_json(bridge("submit", db_name(args[0]), a))
+
+
+def cmd_wait(args):
+    need_db_core("wait")
+    opt = _opts(args[1:], {"run", "lease", "fence", "reason"})
+    a = _guard(opt)
+    if opt.get("reason"):
+        a["reason"] = opt["reason"]
+    _print_json(bridge("wait", db_name(args[0]), a))
+
+
+def cmd_complete(args):
+    need_db_core("complete")
+    opt = _opts(args[1:], {"run", "lease", "fence", "status"})
+    a = _guard(opt)
+    if opt.get("status"):
+        a["status"] = opt["status"]
+    _print_json(bridge("complete", db_name(args[0]), a))
+
+
 CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start": cmd_round_start,
         "merge": cmd_merge, "render": cmd_render, "approve": cmd_approve, "reopen": cmd_reopen,
         "status": cmd_status, "pending": cmd_pending, "mark": cmd_mark, "chat": cmd_chat,
         "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
-        "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock}
+        "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock,
+        "context": cmd_context, "claim": cmd_claim, "submit": cmd_submit, "wait": cmd_wait, "complete": cmd_complete}
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
@@ -1778,7 +2284,7 @@ def main(argv=None):
     if len(args) < 2 or args[0] not in CMDS:
         print(__doc__)
         sys.exit(1)
-    CMDS[args[0]](args[1:])
+    (DB_CMDS[args[0]] if db_core() and args[0] in DB_CMDS else CMDS[args[0]])(args[1:])
 
 
 if __name__ == "__main__":

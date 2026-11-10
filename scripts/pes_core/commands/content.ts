@@ -123,7 +123,7 @@ interface VersionRow {
   version_no: bigint;
 }
 
-interface ArtifactFields {
+export interface ArtifactFields {
   title: string;
   summary: string;
   question: string | null;
@@ -381,7 +381,7 @@ function canonical_json(value: unknown): string {
   return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical_json(record[key])}`).join(",")}}`;
 }
 
-function artifact_digest_fields(fields: ArtifactFields): Record<string, unknown> {
+export function artifact_digest_fields(fields: ArtifactFields): Record<string, unknown> {
   return {
     title: fields.title,
     summary: fields.summary,
@@ -409,7 +409,7 @@ function source_digest_fields(facts: SourceFacts): Record<string, unknown> {
   };
 }
 
-function content_digest(kind: string, fields: Record<string, unknown>): string {
+export function content_digest(kind: string, fields: Record<string, unknown>): string {
   return createHash("sha256").update(`${kind}\n${canonical_json(fields)}`).digest("hex");
 }
 
@@ -486,7 +486,7 @@ function take_display_no(runtime: CommandRuntime, project_id: string, namespace:
   return display_no;
 }
 
-function write_object(
+export function write_object(
   runtime: CommandRuntime,
   project_id: string,
   object_id: string,
@@ -510,7 +510,7 @@ function write_object(
   return display_no;
 }
 
-function write_object_version(
+export function write_object_version(
   runtime: CommandRuntime,
   input: {
     project_id: string;
@@ -547,7 +547,7 @@ function write_object_version(
   }
 }
 
-function write_artifact_version(
+export function write_artifact_version(
   runtime: CommandRuntime,
   project_id: string,
   object_id: string,
@@ -611,7 +611,7 @@ function write_source_version(
 }
 
 /** The first version of a bare object becomes current; later appends do not move it. */
-function set_first_current_version(
+export function set_first_current_version(
   runtime: CommandRuntime,
   project_id: string,
   object_id: string,
