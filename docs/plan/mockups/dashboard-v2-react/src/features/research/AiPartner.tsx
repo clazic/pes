@@ -34,14 +34,27 @@ const QUICK = ["이 문단 다시 써 줘", "근거 더 찾아 줘", "반대 근
  * - 부탁은 “접수됨”까지가 사실이다. 방식 B는 내 컴퓨터 AI가 받아야 처리되고(받음 ≠ 읽음), 답이 오기 전에는 “답 없음”.
  * - 연결·사용량은 맨 아래 한 줄(작게). 문제가 되면 막힌 것·풀 것에 올라온다.
  */
-export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws: WorkspaceView; idPrefix?: string; className?: string; onCollapse?: () => void }) {
+type AiPartnerProps = { ws: WorkspaceView; idPrefix?: string; className?: string; onCollapse?: () => void };
+
+/**
+ * 프로젝트가 바뀌면 칸의 지역 상태(부탁 초안·가정 일괄 대화 상자)를 새 프로젝트로 가져가지 않는다 —
+ * key 로 다시 그려 이전 프로젝트의 가정 id 가 새 프로젝트로 전송되는 상태를 없앤다(최종 리뷰 F1).
+ */
+export function AiPartner(props: AiPartnerProps) {
+  return <AiPartnerView key={props.ws.slug} {...props} />;
+}
+
+function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartnerProps) {
   const { role } = useMockSettings();
   const sheet = useAiSheet();
   const paragraphs = ws.result?.paragraphs.map((_, i) => `문단 ${i + 1}`) ?? [];
   const [target, setTarget] = React.useState(() => (sheet.target && paragraphs.includes(sheet.target) ? sheet.target : WHOLE));
   const [text, setText] = React.useState("");
   const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [bulkSession, setBulkSession] = React.useState(0);
   const textRef = React.useRef<HTMLTextAreaElement>(null);
+  const bulkOpenRef = React.useRef<HTMLSpanElement>(null);
+  const proposalHeadingRef = React.useRef<HTMLHeadingElement>(null);
   const ask = useCommand("question.create", { successText: (r) => `AI에게 부탁 접수됨 · 접수 번호 ${r.receipt_no} — ${ws.mode === "B" ? "내 컴퓨터 AI가 받아야 처리됩니다" : "실행이 이어질 때 처리됩니다"}` });
   const decide = useCommand("decision.record");
 
@@ -70,6 +83,17 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
   const pending = props.filter((p) => p.state.value === "proposed").length;
   const pendingAssumptions = props.filter((p) => p.kind === "assumption" && p.state.value === "proposed");
   const t = ws.third_card;
+
+  const openBulk = () => {
+    setBulkSession((n) => n + 1);
+    setBulkOpen(true);
+  };
+  // 닫힌 뒤 초점: 열기 단추가 남아 있으면 그 단추, 전부 받아들여 단추가 사라졌으면 제안 제목(최종 리뷰 F3)
+  const restoreProposalFocus = () => {
+    const opener = bulkOpenRef.current?.querySelector("button");
+    if (opener) opener.focus();
+    else proposalHeadingRef.current?.focus();
+  };
 
   return (
     <section aria-labelledby={`${idPrefix}-title`} className={cn("rounded-xl border bg-card text-card-foreground shadow-xs", className)}>
@@ -187,20 +211,20 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
 
         <section aria-labelledby={`${idPrefix}-prop`} className="space-y-2 border-t border-line pt-3.5">
           <div className="flex flex-wrap items-center gap-1">
-            <h3 id={`${idPrefix}-prop`} className="text-meta">
+            <h3 ref={proposalHeadingRef} id={`${idPrefix}-prop`} tabIndex={-1} className="text-meta">
               AI가 남긴 가정·결정 제안 <span className="font-normal text-muted-foreground tabular-nums">{props.length}</span>
             </h3>
             <InfoTip label="가정·결정 제안 설명">
               <p>AI가 일하며 세운 가정과 결정 제안입니다. 받아들이거나 버리면 판단자·근거가 기록됩니다. 판단하지 않아도 일을 막지 않으며 나의 할 일 수에 넣지 않습니다{pending ? ` — 판단 전 ${pending}개` : ""}.</p>
             </InfoTip>
             {pendingAssumptions.length >= 2 ? (
-              <span className="ml-auto flex flex-wrap items-center gap-1">
+              <span ref={bulkOpenRef} className="ml-auto flex flex-wrap items-center gap-1">
                 <ActionButton
                   size="xs"
                   variant="outline"
                   blockedBy={role === "owner" ? null : "소유자만 가정을 확인할 수 있습니다."}
                   showReason
-                  onClick={() => setBulkOpen(true)}
+                  onClick={openBulk}
                 >
                   판단 전 가정 {pendingAssumptions.length}개 모두 받아들이기
                 </ActionButton>
@@ -245,7 +269,14 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
           </InfoTip>
         </p>
       </div>
-      {bulkOpen ? <AssumptionBulkDialog slug={ws.slug} assumptions={pendingAssumptions} open onOpenChange={setBulkOpen} /> : null}
+      <AssumptionBulkDialog
+        key={bulkSession}
+        slug={ws.slug}
+        assumptions={pendingAssumptions}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onClosedFocus={restoreProposalFocus}
+      />
     </section>
   );
 }
