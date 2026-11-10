@@ -416,17 +416,21 @@ export function read_storage_bytes(
 }
 
 /**
- * The one root rule for every cleanup path (gc scan/delete, restore sweep and
- * its pre-check): the objects root must be a real directory (lstat: no link, no
- * file, no lstat failure), and this project's folder, when it exists, too.
- * Nothing below a link is ever scanned or removed.
+ * The one root rule for every cleanup path (gc scan/delete, blob delete,
+ * restore sweep and its pre-check). A root or project folder that does not
+ * exist (ENOENT) is "missing" (nothing to clean; a write creates it later). A
+ * link, a non-directory or any other lstat error is "unsafe". Nothing below a
+ * link is ever scanned or removed. Check-then-act is not atomic (Node has no
+ * openat/O_NOFOLLOW): a swap after the check needs another process of the same
+ * user, which `pes stop` before restore rules out.
  */
 type ProjectFolder = { kind: "unsafe" } | { kind: "missing" } | { kind: "dir"; path: string };
 
 function project_folder(objects_dir: string, project_id: string): ProjectFolder {
   try {
     const root = resolve_objects_dir(objects_dir);
-    const root_stat = lstatSync(root);
+    const root_stat = lstat_or_undefined(root);
+    if (root_stat === undefined) return { kind: "missing" };
     if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return { kind: "unsafe" };
     const path = join(root, project_id);
     const stat = lstat_or_undefined(path);
@@ -438,7 +442,7 @@ function project_folder(objects_dir: string, project_id: string): ProjectFolder 
   }
 }
 
-/** Restore pre-check (before any row changes): refuse a store the sweep could not trust. */
+/** Restore pre-check (inside the restore tx; a refusal rolls it back): refuse a store the sweep could not trust. */
 export function assert_project_folder_safe(objects_dir: string, project_id: string): void {
   if (project_folder(objects_dir, project_id).kind === "unsafe") {
     throw new ApiError("conflict", "the object store folder is not a real directory");
@@ -618,23 +622,10 @@ export function delete_storage_file(
   project_id: string,
   storage_key: string,
 ): void {
+  // Same root and per-segment rule as every other cleanup path (project_folder).
+  if (!storage_file_is_regular(objects_dir, project_id, storage_key)) return;
   try {
-    const parts = storage_segments(storage_key, project_id);
-    const root = resolve_objects_dir(objects_dir);
-    const root_stat = lstatSync(root);
-    if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return;
-    let current = root;
-    for (let index = 0; index < parts.length; index += 1) {
-      current = join(current, parts[index]!);
-      const stat = lstatSync(current);
-      if (stat.isSymbolicLink()) return;
-      if (index === parts.length - 1) {
-        if (!stat.isFile()) return;
-        rmSync(current, { force: true });
-        return;
-      }
-      if (!stat.isDirectory()) return;
-    }
+    rmSync(join(resolve_objects_dir(objects_dir), ...storage_key.split("/")), { force: true });
   } catch {
     // Best effort; the next gc reconciles the DB and the disk.
   }
