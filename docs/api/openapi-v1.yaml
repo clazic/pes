@@ -907,10 +907,24 @@ paths:
       security: [{ agentToken: [] }]
       responses:
         "200":
-          description: Accepted or successful answer
+          description: The run's answers after the cursor (data.inputs is an array of InputItem)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Success" }
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Success"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [inputs, next_cursor, has_more, epoch]
+                        properties:
+                          inputs:
+                            type: array
+                            items: { $ref: "#/components/schemas/InputItem" }
+                          next_cursor: { type: string }
+                          has_more: { type: boolean }
+                          epoch: { type: string }
         "400": { description: Invalid payload, query, or cursor }
         "401": { description: Missing or invalid credential }
         "403": { description: Not allowed for this caller, scope, or policy }

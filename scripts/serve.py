@@ -181,11 +181,15 @@ class ApiBudget:
         self._hits[key] = hits
         return None
 
-    def settle(self, ticket, status, payload):
-        """Give the slot back for a request refused over its own input; note empty polls and proven credentials."""
+    def settle(self, ticket, status, payload, verified=False):
+        """Give the slot back for a request refused over its own input; note empty polls and proven credentials.
+
+        `verified` 는 Node 브리지의 내부 표지다: 이 요청에서 자격 검증을 통과했을 때만 True.
+        인증 전에 나오는 404(라우트)·405·400·429·401 은 False 라서 가짜 자격을 '검증됨'으로 올리지 않는다.
+        """
         if ticket is None:
             return
-        key, at, poll_key, digest, project = ticket
+        key, at, poll_key, digest, _project = ticket
         code, inputs = None, None
         if status >= 400 or poll_key is not None:
             try:
@@ -198,8 +202,7 @@ class ApiBudget:
                 pass
         with self._lock:
             now = self._now()
-            if project and status != 401 and status < 500:
-                # 프로젝트 경로는 인증을 먼저 본다(인증 뒤 404): 401 이 아니면 살아 있는 자격이다.
+            if verified and status != 401:
                 self._verified[digest] = now
             elif status == 401:
                 self._verified.pop(digest, None)
@@ -466,9 +469,11 @@ def main():
                 status = int(response["status"])
                 headers = response.get("headers") or {}
                 payload = base64.b64decode(response.get("body_b64") or "")
+                # 내부 표지(응답 본문·헤더 밖의 필드): Node 가 자격 검증을 끝냈을 때만 true. 클라이언트에는 보내지 않는다.
+                verified = response.get("credential_verified") is True
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 return self._api_error("internal_error", "internal error", 500)
-            self.server.api_budget.settle(ticket, status, payload)
+            self.server.api_budget.settle(ticket, status, payload, verified=verified)
             self.send_response(status)
             for name, value in headers.items():
                 if name.lower() in ("content-length", "connection", "transfer-encoding"):

@@ -71,5 +71,100 @@
         }
       }
     }
+  },
+  "scenes": {
+    "answer": {
+      "request": {
+        "path_params": {
+          "project_id": "prj_01J9Z3K7Q2",
+          "object_id": "obj_01J9Z3K7Q9",
+          "version_id": "ver_01J9Z3K7QA"
+        },
+        "headers": {
+          "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "format_version": "1.0",
+          "request_id": "req_ver_ans_01J9Z3K7QN",
+          "data": {
+            "project_id": "prj_01J9Z3K7Q2",
+            "object_id": "obj_01J9Z3K7Q9",
+            "kind": "answer",
+            "version_id": "ver_01J9Z3K7QA",
+            "version_no": 1,
+            "is_current": true,
+            "content_hash": "8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b",
+            "content": {
+              "question_version_id": "qvr_01J9Z3K7QC",
+              "value": "A",
+              "state": "submitted",
+              "comment": "합성 의견"
+            },
+            "files": []
+          }
+        }
+      }
+    },
+    "question": {
+      "request": {
+        "path_params": {
+          "project_id": "prj_01J9Z3K7Q2",
+          "object_id": "qst_01J9Z3K7QB",
+          "version_id": "qvr_01J9Z3K7QC"
+        },
+        "headers": {
+          "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "format_version": "1.0",
+          "request_id": "req_ver_qst_01J9Z3K7QN",
+          "data": {
+            "project_id": "prj_01J9Z3K7Q2",
+            "object_id": "qst_01J9Z3K7QB",
+            "kind": "question",
+            "version_id": "qvr_01J9Z3K7QC",
+            "version_no": 1,
+            "is_current": true,
+            "content_hash": "7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
+            "content": {
+              "text": "계약 시험 질문 장면",
+              "type": "single",
+              "state": "open",
+              "importance": "normal",
+              "required": true,
+              "allow_comment_as_answer": false,
+              "default_value": "B",
+              "options": [
+                {
+                  "value": "A",
+                  "label": "합성 A"
+                },
+                {
+                  "value": "B",
+                  "label": "합성 B"
+                }
+              ],
+              "show_if": null,
+              "help": null
+            },
+            "files": []
+          }
+        }
+      }
+    }
   }
 }

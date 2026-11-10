@@ -92,6 +92,14 @@ export interface ApiResponse {
   headers: Record<string, string>;
   json: unknown;
   bytes: Uint8Array | null;
+  /**
+   * Internal: true only when this request's credential (agent token or local
+   * session) passed verification. The bridge passes it to serve.py beside the
+   * response (never as a header); serve.py uses it to move the credential out
+   * of the server-wide unverified bucket. Pre-auth refusals (404 route, 405,
+   * 401, malformed input before auth) leave it false.
+   */
+  credential_verified?: boolean;
 }
 
 export interface ApiAppOptions {
@@ -653,6 +661,7 @@ export class ApiApp {
     const supplied = headers["x-request-id"];
     const request_id =
       typeof supplied === "string" && supplied.length > 0 ? supplied : this.#new_id();
+    const seen = { verified: false };
     try {
       const [path, ...rest] = request.path.split("?");
       const method = request.method.toUpperCase();
@@ -678,17 +687,18 @@ export class ApiApp {
         request_id,
         key: typeof key_header === "string" && key_header.length > 0 ? key_header : null,
       };
-      const result = await this.#dispatch(hit.spec, route_request);
-      return this.#success(request_id, result);
+      const result = await this.#dispatch(hit.spec, route_request, seen);
+      return { ...this.#success(request_id, result), credential_verified: seen.verified };
     } catch (error) {
-      return this.#error(error, request_id);
+      return { ...this.#error(error, request_id), credential_verified: seen.verified };
     }
   }
 
-  async #dispatch(spec: RouteSpec, request: RouteRequest): Promise<HandlerResult> {
+  async #dispatch(spec: RouteSpec, request: RouteRequest, seen: { verified: boolean }): Promise<HandlerResult> {
     if (spec.kind === "open") return this.#capabilities();
     if (spec.kind === "global") {
       this.#require_session(request);
+      seen.verified = true;
       return spec.operation === "projects.create"
         ? this.#create_project(request)
         : this.#register(request);
@@ -699,6 +709,7 @@ export class ApiApp {
         ? { who: "any", act: async () => { throw new Fail("not_supported"); } }
         : (spec.op as Op);
     const credential = this.#credential(request, project_id);
+    seen.verified = true;
     const refund = this.#spend(credential, op.bucket ?? "general");
     try {
       const project = this.#project(project_id);
@@ -1783,12 +1794,22 @@ export class ApiApp {
 
   /**
    * The receipt this request replays, if any. A key already spent on another command, or on the same command
-   * for another run, is not a replay: 409 idempotency_key_reuse, before anything is written.
+   * for another run, is not a replay: 409 idempotency_key_reuse, before anything is written. That holds across
+   * actors too: a key another actor of this project already spent (say on another run, which the owner or the
+   * next holder now targets) is a reuse, never a fresh request.
    */
   #lease_replay(project: ProjectRow, auth: AuthInfo, key: string | null, action: string, run_id: string): ReceiptRow | undefined {
     if (key === null) return undefined;
     const prior = receipt_of_request(this.#db, project.id, auth.actor_id, key);
-    if (prior === undefined) return undefined;
+    if (prior === undefined) {
+      const elsewhere = this.#db.get<{ id: string }>(
+        `SELECT id FROM mutation_commits WHERE project_id = ? AND client_request_id = ? LIMIT 1`,
+        project.id,
+        key,
+      );
+      if (elsewhere !== undefined) throw new Fail("idempotency_key_reuse", { target: "$.headers.idempotency-key" });
+      return undefined;
+    }
     let target: unknown = null;
     try {
       const result: unknown = JSON.parse(prior.result_json);

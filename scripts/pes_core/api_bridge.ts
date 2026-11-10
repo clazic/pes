@@ -27,6 +27,8 @@ interface BridgeOutput {
   status: number;
   headers: Record<string, string>;
   body_b64: string;
+  /** Internal to serve.py (rate budget): the credential passed verification. Never sent to the client. */
+  credential_verified?: boolean;
 }
 
 const FORMAT_VERSION = "1.0";
@@ -205,6 +207,7 @@ async function main(): Promise<void> {
       status: response.status,
       headers: response.headers,
       body_b64: Buffer.from(bytes).toString("base64"),
+      credential_verified: response.credential_verified === true,
     };
     process.stdout.write(JSON.stringify(output));
   } finally {
