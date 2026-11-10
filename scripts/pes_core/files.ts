@@ -27,6 +27,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  rmdirSync,
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -208,22 +209,30 @@ function ensure_objects_root(objects_dir: string): string {
   return root;
 }
 
-/** Write bytes to the path derived from storage_key, atomically, without following links. */
-function write_storage_bytes_inner(
+interface StorageTarget {
+  dir: string;
+  target: string;
+  /** Folders this call had to create, outermost first. */
+  created: string[];
+}
+
+/** Check (and create the folders of) the path derived from storage_key, without following links. */
+function prepare_storage_target(
   objects_dir: string,
   project_id: string,
   storage_key: string,
-  bytes: Uint8Array,
-): void {
+): StorageTarget {
   const parts = storage_segments(storage_key, project_id);
   let current = ensure_objects_root(objects_dir);
+  const created: string[] = [];
   for (let index = 0; index < parts.length - 1; index += 1) {
     current = join(current, parts[index]!);
     const stat = lstat_or_undefined(current);
     if (stat === undefined) {
       mkdirSync(current);
-      const created = lstat_or_undefined(current);
-      if (created === undefined || created.isSymbolicLink() || !created.isDirectory()) {
+      created.push(current);
+      const made = lstat_or_undefined(current);
+      if (made === undefined || made.isSymbolicLink() || !made.isDirectory()) {
         throw unsafe("a storage folder could not be created safely");
       }
       continue;
@@ -233,27 +242,118 @@ function write_storage_bytes_inner(
     }
   }
   const target = join(current, parts[parts.length - 1]!);
+  check_storage_target(target);
+  return { dir: current, target, created };
+}
+
+function check_storage_target(target: string): void {
   const existing = lstat_or_undefined(target);
   if (existing !== undefined) {
     if (existing.isSymbolicLink()) throw unsafe("the storage target is a symbolic link");
     if (!existing.isFile()) throw unsafe("the storage target is not a regular file");
   }
+}
+
+function remove_quietly(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    // Best effort; a leftover temporary file is swept by a later gc.
+  }
+}
+
+function remove_created_dirs(created: readonly string[]): void {
+  for (const dir of [...created].reverse()) {
+    try {
+      rmdirSync(dir); // only an empty folder goes; anything else stays
+    } catch {
+      // Not empty or already gone.
+    }
+  }
+}
+
+/** Write bytes to the path derived from storage_key, atomically, without following links. */
+function write_storage_bytes_inner(
+  objects_dir: string,
+  project_id: string,
+  storage_key: string,
+  bytes: Uint8Array,
+): void {
+  const { dir, target } = prepare_storage_target(objects_dir, project_id, storage_key);
 
   // A same-directory temporary file plus rename keeps a failed write from
   // leaving a partial blob behind. The temporary file is always removed.
-  const temporary = join(current, `.upload-${globalThis.crypto.randomUUID()}.tmp`);
+  const temporary = join(dir, `.upload-${globalThis.crypto.randomUUID()}.tmp`);
   try {
     writeFileSync(temporary, bytes, { flag: "wx" });
     renameSync(temporary, target);
   } finally {
     // A cleanup failure must not turn a successful rename into an error; a
     // leftover temp file is swept by a later gc like any other stray file.
-    try {
-      rmSync(temporary, { force: true });
-    } catch {
-      // Best effort.
-    }
+    remove_quietly(temporary);
   }
+}
+
+/**
+ * A file that is fully written next to its target but not yet in place.
+ * `commit` swaps it in (rename over the target); `discard` throws it away and
+ * removes the folders that staging created. Neither follows a link.
+ */
+export interface StagedStorageFile {
+  readonly storage_key: string;
+  commit(): void;
+  discard(): void;
+}
+
+/**
+ * First half of a replace: validate the target and write the bytes to a
+ * temporary file in the same folder. The target itself is not touched, so a
+ * caller can stage many files and commit them only when every one was staged.
+ */
+export function stage_storage_bytes(
+  objects_dir: string,
+  project_id: string,
+  storage_key: string,
+  bytes: Uint8Array,
+): StagedStorageFile {
+  let prepared: StorageTarget;
+  try {
+    prepared = prepare_storage_target(objects_dir, project_id, storage_key);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("conflict", "the object store is not writable");
+  }
+  const { dir, target, created } = prepared;
+  const temporary = join(dir, `.upload-${globalThis.crypto.randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, bytes, { flag: "wx" });
+  } catch {
+    remove_quietly(temporary);
+    remove_created_dirs(created);
+    throw new ApiError("conflict", "the object store is not writable");
+  }
+  let finished = false;
+  return {
+    storage_key,
+    commit(): void {
+      if (finished) return;
+      finished = true;
+      try {
+        check_storage_target(target); // re-checked: a link or folder may have appeared since
+        renameSync(temporary, target);
+      } catch (error) {
+        remove_quietly(temporary);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError("conflict", "the object store is not writable");
+      }
+    },
+    discard(): void {
+      if (finished) return;
+      finished = true;
+      remove_quietly(temporary);
+      remove_created_dirs(created);
+    },
+  };
 }
 
 export function write_storage_bytes(

@@ -31,7 +31,8 @@ import {
   delete_project_file,
   read_storage_bytes,
   scan_project_files,
-  write_storage_bytes,
+  stage_storage_bytes,
+  type StagedStorageFile,
 } from "../files.ts";
 import {
   assert_backup_location,
@@ -39,6 +40,7 @@ import {
   take_prepared_restore,
   take_prepared_validation,
   type LostWrite,
+  type StagedRestoreFiles,
 } from "../migration.ts";
 import {
   insert_receipt,
@@ -337,25 +339,57 @@ function same_bytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && Buffer.compare(Buffer.from(left), Buffer.from(right)) === 0;
 }
 
-/** Put the project's object files exactly as the bundle has them (PR9 file helpers). */
-function restore_object_files(objects_dir: string, project_id: string, prepared: PreparedProjectRestore): void {
+/**
+ * Prepare the project's object files exactly as the bundle has them (PR9 file
+ * helpers): every file that differs is written to a temporary file beside its
+ * target. Nothing in place changes here, so a failure at any file leaves every
+ * file as it was. The returned handle swaps them in after the rows commit.
+ */
+function stage_object_files(
+  objects_dir: string,
+  project_id: string,
+  prepared: PreparedProjectRestore,
+): StagedRestoreFiles {
   const keep = new Set<string>();
-  for (const object of prepared.objects) {
-    keep.add(object.storage_key);
-    let current: Uint8Array | undefined;
-    try {
-      current = read_storage_bytes(objects_dir, project_id, object.storage_key);
-    } catch {
-      current = undefined;
+  const staged: StagedStorageFile[] = [];
+  try {
+    for (const object of prepared.objects) {
+      keep.add(object.storage_key);
+      let current: Uint8Array | undefined;
+      try {
+        current = read_storage_bytes(objects_dir, project_id, object.storage_key);
+      } catch {
+        current = undefined;
+      }
+      if (current === undefined || !same_bytes(current, object.bytes)) {
+        staged.push(stage_storage_bytes(objects_dir, project_id, object.storage_key, object.bytes));
+      }
     }
-    if (current === undefined || !same_bytes(current, object.bytes)) {
-      write_storage_bytes(objects_dir, project_id, object.storage_key, object.bytes);
-    }
+  } catch (error) {
+    for (const file of staged) file.discard();
+    throw error;
   }
-  // Files written after the bundle (and stray temporary files) are not part of it.
-  for (const file of scan_project_files(objects_dir, project_id)) {
-    if (!keep.has(file.key)) delete_project_file(objects_dir, project_id, file);
-  }
+  return {
+    commit(): string[] {
+      const failed: string[] = [];
+      for (const file of staged) {
+        try {
+          file.commit();
+        } catch {
+          file.discard();
+          failed.push(file.storage_key);
+        }
+      }
+      // Files written after the bundle (and stray temporary files) are not part of it.
+      for (const file of scan_project_files(objects_dir, project_id)) {
+        if (!keep.has(file.key)) delete_project_file(objects_dir, project_id, file);
+      }
+      return failed;
+    },
+    discard(): void {
+      for (const file of staged) file.discard();
+    },
+  };
 }
 
 function run_restore_project(runtime: CommandRuntime): CommandResult {
@@ -432,8 +466,10 @@ function run_restore_project(runtime: CommandRuntime): CommandResult {
     result,
   });
 
-  // Files last: they cannot be rolled back with the transaction.
-  restore_object_files(objects_dir, project_id, prepared);
+  // Files are prepared (not yet in place) inside the transaction: a failure here
+  // rolls the rows back and leaves every file as it was. The wrapper swaps them
+  // in after the commit.
+  handed.files = stage_object_files(objects_dir, project_id, prepared);
 
   return {
     result,

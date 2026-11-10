@@ -16,7 +16,7 @@
 // the input that a command consumes in the same process. Nothing here reads the
 // environment or the real home: every path comes from the caller.
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { BackupError, prepare_project_restore, type PreparedProjectRestore } from "./backup.ts";
@@ -150,10 +150,21 @@ interface PreparedValidation {
   prepared: PreparedImport;
 }
 
-interface PreparedRestore {
+/**
+ * The object files of a restore, prepared inside the transaction and settled by
+ * the wrapper once the transaction is over: `commit` puts them in place and
+ * returns the storage keys it could not; `discard` throws them away.
+ */
+export interface StagedRestoreFiles {
+  commit(): string[];
+  discard(): void;
+}
+
+export interface PreparedRestore {
   owner_actor_id: string;
   project_id: string;
   prepared: PreparedProjectRestore;
+  files?: StagedRestoreFiles;
 }
 
 const prepared_validations = new Map<string, PreparedValidation>();
@@ -168,10 +179,10 @@ export function take_prepared_validation(owner_actor_id: string, token: string):
 export function take_prepared_restore(
   owner_actor_id: string,
   token: string,
-): { project_id: string; prepared: PreparedProjectRestore } | undefined {
+): PreparedRestore | undefined {
   const entry = prepared_restores.get(token);
   if (entry === undefined || entry.owner_actor_id !== owner_actor_id) return undefined;
-  return { project_id: entry.project_id, prepared: entry.prepared };
+  return entry;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,18 +311,36 @@ export async function restore_project(
     throw new ApiError("conflict", "the bundle belongs to another project");
   }
   const token = new_id();
-  prepared_restores.set(token, { owner_actor_id, project_id, prepared });
+  const entry: PreparedRestore = { owner_actor_id, project_id, prepared };
+  prepared_restores.set(token, entry);
   try {
-    const outcome = await service.execute(
-      {
-        project_id: null,
-        actor_id: owner_actor_id,
-        via: "import",
-        client_request_id: `legacy-restore:${project_id}:${token}`,
-      },
-      "legacy.restore_project",
-      { project_id, bundle_dir, bundle_token: token },
-    );
+    // Order: the files are prepared inside the transaction (any failure rolls the
+    // rows back and removes them) -> the rows commit -> only then are the files
+    // swapped in. A swap that fails after the commit is reported, never hidden.
+    let outcome: Awaited<ReturnType<CommandService["execute"]>>;
+    try {
+      outcome = await service.execute(
+        {
+          project_id: null,
+          actor_id: owner_actor_id,
+          via: "import",
+          client_request_id: `legacy-restore:${project_id}:${token}`,
+        },
+        "legacy.restore_project",
+        { project_id, bundle_dir, bundle_token: token },
+      );
+    } catch (error) {
+      entry.files?.discard();
+      throw error;
+    }
+    const failed = entry.files?.commit() ?? [];
+    if (failed.length > 0) {
+      throw new ApiError(
+        "conflict",
+        `the project rows were restored, but ${failed.length} object file(s) could not be put in place; run the restore again to finish`,
+        { rows_restored: true, failed_files: failed },
+      );
+    }
     return outcome.result as RestoreResult;
   } finally {
     prepared_restores.delete(token);
@@ -345,6 +374,12 @@ export function bundle_error(error: unknown): ApiError | unknown {
 // folders) and outside a synced OneDrive folder, and must not sit in the object
 // store it describes.
 
+/**
+ * The real spelling of a path: symbolic links resolved and, on a disk that
+ * ignores case, the spelling the disk itself reports (realpathSync.native).
+ * For a path that does not exist yet, the nearest existing ancestor is
+ * normalised and the missing tail is kept as given.
+ */
 function resolve_real(path: string): string {
   const absolute = resolve(path);
   const rest: string[] = [];
@@ -357,15 +392,48 @@ function resolve_real(path: string): string {
   }
   let real: string;
   try {
-    real = realpathSync(current);
+    real = realpathSync.native(current);
   } catch {
     real = current;
   }
   return rest.length === 0 ? real : join(real, ...rest);
 }
 
+/**
+ * True when the disk holding `dir` treats names that differ only in case as the
+ * same entry. Nothing is written: an existing folder is looked up under a
+ * case-swapped spelling and compared by identity (device + inode).
+ */
+function disk_ignores_case(dir: string): boolean {
+  let probe = dir;
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+  const platform_default = process.platform === "win32" || process.platform === "darwin";
+  const swapped = probe
+    .split("")
+    .map((ch) => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()))
+    .join("");
+  if (swapped === probe) return platform_default; // no letters to swap (for example the root)
+  try {
+    const here = statSync(probe, { bigint: true });
+    const there = statSync(swapped, { bigint: true });
+    return here.dev === there.dev && here.ino === there.ino;
+  } catch {
+    return false; // the swapped spelling does not exist: names are case-sensitive here
+  }
+}
+
 function is_inside(parent: string, child: string): boolean {
-  const rel = relative(parent, child);
+  let left = parent;
+  let right = child;
+  if (disk_ignores_case(parent) || disk_ignores_case(child)) {
+    left = left.toLowerCase();
+    right = right.toLowerCase();
+  }
+  const rel = relative(left, right);
   return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
