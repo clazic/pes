@@ -64,41 +64,42 @@ function useResearchActions(): Action[] {
 export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const navigate = useNavigate();
   const research = useResearchActions();
+  const ui = useResearchUi();
   const all = [...research, ...ACTIONS];
   const groups = [...new Set(all.map((a) => a.group))];
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <Command>
-      <CommandInput placeholder="동작 이름으로 찾기 (예: 자료 올리기)" />
-      <CommandList>
-        <CommandEmpty>찾는 동작이 없습니다. 검색어를 AI에게 보내지 않습니다.</CommandEmpty>
-        {groups.map((g) => (
-          <CommandGroup key={g} heading={g}>
-            {all.filter((a) => a.group === g).map((a) => (
-              <CommandItem
-                key={a.label}
-                onSelect={() => {
-                  onOpenChange(false);
-                  if (a.run) a.run();
-                  else if (a.to) navigate(a.to);
-                }}
-              >
-                <span className="min-w-0 flex-1">{a.label}</span>
-                {a.owner ? <span className="text-xs font-medium text-muted-foreground">소유자</span> : null}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ))}
-      </CommandList>
-      {/* 단축키 도움말 — 같은 표를 설계 18.10 · 16.5의 집중 보조와 맞춘다 */}
-      <div className="border-t border-line px-3 py-2.5 text-caption text-ink-2">
-        <p className="flex flex-wrap items-center gap-1">
-          <Kbd>1</Kbd>~<Kbd>4</Kbd> 선택지 고르기 · 질문 카드 안에서
-        </p>
-        <p className="mt-1 flex flex-wrap items-center gap-1">
-          <Kbd>⌘</Kbd>/<Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd> 답 검토 후 보내기
-        </p>
-      </div>
+        <CommandInput placeholder="동작 이름으로 찾기 (예: 자료 올리기)" />
+        <CommandList>
+          <CommandEmpty>찾는 동작이 없습니다. 검색어를 AI에게 보내지 않습니다.</CommandEmpty>
+          {groups.map((g) => (
+            <CommandGroup key={g} heading={g}>
+              {all.filter((a) => a.group === g).map((a) => (
+                <CommandItem
+                  key={a.label}
+                  onSelect={() => {
+                    onOpenChange(false);
+                    if (a.run) a.run();
+                    else if (a.to) navigate(a.to);
+                  }}
+                >
+                  <span className="min-w-0 flex-1">{a.label}</span>
+                  {a.owner ? <span className="text-xs font-medium text-muted-foreground">소유자</span> : null}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+        {/* 단축키 도움말 — 같은 표를 설계 18.10 · 16.5의 집중 보조와 맞춘다 */}
+        <div className="border-t border-line px-3 py-2.5 text-caption text-ink-2">
+          <p className="flex flex-wrap items-center gap-1">
+            <Kbd>1</Kbd>~<Kbd>4</Kbd> 선택지 고르기{ui.jk ? "" : " (꺼짐)"} · 질문 카드 안에서
+          </p>
+          <p className="mt-1 flex flex-wrap items-center gap-1">
+            <Kbd>⌘</Kbd>/<Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd> 답 검토 후 보내기
+          </p>
+        </div>
       </Command>
     </CommandDialog>
   );

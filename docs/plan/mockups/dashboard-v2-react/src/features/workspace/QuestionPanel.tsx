@@ -18,7 +18,7 @@ import { Callout, EmptyState } from "@/components/pes/blocks";
 import { ActionButton } from "@/components/pes/controls";
 import { InfoTip, MoreContent, MoreRoot, MoreTrigger } from "@/components/pes/disclosure";
 import { Chip, Status, StatusFrom } from "@/components/pes/status";
-import { clearDraft, draftKey, draftToAnswerText, readDraftNow, useDraft } from "@/lib/draft";
+import { clearDraft, draftKey, draftToAnswerText, readDraftNow, useDraft, type AnswerDraft } from "@/lib/draft";
 import { useMockSettings } from "@/lib/mock-settings";
 import { answersSent, hasOpenOverlay, isTypingTarget, researchUi, useResearchUi } from "@/lib/research-ui";
 import { cn } from "@/lib/utils";
@@ -57,9 +57,16 @@ function QuestionTags({ q, extra }: { q: QuestionView; extra?: React.ReactNode }
   );
 }
 
-function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slug: string; formVersion: number; readOnly: boolean }) {
+function QuestionCard({ q, slug, formVersion, readOnly, onDraftChange }: { q: QuestionView; slug: string; formVersion: number; readOnly: boolean; onDraftChange?: () => void }) {
   const key = draftKey(slug, formVersion, q.id, q.version);
-  const [draft, setDraft] = useDraft(key);
+  const [draft, setDraftState] = useDraft(key);
+  const setDraft = React.useCallback(
+    (patch: Partial<AnswerDraft> | null) => {
+      setDraftState(patch);
+      onDraftChange?.();
+    },
+    [setDraftState, onDraftChange],
+  );
   const ui = useResearchUi();
   const showTools = usePhoneTools();
   const titleId = `${q.id}-t`;
@@ -74,7 +81,7 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
     if (!el) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       if (!researchUi.get().jk || readOnly) return;
       const m = /^Digit([1-4])$/.exec(e.code);
       if (!m) return;
@@ -197,12 +204,12 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
                   const id = `${q.id}-${o.id}`;
                   return (
                     <label key={o.id} htmlFor={id} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-[7px] text-body coarse:min-h-[48px] coarse:items-center", draft?.option === o.id ? "border-primary bg-primary-soft" : "border-line bg-surface")}>
-                      {ui.jk ? (
+                      {ui.jk && i < 4 ? (
                         <span aria-hidden="true" className="mt-0.5 shrink-0">
                           <Kbd>{i + 1}</Kbd>
                         </span>
                       ) : null}
-                      <RadioGroupItem value={o.id} id={id} aria-keyshortcuts={ui.jk ? String(i + 1) : undefined} className="mt-0.5" />
+                      <RadioGroupItem value={o.id} id={id} aria-keyshortcuts={ui.jk && i < 4 ? String(i + 1) : undefined} className="mt-0.5" />
                       <span>
                         {o.label}
                         {o.id === q.default_option ? (
@@ -390,6 +397,7 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
   const [review, setReview] = React.useState(false);
   const [adding, setAdding] = React.useState(false);
   const [noAnswers, setNoAnswers] = React.useState(false);
+  const clearNoAnswers = React.useCallback(() => setNoAnswers(false), []);
   const showTools = usePhoneTools();
 
   // ⌘/Ctrl+Enter — 답 검토 후 보내기 대화 상자를 연다(바로 보내지 않음). 답이 0개면 대화 상자 대신 상태 한 줄(18.10).
@@ -432,7 +440,7 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
               action={<Button asChild><Link to={`/p/${ws.slug}/ai`}>AI 작업 기록 보기</Link></Button>}
             />
           ) : (
-            ws.form.questions.map((q) => <QuestionCard key={`${q.id}-${q.version}`} q={q} slug={ws.slug} formVersion={ws.form.version} readOnly={readOnly} />)
+            ws.form.questions.map((q) => <QuestionCard key={`${q.id}-${q.version}`} q={q} slug={ws.slug} formVersion={ws.form.version} readOnly={readOnly} onDraftChange={clearNoAnswers} />)
           )}
           {!readOnly && showTools && ws.form.questions.length ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -452,11 +460,6 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
                 <p>더하기·빼기·순서는 새 폼(v{ws.form.version + 1})을 만듭니다. 빼기는 지우기가 아니라 보류·합치기·철회입니다.</p>
               </InfoTip>
             </div>
-          ) : null}
-          {noAnswers ? (
-            <p role="status" className="mt-3 text-meta text-ink-2">
-              보낼 답이 없습니다 — 선택지를 고르거나 의견으로 답한 뒤 다시 눌러 주세요.
-            </p>
           ) : null}
           {!readOnly && ws.form.answerable > 0 ? (
             <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-primary-line bg-primary-soft p-3">
@@ -499,6 +502,11 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* 단축키 결과 — 어느 탭을 보고 있어도 보이게 탭 밖에 두고, 요소는 늘 두고 글만 바꾼다(화면 읽기가 처음부터 읽게) */}
+      <p role="status" className="mt-2 text-meta text-ink-2">
+        {noAnswers ? "보낼 답이 없습니다 — 선택지를 고르거나 의견으로 답한 뒤 다시 눌러 주세요." : ""}
+      </p>
 
       {/* 단계 승인은 지금 할 일의 “단계 승인” 단계(다음 마일스톤)로 옮겼다(5차) — 질문 폼은 답하기 한 가지만 */}
       <ReviewDialog ws={ws} open={review} onOpenChange={setReview} />
