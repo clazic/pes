@@ -18,6 +18,7 @@ import { resolve_run_config, type RunConfig } from "./config.ts";
 import { tx, type Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { new_id } from "./ids.ts";
+import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
@@ -452,6 +453,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ["project.bootstrap", BOOTSTRAP_COMMAND],
   ["project.set_topic", SET_TOPIC_COMMAND],
   ...RUN_COMMAND_ENTRIES,
+  ...CONTENT_COMMAND_ENTRIES,
 ]);
 
 /**

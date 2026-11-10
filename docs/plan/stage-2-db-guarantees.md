@@ -155,3 +155,20 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **입력 영수증**: `applied`는 같은 프로젝트의 `mutation_commits.id`인 `applied_tx_id`가 있을 때만 인정한다. 중복 반영 방지 범위는 **같은 인계 흐름**이다. `parent_run_id` 사슬을 거슬러 뿌리 run을 찾고, 그 뿌리에서 파생된 모든 run(조상·후손·형제)이 이미 `applied`한 입력은 다시 적용하지 않고 `already_applied: true`로 답하며 저장된 `applied_tx_id`를 바꾸지 않는다. 뿌리가 다른 독립 run은 서로 막지 않는다. 인계 뒤 원본 run을 재개하거나 형제 run을 파생해도 같은 흐름에서는 한 번만 반영된다.
 - **영수증·사건**: run 명령의 영수증은 `run_id`·`lease_id`·`fence`를, 사건은 `events.run_id`를 남긴다. 거부·검증 실패는 영수증도 사건도 남기지 않는다.
 - **설정**: `lease_ttl_ms`·`heartbeat_interval_ms`는 `scripts/pes_core/config.ts`에만 있다. 서비스는 `process.env`를 읽지 않는다. API/CLI 같은 합성 지점이 `resolve_run_config(overrides, process.env)`로 env를 명시해 넘기고, 주입된 `RunConfig`가 없으면 서비스는 설정 기본값만 쓴다. 주입값도 생성자에서 `resolve_run_config(overrides, {})`로 검증·복사·동결하며, 잘못된 값은 생성 시점에 거부한다. 우선순위는 주입값 > env > 기본값이며, 양의 안전 정수만 받고 heartbeat가 TTL보다 짧아야 한다.
+
+### 8.4 내용 버전·출처·연결(PR7)
+
+`scripts/pes_core/commands/content.ts`가 `content.*` 8개 명령을 정의하고, `scripts/pes_core/content.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 명령은 8절 실행 순서를 그대로 지나며 한 tx다.
+
+- **append-only**: `object_versions`·`artifact_versions`·`source_versions`·`citations`·`version_relations`·`artifact_components`를 UPDATE/DELETE하는 경로가 없다. 새 내용은 `content.append_version`으로만 쌓고 과거 행은 그대로 둔다.
+- **현재 포인터**: `objects.current_version_id`는 `content.set_current`로만 옮기며 그 객체 자신의 버전만 가리킨다(다른 객체·다른 프로젝트 버전은 `conflict`/`not_found`). 포인터를 옮겨도 `objects.rev`만 1 증가하고 버전 행은 변하지 않는다.
+- **각주**: `citations`는 artifact 버전별 1..n으로 번호를 매기고, 가장 최근 버전(최고 `version_no`)만 새 각주를 받는다. 오래된 버전은 sealed라 `conflict`다. 같은 URL이라도 출처 객체를 합치지 않는다.
+- **출처 사실**: `source_versions`에 확인 시점·발췌·위치·방법·판정·확인 행위자를 저장한다. `verified_by_actor_id`는 그 프로젝트 소속이며 비활성화되지 않은(`actors.disabled_at`·`users.disabled_at` NULL) 행위자여야 한다(아니면 `not_found`). `verification_state='unreachable'`인 버전에는 발췌를 붙일 수 없다(`invalid_payload`).
+- **연결**: `version_relations`의 from 버전은 그 객체의 최신 버전이어야 하고, 같은 (from,to,kind)는 한 번만 둔다.
+- **library**: `content.import_library`는 한 tx에서 항목·출처·각주를 만들고 원본 JSON을 같은 tx의 `content.library_imported` 사건 payload `original`에 보존한다. 같은 library를 다시 가져오면(`library_hash` 동일) 업무 행을 만들지 않고 첫 결과를 돌려준다. 같은 library 정체성(항목 목록을 뺀 메타데이터가 동일) 안에서는 `legacy_id` 기준으로 이미 가져온 항목을 항목별로 건너뛰고 새 항목만 추가한다(부분집합·부분겹침·상위집합 모두). 항목 목록 밖 메타데이터가 다른 library는 별도 가져오기다. `legacy_id`·`kind_original`은 가져오기 고유 필드로 item의 같은 이름 키에 덮이지 않으며, item의 `__proto__` 같은 own 키도 데이터로 보존한다. library의 모든 문자열에 외톨이 서로게이트가 있으면 `invalid_payload`로 아무것도 쓰지 않는다. 파일 바이트 저장은 PR9/11 경계다.
+  - **항목 id·비교 키**: 항목 `id`는 0 이상의 안전 정수 또는 비어 있지 않은 문자열이다(실제 library의 id는 정수). 중복·재가져오기 비교는 타입을 붙인 키(`number:5` / `string:5`)로 해서 5와 "5"는 다른 항목이다. `legacy_extra.legacy_id`와 결과 `items`는 원래 값(정수는 정수 그대로)이다.
+  - **library 정체성**: 항목 목록과 휘발 키(`imported`·`round`)를 뺀 최상위 메타데이터다. 해시(`shell_hash`)와 항목 비교 키 목록(`item_keys`)을 사건 payload에 따로 두므로 재가져오기 판정은 `original`을 파싱하지 않는다.
+  - **건너뛴 가져오기**: 같은 정체성·같은 id지만 내용이 바뀐 파일은 구조 행에 반영하지 않고(옛 내용 유지) 건너뛰되, `content.library_import_skipped` 사건에 그 파일의 `original`과 `library_hash`를 남긴다. 정확히 같은 파일의 반복은 `library_hash`만 남긴다.
+  - **제목**: 제목이 없거나 문자열이 아니면 `(제목 없음)`으로 저장하고 원래 값(없었으면 null)을 `legacy_extra.title_original`에 둔다.
+  - **`archived_at`**: library 가져오기에서 `status:"removed"`인 항목에만 찍는 가져오기 전용 표시다. `append_version`/`add_artifact`로 status를 바꿔도 `archived_at`은 바뀌지 않는다. 버전 상태가 기준이다.
+  - **예정**: library 원본을 사건 payload에 두는 것은 D1 행 2MB 한도 때문에 PR9/11의 blob 경계로 옮길 예정이다.

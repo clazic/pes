@@ -1,0 +1,66 @@
+{
+  "source": "synthetic-source-folder",
+  "imported": "2026-01-02T03:04:05",
+  "round": 2,
+  "topic": "합성 라이브러리 주제",
+  "settings": { "synthetic_flag": true },
+  "items": [
+    {
+      "id": "L1",
+      "title": "합성 항목 하나",
+      "kind": "topic",
+      "question": "합성 질문은 무엇인가?",
+      "summary": "합성 요약 하나",
+      "details": "합성 본문 하나\n\n둘째 문단",
+      "status": "done",
+      "confidence": "medium",
+      "depth": 2,
+      "stats": [{ "name": "합성 지표", "value": "12", "unit": "건" }],
+      "conflicts": ["합성 상충 메모"],
+      "verify": {
+        "claims": [
+          { "claim": "합성 주장", "verdict": "supported", "evidence": "합성 근거", "source": "합성 출처 A" }
+        ]
+      },
+      "sources": [
+        {
+          "title": "합성 출처 A",
+          "url": "https://example.test/shared-page",
+          "method": "fetch",
+          "date": "2025-12-31",
+          "note": "합성 메모 A"
+        },
+        {
+          "title": "합성 출처 B",
+          "url": "https://example.test/shared-page",
+          "method": "search",
+          "date": "2025-12-30"
+        }
+      ]
+    },
+    {
+      "id": "L2",
+      "title": "합성 항목 둘 (제거됨)",
+      "kind": "claim",
+      "summary": "합성 요약 둘",
+      "status": "removed",
+      "sources": []
+    },
+    {
+      "id": "L3",
+      "title": "합성 항목 셋",
+      "kind": "mystery",
+      "summary": "알 수 없는 종류",
+      "custom_field": "합성 임의 값",
+      "sources": [
+        {
+          "title": "합성 출처 C",
+          "url": "https://example.test/shared-page",
+          "method": "fetch"
+        }
+      ]
+    }
+  ],
+  "suggestions": [],
+  "warnings": []
+}
