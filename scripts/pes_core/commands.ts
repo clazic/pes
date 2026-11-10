@@ -626,6 +626,10 @@ export class CommandService {
    * current state outside a command (for example to tell a replayed receipt
    * from a state that has moved on). SELECT/WITH only; the handle is dead once
    * fn returns, and no write is possible through it.
+   *
+   * INTERNAL ONLY: this reads any table of any project with no actor or scope
+   * check. It is for code that already holds the service. Never expose it through
+   * the HTTP API or give it to a caller that acts for a user.
    */
   read<T>(fn: (db: ReadonlyDbHandle) => T): T {
     return with_readonly_db(this.#db, fn);

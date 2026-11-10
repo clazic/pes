@@ -76,6 +76,11 @@ export interface ValidationReport {
   checked: Record<CheckName, number>;
   problems: ValidationProblem[];
   regenerated_reports: RegeneratedReport[];
+  /**
+   * "provisional": the regeneration is a structural stand-in used until the real
+   * report generator exists (PR16). A mismatch is only reported and is not final.
+   */
+  regeneration_format: "provisional";
 }
 
 export interface ValidateOptions {
@@ -333,15 +338,26 @@ export async function restore_project(
       entry.files?.discard();
       throw error;
     }
+    const result = outcome.result as RestoreResult;
     const failed = entry.files?.commit() ?? [];
     if (failed.length > 0) {
+      // The rows are final and the epoch is raised: say what the restore took away
+      // and where the cursor stands. A second run of the same restore only finishes
+      // the files, and then reports no loss of its own.
       throw new ApiError(
         "conflict",
-        `the project rows were restored, but ${failed.length} object file(s) could not be put in place; run the restore again to finish`,
-        { rows_restored: true, failed_files: failed },
+        `the project rows were restored, but ${failed.length} object file(s) could not be put in place; run the same restore again to finish`,
+        {
+          rows_restored: true,
+          failed_files: failed,
+          lost_writes: result.lost_writes,
+          reverted_steps: result.reverted_steps,
+          cursor_epoch_before: result.cursor_epoch_before,
+          cursor_epoch_after: result.cursor_epoch_after,
+        },
       );
     }
-    return outcome.result as RestoreResult;
+    return result;
   } finally {
     prepared_restores.delete(token);
   }
@@ -614,7 +630,12 @@ export function build_validation_report(db: ReadDb, input: ValidationInput): Val
   if (out.dropped > 0) {
     out.problems.push({ check: "counts", detail: { more_problems_not_listed: out.dropped } });
   }
-  return { checked: out.checked, problems: out.problems, regenerated_reports: regenerated };
+  return {
+    checked: out.checked,
+    problems: out.problems,
+    regenerated_reports: regenerated,
+    regeneration_format: "provisional",
+  };
 }
 
 function check_content(
@@ -825,6 +846,44 @@ function check_counts(
     const actual = num(db_roles.find((row) => row.role === role)?.n);
     compare_count(out, "counts", `version_files/${role}`, expected, actual);
   }
+
+  // blobs of the whole project and submissions: nothing the plan does not know
+  // about may be there. The importer stores each distinct file once (same hash and
+  // size = one blob), plus the source manifest, the import report and the inline
+  // snapshot documents.
+  const blob_keys = new Set<string>();
+  for (const blob of plan.blobs) {
+    const content = input.prepared.bytes.get(blob.path);
+    if (content !== undefined) blob_keys.add(`${sha256_hex(content)}:${content.byteLength}`);
+  }
+  for (const snapshot of plan.snapshots) {
+    if (snapshot.source.kind !== "inline") continue;
+    const content = new TextEncoder().encode(snapshot.source.json);
+    blob_keys.add(`${sha256_hex(content)}:${content.byteLength}`);
+  }
+  for (const blob_id of [input.batch.source_manifest_blob_id, input.batch.report_blob_id]) {
+    if (blob_id === null) continue;
+    const stored = db.get<{ sha256: string; size: bigint }>(
+      "SELECT sha256, size FROM blobs WHERE project_id = ? AND id = ?",
+      pid,
+      blob_id,
+    );
+    if (stored !== undefined) blob_keys.add(`${stored.sha256}:${num(stored.size)}`);
+  }
+  compare_count(
+    out,
+    "counts",
+    "blobs",
+    blob_keys.size,
+    count_of(db, "SELECT count(*) AS n FROM blobs WHERE project_id = ?", pid),
+  );
+  compare_count(
+    out,
+    "counts",
+    "submissions",
+    plan.submissions.filter((entry) => input.prepared.bytes.has(entry.raw_blob_path)).length,
+    count_of(db, "SELECT count(*) AS n FROM submissions WHERE project_id = ?", pid),
+  );
 
   // legacy_mappings the importer could resolve
   const resolvable = plan.mappings.filter((mapping) => mapping_resolvable(plan, input.prepared, mapping)).length;

@@ -189,6 +189,32 @@ function run_validate_import(runtime: CommandRuntime): CommandResult {
 // ---------------------------------------------------------------------------
 // legacy.activate_import
 
+/**
+ * The database that gets activated must be the one the last validation checked:
+ * a business write on the staging project after that receipt means "validate again".
+ * (Project commands do not look at the project status, so such a write is possible.)
+ */
+function assert_unchanged_since_validation(runtime: CommandRuntime, project_id: string): void {
+  const validation = runtime.db.get<{ rid: bigint }>(
+    `SELECT max(rowid) AS rid FROM mutation_commits
+      WHERE project_id = ? AND action = 'legacy.validate_import'`,
+    project_id,
+  );
+  if (validation?.rid === null || validation?.rid === undefined) return;
+  const later = runtime.db.get<{ n: bigint }>(
+    `SELECT count(*) AS n FROM mutation_commits
+      WHERE project_id = ? AND rowid > ? AND action NOT LIKE 'legacy.%'`,
+    project_id,
+    validation.rid,
+  );
+  if ((later?.n ?? 0n) > 0n) {
+    throw new ApiError(
+      "conflict",
+      "the project changed after it was validated; validate the import again before activating it",
+    );
+  }
+}
+
 function run_activate_import(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   reject_unknown_fields(payload, ["batch_id", "backup_dir", "pes_home"]);
@@ -205,6 +231,7 @@ function run_activate_import(runtime: CommandRuntime): CommandResult {
   }
   const objects_dir = require_objects_dir(runtime);
   assert_backup_location(backup_dir, pes_home, objects_dir);
+  assert_unchanged_since_validation(runtime, project.id);
 
   // The backup comes first and is read from this very transaction: it shows the
   // project exactly as it is before the state changes. If it cannot be written

@@ -70,7 +70,8 @@ export interface ImportOptions {
 export interface ImportResult {
   batch_id: string;
   project_id: string;
-  state: "staging" | "failed";
+  /** For a replayed answer: the batch state right now (it may have moved on since the first import). */
+  state: "staging" | "validated" | "activated" | "failed";
   replayed: boolean;
   source_fingerprint: string;
   report: UnknownReport;
@@ -3341,18 +3342,26 @@ export async function import_project(
     );
     const result = outcome.result as ImportResult;
     let state = result.state;
-    if (outcome.replayed && state !== "failed") {
-      // A receipt replay returns what the first call saw. A batch that was
-      // rolled back since (PR12) is failed now and is not silently revived.
+    const replayed = outcome.replayed || result.replayed === true;
+    if (replayed) {
+      // A receipt replay returns what the first call saw. The batch may have moved
+      // on since (validated, activated, rolled back in PR12): show where it is now.
       const current = service.read((db) =>
         db.get<{ state: string }>("SELECT state FROM import_batches WHERE id = ?", result.batch_id),
       );
-      if (current?.state === "failed") state = "failed";
+      if (
+        current?.state === "staging" ||
+        current?.state === "validated" ||
+        current?.state === "activated" ||
+        current?.state === "failed"
+      ) {
+        state = current.state;
+      }
     }
     return {
       ...result,
       state,
-      replayed: outcome.replayed || result.replayed === true,
+      replayed,
     };
   } finally {
     drop_prepared_import(owner_actor_id, fingerprint);

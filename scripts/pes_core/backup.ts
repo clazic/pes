@@ -1036,7 +1036,15 @@ function relink_missing_references(db: Db, table: RowsTable): unknown[][] {
   });
 }
 
-function insert_rows(db: Db, table: RowsTable, rows: unknown[][]): void {
+/**
+ * How rows of the shared users/actors tables meet rows that already exist:
+ * "match" (import_bundle) skips an identical row and refuses a different one;
+ * "keep" (project restore) leaves the current row exactly as it is, whatever
+ * it holds now, and only adds a row that is missing.
+ */
+type SharedRowMode = "match" | "keep";
+
+function insert_rows(db: Db, table: RowsTable, rows: unknown[][], shared: SharedRowMode = "match"): void {
   const names = table.columns.map((column) => column.name);
   const quoted_names = names.map((name) => `"${escape_identifier(name)}"`).join(", ");
   const placeholders = names.map(() => "?").join(", ");
@@ -1058,7 +1066,7 @@ function insert_rows(db: Db, table: RowsTable, rows: unknown[][]): void {
         values[id_index]!,
       );
       if (existing !== undefined) {
-        if (row_matches(existing, values, names)) continue;
+        if (shared === "keep" || row_matches(existing, values, names)) continue;
         throw new BackupError("project_conflict", `${table.name} id ${String(values[id_index])} already exists with different values`);
       }
     }
@@ -1306,7 +1314,7 @@ function writeAll(fd: number, bytes: Uint8Array): void {
   }
 }
 
-function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint {
+function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest, shared: SharedRowMode = "match"): bigint {
   // Rows contain cycles (projects <-> project_members/editions, editions <->
   // stages), so per-statement foreign key checks cannot work with any single
   // insertion order. Deferring enforcement until COMMIT keeps the whole restore
@@ -1351,7 +1359,7 @@ function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint 
       const rows = table.name === "project_references"
         ? relink_missing_references(db, table)
         : remap_event_columns(table, seq_map);
-      insert_rows(db, table, rows);
+      insert_rows(db, table, rows, shared);
     }
   }
 
@@ -1512,8 +1520,10 @@ export function prepare_project_restore(bundle_dir: string): PreparedProjectRest
 
 /**
  * Replace the rows of one project with the bundle's rows. The caller holds the
- * write transaction. Other projects are never touched; users and actors that
- * the bundle references are kept as they are (or added when missing).
+ * write transaction. Other projects are never touched; users and actors are
+ * neither compared nor replaced: an existing row stays exactly as it is now
+ * (a renamed user or a disabled actor does not block a restore) and only a
+ * missing row is added.
  * Returns the new cursor_epoch (max(target, bundle) + 1).
  */
 export function replace_project_rows_in_tx(
@@ -1548,7 +1558,8 @@ export function replace_project_rows_in_tx(
       db.run(`DELETE FROM "${escape_identifier(name)}" WHERE project_id = ?`, project_id);
     }
     db.run('DELETE FROM "projects" WHERE id = ?', project_id);
-    return insert_bundle(db, prepared.tables, manifest);
+    // users and actors are shared by every project: the current rows stay as they are.
+    return insert_bundle(db, prepared.tables, manifest, "keep");
   } catch (error) {
     throw translate_import_error(error);
   }
