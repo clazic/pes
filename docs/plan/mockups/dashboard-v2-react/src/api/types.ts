@@ -19,6 +19,8 @@ export type IsoTime = string;
 export type ApiErrorCode =
   | "policy_blocked" // AI가 읽기: 막음·차단 중, AI 참조 금지 등. 자동 재시도 금지
   | "version_conflict" // 그사이 폼·결과·정책 rev가 바뀜
+  /** 그사이 다른 사람이 판단해 제안이 이미 판단됨 — 버전 충돌과 구분해 센다(UI7-4b) */
+  | "already_judged"
   | "permission_denied" // 서버가 권한을 다시 검사해 거절(단추를 숨기는 것은 권한 검사가 아님)
   | "lease_lost"
   | "cursor_invalid"

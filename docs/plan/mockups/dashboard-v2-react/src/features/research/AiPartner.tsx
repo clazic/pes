@@ -14,6 +14,7 @@ import { agoText, elapsedText, TurnMark, useNow } from "@/components/pes/turn";
 import { aiSheet, useAiSheet } from "@/lib/research-ui";
 import { useMockSettings } from "@/lib/mock-settings";
 import { cn } from "@/lib/utils";
+import { AssumptionBulkDialog } from "@/features/research/AssumptionBulkDialog";
 
 const WHOLE = "이 라운드 전체";
 
@@ -39,6 +40,7 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
   const paragraphs = ws.result?.paragraphs.map((_, i) => `문단 ${i + 1}`) ?? [];
   const [target, setTarget] = React.useState(() => (sheet.target && paragraphs.includes(sheet.target) ? sheet.target : WHOLE));
   const [text, setText] = React.useState("");
+  const [bulkOpen, setBulkOpen] = React.useState(false);
   const textRef = React.useRef<HTMLTextAreaElement>(null);
   const ask = useCommand("question.create", { successText: (r) => `AI에게 부탁 접수됨 · 접수 번호 ${r.receipt_no} — ${ws.mode === "B" ? "내 컴퓨터 AI가 받아야 처리됩니다" : "실행이 이어질 때 처리됩니다"}` });
   const decide = useCommand("decision.record");
@@ -66,6 +68,7 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
   const recent = [...ws.asks].reverse().slice(0, 3);
   const props = ws.proposals;
   const pending = props.filter((p) => p.state.value === "proposed").length;
+  const pendingAssumptions = props.filter((p) => p.kind === "assumption" && p.state.value === "proposed");
   const t = ws.third_card;
 
   return (
@@ -183,13 +186,26 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
         </section>
 
         <section aria-labelledby={`${idPrefix}-prop`} className="space-y-2 border-t border-line pt-3.5">
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <h3 id={`${idPrefix}-prop`} className="text-meta">
               AI가 남긴 가정·결정 제안 <span className="font-normal text-muted-foreground tabular-nums">{props.length}</span>
             </h3>
             <InfoTip label="가정·결정 제안 설명">
               <p>AI가 일하며 세운 가정과 결정 제안입니다. 받아들이거나 버리면 판단자·근거가 기록됩니다. 판단하지 않아도 일을 막지 않으며 나의 할 일 수에 넣지 않습니다{pending ? ` — 판단 전 ${pending}개` : ""}.</p>
             </InfoTip>
+            {pendingAssumptions.length >= 2 ? (
+              <span className="ml-auto flex flex-wrap items-center gap-1">
+                <ActionButton
+                  size="xs"
+                  variant="outline"
+                  blockedBy={role === "owner" ? null : "소유자만 가정을 확인할 수 있습니다."}
+                  showReason
+                  onClick={() => setBulkOpen(true)}
+                >
+                  판단 전 가정 {pendingAssumptions.length}개 모두 받아들이기
+                </ActionButton>
+              </span>
+            ) : null}
           </div>
           {props.length === 0 ? <p className="text-meta text-muted-foreground">아직 없습니다.</p> : null}
           <ul className="space-y-2">
@@ -229,6 +245,7 @@ export function AiPartner({ ws, idPrefix = "aip", className, onCollapse }: { ws:
           </InfoTip>
         </p>
       </div>
+      {bulkOpen ? <AssumptionBulkDialog slug={ws.slug} assumptions={pendingAssumptions} open onOpenChange={setBulkOpen} /> : null}
     </section>
   );
 }

@@ -816,7 +816,11 @@ export class MockPesClient {
         const r = this.store.research[input.slug];
         const pr = r?.proposals.find((x) => x.id === input.proposal_id);
         if (!r || !pr) throw apiError("version_conflict", "그 제안이 바뀌었거나 없습니다.", false);
-        if (pr.state.value !== "proposed") throw apiError("version_conflict", "이미 판단한 제안입니다 — 화면을 다시 받았습니다.", false);
+        if (pr.state.value !== "proposed") throw apiError("already_judged", "이미 판단한 제안입니다 — 화면을 다시 받았습니다.", false);
+        // UI7-4b 시험용: 고른 제안 한 건을 버전 충돌로 거절한다(저장소는 그대로 — 판단 전 유지)
+        if (input.verdict === "accept" && mockSettings.get().failAssumption === input.proposal_id) {
+          throw apiError("version_conflict", "그사이 제안이 바뀌었습니다 — 버전 충돌입니다.", false);
+        }
         pr.state = { domain: "proposal", value: input.verdict === "accept" ? "accepted" : "rejected", label: `${input.verdict === "accept" ? "받아들임" : "버림"} · ${this.person()} ${nowLabel()}` };
         this.emit(input.slug, ["workspace"]);
         return {};
