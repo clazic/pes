@@ -90,7 +90,7 @@ const REVISE_FIELDS = [
   "fence",
 ] as const;
 
-const SUBMIT_FIELDS = ["set_id", "answers", "run_id", "lease_id", "fence"] as const;
+const SUBMIT_FIELDS = ["set_id", "answers"] as const;
 const ANSWER_ITEM_FIELDS = new Set(["question_id", "value", "other", "used_default"]);
 
 function invalid_payload(message: string): never {
@@ -467,7 +467,7 @@ function parse_new_question(
   const allow_comment_as_answer = optional_boolean(
     payload,
     "allow_comment_as_answer",
-    true,
+    false,
   )
     ? 1
     : 0;
@@ -487,51 +487,88 @@ function parse_new_question(
   };
 }
 
-/** The current version of an existing question in this project, or not_found. */
+/**
+ * The current version of an existing question in this project. A question that
+ * is not usable now (deferred, withdrawn, merged, closed, draft) cannot enter
+ * a new set; it is conflict, not not_found.
+ */
 function current_question_version(
   runtime: CommandRuntime,
   project_id: string,
   question_id: string,
 ): string {
-  const row = runtime.db.get<{ current_version_id: string | null }>(
-    `SELECT o.current_version_id
+  const row = runtime.db.get<{ current_version_id: string | null; state: string | null }>(
+    `SELECT o.current_version_id, qv.state
        FROM objects o
        JOIN questions q ON q.project_id = o.project_id AND q.object_id = o.id
+       LEFT JOIN question_versions qv
+         ON qv.project_id = o.project_id AND qv.object_id = o.id
+        AND qv.version_id = o.current_version_id
       WHERE o.project_id = ? AND o.id = ? AND o.kind = 'question'`,
     project_id,
     question_id,
   );
-  if (row === undefined || row.current_version_id === null) {
+  if (row === undefined || row.current_version_id === null || row.state === null) {
     throw new ApiError("not_found", "question not found");
+  }
+  if (row.state !== "open") {
+    throw new ApiError("conflict", "the question is not open");
   }
   return row.current_version_id;
 }
 
-function require_stage(runtime: CommandRuntime, project_id: string, stage_id: string): void {
-  const stage = runtime.db.get<{ id: string }>(
-    "SELECT id FROM stages WHERE project_id = ? AND id = ?",
+/**
+ * A publish target must be a stage of the project's active edition (PR6 rule),
+ * not a stage of a completed, archived, draft, or other edition.
+ */
+function require_publish_stage(
+  runtime: CommandRuntime,
+  project_id: string,
+  stage_id: string,
+): void {
+  const stage = runtime.db.get<{ id: string; edition_id: string }>(
+    "SELECT id, edition_id FROM stages WHERE project_id = ? AND id = ?",
     project_id,
     stage_id,
   );
   if (stage === undefined) {
     throw new ApiError("not_found", "stage not found");
   }
+  const edition = runtime.db.get<{ status: string }>(
+    "SELECT status FROM editions WHERE project_id = ? AND id = ?",
+    project_id,
+    stage.edition_id,
+  );
+  if (edition === undefined || edition.status !== "active") {
+    throw new ApiError("conflict", "the edition is not active");
+  }
+  const project = runtime.db.get<{ active_edition_id: string | null }>(
+    "SELECT active_edition_id FROM projects WHERE id = ?",
+    project_id,
+  );
+  if (project === undefined || project.active_edition_id !== stage.edition_id) {
+    throw new ApiError("conflict", "stage is not in the active edition");
+  }
 }
 
-function require_round(
+/** A publish target round must still be open; a sealed round is closed to new forms. */
+function require_publish_round(
   runtime: CommandRuntime,
   project_id: string,
   stage_id: string,
   round_id: string,
 ): void {
-  const round = runtime.db.get<{ id: string }>(
-    "SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
+  const round = runtime.db.get<{ id: string; state: string }>(
+    "SELECT id, state FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
     project_id,
     stage_id,
     round_id,
   );
   if (round === undefined) {
     throw new ApiError("not_found", "round not found");
+  }
+  if (round.state !== "open") {
+    throw new ApiError("conflict", "the round is not open");
   }
 }
 
@@ -559,12 +596,13 @@ function run_publish_set(runtime: CommandRuntime): CommandResult {
   }
   const { guard } = member_actor_with_guard(runtime, payload);
 
-  require_stage(runtime, project.id, stage_id);
+  require_publish_stage(runtime, project.id, stage_id);
   if (round_id !== null) {
-    require_round(runtime, project.id, stage_id, round_id);
+    require_publish_round(runtime, project.id, stage_id, round_id);
   }
 
   const plans: MemberPlan[] = [];
+  const seen = new Set<string>();
   for (const [position, raw] of raw_questions.entries()) {
     if (!is_record(raw)) {
       return invalid_payload("each question must be an object");
@@ -572,6 +610,10 @@ function run_publish_set(runtime: CommandRuntime): CommandResult {
     if (has_own(raw, "question_id")) {
       reject_unknown_fields(raw, ["question_id"]);
       const question_id = require_non_empty_string(raw, "question_id");
+      if (seen.has(question_id)) {
+        return invalid_payload("a question may appear only once in a set");
+      }
+      seen.add(question_id);
       const question_version_id = current_question_version(
         runtime,
         project.id,
@@ -580,6 +622,10 @@ function run_publish_set(runtime: CommandRuntime): CommandResult {
       plans.push({ question_id, question_version_id, position, new_question: null });
     } else {
       const parsed = parse_new_question(runtime, raw);
+      if (seen.has(parsed.object_id)) {
+        return invalid_payload("a question may appear only once in a set");
+      }
+      seen.add(parsed.object_id);
       plans.push({
         question_id: parsed.object_id,
         question_version_id: parsed.version_id,
@@ -993,6 +1039,7 @@ interface MemberRow {
 
 interface QuestionVersionRow {
   type: string;
+  state: string;
   required: bigint;
   allow_comment_as_answer: bigint;
   default_value: string;
@@ -1031,12 +1078,67 @@ export function prepare_submission(
     return problem(null, "invalid_payload");
   }
 
-  const set = db.get<{ id: string }>(
-    "SELECT id FROM question_sets WHERE project_id = ? AND id = ?",
+  const set = db.get<{
+    id: string;
+    stage_id: string;
+    round_id: string | null;
+    form_key: string;
+    version_no: bigint;
+  }>(
+    `SELECT id, stage_id, round_id, form_key, version_no
+       FROM question_sets WHERE project_id = ? AND id = ?`,
     project_id,
     set_id,
   );
   if (set === undefined) return problem(null, "not_found");
+
+  // PR6 boundary: a form lives in a stage of the active edition. A completed,
+  // archived, draft, or foreign edition takes no new answers.
+  const stage = db.get<{ edition_id: string }>(
+    "SELECT edition_id FROM stages WHERE project_id = ? AND id = ?",
+    project_id,
+    set.stage_id,
+  );
+  const edition =
+    stage === undefined
+      ? undefined
+      : db.get<{ status: string; active_edition_id: string | null }>(
+          `SELECT e.status, p.active_edition_id
+             FROM editions e JOIN projects p ON p.id = e.project_id
+            WHERE e.project_id = ? AND e.id = ?`,
+          project_id,
+          stage.edition_id,
+        );
+  if (
+    stage === undefined ||
+    edition === undefined ||
+    edition.status !== "active" ||
+    edition.active_edition_id !== stage.edition_id
+  ) {
+    return problem(null, "conflict");
+  }
+  if (set.round_id !== null) {
+    const round = db.get<{ state: string }>(
+      "SELECT state FROM rounds WHERE project_id = ? AND id = ?",
+      project_id,
+      set.round_id,
+    );
+    if (round === undefined || round.state !== "open") {
+      return problem(null, "conflict");
+    }
+  }
+
+  // Only the latest set of a (stage, form_key) is the form the human sees.
+  const latest_set = db.get<{ n: bigint | null }>(
+    `SELECT MAX(version_no) AS n FROM question_sets
+      WHERE project_id = ? AND stage_id = ? AND form_key = ?`,
+    project_id,
+    set.stage_id,
+    set.form_key,
+  );
+  if (Number(latest_set?.n ?? 0n) !== Number(set.version_no)) {
+    return problem(null, "conflict");
+  }
 
   const seen = new Set<string>();
   const items: PlannedAnswer[] = [];
@@ -1074,7 +1176,7 @@ export function prepare_submission(
     }
 
     const version = db.get<QuestionVersionRow>(
-      `SELECT type, required, allow_comment_as_answer, default_value, options
+      `SELECT type, state, required, allow_comment_as_answer, default_value, options
          FROM question_versions
         WHERE project_id = ? AND object_id = ? AND version_id = ?`,
       project_id,
@@ -1082,6 +1184,7 @@ export function prepare_submission(
       member.question_version_id,
     );
     if (version === undefined) return problem(question_id, "conflict");
+    if (version.state !== "open") return problem(question_id, "conflict");
 
     let other: string | null = null;
     if (raw.other !== undefined && raw.other !== null) {
@@ -1109,6 +1212,14 @@ export function prepare_submission(
     if (has_value) {
       if (!value_matches_type(raw.value, version.type, version.options)) {
         return problem(question_id, "invalid_payload");
+      }
+      if (Number(version.required) === 1) {
+        if (typeof raw.value === "string" && raw.value.trim().length === 0) {
+          return problem(question_id, "invalid_payload");
+        }
+        if (Array.isArray(raw.value) && raw.value.length === 0) {
+          return problem(question_id, "invalid_payload");
+        }
       }
       if (used_default && !value_matches_default(version.default_value, raw.value)) {
         return problem(question_id, "invalid_payload");
@@ -1169,7 +1280,6 @@ interface AnswerWrite {
 
 function run_submit_answers(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, SUBMIT_FIELDS);
   const project = runtime.project;
   const actor_id = runtime.actor_id;
   if (project === null || actor_id === null) {
@@ -1177,11 +1287,13 @@ function run_submit_answers(runtime: CommandRuntime): CommandResult {
   }
 
   // PR10 rule: only a human member answers. An agent sharing the owner's user
-  // is still refused, with or without a lease guard.
+  // is still refused, with or without lease-like fields in the payload. This
+  // check runs before the closed-field check so an agent is always forbidden.
   const actor = command_actor(runtime);
   if (actor.kind !== "human") {
     throw new ApiError("forbidden", "only a human may submit answers");
   }
+  reject_unknown_fields(payload, SUBMIT_FIELDS);
 
   const prepared = prepare_submission(runtime.db, project.id, payload);
   if (!prepared.ok) {
