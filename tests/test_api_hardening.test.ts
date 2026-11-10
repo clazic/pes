@@ -538,25 +538,31 @@ test("fence: values at or beyond 2^53, zero, negatives, and non-string forms are
   });
 });
 
-test("results expected_control_rev: 2^53 and larger strings, bad forms, and any number are 400, never 500", async () => {
+test("results expected_control_rev: bad forms and any number are 400; well-formed 2^53-and-larger strings are 409 (one decimal rule)", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "revbig");
     const lease = await agent_claims(env, agent);
+    const items = [{ op: "append_version", object_id: (await new_artifact(env, "revbig")).object_id, title: "합성 항목" }];
     const before = state_signature(env.db);
-    for (const rev of [...BIG_DECIMALS, ...BAD_FORMS, 0, 5]) {
-      const res = await results_call(env, agent.token, lease, [], { expected_control_rev: rev });
+    for (const rev of [...BAD_FORMS, 0, 5]) {
+      const res = await results_call(env, agent.token, lease, items, { expected_control_rev: rev });
       assert_error(res, 400, "invalid_payload");
+    }
+    for (const rev of BIG_DECIMALS) {
+      const error = assert_error(await results_call(env, agent.token, lease, items, { expected_control_rev: rev }), 409, "rev_conflict");
+      assert.equal(error.details.expected, rev);
+      assert.equal(error.details.current, "0");
     }
     assert.equal(state_signature(env.db), before);
   });
 });
 
-test("claim expected_control_rev: a huge decimal string is a clean 409 with exact strings, other forms are 400", async () => {
+test("claim expected_control_rev: every well-formed huge decimal string is a clean 409 with exact strings, other forms are 400", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "claimbig");
     const body = { mode: "B", runtime: "r", provider: "p", model: "m" };
     const before = state_signature(env.db);
-    for (const rev of ["18446744073709551616", "99999999999999999999999999"]) {
+    for (const rev of [...BIG_DECIMALS, "9007199254740994", "9223372036854775808"]) {
       const res = await call(env, { method: "POST", path: P(env, "/claims"), auth: { token: agent.token }, body: { ...body, expected_control_rev: rev } });
       const error = assert_error(res, 409, "rev_conflict");
       assert.equal(error.details.expected, rev);
@@ -573,18 +579,22 @@ test("claim expected_control_rev: a huge decimal string is a clean 409 with exac
   });
 });
 
-test("DEFECT? the same expected_control_rev beyond 2^53 is 400 on results but 409 on claims (one decimal rule is expected)", async () => {
+test("the same expected_control_rev gets the same answer on results and claims at every size (one decimal rule)", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "uniform");
     const lease = await agent_claims(env, agent);
-    const results = await results_call(env, agent.token, lease, [], { expected_control_rev: "9007199254740993" });
-    const claims = await call(env, {
-      method: "POST",
-      path: P(env, "/claims"),
-      auth: { token: agent.token },
-      body: { mode: "B", runtime: "r", provider: "p", model: "m", expected_control_rev: "9007199254740993" },
-    });
-    assert.equal(results.status, claims.status);
+    const items = [{ op: "append_version", object_id: (await new_artifact(env, "uniform")).object_id, title: "합성 항목" }];
+    for (const rev of ["9007199254740991", "9007199254740992", "9007199254740993", "9007199254740994", "9223372036854775808", "99999999999999999999999999"]) {
+      const results = await results_call(env, agent.token, lease, items, { expected_control_rev: rev });
+      const claims = await call(env, {
+        method: "POST",
+        path: P(env, "/claims"),
+        auth: { token: agent.token },
+        body: { mode: "B", runtime: "r", provider: "p", model: "m", expected_control_rev: rev },
+      });
+      assert.equal(results.status, 409, `results ${rev}`);
+      assert.equal(claims.status, 409, `claims ${rev}`);
+    }
   });
 });
 
