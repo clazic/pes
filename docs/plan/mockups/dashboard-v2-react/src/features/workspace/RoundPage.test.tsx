@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChangeFeed } from "@/api/queries";
 import { mockSettings } from "@/lib/mock-settings";
 import { answersSent, aiSheet, researchUi } from "@/lib/research-ui";
@@ -99,4 +99,20 @@ describe("“마쳤습니다” — 보던 단계가 사라졌을 때", () => {
     // 다음 할 일 링크로 초점
     await waitFor(() => expect(next).toHaveFocus(), { timeout: 2000 });
   }, 20000);
+});
+
+describe("“마쳤습니다” — 본 적 없는 단계 이름이 Object 상속 속성 이름일 때(최종 리뷰 회귀)", () => {
+  it.each(["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__"])("?t=%s 로 처음 열어도 마쳤다고 하지 않고 React 경고도 없다", async (name) => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderRoutes(await workspaceRoutes(), `${ROUND}?t=${name}`);
+      await screen.findByRole("region", { name: /AI 동료/ }, { timeout: 4000 });
+      expect(screen.queryByText(/마쳤습니다/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /마쳤습니다/ })).not.toBeInTheDocument();
+      const msgs = errors.mock.calls.map((c) => c.map(String).join(" "));
+      expect(msgs.filter((m) => /not valid as a React child|Warning:/.test(m))).toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
 });

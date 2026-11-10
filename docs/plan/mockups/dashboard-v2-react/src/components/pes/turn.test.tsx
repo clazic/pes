@@ -95,3 +95,25 @@ describe("TurnIndicator 경과 · 소식", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe("밀리초가 있는 시각(최종 리뷰 회귀)", () => {
+  const MS = Date.parse("2026-03-10T12:00:00.500Z");
+  it("현재 .500 · 시작 11:57:00.500 · 소식 11:42:00.500 이면 3분째 · 소식 18분 전", () => {
+    vi.setSystemTime(MS);
+    render(ui({ side: "ai", since: "2026-03-10T11:57:00.500Z", last_signal: "2026-03-10T11:42:00.500Z", fresh: true }));
+    expect(screen.getByText("3분째 · 소식 18분 전")).toBeInTheDocument();
+  });
+  it("elapsedText · agoText 도 밀리초를 버리지 않고 센다", () => {
+    expect(elapsedText("2026-03-10T11:57:00.500Z", MS)).toBe("3분째");
+    expect(agoText("2026-03-10T11:42:00.500Z", MS)).toBe("18분 전");
+  });
+  it("15초 갱신 때 밀리초 있는 분 경계를 놓치지 않는다", () => {
+    vi.setSystemTime(Date.parse("2026-03-10T12:00:00.500Z") - 30 * 1000);
+    render(ui({ side: "ai", since: "2026-03-10T11:57:00.500Z", fresh: true }));
+    expect(screen.getByText("2분째")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(30 * 1000);
+    });
+    expect(screen.getByText("3분째")).toBeInTheDocument();
+  });
+});
