@@ -581,10 +581,9 @@ test("a second reopen of a different stage keeps the earlier stale marks and the
   });
 });
 
-test("run invalidation reaches only later stages of this edition; finished and leased runs keep their record", async () => {
+test("run invalidation reaches only later stages of this edition; finished runs keep their record", async () => {
   await with_env(async (env) => {
     const s = ids(env);
-    const base = add_agent(env);
     const plan = await drive_stage(env, s.plan, "plan");
     const research = await drive_stage(env, s.research, "research");
 
@@ -595,16 +594,13 @@ test("run invalidation reaches only later stages of this edition; finished and l
     insert_run(env, "run-later-failed", "failed", s.analyze, null, null);
     insert_run(env, "run-later-blocked", "queued", s.analyze, null, null);
     env.db.run("UPDATE runs SET status = 'blocked_usage', go_block_reason = 'usage_limit', go_blocked_at = 1 WHERE id = 'run-later-blocked'");
-    // a running run that holds the lease
-    const lease = await agent_claim(env, base, "claim-1");
-    aim_run(env, lease.run_id, s.research, research.round.round_id, null);
+    // (a running run that holds the lease is interrupted by a reopen: see test_editions_stages_review.test.ts)
     // a run of another edition
     const ed2 = (await create_edition(env.service, env.ctx("ed-2"), {})).result as { stage_ids: Record<string, string> };
     insert_run(env, "run-other-edition", "queued", ed2.stage_ids.research!, null, null);
 
     const succeeded_before = { ...env.db.get("SELECT * FROM runs WHERE id = 'run-later-succeeded'")! };
     const failed_before = { ...env.db.get("SELECT * FROM runs WHERE id = 'run-later-failed'")! };
-    const lease_run_before = { ...env.db.get("SELECT * FROM runs WHERE id = ?", lease.run_id)! };
 
     const out = await reopen_stage(env.service, env.ctx("reopen-plan"), { stage_id: s.plan });
     const r = out.result as { cancelled_run_ids: string[] };
@@ -618,7 +614,6 @@ test("run invalidation reaches only later stages of this edition; finished and l
     assert.ok(status("run-later-interrupted").ended_at !== null);
     assert.deepEqual({ ...env.db.get("SELECT * FROM runs WHERE id = 'run-later-succeeded'")! }, succeeded_before);
     assert.deepEqual({ ...env.db.get("SELECT * FROM runs WHERE id = 'run-later-failed'")! }, failed_before);
-    assert.deepEqual({ ...env.db.get("SELECT * FROM runs WHERE id = ?", lease.run_id)! }, lease_run_before, "a running run with a lease is not touched");
     const receipt = receipt_of(env.db, env.p.project_id, "reopen-plan")!;
     assert.equal(events_of(env.db, receipt.id).filter((e) => e.type === "run.invalidated").length, 2);
     // history events of the finished runs are not rewritten: no invalidation event for them
