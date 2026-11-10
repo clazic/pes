@@ -92,13 +92,17 @@ test("validate_import: v0.15 가 만든 보고서(시각만 다름)는 실제 �
   });
 });
 
-test("validate_import: 옛 보고서와 재생성본이 다르면 문제로 올리고 검증하지 않는다 (md·html 각각)", async () => {
-  await with_migration(async (env, api, mig) => {
-    for (const [file, path] of [["report.md", "reports/plan/report.md"], ["report.html", "reports/plan/report.html"]] as const) {
+// md·html 은 각각 별도 test(= 별도 with_migration 환경)다: 한 환경에서 fixture full 을 두 번 import 하면, v0.15 report 가 분 단위
+// reports_built 를 다시 써서 분 경계를 넘을 때 둘째 사본이 새 fingerprint → 첫 배치(staging)와 slug 충돌로 failed 가 되고,
+// 같은 분이면 둘째가 첫 배치를 재생해 의도와 다르다. 각 반복이 독립 배치를 검증한다.
+for (const [file, path, label] of [["report.md", "reports/plan/report.md", "md"], ["report.html", "reports/plan/report.html", "html"]] as const) {
+  test(`validate_import: 옛 보고서와 재생성본이 다르면 문제로 올리고 검증하지 않는다 (${label})`, async () => {
+    await with_migration(async (env, api, mig) => {
       const dir = legacy_with_real_reports(env);
       writeFileSync(join(dir, "reports", "plan", file), file.endsWith("md") ? "# 사람이 직접 고친 보고서\n" : "<html>손으로 고침</html>\n", "utf8");
       const imp = await api.import_project(env.service, dir, { owner_actor_id: owner_of(env) });
-      expect_staging(imp, dir, "test_cli_read_validate.test.ts#2");
+      expect_staging(imp, dir, `test_cli_read_validate.test.ts#2-${label}`);
+      assert.equal(imp.replayed, false, "독립 배치: 다른 배치를 재생하지 않는다");
       const out = await mig.validate_import(env.service, imp.batch_id, { owner_actor_id: owner_of(env), source_dir: dir });
       assert.equal(out.ok, false, `${file}: 불일치는 문제`);
       assert.equal(out.state, "staging");
@@ -107,9 +111,9 @@ test("validate_import: 옛 보고서와 재생성본이 다르면 문제로 올�
       assert.equal(problem?.path, path, "문제는 어느 보고서인지 경로로 알린다");
       assert.equal(out.report.regenerated_reports.find((r) => r.path === path)?.matches, false);
       assert.equal(batch_row(env.db, imp.batch_id).state, "staging", "문제가 있으면 validated 가 되지 않는다");
-    }
+    });
   });
-});
+}
 
 test("validate_import: 재생성 대상이 아닌 보고서 파일(pdf·eli5)은 비교하지 않는다", async () => {
   await with_migration(async (env, api, mig) => {

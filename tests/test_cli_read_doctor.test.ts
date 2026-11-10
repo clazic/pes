@@ -187,7 +187,7 @@ test("doctor: 서버 포트를 PES 가 아닌 프로그램이 쥐고 있으면 �
     [
       "-e",
       `const net=require("node:net");const held=[];let left=5;const done=()=>{if(--left===0)console.log("HELD "+JSON.stringify(held));};
-for(const p of [8760,8761,8762,8763,8764]){const s=net.createServer(k=>k.end("not http\\r\\n"));s.once("error",done);s.listen(p,"127.0.0.1",()=>{held.push(p);done();});}
+for(const p of [8760,8761,8762,8763,8764]){const s=net.createServer(k=>{k.on("error",()=>{});k.end("not http\\r\\n");});s.once("error",done);s.listen(p,"127.0.0.1",()=>{held.push(p);done();});}
 setInterval(()=>{},1000);`,
     ],
     { stdio: ["ignore", "pipe", "inherit"] },
