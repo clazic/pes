@@ -107,30 +107,172 @@ function redirect_hits(line: string, named: Named): boolean {
   return false;
 }
 
-function command_words(piece: string): { cmd: string; args: string[] } | null {
-  const words = piece.trim().match(/"[^"]*"|'[^']*'|\S+/g);
-  if (words === null) return null;
+/** 쉘 명령 구분자(`&&`·`||`·`;`·`|`)로 나눈다. 괄호 묶음 `( … )` 안의 구분자는 나누지 않는다(괄호가 안 맞으면 단순 분리). */
+function split_pieces(text: string): string[] {
+  const pieces: string[] = [];
+  let cur = "";
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (ch === "(") depth += 1;
+    else if (ch === ")" && depth > 0) depth -= 1;
+    if (depth === 0) {
+      if (ch === ";" || ch === "|") {
+        pieces.push(cur);
+        cur = "";
+        if (ch === "|" && text[i + 1] === "|") i += 1;
+        continue;
+      }
+      if (ch === "&" && text[i + 1] === "&") {
+        pieces.push(cur);
+        cur = "";
+        i += 1;
+        continue;
+      }
+    }
+    cur += ch;
+  }
+  if (depth !== 0) return text.split(/&&|\|\||;|\|/);
+  pieces.push(cur);
+  return pieces;
+}
+
+/** 명령 조각 목록. `( … )` 로 묶은 하위 쉘이 조각 전체이면 그 안을 다시 나눈다. */
+function pieces_of(text: string): string[] {
+  const out: string[] = [];
+  for (const p of split_pieces(text)) {
+    const t = p.trim();
+    if (t.startsWith("(") && t.endsWith(")")) out.push(...pieces_of(t.slice(1, -1)));
+    else out.push(p);
+  }
+  return out;
+}
+
+/** 쉘 낱말 나누기: 따옴표와 괄호 묶음(`(Get-Content "x")`, `$(…)`)은 한 낱말이다. 따옴표가 닫히지 않으면 단순 분리. */
+function shell_words(piece: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  let depth = 0;
+  for (const ch of piece) {
+    if (quote !== null) {
+      cur += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "(") depth += 1;
+    else if (ch === ")" && depth > 0) depth -= 1;
+    if (depth === 0 && /\s/.test(ch)) {
+      if (cur !== "") out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (quote !== null) return piece.trim().match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  if (cur !== "") out.push(cur);
+  return out;
+}
+
+/** 입력 리다이렉트(`< 파일`, `<파일`, `<< 표지`, `<<< 문자열`, `<(…)`)와 그 파일은 읽기이므로 낱말에서 뺀다. `<dir>` 같은 자리표시자는 남긴다. */
+function without_input_redirects(words: string[]): string[] {
+  const out: string[] = [];
+  for (let k = 0; k < words.length; k += 1) {
+    const w = words[k]!;
+    if (/^\d*<{1,3}-?$/.test(w)) {
+      k += 1;
+      continue;
+    }
+    if (/^\d*<(?:\(|[^<>(]*$)/.test(w) && w !== "<") continue;
+    out.push(w);
+  }
+  return out;
+}
+
+function command_words(piece: string): { cmd: string; args: string[]; raw: string[] } | null {
+  const words = without_input_redirects(shell_words(piece));
+  if (words.length === 0) return null;
   const is_flag = (w: string) => w.startsWith("-") || /^\/[A-Za-z](?::\S*)?$/.test(w);
-  return { cmd: words[0]!.replace(/^[$>]+/, "").toLowerCase(), args: words.slice(1).filter((w) => !is_flag(w)) };
+  const raw = words.slice(1);
+  return { cmd: words[0]!.replace(/^[$>]+/, "").toLowerCase(), args: raw.filter((w) => !is_flag(w)), raw };
 }
 
 const MOVE_LIKE = /^(?:mv|move|move-item|ren|rename)$/;
 const COPY_LIKE = /^(?:cp|ln|install|rsync|copy|xcopy|robocopy|copy-item)$/;
 
+/**
+ * PowerShell 의 Copy-Item·Move-Item 식 이름 붙은 인자: `-Path`(원본)·`-Destination`(도착지), 이름 없는 낱말은 남은 자리에 차례로 들어간다.
+ * 이름 붙은 인자가 하나도 없으면 null (일반 cp·mv 규칙을 쓴다).
+ */
+function ps_copy_args(raw: string[]): { src?: string; dest?: string } | null {
+  let src: string | undefined;
+  let dest: string | undefined;
+  let named_seen = false;
+  const positional: string[] = [];
+  for (let k = 0; k < raw.length; k += 1) {
+    const w = raw[k]!;
+    const m = /^-([A-Za-z]+)(?::(.*))?$/.exec(w);
+    if (m === null) {
+      if (!w.startsWith("-")) positional.push(w);
+      continue;
+    }
+    const name = m[1]!.toLowerCase();
+    const kind = /^(?:path|literalpath|pspath)$/.test(name)
+      ? "src"
+      : name.length >= 4 && "destination".startsWith(name)
+        ? "dest"
+        : /^(?:filter|include|exclude|credential|fromsession|tosession|stream)$/.test(name)
+          ? "skip"
+          : null;
+    if (kind === null) continue;
+    let value = m[2];
+    if (value === undefined) {
+      value = raw[k + 1];
+      k += 1;
+    }
+    if (value === undefined) continue;
+    if (kind === "src") {
+      src = value;
+      named_seen = true;
+    } else if (kind === "dest") {
+      dest = value;
+      named_seen = true;
+    }
+  }
+  if (!named_seen) return null;
+  for (const w of positional) {
+    if (src === undefined) src = w;
+    else if (dest === undefined) dest = w;
+  }
+  return { src, dest };
+}
+
 /** cp·mv·copy·Copy-Item 같은 명령의 도착지(마지막 인자)가 대상인지. 이동은 원본도 사라지므로 첫 인자도 본다. */
 function destination_hits(line: string, named: Named): boolean {
-  for (const piece of line.split(/&&|\|\||;|\|/)) {
+  for (const piece of pieces_of(line)) {
     const c = command_words(piece);
     if (c === null || !(MOVE_LIKE.test(c.cmd) || COPY_LIKE.test(c.cmd))) continue;
+    const move = MOVE_LIKE.test(c.cmd);
+    const ps = ps_copy_args(c.raw);
+    if (ps !== null) {
+      if (ps.dest !== undefined && named(ps.dest)) return true;
+      if (move && ps.src !== undefined && named(ps.src)) return true;
+      continue;
+    }
     if (c.args.length >= 2 && named(c.args[c.args.length - 1]!)) return true;
-    if (MOVE_LIKE.test(c.cmd) && c.args.length >= 1 && named(c.args[0]!)) return true;
+    if (move && c.args.length >= 1 && named(c.args[0]!)) return true;
   }
   return false;
 }
 
 /** rm·touch·del 같은 명령은 어느 인자든 대상이면 위반이다. */
 function any_arg_hits(line: string, named: Named): boolean {
-  for (const piece of line.split(/&&|\|\||;|\|/)) {
+  for (const piece of pieces_of(line)) {
     const c = command_words(piece);
     if (c === null || !/^(?:rm|touch|unlink|truncate|shred|del|erase)$/.test(c.cmd)) continue;
     if (c.args.some(named)) return true;
@@ -173,13 +315,24 @@ function call_args(text: string, open: number): string[] {
   return args;
 }
 
-/** Python 의 shutil.copy*(원본, 도착지)·shutil.move·os.rename·os.replace: 복사는 도착지만, 이동은 둘 다 본다. */
+/** Node 의 fs 모듈을 가리키는 수신 식: `fs`·`fsp`·`fsPromises`·`fs.promises`·`require(...)`(+`.promises`). */
+const NODE_RECV = /^(?:(?:fs|fsp|fsPromises|fse|promises)(?:\.promises)?|require\([^()]*\)(?:\.promises)?)$/;
+
+/** Python 의 shutil.copy*(원본, 도착지)·shutil.move·os.rename·os.replace, Node 의 copyFile*·cp*·rename*·link*·symlink*: 복사는 도착지만, 이동은 둘 다 본다. */
 function call_dest_hits(text: string, named: Named): boolean {
   const CALLS =
-    /(?<![\w.])(shutil\.(?:copy2?|copyfile|copyfileobj|copytree|move)|os\.(?:rename|replace|renames|link|symlink)|(?:fs\.(?:promises\.)?)?(?:copyFile(?:Sync)?|cpSync|cp|renameSync|rename|linkSync|symlinkSync)|(?:\[(?:System\.)?IO\.File\]::)(?:Copy|Move|Replace))\(/g;
+    /(?<![\w.])(shutil\.(?:copy2?|copyfile|copyfileobj|copytree|move)|os\.(?:rename|replace|renames|link|symlink)|(?:\[(?:System\.)?IO\.File\]::)(?:Copy|Move|Replace))\(/g;
   for (const m of text.matchAll(CALLS)) {
     const args = call_args(text, m.index! + m[0].length - 1);
     const move = /move|rename|replace|Move|Replace/.test(m[1]!);
+    if (args.length >= 2 && (named(args[1]!) || (move && named(args[0]!)))) return true;
+  }
+  // Node: 맨 함수(`import { rename }`)이거나 수신이 fs 모듈일 때만 (그 밖의 `.rename(` 은 pathlib 이라 따로 본다)
+  const NODE_CALLS = /(?<![\w$])(copyFile(?:Sync)?|cpSync|cp|renameSync|rename|linkSync|link|symlinkSync|symlink)\(/g;
+  for (const m of text.matchAll(NODE_CALLS)) {
+    if (text[m.index! - 1] === "." && !NODE_RECV.test(receiver(text, m.index! - 1))) continue;
+    const args = call_args(text, m.index! + m[0].length - 1);
+    const move = /^rename/.test(m[1]!);
     if (args.length >= 2 && (named(args[1]!) || (move && named(args[0]!)))) return true;
   }
   return false;
@@ -239,9 +392,11 @@ function receiver(text: string, dot: number): string {
   let i = dot - 1;
   while (i >= 0 && /\s/.test(text[i]!)) i -= 1; // 줄을 나눈 `.메서드` 이어 쓰기
   const end = i + 1;
+  let after_word = false; // 직전에 이름 문자를 걸었으면 그 앞의 따옴표는 바깥 문자열의 여는 따옴표다
   while (i >= 0) {
     const ch = text[i]!;
     if (ch === ")" || ch === "]") {
+      after_word = false;
       let depth = 0;
       let quote: string | null = null;
       for (; i >= 0; i -= 1) {
@@ -261,12 +416,14 @@ function receiver(text: string, dot: number): string {
       continue;
     }
     if (ch === '"' || ch === "'") {
-      i -= 1;
-      while (i >= 0 && text[i] !== ch) i -= 1;
-      i -= 1;
+      if (after_word) break;
+      const open = text.lastIndexOf(ch, i - 1);
+      if (open < 0) break;
+      i = open - 1;
       continue;
     }
     if (/[\w.$]/.test(ch)) {
+      after_word = true;
       i -= 1;
       continue;
     }
@@ -283,7 +440,7 @@ function receiver(text: string, dot: number): string {
  *    `unlink*`·`rm*`·`truncate*`, Python `os.remove`·`os.unlink`·`os.truncate`, .NET `WriteAll*`·`AppendAll*`의 첫 인자
  */
 function write_call_hits(text: string, named: Named): boolean {
-  for (const m of text.matchAll(/\.(write_text|write_bytes|unlink|touch|open|replace|rename)\(/g)) {
+  for (const m of text.matchAll(/\.(write_text|write_bytes|unlink|touch|open|replace|rename|symlink_to|hardlink_to)\(/g)) {
     const open = m.index! + m[0].length - 1;
     const args = call_args(text, open);
     const recv = receiver(text, m.index!);
@@ -307,20 +464,70 @@ function write_call_hits(text: string, named: Named): boolean {
     if (args.length >= 2 && named(args[1]!)) return true;
   }
   const FIRST_ARG =
-    /(?<![\w])(?:fs\.(?:promises\.)?)?(?:writeFile(?:Sync)?|appendFile(?:Sync)?|createWriteStream|unlink(?:Sync)?|rm(?:Sync)?|truncate(?:Sync)?|os\.(?:remove|unlink|truncate)|(?:\[(?:System\.)?IO\.File\]::)?(?:WriteAll(?:Text|Bytes|Lines)|AppendAll(?:Text|Lines)))\(/g;
+    /(?<![\w])(?:writeFile(?:Sync)?|appendFile(?:Sync)?|createWriteStream|unlink(?:Sync)?|rm(?:Sync)?|truncate(?:Sync)?|os\.(?:remove|unlink|truncate)|(?:\[(?:System\.)?IO\.File\]::)?(?:WriteAll(?:Text|Bytes|Lines)|AppendAll(?:Text|Lines)))\(/g;
   for (const m of text.matchAll(FIRST_ARG)) {
-    if (text[m.index! - 1] === ".") continue; // pathlib .unlink( 은 위에서 수신 객체로 본다
+    // 앞이 점이면 수신이 fs 모듈일 때만 Node 호출이다 (pathlib .unlink( 은 위에서 수신 객체로 본다)
+    if (text[m.index! - 1] === "." && !NODE_RECV.test(receiver(text, m.index! - 1))) continue;
     const args = call_args(text, m.index! + m[0].length - 1);
     if (args.length >= 1 && named(args[0]!)) return true;
   }
   return false;
 }
 
+/** PowerShell 쓰기 cmdlet 의 이름 없는 인자 자리 (t = 대상 경로, o = 내용·인코딩·새 이름 등 대상이 아닌 값). */
+const PS_SLOTS = new Map<string, ("t" | "o")[]>([
+  ["set-content", ["t", "o"]],
+  ["add-content", ["t", "o"]],
+  ["clear-content", ["t"]],
+  ["out-file", ["t", "o"]],
+  ["remove-item", ["t"]],
+  ["rename-item", ["t", "t"]], // 새 이름도 만들어지는 파일 이름이다
+  ["new-item", ["t", "t"]],
+]);
+
+/**
+ * PowerShell cmdlet 의 쓰기 대상만 골라낸다: 이름 붙은 `-Path`·`-LiteralPath`·`-FilePath`·`-Name` 의 값,
+ * 이름 없는 낱말은 남은 자리에 차례로(`Set-Content 경로 값`). `-Value (…)`·두 번째 위치 인자·`(…)` 괄호 식 값은 쓰는 내용이지 대상이 아니다.
+ */
+function ps_targets(cmd: string, rest: string[]): string[] {
+  const order = [...PS_SLOTS.get(cmd)!];
+  const targets: string[] = [];
+  const positional: string[] = [];
+  for (let k = 0; k < rest.length; k += 1) {
+    const w = rest[k]!;
+    const m = /^-([A-Za-z]+)(?::(.*))?$/.exec(w);
+    if (m === null) {
+      if (!w.startsWith("-")) positional.push(w);
+      continue;
+    }
+    const name = m[1]!.toLowerCase();
+    const slot = /^(?:path|literalpath|filepath|pspath|name|newname)$/.test(name)
+      ? "t"
+      : /^(?:value|encoding|itemtype|inputobject)$/.test(name)
+        ? "o"
+        : /^(?:filter|include|exclude|stream|width|credential|delimiter)$/.test(name)
+          ? "skip"
+          : null;
+    if (slot === null) continue; // -Force·-Append·-NoNewline 같은 스위치
+    if (m[2] === undefined) k += 1;
+    if (slot === "skip") continue;
+    const value = m[2] ?? rest[k] ?? "";
+    const at = order.indexOf(slot);
+    if (at >= 0) order.splice(at, 1);
+    if (slot === "t") targets.push(value);
+  }
+  const fallback = cmd === "remove-item" || cmd === "clear-content" ? "t" : "o";
+  positional.forEach((w, k) => {
+    if ((order[k] ?? fallback) === "t") targets.push(w);
+  });
+  return targets;
+}
+
 /** 쉘·PowerShell 명령 조각에서 쓰기 대상 인자만 본다 (파이프 앞의 읽기 명령은 다른 조각이다). */
 function shell_write_hits(text: string, named: Named): boolean {
-  for (const piece of text.split(/&&|\|\||;|\|/)) {
-    const words = piece.trim().match(/"[^"]*"|'[^']*'|\S+/g);
-    if (words === null) continue;
+  for (const piece of pieces_of(text)) {
+    const words = without_input_redirects(shell_words(piece));
+    if (words.length === 0) continue;
     const cmd = words[0]!.replace(/^[$>]+/, "").toLowerCase();
     const rest = words.slice(1);
     const plain = rest.filter((w) => !w.startsWith("-"));
@@ -334,12 +541,7 @@ function shell_write_hits(text: string, named: Named): boolean {
         if (/^--output(?:-document)?=/.test(w) && named(w.slice(w.indexOf("=") + 1))) throw HIT;
       });
     }
-    if (/^(?:set-content|add-content|clear-content|out-file|remove-item|rename-item|new-item)$/.test(cmd)) {
-      // -Value 뒤의 값은 쓰는 내용이지 대상이 아니다
-      const targets = rest.filter((w, k) => !w.startsWith("-") && !/^-(?:value|encoding|itemtype|newname)$/i.test(rest[k - 1] ?? ""));
-      if (targets.some(named)) return true;
-      if (cmd === "rename-item" || cmd === "move-item") continue;
-    }
+    if (PS_SLOTS.has(cmd) && ps_targets(cmd, rest).some(named)) return true;
   }
   return false;
 }

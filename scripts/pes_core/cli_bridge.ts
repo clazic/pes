@@ -794,7 +794,8 @@ const approve: Handler = async (s, req) => {
     );
     next = row === undefined ? null : { ...row };
   }
-  return { next, complete: result.edition_completed === true, handed_over: made === null ? null : (made as { made: number }).made, reused: made === null ? null : (made as { reused: number }).reused };
+  const done = made as { made: number; reused: number } | null;
+  return { next, complete: result.edition_completed === true, handed_over: done === null ? null : done.made, reused: done === null ? null : done.reused };
 };
 
 const reopen: Handler = async (s, req) => {

@@ -26,7 +26,7 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 
 - 각 topic은 최소 한 chapter와 연결한다. chapter마다 근거가 될 topic이 있어야 한다.
 - **참고자료(library)가 있으면** 항목을 하나씩 대조해 겹치는 topic에 `"reuse": <library id>`를 단다. 그 topic의 summary 첫 줄에 "기존 조사 #N 재사용 — 보완할 점: …"을 적는다. 기획에 맞지 않는 library 항목은 쓰지 않는다(이유를 changes에 한 줄 — `show <dir> plan --fields changes`로 읽은 전체 배열에 더해 `set`).
-- 참고자료를 읽는 길: 개수·출처는 `status`, 항목 번호·제목·요약은 `render <dir> plan` 뒤 대시보드 기획 탭의 「참고자료」 칸(`open`). 항목 본문이 더 필요하면 `--import`에 준 원래 조사 폴더의 `state.json`을 읽는다 — PES 상태가 아니라 가져온 참고 자료라 읽기만 하고 고치지 않는다. `show`·`digest`는 여섯 단계만 받으므로 library를 대상으로 쓰지 않는다.
+- 참고자료를 읽는 길: 개수·출처는 `status`, 항목 번호·제목·요약은 `render <dir> plan` 뒤 대시보드 기획 탭의 「참고자료」 칸(`open`). DB 경로(`PES_DB_CORE=1`)에서는 칸이 개수만 보이므로 `--import`에 준 원래 폴더의 `state.json`을 읽는다. 항목 본문이 더 필요하면 `--import`에 준 원래 조사 폴더의 `state.json`을 읽는다 — PES 상태가 아니라 가져온 참고 자료라 읽기만 하고 고치지 않는다. `show`·`digest`는 여섯 단계만 받으므로 library를 대상으로 쓰지 않는다.
 - 기획 단계에서는 새 조사를 하지 않는다. 필요하면 주제 파악용 빠른 검색만(출처는 sources에).
 - 항목은 제안 파일(JSON 배열: 항목마다 `kind`·`title`·`summary`·`question`·`links`·`reuse` 등)로 쓰고 `merge <dir> plan <파일>`로 넘긴다. `updated_round`·`depth`는 PES가 맞춘다. `merge`는 `reuse`를 그대로 남기고, 기획 승인 때 `reuse`가 달린 topic은 참고자료 내용을 이어받은 조사 항목(deepen)이 된다.
 
