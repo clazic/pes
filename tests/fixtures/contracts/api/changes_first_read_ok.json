@@ -1,0 +1,35 @@
+{
+  "name": "changes_first_read_ok",
+  "description": "커서 없이 변경분을 읽으면 공개 DTO 사건, 불투명 커서, 10진 문자열 epoch가 나온다.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/changes",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "events": {
+              "$array_of": {
+                "event_seq": "$dec",
+                "type": "$string",
+                "tx_id": "$string",
+                "at": "$int"
+              },
+              "min": 1
+            },
+            "next_cursor": "$string",
+            "has_more": "$bool",
+            "epoch": "$dec",
+            "resync": false
+          }
+        }
+      }
+    }
+  ]
+}

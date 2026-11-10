@@ -1,0 +1,106 @@
+{
+  "name": "error_agent_cannot_submit",
+  "description": "에이전트 토큰은 모든 권한을 가져도 답을 제출할 수 없다. 사람 전용 오류 안내가 붙는다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "owner"
+      },
+      "save": {
+        "stage": "data.stages.0.stage_id"
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/questions",
+        "auth": "owner",
+        "body": {
+          "stage_id": "${stage}",
+          "round_id": null,
+          "purpose": "stage_start",
+          "form_key": "main",
+          "questions": [
+            {
+              "text": "합성 질문입니다",
+              "type": "single",
+              "required": true,
+              "allow_comment_as_answer": false,
+              "options": [
+                {
+                  "value": "a",
+                  "label": "합성 A",
+                  "recommended": true
+                },
+                {
+                  "value": "b",
+                  "label": "합성 B"
+                }
+              ],
+              "default_value": "b"
+            }
+          ]
+        }
+      },
+      "save": {
+        "set": "data.set_id",
+        "question": "data.members.0.question_id"
+      },
+      "expect": {
+        "status": 201
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/submissions",
+        "auth": "agent:agent",
+        "body": {
+          "set_id": "${set}",
+          "answers": [
+            {
+              "question_id": "${question}",
+              "value": "a"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 403,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "forbidden",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": {
+              "required": "human_owner"
+            },
+            "next_action": "use_owner_session"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

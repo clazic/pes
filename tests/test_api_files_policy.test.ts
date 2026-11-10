@@ -9,7 +9,7 @@
  *   GET  P/files/{b}/content        raw bytes through the PES proxy; policy is checked on EVERY read
  *
  * Scopes: file:write for the first three, file:read for the read. A Go-bound actor (kind internal_ai)
- * is blocked from reading while Go is OFF (403 policy_denied, retryable=false); the owner and external
+ * is blocked from reading while Go is OFF (403 policy_blocked, retryable=false); the owner and external
  * agents are not. There is no download URL anywhere in a response, so OFF cannot be bypassed.
  */
 
@@ -309,7 +309,7 @@ test("Go OFF blocks a Go-bound actor's file read on every request; ON again lets
     const begins = env.begin_count();
     for (let i = 0; i < 3; i += 1) {
       const res = await read(env, go_actor.token, blob_id);
-      const error = assert_error(res, 403, "policy_denied");
+      const error = assert_error(res, 403, "policy_blocked");
       assert.equal(error.retryable, false);
       assert.equal(res.headers["retry-after"], undefined);
       assert.equal(res.bytes, null, "no bytes leak with the denial");
@@ -329,19 +329,19 @@ test("Go OFF denial comes before the file lookup: an unknown blob is also 403 fo
   await with_api(async (env) => {
     const go_actor = await make_agent(env, "go", undefined, "internal_ai");
     await go_off(env);
-    assert_error(await read(env, go_actor.token, "no-such-blob"), 403, "policy_denied");
+    assert_error(await read(env, go_actor.token, "no-such-blob"), 403, "policy_blocked");
   });
 });
 
-test("a policy_denied answer is final: the same request repeated is denied again with identical bodies, and nothing runs in between", async () => {
+test("a policy_blocked answer is final: the same request repeated is denied again with identical bodies, and nothing runs in between", async () => {
   await with_api(async (env) => {
     const go_actor = await make_agent(env, "go", undefined, "internal_ai");
     const blob_id = await ready_blob(env, "owner", bytes_of("final", 10));
     await go_off(env);
     const first = await read(env, go_actor.token, blob_id);
     const second = await read(env, go_actor.token, blob_id);
-    const a = assert_error(first, 403, "policy_denied");
-    const b = assert_error(second, 403, "policy_denied");
+    const a = assert_error(first, 403, "policy_blocked");
+    const b = assert_error(second, 403, "policy_blocked");
     assert.deepEqual({ ...a }, { ...b });
     assert.equal(a.retryable, false);
     assert.ok(a.next_action === null || !/retry|again/i.test(String(a.next_action)), "no retry instruction");
@@ -356,6 +356,6 @@ test("a Go OFF denial is not replayed from an old success: policy is checked bef
     assert_ok(ok);
     await go_off(env);
     const replay = await call(env, { method: "POST", path: P(env, "/claims"), auth: { token: go_actor.token }, key: "go-claim", body });
-    assert_error(replay, 403, "policy_denied");
+    assert_error(replay, 403, "policy_blocked");
   });
 });

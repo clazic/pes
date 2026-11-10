@@ -698,7 +698,7 @@ test("an agent token cannot do human-only work: runs, project.create, and owner-
   });
 });
 
-test("Go OFF: a mode A claim is 403 policy_denied, retryable=false, no Retry-After, and the server tries once", async () => {
+test("Go OFF: a mode A claim is 403 policy_blocked, retryable=false, no Retry-After, and the server tries once", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "go", undefined, "internal_ai");
     await go_off(env);
@@ -710,7 +710,7 @@ test("Go OFF: a mode A claim is 403 policy_denied, retryable=false, no Retry-Aft
       auth: { token: agent.token },
       body: { mode: "A", runtime: "builtin", provider: "opencode-go", model: "opencode-go/deepseek-v4.1-flash" },
     });
-    const error = assert_error(res, 403, "policy_denied");
+    const error = assert_error(res, 403, "policy_blocked");
     assert.equal(error.retryable, false);
     assert.equal(res.headers["retry-after"], undefined);
     assert.equal(error.details?.retry, undefined, "no retry hint in the details");
@@ -725,7 +725,7 @@ test("Go OFF: a mode A claim is 403 policy_denied, retryable=false, no Retry-Aft
         body: { mode: "A", runtime: "builtin", provider: "opencode-go", model: "opencode-go/deepseek-v4.1-flash" },
       }),
       403,
-      "policy_denied",
+      "policy_blocked",
     );
     assert.equal(state_signature(env.db), before);
   });
@@ -747,7 +747,7 @@ test("Go OFF blocks context for the Go-bound (internal_ai) actor but not for an 
     assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: { token: internal.token } }));
     await go_off(env);
     const denied = await call(env, { method: "GET", path: P(env, "/context"), auth: { token: internal.token } });
-    assert.equal(assert_error(denied, 403, "policy_denied").retryable, false);
+    assert.equal(assert_error(denied, 403, "policy_blocked").retryable, false);
     assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: { token: external.token } }));
   });
 });

@@ -1,0 +1,56 @@
+{
+  "name": "changes_cursor_invalid",
+  "description": "서버가 만들지 않은 커서는 400 cursor_invalid이고 다시 받아오라는 안내가 붙는다. limit 범위도 JSON 경로로 알려 준다.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/changes?cursor=not-a-cursor",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 400,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "cursor_invalid",
+            "message": "$string",
+            "retryable": false,
+            "target": "$.query.cursor",
+            "details": "$any",
+            "next_action": "resync"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/changes?limit=101",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 400,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "invalid_payload",
+            "message": "$string",
+            "retryable": false,
+            "target": "$.query.limit",
+            "details": "$any",
+            "next_action": "fix_request"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

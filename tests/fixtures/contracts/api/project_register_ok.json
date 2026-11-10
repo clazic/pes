@@ -1,0 +1,81 @@
+{
+  "name": "project_register_ok",
+  "description": "기기 승인(소유자 세션)으로 project token 없이 최초 등록하면 프로젝트·기기·토큰이 한 번에 나오고, 같은 키 재생에는 토큰이 다시 나오지 않는다.",
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/project-registrations",
+        "auth": "owner",
+        "key": "fixture-reg-1",
+        "body": {
+          "slug": "fixture-registered",
+          "topic": "합성 등록 주제",
+          "owner_display_name": "합성 등록 소유자",
+          "device_label": "합성 기기"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "replayed": false,
+          "data": {
+            "project_id": "$string",
+            "owner_user_id": "$string",
+            "owner_actor_id": "$string",
+            "edition_id": "$string",
+            "policy_id": "$string",
+            "device_actor_id": "$string",
+            "token_id": "$string",
+            "token": "$string",
+            "scopes": {
+              "$array_of": "$string",
+              "min": 1
+            },
+            "expires_at": "$int",
+            "stage_ids": {
+              "plan": "$string",
+              "research": "$string",
+              "analyze": "$string",
+              "write": "$string",
+              "verify": "$string",
+              "publish": "$string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/project-registrations",
+        "auth": "owner",
+        "key": "fixture-reg-1",
+        "body": {
+          "slug": "fixture-registered",
+          "topic": "합성 등록 주제",
+          "owner_display_name": "합성 등록 소유자",
+          "device_label": "합성 기기"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "replayed": true,
+          "data": {
+            "project_id": "$string",
+            "device_actor_id": "$string",
+            "token_id": "$string",
+            "$absent": [
+              "token"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

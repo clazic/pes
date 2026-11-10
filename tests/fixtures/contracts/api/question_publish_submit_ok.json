@@ -1,0 +1,118 @@
+{
+  "name": "question_publish_submit_ok",
+  "description": "소유자가 질문 세트를 게시하고 같은 질문에 답을 제출한다. 답은 게시 당시 질문 버전에 묶인다.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "owner"
+      },
+      "save": {
+        "stage": "data.stages.0.stage_id"
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/questions",
+        "auth": "owner",
+        "body": {
+          "stage_id": "${stage}",
+          "round_id": null,
+          "purpose": "stage_start",
+          "form_key": "main",
+          "questions": [
+            {
+              "text": "합성 질문입니다",
+              "type": "single",
+              "required": true,
+              "allow_comment_as_answer": false,
+              "options": [
+                {
+                  "value": "a",
+                  "label": "합성 A",
+                  "recommended": true
+                },
+                {
+                  "value": "b",
+                  "label": "합성 B"
+                }
+              ],
+              "default_value": "b"
+            }
+          ]
+        }
+      },
+      "save": {
+        "set": "data.set_id",
+        "question": "data.members.0.question_id",
+        "question_version": "data.members.0.question_version_id"
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "replayed": false,
+          "data": {
+            "project_id": "${project}",
+            "set_id": "$string",
+            "set_version_no": 1,
+            "stage_id": "${stage}",
+            "form_key": "main",
+            "members": {
+              "$array_of": {
+                "question_id": "$string",
+                "question_version_id": "$string",
+                "position": "$int"
+              },
+              "min": 1,
+              "max": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/submissions",
+        "auth": "owner",
+        "body": {
+          "set_id": "${set}",
+          "answers": [
+            {
+              "question_id": "${question}",
+              "value": "a",
+              "other": "합성 의견"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "submission_id": "$string",
+            "set_id": "${set}",
+            "answers": {
+              "$array_of": {
+                "question_id": "${question}",
+                "question_version_id": "${question_version}",
+                "version_id": "$string"
+              },
+              "min": 1,
+              "max": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

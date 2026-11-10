@@ -1,0 +1,53 @@
+{
+  "name": "capabilities_complete",
+  "description": "capabilities는 자격 없이 열려 있고 지원 경로·미지원 경로·한도·사람 전용 경로·오류 코드를 모두 싣는다. 답 초안 경로는 없다.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/capabilities",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "format_version": "1.0",
+            "routes": {
+              "$array_of": "$string",
+              "min": 30
+            },
+            "unsupported": {
+              "$array_of": "$string",
+              "min": 1
+            },
+            "scopes": {
+              "$array_of": "$string",
+              "min": 5,
+              "max": 5
+            },
+            "human_only": {
+              "$array_of": "$string",
+              "min": 5
+            },
+            "error_codes": {
+              "$array_of": "$string",
+              "min": 10
+            },
+            "limits": {
+              "max_body_bytes": 262144,
+              "long_poll_max_ms": 25000,
+              "list_max_items": 100,
+              "max_results_per_batch": 20,
+              "agent_requests_per_minute": 60,
+              "min_poll_interval_ms": "$int",
+              "owner_requests_per_minute": "$int"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

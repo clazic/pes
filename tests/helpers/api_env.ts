@@ -347,7 +347,8 @@ function pick(root: unknown, dotted: string): unknown {
 }
 
 export function match_json(actual: unknown, expected: unknown, where: string): void {
-  if (typeof expected === "string" && expected.startsWith("$")) {
+  // A placeholder is "$name" only: a JSON path such as "$.body.mode" (an error `target`) is a literal.
+  if (typeof expected === "string" && /^\$[a-z0-9_]+$/.test(expected)) {
     switch (expected) {
       case "$any":
         assert.notEqual(actual, undefined, `${where}: missing`);
