@@ -38,6 +38,34 @@ export interface CommandRuntime {
   project: ProjectRow | null;
   actor_id: string | null;
   run_config: RunConfig;
+  /**
+   * Absolute objects folder when the caller attached a store, or null. File
+   * commands that need stored bytes fail closed when it is null.
+   */
+  objects_dir: string | null;
+}
+
+/**
+ * The one canonical objects folder per database connection. A CommandService
+ * registers the folder it was constructed with; public store wrappers compare
+ * the folder they were handed against this entry and refuse a different one.
+ * The map is keyed by the database object, so a wrapped test handle gets its
+ * own registration without affecting the real connection.
+ */
+const canonical_object_stores = new WeakMap<Db, string>();
+
+export function register_object_store(db: Db, objects_dir: string): void {
+  const existing = canonical_object_stores.get(db);
+  if (existing !== undefined && existing !== objects_dir) {
+    // Two different folders on one database would split read and write paths.
+    // The message stays fixed: no absolute path and no store folder.
+    throw new ApiError("conflict", "the object store does not match the service");
+  }
+  canonical_object_stores.set(db, objects_dir);
+}
+
+export function canonical_object_store_dir(db: Db): string | null {
+  return canonical_object_stores.get(db) ?? null;
 }
 
 export interface EventDraft {

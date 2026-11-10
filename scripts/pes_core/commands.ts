@@ -12,6 +12,7 @@
 // There is no table CRUD and no arbitrary SQL command in the registry.
 
 import { createHash } from "node:crypto";
+import { isAbsolute, resolve } from "node:path";
 
 import type { Clock } from "./clock.ts";
 import { resolve_run_config, type RunConfig } from "./config.ts";
@@ -21,11 +22,13 @@ import { new_id } from "./ids.ts";
 import { read_credential_actor } from "./actors.ts";
 import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
 import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
+import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
   is_record,
+  register_object_store,
   with_readonly_db,
   require_non_empty_string,
   require_record,
@@ -99,6 +102,12 @@ export interface CommandServiceOptions {
   new_id?: () => string;
   /** Run/lease timing; omitted -> resolve_run_config() defaults (no env read here). */
   run_config?: RunConfig;
+  /**
+   * Absolute objects folder for commands that read stored bytes (PR9). A
+   * service without one still runs every other command; file.complete_upload
+   * fails closed instead of trusting caller-supplied hashes.
+   */
+  objects_dir?: string;
 }
 
 export interface CommandOutcome {
@@ -244,6 +253,15 @@ function checked_now_ms(clock: Clock): number {
     throw new TypeError("clock.now_ms() must return a non-negative safe integer");
   }
   return value;
+}
+
+/** An injected objects folder must already be an absolute path; it is resolved once. */
+function checked_objects_dir(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || value.length === 0 || !isAbsolute(value)) {
+    throw new TypeError("the object store path must be absolute");
+  }
+  return resolve(value);
 }
 
 function result_project_id(result: unknown): string {
@@ -460,6 +478,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ["project.set_topic", SET_TOPIC_COMMAND],
   ...RUN_COMMAND_ENTRIES,
   ...CONTENT_COMMAND_ENTRIES,
+  ...FILE_COMMAND_ENTRIES,
   ...ACTOR_COMMAND_ENTRIES,
   ...POLICY_COMMAND_ENTRIES,
 ]);
@@ -563,6 +582,7 @@ export class CommandService {
   readonly #policy: PolicyChecker;
   readonly #new_id: () => string;
   readonly #run_config: RunConfig;
+  readonly #objects_dir: string | null;
 
   constructor(db: Db, options: CommandServiceOptions) {
     this.#db = db;
@@ -572,6 +592,13 @@ export class CommandService {
     // Validate and copy the injected timing once. The service never reads the
     // ambient environment; a composition point resolves env explicitly.
     this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
+    this.#objects_dir = checked_objects_dir(options.objects_dir);
+    if (this.#objects_dir !== null) register_object_store(db, this.#objects_dir);
+  }
+
+  /** The objects folder given at construction, or null when none was injected. */
+  get object_store_dir(): string | null {
+    return this.#objects_dir;
   }
 
   /**
@@ -665,6 +692,7 @@ export class CommandService {
       project,
       actor_id,
       run_config: this.#run_config,
+      objects_dir: this.#objects_dir,
     };
     const outcome = definition.run(runtime);
     write_events(runtime, project?.id ?? result_project_id(outcome.result), outcome.events);
