@@ -181,6 +181,7 @@ function parse_versions(
 ): VersionRef[] {
   const raw = payload.versions;
   if (!Array.isArray(raw)) return invalid_payload("versions must be an array");
+  if (raw.length === 0) return invalid_payload("versions must not be empty");
   const seen = new Set<string>();
   const versions: VersionRef[] = [];
   for (const entry of raw) {
@@ -292,6 +293,30 @@ function read_round(
     throw new ApiError("not_found", "round not found");
   }
   return round;
+}
+
+/**
+ * The latest event that invalidated this stage's approval: its own last
+ * stage.reopened, or the reopen of an earlier stage that marked it stale.
+ * A snapshot can approve the stage only when it was sealed after this event.
+ */
+function approval_invalidation_seq(
+  runtime: CommandRuntime,
+  project_id: string,
+  stage: StageRow,
+): number | null {
+  if (stage.stale_since_event_seq !== null) {
+    return Number(stage.stale_since_event_seq);
+  }
+  const row = runtime.db.get<{ n: bigint | null }>(
+    `SELECT max(event_seq) AS n FROM events
+      WHERE project_id = ? AND type = 'stage.reopened'
+        AND json_extract(payload, '$.stage_id') = ?`,
+    project_id,
+    stage.id,
+  );
+  if (row === undefined || row.n === null) return null;
+  return Number(row.n);
 }
 
 // ---------------------------------------------------------------------------
@@ -648,6 +673,22 @@ function run_stage_approve(runtime: CommandRuntime): CommandResult {
     round.sealed_snapshot_id !== snapshot_id
   ) {
     throw new ApiError("conflict", "the snapshot is not the sealed snapshot of the current round");
+  }
+  const invalidation = approval_invalidation_seq(runtime, project.id, stage);
+  if (invalidation !== null) {
+    const sealed = runtime.db.get<{ through_event_seq: bigint | null }>(
+      "SELECT through_event_seq FROM snapshots WHERE project_id = ? AND stage_id = ? AND id = ?",
+      project.id,
+      stage.id,
+      snapshot_id,
+    );
+    if (
+      sealed === undefined ||
+      sealed.through_event_seq === null ||
+      Number(sealed.through_event_seq) < invalidation
+    ) {
+      throw new ApiError("conflict", "the snapshot was sealed before the reopen");
+    }
   }
 
   const next = runtime.db.get<{ id: string; status: string }>(
@@ -1175,18 +1216,21 @@ function carry_tasks(
   const actor = command_actor(runtime);
   const from_stage_id = require_non_empty_string(payload, "from_stage_id");
   const to_stage_id = require_non_empty_string(payload, "to_stage_id");
-  const from = runtime.db.get<{ ordinal: bigint }>(
-    "SELECT ordinal FROM stages WHERE project_id = ? AND id = ?",
+  const from = runtime.db.get<{ ordinal: bigint; edition_id: string }>(
+    "SELECT ordinal, edition_id FROM stages WHERE project_id = ? AND id = ?",
     project.id,
     from_stage_id,
   );
-  const to = runtime.db.get<{ ordinal: bigint }>(
-    "SELECT ordinal FROM stages WHERE project_id = ? AND id = ?",
+  const to = runtime.db.get<{ ordinal: bigint; edition_id: string }>(
+    "SELECT ordinal, edition_id FROM stages WHERE project_id = ? AND id = ?",
     project.id,
     to_stage_id,
   );
   if (from === undefined || to === undefined) {
     throw new ApiError("not_found", "stage not found");
+  }
+  if (from.edition_id !== to.edition_id) {
+    throw new ApiError("conflict", "the stages are in different editions");
   }
   if (Number(to.ordinal) <= Number(from.ordinal)) {
     throw new ApiError("conflict", "the target stage is not later than the source stage");
