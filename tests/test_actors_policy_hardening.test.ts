@@ -832,6 +832,8 @@ test("H18 OFF right after prepare: authorize and mark_sent are denied, the dispa
     await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-old-prep"), prepare_payload(env, l, "rk-18b")), "conflict");
     const l2 = await claim_go_lease(env, "h18-reclaim", l.run_id);
     assert.ok(l2.fence > l.fence);
+    // with a valid new lease the blocked dispatch's request_key is still burned (conflict from the key itself, not a stale lease)
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-reuse2"), prepare_payload(env, l2, "rk-18")), "conflict");
     const fresh = await do_prepare(env, "h18-fresh", l2, "rk-18b");
     assert.notEqual(fresh, id);
     assert.equal(dispatch_state(env.db, fresh), "prepared");
@@ -919,10 +921,10 @@ test("H21 OFF only touches this project's prepared/authorized dispatches; respon
     assert.ok(rc);
     const events = events_of(env.db, rc.id);
     // Final-review F1: OFF also revokes the Go run's lease, which adds an audit event to the same transaction.
-    assert.equal(events[0]!.type, "policy.changed");
-    assert.equal(events.filter((e) => e.type === "dispatch.blocked").length, 2);
-    assert.deepEqual(events.map((e) => Number(e.tx_index)), events.map((_, i) => i));
-    assert.ok(events.every((e) => Number(e.tx_size) === events.length));
+    assert.deepEqual(events.map((e) => e.type), ["policy.changed", "run.interrupted", "dispatch.blocked", "dispatch.blocked"]);
+    assert.deepEqual(events.map((e) => Number(e.tx_index)), [0, 1, 2, 3]);
+    assert.ok(events.every((e) => Number(e.tx_size) === 4));
+    assert.equal(events[1]!.run_id, l.run_id);
     assert.equal(p2.project_id.length > 0, true);
   });
 });

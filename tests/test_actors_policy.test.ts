@@ -1163,8 +1163,8 @@ test("Go OFF blocks prepared and authorized-unsent dispatches; sent and unknown 
     assert.ok(rc);
     const types = events_of(env.db, rc.id).map((e) => e.type);
     assert.equal(types[0], "policy.changed");
-    // Final-review F1: OFF may add an audit event for the Go run's lease in this same transaction.
-    assert.deepEqual(types.slice(1).filter((t) => t === "dispatch.blocked"), ["dispatch.blocked", "dispatch.blocked"]);
+    // Final-review F1: the Go run holds an active lease, so OFF interrupts it in this same transaction.
+    assert.deepEqual(types, ["policy.changed", "run.interrupted", "dispatch.blocked", "dispatch.blocked"]);
   });
 });
 
