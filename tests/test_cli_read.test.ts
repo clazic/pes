@@ -704,7 +704,12 @@ test("doctor 기본 진단은 아무것도 고치지 않고, --fix 만 고친다
     assert.deepEqual(c.sig(json), sig);
     assert.equal(state_signature(c.env.db), signature, "기본 진단은 DB 에 쓰지 않는다");
 
-    const fixed = doctor_rows(run_py(c, ["doctor", "doc-legacy", "--fix", "--json"]), "doctor --fix");
+    // 플래그 켜짐 + 홈 안 legacy(미전환) 프로젝트: --fix 도 쓰지 않는다(legacy 는 읽기만 — r1-1 권장 6 결정, review1 R6).
+    run_py(c, ["doctor", "doc-legacy", "--fix", "--json"]);
+    assert.ok(existsSync(tmp), "플래그 켜짐: legacy 폴더의 임시 파일은 --fix 로도 그대로");
+    assert.deepEqual(c.sig(json), sig);
+    // 플래그 없음(v0.15): --fix 가 임시 파일을 지운다.
+    const fixed = doctor_rows(run_py(c, ["doctor", "doc-legacy", "--fix", "--json"], { flag: undefined }), "doctor --fix (v0.15)");
     assert.ok(fixed.some((r) => r.title.includes("임시 파일") && r.fixed === true), "--fix 가 고친 항목을 알린다");
     assert.ok(!existsSync(tmp), "--fix 는 임시 파일을 지운다");
     assert.deepEqual(c.sig(json), sig, "--fix 도 project.json 은 건드리지 않는다");
