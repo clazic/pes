@@ -214,3 +214,8 @@ export function shell_words(line: string): string[] {
 export function parent_of(path: string): string {
   return dirname(path);
 }
+
+/** Minimal legacy project.json with the DB project's topic (for side-by-side runs). */
+export function plain_json_legacy(slug: string): Record<string, unknown> {
+  return { pes: 1, topic: RICH_TOPIC, slug, current: "plan", processed: [], notes: [], stages: {} };
+}
