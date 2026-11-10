@@ -55,6 +55,7 @@ function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartne
   const textRef = React.useRef<HTMLTextAreaElement>(null);
   const bulkOpenRef = React.useRef<HTMLSpanElement>(null);
   const proposalHeadingRef = React.useRef<HTMLHeadingElement>(null);
+  const watchOpenerRef = React.useRef(false);
   const ask = useCommand("question.create", { successText: (r) => `AI에게 부탁 접수됨 · 접수 번호 ${r.receipt_no} — ${ws.mode === "B" ? "내 컴퓨터 AI가 받아야 처리됩니다" : "실행이 이어질 때 처리됩니다"}` });
   const decide = useCommand("decision.record");
 
@@ -82,6 +83,7 @@ function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartne
   const props = ws.proposals;
   const pending = props.filter((p) => p.state.value === "proposed").length;
   const pendingAssumptions = props.filter((p) => p.kind === "assumption" && p.state.value === "proposed");
+  const bulkAvailable = pendingAssumptions.length >= 2;
   const t = ws.third_card;
 
   const openBulk = () => {
@@ -91,9 +93,27 @@ function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartne
   // 닫힌 뒤 초점: 열기 단추가 남아 있으면 그 단추, 전부 받아들여 단추가 사라졌으면 제안 제목(최종 리뷰 F3)
   const restoreProposalFocus = () => {
     const opener = bulkOpenRef.current?.querySelector("button");
-    if (opener) opener.focus();
-    else proposalHeadingRef.current?.focus();
+    if (opener) {
+      watchOpenerRef.current = true;
+      opener.focus();
+    } else {
+      watchOpenerRef.current = false;
+      proposalHeadingRef.current?.focus();
+    }
   };
+  // 늦게 온 목록 갱신으로 열기 단추가 사라지면 제목으로 초점을 잇는다.
+  // 사용자가 그사이 다른 곳으로 초점을 옮겼으면(연결된 다른 요소) 빼앗지 않는다.
+  React.useEffect(() => {
+    if (!watchOpenerRef.current) return;
+    const active = document.activeElement;
+    if (bulkAvailable) {
+      const opener = bulkOpenRef.current?.querySelector("button");
+      if (active && active !== document.body && active !== opener && active.isConnected) watchOpenerRef.current = false;
+      return;
+    }
+    watchOpenerRef.current = false;
+    if (!active || active === document.body || !active.isConnected) proposalHeadingRef.current?.focus();
+  }, [bulkAvailable]);
 
   return (
     <section aria-labelledby={`${idPrefix}-title`} className={cn("rounded-xl border bg-card text-card-foreground shadow-xs", className)}>
@@ -217,7 +237,7 @@ function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartne
             <InfoTip label="가정·결정 제안 설명">
               <p>AI가 일하며 세운 가정과 결정 제안입니다. 받아들이거나 버리면 판단자·근거가 기록됩니다. 판단하지 않아도 일을 막지 않으며 나의 할 일 수에 넣지 않습니다{pending ? ` — 판단 전 ${pending}개` : ""}.</p>
             </InfoTip>
-            {pendingAssumptions.length >= 2 ? (
+            {bulkAvailable ? (
               <span ref={bulkOpenRef} className="ml-auto flex flex-wrap items-center gap-1">
                 <ActionButton
                   size="xs"
