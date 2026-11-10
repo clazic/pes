@@ -95,6 +95,31 @@ describe("F1 — 1280 미만(지금 동작 회귀)", () => {
     await renderRoutes(await workspaceRoutes(), REVIEW);
     await clickAsk();
     const dialog = await screen.findByRole("dialog", { name: "AI 동료" });
-    await waitFor(() => expect(within(dialog).getByRole("textbox", { name: /부탁할 말/ })).toHaveFocus(), { timeout: 2000 });
+    const textarea = within(dialog).getByRole("textbox", { name: /부탁할 말/ });
+    await waitFor(() => expect(document.activeElement).toBe(textarea), { timeout: 2000 });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.tagName).toBe("TEXTAREA");
+  });
+});
+
+describe("F1 — 폭 경계 1279 / 1280", () => {
+  it("1279 — 칸 없이 판이 열린다", async () => {
+    setViewport(1279);
+    await renderRoutes(await workspaceRoutes(), REVIEW);
+    await clickAsk();
+    await screen.findByRole("dialog", { name: "AI 동료" });
+    expect(screen.queryByRole("region", { name: "AI 동료 요약" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "AI 동료 칸" })).not.toBeInTheDocument();
+    expect(researchUi.get().aiOnRound).toBe(false);
+  });
+
+  it("1280 — 접힌 칸(요약 줄)이 있고 부탁하면 판이 아니라 칸이 펼쳐진다", async () => {
+    setViewport(1280);
+    await renderRoutes(await workspaceRoutes(), REVIEW);
+    await screen.findByRole("region", { name: "AI 동료 요약" }, { timeout: 4000 });
+    await clickAsk();
+    await screen.findByRole("complementary", { name: "AI 동료 칸" });
+    expect(screen.queryByRole("dialog", { name: "AI 동료" })).not.toBeInTheDocument();
+    expect(researchUi.get().aiOnRound).toBe(true);
   });
 });

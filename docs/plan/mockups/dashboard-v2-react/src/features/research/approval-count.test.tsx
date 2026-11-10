@@ -65,10 +65,17 @@ describe("F2 — 승인을 막는 것 n건", () => {
 
     await renderRoutes(await workspaceRoutes(), `${round}?t=approve`);
     await screen.findByRole("heading", { level: 1 }, { timeout: 4000 });
+    await screen.findAllByRole("heading", { name: /단계 승인/, level: 2 }, { timeout: 4000 });
+    const head = document.querySelector("section[aria-labelledby='now-title']") as HTMLElement;
+    const card = document.querySelector("[aria-labelledby='ap-t']") as HTMLElement;
+    expect(head).not.toBeNull();
+    expect(card).not.toBeNull();
     if (n) {
-      expect(await screen.findAllByText(label)).not.toHaveLength(0);
+      expect(within(head).getByText(label)).toBeInTheDocument();
+      expect(within(card).getByText(label, { selector: "p" })).toBeInTheDocument();
     } else {
-      expect(screen.queryByText(/승인을 막는 것/)).not.toBeInTheDocument();
+      expect(within(head).queryByText(/승인을 막는 것/)).not.toBeInTheDocument();
+      expect(within(card).queryByText(/승인을 막는 것/)).not.toBeInTheDocument();
     }
   });
 
