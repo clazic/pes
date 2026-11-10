@@ -1690,6 +1690,8 @@ def port_owner_text(owners):
     return "PES 가 아닌 프로그램이 쓰는 중 — 소유 프로세스 " + ", ".join(f"pid {pid}" + (f" ({name})" if name else "") for pid, name in owners)
 
 
+# SQLite 3.53 소스 기준: os_unix.c UNIX_SHM_DMS 와 os_win.c WIN_SHM_DMS 는 같은 값 ((22+8)*4+8 = 128),
+# RESERVED_BYTE = PENDING_BYTE(0x40000000)+1 도 두 플랫폼이 같다
 SQLITE_SHM_DMS = 128  # -shm 의 DMS 잠금 바이트: 연결이 열려 있는 동안 그 연결이 공유 잠금을 쥔다
 SQLITE_RESERVED_BYTE = 0x40000001  # DB 파일의 RESERVED 잠금 바이트: 쓰기 트랜잭션 중인 연결이 쥔다
 
