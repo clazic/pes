@@ -61,6 +61,52 @@ def _route_pattern(template):
     return method, re.compile("[^/]+".join(re.escape(part) for part in parts))
 
 
+# 시험 전용 조이기 변수: 환경 변수에 JSON 객체를 주면 Node 가 내준 한도를 더 작게만 덮어쓴다(풀 수는 없다).
+# 변수가 없으면 아무것도 바뀌지 않는다. 잘못된 값은 조용히 무시하지 않고 서버를 띄우지 않는다.
+BUDGET_OVERRIDE_ENV = "PES_API_BUDGET_TEST_OVERRIDE"
+_BUDGET_OVERRIDE_KEYS = (
+    "window_ms",
+    "agent_requests_per_minute",
+    "agent_control_requests_per_minute",
+    "owner_requests_per_minute",
+    "coarse_requests_per_minute",
+    "min_poll_interval_ms",
+)
+
+
+def _parse_budget_override(raw):
+    """Returns None (변수 없음) or a validated {key: positive int}. Raises ValueError with a clear message."""
+    if raw is None:
+        return None
+    name = BUDGET_OVERRIDE_ENV
+    try:
+        value = json.loads(raw)
+    except ValueError as err:
+        raise ValueError(f"{name}: JSON 이 아닙니다 ({err})")
+    if not isinstance(value, dict):
+        raise ValueError(f"{name}: JSON 객체여야 합니다")
+    unknown = sorted(k for k in value if k not in _BUDGET_OVERRIDE_KEYS)
+    if unknown:
+        raise ValueError(f"{name}: 모르는 키 {', '.join(unknown)} (받는 키: {', '.join(_BUDGET_OVERRIDE_KEYS)})")
+    for key, number in value.items():
+        if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
+            raise ValueError(f"{name}: {key} 는 양의 정수여야 합니다 (받은 값: {number!r})")
+    return value
+
+
+def _apply_budget_override(policy, override):
+    """Node 정책에 조이기 덮어쓰기를 적용한 새 정책. 기본값보다 큰 값은 ValueError (더 조이기만 가능)."""
+    if not override:
+        return policy
+    merged = dict(policy)
+    for key, number in override.items():
+        default = int(policy[key])
+        if number > default:
+            raise ValueError(f"{BUDGET_OVERRIDE_ENV}: {key}={number} 는 기본값 {default} 보다 큽니다 (더 조이기만 할 수 있습니다)")
+        merged[key] = number
+    return merged
+
+
 def _digest(value):
     # 자격 원문은 저장하지 않고 sha256 만 키로 쓴다.
     return hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()
@@ -245,6 +291,8 @@ class LocalHTTPServer(ThreadingHTTPServer):
         self.api_db_ready = False
         self.api_db_lock = threading.Lock()
         self.api_budget = None
+        # 시험 전용 조이기 변수(main 이 시작 때 검증한 값). 없으면 None.
+        self.api_budget_override = None
 
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
@@ -393,7 +441,8 @@ def main():
                     )
                     if limits.returncode != 0:
                         return failed
-                    srv.api_budget = ApiBudget(json.loads(limits.stdout.decode("utf-8")))
+                    policy = json.loads(limits.stdout.decode("utf-8"))
+                    srv.api_budget = ApiBudget(_apply_budget_override(policy, srv.api_budget_override))
                 except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
                     return failed
                 srv.api_db_ready = True
@@ -612,7 +661,28 @@ def main():
                 return self._api("PATCH", path, urlsplit(self.path).query)
             return self.send_error(501, "Unsupported method ('PATCH')")
 
+    try:
+        override = _parse_budget_override(os.environ.get(BUDGET_OVERRIDE_ENV))
+        if override:
+            # 기본값과 견주려면 Node 정책이 필요하다. 변수가 있을 때만 시작 때 한 번 받아 잘못된 값이면 뜨지 않는다.
+            node = shutil.which("node")
+            if node is None:
+                raise ValueError(f"{BUDGET_OVERRIDE_ENV}: node 를 찾을 수 없어 기본값과 견줄 수 없습니다")
+            try:
+                limits = subprocess.run(
+                    [node, str(NODE_BRIDGE), "--limits"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60
+                )
+                if limits.returncode != 0:
+                    raise ValueError("--limits 가 실패했습니다")
+                _apply_budget_override(json.loads(limits.stdout.decode("utf-8")), override)
+            except (OSError, subprocess.SubprocessError, KeyError, TypeError) as err:
+                raise ValueError(f"{BUDGET_OVERRIDE_ENV}: 기본 한도를 읽지 못했습니다 ({err})")
+    except ValueError as err:
+        print(f"serve.py: {err}", file=sys.stderr, flush=True)
+        sys.exit(2)
+
     srv = LocalHTTPServer(("127.0.0.1", port), H)
+    srv.api_budget_override = override
     print(f"serving {root} at http://127.0.0.1:{port}/", flush=True)
     srv.serve_forever()
 
