@@ -55,6 +55,12 @@ export interface CommandRuntime {
 const canonical_object_stores = new WeakMap<Db, string>();
 
 export function register_object_store(db: Db, objects_dir: string): void {
+  const existing = canonical_object_stores.get(db);
+  if (existing !== undefined && existing !== objects_dir) {
+    // Two different folders on one database would split read and write paths.
+    // The message stays fixed: no absolute path and no store folder.
+    throw new ApiError("conflict", "the object store does not match the service");
+  }
   canonical_object_stores.set(db, objects_dir);
 }
 

@@ -431,6 +431,14 @@ export function delete_storage_file(
   }
 }
 
+/** True when any blobs row still names this storage_key (same synchronous check before unlink). */
+function storage_key_is_claimed(db: Db, storage_key: string): boolean {
+  return (
+    db.get<{ ok: bigint }>("SELECT 1 AS ok FROM blobs WHERE storage_key = ?", storage_key) !==
+    undefined
+  );
+}
+
 function context_project(ctx: MutationContext): string {
   if (ctx.project_id === null) not_found("project not found");
   return require_safe_id(ctx.project_id, "project_id");
@@ -532,9 +540,13 @@ export async function gc_orphans(
   };
   for (const blob_id of result.deleted_blob_ids) {
     const storage_key = blob_keys.get(blob_id);
-    if (storage_key !== undefined) {
-      delete_storage_file(objects_dir, project_id, storage_key);
-    }
+    if (storage_key === undefined) continue;
+    // The gc transaction is already committed. Another connection may have
+    // created a new ready blob with the same (project, sha256) storage_key in
+    // the meantime. Re-check the DB in the same synchronous segment as the
+    // unlink and keep the file when a row now claims it.
+    if (storage_key_is_claimed(store.db, storage_key)) continue;
+    delete_storage_file(objects_dir, project_id, storage_key);
   }
 
   const receipt =
@@ -559,7 +571,11 @@ export async function gc_orphans(
   }
   for (const file of scan_project_files(objects_dir, project_id)) {
     if (claimed.has(file.key)) continue;
-    if (now_ms - file.mtime_ms > grace_ms) delete_project_file(objects_dir, project_id, file);
+    if (now_ms - file.mtime_ms <= grace_ms) continue;
+    // Re-check every file right before the unlink: a row created after the
+    // claimed-set read above makes this file live, not an orphan.
+    if (storage_key_is_claimed(store.db, file.key)) continue;
+    delete_project_file(objects_dir, project_id, file);
   }
   return outcome;
 }
@@ -630,7 +646,12 @@ export async function store_blob(
     id,
   );
   if (row === undefined) not_found("blob not found");
-  if (row.state !== "staging") {
+  if (row.state !== "staging" && row.state !== "ready") {
+    throw new ApiError("conflict", "only a staging blob takes bytes");
+  }
+  if (row.state === "ready" && storage_file_is_regular(objects_dir, project, row.storage_key)) {
+    // A ready blob with its file present is immutable; only a missing file may
+    // be recovered by writing the reserved bytes again.
     throw new ApiError("conflict", "only a staging blob takes bytes");
   }
   if (bytes.byteLength !== Number(row.size)) {

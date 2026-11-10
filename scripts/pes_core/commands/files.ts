@@ -50,6 +50,32 @@ const GC_FIELDS = ["grace_ms"] as const;
 
 const RESERVED_EVENT = "file.upload_reserved";
 
+/**
+ * Every table in 001_initial.sql whose foreign key points at blobs. A blob
+ * referenced by any of these is "linked": gc must not delete it and quarantine
+ * must refuse it. Checking all of them also keeps gc from failing on a
+ * RESTRICT foreign key after a row the command did not know about appears.
+ */
+const BLOB_REFERENCES: ReadonlyArray<readonly [table: string, column: string]> = [
+  ["version_files", "blob_id"],
+  ["file_policies", "blob_id"],
+  ["snapshots", "manifest_blob_id"],
+  ["artifact_versions", "body_blob_id"],
+  ["source_versions", "evidence_blob_id"],
+  ["file_extractions", "blob_id"],
+  ["file_extractions", "text_blob_id"],
+  ["sync_items", "blob_id"],
+  ["submissions", "raw_blob_id"],
+  ["outbound_dispatches", "manifest_blob_id"],
+  ["outbound_dispatches", "response_blob_id"],
+  ["import_batches", "source_manifest_blob_id"],
+  ["import_batches", "report_blob_id"],
+];
+
+const BLOB_LINKED_SQL = `SELECT (${BLOB_REFERENCES.map(
+  ([table, column]) => `EXISTS (SELECT 1 FROM ${table} WHERE project_id = ? AND ${column} = ?)`,
+).join(" OR ")}) AS linked`;
+
 interface FileScope {
   project_id: string;
   actor_id: string;
@@ -136,6 +162,16 @@ function read_blob(
     project_id,
     blob_id,
   );
+}
+
+/** True when any table that references blobs points at this blob. */
+function blob_is_linked(runtime: CommandRuntime, project_id: string, blob_id: string): boolean {
+  const params: string[] = [];
+  for (let index = 0; index < BLOB_REFERENCES.length; index += 1) {
+    params.push(project_id, blob_id);
+  }
+  const row = runtime.db.get<{ linked: bigint }>(BLOB_LINKED_SQL, ...params);
+  return Number(row?.linked ?? 0n) !== 0;
 }
 
 function find_version(runtime: CommandRuntime, project_id: string, version_id: string): void {
@@ -438,18 +474,11 @@ function run_quarantine(runtime: CommandRuntime): CommandResult {
   if (blob.state === "quarantined") {
     throw new ApiError("conflict", "the blob is already quarantined");
   }
-  if (blob.state === "ready") {
-    const linked = runtime.db.get<{ ok: bigint }>(
-      "SELECT 1 AS ok FROM version_files WHERE project_id = ? AND blob_id = ?",
-      scope.project_id,
-      blob_id,
-    );
-    if (linked !== undefined) {
-      throw new ApiError("conflict", "a linked ready blob is never quarantined");
-    }
-  }
   if (blob.state !== "staging" && blob.state !== "ready") {
     throw new ApiError("conflict", "the blob cannot be quarantined in its current state");
+  }
+  if (blob_is_linked(runtime, scope.project_id, blob_id)) {
+    throw new ApiError("conflict", "a linked blob is never quarantined");
   }
 
   const result = { project_id: scope.project_id, blob_id, state: "quarantined" };
@@ -489,8 +518,11 @@ function reservation_time(
   project_id: string,
   blob_id: string,
 ): number | null {
+  // The last reservation is the beginning of the current upload attempt. A
+  // client that re-reserved after the grace period gets the same staging row;
+  // measuring from the first reservation would collect the file it is writing.
   const row = runtime.db.get<{ created_at: bigint | null }>(
-    `SELECT MIN(created_at) AS created_at FROM events
+    `SELECT MAX(created_at) AS created_at FROM events
       WHERE project_id = ? AND type = ? AND json_extract(payload, '$.blob_id') = ?`,
     project_id,
     RESERVED_EVENT,
@@ -527,18 +559,7 @@ function run_gc_orphans(runtime: CommandRuntime): CommandResult {
     project_id,
   );
   for (const candidate of candidates) {
-    const linked = runtime.db.get<{ ok: bigint }>(
-      "SELECT 1 AS ok FROM version_files WHERE project_id = ? AND blob_id = ?",
-      project_id,
-      candidate.id,
-    );
-    if (linked !== undefined) continue;
-    const policy = runtime.db.get<{ ok: bigint }>(
-      "SELECT 1 AS ok FROM file_policies WHERE project_id = ? AND blob_id = ?",
-      project_id,
-      candidate.id,
-    );
-    if (policy !== undefined) continue;
+    if (blob_is_linked(runtime, project_id, candidate.id)) continue;
     const created_at = reservation_time(runtime, project_id, candidate.id);
     if (created_at === null) continue;
     if (runtime.now_ms - created_at <= grace_ms) continue;
