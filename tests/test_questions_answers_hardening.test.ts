@@ -713,8 +713,14 @@ test("hardening: resume_ready ignores optional, closed questions and replaced se
     assert.equal(m.length, 1);
     assert.equal(m[0]!.question_id, a);
 
-    // answering through the older set (still valid: a did not change) satisfies the question everywhere
-    await submit(env, v1.set_id, [{ question_id: a, value: "a" }], "sub-old");
+    // the replaced main set v1 no longer takes answers (conflict, nothing written) and leaves the question open
+    const before_old = state_signature(env.db);
+    await rejects_api(submit_answers(env.service, env.ctx("sub-old"), { set_id: v1.set_id, answers: [{ question_id: a, value: "a" }] }), "conflict");
+    assert.equal(state_signature(env.db), before_old);
+    assert.deepEqual(missing_ids(env, where.round_id), [a]);
+
+    // answering through the latest main set v2 satisfies the question everywhere
+    await submit(env, v2.set_id, [{ question_id: a, value: "a" }], "sub-new");
     assert.deepEqual(missing(env, where.round_id), []);
     assert.equal(resume_ready(env.db, env.p.project_id, where.round_id).ready, true);
 
@@ -881,9 +887,13 @@ test("hardening: value types are strict per question type", async () => {
       await rejects_api(submit_answers(env.service, env.ctx(`nf-${i}`), { set_id: set.set_id, answers: [{ question_id: num, value }] }), "invalid_payload");
     }
     assert.equal(state_signature(env.db), before);
+    // required multi [] and required text "" are invalid_payload, even bundled with otherwise fine values; nothing is written
+    await rejects_api(submit_answers(env.service, env.ctx("req-multi"), { set_id: set.set_id, answers: [{ question_id: multi, value: [] }, { question_id: num, value: 0 }] }), "invalid_payload");
+    await rejects_api(submit_answers(env.service, env.ctx("req-text"), { set_id: set.set_id, answers: [{ question_id: txt, value: "" }, { question_id: num, value: 0 }] }), "invalid_payload");
+    assert.equal(state_signature(env.db), before);
     // edge values that ARE fine
-    await submit(env, set.set_id, [{ question_id: multi, value: [] }, { question_id: num, value: 0 }, { question_id: scale, value: -1.5 }, { question_id: txt, value: "" }], "ok");
+    await submit(env, set.set_id, [{ question_id: multi, value: ["a"] }, { question_id: num, value: 0 }, { question_id: scale, value: -1.5 }, { question_id: txt, value: "x" }], "ok");
     assert.equal(answer_versions_of(env.db, num)[0]!.value, "0");
-    assert.equal(answer_versions_of(env.db, txt)[0]!.value, '""');
+    assert.equal(answer_versions_of(env.db, txt)[0]!.value, '"x"');
   });
 });
