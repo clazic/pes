@@ -28,7 +28,9 @@ import { expect_rejected, json_out, make_cli_env, PES_PY, REPO, SLUG, with_cli, 
 import { make_content, seal, start } from "./helpers/editions_env.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
 
-const PY = spawnSync("which", ["python3"], { encoding: "utf8" }).stdout.trim() || "python3";
+// `which python3`는 Windows Git Bash에서 /c/... 경로를 주어 Node spawnSync가 ENOENT를 낸다.
+// python3가 스스로 밝히는 실행 파일 경로(sys.executable)는 그 OS의 원래 경로라 PATH를 비운 시험에서도 쓸 수 있다.
+const PY = spawnSync("python3", ["-I", "-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).stdout.trim() || "python3";
 const OFF = { PES_DB_CORE: undefined } as const;
 
 // ---------------------------------------------------------------------------

@@ -113,6 +113,8 @@ export async function make_cli_env(): Promise<CliEnv> {
     run(args, extra = {}) {
       const child_env: Record<string, string | undefined> = {
         ...env.home.env,
+        // `python3 -I`(아래)는 PYTHON* 환경 변수를 모두 무시하므로 이 값은 -I 실행에서는 효과가 없다.
+        // 한글 출력은 pes.py가 시작할 때 stdout·stderr를 스스로 UTF-8로 바꿔 지킨다 (cp1252 회귀 시험 참고).
         PYTHONIOENCODING: "utf-8",
         PES_OWNER: undefined,
         PES_TOKEN: undefined,
