@@ -108,7 +108,8 @@ describe("F3 — 사용량 맨 위 줄 7경우", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
     expect(document.body.textContent?.trim().length).toBeGreaterThan(50);
     // role=status 전체에도 돈 이야기 줄이 없다
-    expect(moneyLines()).toHaveLength(0);
+    // role=status 는 빈 안내 자리 하나뿐(글 없음)
+    expect(screen.queryAllByRole("status").filter((el) => (el.textContent ?? "").trim() !== "")).toHaveLength(0);
     expect(screen.queryAllByRole("status").filter((el) => /원|요금|상한|꺼짐/.test(el.textContent ?? ""))).toHaveLength(0);
     expect(screen.queryByText(/꺼짐 확인이 유효/)).not.toBeInTheDocument();
     expect(screen.queryByText(/비용 상한이 없습니다/)).not.toBeInTheDocument();
