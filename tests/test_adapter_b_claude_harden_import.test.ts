@@ -477,25 +477,24 @@ test("pasted results that are not the JSON the bundle asked for are bundle_inval
   });
 });
 
-test("one import may carry 20 versions of one object: consecutive numbers, one run, all or nothing", async () => {
+test("one import may not carry the same object twice: invalid_payload, nothing written (leader decision — no branching versions)", async () => {
   await with_cleanup(async (env) => {
     const a = adapter(env);
     const { text } = await export_for(env, a);
-    const items = Array.from({ length: 20 }, (_v, i) => ({ op: "append_version", object_id: env.object_id, title: `연쇄 ${i + 1}` }));
-    const out = await a.import_result({ bundle_text: text, result_text: JSON.stringify({ results: items }) });
-    assert.equal(out.results.length, 20);
-    const rows = env.db.all<{ id: string; version_no: bigint; based_on_version_id: string | null }>(
-      "SELECT id, version_no, based_on_version_id FROM object_versions WHERE object_id = ? ORDER BY version_no",
-      env.object_id,
-    );
-    assert.deepEqual(rows.map((r) => Number(r.version_no)), Array.from({ length: 21 }, (_v, i) => i + 1));
-    const seen = new Set<string>();
-    for (const row of rows) {
-      if (row.based_on_version_id !== null) assert.ok(seen.has(row.based_on_version_id), `version ${row.version_no} is based on an earlier version of the same object`);
-      seen.add(row.id);
+    const sig = state_signature(env.db);
+    for (const n of [2, 20]) {
+      const items = Array.from({ length: n }, (_v, i) => ({ op: "append_version", object_id: env.object_id, title: `중복 ${i + 1}` }));
+      await assert.rejects(
+        a.import_result({ bundle_text: text, result_text: JSON.stringify({ results: items }) }),
+        (error: any) => error.code === "invalid_payload",
+        `${n} versions of one object in one import are refused`,
+      );
+      assert.equal(state_signature(env.db), sig, "a refused import writes nothing (no run, no version, no receipt)");
     }
-    assert.equal(events_of_type(env, "result.submitted").length, 20);
-    assert.equal(events_of_type(env, "run.created").length, 1, "one run for the whole import");
+    // one version of the object is still accepted, and makes one run
+    const ok = await a.import_result({ bundle_text: text, result_text: JSON.stringify({ results: [{ op: "append_version", object_id: env.object_id, title: "한 번" }] }) });
+    assert.equal(ok.results.length, 1);
+    assert.equal(events_of_type(env, "run.created").length, 1, "one run for the import");
   });
 });
 
