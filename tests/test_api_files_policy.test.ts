@@ -251,7 +251,9 @@ test("file routes: no credential is 401, wrong scope is 403, and nothing is writ
     assert_error(await reserve(env, reader.token, bytes), 403, "forbidden");
     assert_error(await read(env, writer.token, ready), 403, "forbidden");
     assert.equal(state_signature(env.db), before);
-    assert_ok(await read(env, reader.token, ready));
+    const got = await read(env, reader.token, ready);
+    assert.equal(got.status, 200);
+    assert.deepEqual(Buffer.from(got.bytes ?? new Uint8Array()), Buffer.from(bytes_of("scopes-ready")));
     assert_ok(await reserve(env, writer.token, bytes), 201);
   });
 });

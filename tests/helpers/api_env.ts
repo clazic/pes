@@ -439,7 +439,7 @@ export async function run_api_fixture(env: ApiEnv, fixture: ApiFixture): Promise
     });
     const where = `${fixture.name} step ${i + 1} ${req.method} ${req.path}`;
     assert.equal(res.status, step.expect.status, `${where}: status (${JSON.stringify(res.json)})`);
-    if (step.expect.json !== undefined) match_json(res.json, step.expect.json, where);
+    if (step.expect.json !== undefined) match_json(res.json, interpolate(step.expect.json, vars), where);
     for (const name of step.expect.headers_absent ?? []) {
       assert.equal(res.headers[name.toLowerCase()], undefined, `${where}: header ${name} must be absent`);
     }
