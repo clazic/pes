@@ -100,7 +100,6 @@ function file_command(name: string): CommandDefinition {
   return definition;
 }
 
-
 function run_import_project(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   reject_unknown_fields(payload, PAYLOAD_FIELDS);
@@ -115,7 +114,7 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
     throw new ApiError("forbidden", "a human owner is required");
   }
 
-  const prepared: PreparedImport | undefined = take_prepared_import(fingerprint);
+  const prepared: PreparedImport | undefined = take_prepared_import(owner_actor_id, fingerprint);
   if (prepared === undefined || prepared.plan.fingerprint !== fingerprint) {
     throw new ApiError("invalid_payload", "the legacy import plan is not prepared");
   }
@@ -127,11 +126,21 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
   // A second request with the same source fingerprint returns the first batch.
   // The wrapper normally reaches this through the service's receipt replay (no
   // writes at all); this branch also covers another request key.
-  const existing = runtime.db.get<{ id: string; project_id: string; state: string }>(
-    "SELECT id, project_id, state FROM import_batches WHERE source_fingerprint = ?",
+  const existing = runtime.db.get<{
+    id: string;
+    project_id: string;
+    state: string;
+    owner_user_id: string;
+  }>(
+    `SELECT b.id AS id, b.project_id AS project_id, b.state AS state, p.owner_user_id AS owner_user_id
+       FROM import_batches b JOIN projects p ON p.id = b.project_id
+      WHERE b.source_fingerprint = ?`,
     fingerprint,
   );
   if (existing !== undefined) {
+    if (existing.owner_user_id !== owner.user_id) {
+      throw new ApiError("conflict", "the source is already imported by another owner");
+    }
     const state = existing.state === "failed" ? "failed" : "staging";
     const result = {
       batch_id: existing.id,
@@ -661,7 +670,7 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
         `INSERT INTO question_versions
            (project_id, version_id, object_id, object_kind, text, type, state, importance,
             required, allow_comment_as_answer, default_value, options, show_if, help)
-         VALUES (?, ?, ?, 'question', ?, ?, ?, 'normal', ?, 1, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, 'question', ?, ?, ?, 'normal', ?, ?, ?, ?, ?, ?)`,
         project_id,
         version_id,
         object_id,
@@ -669,6 +678,7 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
         question.type,
         question.state,
         question.required ? 1 : 0,
+        question.allow_comment_as_answer ? 1 : 0,
         JSON.stringify(question.default_value),
         JSON.stringify(question.options),
         JSON.stringify(question.show_if),
@@ -852,6 +862,22 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
   for (const row of plan.objects) {
     if (row.kind !== "answer" && row.kind !== "message") continue;
     insert_object(row);
+  }
+
+  for (const relation of plan.relations) {
+    const from_version_id = version_ids.get(relation.from_version_key);
+    const to_version_id = version_ids.get(relation.to_version_key);
+    if (from_version_id === undefined || to_version_id === undefined) {
+      throw new Error("an imported relation target is missing");
+    }
+    runtime.db.run(
+      `INSERT INTO version_relations (project_id, from_version_id, to_version_id, kind)
+       VALUES (?, ?, ?, ?)`,
+      project_id,
+      from_version_id,
+      to_version_id,
+      relation.kind,
+    );
   }
 
   // Citations and attached files.

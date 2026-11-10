@@ -769,15 +769,40 @@ export class CommandService {
     actor_id: string | null,
     hash: string,
   ): { result: unknown } | undefined {
-    if (definition.scope === "bootstrap" || definition.scope === "owner") {
-      // These commands have no project scope yet; their receipt is found by
-      // request key and action across the database.
+    if (definition.scope === "bootstrap") {
+      // Bootstrap has no project scope yet; its receipt is found by request key
+      // and action across the database.
       const rows = this.#db.all<{ request_hash: string; result_json: string }>(
         `SELECT request_hash, result_json FROM mutation_commits
          WHERE client_request_id = ? AND action = ?
          ORDER BY created_at, id`,
         ctx.client_request_id,
         definition.action,
+      );
+      if (rows.length === 0) return undefined;
+      const match = rows.find((row) => row.request_hash === hash);
+      if (match === undefined) {
+        throw new ApiError(
+          "idempotency_key_reuse",
+          "client_request_id was already used for a different request",
+        );
+      }
+      return { result: JSON.parse(match.result_json) };
+    }
+
+    if (definition.scope === "owner") {
+      // Owner-scoped commands have no project yet; the same request key from
+      // another actor must never replay this actor's result.
+      if (actor_id === null) {
+        throw new Error("an owner command must resolve its actor first");
+      }
+      const rows = this.#db.all<{ request_hash: string; result_json: string }>(
+        `SELECT request_hash, result_json FROM mutation_commits
+         WHERE client_request_id = ? AND action = ? AND actor_id = ?
+         ORDER BY created_at, id`,
+        ctx.client_request_id,
+        definition.action,
+        actor_id,
       );
       if (rows.length === 0) return undefined;
       const match = rows.find((row) => row.request_hash === hash);

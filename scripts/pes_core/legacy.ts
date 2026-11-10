@@ -233,8 +233,6 @@ const IMPORTER_VERSION = "pes-legacy-import/1";
 
 export interface PlanBlob {
   path: string;
-  sha256: string;
-  size: number;
   media_type: string;
   state: "ready" | "quarantined";
 }
@@ -280,6 +278,7 @@ export interface PlanQuestionData {
   text: string;
   type: string;
   required: boolean;
+  allow_comment_as_answer: boolean;
   options: unknown[];
   default_value: unknown;
   show_if: unknown;
@@ -348,6 +347,12 @@ export interface PlanCitation {
   locator: Record<string, unknown>;
 }
 
+export interface PlanRelation {
+  from_version_key: string;
+  to_version_key: string;
+  kind: "derived_from" | "supports" | "supersedes" | "reuses" | "related";
+}
+
 export interface PlanVersionFile {
   version_key: string;
   blob_path: string;
@@ -412,7 +417,6 @@ export interface PlanEvent {
 
 export interface ImportPlan {
   fingerprint: string;
-  project_json_ok: boolean;
   failed: boolean;
   source_schema: string;
   importer_version: string;
@@ -432,6 +436,7 @@ export interface ImportPlan {
   blobs: PlanBlob[];
   objects: PlanObjectRow[];
   citations: PlanCitation[];
+  relations: PlanRelation[];
   version_files: PlanVersionFile[];
   question_sets: PlanQuestionSet[];
   submissions: PlanSubmission[];
@@ -463,12 +468,15 @@ export interface PreparedImport {
 // receipt replay compares the same request hash and writes nothing.
 const prepared_imports = new Map<string, PreparedImport>();
 
-export function take_prepared_import(fingerprint: string): PreparedImport | undefined {
-  return prepared_imports.get(fingerprint);
+export function take_prepared_import(
+  owner_actor_id: string,
+  fingerprint: string,
+): PreparedImport | undefined {
+  return prepared_imports.get(prepared_key(owner_actor_id, fingerprint));
 }
 
-export function drop_prepared_import(fingerprint: string): void {
-  prepared_imports.delete(fingerprint);
+export function drop_prepared_import(owner_actor_id: string, fingerprint: string): void {
+  prepared_imports.delete(prepared_key(owner_actor_id, fingerprint));
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +534,37 @@ function digest(value: unknown): string {
 
 function hash_manifest(files: ScannedFile[]): string {
   return createHash("sha256").update(JSON.stringify(files), "utf8").digest("hex");
+}
+
+const MAX_JSON_DEPTH = 200;
+
+/**
+ * JSON.parse accepts very deep arrays, but later JSON.stringify/json_valid or
+ * recursive normalisation can exhaust the stack. A depth guard turns that into
+ * a normal parse_error instead of a RangeError or an SQLite CHECK failure.
+ */
+function json_depth_exceeds(text: string, max: number): boolean {
+  let depth = 0;
+  let in_string = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const ch = text[index];
+    if (in_string) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') in_string = false;
+      continue;
+    }
+    if (ch === '"') {
+      in_string = true;
+    } else if (ch === "{" || ch === "[") {
+      depth += 1;
+      if (depth > max) return true;
+    } else if ((ch === "}" || ch === "]") && depth > 0) {
+      depth -= 1;
+    }
+  }
+  return false;
 }
 
 /** "YYYY-MM-DD" -> UTC midnight; null when missing or invalid. */
@@ -660,10 +699,6 @@ function safe_reference_path(path: string): string {
 // ---------------------------------------------------------------------------
 // scan_project
 
-function wasm_sha256(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 function walk_files(dir: string): string[] {
   const out: string[] = [];
   const walk = (current: string): void => {
@@ -734,7 +769,7 @@ export function scan_project(dir: string): LegacyScan {
     } catch {
       continue;
     }
-    files.push({ path, size: bytes.byteLength, sha256: wasm_sha256(bytes) });
+    files.push({ path, size: bytes.byteLength, sha256: sha256_hex(bytes) });
   }
   let project_json_ok = false;
   try {
@@ -746,7 +781,7 @@ export function scan_project(dir: string): LegacyScan {
   }
   return {
     files,
-    fingerprint: hash_manifest(files),
+    fingerprint: hash_manifest(files.filter((file) => !classify_file(file.path).regenerable)),
     project_json_ok,
   };
 }
@@ -816,6 +851,16 @@ function classify_file(path: string): FileClass {
 // ---------------------------------------------------------------------------
 // Plan building
 
+interface PendingRelation {
+  from_version_key: string;
+  scope: string;
+  key: string;
+  kind: "reuses" | "supports";
+  pointer: string;
+  path: string;
+  raw: unknown;
+}
+
 interface BuildContext {
   plan: ImportPlan;
   bytes: Map<string, Uint8Array>;
@@ -825,6 +870,7 @@ interface BuildContext {
   items: Map<string, Map<string, { object_key: string; version_key: string }>>;
   questions: Map<string, Map<string, { object_key: string; version_key: string }>>;
   ask_sets: Map<string, string>;
+  pending_relations: PendingRelation[];
 }
 
 function plan_entry_category(
@@ -875,7 +921,7 @@ function add_file_mapping(
     kind,
     scope,
     key,
-    content_hash: wasm_sha256(bytes),
+    content_hash: sha256_hex(bytes),
     object_key: null,
     version_key: null,
     row,
@@ -1039,6 +1085,22 @@ function build_stages(ctx: BuildContext): void {
       if (raw_value !== undefined) extras.stage_original = raw_value;
       plan_entry_category(ctx.entries, "default_filled", "project.json", `/stages/${stage_key}`);
     }
+    const status_raw = stage.status;
+    const status_known =
+      status_raw === "pending" ||
+      status_raw === "asking" ||
+      status_raw === "active" ||
+      status_raw === "approved";
+    if (status_raw !== undefined && !status_known) {
+      extras.legacy_unverified = true;
+      plan_entry_category(
+        ctx.entries,
+        "default_filled",
+        "project.json",
+        `/stages/${stage_key}/status`,
+        status_raw,
+      );
+    }
     if (approved && approved_at_ms === null) {
       extras.legacy_unverified = true;
     }
@@ -1119,6 +1181,7 @@ function add_source(ctx: BuildContext, input: {
   canonical_locator: string | null;
   locator: Record<string, unknown>;
   method: string;
+  verification_state?: string;
   created_at: number;
 }): { object_key: string; version_key: string } {
   const version = version_for(input.key, input.created_at, null, {
@@ -1126,6 +1189,7 @@ function add_source(ctx: BuildContext, input: {
     url: input.url,
     locator: input.locator,
     method: input.method,
+    verification_state: input.verification_state ?? "legacy_unknown",
   });
   add_object(ctx, {
     key: input.key,
@@ -1141,7 +1205,7 @@ function add_source(ctx: BuildContext, input: {
       locator: input.locator,
       retrieved_at: null,
       method: input.method,
-      verification_state: "legacy_unknown",
+      verification_state: input.verification_state ?? "legacy_unknown",
     },
   });
   return { object_key: input.key, version_key: version.key };
@@ -1163,6 +1227,7 @@ function add_citation(
 }
 
 function add_file(ctx: BuildContext, version_key: string, blob_path: string, role: string): void {
+  if (!ctx.plan.blobs.some((blob) => blob.path === blob_path && blob.state === "ready")) return;
   ctx.plan.version_files.push({ version_key, blob_path, role });
 }
 
@@ -1179,9 +1244,14 @@ function add_item(
 ): { object_key: string; version_key: string } | null {
   const raw_id = raw.id;
   const legacy_id = raw_id === undefined || raw_id === null ? String(index + 1) : String(raw_id);
+  const report_path = scope === "library" ? "library.json" : "project.json";
+  const item_pointer = scope === "library" ? `/items/${index}` : `/stages/${scope}/items/${index}`;
   const scope_map = ctx.items.get(scope) ?? new Map<string, { object_key: string; version_key: string }>();
   ctx.items.set(scope, scope_map);
-  if (scope_map.has(legacy_id)) return scope_map.get(legacy_id)!;
+  if (scope_map.has(legacy_id)) {
+    plan_entry_category(ctx.entries, "unknown_field", report_path, item_pointer, raw);
+    return null;
+  }
 
   const key = item_key(scope, legacy_id);
   const title_raw = raw.title;
@@ -1214,11 +1284,10 @@ function add_item(
   for (const field of Object.keys(raw)) {
     if (KNOWN_ITEM_KEYS.has(field)) continue;
     metadata_extra[field] = raw[field];
-    const pointer =
-      scope === "library"
-        ? `/items/${index}/${field}`
-        : `/stages/${scope}/items/${index}/${field}`;
-    plan_entry_category(ctx.entries, "unknown_field", scope === "library" ? "library.json" : "project.json", pointer);
+    plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/${field}`);
+  }
+  if (raw.request !== undefined) {
+    plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/request`, raw.request);
   }
   if (kind_raw !== kind || status_raw !== status || title_raw === undefined || title_raw === "") {
     metadata_extra.legacy_unverified = true;
@@ -1261,7 +1330,16 @@ function add_item(
   const sources = as_array(raw.sources);
   for (const [source_index, source_value] of sources.entries()) {
     const source = as_record(source_value);
-    if (source === null) continue;
+    if (source === null) {
+      plan_entry_category(
+        ctx.entries,
+        "unknown_field",
+        report_path,
+        `${item_pointer}/sources/${source_index}`,
+        source_value,
+      );
+      continue;
+    }
     const url = text_or_null(source.url);
     const method_raw = source.method;
     const method =
@@ -1292,13 +1370,118 @@ function add_item(
     add_citation(ctx, artifact.version_key, added.version_key, source_index + 1);
   }
 
+  // user_links: a user's own saved links become import sources, never verified.
+  if (raw.user_links !== undefined) {
+    const user_links = raw.user_links;
+    if (!Array.isArray(user_links)) {
+      plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/user_links`, user_links);
+    } else {
+      for (const [link_index, link_value] of user_links.entries()) {
+        const link = as_record(link_value);
+        if (link === null) {
+          plan_entry_category(
+            ctx.entries,
+            "unknown_field",
+            report_path,
+            `${item_pointer}/user_links/${link_index}`,
+            link_value,
+          );
+          continue;
+        }
+        const url = text_or_null(link.url);
+        const title = text_or(link.title, url ?? "(제목 없음)");
+        const status = typeof link.status === "string" ? link.status : null;
+        const verification_state = status === "failed" ? "unreachable" : "unverified";
+        const locator: Record<string, unknown> = { legacy_extra: { legacy_unverified: true } };
+        if (link.memo !== undefined) locator.memo = link.memo;
+        if (link.added !== undefined) locator.added = link.added;
+        if (status !== null) locator.user_status = status;
+        add_source(ctx, {
+          key: `user-link:${key}:${link_index}`,
+          title,
+          url,
+          source_kind: url === null ? "file" : "web",
+          canonical_locator: url ?? title,
+          locator,
+          method: "import",
+          verification_state,
+          created_at: 0,
+        });
+      }
+    }
+  }
+
   // shots
-  for (const shot of as_array(raw.shots)) {
-    if (typeof shot !== "string") continue;
+  const shots = as_array(raw.shots);
+  for (const [shot_index, shot] of shots.entries()) {
+    if (typeof shot !== "string") {
+      plan_entry_category(
+        ctx.entries,
+        "unknown_field",
+        report_path,
+        `${item_pointer}/shots/${shot_index}`,
+        shot,
+      );
+      continue;
+    }
     if (ctx.bytes.has(shot)) {
       add_file(ctx, artifact.version_key, shot, "image");
     } else {
       plan_entry_category(ctx.entries, "missing_file", safe_reference_path(shot));
+    }
+  }
+
+  // reuse / links: resolved after all items (including library) exist.
+  if (raw.reuse !== undefined) {
+    if (typeof raw.reuse === "string" || typeof raw.reuse === "number") {
+      ctx.pending_relations.push({
+        from_version_key: artifact.version_key,
+        scope: "library",
+        key: String(raw.reuse),
+        kind: "reuses",
+        pointer: `${item_pointer}/reuse`,
+        path: report_path,
+        raw: raw.reuse,
+      });
+    } else {
+      plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/reuse`, raw.reuse);
+    }
+  }
+  if (raw.links !== undefined) {
+    const links = as_record(raw.links);
+    if (links === null) {
+      plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/links`, raw.links);
+    } else {
+      let usable = 0;
+      let reported = false;
+      const report_links = (): void => {
+        if (reported) return;
+        reported = true;
+        plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/links`, raw.links);
+      };
+      for (const [target_scope, targets] of Object.entries(links)) {
+        if (!Array.isArray(targets)) {
+          report_links();
+          continue;
+        }
+        for (const target of targets) {
+          if (typeof target === "string" || typeof target === "number") {
+            usable += 1;
+            ctx.pending_relations.push({
+              from_version_key: artifact.version_key,
+              scope: target_scope,
+              key: String(target),
+              kind: "supports",
+              pointer: `${item_pointer}/links`,
+              path: report_path,
+              raw: raw.links,
+            });
+          } else {
+            report_links();
+          }
+        }
+      }
+      if (usable === 0 && Object.keys(links).length > 0) report_links();
     }
   }
 
@@ -1315,6 +1498,7 @@ function add_question(
     text: string;
     type: string;
     required: boolean;
+    allow_comment_as_answer?: boolean;
     options: unknown[];
     default_value: unknown;
     show_if: unknown;
@@ -1328,6 +1512,7 @@ function add_question(
     text: input.text,
     type: input.type,
     required: input.required,
+    allow_comment_as_answer: input.allow_comment_as_answer ?? true,
     options: input.options,
     state: input.state,
   });
@@ -1344,6 +1529,7 @@ function add_question(
       text: input.text,
       type: input.type,
       required: input.required,
+      allow_comment_as_answer: input.allow_comment_as_answer ?? true,
       options: input.options,
       default_value: input.default_value,
       show_if: input.show_if,
@@ -1396,24 +1582,35 @@ function build_ask_files(ctx: BuildContext): void {
       parsed.kind === "resume" ? "resume" : parsed.kind === "review" ? "review" : "stage_start";
     const set_key = `ask-set:${path}`;
     const members: PlanQuestionSet["members"] = [];
+    if (parsed.questions !== undefined && !Array.isArray(parsed.questions)) {
+      plan_entry_category(ctx.entries, "unknown_field", path, "/questions", parsed.questions);
+    }
     const questions = [...as_array(parsed.questions)];
     for (const [position, question_value] of questions.entries()) {
       const question = as_record(question_value);
-      if (question === null) continue;
+      if (question === null) {
+        plan_entry_category(
+          ctx.entries,
+          "unknown_field",
+          path,
+          `/questions/${position}`,
+          question_value,
+        );
+        continue;
+      }
       const question_id = text_or(question.id, `q${position + 1}`);
       const key = `question:${stage_key}:${question_id}`;
-      const type_raw = question.type;
-      const type = typeof type_raw === "string" && QUESTION_TYPES.has(type_raw) ? type_raw : "text";
-      const text = text_or(question.label, "(질문 없음)");
+      const defaults = question_defaults(ctx, path, `/questions/${position}`, question);
       const options = as_array(question.options);
       const added = add_question(ctx, {
         key,
         stage_key,
         bank_key: typeof question.id === "string" ? question.id : null,
         origin: "bank",
-        text,
-        type,
-        required: question.required === true,
+        text: defaults.text,
+        type: defaults.type,
+        required: defaults.required,
+        allow_comment_as_answer: defaults.allow_comment_as_answer,
         options,
         default_value: "default" in question ? question.default : null,
         show_if: "show_if" in question ? question.show_if : null,
@@ -1558,11 +1755,170 @@ function add_message(
   return { object_key: input.key, version_key: version.key };
 }
 
+/** A free-form text kept as a note plus an ordinary thread message. */
+function add_general_message(
+  ctx: BuildContext,
+  input: {
+    key: string;
+    stage_key: LegacyStageKey | null;
+    text: string;
+    created_at: number;
+  },
+): void {
+  const note = add_artifact(ctx, {
+    key: `${input.key}:note`,
+    stage_key: input.stage_key,
+    edition: "edition",
+    artifact_kind: "note",
+    title: "(이전 제안)",
+    summary: "",
+    body_md: input.text,
+    status: "new",
+    confidence: null,
+    stats: [],
+    conflicts: [],
+    verify: null,
+    metadata: { legacy_extra: { suggestion: input.text, legacy_unverified: true } },
+    created_at: input.created_at,
+    round_key: null,
+    archived: false,
+  });
+  const thread = add_thread(ctx, {
+    key: `${input.key}:thread`,
+    target_object_key: note.object_key,
+    target_version_key: note.version_key,
+    context_kind: "general",
+    created_at: input.created_at,
+  });
+  add_message(ctx, {
+    key: `${input.key}:message`,
+    thread_key: thread.object_key,
+    submission_key: null,
+    body_md: input.text,
+    created_at: input.created_at,
+  });
+}
+
+interface QuestionDefaults {
+  text: string;
+  type: string;
+  required: boolean;
+  allow_comment_as_answer: boolean;
+}
+
+/**
+ * The migration-map question defaults, plus default_filled reports for every
+ * value the old file did not give (or gave unusably). placeholder/other/gap have
+ * no column; their raw values are reported instead of being dropped.
+ */
+function question_defaults(
+  ctx: BuildContext,
+  path: string,
+  pointer: string,
+  raw: Record<string, unknown>,
+): QuestionDefaults {
+  const label = raw.label;
+  const label_valid = typeof label === "string" && label.trim().length > 0;
+  if (!label_valid) {
+    plan_entry_category(ctx.entries, "default_filled", path, `${pointer}/label`, label ?? null);
+  }
+  const type = raw.type;
+  const type_valid = typeof type === "string" && QUESTION_TYPES.has(type);
+  if (!type_valid) {
+    plan_entry_category(ctx.entries, "default_filled", path, `${pointer}/type`, type ?? null);
+  }
+  const required = raw.required;
+  const required_valid = typeof required === "boolean";
+  if (!required_valid) {
+    plan_entry_category(ctx.entries, "default_filled", path, `${pointer}/required`, required ?? null);
+  }
+  const allow = raw.allow_comment_as_answer;
+  const allow_valid = typeof allow === "boolean";
+  if (!allow_valid) {
+    plan_entry_category(
+      ctx.entries,
+      "default_filled",
+      path,
+      `${pointer}/allow_comment_as_answer`,
+      allow ?? null,
+    );
+  }
+  for (const field of ["placeholder", "other", "gap"] as const) {
+    if (raw[field] !== undefined) {
+      plan_entry_category(ctx.entries, "default_filled", path, `${pointer}/${field}`, raw[field]);
+    }
+  }
+  return {
+    text: label_valid ? (label as string) : "(질문 없음)",
+    type: type_valid ? (type as string) : "text",
+    required: required === true,
+    allow_comment_as_answer: allow_valid ? (allow as boolean) : true,
+  };
+}
+
+/** '[#id] question' becomes an import/deferred question; other text becomes a thread message. */
+function build_suggestions(
+  ctx: BuildContext,
+  path: string,
+  pointer_prefix: string,
+  stage_key: LegacyStageKey | null,
+  value: unknown,
+): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    plan_entry_category(ctx.entries, "unknown_field", path, pointer_prefix, value);
+    return;
+  }
+  for (const [index, suggestion] of value.entries()) {
+    if (typeof suggestion !== "string") {
+      plan_entry_category(
+        ctx.entries,
+        "unknown_field",
+        path,
+        `${pointer_prefix}/${index}`,
+        suggestion,
+      );
+      continue;
+    }
+    const match = suggestion.match(/^\[#([^\]]+)\]\s*(.*)$/);
+    if (match !== null) {
+      const id = match[1]!;
+      const text = match[2]!.trim().length > 0 ? match[2]!.trim() : suggestion;
+      add_question(ctx, {
+        key: `suggestion-question:${path}:${pointer_prefix}:${index}`,
+        stage_key: stage_key ?? "plan",
+        bank_key: id,
+        origin: "import",
+        text,
+        type: "text",
+        required: false,
+        allow_comment_as_answer: true,
+        options: [],
+        default_value: null,
+        show_if: null,
+        help: null,
+        state: "deferred",
+        created_at: 0,
+      });
+    } else {
+      add_general_message(ctx, {
+        key: `suggestion-message:${path}:${pointer_prefix}:${index}`,
+        stage_key,
+        text: suggestion,
+        created_at: 0,
+      });
+    }
+  }
+}
+
 function build_feedback(ctx: BuildContext): void {
   const processed = new Set<string>();
   const raw_processed = ctx.project_raw === null ? [] : as_array(ctx.project_raw.processed);
-  for (const name of raw_processed) {
-    if (typeof name !== "string") continue;
+  for (const [index, name] of raw_processed.entries()) {
+    if (typeof name !== "string") {
+      plan_entry_category(ctx.entries, "unknown_field", "project.json", `/processed/${index}`, name);
+      continue;
+    }
     processed.add(name);
     const file_path = `feedback/${name}`;
     const matched = ctx.bytes.has(file_path);
@@ -1611,6 +1967,9 @@ function build_feedback(ctx: BuildContext): void {
     });
 
     const answers = as_record(parsed.answers);
+    if (parsed.answers !== undefined && answers === null) {
+      plan_entry_category(ctx.entries, "unknown_field", path, "/answers", parsed.answers);
+    }
     if (answers !== null) {
       for (const [answer_id, value] of Object.entries(answers)) {
         if (answer_id.endsWith("__other")) {
@@ -1706,10 +2065,14 @@ function build_library(ctx: BuildContext): void {
   for (const warning of as_array(library.warnings)) {
     ctx.plan.events.push({ type: "legacy.warning", payload: { source: "library", warning } });
   }
+  build_suggestions(ctx, "library.json", "/suggestions", null, library.suggestions);
   const items = as_array(library.items);
   for (const [index, value] of items.entries()) {
     const item = as_record(value);
-    if (item === null) continue;
+    if (item === null) {
+      plan_entry_category(ctx.entries, "unknown_field", "library.json", `/items/${index}`, value);
+      continue;
+    }
     add_item(ctx, "library", null, index, item);
   }
 }
@@ -1719,7 +2082,10 @@ function build_notes(ctx: BuildContext): void {
   const notes = as_array(ctx.project_raw.notes);
   for (const [index, value] of notes.entries()) {
     const note = as_record(value);
-    if (note === null) continue;
+    if (note === null) {
+      plan_entry_category(ctx.entries, "unknown_field", "project.json", `/notes/${index}`, value);
+      continue;
+    }
     const stage_raw_value = note.stage;
     const stage_key =
       typeof stage_raw_value === "string" && STAGE_KEY_SET.has(stage_raw_value)
@@ -1747,9 +2113,120 @@ function build_notes(ctx: BuildContext): void {
   }
 }
 
+function build_review(
+  ctx: BuildContext,
+  stage_key: LegacyStageKey,
+  review: Record<string, unknown>,
+  pointer: string,
+): void {
+  const round_no = integer_or(review.round, 0);
+  const stage_plan = ctx.plan.stages.find((stage) => stage.key === stage_key);
+  const round_key =
+    round_no >= 1 && stage_plan !== undefined && stage_plan.rounds.some((round) => round.round_no === round_no)
+      ? `${stage_key}:${round_no}`
+      : null;
+  const summary = typeof review.summary === "string" ? review.summary : "";
+  const questions_value = review.questions;
+  const questions = as_array(questions_value);
+  if (questions_value !== undefined && !Array.isArray(questions_value)) {
+    plan_entry_category(ctx.entries, "unknown_field", "project.json", `${pointer}/questions`, questions_value);
+  }
+  if (summary.trim().length > 0 || questions.length > 0) {
+    add_artifact(ctx, {
+      key: `stage-review-summary:${stage_key}`,
+      stage_key,
+      edition: "edition",
+      artifact_kind: "review",
+      title: "(검토 요약)",
+      summary,
+      body_md: null,
+      status: "draft",
+      confidence: null,
+      stats: [],
+      conflicts: [],
+      verify: null,
+      metadata: { review, legacy_extra: { review, legacy_unverified: true } },
+      created_at: 0,
+      round_key,
+      archived: false,
+    });
+  }
+  const members: PlanQuestionSet["members"] = [];
+  for (const [index, value] of questions.entries()) {
+    const question = as_record(value);
+    if (question === null) {
+      plan_entry_category(
+        ctx.entries,
+        "unknown_field",
+        "project.json",
+        `${pointer}/questions/${index}`,
+        value,
+      );
+      continue;
+    }
+    const question_id = text_or(question.id, `rq${index + 1}`);
+    const defaults = question_defaults(
+      ctx,
+      "project.json",
+      `${pointer}/questions/${index}`,
+      question,
+    );
+    const added = add_question(ctx, {
+      key: `review-question:${stage_key}:${index}:${question_id}`,
+      stage_key,
+      bank_key: typeof question.id === "string" ? question.id : null,
+      origin: "review",
+      text: defaults.text,
+      type: defaults.type,
+      required: defaults.required,
+      allow_comment_as_answer: defaults.allow_comment_as_answer,
+      options: as_array(question.options),
+      default_value: "default" in question ? question.default : null,
+      show_if: "show_if" in question ? question.show_if : null,
+      help: text_or_null(question.help),
+      state: "open",
+      created_at: 0,
+      mapping: { scope: stage_key, key: question_id, raw: question },
+    });
+    members.push({
+      question_key: added.object_key,
+      question_version_key: added.version_key,
+      position: members.length,
+    });
+  }
+  if (members.length > 0) {
+    ctx.plan.question_sets.push({
+      key: `review-set:${stage_key}`,
+      stage_key,
+      round_key,
+      purpose: "review",
+      form_key: `review/${stage_key}`,
+      version_no: 1,
+      published_at: 0,
+      members,
+    });
+  }
+}
+
 function build_stage_content(ctx: BuildContext): void {
   for (const stage_key of LEGACY_STAGE_KEYS) {
     const raw = stage_raw(ctx, stage_key);
+    const stage_pointer = `/stages/${stage_key}`;
+    const stage_plan = ctx.plan.stages.find((stage) => stage.key === stage_key);
+    const stage_extra = stage_plan === undefined ? null : as_record(stage_plan.settings.legacy_extra);
+    if (stage_extra !== null && raw.carry_over !== undefined) {
+      stage_extra.carry_over = raw.carry_over;
+    }
+
+    build_suggestions(ctx, "project.json", `${stage_pointer}/suggestions`, stage_key, raw.suggestions);
+    if (raw.review !== undefined) {
+      const review = as_record(raw.review);
+      if (review === null) {
+        plan_entry_category(ctx.entries, "unknown_field", "project.json", `${stage_pointer}/review`, raw.review);
+      } else {
+        build_review(ctx, stage_key, review, `${stage_pointer}/review`);
+      }
+    }
 
     for (const warning of as_array(raw.warnings)) {
       ctx.plan.events.push({ type: "legacy.warning", payload: { stage: stage_key, warning } });
@@ -1783,10 +2260,43 @@ function build_stage_content(ctx: BuildContext): void {
       });
     }
 
+    if (raw.reports_built !== undefined) {
+      add_artifact(ctx, {
+        key: `stage-reports-built:${stage_key}`,
+        stage_key,
+        edition: "edition",
+        artifact_kind: "report",
+        title: "(보고서 빌드)",
+        summary: "",
+        body_md: null,
+        status: "draft",
+        confidence: null,
+        stats: [],
+        conflicts: [],
+        verify: null,
+        metadata: {
+          reports_built: raw.reports_built,
+          legacy_extra: { reports_built: raw.reports_built, legacy_unverified: true },
+        },
+        created_at: 0,
+        round_key: null,
+        archived: false,
+      });
+    }
+
     const reports = as_array(raw.reports);
     for (const [index, value] of reports.entries()) {
       const report = as_record(value);
-      if (report === null) continue;
+      if (report === null) {
+        plan_entry_category(
+          ctx.entries,
+          "unknown_field",
+          "project.json",
+          `${stage_pointer}/reports/${index}`,
+          value,
+        );
+        continue;
+      }
       const path = typeof report.path === "string" ? report.path : null;
       const round_no = integer_or(report.round, 0);
       const round_key = round_no >= 1 ? `${stage_key}:${round_no}` : null;
@@ -1826,7 +2336,16 @@ function build_stage_content(ctx: BuildContext): void {
 
     for (const [index, value] of as_array(raw.qa).entries()) {
       const qa = as_record(value);
-      if (qa === null) continue;
+      if (qa === null) {
+        plan_entry_category(
+          ctx.entries,
+          "unknown_field",
+          "project.json",
+          `${stage_pointer}/qa/${index}`,
+          value,
+        );
+        continue;
+      }
       const round_no = integer_or(qa.round, 0);
       add_artifact(ctx, {
         key: `stage-qa:${stage_key}:${index}`,
@@ -1849,7 +2368,16 @@ function build_stage_content(ctx: BuildContext): void {
     }
     for (const [index, value] of as_array(raw.review_log).entries()) {
       const review = as_record(value);
-      if (review === null) continue;
+      if (review === null) {
+        plan_entry_category(
+          ctx.entries,
+          "unknown_field",
+          "project.json",
+          `${stage_pointer}/review_log/${index}`,
+          value,
+        );
+        continue;
+      }
       add_artifact(ctx, {
         key: `stage-review:${stage_key}:${index}`,
         stage_key,
@@ -1873,28 +2401,45 @@ function build_stage_content(ctx: BuildContext): void {
     const items = as_array(raw.items);
     for (const [index, value] of items.entries()) {
       const item = as_record(value);
-      if (item === null) continue;
-      add_item(ctx, stage_key, stage_key, index, item);
-    }
-
-    const carry_over = as_array(raw.carry_over);
-    for (const [index, value] of carry_over.entries()) {
-      const entry = as_record(value);
-      if (entry === null) continue;
-      const request = safe_text(entry.request);
-      const from = typeof entry.from === "string" && STAGE_KEY_SET.has(entry.from)
-        ? (entry.from as LegacyStageKey)
-        : null;
-      if (from === null) {
+      if (item === null) {
         plan_entry_category(
           ctx.entries,
           "unknown_field",
           "project.json",
-          `/stages/${stage_key}/carry_over/${index}`,
-          { request },
+          `${stage_pointer}/items/${index}`,
+          value,
         );
         continue;
       }
+      add_item(ctx, stage_key, stage_key, index, item);
+    }
+
+    const next_stage_key =
+      LEGACY_STAGE_KEYS[LEGACY_STAGE_KEYS.indexOf(stage_key) + 1] ?? null;
+    const carry_over = as_array(raw.carry_over);
+    for (const [index, value] of carry_over.entries()) {
+      const entry = as_record(value);
+      if (entry === null) {
+        plan_entry_category(
+          ctx.entries,
+          "unknown_field",
+          "project.json",
+          `${stage_pointer}/carry_over/${index}`,
+          value,
+        );
+        continue;
+      }
+      if (next_stage_key === null) {
+        plan_entry_category(
+          ctx.entries,
+          "unknown_field",
+          "project.json",
+          `${stage_pointer}/carry_over/${index}`,
+          entry,
+        );
+        continue;
+      }
+      const request = safe_text(entry.request);
       const legacy_item = entry.item === undefined ? null : String(entry.item);
       const base =
         legacy_item === null ? undefined : ctx.items.get(stage_key)?.get(legacy_item);
@@ -1902,7 +2447,7 @@ function build_stage_content(ctx: BuildContext): void {
       const version = version_for(key, 0, null, {
         kind: "next_round_task",
         description: request,
-        target_stage: from,
+        target_stage: next_stage_key,
       });
       add_object(ctx, {
         key,
@@ -1914,11 +2459,39 @@ function build_stage_content(ctx: BuildContext): void {
           kind: "next_round_task",
           state: "proposed",
           description: request.length > 0 ? request : "(요청 없음)",
-          target_stage_key: from,
+          target_stage_key: next_stage_key,
           base_version_key: base?.version_key ?? null,
         },
       });
     }
+  }
+}
+
+function resolve_pending_relations(ctx: BuildContext): void {
+  const resolved = new Set<string>();
+  const unresolved = new Map<string, { path: string; pointer: string; raw: unknown }>();
+  for (const pending of ctx.pending_relations) {
+    const target = ctx.items.get(pending.scope)?.get(pending.key);
+    if (target !== undefined && target.version_key !== pending.from_version_key) {
+      const key = `${pending.from_version_key}|${target.version_key}|${pending.kind}`;
+      if (!resolved.has(key)) {
+        resolved.add(key);
+        ctx.plan.relations.push({
+          from_version_key: pending.from_version_key,
+          to_version_key: target.version_key,
+          kind: pending.kind,
+        });
+      }
+      continue;
+    }
+    unresolved.set(`${pending.from_version_key}|${pending.pointer}`, {
+      path: pending.path,
+      pointer: pending.pointer,
+      raw: pending.raw,
+    });
+  }
+  for (const item of unresolved.values()) {
+    plan_entry_category(ctx.entries, "unknown_field", item.path, item.pointer, item.raw);
   }
 }
 
@@ -1930,7 +2503,9 @@ function build_project(ctx: BuildContext): void {
     typeof pes === "number" ? `pes-project-json/${pes}` : "pes-project-json/unknown";
 
   const slug = text_or_null(raw.slug);
-  const topic = text_or(raw.topic, "(주제 없음)");
+  const topic_raw = raw.topic;
+  const topic_valid = typeof topic_raw === "string" && topic_raw.trim().length > 0;
+  const topic = topic_valid ? (topic_raw as string) : "(주제 없음)";
   const created_at = parse_date_utc(raw.created) ?? 0;
   const current_raw = raw.current;
   const current_stage_key =
@@ -1956,6 +2531,10 @@ function build_project(ctx: BuildContext): void {
   const created_valid = raw.created !== undefined && parse_date_utc(raw.created) !== null;
   if (!created_valid) {
     legacy_extra.legacy_unverified = true;
+  }
+  if (!topic_valid) {
+    legacy_extra.legacy_unverified = true;
+    plan_entry_category(ctx.entries, "unknown_field", "project.json", "/topic", topic_raw ?? null);
   }
   ctx.plan.edition_settings = { ...settings, legacy_extra };
   ctx.plan.edition_status = ctx.plan.failed
@@ -1998,6 +2577,7 @@ function build_project(ctx: BuildContext): void {
   build_notes(ctx);
   build_stage_content(ctx);
   build_library(ctx);
+  resolve_pending_relations(ctx);
   build_ask_files(ctx);
   build_feedback(ctx);
 
@@ -2076,8 +2656,6 @@ function add_blobs(ctx: BuildContext): void {
         project_json_bytes.every((value, index) => value === bytes[index]);
       ctx.plan.blobs.push({
         path: file.path,
-        sha256: file.sha256,
-        size: file.size,
         media_type: media_type_for(file.path),
         state: same ? "ready" : "quarantined",
       });
@@ -2086,10 +2664,9 @@ function add_blobs(ctx: BuildContext): void {
       }
       continue;
     }
+    if (classify_file(file.path).regenerable) continue;
     ctx.plan.blobs.push({
       path: file.path,
-      sha256: file.sha256,
-      size: file.size,
       media_type: media_type_for(file.path),
       state: "ready",
     });
@@ -2113,8 +2690,19 @@ function build_plan(dir: string): PreparedImport {
   const parsed = new Map<string, unknown>();
   for (const [path, content] of bytes) {
     if (!path.endsWith(".json")) continue;
+    let text: string;
     try {
-      parsed.set(path, JSON.parse(new TextDecoder().decode(content)));
+      text = new TextDecoder("utf-8", { fatal: true }).decode(content);
+    } catch {
+      plan_entry_category(entries, "parse_error", path);
+      continue;
+    }
+    if (json_depth_exceeds(text, MAX_JSON_DEPTH)) {
+      plan_entry_category(entries, "parse_error", path);
+      continue;
+    }
+    try {
+      parsed.set(path, JSON.parse(text));
     } catch {
       plan_entry_category(entries, "parse_error", path);
     }
@@ -2122,7 +2710,6 @@ function build_plan(dir: string): PreparedImport {
   const project_raw = as_record(parsed.get("project.json")) ?? null;
   const plan: ImportPlan = {
     fingerprint: scan.fingerprint,
-    project_json_ok: scan.project_json_ok,
     failed: !scan.project_json_ok || project_raw === null,
     source_schema: "pes-project-json/unknown",
     importer_version: IMPORTER_VERSION,
@@ -2142,6 +2729,7 @@ function build_plan(dir: string): PreparedImport {
     blobs: [],
     objects: [],
     citations: [],
+    relations: [],
     version_files: [],
     question_sets: [],
     submissions: [],
@@ -2158,6 +2746,7 @@ function build_plan(dir: string): PreparedImport {
     items: new Map(),
     questions: new Map(),
     ask_sets: new Map(),
+    pending_relations: [],
   };
   add_blobs(ctx);
   if (project_raw === null) {
@@ -2176,8 +2765,12 @@ function build_plan(dir: string): PreparedImport {
 export function prepare_import_plan(dir: string, owner_actor_id: string): PreparedImport {
   const prepared = build_plan(dir);
   prepared.owner_actor_id = owner_actor_id;
-  prepared_imports.set(prepared.plan.fingerprint, prepared);
+  prepared_imports.set(`${owner_actor_id}:${prepared.plan.fingerprint}`, prepared);
   return prepared;
+}
+
+function prepared_key(owner_actor_id: string, fingerprint: string): string {
+  return `${owner_actor_id}:${fingerprint}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2203,7 +2796,7 @@ export async function import_project(
         project_id: null,
         actor_id: owner_actor_id,
         via: "import",
-        client_request_id: `legacy-import:${fingerprint}`,
+        client_request_id: `legacy-import:${owner_actor_id}:${fingerprint}`,
       },
       "legacy.import_project",
       { source_fingerprint: fingerprint },
@@ -2214,7 +2807,7 @@ export async function import_project(
       replayed: outcome.replayed || result.replayed === true,
     };
   } finally {
-    drop_prepared_import(fingerprint);
+    drop_prepared_import(owner_actor_id, fingerprint);
   }
 }
 
