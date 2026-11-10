@@ -1271,7 +1271,7 @@ def stop_server(root: Path, old=False):
     return not alive()
 
 
-SHELL_SAFE = re.compile(r"[\w@%+=:,./\\~-]+")
+SHELL_SAFE = re.compile(r"[\w@%+=:,./~-]+")
 
 
 def shell_quote(text: str) -> str:
@@ -1829,8 +1829,11 @@ def doctor_project(R, d: Path):
 class DocReport:
     def __init__(self):
         self.rows = []
+        self.no_fix = False  # True 동안 더하는 행은 진단만 하고 --fix 대상에서 뺀다
 
     def add(self, group, level, title, detail="", fix=None):
+        if self.no_fix:
+            fix = None
         self.rows.append({"group": group, "level": level, "title": title, "detail": detail, "fix": fix})
 
 
@@ -1861,7 +1864,14 @@ def cmd_doctor(args):
         if not (d / "project.json").exists():
             R.add(d.name, "bad", "project.json 없음", str(d))
             continue
-        doctor_project(R, d)
+        outside = db_core() and (d.is_symlink() or not d.resolve().is_relative_to(h.resolve()))
+        if outside:
+            R.add(d.name, "info", "PES 홈 밖을 가리키는 폴더(심볼릭 링크)", f"{d} — 진단만 하고 --fix 로 고치지 않습니다 (임시 파일·잠금·서버 기록을 지우지 않음)")
+        R.no_fix = bool(outside)
+        try:
+            doctor_project(R, d)
+        finally:
+            R.no_fix = False
     if not tgt and h.exists():
         stray = [x.name for x in h.iterdir() if x.is_dir() and not (x / "project.json").exists() and not x.name.startswith(".") and x.name not in served]
         if stray:
@@ -2008,7 +2018,10 @@ def db_slugs():
 
 
 def db_name(arg) -> str:
-    return pdir(arg).name
+    d = pdir(arg)
+    if d.parent != pes_home():
+        refuse_legacy_write("쓰기", d)
+    return d.name
 
 
 def db_init(args):
@@ -2477,6 +2490,9 @@ def dbr_web(args):
     print_output_files(data)
 
 
+DB_PROJECT_WRITES = {"ask-prep", "ask", "round-start", "merge", "render", "approve", "reopen", "mark", "chat", "note",
+                     "qa-brief", "qa", "lock", "unlock", "report", "assemble", "web"}
+
 DB_CMDS = {"init": db_init, "ask-prep": db_ask_prep, "ask": db_ask, "round-start": db_round_start, "merge": db_merge,
            "render": db_render, "approve": db_approve, "reopen": db_reopen, "mark": db_mark, "chat": db_chat,
            "note": db_note, "qa-brief": db_qa_brief, "qa": db_qa, "serve": db_serve, "stop": db_stop,
@@ -2585,6 +2601,10 @@ def main(argv=None):
     if len(args) < 2 or args[0] not in CMDS:
         print(__doc__)
         sys.exit(1)
+    if db_core() and args[0] in DB_PROJECT_WRITES and not args[1].startswith("-"):
+        d = pdir(args[1])
+        if d.parent != pes_home():  # PES 홈 밖 절대 경로 폴더는 DB 가 서비스하는 프로젝트가 아니다: 같은 이름이 DB 에 있어도 쓰지 않는다
+            refuse_legacy_write(args[0], d)
     (DB_CMDS[args[0]] if db_core() and args[0] in DB_CMDS else CMDS[args[0]])(args[1:])
 
 
