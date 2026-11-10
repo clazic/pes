@@ -27,9 +27,9 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | 명령 | 하는 일 |
 |---|---|
 | `init <dir> --topic "…" [--import <research-loop 폴더>]` | 새 프로젝트. 기획부터. `--import`는 기존 조사를 참고자료(library)로 |
-| `ask-prep <dir> <stage\|resume>` → `ask <dir> <spec>` | 질문 은행 복사 → (에이전트가 다듬음) → 질문 게시와 폼 HTML `ask-<id>.html` (시작 질문 · AI 점검 질문 모두) |
+| `ask-prep <dir> <stage\|resume>` → `ask <dir> <spec>` | 질문 은행 복사 → (에이전트가 다듬음) → 시작 질문 폼 HTML `ask-<id>.html`. AI 점검 질문은 `ask`가 아니라 `set <dir> <단계> review`로 쓰고 `render`가 대시보드에 띄운다 |
 | `round-start <dir> <stage>` | 라운드 +1, 현재 단계로 지정, changes 비움 |
-| `merge <dir> <stage> <결과.json…>` | 서브에이전트 결과 병합 (출처 url 중복 제거·누적, open_questions→제안, depth+1) |
+| `merge <dir> <stage> <결과.json…>` | 서브에이전트 결과 병합 (출처 url 중복 제거·누적, open_questions→제안, depth+1). `request`는 줄 때만 덮어쓰고 빈 문자열이면 비운다. `reuse`·`model`은 그대로 남고, `user_links`는 url이 같으면 준 칸(status·memo)만 고치고 새 url은 뒤에 붙인다. `status`·`request`·`user_links`만 담은 제안은 depth를 올리지 않고, status를 주지 않으면 지금 status를 둔다 |
 | `render <dir> [stage]` | 스냅샷 + 대시보드 `index.html` |
 | `approve <dir> <stage>` | 승인 → 다음 단계 asking. 기획 승인 시 조사 항목 자동 생성 |
 | `list [projects]` · `hub [projects]` | 프로젝트 목록 (채팅용 · 화면 127.0.0.1:8760/) |
@@ -37,7 +37,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `setup.py check · install missing · keys · mark · needed` | 설치 도우미 (`/pes:setup`) — 도구 설치, API 키 화면(127.0.0.1:8759), 완료 표시 |
 | `doctor [dir] [--fix] [--json]` | 진단 (환경·도구·키·포트·프로젝트 상태·잠금·답·보고서·연결). 명령이 이상하게 실패하면 먼저 실행 |
 | `lock <dir> [--force]` · `unlock <dir>` | 세션 표시 (PES_OWNER) — 잠금 파일을 직접 만들거나 지우지 않는다 |
-| `digest <dir> <stage> [--round N]` · `show <dir> <stage> [id…] [--fields a,b]` | 점검용 압축 요약 · 필요한 부분만 보기 |
+| `digest <dir> <stage> [--round N]` · `show <dir> <stage> [id…] [--fields a,b]` | 점검용 압축 요약 · 필요한 부분만 보기. `show <dir> <stage> --fields changes`(id 없이, changes·carry_over·settings·review)는 단계 값을 보여 준다 |
 | `note <dir> "메모"` | 인계 메모 (새 세션이 먼저 읽음) |
 | `set <dir> <단계> <필드> <파일>` · `set <dir> project <필드> <파일>` | 허용된 필드 하나를 통째로 바꾼다 (파일 자리에 `-`면 표준 입력). 단계 필드: summary·changes·carry_over·settings·review, 프로젝트 필드: executive_summary·conclusion — 아래 「상태 읽기와 검증된 제출」 |
 | `report <dir> <stage>` | 단계 보고서 생성·등록 (reports/<stage>/: report.md·report.html·eli5.html·기타 형식) |
@@ -46,8 +46,8 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `chat <dir> <stage> "텍스트" [kind]` | 채팅으로 받은 지시도 기록 (타임라인이 끊기지 않게) |
 | `assemble <dir>` | 집필 원고 → `out/report.md` (각주 번호 정리) |
 | `qa-brief <dir> <stage>` · `qa <dir> <stage>` | 독립 검토(QC/QA) 지시문 만들기 · 결과 기록 (reviewer 역할) |
-| `context <dir>` | 에이전트가 읽는 현재 맥락 (단계·라운드·할 일·인계 메모) |
-| `claim <dir> [--mode …]` → `submit <dir> --run <run> --lease <lease> --fence <fence> --file <결과.json>` → `complete <dir> --run … --lease … --fence …` | 에이전트 작업 경로: 작업 맡기(run·lease·fence를 받음) → 검증된 결과 제출 → 끝내기. 사람에게 물을 때는 `wait <dir> --run … --lease … --fence … [--reason …]` |
+| `context <dir>` | **DB 경로에서 쓰는 명령** — 작업 토큰을 받은 작업자가 읽는 현재 맥락 (단계·라운드·할 일·인계 메모). 기본 경로에서는 `status`·`digest`·`show`로 읽는다 |
+| `claim <dir> [--mode …]` → `submit <dir> --run <run> --lease <lease> --fence <fence> --file <결과.json>` → `complete <dir> --run … --lease … --fence …` | **DB 경로에서 쓰는 명령** — 에이전트 작업 경로: 작업 맡기(run·lease·fence를 받음) → 검증된 결과 제출 → 끝내기. 사람에게 물을 때는 `wait <dir> --run … --lease … --fence … [--reason …]`. 기본 경로에서는 거부되므로 결과는 `merge`로 넘긴다 |
 | `web <dir> [--assemble]` | 최종 웹 보고서 `out/report.html` (`templates/final-report.html`; 표지 정보 `out/cover.json`, 출처 확인 여부 `out/sources.json` — assemble 이 만든다) |
 | `serve` / `stop` / `watch` | 로컬 서버 — 홈마다 포트 하나(127.0.0.1:8760, 프로젝트는 `/<slug>/`) / 종료(홈 전체) / 답 대기 명령 |
 
@@ -68,11 +68,11 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 
 | 하려는 일 | 쓰는 명령 |
 |---|---|
-| 현재 상태·맥락 읽기 | `status` · `context <dir>` · `digest` · `show` (파일을 통째로 읽지 않는다) |
-| 항목 만들기·고치기 (기획 항목, 조사 결과, 쟁점, 원고, 주장 판정, 산출물) | 결과를 **제안 파일**(JSON)로 쓰고 `merge <dir> <단계> <파일…>`. 토큰을 가진 작업자는 `claim` 후 `submit` |
+| 현재 상태·맥락 읽기 | `status` · `digest` · `show` (파일을 통째로 읽지 않는다). DB 경로의 작업자는 `context <dir>` |
+| 항목 만들기·고치기 (기획 항목, 조사 결과, 쟁점, 원고, 주장 판정, 산출물) | 결과를 **제안 파일**(JSON)로 쓰고 `merge <dir> <단계> <파일…>`. DB 경로에서 토큰을 가진 작업자는 `claim` 후 `submit` |
 | 항목 상태 바꾸기 (심화·수정·삭제·원문 확인) | 항목의 `status`·`request`를 제안 파일에 담아 `merge` |
 | 사람에게 묻기 (시작 질문) | 질문 명세 파일을 만들고 `ask <dir> <명세>` |
-| 받은 답·채팅 지시 처리 | `pending`으로 읽고 처리한 뒤 `mark`, 채팅 지시는 `chat` |
+| 받은 답·채팅 지시 처리 | `pending`이 알려 준 답 파일(`feedback/*.json`)의 kind·text·answers를 읽고 처리한 뒤 `mark`, 채팅 지시는 `chat` |
 | 인계 메모 (대화에서 나온 결정·선호) | `note` |
 | 단계 요약·라운드 변경점·남은 일(`carry_over`)·단계 설정·AI 점검 기록, 프로젝트 최종 요약·결론 | `set` (아래 예) |
 | 독립 검토 결과 | `qa` |
@@ -80,6 +80,9 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 
 - 제안 파일은 작업 산출물이다(`rounds/<단계>-R<n>/` 아래 결과 JSON, 질문 명세 `ask/<id>.json`, `reports/<단계>/eli5.json`, `out/cover.json`). 상태가 아니라 PES에 넘길 입력이며, 반영되는 것은 위 명령이 검증을 통과한 뒤뿐이다.
 - `set`은 허용 목록의 필드만 쓴다. 목록 밖 필드(항목·상태·라운드·승인·검토 기록 등)와 형식이 틀린 값은 한국어 이유와 함께 거부되고 아무것도 바뀌지 않는다. 값은 필드를 **통째로 바꾼다**(덧붙이지 않는다). 텍스트 필드(summary·executive_summary·conclusion)는 파일 내용 그대로, changes는 문자열 배열 JSON, carry_over는 객체 배열 JSON, settings·review는 JSON 객체다.
+- 한 줄 더하기(변경점에 한 줄 등)도 통째로 바꾸기다: `show <dir> <단계> --fields changes`로 지금 값을 읽고 **이미 쓴 줄을 포함한 전체 배열을 다시 쓴다**. carry_over도 같다.
+- `set <dir> plan settings`는 기획 답을 프로젝트 설정에도 함께 둔다 — 보고서 형식(`stage_reports`)과 독립 검토의 사용자 기준(`qa-brief`)이 읽는다.
+- `merge`로 줄일 수 없는 것: `conflicts`·`links`·출처(sources, 원고 section 밖)는 쌓이기만 한다. 해소된 충돌은 그 항목의 `request`에 "충돌 해소: …"로 적고 summary·details에 결론을 쓴다(항목에서 지우지 못한다).
 
 ```bash
 $PES set "$DIR" plan summary "$DIR/rounds/plan-R1/summary.txt"        # 단계 요약 (근거 표기 포함, 텍스트)
@@ -134,7 +137,7 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 ## 단계 생명주기 (모든 단계 스킬이 따른다)
 
 1. **시작 질문** (status=asking): `ask-prep` → 명세 다듬기(이미 정해진 것은 지우고 `inherited`로 — 항목은 `{"label": "주제", "value": "…"}` 또는 `"주제: …"` 문자열, `_when`이 안 맞는 질문 삭제, 추천을 주제에 맞게) → `ask` → `serve` → 브라우저로 연다 → 답 대기(`watch`, 아래 「답 받기」). 채팅엔 한 줄: "질문 폼을 열었습니다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 보내 주세요."
-2. **답(kind=stage_start)** → `pending`·`context`로 읽은 answers를 `set <dir> <단계> settings <파일>`로 단계 설정에 저장 → `mark`.
+2. **답(kind=stage_start)** → `pending`이 알려 준 답 파일(`feedback/<단계>-R<n>-<시각>.json`)의 answers를 읽어 `set <dir> <단계> settings <파일>`로 단계 설정에 저장(기획 답은 프로젝트 설정에도 함께 들어간다) → `mark`.
 3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge`, 토큰 작업자는 `submit`) → 라운드 변경점 3~5줄(각 줄 `짧은 라벨: 내용` 형식)을 `set <dir> <단계> changes <파일>`로 → **AI 점검(자체 검토) 작성** — `set <dir> <단계> review <파일>` → **독립 검토(QC/QA)** (아래) → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개, 독립 검토 결과를 올렸습니다."
 
 ### 독립 검토 (QC/QA) — 모든 단계·모든 라운드, 생략하지 않는다
@@ -142,7 +145,7 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 1. `qa-brief <dir> <stage>` → `rounds/<stage>-R<n>/qa-brief.md` (digest·자체 점검 초안·사용자 기준 포함).
 2. reviewer 역할(`agents/reviewer.md`)의 서브에이전트를 가장 강한 모델로 1개 띄운다: "지시문 파일을 읽고 따르라"만 넘긴다. **메인의 결론·기대를 프롬프트에 쓰지 않는다** (자체 점검 초안은 파일로만, 검토원이 마지막에 읽음).
 3. 끝나면 `qa <dir> <stage>` → PES가 검토 결과를 그 단계에 기록한다(그때의 자체 점검도 함께 남는다). 대시보드 단계 탭에 '독립 검토' 칸이 생긴다.
-4. 반영: severity high와 `missed_by_self_review`는 **점검 질문에 추가**(gap.kind는 지적의 kind, label 앞에 "[QA]")하거나, 사실 오류처럼 답이 분명한 것은 바로 다음 라운드 할 일(revise/browser)로 건다(`merge`). 반영한 것과 반영하지 않은 것(이유)을 변경점(`set <dir> <단계> changes`)에 한 줄.
+4. 반영: severity high와 `missed_by_self_review`는 **점검 질문에 추가**(gap.kind는 지적의 kind, label 앞에 "[QA]")하거나, 사실 오류처럼 답이 분명한 것은 바로 다음 라운드 할 일(revise/browser)로 건다(`merge`). 반영한 것과 반영하지 않은 것(이유)을 변경점에 한 줄 — `show <dir> <단계> --fields changes`로 읽은 줄에 더해 전체 배열을 `set <dir> <단계> changes`로 다시 쓴다.
 5. 판정이 fail이면 승인을 권하지 않는다(마지막 질문을 "한 라운드 더"로 추천).
 
 ### 근거 기록 — 보고서에 쓰는 모든 내용
@@ -212,12 +215,12 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 
 | 받은 것 | 처리 |
 |---|---|
-| 질문 폼 답의 `<질문 id>__other` | 그 질문에 붙인 **기타·덧붙일 말(요청사항)** — 선택한 답보다 구체적인 조건이므로 그대로 반영하고, 반영 방식을 라운드 변경점(`set <dir> <단계> changes`)에 한 줄로 적는다 |
+| 질문 폼 답의 `<질문 id>__other` | 그 질문에 붙인 **기타·덧붙일 말(요청사항)** — 선택한 답보다 구체적인 조건이므로 그대로 반영하고, 반영 방식을 라운드 변경점에 한 줄로 적는다(`show <dir> <단계> --fields changes`로 읽은 전체 배열에 더해 `set <dir> <단계> changes`) |
 | "N번 심화: …" | status=deepen, request=지시 |
 | "N번 삭제" / "N번 복구" | removed / done |
 | "N번 수정: …" | status=revise, request=지시 |
 | "N번 원문 확인" | status=browser |
-| "조사 링크: 주소 \| 항목 \| 메모" | 조사 단계 「사용자 제공 링크」 절차 (그 항목 `request`에 링크를 적고 할 일로) |
+| "조사 링크: 주소 \| 항목 \| 메모" | 조사 단계 「사용자 제공 링크」 절차 (그 항목 `user_links`에 넣고 `request`에 적어 할 일로) |
 | "OO 추가" | 새 항목 id=max+1, status=new |
 | "제안 K 진행" | 제안 목록(`status`로 보인다)의 K번째를 새 항목으로 |
 | review answers | 질문마다: 원문 확인→browser, 범위에서 빼기→removed, 기준 선택→해당 항목 revise(conflicts 정리 지시), 추가 조사→new 항목 |
@@ -225,7 +228,7 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 | kind=reopen | 다시 열기 절차 (6) |
 | 모호할 때만 | 다음 라운드 점검 질문으로 되묻는다 (채팅으로 묻지 않는다) |
 
-항목에 거는 status·request와 새 항목은 모두 제안 파일에 담아 `merge`로 넘긴다 — 상태 파일을 열어 고치지 않는다.
+항목에 거는 status·request와 새 항목은 모두 제안 파일에 담아 `merge`로 넘긴다 — 상태 파일을 열어 고치지 않는다. 예: `{"id": 3, "status": "deepen", "request": "2023년 이후 자료 보완"}` (상태·요청만 담은 제안이라 depth는 그대로). 요청을 지울 때는 `"request": ""`.
 
 ## 공통 작업 규칙
 

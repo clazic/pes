@@ -64,7 +64,7 @@ python -m venv .venv
 
 ## 원칙 0 — 에이전트는 상태를 직접 쓰지 않는다
 
-모든 쓰기는 PES가 검증하는 하나의 경로를 지난다(`docs/plan/stage-0.md` 1절). 현재 스킬의 `project.json` 직접 편집(`skills/core/SKILL.md`)은 현행 운영 설명으로 남아 있지만, **새 코드는 이 방식을 따라 하지 않는다**. 2단계에서 없앤다.
+모든 쓰기는 PES가 검증하는 하나의 경로를 지난다(`docs/plan/stage-0.md` 1절). 스킬·서브에이전트 지침·명령 문서는 상태를 `merge`·`set`·`qa` 같은 pes 명령으로만 바꾼다(2단계 PR17에서 `project.json` 직접 편집을 없앴다 — `docs/plan/stage-2-db-guarantees.md` 8.14). `npm run lint:skills`가 문서의 직접 쓰기를 막는다. **새 코드·문서도 상태 파일·업무 DB·잠금 파일을 직접 쓰지 않는다**.
 
 ## 변경 규칙
 

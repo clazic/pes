@@ -108,7 +108,9 @@ const WRITE_VERB = new RegExp(
     String.raw`\btee\b`, String.raw`\bsponge\b`, String.raw`\btruncate\b`,
     String.raw`\bdd\b[^\n]*\bof=`,
     String.raw`\bcurl\b[^\n]*\s(?:-o|-O|--output)\b`, String.raw`\bwget\b[^\n]*\s(?:-O|--output-document)\b`,
-    String.raw`\bopen\(.*,\s*(?:mode\s*=\s*)?["'][wax+]b?\+?["']`, String.raw`\bmode\s*=\s*["'][wax+]`,
+    String.raw`\bopen\(.*,\s*(?:mode\s*=\s*)?["'](?:[wax+][bt]?\+?|r[bt]?\+[bt]?)["']`, String.raw`\bmode\s*=\s*["'](?:[wax+]|r[bt]?\+)`,
+    // pathlib: (Path(d) / "project.json").open("w") — 모드가 첫 인자
+    String.raw`\.open\(\s*["'](?:[wax+][bt]?\+?|r[bt]?\+[bt]?)["']`,
   ].join("|"),
   "i",
 );
@@ -286,7 +288,7 @@ function check_project_json(seg: Segment, file: string, out: Violation[]): void 
 
 /** 업무 표를 바꾸는 SQL. 조각 전체에서 찾아(여러 줄에 걸친 SQL 포함) 줄 번호를 계산한다. */
 const SQL_WRITE =
-  /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE\s+(?:OR\s+\w+\s+)?[\w."`[\]]+\s+SET|DELETE\s+FROM|DROP\s+(?:TABLE|INDEX|VIEW|TRIGGER)|ALTER\s+TABLE|TRUNCATE\s+TABLE)\b/gi;
+  /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE\s+(?:OR\s+\w+\s+)?[\w."`[\]]+\s+SET|DELETE\s+FROM|DROP\s+(?:TABLE|INDEX|VIEW|TRIGGER)|ALTER\s+TABLE|TRUNCATE\s+TABLE|CREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:TABLE|INDEX|VIEW|TRIGGER))\b|(?<![\w.])\.import\s+\S/gi;
 
 function check_sql(seg: Segment, file: string, out: Violation[]): void {
   for (const m of seg.text.matchAll(SQL_WRITE)) {

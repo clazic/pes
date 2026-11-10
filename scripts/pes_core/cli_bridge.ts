@@ -666,36 +666,83 @@ async function hand_over_plan(
     if (meta.legacy_kind !== "topic") continue;
     if (meta.legacy_id === undefined || meta.legacy_id === null || linked.has(String(meta.legacy_id))) continue;
     const topic_links = is_record(meta.links) && Array.isArray(meta.links.plan) ? meta.links.plan : [];
+    // reuse = an imported library item's id: the new research item carries its content and is to be completed (deepen).
+    const lib = find_library_item(s, project, meta.reuse);
     next_id += 1;
     const created = await create_object(s.service, s.ctx(project, auth), {
       kind: "artifact",
       edition_id: research.edition_id,
     });
-    await add_artifact(s.service, s.ctx(project, auth), {
+    const links: Record<string, unknown[]> = {
+      plan: [meta.legacy_id, ...topic_links.filter((id) => String(id) !== String(meta.legacy_id))],
+    };
+    const metadata: Record<string, unknown> = { legacy_id: next_id, legacy_kind: "topic", depth: 0, stage: "research", links };
+    if (lib !== undefined) {
+      links.library = [meta.reuse];
+      metadata.request =
+        `기존 조사(라이브러리 #${String(meta.reuse)}) 재사용 — 기획의 조사 질문에 맞게 보완하고, ` +
+        "원문 미확인 출처와 충돌(⚠)은 다시 확인";
+      const extra = (parse_json_field(lib.metadata_json, {}) as Record<string, unknown>).legacy_extra;
+      if (is_record(extra) && Array.isArray(extra.shots)) metadata.shots = extra.shots;
+      // a confidence the old file wrote outside high/medium/low ("중간") stays as written, like the old copy
+      if (is_record(extra) && "confidence" in extra) metadata.legacy_extra = { confidence_original: extra.confidence };
+    }
+    const added = await add_artifact(s.service, s.ctx(project, auth), {
       object_id: String(result_of(created).object_id),
       artifact_kind: "topic",
       stage_id: research.id,
       title: topic.title,
-      summary: "",
+      summary: lib?.summary ?? "",
       question: topic.question || topic.summary || "",
-      body_md: null,
-      status: "new",
-      confidence: null,
-      stats: [],
-      conflicts: [],
+      body_md: lib?.body_md ?? null,
+      status: lib !== undefined ? "deepen" : "new",
+      confidence: lib?.confidence ?? null,
+      stats: lib !== undefined ? parse_json_field(lib.stats, []) : [],
+      conflicts: lib !== undefined ? parse_json_field(lib.conflicts, []) : [],
       verify: null,
-      metadata: {
-        legacy_id: next_id,
-        legacy_kind: "topic",
-        depth: 0,
-        stage: "research",
-        links: { plan: [meta.legacy_id, ...topic_links.filter((id) => String(id) !== String(meta.legacy_id))] },
-      },
+      metadata,
     });
+    if (lib !== undefined) {
+      const version_id = String(result_of(added).version_id);
+      const cites = s.db.all<{ source_version_id: string; quote: string | null; locator: string }>(
+        `SELECT source_version_id, quote, locator FROM citations
+          WHERE project_id = ? AND artifact_version_id = ? ORDER BY citation_no`,
+        project.id,
+        lib.version_id,
+      );
+      for (const c of cites) {
+        await add_citation(s.service, s.ctx(project, auth), {
+          artifact_version_id: version_id,
+          source_version_id: c.source_version_id,
+          quote: c.quote,
+          locator: parse_json_field(c.locator, {}),
+        });
+      }
+    }
     linked.add(String(meta.legacy_id));
     made += 1;
   }
   return made;
+}
+
+/** An imported library item (an artifact outside every stage) by its old id, as `handoff_plan` looked it up. */
+function find_library_item(s: Session, project: ProjectInfo, reuse: unknown): PrevArtifact | undefined {
+  if (reuse === undefined || reuse === null || reuse === "") return undefined;
+  if (typeof reuse !== "number" && typeof reuse !== "string") return undefined;
+  return s.db.get<PrevArtifact>(
+    `SELECT o.id AS object_id, v.version_id AS version_id, v.title AS title, v.question AS question,
+            v.summary AS summary, v.body_md AS body_md, v.status AS status, v.confidence AS confidence,
+            v.stats AS stats, v.conflicts AS conflicts, v.verify AS verify, v.metadata_json AS metadata_json
+       FROM objects o
+       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+      WHERE o.project_id = ? AND a.stage_id IS NULL AND o.kind = 'artifact'
+        AND a.kind NOT IN ('note', 'review', 'report', 'output')
+        AND json_extract(v.metadata_json, '$.legacy_extra.legacy_id') = ?
+      LIMIT 1`,
+    project.id,
+    reuse,
+  );
 }
 
 const approve: Handler = async (s, req) => {
@@ -908,6 +955,37 @@ function union_links(current: unknown, incoming: Record<string, unknown>): Recor
   return out;
 }
 
+/** Keys of a control-only proposal (status/request/user_links and the id they apply to). */
+const CONTROL_KEYS = new Set(["id", "status", "request", "user_links"]);
+
+function is_control_only(raw: Record<string, unknown>): boolean {
+  const keys = Object.keys(raw);
+  return keys.every((k) => CONTROL_KEYS.has(k)) && keys.some((k) => k !== "id");
+}
+
+/**
+ * user_links (links the user handed in, with a todo/done/failed status): a link whose url is already
+ * there only gets the fields given (status, memo, added); a new url is appended with status "todo".
+ */
+function merge_user_links(current: unknown, incoming: unknown[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = Array.isArray(current)
+    ? current.filter(is_record).map((x) => ({ ...x }))
+    : [];
+  for (const x of incoming) {
+    if (!is_record(x) || typeof x.url !== "string" || x.url.length === 0) continue;
+    const old = out.find((u) => u.url === x.url);
+    if (old === undefined) {
+      const added: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(x)) if (v !== undefined && v !== null) added[k] = v;
+      if (typeof added.status !== "string" || added.status.length === 0) added.status = "todo";
+      out.push(added);
+    } else {
+      for (const [k, v] of Object.entries(x)) if (v !== undefined && v !== null && v !== "") old[k] = v;
+    }
+  }
+  return out;
+}
+
 const CONFIDENCES = ["high", "medium", "low"];
 
 /** What the old source dictionary carried besides title/url/method (the importer keeps the same four keys in the locator). */
@@ -959,17 +1037,24 @@ const merge: Handler = async (s, req) => {
     const prev = find_previous(s, project, stage, legacy_id);
     const prev_meta = prev === undefined ? {} : (parse_json_field(prev.metadata_json, {}) as Record<string, unknown>);
     const prev_fields: Partial<PrevArtifact> = prev ?? {};
-    const status = typeof raw.status === "string" && raw.status.length > 0 ? raw.status : "done";
+    // A proposal that only carries status/request/user_links (deepen, revise, remove, a user's link) is a
+    // control change, not merged content: like the old direct edit it neither raises depth nor turns the item "done".
+    const control_only = is_control_only(raw);
+    const given = typeof raw.status === "string" && raw.status.length > 0 ? raw.status : null;
+    const status = given ?? (control_only ? prev?.status ?? "new" : "done");
     const metadata: Record<string, unknown> = {
       ...prev_meta,
       legacy_id: legacy_id ?? prev_meta.legacy_id ?? null,
       legacy_kind: typeof raw.kind === "string" ? raw.kind : prev_meta.legacy_kind ?? "",
-      depth: Number(prev_meta.depth ?? 0) + 1,
+      depth: Number(prev_meta.depth ?? 0) + (control_only ? 0 : 1),
       stage: stage.key,
     };
-    for (const key of ["order", "verdict", "path", "open_questions", "request"]) {
+    for (const key of ["order", "verdict", "path", "open_questions", "reuse", "model"]) {
       if (raw[key] !== undefined && raw[key] !== null && raw[key] !== "") metadata[key] = raw[key];
     }
+    // request: overwritten only when given; an empty string clears it.
+    if (typeof raw.request === "string") metadata.request = raw.request;
+    if (Array.isArray(raw.user_links)) metadata.user_links = merge_user_links(prev_meta.user_links, raw.user_links);
     // shots and links accumulate across rounds like the old merge (no duplicates).
     if (Array.isArray(raw.shots) && raw.shots.length > 0) metadata.shots = union_json(prev_meta.shots, raw.shots);
     if (is_record(raw.links) && Object.keys(raw.links).length > 0) metadata.links = union_links(prev_meta.links, raw.links);

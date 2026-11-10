@@ -13,7 +13,7 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 - 요청에 주제가 있으면 `topic` 질문 삭제, `inherited`에 주제.
 - `project.library`가 없으면 `library` 질문 삭제. 있으면 inherited에 "기존 조사: 항목 N개(R{round}까지)".
 - 형식이 연구보고서가 아닐 법하면 `research_type`·`team` 삭제.
-- 답(주제·목적·독자·형식·범위)은 `pending`·`context`로 읽어 `set <dir> plan settings <파일>`로 저장한다.
+- 답(주제·목적·독자·형식·범위·보고서 형식)은 `pending`이 알려 준 답 파일(`feedback/*.json`)의 answers를 읽어 `set <dir> plan settings <파일>`로 저장한다(프로젝트 설정에도 함께 들어가 보고서 형식과 검토원이 읽는 사용자 기준이 된다).
 
 ## R1에 만드는 것 (항목 kind)
 
@@ -25,9 +25,9 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 | `schedule` 일정 | 마감이 있으면 단계별 날짜 | details=표 |
 
 - 각 topic은 최소 한 chapter와 연결한다. chapter마다 근거가 될 topic이 있어야 한다.
-- **참고자료(library)가 있으면** 항목을 하나씩 대조해 겹치는 topic에 `"reuse": <library id>`를 단다. 그 topic의 summary 첫 줄에 "기존 조사 #N 재사용 — 보완할 점: …"을 적는다. 기획에 맞지 않는 library 항목은 쓰지 않는다(이유를 changes에 한 줄).
+- **참고자료(library)가 있으면** 항목을 하나씩 대조해 겹치는 topic에 `"reuse": <library id>`를 단다. 그 topic의 summary 첫 줄에 "기존 조사 #N 재사용 — 보완할 점: …"을 적는다. 기획에 맞지 않는 library 항목은 쓰지 않는다(이유를 changes에 한 줄 — `show <dir> plan --fields changes`로 읽은 전체 배열에 더해 `set`).
 - 기획 단계에서는 새 조사를 하지 않는다. 필요하면 주제 파악용 빠른 검색만(출처는 sources에).
-- 항목은 제안 파일(JSON 배열: 항목마다 `kind`·`title`·`summary`·`question`·`links`·`reuse` 등)로 쓰고 `merge <dir> plan <파일>`로 넘긴다 (토큰을 가진 작업자는 `claim` → `submit`). `updated_round`·`depth`는 PES가 맞춘다.
+- 항목은 제안 파일(JSON 배열: 항목마다 `kind`·`title`·`summary`·`question`·`links`·`reuse` 등)로 쓰고 `merge <dir> plan <파일>`로 넘긴다 (DB 경로에서 토큰을 가진 작업자는 `claim` → `submit`). `updated_round`·`depth`는 PES가 맞춘다. `merge`는 `reuse`를 그대로 남기고, 기획 승인 때 `reuse`가 달린 topic은 참고자료 내용을 이어받은 조사 항목(deepen)이 된다.
 
 ## AI 점검 초점
 
