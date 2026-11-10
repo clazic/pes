@@ -282,6 +282,18 @@ def main():
                 return self._api("PUT", path)
             return self._json(405, {"ok": False})
 
+        def do_DELETE(self):
+            path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("DELETE", path)
+            return self.send_error(501, "Unsupported method ('DELETE')")
+
+        def do_PATCH(self):
+            path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("PATCH", path)
+            return self.send_error(501, "Unsupported method ('PATCH')")
+
     srv = LocalHTTPServer(("127.0.0.1", port), H)
     print(f"serving {root} at http://127.0.0.1:{port}/", flush=True)
     srv.serve_forever()

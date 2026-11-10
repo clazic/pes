@@ -43,6 +43,13 @@ components:
       in: header
       required: true
       schema: { type: string, minLength: 1 }
+  responses:
+    MethodNotAllowed:
+      description: Method not allowed; the Allow header names the supported methods
+      headers:
+        Allow:
+          description: Comma-separated list of methods allowed on this path
+          schema: { type: string }
   schemas:
     Success:
       type: object
@@ -78,6 +85,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Success" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects:
     post:
       summary: Create a project, its owner, initial policy, and first edition in one transaction
@@ -105,6 +113,8 @@ paths:
         "400": { description: Invalid payload }
         "401": { description: Local session required }
         "409": { description: Duplicate slug or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/context:
     get:
       summary: Read the project's consistency boundary, policy, stages, manifest, and lease
@@ -122,6 +132,7 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing scope or Go policy denied }
         "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs:
     post:
       summary: Owner queues a run for an agent actor (no lease is taken)
@@ -138,6 +149,9 @@ paths:
         "400": { description: Invalid payload }
         "401": { description: Local session required }
         "403": { description: Agent tokens cannot start runs }
+        "404": { description: Unknown project or target actor }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/claims:
     post:
       summary: Claim a queued run or create and claim a fresh run
@@ -154,7 +168,10 @@ paths:
         "400": { description: Invalid payload }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing scope or Go policy denied }
+        "404": { description: Unknown project }
         "409": { description: Live lease, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs/{r}/wait:
     post:
       summary: Commit waiting_human, release the lease, then optionally hold the response
@@ -172,7 +189,10 @@ paths:
         "400": { description: Invalid wait_ms or payload }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing scope or Go policy denied }
+        "404": { description: Unknown project or run }
         "409": { description: Lease is not current }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs/{r}/results:
     post:
       summary: Submit 1-20 version appends as one atomic result bundle
@@ -192,6 +212,8 @@ paths:
         "403": { description: Missing scope or Go policy denied }
         "404": { description: Unknown object or run }
         "409": { description: Lease is not current, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs/{r}/complete:
     post:
       summary: End the run (not an approval or a seal)
@@ -209,7 +231,10 @@ paths:
         "400": { description: Invalid status or payload }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing scope or Go policy denied }
+        "404": { description: Unknown project or run }
         "409": { description: Lease is not current or the run already ended }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/uploads:
     post:
       summary: Reserve a staging blob (no download URL is returned)
@@ -231,6 +256,9 @@ paths:
         "400": { description: Invalid reservation }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing file:write scope }
+        "404": { description: Unknown project }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/uploads/{b}:
     put:
       summary: Upload raw bytes for a staging blob
@@ -248,6 +276,7 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing file:write scope }
         "404": { description: Unknown blob in this project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/uploads/{b}/complete:
     post:
       summary: Re-read the stored bytes and move staging to ready or quarantined
@@ -267,6 +296,8 @@ paths:
         "403": { description: Missing file:write scope }
         "404": { description: Unknown blob in this project }
         "409": { description: The blob is not staging or has no stored bytes }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/files/{b}/content:
     get:
       summary: Read a ready blob through the PES proxy (policy checked on every read)
@@ -285,4 +316,5 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing file:read scope or Go policy denied }
         "404": { description: Unknown blob in this project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
         "409": { description: Blob is not ready or stored bytes do not match }

@@ -125,6 +125,14 @@ const FORMAT_VERSION = "1.0";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_WAIT_MS = 25_000;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
+const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** SQLite INTEGER is signed 64-bit; a larger decimal can never be a real rev. */
+const MAX_SQLITE_INTEGER = 9223372036854775807n;
+
+type RevDecimal =
+  | { kind: "safe"; text: string; value: number }
+  | { kind: "too_precise"; text: string }
+  | { kind: "out_of_sqlite"; text: string };
 
 const ERROR_STATUS: Readonly<Record<string, number>> = Object.freeze({
   unauthenticated: 401,
@@ -208,13 +216,37 @@ function parse_fence(value: unknown): number {
   return fence;
 }
 
-function parse_rev(value: unknown): number {
+/**
+ * One decimal revision classifier for both claims and results.
+ *
+ * - Values at or below Number.MAX_SAFE_INTEGER are exact.
+ * - Values above that but within SQLite's signed 64-bit range are accepted only
+ *   when a double represents them exactly; otherwise comparing them in JS
+ *   would round, so the client must not send them (400 invalid_payload).
+ * - Values beyond SQLite's range can never equal a stored rev; claims report
+ *   them as a stale revision (409), while results reject them as invalid input.
+ */
+function classify_rev_decimal(value: unknown): RevDecimal {
   const text = parse_decimal(value, "expected_control_rev");
-  const rev = Number(text);
-  if (!Number.isSafeInteger(rev) || rev < 0) {
+  const parsed = BigInt(text);
+  if (parsed > MAX_SQLITE_INTEGER) return { kind: "out_of_sqlite", text };
+  if (parsed <= BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { kind: "safe", text, value: Number(parsed) };
+  }
+  const as_number = Number(parsed);
+  if (BigInt(as_number) === parsed) {
+    return { kind: "safe", text, value: as_number };
+  }
+  return { kind: "too_precise", text };
+}
+
+/** results.submit takes a Number base rev, so anything beyond the safe range is invalid. */
+function parse_results_rev(value: unknown): number {
+  const parsed = classify_rev_decimal(value);
+  if (parsed.kind !== "safe" || parsed.value > Number.MAX_SAFE_INTEGER) {
     invalid("expected_control_rev must be a non-negative safe integer decimal string");
   }
-  return rev;
+  return parsed.value;
 }
 
 function require_mode(body: Record<string, unknown>): "A" | "B" {
@@ -609,10 +641,13 @@ export class ApiApp {
 
   #check_claim_rev(body: Record<string, unknown>, project: ProjectRow): void {
     if (!Object.hasOwn(body, "expected_control_rev")) return;
-    const expected = parse_decimal(body.expected_control_rev, "expected_control_rev");
-    if (BigInt(expected) !== project.control_rev) {
+    const parsed = classify_rev_decimal(body.expected_control_rev);
+    if (parsed.kind === "too_precise") {
+      invalid("expected_control_rev must be an exactly representable decimal string");
+    }
+    if (parsed.kind === "out_of_sqlite" || BigInt(parsed.text) !== project.control_rev) {
       throw new ApiError("rev_conflict", "the control revision is stale", {
-        expected,
+        expected: parsed.text,
         current: project.control_rev.toString(),
       });
     }
@@ -662,8 +697,12 @@ export class ApiApp {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
     reject_unknown(body, ["slug", "topic", "owner_display_name"]);
+    const slug = require_text(body, "slug");
+    if (!SLUG.test(slug)) {
+      invalid("slug must be 1-64 lowercase letters, digits, or hyphens and start with a letter or digit");
+    }
     const payload = {
-      slug: require_text(body, "slug"),
+      slug,
       topic: require_text(body, "topic"),
       owner_display_name: require_text(body, "owner_display_name"),
     };
@@ -895,7 +934,7 @@ export class ApiApp {
     const fence = parse_fence(body.fence);
     let base: number | undefined;
     if (Object.hasOwn(body, "expected_control_rev")) {
-      base = parse_rev(body.expected_control_rev);
+      base = parse_results_rev(body.expected_control_rev);
     }
     if (!Array.isArray(body.results)) invalid("results must be an array");
     this.#require_go_for_run(project.id, run_id);
