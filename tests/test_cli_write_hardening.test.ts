@@ -17,7 +17,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -131,9 +131,22 @@ function baseline_dir(): string | null {
   return dir;
 }
 
+/** 한 루트의 모든 표기: 그대로, Windows 긴 이름(8.3 RUNNER~1 → runneradmin), 파이썬 repr 의 겹친 역슬래시. */
+function root_forms(root: string): string[] {
+  const forms = new Set([root]);
+  try {
+    forms.add(realpathSync.native(root));
+  } catch {
+    // 없는 경로(예: macOS 의 /private 변형)는 그대로만 쓴다.
+  }
+  for (const form of [...forms]) if (form.includes("\\")) forms.add(form.split("\\").join("\\\\"));
+  return [...forms];
+}
+
 function normalize(text: string, roots: string[]): string {
   let out = text;
-  for (const root of [...roots].sort((x, y) => y.length - x.length)) out = out.split(root).join("<ROOT>");
+  const all = roots.flatMap(root_forms);
+  for (const root of all.sort((x, y) => y.length - x.length)) out = out.split(root).join("<ROOT>");
   return out
     .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?/g, "<TS>")
     .replace(/\d{8}-\d{6}/g, "<STAMP>") // chat 이 만드는 feedback/plan-R1-YYYYMMDD-HHMMSS.json 의 초 단위 시각
