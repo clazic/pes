@@ -20,22 +20,13 @@ const RANK_NAME: Record<NowItem["kind"], string> = {
   check: "확인",
   wait: "기다림",
 };
-const RANK_EDGE: Record<NowItem["kind"], string> = {
-  blocked: "border-bad-line",
-  answer: "border-primary-line",
-  approve: "border-primary-line",
-  resume: "border-primary-line",
-  check: "border-warn-line",
-  wait: "border-ok-line",
-};
-/** 배너 바탕: 순위 색을 옅은 바탕 한 면으로 깐다(왼쪽 굵은 띠·번짐 없음 — impeccable side-tab 지적, 11-10). 순위 이름은 머리글 글자로도 보인다. */
-const RANK_BG: Record<NowItem["kind"], string> = {
-  blocked: "bg-bad-soft",
-  answer: "bg-primary-soft",
-  approve: "bg-primary-soft",
-  resume: "bg-primary-soft",
-  check: "bg-warn-soft",
-  wait: "bg-ok-soft",
+const RANK_TONE: Record<NowItem["kind"], "bad" | "primary" | "warn" | "ok"> = {
+  blocked: "bad",
+  answer: "primary",
+  approve: "primary",
+  resume: "primary",
+  check: "warn",
+  wait: "ok",
 };
 
 /** 이 역할이 이 순위의 일을 직접 할 수 없는가(시안 — 실제로는 서버가 사람·권한별로 계산한 지금 할 일을 준다) */
@@ -57,56 +48,58 @@ export function NowCard({ now, context, titleId, className, extraAction, turn }:
   const others = now.for_others && lacksPermission(now.kind, role) ? now.for_others : null;
   const hasMore = Boolean(now.detail || now.hint);
   return (
-    <Card className={cn("gap-0 px-5 py-4", RANK_EDGE[now.kind], RANK_BG[now.kind], className)} aria-labelledby={titleId}>
-      <MoreRoot>
-        <div className="flex flex-col gap-3 tab:flex-row tab:items-start tab:justify-between tab:gap-6">
-          <div className="min-w-0">
-            <Eyebrow>
-              지금 할 일{context ? ` · ${context}` : ""} · {RANK_NAME[now.kind]}
-            </Eyebrow>
-            <h2 id={titleId} className="text-title tracking-tight">
-              {now.title}
-            </h2>
-            {now.facts?.length ? <p className="mt-1 text-sm text-ink-2">{now.facts.join(" · ")}</p> : null}
-            {others ? (
-              <p className="mt-2">
-                <Chip shape="hsquare" tone="off" wrap>
-                  {others}
-                </Chip>
+    <div className={className}>
+      <Card size="compact" tone={RANK_TONE[now.kind]} aria-labelledby={titleId}>
+        <MoreRoot>
+          <div className="flex flex-col gap-3 tab:flex-row tab:items-start tab:justify-between tab:gap-6">
+            <div className="min-w-0">
+              <Eyebrow>
+                지금 할 일{context ? ` · ${context}` : ""} · {RANK_NAME[now.kind]}
+              </Eyebrow>
+              <h2 id={titleId} className="text-title tracking-tight">
+                {now.title}
+              </h2>
+              {now.facts?.length ? <p className="mt-1 text-sm text-ink-2">{now.facts.join(" · ")}</p> : null}
+              {others ? (
+                <p className="mt-2">
+                  <Chip shape="hsquare" tone="off" wrap>
+                    {others}
+                  </Chip>
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-col items-stretch gap-2 tab:max-w-[22rem] tab:items-end">
+              {/* 나의 할 일의 “먼저 할 일” 한 줄은 이 띠의 제목이 이미 말한다 — AI·기다림일 때만 한 줄 */}
+              {turn ? <TurnIndicator turn={turn} size="lg" align="end" detail={turn.side !== "you"} /> : null}
+              <Button asChild variant="default">
+                <Link to={now.action.href}>{now.action.label}</Link>
+              </Button>
+              {extraAction}
+            </div>
+          </div>
+          {now.then.length > 0 || hasMore ? (
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-2 text-meta">
+              {now.then.length > 0 ? <span className="font-medium text-muted-foreground">그다음</span> : null}
+              {now.then.map((t) => (
+                <Link key={t.label} to={t.href}>
+                  {t.label}
+                </Link>
+              ))}
+              {hasMore ? <MoreTrigger className="ml-auto" name="지금 할 일 자세히" /> : null}
+            </div>
+          ) : null}
+          {hasMore ? (
+            <MoreContent className="mt-1.5 space-y-0.5">
+              {now.detail ? <p>{now.detail}</p> : null}
+              {now.hint ? <p>{now.hint}</p> : null}
+              <p className="text-muted-foreground">
+                우선순위 {now.rank} · {RANK_NAME[now.kind]}
               </p>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 flex-col items-stretch gap-2 tab:max-w-[22rem] tab:items-end">
-            {/* 나의 할 일의 “먼저 할 일” 한 줄은 이 띠의 제목이 이미 말한다 — AI·기다림일 때만 한 줄 */}
-            {turn ? <TurnIndicator turn={turn} size="lg" align="end" detail={turn.side !== "you"} /> : null}
-            <Button asChild variant="default">
-              <Link to={now.action.href}>{now.action.label}</Link>
-            </Button>
-            {extraAction}
-          </div>
-        </div>
-        {now.then.length > 0 || hasMore ? (
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-2 text-meta">
-            {now.then.length > 0 ? <span className="font-medium text-muted-foreground">그다음</span> : null}
-            {now.then.map((t) => (
-              <Link key={t.label} to={t.href}>
-                {t.label}
-              </Link>
-            ))}
-            {hasMore ? <MoreTrigger className="ml-auto" name="지금 할 일 자세히" /> : null}
-          </div>
-        ) : null}
-        {hasMore ? (
-          <MoreContent className="mt-1.5 space-y-0.5">
-            {now.detail ? <p>{now.detail}</p> : null}
-            {now.hint ? <p>{now.hint}</p> : null}
-            <p className="text-muted-foreground">
-              우선순위 {now.rank} · {RANK_NAME[now.kind]}
-            </p>
-          </MoreContent>
-        ) : null}
-      </MoreRoot>
-    </Card>
+            </MoreContent>
+          ) : null}
+        </MoreRoot>
+      </Card>
+    </div>
   );
 }
 
@@ -169,10 +162,12 @@ export function LoadError({ what, lastReceived, code, onRetry }: { what: string;
         다른 영역은 그대로 쓸 수 있습니다. 마지막으로 받은 시각 {lastReceived} · 오류 번호 {code}. 입력 중인 초안은 지우지 않습니다.
       </p>
       {onRetry ? (
-        <Button size="sm" className="mt-2" onClick={onRetry}>
-          <RotateCcwIcon aria-hidden="true" />
-          다시 시도
-        </Button>
+        <div className="mt-2">
+          <Button size="sm" onClick={onRetry}>
+            <RotateCcwIcon aria-hidden="true" />
+            다시 시도
+          </Button>
+        </div>
       ) : null}
     </div>
   );

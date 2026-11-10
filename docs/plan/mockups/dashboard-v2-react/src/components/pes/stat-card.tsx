@@ -16,7 +16,6 @@ export function StatCard({
   lead,
   sub,
   footer,
-  className,
   labelAside,
 }: {
   id: string;
@@ -29,10 +28,9 @@ export function StatCard({
   lead?: React.ReactNode;
   sub?: React.ReactNode;
   footer?: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <Card aria-labelledby={id} className={cn("@container/card gap-0 bg-linear-to-t from-primary/5 to-card py-0 dark:bg-card dark:bg-none", className)}>
+    <Card size="flush" variant="metric" aria-labelledby={id}>
       <div className="px-4 pt-3.5 @[15rem]/card:px-5 @[15rem]/card:pt-4">
         <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
           <div className="flex min-w-0 items-center gap-1">

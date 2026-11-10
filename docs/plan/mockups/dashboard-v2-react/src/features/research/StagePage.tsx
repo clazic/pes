@@ -33,7 +33,7 @@ export function StagePage() {
 
   return (
     <div className="mt-5 space-y-4">
-      <Card className="gap-0 px-5" aria-labelledby="stg-t">
+      <Card size="compact" aria-labelledby="stg-t">
         <CardHead eyebrow="단계 결과" title={`${STAGE_LABEL[key]} 단계`} titleId="stg-t" right={<Status of="stage" value={st.view} label={st.state_text} />} />
         {st.view === "stale" ? (
           <p className="mb-3 rounded-lg border border-warn-line bg-warn-soft px-3 py-2 text-meta">

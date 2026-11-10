@@ -38,7 +38,7 @@ export function ProjectSyncPage() {
   return (
     <div className="mt-5">
       <SectionTitle title="내 컴퓨터 연결" sub="이 프로젝트의 기기 · 도우미 · AI 도구 · 동기화" className="mt-0" right={<Button asChild size="sm"><Link to="/computer">모든 기기(관리 공간)</Link></Button>} />
-      <Card className="gap-0 px-5" aria-labelledby="pc-t">
+      <Card size="compact" aria-labelledby="pc-t">
         <CardHead eyebrow="기기" title={t.device} titleId="pc-t" right={<StatusFrom s={t.status} />} meta={t.checked} />
         <MoreList className="text-meta" items={t.observations.map((o) => [o.k, o.v] as [string, string])} />
       </Card>
