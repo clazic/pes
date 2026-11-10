@@ -22,6 +22,7 @@ import time
 import pytest
 
 from conftest import ROOT
+from serve_budget import tighten
 from test_serve import Server, _make_home
 
 SECRET = "synthetic-limits-session-secret"
@@ -70,8 +71,9 @@ def _call(server, method, path, auth, obj=None, key=None):
 
 
 class Env:
-    def __init__(self, server, home):
+    def __init__(self, server, home, override=None):
         self.server = server
+        self.override = override or {}
         self.db_path = home / ".pes" / "pes.db"
         self.env_vars = {"HOME": str(home), "USERPROFILE": str(home), "PES_HOME": str(home / "pes-projects"),
                          "PES_LOCAL_SESSION_SECRET": SECRET}
@@ -90,6 +92,8 @@ class Env:
         # 문서 계약: capabilities.limits. 지금 구현의 최상위 limits 도 같은 값이다 (둘 다 본다).
         merged = dict(self.caps.get("limits") or {})
         merged.update(self.caps["capabilities"]["limits"])
+        # capabilities 는 Node 의 기본 숫자를 내준다. 서버가 실제로 쓰는 조인 값이 있으면 그것이 유효 한도다.
+        merged.update(self.override)
         return merged
 
     def make_agent(self, name):
@@ -133,6 +137,19 @@ def env(isolated_home, tmp_path, monkeypatch):
         instance.stop()
 
 
+@pytest.fixture
+def tight_env(isolated_home, tmp_path, monkeypatch):
+    """한도 숫자만 작게 조인 서버 (PES_API_BUDGET_TEST_OVERRIDE). 단언은 env 와 같다."""
+    monkeypatch.setenv("PES_LOCAL_SESSION_SECRET", SECRET)
+    override = tighten(monkeypatch)
+    instance = Server(_make_home(isolated_home), tmp_path)
+    try:
+        instance.start()
+        yield Env(instance, isolated_home, override)
+    finally:
+        instance.stop()
+
+
 def _poll_gap_s(env):
     return int(env.limits["min_poll_interval_ms"]) / 1000.0
 
@@ -155,60 +172,60 @@ def _assert_rate_limited(status, doc, headers, scope):
 # ---------------------------------------------------------------------------
 # (1) 요청 예산
 
-def test_the_request_after_the_agent_limit_is_429_with_the_whole_error_contract(env):
-    agent = env.make_agent("budget")
-    limit = int(env.limits["agent_requests_per_minute"])
+def test_the_request_after_the_agent_limit_is_429_with_the_whole_error_contract(tight_env):
+    agent = tight_env.make_agent("budget")
+    limit = int(tight_env.limits["agent_requests_per_minute"])
     for i in range(limit):
-        status, doc, _ = _call(env.server, "GET", f"{env.P}/changes", agent["token"])
+        status, doc, _ = _call(tight_env.server, "GET", f"{tight_env.P}/changes", agent["token"])
         assert status == 200, (i, doc)
-    status, doc, headers = _call(env.server, "GET", f"{env.P}/changes", agent["token"])
+    status, doc, headers = _call(tight_env.server, "GET", f"{tight_env.P}/changes", agent["token"])
     _assert_rate_limited(status, doc, headers, "general")
     # 한 번 더 보내도 같은 창 안에서는 계속 거절된다.
-    status, doc, headers = _call(env.server, "GET", f"{env.P}/context", agent["token"])
+    status, doc, headers = _call(tight_env.server, "GET", f"{tight_env.P}/context", agent["token"])
     _assert_rate_limited(status, doc, headers, "general")
 
 
-def test_other_tokens_the_owner_session_and_the_control_bucket_have_their_own_budget(env):
-    spent = env.make_agent("spent")
-    fresh = env.make_agent("fresh")
-    limit = int(env.limits["agent_requests_per_minute"])
+def test_other_tokens_the_owner_session_and_the_control_bucket_have_their_own_budget(tight_env):
+    spent = tight_env.make_agent("spent")
+    fresh = tight_env.make_agent("fresh")
+    limit = int(tight_env.limits["agent_requests_per_minute"])
     for _ in range(limit):
-        assert _call(env.server, "GET", f"{env.P}/changes", spent["token"])[0] == 200
-    assert _call(env.server, "GET", f"{env.P}/changes", spent["token"])[0] == 429
+        assert _call(tight_env.server, "GET", f"{tight_env.P}/changes", spent["token"])[0] == 200
+    assert _call(tight_env.server, "GET", f"{tight_env.P}/changes", spent["token"])[0] == 429
     # 다른 토큰은 영향이 없다.
-    assert _call(env.server, "GET", f"{env.P}/changes", fresh["token"])[0] == 200
+    assert _call(tight_env.server, "GET", f"{tight_env.P}/changes", fresh["token"])[0] == 200
     # 소유자 세션 예산은 별개다.
-    assert _call(env.server, "GET", f"{env.P}/changes", "owner")[0] == 200
+    assert _call(tight_env.server, "GET", f"{tight_env.P}/changes", "owner")[0] == 200
     # 같은 토큰의 control 경로(operations 조회)는 별도 예산이라 429 가 아니다 (없는 id 는 404).
-    status, doc, _ = _call(env.server, "GET", f"{env.P}/operations/no-such-operation", spent["token"])
+    status, doc, _ = _call(tight_env.server, "GET", f"{tight_env.P}/operations/no-such-operation", spent["token"])
     assert status != 429, doc
     # 프로젝트 경로가 아닌 열린 경로는 예산을 쓰지 않는다.
-    assert _call(env.server, "GET", "/api/v1/capabilities", None)[0] == 200
+    assert _call(tight_env.server, "GET", "/api/v1/capabilities", None)[0] == 200
 
 
-def test_requests_refused_over_their_own_input_do_not_spend_the_budget(env):
-    agent = env.make_agent("refund")
-    limit = int(env.limits["agent_requests_per_minute"])
+def test_requests_refused_over_their_own_input_do_not_spend_the_budget(tight_env):
+    agent = tight_env.make_agent("refund")
+    limit = int(tight_env.limits["agent_requests_per_minute"])
     # 변조 cursor -> 400 cursor_invalid 는 요청 예산을 돌려받는다 (쿼리가 전달돼야만 400 이 된다).
     for i in range(limit + 3):
-        status, doc, _ = _call(env.server, "GET", f"{env.P}/changes?cursor=tampered-{i}", agent["token"])
+        status, doc, _ = _call(tight_env.server, "GET", f"{tight_env.P}/changes?cursor=tampered-{i}", agent["token"])
         assert status == 400, (i, status, doc)
         assert doc["error"]["code"] == "cursor_invalid"
-    assert _call(env.server, "GET", f"{env.P}/changes", agent["token"])[0] == 200
+    assert _call(tight_env.server, "GET", f"{tight_env.P}/changes", agent["token"])[0] == 200
 
 
-def test_the_raw_token_never_reaches_the_server_log(env):
-    agent = env.make_agent("log")
-    limit = int(env.limits["agent_requests_per_minute"])
+def test_the_raw_token_never_reaches_the_server_log(tight_env):
+    agent = tight_env.make_agent("log")
+    limit = int(tight_env.limits["agent_requests_per_minute"])
     for _ in range(limit + 1):
-        _call(env.server, "GET", f"{env.P}/changes", agent["token"])
+        _call(tight_env.server, "GET", f"{tight_env.P}/changes", agent["token"])
     for bad in (agent["token"] + "x", "synthetic-wrong-token"):
-        _call(env.server, "GET", f"{env.P}/changes", bad)
-    log = env.server.log_text()
+        _call(tight_env.server, "GET", f"{tight_env.P}/changes", bad)
+    log = tight_env.server.log_text()
     assert agent["token"] not in log
     assert SECRET not in log
     # 본문 응답에도 토큰 원문이 없다.
-    status, body_doc, headers = _call(env.server, "GET", f"{env.P}/changes", agent["token"])
+    status, body_doc, headers = _call(tight_env.server, "GET", f"{tight_env.P}/changes", agent["token"])
     assert status == 429
     assert agent["token"] not in json.dumps(body_doc) + json.dumps(headers)
 
@@ -216,37 +233,37 @@ def test_the_raw_token_never_reaches_the_server_log(env):
 # ---------------------------------------------------------------------------
 # (2) inputs 최소 poll 간격
 
-def test_an_empty_inputs_poll_faster_than_the_minimum_interval_is_429_poll(env):
-    agent = env.make_agent("poller")
-    other = env.make_agent("poller-other")
-    run = env.owner_creates_run(agent)
-    other_run = env.owner_creates_run(other)
-    path = f"{env.P}/runs/{run}/inputs"
+def test_an_empty_inputs_poll_faster_than_the_minimum_interval_is_429_poll(tight_env):
+    agent = tight_env.make_agent("poller")
+    other = tight_env.make_agent("poller-other")
+    run = tight_env.owner_creates_run(agent)
+    other_run = tight_env.owner_creates_run(other)
+    path = f"{tight_env.P}/runs/{run}/inputs"
 
-    status, doc, _ = _call(env.server, "GET", path, agent["token"])
+    status, doc, _ = _call(tight_env.server, "GET", path, agent["token"])
     assert status == 200 and doc["data"]["inputs"] == [], doc
-    status, doc, headers = _call(env.server, "GET", path, agent["token"])
+    status, doc, headers = _call(tight_env.server, "GET", path, agent["token"])
     _assert_rate_limited(status, doc, headers, "poll")
-    assert doc["error"]["details"]["retry_after_ms"] <= int(env.limits["min_poll_interval_ms"])
+    assert doc["error"]["details"]["retry_after_ms"] <= int(tight_env.limits["min_poll_interval_ms"])
     # 다른 토큰(다른 run)의 poll 은 막히지 않는다.
-    assert _call(env.server, "GET", f"{env.P}/runs/{other_run}/inputs", other["token"])[0] == 200
+    assert _call(tight_env.server, "GET", f"{tight_env.P}/runs/{other_run}/inputs", other["token"])[0] == 200
 
-    time.sleep(_poll_gap_s(env) + 0.3)
-    status, doc, _ = _call(env.server, "GET", path, agent["token"])
+    time.sleep(_poll_gap_s(tight_env) + 0.3)
+    status, doc, _ = _call(tight_env.server, "GET", path, agent["token"])
     assert status == 200, doc
 
 
-def test_a_poll_refusal_leaves_the_next_allowed_time_where_it_was(env):
-    agent = env.make_agent("poller2")
-    run = env.owner_creates_run(agent)
-    path = f"{env.P}/runs/{run}/inputs"
-    assert _call(env.server, "GET", path, agent["token"])[0] == 200
+def test_a_poll_refusal_leaves_the_next_allowed_time_where_it_was(tight_env):
+    agent = tight_env.make_agent("poller2")
+    run = tight_env.owner_creates_run(agent)
+    path = f"{tight_env.P}/runs/{run}/inputs"
+    assert _call(tight_env.server, "GET", path, agent["token"])[0] == 200
     for _ in range(3):
-        status, doc, _ = _call(env.server, "GET", path, agent["token"])
+        status, doc, _ = _call(tight_env.server, "GET", path, agent["token"])
         assert status == 429 and doc["error"]["details"]["scope"] == "poll"
     # 거절된 요청들이 간격을 계속 미루지 않는다: 간격 + 여유 뒤에는 통과한다.
-    time.sleep(_poll_gap_s(env) + 0.3)
-    assert _call(env.server, "GET", path, agent["token"])[0] == 200
+    time.sleep(_poll_gap_s(tight_env) + 0.3)
+    assert _call(tight_env.server, "GET", path, agent["token"])[0] == 200
 
 
 # ---------------------------------------------------------------------------

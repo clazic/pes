@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from conftest import ROOT
+from serve_budget import TIGHT, tighten
 from test_serve import Server, _make_home
 
 BOOT = ROOT / "tests" / "helpers" / "bootstrap_agent.ts"
@@ -154,11 +155,26 @@ def _hammer(server, path, token, count):
     return seen
 
 
-def test_requests_without_any_credential_end_in_429_from_a_coarse_bucket(plain):
-    server, boot, _, _ = plain
+@pytest.fixture
+def tight_plain(isolated_home, tmp_path, monkeypatch):
+    """plain 과 같되 한도 숫자만 조인 서버 (PES_API_BUDGET_TEST_OVERRIDE)."""
+    monkeypatch.delenv("PES_LOCAL_SESSION_SECRET", raising=False)
+    boot = _bootstrap(isolated_home, "synthetic-r1t")
+    tighten(monkeypatch)
+    instance = Server(_make_home(isolated_home), tmp_path)
+    try:
+        instance.start()
+        yield instance, boot, isolated_home, tmp_path
+    finally:
+        instance.stop()
+
+
+def test_requests_without_any_credential_end_in_429_from_a_coarse_bucket(tight_plain):
+    server, boot, _, _ = tight_plain
     status, doc, _, _ = _get(server, "/api/v1/capabilities")
     assert status == 200
-    ceiling = int(doc["data"]["capabilities"]["limits"]["agent_requests_per_minute"]) * 12
+    # 거친 상한(조인 값)의 두 배 가까이 보내야 반드시 넘는다 (기본 서버에서는 agent 60 * 12 = 720 건이었다).
+    ceiling = TIGHT["coarse_requests_per_minute"] * 3
     seen = _hammer(server, f"/api/v1/projects/{boot['project_id']}/changes", None, ceiling)
     assert seen["limited"] is not None, f"{seen['sent']} 건의 무자격 요청이 모두 Node 까지 갔다"
     limited, headers = seen["limited"]
@@ -166,10 +182,10 @@ def test_requests_without_any_credential_end_in_429_from_a_coarse_bucket(plain):
     assert headers.get("retry-after")
 
 
-def test_refunded_input_errors_with_a_valid_token_end_in_429_too(plain):
-    server, boot, _, _ = plain
+def test_refunded_input_errors_with_a_valid_token_end_in_429_too(tight_plain):
+    server, boot, _, _ = tight_plain
     status, doc, _, _ = _get(server, "/api/v1/capabilities")
-    ceiling = int(doc["data"]["capabilities"]["limits"]["agent_requests_per_minute"]) * 12
+    ceiling = TIGHT["coarse_requests_per_minute"] * 3
     path = f"/api/v1/projects/{boot['project_id']}/changes?cursor=tampered"
     seen = _hammer(server, path, boot["token"], ceiling)
     assert seen["limited"] is not None, f"{seen['sent']} 건의 형식 틀린 요청이 모두 환불돼 무제한이었다"

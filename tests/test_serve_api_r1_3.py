@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from serve_budget import tighten
 from test_serve import Server, _make_home
 from test_serve_api_r1_regression import _bootstrap, _get, _http
 
@@ -23,6 +24,8 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node 가 �
 def plain(isolated_home, tmp_path, monkeypatch):
     monkeypatch.delenv("PES_LOCAL_SESSION_SECRET", raising=False)
     boot = _bootstrap(isolated_home, "synthetic-r13")
+    # 거친 상한 12·에이전트 6/분으로 조인 서버: 수백 번 대신 수십 번 요청으로 같은 성질(429 승격 여부)을 본다.
+    tighten(monkeypatch)
     instance = Server(_make_home(isolated_home), tmp_path)
     try:
         instance.start()
@@ -34,8 +37,9 @@ def plain(isolated_home, tmp_path, monkeypatch):
 def _coarse(server):
     status, doc, _, _ = _get(server, "/api/v1/capabilities")
     assert status == 200
-    # 거친 상한은 에이전트 분당 한도의 5배(api.ts budget_policy). capabilities 에는 agent 한도만 나온다.
-    return int(doc["data"]["capabilities"]["limits"]["agent_requests_per_minute"]) * 5
+    # 서버가 실제로 쓰는 거친 상한 = 시험이 넣은 조임 값. (기본 300 = agent 60 의 5배는 test_serve_budget_override 가 --limits 로 확인.)
+    from serve_budget import TIGHT
+    return TIGHT["coarse_requests_per_minute"]
 
 
 def _fake_requests(project_id, count):
@@ -87,8 +91,8 @@ def test_n1_a_fake_credential_that_got_404_is_not_verified_on_its_second_request
     with ThreadPoolExecutor(max_workers=8) as pool:
         first = list(pool.map(lambda i: _send(server, "GET", f"{base}/no-such-route", f"synthetic-promote-{i}")[0], range(ceiling + 20)))
     assert 429 in first, "거친 상한에서 429 가 나와야 한다"
-    # 2단계: 같은 가짜 자격들의 두 번째 요청. 검증됨으로 올랐다면 자기 예산(60/분)으로 넘어가 통과한다 -> 안 올랐으면 모두 429.
-    second = [_send(server, "GET", f"{base}/no-such-route", f"synthetic-promote-{i}")[0] for i in range(40)]
+    # 2단계: 같은 가짜 자격들의 두 번째 요청. 검증됨으로 올랐다면 자기 예산(agent 분당 한도)으로 넘어가 통과한다 -> 안 올랐으면 모두 429.
+    second = [_send(server, "GET", f"{base}/no-such-route", f"synthetic-promote-{i}")[0] for i in range(min(40, ceiling + 20))]
     assert all(status == 429 for status in second), f"404 를 받은 가짜 자격이 검증됨으로 올랐다: {sorted(set(second))}"
 
 
