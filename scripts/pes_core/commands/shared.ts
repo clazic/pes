@@ -539,3 +539,66 @@ export function write_events(runtime: CommandRuntime, project_id: string, events
     }
   }
 }
+
+export interface KeyedStage {
+  id: string;
+  key: string;
+  edition_id: string;
+  latest_round_no: number;
+}
+
+/**
+ * A stage of the project's active edition, found by its key ("plan" ...). With
+ * no key the edition's current stage is used. Used by the CLI record commands
+ * that name a stage the way the old CLI did.
+ */
+export function resolve_stage_key(
+  runtime: CommandRuntime,
+  project_id: string,
+  key: unknown,
+): KeyedStage {
+  const edition = runtime.db.get<{ id: string; current_stage_id: string | null }>(
+    `SELECT e.id AS id, e.current_stage_id AS current_stage_id
+       FROM projects p JOIN editions e ON e.project_id = p.id AND e.id = p.active_edition_id
+      WHERE p.id = ?`,
+    project_id,
+  );
+  if (edition === undefined) {
+    throw new ApiError("conflict", "the project has no active edition");
+  }
+  let stage: { id: string; key: string } | undefined;
+  if (key === undefined || key === null) {
+    stage =
+      edition.current_stage_id === null
+        ? undefined
+        : runtime.db.get<{ id: string; key: string }>(
+            "SELECT id, key FROM stages WHERE project_id = ? AND id = ?",
+            project_id,
+            edition.current_stage_id,
+          );
+  } else {
+    if (typeof key !== "string" || key.length === 0) {
+      throw new ApiError("invalid_payload", "stage must be a stage key");
+    }
+    stage = runtime.db.get<{ id: string; key: string }>(
+      "SELECT id, key FROM stages WHERE project_id = ? AND edition_id = ? AND key = ?",
+      project_id,
+      edition.id,
+      key,
+    );
+  }
+  if (stage === undefined) {
+    throw new ApiError("not_found", "stage not found");
+  }
+  const round = runtime.db.get<{ n: bigint | null }>(
+    "SELECT max(round_no) AS n FROM rounds WHERE project_id = ? AND stage_id = ?",
+    project_id,
+    stage.id,
+  );
+  return {
+    id: stage.id,
+    key: stage.key,
+    edition_id: edition.id,
+    latest_round_no: Number(round?.n ?? 0n),
+  };
+}
