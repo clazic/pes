@@ -95,7 +95,7 @@ export function SettingsPage() {
     <WorkspaceFrame active="settings">
       <SectionTitle as="h2" title="프로젝트 설정" sub={owner ? undefined : "읽기만 — 바꾸기는 소유자"} className="mt-6" />
       <div className="grid grid-cols-1 gap-3 wide:grid-cols-2">
-        <Card className="gap-0 px-5" aria-labelledby="st-transfer">
+        <Card size="compact" aria-labelledby="st-transfer">
           <CardHead
             eyebrow="자료 보내기"
             title="AI가 읽기"
@@ -122,7 +122,7 @@ export function SettingsPage() {
           {!owner ? <Hint className="mt-2">지금 상태는 볼 수 있습니다. 바꿔야 하면 첨언으로 소유자에게 알리세요.</Hint> : null}
         </Card>
 
-        <Card className="gap-0 px-5" aria-labelledby="st-model">
+        <Card size="compact" aria-labelledby="st-model">
           <CardHead eyebrow="방식 A" title="AI 연결 · 모델" titleId="st-model" right={<Tag>지금: {ws.runner_label}</Tag>} />
           {ws.mode === "B" ? (
             <Callout tone="off">

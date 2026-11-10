@@ -101,61 +101,63 @@ export function SyncPanel({ ws }: { ws: WorkspaceView }) {
   if (!ws.sync) return null;
   const resolveWhy = settings.role !== "owner" ? "충돌 고르기는 소유자만(편집자 허용은 WEB3에서 정함 — 지금은 기본 거부)." : null;
   return (
-    <Card id="sync" className="mt-4 gap-0 px-5" aria-labelledby="sync-title">
-      <CardHead
-        eyebrow={`동기화 · ${ws.sync.device} · ${ws.sync.folder_label}`}
-        title={ws.sync.summary}
-        titleId="sync-title"
-        right={
-          <>
-            <Button size="sm" onClick={() => pause.run({ slug: ws.slug })}>
-              동기화 일시 중지
-            </Button>
-            <Button size="sm" asChild>
-              <Link to="/computer">내 컴퓨터 연결 관리</Link>
-            </Button>
-          </>
-        }
-      />
-      <Table regionLabel="동기화 항목" className="min-w-[640px]">
-        <TableCaption>최근 항목</TableCaption>
-        <TableHeader>
-          <TableRow>
-            <TableHead scope="col">항목</TableHead>
-            <TableHead scope="col">방향</TableHead>
-            <TableHead scope="col">상태</TableHead>
-            <TableHead scope="col">버전</TableHead>
-            <TableHead scope="col">동작</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {ws.sync.rows.map((r) => (
-            <TableRow key={r.id}>
-              <TableCell>{r.item}</TableCell>
-              <TableCell>{r.direction === "up" ? "올림 · PC→웹" : "받음 · 웹→PC"}</TableCell>
-              <TableCell>
-                <StatusFrom s={r.status} wrap />
-              </TableCell>
-              <TableCell>{r.version}</TableCell>
-              <TableCell>
-                {r.action === "resolve" ? (
-                  <ActionButton size="sm" blockedBy={resolveWhy} onClick={() => setOpen(true)}>
-                    고르기
-                  </ActionButton>
-                ) : r.action === "open_web" ? (
-                  <Button variant="link" asChild>
-                    <Link to={`/p/${ws.slug}/files#f4`}>웹에서 열기</Link>
-                  </Button>
-                ) : (
-                  "—"
-                )}
-              </TableCell>
+    <div className="mt-4">
+      <Card id="sync" size="compact" aria-labelledby="sync-title">
+        <CardHead
+          eyebrow={`동기화 · ${ws.sync.device} · ${ws.sync.folder_label}`}
+          title={ws.sync.summary}
+          titleId="sync-title"
+          right={
+            <>
+              <Button size="sm" onClick={() => pause.run({ slug: ws.slug })}>
+                동기화 일시 중지
+              </Button>
+              <Button size="sm" asChild>
+                <Link to="/computer">내 컴퓨터 연결 관리</Link>
+              </Button>
+            </>
+          }
+        />
+        <Table regionLabel="동기화 항목" className="min-w-[640px]">
+          <TableCaption>최근 항목</TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">항목</TableHead>
+              <TableHead scope="col">방향</TableHead>
+              <TableHead scope="col">상태</TableHead>
+              <TableHead scope="col">버전</TableHead>
+              <TableHead scope="col">동작</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <Anno>삭제는 건너가지 않고 표시만 합니다. 내 컴퓨터 폴더의 실제 경로는 웹에 보내지 않고, 사람이 붙인 폴더 이름만 보입니다. 큰 파일은 웹소켓이 아니라 HTTP로 올리고 받습니다. AI 참조 금지 파일은 내 컴퓨터로 자동으로 내려보내지 않습니다(사람이 웹에서 열거나 직접 받음).</Anno>
-      {ws.conflict ? <ConflictDialog ws={ws} open={open} onOpenChange={setOpen} /> : null}
-    </Card>
+          </TableHeader>
+          <TableBody>
+            {ws.sync.rows.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell>{r.item}</TableCell>
+                <TableCell>{r.direction === "up" ? "올림 · PC→웹" : "받음 · 웹→PC"}</TableCell>
+                <TableCell>
+                  <StatusFrom s={r.status} wrap />
+                </TableCell>
+                <TableCell>{r.version}</TableCell>
+                <TableCell>
+                  {r.action === "resolve" ? (
+                    <ActionButton size="sm" blockedBy={resolveWhy} onClick={() => setOpen(true)}>
+                      고르기
+                    </ActionButton>
+                  ) : r.action === "open_web" ? (
+                    <Button variant="link" asChild>
+                      <Link to={`/p/${ws.slug}/files#f4`}>웹에서 열기</Link>
+                    </Button>
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <Anno>삭제는 건너가지 않고 표시만 합니다. 내 컴퓨터 폴더의 실제 경로는 웹에 보내지 않고, 사람이 붙인 폴더 이름만 보입니다. 큰 파일은 웹소켓이 아니라 HTTP로 올리고 받습니다. AI 참조 금지 파일은 내 컴퓨터로 자동으로 내려보내지 않습니다(사람이 웹에서 열거나 직접 받음).</Anno>
+        {ws.conflict ? <ConflictDialog ws={ws} open={open} onOpenChange={setOpen} /> : null}
+      </Card>
+    </div>
   );
 }

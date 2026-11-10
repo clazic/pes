@@ -28,7 +28,7 @@ export function ReferenceCard({ r, slug, anchor }: { r: ReferenceView; slug: str
   const owner = settings.role === "owner";
   const why = owner ? null : "참고 프로젝트 갱신·떼기는 소유자만 할 수 있습니다(편집자 허용은 정해지지 않음 — 지금은 기본 거부).";
   return (
-    <Card id={anchor ? "refs" : undefined} className="gap-0 px-5" aria-labelledby={`${r.id}-t`}>
+    <Card id={anchor ? "refs" : undefined} size="compact" aria-labelledby={`${r.id}-t`}>
       <CardHead eyebrow="참고 프로젝트 · 읽기 전용" title={r.title} titleId={`${r.id}-t`} right={<StatusFrom s={r.status} />} />
       {/* 정보 밀도(14절): 고정 버전 · 새 버전 · AI 제공 한 줄. 붙인 범위 · 목적지별 이유 · 사람은 “자세히” */}
       <KV
@@ -312,7 +312,7 @@ export function ResultPanel({ ws, withReferences = false }: { ws: WorkspaceView;
       ))}
 
       {ws.reflection ? (
-        <Card className="gap-0 px-5" aria-labelledby="refl-title">
+        <Card size="compact" aria-labelledby="refl-title">
           <CardHead eyebrow="반영 내역" title={`지난 라운드 의견 ${ws.reflection.rows.length}건`} titleId="refl-title" right={<StatusFrom s={ws.reflection.summary} />} />
           <Table regionLabel="반영 내역" className="min-w-[560px]">
             <TableCaption className="sr-only">반영 내역</TableCaption>
