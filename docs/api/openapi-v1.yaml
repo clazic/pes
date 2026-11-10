@@ -1,0 +1,288 @@
+openapi: 3.1.0
+info:
+  title: PES API v1
+  version: "1.0"
+  description: |
+    Closed HTTP/JSON command surface for PES projects. Business writes go through
+    the PES command service; there is no table CRUD, arbitrary SQL, or generic
+    command route. Revision and fence values travel as normalized decimal
+    strings. A successful body is
+    {format_version, request_id, data, replayed?}; an error body is
+    {format_version, error:{code, message, retryable, target, details,
+    next_action}, request_id}. POST writes require Idempotency-Key.
+servers:
+  - url: http://127.0.0.1:8760
+components:
+  securitySchemes:
+    agentToken:
+      type: http
+      scheme: bearer
+      bearerFormat: PES project token
+    localSession:
+      type: apiKey
+      in: header
+      name: x-pes-session
+  parameters:
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    RunId:
+      name: r
+      in: path
+      required: true
+      schema: { type: string }
+    BlobId:
+      name: b
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+  schemas:
+    Success:
+      type: object
+      required: [format_version, request_id, data]
+      properties:
+        format_version: { type: string, const: "1.0" }
+        request_id: { type: string }
+        data: {}
+        replayed: { type: boolean }
+    Error:
+      type: object
+      required: [format_version, request_id, error]
+      properties:
+        format_version: { type: string, const: "1.0" }
+        request_id: { type: string }
+        error:
+          type: object
+          required: [code, message, retryable, target, details, next_action]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            retryable: { type: boolean }
+            target: { type: [string, "null"] }
+            details: { type: [object, "null"] }
+            next_action: { type: [string, "null"] }
+paths:
+  /api/v1/capabilities:
+    get:
+      summary: Supported routes, scopes, and limits (open; content grows in PR14)
+      responses:
+        "200":
+          description: Capability object
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+  /api/v1/projects:
+    post:
+      summary: Create a project, its owner, initial policy, and first edition in one transaction
+      security: [{ localSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, topic, owner_display_name]
+              additionalProperties: false
+              properties:
+                slug: { type: string }
+                topic: { type: string }
+                owner_display_name: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Local session required }
+        "409": { description: Duplicate slug or idempotency key reuse }
+  /api/v1/projects/{id}/context:
+    get:
+      summary: Read the project's consistency boundary, policy, stages, manifest, and lease
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Context
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing scope or Go policy denied }
+        "404": { description: Unknown project }
+  /api/v1/projects/{id}/runs:
+    post:
+      summary: Owner queues a run for an agent actor (no lease is taken)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      responses:
+        "201":
+          description: Queued run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Local session required }
+        "403": { description: Agent tokens cannot start runs }
+  /api/v1/projects/{id}/claims:
+    post:
+      summary: Claim a queued run or create and claim a fresh run
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Lease
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing scope or Go policy denied }
+        "409": { description: Live lease, stale revision, or idempotency key reuse }
+  /api/v1/projects/{id}/runs/{r}/wait:
+    post:
+      summary: Commit waiting_human, release the lease, then optionally hold the response
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Waiting
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid wait_ms or payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing scope or Go policy denied }
+        "409": { description: Lease is not current }
+  /api/v1/projects/{id}/runs/{r}/results:
+    post:
+      summary: Submit 1-20 version appends as one atomic result bundle
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Submitted versions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload or closed result list }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing scope or Go policy denied }
+        "404": { description: Unknown object or run }
+        "409": { description: Lease is not current, stale revision, or idempotency key reuse }
+  /api/v1/projects/{id}/runs/{r}/complete:
+    post:
+      summary: End the run (not an approval or a seal)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Completed run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid status or payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing scope or Go policy denied }
+        "409": { description: Lease is not current or the run already ended }
+  /api/v1/projects/{id}/uploads:
+    post:
+      summary: Reserve a staging blob (no download URL is returned)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "201":
+          description: New staging reservation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "200":
+          description: Deduplicated reservation of an existing ready blob
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid reservation }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope }
+  /api/v1/projects/{id}/uploads/{b}:
+    put:
+      summary: Upload raw bytes for a staging blob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/BlobId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Bytes stored; the blob is still staging until complete
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Bytes do not match the reservation }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope }
+        "404": { description: Unknown blob in this project }
+  /api/v1/projects/{id}/uploads/{b}/complete:
+    post:
+      summary: Re-read the stored bytes and move staging to ready or quarantined
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/BlobId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Ready or quarantined blob
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope }
+        "404": { description: Unknown blob in this project }
+        "409": { description: The blob is not staging or has no stored bytes }
+  /api/v1/projects/{id}/files/{b}/content:
+    get:
+      summary: Read a ready blob through the PES proxy (policy checked on every read)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/BlobId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Raw bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:read scope or Go policy denied }
+        "404": { description: Unknown blob in this project }
+        "409": { description: Blob is not ready or stored bytes do not match }

@@ -15,6 +15,9 @@ import { ApiError } from "../errors.ts";
 import {
   insert_receipt,
   is_record,
+  optional_lease_guard,
+  reject_unknown_fields,
+  require_current_lease,
   require_non_empty_string,
   require_record,
   type CommandDefinition,
@@ -516,6 +519,8 @@ function write_object_version(
     version_no: number;
     based_on_version_id: string | null;
     actor_id: string;
+    /** The run that produced this version, when it came from a run submission. */
+    run_id?: string | null;
     content_hash: string;
   },
 ): void {
@@ -523,7 +528,7 @@ function write_object_version(
     `INSERT INTO object_versions
        (id, project_id, object_id, kind, version_no, based_on_version_id, created_in_round_id,
         actor_id, run_id, tx_id, content_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
     input.version_id,
     input.project_id,
     input.object_id,
@@ -531,6 +536,7 @@ function write_object_version(
     input.version_no,
     input.based_on_version_id,
     input.actor_id,
+    input.run_id ?? null,
     runtime.tx_id,
     input.content_hash,
     runtime.now_ms,
@@ -850,8 +856,31 @@ function next_version_no(
   return Number(row?.max_no ?? 0n) + 1;
 }
 
-function run_append_version(runtime: CommandRuntime): CommandResult {
-  const payload = require_record(runtime.payload);
+interface AppendPlan {
+  object_id: string;
+  version_id: string;
+  version_no: number;
+  kind: "artifact" | "source";
+  based_on_version_id: string | null;
+  content_hash: string;
+  fields: ArtifactFields | null;
+  facts: SourceFacts | null;
+}
+
+/**
+ * Validate one append item and decide its version id/number without writing.
+ * Planning before the receipt exists lets result.submit write one receipt and
+ * then the version rows that reference its tx_id in the same transaction.
+ * `reserved` keeps version numbers of several items for the same object
+ * monotonic, and `previous` makes the second item base on the first planned
+ * version of that object.
+ */
+function plan_append_version(
+  runtime: CommandRuntime,
+  payload: Record<string, unknown>,
+  reserved: Map<string, number>,
+  previous: Map<string, AppendPlan>,
+): AppendPlan {
   const object_id = require_non_empty_string(payload, "object_id");
   const scope = content_scope(runtime);
   const object = read_object(runtime, scope.project_id, object_id);
@@ -859,49 +888,90 @@ function run_append_version(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "only artifacts and sources take versions");
   }
 
+  const prior = previous.get(object_id);
+  const explicit_based_on =
+    payload.based_on_version_id !== undefined && payload.based_on_version_id !== null;
+  const based_on_version_id = explicit_based_on
+    ? resolve_based_on(runtime, scope.project_id, object, payload)
+    : prior?.version_id ?? resolve_based_on(runtime, scope.project_id, object, payload);
+  const version_no =
+    reserved.get(object_id) ??
+    next_version_no(runtime, scope.project_id, object_id);
+  reserved.set(object_id, version_no + 1);
   const version_id = runtime.new_id();
-  let version_no: number;
 
   if (object.kind === "artifact") {
     require_fields(payload, ["object_id", "based_on_version_id", ...ARTIFACT_COMMON_FIELDS]);
     const fields = parse_artifact_fields(payload);
-    const based_on_version_id = resolve_based_on(runtime, scope.project_id, object, payload);
-    version_no = next_version_no(runtime, scope.project_id, object_id);
-    const result = { project_id: scope.project_id, object_id, version_id, version_no };
-    insert_receipt(runtime, {
-      project_id: scope.project_id,
-      actor_id: scope.actor_id,
-      action: "content.version_appended",
-      base_control_rev: null,
-      result,
-    });
-    write_object_version(runtime, {
-      project_id: scope.project_id,
+    return {
       object_id,
-      kind: "artifact",
       version_id,
       version_no,
+      kind: "artifact",
       based_on_version_id,
-      actor_id: scope.actor_id,
       content_hash: content_digest("artifact", artifact_digest_fields(fields)),
-    });
-    write_artifact_version(runtime, scope.project_id, object_id, version_id, fields);
-    return {
-      result,
-      events: [
-        {
-          type: "content.version_appended",
-          payload: { object_id, version_id, version_no, kind: object.kind },
-        },
-      ],
+      fields,
+      facts: null,
     };
   }
 
   require_fields(payload, ["object_id", "based_on_version_id", ...SOURCE_COMMON_FIELDS]);
   const facts = parse_source_facts(runtime, scope.project_id, payload);
-  const based_on_version_id = resolve_based_on(runtime, scope.project_id, object, payload);
-  version_no = next_version_no(runtime, scope.project_id, object_id);
-  const result = { project_id: scope.project_id, object_id, version_id, version_no };
+  return {
+    object_id,
+    version_id,
+    version_no,
+    kind: "source",
+    based_on_version_id,
+    content_hash: content_digest("source", source_digest_fields(facts)),
+    fields: null,
+    facts,
+  };
+}
+
+/** Write a planned version; the caller has already written its receipt. */
+function write_append_plan(
+  runtime: CommandRuntime,
+  plan: AppendPlan,
+  actor_id: string,
+  run_id: string | null,
+): void {
+  const scope = content_scope(runtime);
+  write_object_version(runtime, {
+    project_id: scope.project_id,
+    object_id: plan.object_id,
+    kind: plan.kind,
+    version_id: plan.version_id,
+    version_no: plan.version_no,
+    based_on_version_id: plan.based_on_version_id,
+    actor_id,
+    run_id,
+    content_hash: plan.content_hash,
+  });
+  if (plan.kind === "artifact") {
+    if (plan.fields === null) throw new Error("an artifact plan must carry its fields");
+    write_artifact_version(runtime, scope.project_id, plan.object_id, plan.version_id, plan.fields);
+    return;
+  }
+  if (plan.facts === null) throw new Error("a source plan must carry its facts");
+  write_source_version(runtime, {
+    project_id: scope.project_id,
+    object_id: plan.object_id,
+    version_id: plan.version_id,
+    facts: plan.facts,
+  });
+}
+
+function run_append_version(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  const scope = content_scope(runtime);
+  const plan = plan_append_version(runtime, payload, new Map(), new Map());
+  const result = {
+    project_id: scope.project_id,
+    object_id: plan.object_id,
+    version_id: plan.version_id,
+    version_no: plan.version_no,
+  };
   insert_receipt(runtime, {
     project_id: scope.project_id,
     actor_id: scope.actor_id,
@@ -909,30 +979,126 @@ function run_append_version(runtime: CommandRuntime): CommandResult {
     base_control_rev: null,
     result,
   });
-  write_object_version(runtime, {
-    project_id: scope.project_id,
-    object_id,
-    kind: "source",
-    version_id,
-    version_no,
-    based_on_version_id,
-    actor_id: scope.actor_id,
-    content_hash: content_digest("source", source_digest_fields(facts)),
-  });
-  write_source_version(runtime, {
-    project_id: scope.project_id,
-    object_id,
-    version_id,
-    facts,
-  });
+  write_append_plan(runtime, plan, scope.actor_id, null);
   return {
     result,
     events: [
       {
         type: "content.version_appended",
-        payload: { object_id, version_id, version_no, kind: object.kind },
+        payload: {
+          object_id: plan.object_id,
+          version_id: plan.version_id,
+          version_no: plan.version_no,
+          kind: plan.kind,
+        },
       },
     ],
+  };
+}
+
+const RESULT_SUBMIT_FIELDS = ["run_id", "lease_id", "fence", "results"] as const;
+const RESULT_ITEM_FIELDS = [
+  "op",
+  "object_id",
+  "based_on_version_id",
+  ...ARTIFACT_COMMON_FIELDS,
+  ...SOURCE_COMMON_FIELDS,
+] as const;
+
+/**
+ * Submit a small atomic batch of version appends for one run. The project's
+ * current lease (exact run/lease/fence and owner) is required; an optional
+ * ctx.base_control_rev is checked before any write. Every item is validated
+ * and appended in the same transaction, then one receipt and one event per
+ * appended version are written. A failure anywhere rolls the whole batch back.
+ */
+function run_submit_results(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, RESULT_SUBMIT_FIELDS);
+  const guard = optional_lease_guard(payload);
+  if (guard === null) {
+    throw new ApiError("invalid_payload", "run_id, lease_id and fence are required");
+  }
+  const scope = content_scope(runtime);
+
+  const base = runtime.ctx.base_control_rev;
+  const project = runtime.project;
+  if (project === null) {
+    throw new Error("result.submit must resolve a project first");
+  }
+  if (base !== undefined) {
+    if (!Number.isSafeInteger(base) || base < 0) {
+      throw new ApiError("invalid_payload", "base_control_rev must be a non-negative safe integer");
+    }
+    if (BigInt(base) !== project.control_rev) {
+      throw new ApiError("rev_conflict", "base_control_rev is stale", {
+        expected: base,
+        actual: Number(project.control_rev),
+      });
+    }
+  }
+
+  const results = payload.results;
+  if (!Array.isArray(results) || results.length < 1 || results.length > 20) {
+    throw new ApiError("invalid_payload", "results must be an array of 1 to 20 items");
+  }
+  const items: Record<string, unknown>[] = results.map((item) => {
+    if (!is_record(item)) {
+      throw new ApiError("invalid_payload", "each result item must be a JSON object");
+    }
+    reject_unknown_fields(item, RESULT_ITEM_FIELDS);
+    if (item.op !== "append_version") {
+      throw new ApiError("invalid_payload", 'result op must be "append_version"');
+    }
+    const { op: _op, ...fields } = item;
+    return fields;
+  });
+
+  require_current_lease(runtime, guard);
+  const reserved = new Map<string, number>();
+  const previous = new Map<string, AppendPlan>();
+  const plans = items.map((item) => {
+    const plan = plan_append_version(runtime, item, reserved, previous);
+    previous.set(plan.object_id, plan);
+    return plan;
+  });
+
+  const result = {
+    project_id: scope.project_id,
+    run_id: guard.run_id,
+    results: plans.map((plan) => ({
+      object_id: plan.object_id,
+      version_id: plan.version_id,
+      version_no: plan.version_no,
+    })),
+  };
+  // The receipt must exist before the version rows: object_versions.tx_id
+  // references this transaction's mutation_commits row.
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    action: "result.submitted",
+    base_control_rev: base ?? null,
+    run_id: guard.run_id,
+    lease_id: guard.lease_id,
+    fence: guard.fence,
+    result,
+  });
+  for (const plan of plans) {
+    write_append_plan(runtime, plan, scope.actor_id, guard.run_id);
+  }
+  return {
+    result,
+    events: plans.map((plan) => ({
+      type: "result.submitted",
+      run_id: guard.run_id,
+      payload: {
+        object_id: plan.object_id,
+        version_id: plan.version_id,
+        version_no: plan.version_no,
+        kind: plan.kind,
+      },
+    })),
   };
 }
 
@@ -1580,6 +1746,10 @@ const CONTENT_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]
   ["content.import_library", definition("content.library_imported", run_import_library)],
 ];
 
+const RESULT_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> = [
+  ["result.submit", definition("result.submitted", run_submit_results)],
+];
+
 /**
  * Registry entries merged into COMMANDS by commands.ts (names, not actions).
  * The array and each name/definition tuple are frozen, so importing this module
@@ -1587,3 +1757,11 @@ const CONTENT_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]
  */
 export const CONTENT_COMMAND_ENTRIES: ReadonlyArray<readonly [string, CommandDefinition]> =
   Object.freeze(CONTENT_COMMAND_INPUTS.map((entry) => Object.freeze([entry[0], entry[1]] as const)));
+
+/**
+ * The result bundle is defined in the content domain but kept in its own
+ * frozen entries group so the existing content.* registry view stays exactly
+ * the eight content commands.
+ */
+export const RESULT_COMMAND_ENTRIES: ReadonlyArray<readonly [string, CommandDefinition]> =
+  Object.freeze(RESULT_COMMAND_INPUTS.map((entry) => Object.freeze([entry[0], entry[1]] as const)));

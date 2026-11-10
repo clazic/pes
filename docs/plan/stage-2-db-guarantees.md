@@ -145,8 +145,9 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 
 ### 8.3 run·lease·fence(PR5)
 
-`scripts/pes_core/commands/runs.ts`가 `run.claim`·`run.heartbeat`·`run.wait`·`run.complete`·`run.release`·`run.handoff`·`run.interrupt`·`run.record_receipt`를 정의하고, `scripts/pes_core/runs.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 run 쓰기는 8절의 실행 순서(등록표 → 프로젝트·행위자 → 정책 → 영수증 재생 → rev/lease → 변경 → `events`+영수증)를 그대로 지나며 한 tx다.
+`scripts/pes_core/commands/runs.ts`가 `run.create`·`run.claim`·`run.heartbeat`·`run.wait`·`run.complete`·`run.release`·`run.handoff`·`run.interrupt`·`run.record_receipt`를 정의하고, `scripts/pes_core/runs.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 run 쓰기는 8절의 실행 순서(등록표 → 프로젝트·행위자 → 정책 → 영수증 재생 → rev/lease → 변경 → `events`+영수증)를 그대로 지나며 한 tx다.
 
+- **create(PR13)**: `run.create`는 사람 owner만 실행한다. 입력은 `{actor_id, mode, runtime, provider, model}`뿐이고, 대상 actor는 그 프로젝트의 활성 멤버여야 한다. `runs` 행은 `status='queued'`, `role='worker'`, `started_at=NULL`로 만들고 **lease를 만들거나 fence를 바꾸지 않는다**. 따라서 이 run의 첫 `run.claim`은 fence 1이다. 영수증·사건은 `run.created`이고 사건은 `run_id`를 담는다. 영수증의 `run_id`는 비워 둔다: `mutation_commits`의 `(project_id, run_id, actor_id)` FK는 run 소유 actor를 요구하는데 이 명령의 actor는 owner이므로, run 식별은 결과와 사건이 담당한다.
 - **claim**: 프로젝트에 활성·미만료 lease가 없을 때만 run을 만들거나 재개한다. run은 `running`, lease는 `active`, `fence`는 이전 값 + 1(첫 lease는 1)이다. `run_id` 재개는 `queued`·`waiting_human`·`blocked_usage`·`interrupted`에서만 되고 `succeeded`·`failed`·`cancelled`는 거부한다. `blocked_usage`를 재개하면 `go_block_reason`·`go_blocked_at`·`go_block_reset_at`을 함께 지운다(DDL의 `go_block_reason IS NULL OR status = 'blocked_usage'` 제약). 재개 payload에 `parent_run_id`나 `role`이 있으면 `invalid_payload`다. 만료된 lease를 대신할 때 그 lease의 run이 아직 `running`이면 같은 tx에서 `interrupted`로 끝내고(`ended_at` 설정) `events.run_id`가 그 옛 run인 interrupt 사건을 남긴다. 이미 끝난 run은 건드리지 않는다. 다음 `fence`가 `Number.MAX_SAFE_INTEGER`를 넘으면 쓰기 전에 `conflict`로 거부한다.
 - **가드**: claim을 뺀 모든 run 명령은 `project_leases` 행이 그 프로젝트의 **활성·미만료**(`now < expires_at`) lease이고 `lease_id`·`fence`·`run_id`·소유 행위자가 정확히 같을 때만 통과한다. 아니면 `conflict`이고 아무것도 쓰지 않는다. 만료(`now >= expires_at`)·해제된 lease는 되살리지 않으며, 새 claim만 새 `lease_id`와 더 높은 `fence`를 만든다.
 - **heartbeat**: `expires_at = now + lease_ttl_ms`로 연장하고 `fence`는 바꾸지 않는다. 만료 경계(`now == expires_at`)에서는 거부한다.
@@ -158,8 +159,9 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 
 ### 8.4 내용 버전·출처·연결(PR7)
 
-`scripts/pes_core/commands/content.ts`가 `content.*` 8개 명령을 정의하고, `scripts/pes_core/content.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 명령은 8절 실행 순서를 그대로 지나며 한 tx다.
+`scripts/pes_core/commands/content.ts`가 `content.*` 8개 명령을 정의하고, `scripts/pes_core/content.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 모든 명령은 8절 실행 순서를 그대로 지나며 한 tx다. 같은 파일이 `result.submit`(PR13)도 정의하되 `RESULT_COMMAND_ENTRIES`라는 별도 동결 묶음으로 내보내고, 공개 래퍼 `submit_results`는 `scripts/pes_core/results.ts`에 두어 `content.ts`에서 재수출한다(기존 content 명령 8개 표면을 그대로 유지).
 
+- **결과 묶음(PR13)**: `result.submit` 입력은 `{run_id, lease_id, fence, results:[{op:'append_version', ...}]}`이고 항목은 1~20개다. 각 항목의 `op`는 `append_version`뿐이며 그 밖의 키는 `content.append_version`이 허용하는 필드로 제한한다. 현재 활성·미만료 lease(정확한 `run_id`·`lease_id`·`fence`·소유 actor)를 요구하고, `ctx.base_control_rev`가 있으면 쓰기 전에 현재 `projects.control_rev`와 비교한다(낡으면 `rev_conflict`, 아무것도 쓰지 않음). 모든 항목의 버전 id·번호를 먼저 계획한 뒤 영수증 1행을 쓰고, 같은 tx에서 버전 행들을 쓴다(`object_versions.tx_id`가 그 영수증을 참조하므로 순서가 고정된다). 한 항목이라도 실패하면 영수증·버전·사건이 모두 롤백되고, 성공하면 `result.submitted` 영수증 1행과 항목별 `result.submitted` 사건(`run_id` 포함)을 남긴다. 같은 키·같은 입력은 저장된 결과를 재생하고 같은 키·다른 입력은 `idempotency_key_reuse`다.
 - **append-only**: `object_versions`·`artifact_versions`·`source_versions`·`citations`·`version_relations`·`artifact_components`를 UPDATE/DELETE하는 경로가 없다. 새 내용은 `content.append_version`으로만 쌓고 과거 행은 그대로 둔다.
 - **현재 포인터**: `objects.current_version_id`는 `content.set_current`로만 옮기며 그 객체 자신의 버전만 가리킨다(다른 객체·다른 프로젝트 버전은 `conflict`/`not_found`). 포인터를 옮겨도 `objects.rev`만 1 증가하고 버전 행은 변하지 않는다.
 - **각주**: `citations`는 artifact 버전별 1..n으로 번호를 매기고, 가장 최근 버전(최고 `version_no`)만 새 각주를 받는다. 오래된 버전은 sealed라 `conflict`다. 같은 URL이라도 출처 객체를 합치지 않는다.

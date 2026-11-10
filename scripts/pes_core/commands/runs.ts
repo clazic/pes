@@ -10,8 +10,11 @@
 // unexpired lease and both lease_id and fence match. An expired lease is never
 // revived: it must be replaced by a new claim, which raises the fence by one.
 
+import { read_credential_actor } from "../actors.ts";
 import {
   insert_receipt,
+  reject_unknown_fields,
+  require_human_owner_actor,
   require_non_empty_string,
   require_record,
   type CommandDefinition,
@@ -450,6 +453,102 @@ function run_claim(runtime: CommandRuntime): CommandResult {
   };
 }
 
+const CREATE_RUN_FIELDS = ["actor_id", "mode", "runtime", "provider", "model"] as const;
+
+/**
+ * A human owner queues a run for an agent actor. No lease is taken and no
+ * fence moves: the first claim of the returned run gets fence 1. The target
+ * actor must be an enabled member of this project; the caller never chooses
+ * an id, status, edition, or base rev.
+ */
+function run_create(runtime: CommandRuntime): CommandResult {
+  const scope = require_scope(runtime);
+  require_human_owner_actor(runtime);
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, CREATE_RUN_FIELDS);
+
+  const actor_id = require_non_empty_string(payload, "actor_id");
+  const mode = payload.mode;
+  if (mode !== "A" && mode !== "B") {
+    throw new ApiError("invalid_payload", 'mode must be "A" or "B"');
+  }
+  const runtime_name = require_non_empty_string(payload, "runtime");
+  const provider = require_non_empty_string(payload, "provider");
+  const model = require_non_empty_string(payload, "model");
+  if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
+    throw new ApiError("invalid_payload", "mode A requires the opencode-go provider and model prefix");
+  }
+
+  const target = read_credential_actor(runtime.db, actor_id);
+  if (target === undefined) {
+    throw new ApiError("not_found", "the run actor is not allowed in this project");
+  }
+  const member = runtime.db.get<{ ok: bigint }>(
+    "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?",
+    scope.project_id,
+    target.user_id,
+  );
+  if (member === undefined) {
+    throw new ApiError("not_found", "the run actor is not a member of the project");
+  }
+
+  const edition = runtime.db.get<{ active_edition_id: string | null }>(
+    "SELECT active_edition_id FROM projects WHERE id = ?",
+    scope.project_id,
+  );
+  if (edition === undefined || edition.active_edition_id === null) {
+    throw new ApiError("conflict", "the project has no active edition");
+  }
+
+  const run_id = runtime.new_id();
+  const written = runtime.db.run(
+    `INSERT INTO runs
+       (id, project_id, edition_id, actor_id, mode, runtime, provider, model, role,
+        status, parent_run_id, base_control_rev, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'worker', 'queued', NULL, ?, NULL, NULL)`,
+    run_id,
+    scope.project_id,
+    edition.active_edition_id,
+    actor_id,
+    mode,
+    runtime_name,
+    provider,
+    model,
+    scope.control_rev,
+  );
+  if (written.changes !== 1n) {
+    throw new Error("the queued run was not created");
+  }
+
+  const result = {
+    project_id: scope.project_id,
+    run_id,
+    actor_id,
+    status: "queued",
+  };
+  // The receipt belongs to the owner who queued the run, while runs.actor_id is
+  // the agent that will claim it. mutation_commits' (project_id, run_id,
+  // actor_id) FK requires those to agree, so this receipt records the run only
+  // in its result and event; the run row itself carries run_id.
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    action: "run.created",
+    base_control_rev: null,
+    result,
+  });
+  return {
+    result,
+    events: [
+      {
+        type: "run.created",
+        run_id,
+        payload: { run_id, actor_id, mode },
+      },
+    ],
+  };
+}
+
 function run_heartbeat(runtime: CommandRuntime): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
   const guard = require_guard(payload);
@@ -718,6 +817,7 @@ function definition(action: string, run: (runtime: CommandRuntime) => CommandRes
 }
 
 const RUN_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> = [
+  ["run.create", definition("run.created", run_create)],
   ["run.claim", definition("run.claimed", run_claim)],
   ["run.heartbeat", definition("run.heartbeat", run_heartbeat)],
   ["run.wait", definition("run.waiting_human", run_wait)],

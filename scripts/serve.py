@@ -11,10 +11,13 @@
  - 홈 폴더 자체가 프로젝트면(예전 방식) POST /feedback 도 받는다.
  - 다른 출처(Origin)의 POST 는 거부한다.
 """
+import base64
 import json
 import os
 import re
+import shutil
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -23,6 +26,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 MAX_BODY = 256 * 1024
+MAX_API_BODY = 2 * MAX_BODY
+NODE_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "api_bridge.ts"
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 # feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
@@ -108,8 +113,80 @@ def main():
             self.send_header("Location", to)
             self.end_headers()
 
+        def _api_error(self, code, message, status):
+            request_id = f"serve-{time.time_ns()}"
+            return self._json(status, {
+                "format_version": "1.0",
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "retryable": False,
+                    "target": None,
+                    "details": None,
+                    "next_action": None,
+                },
+                "request_id": request_id,
+            })
+
+        def _api(self, method, path):
+            """Pass /api/v1/* to the Node ApiApp and relay its raw response.
+
+            The Python server keeps its static-file and feedback duties; the API
+            contract, credentials, transactions, and envelopes live in Node.
+            """
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                length = 0
+            if length < 0 or length > MAX_API_BODY:
+                return self._api_error("payload_too_large", "the request body is too large", 413)
+            body = self.rfile.read(length) if length > 0 else b""
+            node = shutil.which("node")
+            if node is None:
+                return self._api_error("internal_error", "internal error", 500)
+            request = {
+                "method": method,
+                "path": path,
+                "headers": {name.lower(): value for name, value in self.headers.items()},
+                "body_b64": base64.b64encode(body).decode("ascii"),
+            }
+            try:
+                proc = subprocess.run(
+                    [node, str(NODE_BRIDGE)],
+                    input=json.dumps(request).encode("utf-8"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return self._api_error("internal_error", "internal error", 500)
+            if proc.returncode != 0:
+                return self._api_error("internal_error", "internal error", 500)
+            try:
+                response = json.loads(proc.stdout.decode("utf-8"))
+                status = int(response["status"])
+                headers = response.get("headers") or {}
+                payload = base64.b64decode(response.get("body_b64") or "")
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return self._api_error("internal_error", "internal error", 500)
+            self.send_response(status)
+            for name, value in headers.items():
+                if name.lower() in ("content-length", "connection", "transfer-encoding"):
+                    continue
+                self.send_header(name, str(value))
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            if payload:
+                self.wfile.write(payload)
+            return None
+
+        def _is_api_path(self, path):
+            return path == "/api/v1" or path.startswith("/api/v1/")
+
         def do_GET(self):
             path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("GET", path)
             if path == "/whoami":
                 return self._json(200, {"root": str(root), "single": True}, cors=True)
             if path == "/version" or path.endswith("/version"):  # 열린 화면이 새 결과를 알아채도록 (index.html·ask-*.html 수정 시각)
@@ -132,6 +209,8 @@ def main():
 
         def do_POST(self):
             path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("POST", path)
             d, rest = project_of(path)
             if d is None and path == "/feedback":  # 0.8 이전에 만든 화면: 보낸 페이지 주소로 프로젝트를 찾는다
                 d, _ = project_of(urlsplit(self.headers.get("Referer") or "").path)
@@ -196,6 +275,12 @@ def main():
                 with (d / "feedback.log").open("a", encoding="utf-8") as f:
                     f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
             return self._json(200, {"ok": True, "file": fp.name})
+
+        def do_PUT(self):
+            path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("PUT", path)
+            return self._json(405, {"ok": False})
 
     srv = LocalHTTPServer(("127.0.0.1", port), H)
     print(f"serving {root} at http://127.0.0.1:{port}/", flush=True)
