@@ -318,3 +318,92 @@ test("R9 DB 프로젝트의 created 는 로컬 날짜다 (TZ=Asia/Seoul, UTC 20�
     assert.equal(created_in("UTC"), "2026-03-01");
     assert.equal(created_in("America/Los_Angeles"), "2026-03-01", "LA 는 12시 — 같은 날");
   }));
+
+// ---------------------------------------------------------------------------
+// 8 · 실패한 쓰기는 디스크에도 이번 실행의 파일을 남기지 않는다
+
+test("R8 report·assemble·web 이 중간에 실패해도(DB 에서 attach 거부) DB 와 객체 폴더 모두 실행 전과 같다", () =>
+  with_cli(async (c) => {
+    const item = (summary: string) => [{ id: 1, kind: "topic", title: "항목", summary, status: "done", sources: [{ title: "출처", url: "https://example.invalid/a", method: "law" }] }];
+    const section = (details: string) => [{ id: 1, kind: "section", title: "1장", status: "done", details, sources: [{ title: "출처", url: "https://example.invalid/a", method: "law" }] }];
+    const counts = () => c.env.db.all<Record<string, unknown>>("SELECT (SELECT count(*) FROM blobs) AS blobs, (SELECT count(*) FROM object_versions) AS versions, (SELECT count(*) FROM mutation_commits) AS commits");
+    ok(run_py(c, ["round-start", SLUG, "plan"]), "round-start");
+    ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "r8a.json", item("처음"))]), "merge");
+    ok(run_py(c, ["merge", SLUG, "write", write_json(c, "r8w.json", section("본문 [^1]"))]), "merge write");
+    ok(run_py(c, ["report", SLUG, "plan"]), "report (성공: 프로젝트 객체 폴더가 생긴다)");
+    ok(run_py(c, ["assemble", SLUG]), "assemble");
+    c.env.db.exec("CREATE TRIGGER r8_fail BEFORE INSERT ON version_files BEGIN SELECT RAISE(ABORT, 'synthetic attach failure'); END");
+    try {
+      const cases: Array<[string[], () => void]> = [
+        [["report", SLUG, "plan"], () => ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "r8b.json", item("바뀐 요약"))]), "merge 2")],
+        [["assemble", SLUG], () => ok(run_py(c, ["merge", SLUG, "write", write_json(c, "r8x.json", section("바뀐 본문 [^1]"))]), "merge write 2")],
+        [["web", SLUG, "--assemble"], () => ok(run_py(c, ["merge", SLUG, "write", write_json(c, "r8y.json", section("또 바뀐 본문 [^1]"))]), "merge write 3")],
+      ];
+      for (const [args, change] of cases) {
+        change();
+        const rows = counts();
+        const files = tree_digest(c.env.objects);
+        const res = run_py(c, args);
+        assert.notEqual(res.status, 0, `${args[0]}: attach 가 거부되면 실패`);
+        assert.doesNotMatch(res.stderr, /Traceback/, args[0]);
+        assert.deepEqual(counts(), rows, `${args[0]}: DB 행 불변`);
+        assert.equal(tree_digest(c.env.objects), files, `${args[0]}: 객체 폴더에 이번 실행이 쓴 파일이 남지 않는다`);
+      }
+    } finally {
+      c.env.db.exec("DROP TRIGGER r8_fail");
+    }
+    ok(run_py(c, ["report", SLUG, "plan"]), "복구 뒤 다시 실행");
+  }));
+
+// ---------------------------------------------------------------------------
+// 7 · web 재사용의 derived_from, 새 판
+
+function output_versions(c: CliEnv, object_id: string): string[] {
+  return c.env.db.all<{ id: string }>("SELECT id FROM object_versions WHERE object_id = ? ORDER BY version_no", object_id).map((r) => r.id);
+}
+
+function derived_of(c: CliEnv, version_id: string): string[] {
+  return c.env.db.all<{ to_version_id: string }>("SELECT to_version_id FROM version_relations WHERE from_version_id = ? AND kind = 'derived_from'", version_id).map((r) => r.to_version_id);
+}
+
+test("R7b web 이 기존 조립본을 재사용하면 새 버전이 직전 조립 버전을 derived_from 으로 가리킨다 (추적이 끊기지 않음)", () =>
+  with_cli(async (c) => {
+    ok(run_py(c, ["merge", SLUG, "write", write_json(c, "r7b.json", [{ id: 1, kind: "section", title: "1장", status: "done", details: "본문 [^1]", sources: [{ title: "출처", url: "https://example.invalid/a", method: "law" }] }])]), "merge write");
+    ok(run_py(c, ["assemble", SLUG]), "assemble");
+    const object = c.env.db.get<{ object_id: string }>("SELECT object_id FROM artifacts WHERE kind = 'output'")!.object_id;
+    const assembled = output_versions(c, object)[0]!;
+    assert.ok(derived_of(c, assembled).length >= 1, "조립 버전은 장 항목의 현재 버전을 근거로 든다");
+    ok(run_py(c, ["web", SLUG]), "web (재사용)");
+    const after = output_versions(c, object);
+    assert.equal(after.length, 2);
+    assert.ok(derived_of(c, after[1]!).includes(assembled), `web 새 버전이 직전 조립 버전을 가리킨다: [${derived_of(c, after[1]!)}]`);
+    ok(run_py(c, ["web", SLUG]), "web 한 번 더");
+    const third = output_versions(c, object);
+    assert.ok(derived_of(c, third[2]!).includes(third[1]!), "그다음 버전은 바로 앞 버전을 가리킨다");
+  }));
+
+test("R7c 새 판에서 조립 없이 web 을 하면 옛 판의 조립본을 재사용하지 않는다: 새 판 객체, derived_from 이 옛 판을 가리키지 않음", () =>
+  with_cli(async (c) => {
+    const section = (title: string) => [{ id: 1, kind: "section", title, status: "done", details: `${title} 본문 [^1]`, sources: [{ title: "출처", url: "https://example.invalid/a", method: "law" }] }];
+    ok(run_py(c, ["merge", SLUG, "write", write_json(c, "r7c-a.json", section("옛 판 장"))]), "merge (판 1)");
+    ok(run_py(c, ["assemble", SLUG]), "assemble (판 1)");
+    const old_object = c.env.db.get<{ object_id: string }>("SELECT object_id FROM artifacts WHERE kind = 'output'")!.object_id;
+    const old_versions = output_versions(c, old_object);
+    const created = (await create_edition(c.env.service, c.env.ctx("r7c-ed2"), { parent_edition_id: c.env.p.edition_id })).result as { edition_id: string };
+    c.env.db.run("UPDATE editions SET status = 'completed' WHERE id = ?", c.env.p.edition_id);
+    c.env.db.run("UPDATE editions SET status = 'active' WHERE id = ?", created.edition_id);
+    c.env.db.run("UPDATE projects SET active_edition_id = ? WHERE id = ?", created.edition_id, c.env.p.project_id);
+    ok(run_py(c, ["merge", SLUG, "write", write_json(c, "r7c-b.json", section("새 판 장"))]), "merge (판 2)");
+    ok(run_py(c, ["web", SLUG]), "web (판 2, 조립 없이)");
+    assert.deepEqual(output_versions(c, old_object), old_versions, "옛 판 객체는 그대로");
+    const fresh = c.env.db.all<{ object_id: string }>("SELECT a.object_id AS object_id FROM artifacts a JOIN objects o ON o.id = a.object_id WHERE a.kind = 'output' AND o.edition_id = ?", created.edition_id);
+    assert.equal(fresh.length, 1, "새 판에는 새 output 객체");
+    for (const v of output_versions(c, fresh[0]!.object_id)) {
+      assert.ok(!derived_of(c, v).some((id) => old_versions.includes(id)), "새 판 버전이 옛 판의 조립 버전을 근거로 들지 않는다");
+    }
+    const md = c.env.db.all<{ storage_key: string }>("SELECT b.storage_key AS storage_key FROM version_files vf JOIN blobs b ON b.id = vf.blob_id WHERE vf.version_id IN (SELECT id FROM object_versions WHERE object_id = ?) AND b.original_name = 'report.md'", fresh[0]!.object_id);
+    assert.ok(md.length >= 1);
+    const text = readFileSync(disk_path(c.env, md[0]!), "utf8");
+    assert.match(text, /새 판 장/);
+    assert.doesNotMatch(text, /옛 판 장/, "옛 판의 조립본 내용이 섞이지 않는다");
+  }));

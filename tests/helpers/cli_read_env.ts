@@ -3,7 +3,7 @@
 // Builds on cli_write_env.ts (same isolated HOME / USERPROFILE / PES_HOME, same DB bootstrap) and adds:
 //   - run_py(): runs a given pes.py (this repo's or a baseline checkout) with `python3 -I -X utf8`, so Korean
 //     output survives Windows pipes (python -I ignores PYTHONIOENCODING, -X utf8 does not)
-//   - baseline_dir(): a `git archive` of the last v0.15 read implementation, to compare outputs against
+//   - baseline_dir(): a copy (git ls-tree + git show, no shell or tar) of the last v0.15 read implementation, to compare outputs against
 //   - normalize(): output normalisation (roots in every spelling, timestamps, epoch, uuid)
 //   - RICH_LEGACY: a legacy project.json with items, sources, notes, a write stage and unprocessed answers
 //   - shell_words(): a tiny POSIX-style word splitter, so a printed shell command can be checked without a shell
@@ -26,9 +26,17 @@ export const PY: string =
 export function baseline_dir(ref: string = READ_BASELINE_REF): string | null {
   const probe = spawnSync("git", ["cat-file", "-e", `${ref}:scripts/pes.py`], { cwd: REPO });
   if (probe.status !== 0) return null; // shallow clone: the caller fails loudly (CI uses fetch-depth: 0)
+  // No shell, no tar: list the files with `git ls-tree` and read each one with `git show` (argument arrays only).
+  const listing = spawnSync("git", ["ls-tree", "-r", "-z", "--name-only", ref, "--", "scripts", "templates", "questions"], { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
+  assert.equal(listing.status, 0, "baseline listing");
   const dir = mkdtempSync(join(tmpdir(), "pes-sel49-base-"));
-  const archive = spawnSync("sh", ["-c", `git archive ${ref} scripts templates questions | tar -x -C "${dir}"`], { cwd: REPO });
-  assert.equal(archive.status, 0, "baseline extract");
+  for (const rel of listing.stdout.toString("utf8").split("\0").filter((x) => x.length > 0)) {
+    const blob = spawnSync("git", ["show", `${ref}:${rel}`], { cwd: REPO, maxBuffer: 256 * 1024 * 1024 });
+    assert.equal(blob.status, 0, `baseline show ${rel}`);
+    const target = join(dir, ...rel.split("/"));
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, blob.stdout);
+  }
   return dir;
 }
 

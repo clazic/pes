@@ -24,6 +24,7 @@ import { test } from "node:test";
 
 import { revoke_agent_token } from "../scripts/pes_core/actors.ts";
 import { new_artifact } from "./helpers/blob_env.ts";
+import { baseline_dir as shared_baseline_dir } from "./helpers/cli_read_env.ts";
 import { expect_rejected, json_out, make_cli_env, PES_PY, REPO, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
 import { make_content, seal, start } from "./helpers/editions_env.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
@@ -123,12 +124,7 @@ async function open_plan_round(c: CliEnv, tag: string) {
 const BASELINE_REF = "1e0a25e"; // SEL-46 머지 시점: scripts/pes.py 가 아직 DB 경로를 모르는 마지막 main
 
 function baseline_dir(): string | null {
-  const probe = spawnSync("git", ["cat-file", "-e", `${BASELINE_REF}:scripts/pes.py`], { cwd: REPO });
-  if (probe.status !== 0) return null; // 얕은 복제 등으로 옛 커밋이 없으면 이 비교는 할 수 없다
-  const dir = mkdtempSync(join(tmpdir(), "pes-sel48-base-"));
-  const archive = spawnSync("sh", ["-c", `git archive ${BASELINE_REF} scripts templates questions | tar -x -C "${dir}"`], { cwd: REPO });
-  assert.equal(archive.status, 0, "baseline extract");
-  return dir;
+  return shared_baseline_dir(BASELINE_REF); // 셸·tar 없이 git ls-tree + git show 로 꺼낸다 (Windows CI 에서도 같음)
 }
 
 /** 한 루트의 모든 표기: 그대로, Windows 긴 이름(8.3 RUNNER~1 → runneradmin), 파이썬 repr 의 겹친 역슬래시. */
