@@ -12,10 +12,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
 import type { Clock } from "./clock.ts";
 import { CommandService, type MutationContext } from "./commands.ts";
+import { read_tx } from "./commands/read_tx.ts";
 import { submit_results } from "./content.ts";
 import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
-import { complete_upload, get_blob, reserve_upload, store_blob } from "./files.ts";
+import { complete_upload, get_blob, is_safe_media_type, reserve_upload, store_blob } from "./files.ts";
 import { new_id as default_new_id } from "./ids.ts";
 import { check_go_allowed, current_policy, DbPolicyChecker, type PolicySnapshot } from "./policy.ts";
 import {
@@ -311,6 +312,11 @@ export class ApiApp {
         new RegExp(`^/api/v1/projects/${project}/context$`),
         "GET",
         (request) => this.#context(request),
+      ),
+      route(
+        new RegExp(`^/api/v1/projects/${project}/objects/${blob}/versions/${blob}$`),
+        "GET",
+        (request) => this.#version_read(request),
       ),
       route(
         new RegExp(`^/api/v1/projects/${project}/runs$`),
@@ -641,6 +647,7 @@ export class ApiApp {
         routes: [
           "GET /api/v1/capabilities",
           "GET /api/v1/projects/{id}/context",
+          "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
           "POST /api/v1/projects",
           "POST /api/v1/projects/{id}/runs",
           "POST /api/v1/projects/{id}/claims",
@@ -685,10 +692,59 @@ export class ApiApp {
   }
 
   async #context(request: RouteRequest): Promise<HandlerResult> {
-    const project = this.#project(request.params[0] as string);
-    const auth = this.#auth_project(project, request, "context:read");
-    if (auth.kind === "internal_ai") this.#require_go(project.id);
-    return { status: 200, data: this.#context_data(project) };
+    const data = read_tx(this.#db, () => {
+      const project = this.#project(request.params[0] as string);
+      const auth = this.#auth_project(project, request, "context:read");
+      if (auth.kind === "internal_ai") this.#require_go(project.id);
+      return this.#context_data(project);
+    });
+    return { status: 200, data };
+  }
+
+  async #version_read(request: RouteRequest): Promise<HandlerResult> {
+    const data = read_tx(this.#db, () => {
+      const project = this.#project(request.params[0] as string);
+      const auth = this.#auth_project(project, request, "context:read");
+      if (auth.kind === "internal_ai") this.#require_go(project.id);
+      const object_id = request.params[1] as string;
+      const version_id = request.params[2] as string;
+      const row = this.#db.get<{
+        object_id: string;
+        kind: string;
+        version_id: string;
+        version_no: bigint;
+        content_hash: string;
+        is_current: bigint;
+      }>(
+        `SELECT o.id AS object_id, o.kind AS kind, v.id AS version_id,
+                v.version_no AS version_no, v.content_hash AS content_hash,
+                (o.current_version_id = v.id) AS is_current
+           FROM object_versions v
+           JOIN objects o ON o.project_id = v.project_id AND o.id = v.object_id
+          WHERE v.project_id = ? AND v.object_id = ? AND v.id = ?`,
+        project.id,
+        object_id,
+        version_id,
+      );
+      if (row === undefined) throw new ApiError("not_found", "version not found");
+      const files = this.#db.all<{ blob_id: string; role: string }>(
+        `SELECT blob_id, role FROM version_files
+          WHERE project_id = ? AND version_id = ? ORDER BY role, blob_id`,
+        project.id,
+        version_id,
+      );
+      return {
+        project_id: project.id,
+        object_id: row.object_id,
+        kind: row.kind,
+        version_id: row.version_id,
+        version_no: Number(row.version_no),
+        is_current: Number(row.is_current) === 1,
+        content_hash: row.content_hash,
+        files: files.map((file) => ({ blob_id: file.blob_id, role: file.role })),
+      };
+    });
+    return { status: 200, data };
   }
 
   #context_data(project: ProjectRow): unknown {
@@ -715,11 +771,8 @@ export class ApiApp {
          FROM objects o
          JOIN object_versions v
            ON v.project_id = o.project_id AND v.object_id = o.id
+          AND v.id = o.current_version_id
         WHERE o.project_id = ? AND o.archived_at IS NULL
-          AND v.version_no = (
-            SELECT MAX(v2.version_no) FROM object_versions v2
-             WHERE v2.project_id = o.project_id AND v2.object_id = o.id
-          )
         ORDER BY o.id`,
       project.id,
     );
@@ -1010,7 +1063,11 @@ export class ApiApp {
     return {
       status: 200,
       bytes: blob.bytes,
-      headers: { "content-type": blob.media_type },
+      headers: {
+        "content-type": is_safe_media_type(blob.media_type)
+          ? blob.media_type
+          : "application/octet-stream",
+      },
     };
   }
 }

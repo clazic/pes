@@ -132,7 +132,7 @@ async function main(): Promise<void> {
       local_session_secret: local_session_secret(env),
     });
     const body =
-      typeof input.body_b64 === "string" && input.body_b64.length > 0
+      typeof input.body_b64 === "string"
         ? new Uint8Array(Buffer.from(input.body_b64, "base64"))
         : null;
     const response = await app.handle({

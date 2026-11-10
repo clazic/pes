@@ -46,12 +46,12 @@ class LocalHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # The API database is migrated once, lazily, after the first API
-        # request has passed the origin check. A rejected cross-origin request
-        # must not create ~/.pes or the database file.
+        # The API database is migrated lazily on the first API request that
+        # reaches the bridge (a GET, which has no Origin check, also does it).
+        # A cross-origin POST rejected by the origin check must not create
+        # ~/.pes or the database file. Only a successful migrate is cached.
         self.api_db_ready = False
         self.api_db_lock = threading.Lock()
-        self.api_db_error = None
 
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
@@ -149,12 +149,10 @@ def main():
             with srv.api_db_lock:
                 if srv.api_db_ready:
                     return None
-                if srv.api_db_error is not None:
-                    return srv.api_db_error
                 node = shutil.which("node")
                 if node is None:
-                    srv.api_db_error = ("internal_error", "internal error", 500)
-                    return srv.api_db_error
+                    return ("internal_error", "internal error", 500)
+                failed = ("schema_not_ready", "the PES database could not be migrated", 503)
                 try:
                     proc = subprocess.run(
                         [node, str(NODE_BRIDGE), "--migrate"],
@@ -163,11 +161,9 @@ def main():
                         timeout=60,
                     )
                 except (OSError, subprocess.SubprocessError):
-                    srv.api_db_error = ("schema_not_ready", "the PES database could not be migrated", 503)
-                    return srv.api_db_error
+                    return failed
                 if proc.returncode != 0:
-                    srv.api_db_error = ("schema_not_ready", "the PES database could not be migrated", 503)
-                    return srv.api_db_error
+                    return failed
                 srv.api_db_ready = True
                 return None
 
@@ -219,7 +215,10 @@ def main():
             for name, value in headers.items():
                 if name.lower() in ("content-length", "connection", "transfer-encoding"):
                     continue
-                self.send_header(name, str(value))
+                name, value = str(name), str(value)
+                if not name or any(c in name for c in "\r\n\0:") or any(c in value for c in "\r\n\0"):
+                    continue
+                self.send_header(name, value)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             if payload:

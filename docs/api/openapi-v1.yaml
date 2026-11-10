@@ -33,6 +33,16 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ObjectId:
+      name: o
+      in: path
+      required: true
+      schema: { type: string }
+    VersionId:
+      name: v
+      in: path
+      required: true
+      schema: { type: string }
     BlobId:
       name: b
       in: path
@@ -234,6 +244,31 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing scope or Go policy denied }
         "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/objects/{o}/versions/{v}:
+    get:
+      summary: Read one exact object version (kind, number, content hash, attached files)
+      description: |
+        data = {project_id, object_id, kind, version_id, version_no (integer),
+        is_current (true when objects.current_version_id points at it),
+        content_hash (64 hex), files:[{blob_id, role}]}. A project, object, and
+        version that do not belong together are 404.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ObjectId"
+        - $ref: "#/components/parameters/VersionId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project, object, or version, or a mismatched pair }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs:
     post:
