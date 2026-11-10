@@ -21,7 +21,7 @@ export function RegisterBPage() {
     <>
       <SectionTitle as="h1" title="내 컴퓨터 AI로 만들고 웹에 등록하기" sub="연결은 내 컴퓨터가 먼저 겁니다." right={<ModeBadge mode="B" detail="내 컴퓨터 AI" />} />
       <div className="grid grid-cols-1 gap-3 desk:grid-cols-2">
-        <Card className="gap-0 px-5" aria-labelledby="b-steps">
+        <Card size="compact" aria-labelledby="b-steps">
           <h2 id="b-steps" className="text-title">
             순서
           </h2>
@@ -55,7 +55,7 @@ export function RegisterBPage() {
             </Button>
           </div>
         </Card>
-        <Card className="gap-0 px-5" aria-labelledby="b-cost">
+        <Card size="compact" aria-labelledby="b-cost">
           <h2 id="b-cost" className="text-title">
             알아 둘 것
           </h2>
@@ -72,37 +72,39 @@ export function RegisterBPage() {
           </More>
         </Card>
       </div>
-      <Card className="mt-3 gap-0 px-5">
-        <Table regionLabel="방식 B 도구 6가지" className="min-w-[720px]">
-          <TableCaption>방식 B 도구 6가지 — 연결 방법과 한계</TableCaption>
-          <TableHeader>
-            <TableRow>
-              <TableHead scope="col">도구</TableHead>
-              <TableHead scope="col" className="w-[30%]">연결 방법</TableHead>
-              <TableHead scope="col">확인 상태</TableHead>
-              <TableHead scope="col">AI 참조 금지 통제</TableHead>
-              <TableHead scope="col" className="w-[26%]">알아 둘 것</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {TOOLS.map((t) => (
-              <TableRow key={t.tool}>
-                <TableHead scope="row">{t.tool}</TableHead>
-                <TableCell>{t.how}</TableCell>
-                <TableCell>
-                  <Tag>{t.test}</Tag>
-                </TableCell>
-                <TableCell>
-                  <Status of="generic" value={t.ctrl} />
-                  {t.ctrlNote ? <span className="block text-xs text-muted-foreground">{t.ctrlNote}</span> : null}
-                </TableCell>
-                <TableCell>{t.note}</TableCell>
+      <div className="mt-3">
+        <Card size="compact">
+          <Table regionLabel="방식 B 도구 6가지" className="min-w-[720px]">
+            <TableCaption>방식 B 도구 6가지 — 연결 방법과 한계</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">도구</TableHead>
+                <TableHead scope="col" className="w-[30%]">연결 방법</TableHead>
+                <TableHead scope="col">확인 상태</TableHead>
+                <TableHead scope="col">AI 참조 금지 통제</TableHead>
+                <TableHead scope="col" className="w-[26%]">알아 둘 것</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        <Anno>OpenCode TUI·앱이 PES에 등록된 것과 같은 API로 보내는지는 도구가 알린 값으로만 압니다. 모르면 API 목적지로 보고 엄격하게 막습니다(Codex F02, 설계 G18).</Anno>
-      </Card>
+            </TableHeader>
+            <TableBody>
+              {TOOLS.map((t) => (
+                <TableRow key={t.tool}>
+                  <TableHead scope="row">{t.tool}</TableHead>
+                  <TableCell>{t.how}</TableCell>
+                  <TableCell>
+                    <Tag>{t.test}</Tag>
+                  </TableCell>
+                  <TableCell>
+                    <Status of="generic" value={t.ctrl} />
+                    {t.ctrlNote ? <span className="block text-xs text-muted-foreground">{t.ctrlNote}</span> : null}
+                  </TableCell>
+                  <TableCell>{t.note}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Anno>OpenCode TUI·앱이 PES에 등록된 것과 같은 API로 보내는지는 도구가 알린 값으로만 압니다. 모르면 API 목적지로 보고 엄격하게 막습니다(Codex F02, 설계 G18).</Anno>
+        </Card>
+      </div>
     </>
   );
 }

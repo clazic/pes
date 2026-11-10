@@ -34,7 +34,7 @@ export function NotificationsPage() {
         }
       />
       <div className="grid grid-cols-1 items-start gap-3 desk:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <Card className="gap-0 px-5" aria-labelledby="nt-list">
+        <Card size="compact" aria-labelledby="nt-list">
           <CardHead title="알림 목록" titleId="nt-list" />
           <ul className="divide-y divide-line">
             {q.data.map((n) => {
@@ -60,7 +60,7 @@ export function NotificationsPage() {
             })}
           </ul>
         </Card>
-        <Card className="gap-0 px-5" aria-labelledby="nt-set">
+        <Card size="compact" aria-labelledby="nt-set">
           <CardHead
             title="알림 설정"
             titleId="nt-set"
