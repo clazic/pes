@@ -39,14 +39,12 @@ export function turnLabel(t: TurnView): string {
 
 /* ───────── 경과 시간: 15초마다 다시 그림(글자만 바뀜 — 움직임 아님) ───────── */
 
-let tick = 0;
 let ticker: number | undefined;
 const tickListeners = new Set<() => void>();
 function subscribeNow(cb: () => void) {
   tickListeners.add(cb);
   if (ticker === undefined) {
     ticker = window.setInterval(() => {
-      tick += 1;
       tickListeners.forEach((l) => l());
     }, 15000);
   }
@@ -58,10 +56,15 @@ function subscribeNow(cb: () => void) {
     }
   };
 }
-/** 15초마다 다시 그리게 하고, 그릴 때의 지금 시각을 돌려준다(새 자료가 와서 그릴 때도 늦은 시각을 쓰지 않음) */
+/**
+ * 그릴 때의 지금 시각 — 바깥(시계)에서 읽는 값이라 useSyncExternalStore로 읽는다.
+ * 15초 타이머가 다시 그리게 하고, 초 단위로 잘라 한 번 그리는 동안 같은 값을 돌려준다.
+ */
+function nowSnapshot() {
+  return Math.floor(Date.now() / 1000) * 1000;
+}
 export function useNow() {
-  React.useSyncExternalStore(subscribeNow, () => tick, () => tick);
-  return Date.now();
+  return React.useSyncExternalStore(subscribeNow, nowSnapshot, nowSnapshot);
 }
 
 function minutesBetween(fromIso: string, now: number) {

@@ -30,9 +30,12 @@ export function ActionButton({
   const blocked = Boolean(blockedBy);
   const describedId = blocked ? (reasonId ?? `${autoId}-why`) : undefined;
   const [tried, setTried] = React.useState(false);
-  React.useEffect(() => {
+  // 막힘이 풀리면 이유를 다시 숨긴 채로 시작한다 — effect가 아니라 그리기 중 이전 값과 비교해 맞춘다
+  const [wasBlocked, setWasBlocked] = React.useState(blocked);
+  if (wasBlocked !== blocked) {
+    setWasBlocked(blocked);
     if (!blocked) setTried(false);
-  }, [blocked]);
+  }
   const visible = showReason || tried;
   return (
     <>
@@ -89,9 +92,11 @@ export function StateSwitch({
   const blocked = Boolean(blockedBy);
   // 막힌 스위치를 누르면 이유를 그 자리에 보인다(ActionButton과 같음 — 6차)
   const [tried, setTried] = React.useState(false);
-  React.useEffect(() => {
+  const [wasBlocked, setWasBlocked] = React.useState(blocked);
+  if (wasBlocked !== blocked) {
+    setWasBlocked(blocked);
     if (!blocked) setTried(false);
-  }, [blocked]);
+  }
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-x-2 gap-y-1", className)}>
       <Switch

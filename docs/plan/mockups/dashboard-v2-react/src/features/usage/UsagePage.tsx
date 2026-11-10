@@ -332,10 +332,13 @@ export function UsagePage() {
   const [settling, setSettling] = React.useState<UsageView["unknown_calls"][number] | null>(null);
   const { hash } = useLocation();
   const [tab, setTab] = React.useState(hash === "#ops" ? "ops" : "api");
-  React.useEffect(() => {
+  // 해시가 바뀌면 그 탭으로 — effect가 아니라 그리기 중 이전 해시와 비교해 맞춘다(같은 해시로 다시 그려도 사람이 고른 탭 유지)
+  const [prevHash, setPrevHash] = React.useState(hash);
+  if (prevHash !== hash) {
+    setPrevHash(hash);
     if (hash === "#ops") setTab("ops");
     else if (hash) setTab("api");
-  }, [hash]);
+  }
 
   if (q.isPending) return <div className="mt-3"><QuietLoading what="사용량" /></div>;
   if (q.isError || !q.data) return <div className="mt-3"><LoadError what="사용량" lastReceived="—" code="U-0001" onRetry={() => q.refetch()} /></div>;

@@ -230,15 +230,18 @@ export function MaterialsPage() {
   const settings = useMockSettings();
   const [filter, setFilter] = React.useState<Filter>("all");
   const [query, setQuery] = React.useState("");
-  const [upload, setUpload] = React.useState<null | "files" | "folder">(null);
+  const [upload, setUpload] = React.useState<null | "files" | "folder">(hash === "#upload" ? "files" : null);
   const [pending, setPending] = React.useState<{ files: FileRow[]; next: "allow" | "deny"; folder?: string } | null>(null);
   const [gapsOnly, setGapsOnly] = React.useState(false);
   const [page, setPage] = React.useState(7);
   const access = useCommand("file_ai_access_set");
 
-  React.useEffect(() => {
+  // 주소가 #upload면 올리기 대화 상자를 연다 — effect가 아니라 그리기 중 이전 해시와 비교해 맞춘다
+  const [prevHash, setPrevHash] = React.useState(hash);
+  if (prevHash !== hash) {
+    setPrevHash(hash);
     if (hash === "#upload") setUpload("files");
-  }, [hash]);
+  }
 
   if (q.isPending) return <WorkspaceFrame active="files"><QuietLoading what="자료" /></WorkspaceFrame>;
   if (q.isError || !q.data) return <WorkspaceFrame active="files"><LoadError what="자료" lastReceived="—" code="M-0001" onRetry={() => q.refetch()} /></WorkspaceFrame>;

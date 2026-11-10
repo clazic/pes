@@ -60,12 +60,17 @@ export function ConfirmDialog({
   const reasonRef = React.useRef<HTMLInputElement>(null);
   const id = React.useId();
 
-  React.useEffect(() => {
+  // 열 때마다 처음 단계·이유로 — effect가 아니라 그리기 중 이전 값과 비교해 맞춘다
+  const [wasOpen, setWasOpen] = React.useState(open);
+  const [wasReasonDefault, setWasReasonDefault] = React.useState(spec.reasonDefault);
+  if (wasOpen !== open || wasReasonDefault !== spec.reasonDefault) {
+    setWasOpen(open);
+    setWasReasonDefault(spec.reasonDefault);
     if (open) {
       setStage("form");
       setReason(spec.reasonDefault ?? "");
     }
-  }, [open, spec.reasonDefault]);
+  }
 
   const busy = phase === "sending" || phase === "confirming";
   const reasonMissing = Boolean(spec.reasonRequired && !reason.trim());
