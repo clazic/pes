@@ -13,19 +13,29 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { CardHead, Hint, Tag } from "@/components/pes/bits";
+import { CardHead, Hint, Kbd, Tag } from "@/components/pes/bits";
 import { Callout, EmptyState } from "@/components/pes/blocks";
 import { ActionButton } from "@/components/pes/controls";
 import { InfoTip, MoreContent, MoreRoot, MoreTrigger } from "@/components/pes/disclosure";
 import { Chip, Status, StatusFrom } from "@/components/pes/status";
-import { clearDraft, draftKey, draftToAnswerText, readDraftNow, useDraft } from "@/lib/draft";
+import { clearDraft, draftKey, draftToAnswerText, readDraftNow, useDraft, type AnswerDraft } from "@/lib/draft";
 import { useMockSettings } from "@/lib/mock-settings";
-import { answersSent } from "@/lib/research-ui";
+import { answersSent, hasOpenOverlay, isTypingTarget, researchUi, useResearchUi } from "@/lib/research-ui";
 import { cn } from "@/lib/utils";
 import { usePhoneTools } from "./phone-tools";
 
 function answerTextFor(q: QuestionView, key: string) {
   return draftToAnswerText(readDraftNow(key), q.options);
+}
+
+/** 보내지 않았고 보류가 아닌 질문의 초안 줄 — 검토 대화 상자와 ⌘/Ctrl+Enter가 같은 셈을 쓴다(18.3-1) */
+function openQuestionRows(ws: WorkspaceView) {
+  return ws.form.questions
+    .filter((q) => !q.sent && !q.deferred)
+    .map((q) => {
+      const key = draftKey(ws.slug, ws.form.version, q.id, q.version);
+      return { q, key, text: answerTextFor(q, key) };
+    });
 }
 
 /** 질문 카드 머리: 번호 · 필수/선택 · 중요도 · (AI가 아닌 경우) 출처 · 다시 확인 + 질문 정보(ⓘ). 같은 뜻의 표시는 하나만(탭이 이미 “AI가 묻는 질문”). */
@@ -47,13 +57,43 @@ function QuestionTags({ q, extra }: { q: QuestionView; extra?: React.ReactNode }
   );
 }
 
-function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slug: string; formVersion: number; readOnly: boolean }) {
+function QuestionCard({ q, slug, formVersion, readOnly, onDraftChange }: { q: QuestionView; slug: string; formVersion: number; readOnly: boolean; onDraftChange?: () => void }) {
   const key = draftKey(slug, formVersion, q.id, q.version);
-  const [draft, setDraft] = useDraft(key);
+  const [draft, setDraftState] = useDraft(key);
+  const setDraft = React.useCallback(
+    (patch: Partial<AnswerDraft> | null) => {
+      setDraftState(patch);
+      onDraftChange?.();
+    },
+    [setDraftState, onDraftChange],
+  );
+  const ui = useResearchUi();
   const showTools = usePhoneTools();
   const titleId = `${q.id}-t`;
   const otherOpt = q.options.find((o) => o.label.startsWith("기타"));
   const commentOnly = q.options.length === 0;
+  const cardRef = React.useRef<HTMLElement>(null);
+
+  // 카드 안에 초점이 있을 때 1~4로 그 카드의 선택지를 고른다(18.10 — 입력 중 · 조합 중 · 열린 것 · 끄기 · 읽기 전용은 무시).
+  // 끄기는 그때의 저장값을 읽어(그리기 사이에 바뀌어도) 옛 값을 붙잡지 않는다.
+  React.useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (!researchUi.get().jk || readOnly) return;
+      const m = /^Digit([1-4])$/.exec(e.code);
+      if (!m) return;
+      if (isTypingTarget(e.target) || hasOpenOverlay()) return;
+      const opt = q.options[Number(m[1]) - 1];
+      if (!opt) return;
+      e.preventDefault();
+      setDraft({ option: opt.id, usedDefault: opt.id === q.default_option });
+    };
+    el.addEventListener("keydown", onKeyDown);
+    return () => el.removeEventListener("keydown", onKeyDown);
+  }, [q, readOnly, setDraft]);
 
   if (q.deferred) {
     return (
@@ -108,7 +148,7 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
   );
 
   return (
-    <article id={q.id} aria-labelledby={titleId} data-jk="" tabIndex={-1} className={cn("rounded-xl border bg-surface p-3 outline-none", q.recheck ? "border-warn-line" : "border-line")}>
+    <article ref={cardRef} id={q.id} aria-labelledby={titleId} data-jk="" tabIndex={-1} className={cn("rounded-xl border bg-surface p-3 outline-none", q.recheck ? "border-warn-line" : "border-line")}>
       <div className="flex flex-wrap items-start justify-between gap-1.5">
         <QuestionTags q={q} extra={q.recheck ? <Status of="question" value="recheck" /> : null} />
         {!readOnly && showTools ? (
@@ -160,11 +200,16 @@ function QuestionCard({ q, slug, formVersion, readOnly }: { q: QuestionView; slu
             <fieldset className="mt-2">
               <legend className="mb-1 text-meta font-semibold">하나를 고르세요</legend>
               <RadioGroup value={draft?.option ?? ""} onValueChange={(v) => setDraft({ option: v, usedDefault: v === q.default_option })} className="gap-1.5" aria-label={`${q.number} 선택지`}>
-                {q.options.map((o) => {
+                {q.options.map((o, i) => {
                   const id = `${q.id}-${o.id}`;
                   return (
                     <label key={o.id} htmlFor={id} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-[7px] text-body coarse:min-h-[48px] coarse:items-center", draft?.option === o.id ? "border-primary bg-primary-soft" : "border-line bg-surface")}>
-                      <RadioGroupItem value={o.id} id={id} className="mt-0.5" />
+                      {ui.jk && i < 4 ? (
+                        <span aria-hidden="true" className="mt-0.5 shrink-0">
+                          <Kbd>{i + 1}</Kbd>
+                        </span>
+                      ) : null}
+                      <RadioGroupItem value={o.id} id={id} aria-keyshortcuts={ui.jk && i < 4 ? String(i + 1) : undefined} className="mt-0.5" />
                       <span>
                         {o.label}
                         {o.id === q.default_option ? (
@@ -219,11 +264,7 @@ function ReviewDialog({ ws, open, onOpenChange }: { ws: WorkspaceView; open: boo
   // 성공 확인은 화면 가운데(같은 단계 자리)에 — 토스트와 겹쳐 두 번 읽히지 않게 조용히
   const send = useCommand("submission.create", { silent: true });
   const navigate = useNavigate();
-  const open_q = ws.form.questions.filter((q) => !q.sent && !q.deferred);
-  const rows = open_q.map((q) => {
-    const key = draftKey(ws.slug, ws.form.version, q.id, q.version);
-    return { q, key, text: answerTextFor(q, key) };
-  });
+  const rows = openQuestionRows(ws);
   const missingRequired = rows.filter((r) => r.q.required && !r.text);
   const toSend = rows.filter((r) => r.text);
   const busy = send.phase === "sending" || send.phase === "confirming";
@@ -355,7 +396,28 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
   const readOnly = settings.role === "reader";
   const [review, setReview] = React.useState(false);
   const [adding, setAdding] = React.useState(false);
+  const [noAnswers, setNoAnswers] = React.useState(false);
+  const clearNoAnswers = React.useCallback(() => setNoAnswers(false), []);
   const showTools = usePhoneTools();
+
+  // ⌘/Ctrl+Enter — 답 검토 후 보내기 대화 상자를 연다(바로 보내지 않음). 답이 0개면 대화 상자 대신 상태 한 줄(18.10).
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.key !== "Enter") return;
+      if (readOnly || review || hasOpenOverlay()) return;
+      e.preventDefault();
+      if (openQuestionRows(ws).every((r) => !r.text)) {
+        setNoAnswers(true);
+        return;
+      }
+      setNoAnswers(false);
+      setReview(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [readOnly, review, ws]);
 
   return (
     <Card size="compact">
@@ -378,7 +440,7 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
               action={<Button asChild><Link to={`/p/${ws.slug}/ai`}>AI 작업 기록 보기</Link></Button>}
             />
           ) : (
-            ws.form.questions.map((q) => <QuestionCard key={`${q.id}-${q.version}`} q={q} slug={ws.slug} formVersion={ws.form.version} readOnly={readOnly} />)
+            ws.form.questions.map((q) => <QuestionCard key={`${q.id}-${q.version}`} q={q} slug={ws.slug} formVersion={ws.form.version} readOnly={readOnly} onDraftChange={clearNoAnswers} />)
           )}
           {!readOnly && showTools && ws.form.questions.length ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -401,7 +463,14 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
           ) : null}
           {!readOnly && ws.form.answerable > 0 ? (
             <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-primary-line bg-primary-soft p-3">
-              <Button variant="default" onClick={() => setReview(true)}>
+              <Button
+                variant="default"
+                aria-keyshortcuts="Meta+Enter Control+Enter"
+                onClick={() => {
+                  setNoAnswers(false);
+                  setReview(true);
+                }}
+              >
                 답 검토 후 보내기
               </Button>
               <span className="text-caption text-ink-2">초안은 이 탭에만 있습니다</span>
@@ -433,6 +502,11 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* 단축키 결과 — 어느 탭을 보고 있어도 보이게 탭 밖에 두고, 요소는 늘 두고 글만 바꾼다(화면 읽기가 처음부터 읽게) */}
+      <p role="status" className="mt-2 text-meta text-ink-2">
+        {noAnswers ? "보낼 답이 없습니다 — 선택지를 고르거나 의견으로 답한 뒤 다시 눌러 주세요." : ""}
+      </p>
 
       {/* 단계 승인은 지금 할 일의 “단계 승인” 단계(다음 마일스톤)로 옮겼다(5차) — 질문 폼은 답하기 한 가지만 */}
       <ReviewDialog ws={ws} open={review} onOpenChange={setReview} />
