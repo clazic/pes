@@ -569,6 +569,53 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
   const object_ids = new Map<string, string>();
   const version_ids = new Map<string, string>();
 
+  function insert_artifact_version(
+    version_id: string,
+    object_id: string,
+    artifact: NonNullable<PlanObjectRow["artifact"]>,
+  ): void {
+    runtime.db.run(
+      `INSERT INTO artifact_versions
+         (project_id, version_id, object_id, object_kind, title, question, summary, body_md,
+          body_blob_id, status, confidence, stats, conflicts, verify, metadata_json)
+       VALUES (?, ?, ?, 'artifact', ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      project_id,
+      version_id,
+      object_id,
+      artifact.title,
+      artifact.question,
+      artifact.summary,
+      artifact.body_md,
+      artifact.status,
+      artifact.confidence,
+      JSON.stringify(artifact.stats),
+      JSON.stringify(artifact.conflicts),
+      JSON.stringify(artifact.verify),
+      JSON.stringify(artifact.metadata),
+    );
+  }
+
+  function insert_object_version(row: PlanObjectRow, object_id: string, version: PlanObjectRow["version"], version_id: string): void {
+    const created_in_round_id =
+      version.created_in_round_key === null ? null : round_ids.get(version.created_in_round_key) ?? null;
+    runtime.db.run(
+      `INSERT INTO object_versions
+         (id, project_id, object_id, kind, version_no, based_on_version_id, created_in_round_id,
+          actor_id, run_id, tx_id, content_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)`,
+      version_id,
+      project_id,
+      object_id,
+      row.kind,
+      version.version_no,
+      created_in_round_id,
+      legacy_actor_id,
+      runtime.tx_id,
+      version.content_hash,
+      version.created_at,
+    );
+  }
+
   function insert_object(row: PlanObjectRow): void {
     const object_id = runtime.new_id();
     const version_id = runtime.new_id();
@@ -585,26 +632,16 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
       display_no,
       row.archived ? runtime.now_ms : null,
     );
-    const created_in_round_id =
-      row.version.created_in_round_key === null
-        ? null
-        : round_ids.get(row.version.created_in_round_key) ?? null;
-    runtime.db.run(
-      `INSERT INTO object_versions
-         (id, project_id, object_id, kind, version_no, based_on_version_id, created_in_round_id,
-          actor_id, run_id, tx_id, content_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)`,
-      version_id,
-      project_id,
-      object_id,
-      row.kind,
-      row.version.version_no,
-      created_in_round_id,
-      legacy_actor_id,
-      runtime.tx_id,
-      row.version.content_hash,
-      row.version.created_at,
-    );
+    // Older versions first (version_no 1..n); the current one is the last.
+    const earlier = row.earlier ?? [];
+    const earlier_ids: string[] = [];
+    for (const old of earlier) {
+      const old_id = runtime.new_id();
+      earlier_ids.push(old_id);
+      version_ids.set(old.version.key, old_id);
+      insert_object_version(row, object_id, old.version, old_id);
+    }
+    insert_object_version(row, object_id, row.version, version_id);
     runtime.db.run(
       "UPDATE objects SET current_version_id = ? WHERE project_id = ? AND id = ?",
       version_id,
@@ -621,25 +658,10 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
         artifact.artifact_kind,
         artifact.stage_key === null ? null : stage_ids.get(artifact.stage_key)!,
       );
-      runtime.db.run(
-        `INSERT INTO artifact_versions
-           (project_id, version_id, object_id, object_kind, title, question, summary, body_md,
-            body_blob_id, status, confidence, stats, conflicts, verify, metadata_json)
-         VALUES (?, ?, ?, 'artifact', ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
-        project_id,
-        version_id,
-        object_id,
-        artifact.title,
-        artifact.question,
-        artifact.summary,
-        artifact.body_md,
-        artifact.status,
-        artifact.confidence,
-        JSON.stringify(artifact.stats),
-        JSON.stringify(artifact.conflicts),
-        JSON.stringify(artifact.verify),
-        JSON.stringify(artifact.metadata),
-      );
+      for (const [position, old] of earlier.entries()) {
+        insert_artifact_version(earlier_ids[position]!, object_id, old.artifact);
+      }
+      insert_artifact_version(version_id, object_id, artifact);
     } else if (row.source !== undefined) {
       const source = row.source;
       runtime.db.run(
@@ -862,6 +884,26 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
   for (const row of plan.objects) {
     if (row.kind !== "answer" && row.kind !== "message") continue;
     insert_object(row);
+  }
+
+  // What each sealed round showed: the exact item version of that moment.
+  for (const content of plan.round_contents) {
+    const round_id = round_ids.get(content.round_key);
+    const object_id = object_ids.get(content.object_key);
+    const version_id = version_ids.get(content.version_key);
+    if (round_id === undefined || object_id === undefined || version_id === undefined) {
+      throw new Error("an imported round content target is missing");
+    }
+    runtime.db.run(
+      `INSERT INTO round_contents (project_id, round_id, object_id, version_id, position, role)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      project_id,
+      round_id,
+      object_id,
+      version_id,
+      content.position,
+      content.role,
+    );
   }
 
   for (const relation of plan.relations) {

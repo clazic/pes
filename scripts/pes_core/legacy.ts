@@ -337,6 +337,16 @@ export interface PlanObjectRow {
   thread?: PlanThreadData;
   message?: PlanMessageData;
   followup?: PlanFollowupData;
+  /** Older artifact versions of this object (version_no 1..n); `version` is the last one. */
+  earlier?: Array<{ version: PlanVersionData; artifact: PlanArtifactData }>;
+}
+
+export interface PlanRoundContent {
+  round_key: string;
+  object_key: string;
+  version_key: string;
+  position: number;
+  role: "result";
 }
 
 export interface PlanCitation {
@@ -438,6 +448,7 @@ export interface ImportPlan {
   citations: PlanCitation[];
   relations: PlanRelation[];
   version_files: PlanVersionFile[];
+  round_contents: PlanRoundContent[];
   question_sets: PlanQuestionSet[];
   submissions: PlanSubmission[];
   mappings: Array<{
@@ -861,8 +872,22 @@ interface PendingRelation {
   raw: unknown;
 }
 
+/** A question form (ask file or project.json review) and the question versions it showed. */
+interface FormRef {
+  set_key: string;
+  stage_key: LegacyStageKey;
+  purpose: string;
+  round_no: number;
+  names: string[];
+  questions: Map<string, { object_key: string; version_key: string }>;
+}
+
 interface BuildContext {
   plan: ImportPlan;
+  forms: FormRef[];
+  question_reuse: Map<string, { object_key: string; version_key: string }>;
+  item_digest: Map<string, string>;
+  object_rows: Map<string, PlanObjectRow>;
   bytes: Map<string, Uint8Array>;
   parsed: Map<string, unknown>;
   entries: ReportEntry[];
@@ -894,6 +919,7 @@ function has_entry(entries: ReportEntry[], category: ReportCategory, path: strin
 
 function add_object(ctx: BuildContext, object: PlanObjectRow): PlanObjectRow {
   ctx.plan.objects.push(object);
+  ctx.object_rows.set(object.key, object);
   return object;
 }
 
@@ -1116,7 +1142,7 @@ function build_stages(ctx: BuildContext): void {
   }
 }
 
-function add_artifact(ctx: BuildContext, input: {
+interface ArtifactInput {
   key: string;
   stage_key: LegacyStageKey | null;
   edition: "edition" | null;
@@ -1134,43 +1160,77 @@ function add_artifact(ctx: BuildContext, input: {
   round_key: string | null;
   archived: boolean;
   question?: string | null;
-}): { object_key: string; version_key: string } {
-  const version = version_for(
-    input.key,
-    input.created_at,
-    input.round_key,
-    {
-      artifact_kind: input.artifact_kind,
-      title: input.title,
-      summary: input.summary,
-      body_md: input.body_md,
-      status: input.status,
-      confidence: input.confidence,
-      metadata: input.metadata,
-    },
-  );
+}
+
+function artifact_content_hash(input: ArtifactInput): string {
+  return digest({
+    artifact_kind: input.artifact_kind,
+    title: input.title,
+    summary: input.summary,
+    body_md: input.body_md,
+    status: input.status,
+    confidence: input.confidence,
+    metadata: input.metadata,
+  });
+}
+
+function artifact_data(input: ArtifactInput): PlanArtifactData {
+  return {
+    artifact_kind: input.artifact_kind,
+    stage_key: input.stage_key,
+    title: input.title,
+    question: input.question ?? null,
+    summary: input.summary,
+    body_md: input.body_md,
+    status: input.status,
+    confidence: input.confidence,
+    stats: input.stats,
+    conflicts: input.conflicts,
+    verify: input.verify,
+    metadata: input.metadata,
+  };
+}
+
+function add_artifact(ctx: BuildContext, input: ArtifactInput): { object_key: string; version_key: string } {
+  const version: PlanVersionData = {
+    key: `${input.key}:v1`,
+    version_no: 1,
+    created_at: input.created_at,
+    created_in_round_key: input.round_key,
+    content_hash: artifact_content_hash(input),
+  };
   add_object(ctx, {
     key: input.key,
     kind: "artifact",
     edition: input.edition,
     archived: input.archived,
     version,
-    artifact: {
-      artifact_kind: input.artifact_kind,
-      stage_key: input.stage_key,
-      title: input.title,
-      question: input.question ?? null,
-      summary: input.summary,
-      body_md: input.body_md,
-      status: input.status,
-      confidence: input.confidence,
-      stats: input.stats,
-      conflicts: input.conflicts,
-      verify: input.verify,
-      metadata: input.metadata,
-    },
+    artifact: artifact_data(input),
   });
   return { object_key: input.key, version_key: version.key };
+}
+
+/** Add an older version before the object's current one. Returns its version key. */
+function add_earlier_version(
+  ctx: BuildContext,
+  object_key: string,
+  label: string,
+  input: ArtifactInput,
+): string {
+  const row = ctx.object_rows.get(object_key);
+  if (row === undefined || row.artifact === undefined) throw new Error("the object for an older version is missing");
+  const earlier = row.earlier ?? [];
+  row.earlier = earlier;
+  const version: PlanVersionData = {
+    key: `${object_key}:${label}:v1`,
+    version_no: earlier.length + 1,
+    created_at: input.created_at,
+    created_in_round_key: input.round_key,
+    content_hash: artifact_content_hash(input),
+  };
+  earlier.push({ version, artifact: artifact_data(input) });
+  row.version.version_no = earlier.length + 1;
+  return version.key;
 }
 
 function add_source(ctx: BuildContext, input: {
@@ -1235,25 +1295,46 @@ function item_key(scope: string, legacy_id: string): string {
   return `item:${scope}:${legacy_id}`;
 }
 
-function add_item(
+const KNOWN_SOURCE_KEYS = new Set(["title", "url", "method", "date", "note", "orgId", "tblId"]);
+const KNOWN_USER_LINK_KEYS = new Set(["title", "url", "memo", "added", "status"]);
+
+/** A relative reference that stays inside the source folder (never absolute, parent-relative or backslashed). */
+function is_inside_reference(path: string): boolean {
+  if (path.length === 0 || is_absolute_reference(path) || path.includes("\\")) return false;
+  return !path.split("/").includes("..");
+}
+
+function report_missing_file(ctx: BuildContext, path: string): void {
+  const safe = safe_reference_path(path);
+  if (!has_entry(ctx.entries, "missing_file", safe)) {
+    plan_entry_category(ctx.entries, "missing_file", safe);
+  }
+}
+
+interface ItemCore {
+  artifact_kind: string;
+  title: string;
+  summary: string;
+  body_md: string | null;
+  status: string;
+  confidence: string | null;
+  stats: unknown[];
+  conflicts: unknown[];
+  verify: unknown;
+  metadata: Record<string, unknown>;
+  archived: boolean;
+  question: string | null;
+}
+
+/** The artifact-version fields of one old item record (no rows are written here). */
+function item_core(
   ctx: BuildContext,
-  scope: string,
-  stage_key: LegacyStageKey | null,
   index: number,
   raw: Record<string, unknown>,
-): { object_key: string; version_key: string } | null {
+  report_path: string,
+  item_pointer: string,
+): ItemCore {
   const raw_id = raw.id;
-  const legacy_id = raw_id === undefined || raw_id === null ? String(index + 1) : String(raw_id);
-  const report_path = scope === "library" ? "library.json" : "project.json";
-  const item_pointer = scope === "library" ? `/items/${index}` : `/stages/${scope}/items/${index}`;
-  const scope_map = ctx.items.get(scope) ?? new Map<string, { object_key: string; version_key: string }>();
-  ctx.items.set(scope, scope_map);
-  if (scope_map.has(legacy_id)) {
-    plan_entry_category(ctx.entries, "unknown_field", report_path, item_pointer, raw);
-    return null;
-  }
-
-  const key = item_key(scope, legacy_id);
   const title_raw = raw.title;
   const title = text_or(title_raw, "(제목 없음)");
   const kind_raw = raw.kind;
@@ -1289,17 +1370,26 @@ function add_item(
   if (raw.request !== undefined) {
     plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/request`, raw.request);
   }
+  // items[].path: the original relative path is kept; a missing file is listed.
+  if (raw.path !== undefined) {
+    if (typeof raw.path === "string") {
+      metadata_extra.path = safe_reference_path(raw.path);
+      if (!is_inside_reference(raw.path) || !ctx.bytes.has(raw.path)) {
+        metadata_extra.missing_paths = [safe_reference_path(raw.path)];
+        report_missing_file(ctx, raw.path);
+      }
+    } else {
+      metadata_extra.path = raw.path;
+      plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/path`, raw.path);
+    }
+  }
   if (kind_raw !== kind || status_raw !== status || title_raw === undefined || title_raw === "") {
     metadata_extra.legacy_unverified = true;
   }
   if (typeof confidence_raw === "string" && confidence_raw === "") {
     metadata_extra.legacy_unverified = true;
   }
-  const metadata = { legacy_extra: metadata_extra };
-  const artifact = add_artifact(ctx, {
-    key,
-    stage_key,
-    edition: scope === "library" ? null : "edition",
+  return {
     artifact_kind: kind,
     title,
     summary,
@@ -1309,24 +1399,25 @@ function add_item(
     stats: as_array(raw.stats),
     conflicts: as_array(raw.conflicts),
     verify: raw.verify === undefined ? null : raw.verify,
-    metadata,
-    created_at: 0,
-    round_key: null,
+    metadata: { legacy_extra: metadata_extra },
     archived: status === "removed",
     question: typeof raw.question === "string" ? raw.question : null,
-  });
-  scope_map.set(legacy_id, artifact);
-  ctx.plan.mappings.push({
-    kind: "item",
-    scope,
-    key: legacy_id,
-    content_hash: digest(raw),
-    object_key: artifact.object_key,
-    version_key: artifact.version_key,
-    row: null,
-  });
+  };
+}
 
-  // sources / citations
+/**
+ * Sources, citations, user links, shots, the items[].path file, and the
+ * reuse/links relations of one item version. `key` makes the new source keys
+ * unique per version.
+ */
+function item_extras(
+  ctx: BuildContext,
+  key: string,
+  version_key: string,
+  raw: Record<string, unknown>,
+  report_path: string,
+  item_pointer: string,
+): void {
   const sources = as_array(raw.sources);
   for (const [source_index, source_value] of sources.entries()) {
     const source = as_record(source_value);
@@ -1356,6 +1447,16 @@ function add_item(
     if (typeof method_raw === "string" && !SOURCE_METHODS.has(method_raw)) {
       legacy_extra.legacy_unverified = true;
     }
+    for (const field of Object.keys(source)) {
+      if (KNOWN_SOURCE_KEYS.has(field)) continue;
+      legacy_extra[field] = source[field];
+      plan_entry_category(
+        ctx.entries,
+        "unknown_field",
+        report_path,
+        `${item_pointer}/sources/${source_index}/${field}`,
+      );
+    }
     locator.legacy_extra = legacy_extra;
     const added = add_source(ctx, {
       key: `source:${key}:${source_index}`,
@@ -1367,7 +1468,7 @@ function add_item(
       method,
       created_at: 0,
     });
-    add_citation(ctx, artifact.version_key, added.version_key, source_index + 1);
+    add_citation(ctx, version_key, added.version_key, source_index + 1);
   }
 
   // user_links: a user's own saved links become import sources, never verified.
@@ -1392,10 +1493,21 @@ function add_item(
         const title = text_or(link.title, url ?? "(제목 없음)");
         const status = typeof link.status === "string" ? link.status : null;
         const verification_state = status === "failed" ? "unreachable" : "unverified";
-        const locator: Record<string, unknown> = { legacy_extra: { legacy_unverified: true } };
+        const legacy_extra: Record<string, unknown> = { legacy_unverified: true };
+        const locator: Record<string, unknown> = { legacy_extra };
         if (link.memo !== undefined) locator.memo = link.memo;
         if (link.added !== undefined) locator.added = link.added;
         if (status !== null) locator.user_status = status;
+        for (const field of Object.keys(link)) {
+          if (KNOWN_USER_LINK_KEYS.has(field)) continue;
+          legacy_extra[field] = link[field];
+          plan_entry_category(
+            ctx.entries,
+            "unknown_field",
+            report_path,
+            `${item_pointer}/user_links/${link_index}/${field}`,
+          );
+        }
         add_source(ctx, {
           key: `user-link:${key}:${link_index}`,
           title,
@@ -1425,17 +1537,22 @@ function add_item(
       continue;
     }
     if (ctx.bytes.has(shot)) {
-      add_file(ctx, artifact.version_key, shot, "image");
+      add_file(ctx, version_key, shot, "image");
     } else {
       plan_entry_category(ctx.entries, "missing_file", safe_reference_path(shot));
     }
+  }
+
+  // items[].path: an existing file is the rendered file of this version.
+  if (typeof raw.path === "string" && is_inside_reference(raw.path) && ctx.bytes.has(raw.path)) {
+    add_file(ctx, version_key, raw.path, "rendered");
   }
 
   // reuse / links: resolved after all items (including library) exist.
   if (raw.reuse !== undefined) {
     if (typeof raw.reuse === "string" || typeof raw.reuse === "number") {
       ctx.pending_relations.push({
-        from_version_key: artifact.version_key,
+        from_version_key: version_key,
         scope: "library",
         key: String(raw.reuse),
         kind: "reuses",
@@ -1468,7 +1585,7 @@ function add_item(
           if (typeof target === "string" || typeof target === "number") {
             usable += 1;
             ctx.pending_relations.push({
-              from_version_key: artifact.version_key,
+              from_version_key: version_key,
               scope: target_scope,
               key: String(target),
               kind: "supports",
@@ -1484,7 +1601,48 @@ function add_item(
       if (usable === 0 && Object.keys(links).length > 0) report_links();
     }
   }
+}
 
+function add_item(
+  ctx: BuildContext,
+  scope: string,
+  stage_key: LegacyStageKey | null,
+  index: number,
+  raw: Record<string, unknown>,
+): { object_key: string; version_key: string } | null {
+  const raw_id = raw.id;
+  const legacy_id = raw_id === undefined || raw_id === null ? String(index + 1) : String(raw_id);
+  const report_path = scope === "library" ? "library.json" : "project.json";
+  const item_pointer = scope === "library" ? `/items/${index}` : `/stages/${scope}/items/${index}`;
+  const scope_map = ctx.items.get(scope) ?? new Map<string, { object_key: string; version_key: string }>();
+  ctx.items.set(scope, scope_map);
+  if (scope_map.has(legacy_id)) {
+    plan_entry_category(ctx.entries, "unknown_field", report_path, item_pointer, raw);
+    return null;
+  }
+
+  const key = item_key(scope, legacy_id);
+  const core = item_core(ctx, index, raw, report_path, item_pointer);
+  const artifact = add_artifact(ctx, {
+    key,
+    stage_key,
+    edition: scope === "library" ? null : "edition",
+    ...core,
+    created_at: 0,
+    round_key: null,
+  });
+  scope_map.set(legacy_id, artifact);
+  ctx.item_digest.set(`${scope}|${legacy_id}`, digest(raw));
+  ctx.plan.mappings.push({
+    kind: "item",
+    scope,
+    key: legacy_id,
+    content_hash: digest(raw),
+    object_key: artifact.object_key,
+    version_key: artifact.version_key,
+    row: null,
+  });
+  item_extras(ctx, key, artifact.version_key, raw, report_path, item_pointer);
   return artifact;
 }
 
@@ -1537,7 +1695,17 @@ function add_question(
       state: input.state,
     },
   });
-  if (input.mapping !== undefined) {
+  const mapping_hash = input.mapping === undefined ? "" : digest(input.mapping.raw);
+  if (
+    input.mapping !== undefined &&
+    !ctx.plan.mappings.some(
+      (entry) =>
+        entry.kind === "question" &&
+        entry.scope === input.mapping!.scope &&
+        entry.key === input.mapping!.key &&
+        entry.content_hash === mapping_hash,
+    )
+  ) {
     ctx.plan.mappings.push({
       kind: "question",
       scope: input.mapping.scope,
@@ -1582,6 +1750,14 @@ function build_ask_files(ctx: BuildContext): void {
       parsed.kind === "resume" ? "resume" : parsed.kind === "review" ? "review" : "stage_start";
     const set_key = `ask-set:${path}`;
     const members: PlanQuestionSet["members"] = [];
+    const form: FormRef = {
+      set_key,
+      stage_key,
+      purpose,
+      round_no,
+      names: [...new Set([form_id, basename(path, ".json"), form_key])],
+      questions: new Map(),
+    };
     if (parsed.questions !== undefined && !Array.isArray(parsed.questions)) {
       plan_entry_category(ctx.entries, "unknown_field", path, "/questions", parsed.questions);
     }
@@ -1599,11 +1775,14 @@ function build_ask_files(ctx: BuildContext): void {
         continue;
       }
       const question_id = text_or(question.id, `q${position + 1}`);
-      const key = `question:${stage_key}:${question_id}`;
       const defaults = question_defaults(ctx, path, `/questions/${position}`, question);
       const options = as_array(question.options);
-      const added = add_question(ctx, {
-        key,
+      // The same question (stage, id, identical record) is reused explicitly; a
+      // question with other content gets its own object, keyed by form and position.
+      const reuse_key = `${stage_key}|bank|${question_id}|${digest(question)}`;
+      const reused = ctx.question_reuse.get(reuse_key);
+      const added = reused ?? add_question(ctx, {
+        key: `ask-question:${path}:${position}:${question_id}`,
         stage_key,
         bank_key: typeof question.id === "string" ? question.id : null,
         origin: "bank",
@@ -1619,7 +1798,10 @@ function build_ask_files(ctx: BuildContext): void {
         created_at: 0,
         mapping: { scope: stage_key, key: question_id, raw: question },
       });
+      ctx.question_reuse.set(reuse_key, added);
       question_index(ctx, stage_key).set(question_id, added);
+      if (!form.questions.has(question_id)) form.questions.set(question_id, added);
+      if (members.some((member) => member.question_key === added.object_key)) continue;
       members.push({
         question_key: added.object_key,
         question_version_key: added.version_key,
@@ -1627,6 +1809,7 @@ function build_ask_files(ctx: BuildContext): void {
       });
     }
     if (members.length > 0) {
+      ctx.forms.push(form);
       ctx.plan.question_sets.push({
         key: set_key,
         stage_key,
@@ -1668,6 +1851,7 @@ function ensure_import_question(
     help: null,
     state: "open",
     created_at: 0,
+    mapping: { scope, key: question_id, raw: { import_placeholder: true, question_id } },
   });
   index.set(question_id, added);
   return added;
@@ -1911,6 +2095,37 @@ function build_suggestions(
   }
 }
 
+/**
+ * The forms a feedback file can have answered, best first: the form named by
+ * `spec`, then forms of the same purpose/stage/round, then the same purpose and
+ * stage in any round (latest round first).
+ */
+function candidate_forms(
+  ctx: BuildContext,
+  stage_key: LegacyStageKey | null,
+  kind: string,
+  spec: string,
+  round_no: number,
+): FormRef[] {
+  if (stage_key === null) return [];
+  const purpose = kind === "review" || kind === "resume" || kind === "stage_start" ? kind : null;
+  const in_stage = ctx.forms.filter((form) => form.stage_key === stage_key);
+  const ordered: FormRef[] = [];
+  const add = (forms: FormRef[]): void => {
+    for (const form of forms) if (!ordered.includes(form)) ordered.push(form);
+  };
+  if (spec.length > 0) add(in_stage.filter((form) => form.names.includes(spec)));
+  if (purpose !== null) {
+    add(in_stage.filter((form) => form.purpose === purpose && form.round_no === round_no));
+    add(
+      in_stage
+        .filter((form) => form.purpose === purpose)
+        .sort((left, right) => right.round_no - left.round_no),
+    );
+  }
+  return ordered;
+}
+
 function build_feedback(ctx: BuildContext): void {
   const processed = new Set<string>();
   const raw_processed = ctx.project_raw === null ? [] : as_array(ctx.project_raw.processed);
@@ -1955,12 +2170,25 @@ function build_feedback(ctx: BuildContext): void {
       parse_time_utc(parsed.time) ??
       (name_stamp === null ? 0 : parse_time_utc(`${name_stamp[2]}-${name_stamp[3]}`) ?? 0);
     const submission = ctx.plan.submissions.find((entry) => entry.key === submission_key);
-    if (submission !== undefined) {
-      submission.received_at = received_at;
-      if (kind === "stage_start" && stage_key !== null) {
-        submission.set_key = ctx.ask_sets.get(stage_key) ?? null;
+    if (submission !== undefined) submission.received_at = received_at;
+    const forms = candidate_forms(
+      ctx,
+      stage_key,
+      kind,
+      typeof parsed.spec === "string" ? parsed.spec : "",
+      integer_or(parsed.round, 0),
+    );
+    let chosen: FormRef | null = null;
+    const find_question = (question_id: string): { object_key: string; version_key: string } => {
+      for (const form of forms) {
+        const found = form.questions.get(question_id);
+        if (found !== undefined) {
+          chosen ??= form;
+          return found;
+        }
       }
-    }
+      return ensure_import_question(ctx, stage_key, question_id);
+    };
     ctx.plan.events.push({
       type: "legacy.feedback_file",
       payload: { path, kind, stage: stage_key, processed: processed.has(name) },
@@ -1975,7 +2203,7 @@ function build_feedback(ctx: BuildContext): void {
         if (answer_id.endsWith("__other")) {
           const question_id = answer_id.slice(0, -"__other".length);
           if (question_id.length === 0) continue;
-          const question = ensure_import_question(ctx, stage_key, question_id);
+          const question = find_question(question_id);
           const text = safe_text(value);
           if (text.trim().length === 0) continue;
           const thread = add_thread(ctx, {
@@ -1994,9 +2222,15 @@ function build_feedback(ctx: BuildContext): void {
           });
           continue;
         }
-        const question = ensure_import_question(ctx, stage_key, answer_id);
+        const question = find_question(answer_id);
         add_answer(ctx, submission_key, received_at, question, answer_id, value);
       }
+    }
+    if (submission !== undefined) {
+      const exact = chosen ?? forms.find((form) => form.names.includes(typeof parsed.spec === "string" ? parsed.spec : "")) ?? null;
+      submission.set_key =
+        (exact as FormRef | null)?.set_key ??
+        (kind === "stage_start" && stage_key !== null ? ctx.ask_sets.get(stage_key) ?? null : null);
     }
 
     const text = typeof parsed.text === "string" ? parsed.text : "";
@@ -2152,6 +2386,14 @@ function build_review(
     });
   }
   const members: PlanQuestionSet["members"] = [];
+  const form: FormRef = {
+    set_key: `review-set:${stage_key}`,
+    stage_key,
+    purpose: "review",
+    round_no,
+    names: [`${stage_key}-R${round_no}-review`, `review/${stage_key}`],
+    questions: new Map(),
+  };
   for (const [index, value] of questions.entries()) {
     const question = as_record(value);
     if (question === null) {
@@ -2188,6 +2430,7 @@ function build_review(
       created_at: 0,
       mapping: { scope: stage_key, key: question_id, raw: question },
     });
+    if (!form.questions.has(question_id)) form.questions.set(question_id, added);
     members.push({
       question_key: added.object_key,
       question_version_key: added.version_key,
@@ -2195,6 +2438,7 @@ function build_review(
     });
   }
   if (members.length > 0) {
+    ctx.forms.push(form);
     ctx.plan.question_sets.push({
       key: `review-set:${stage_key}`,
       stage_key,
@@ -2467,6 +2711,181 @@ function build_stage_content(ctx: BuildContext): void {
   }
 }
 
+/**
+ * Snapshot items: `state.items` of each normal round snapshot becomes the item
+ * versions as they were. An item equal to the current one reuses the current
+ * version; a different record becomes an older version of the same object.
+ * round_contents of that round point at the exact version.
+ */
+function build_snapshot_items(ctx: BuildContext): void {
+  for (const stage_key of LEGACY_STAGE_KEYS) {
+    const stage_plan = ctx.plan.stages.find((stage) => stage.key === stage_key);
+    if (stage_plan === undefined) continue;
+    interface Seen {
+      round_key: string;
+      path: string;
+      index: number;
+      raw: Record<string, unknown>;
+      digest: string;
+    }
+    const groups = new Map<string, Seen[]>();
+    for (const round of stage_plan.rounds) {
+      if (!round.sealed || round.snapshot_key === null) continue;
+      const snapshot = ctx.plan.snapshots.find((entry) => entry.key === round.snapshot_key);
+      if (snapshot === undefined || snapshot.source.kind !== "file") continue;
+      const state = as_record(as_record(ctx.parsed.get(snapshot.source.path))?.state);
+      if (state === null || !Array.isArray(state.items)) continue;
+      const taken = new Set<string>();
+      for (const [index, value] of state.items.entries()) {
+        const raw = as_record(value);
+        if (raw === null) {
+          plan_entry_category(ctx.entries, "unknown_field", snapshot.source.path, `/state/items/${index}`, value);
+          continue;
+        }
+        const legacy_id = raw.id === undefined || raw.id === null ? String(index + 1) : String(raw.id);
+        if (taken.has(legacy_id)) continue;
+        taken.add(legacy_id);
+        const list = groups.get(legacy_id) ?? [];
+        groups.set(legacy_id, list);
+        list.push({ round_key: `${stage_key}:${round.round_no}`, path: snapshot.source.path, index, raw, digest: digest(raw) });
+      }
+    }
+
+    for (const [legacy_id, seen] of groups) {
+      const scope_map = ctx.items.get(stage_key) ?? new Map<string, { object_key: string; version_key: string }>();
+      ctx.items.set(stage_key, scope_map);
+      let current = scope_map.get(legacy_id);
+      const current_digest = ctx.item_digest.get(`${stage_key}|${legacy_id}`);
+      const versions = new Map<string, string>(); // record digest -> version key
+      if (current !== undefined && current_digest !== undefined) versions.set(current_digest, current.version_key);
+
+      const make_input = (entry: Seen, key: string, version_round_key: string | null): ArtifactInput => {
+        const pointer = `/state/items/${entry.index}`;
+        const core = item_core(ctx, entry.index, entry.raw, entry.path, pointer);
+        return { key, stage_key, edition: "edition", ...core, created_at: 0, round_key: version_round_key };
+      };
+      const add_old = (entry: Seen, object_key: string, label: string): void => {
+        const input = make_input(entry, object_key, entry.round_key);
+        const version_key = add_earlier_version(ctx, object_key, label, input);
+        versions.set(entry.digest, version_key);
+        item_extras(ctx, `${object_key}@${label}`, version_key, entry.raw, entry.path, `/state/items/${entry.index}`);
+        ctx.plan.mappings.push({
+          kind: "item",
+          scope: stage_key,
+          key: legacy_id,
+          content_hash: entry.digest,
+          object_key,
+          version_key,
+          row: null,
+        });
+      };
+
+      if (current === undefined) {
+        // The item no longer exists in project.json: its latest snapshot record is the object.
+        const latest = seen[seen.length - 1]!;
+        const key = item_key(stage_key, legacy_id);
+        const created = add_artifact(ctx, make_input(latest, key, latest.round_key));
+        scope_map.set(legacy_id, created);
+        ctx.item_digest.set(`${stage_key}|${legacy_id}`, latest.digest);
+        ctx.plan.mappings.push({
+          kind: "item",
+          scope: stage_key,
+          key: legacy_id,
+          content_hash: latest.digest,
+          object_key: created.object_key,
+          version_key: created.version_key,
+          row: null,
+        });
+        item_extras(ctx, key, created.version_key, latest.raw, latest.path, `/state/items/${latest.index}`);
+        versions.set(latest.digest, created.version_key);
+        current = created;
+      }
+      const object_key = current.object_key;
+      for (const entry of seen) {
+        if (!versions.has(entry.digest)) {
+          add_old(entry, object_key, `old${(ctx.object_rows.get(object_key)?.earlier?.length ?? 0) + 1}`);
+        }
+        ctx.plan.round_contents.push({
+          round_key: entry.round_key,
+          object_key,
+          version_key: versions.get(entry.digest)!,
+          position: entry.index,
+          role: "result",
+        });
+      }
+    }
+  }
+}
+
+const ROUND_FILE_PATTERN = /^rounds\/([a-z]+)-R(\d+)\/([^/]+)$/;
+
+/**
+ * rounds/<stage>-R<n>/qa.json becomes that round's review artifact (metadata.qa
+ * keeps the whole object). A result file whose canonical hash equals the item
+ * record in project.json is that item version's source file; every other
+ * result file stays a raw blob and is reported.
+ */
+function build_round_files(ctx: BuildContext): void {
+  const paths = [...ctx.bytes.keys()].filter((path) => path.startsWith("rounds/")).sort();
+  for (const path of paths) {
+    const match = path.match(ROUND_FILE_PATTERN);
+    if (match === null || !STAGE_KEY_SET.has(match[1]!)) continue;
+    const stage_key = match[1]! as LegacyStageKey;
+    const round_no = Number(match[2]);
+    const name = match[3]!;
+    if (!name.endsWith(".json") || name === "self-review.json") continue;
+    const parsed = ctx.parsed.get(path);
+    if (parsed === undefined) continue; // damaged: parse_error already reported, blob kept
+    const stage_plan = ctx.plan.stages.find((stage) => stage.key === stage_key);
+    if (name === "qa.json") {
+      if (!is_record(parsed)) {
+        plan_entry_category(ctx.entries, "unmapped_input", path);
+        continue;
+      }
+      const round_key =
+        stage_plan !== undefined && stage_plan.rounds.some((round) => round.round_no === round_no)
+          ? `${stage_key}:${round_no}`
+          : null;
+      const added = add_artifact(ctx, {
+        key: `round-qa:${stage_key}:${round_no}`,
+        stage_key,
+        edition: "edition",
+        artifact_kind: "review",
+        title: "(QA)",
+        summary: "",
+        body_md: null,
+        status: "draft",
+        confidence: null,
+        stats: [],
+        conflicts: [],
+        verify: null,
+        metadata: { qa: parsed, legacy_extra: { path, legacy_unverified: true } },
+        created_at: 0,
+        round_key,
+        archived: false,
+      });
+      add_file(ctx, added.version_key, path, "source");
+      ctx.plan.mappings.push({
+        kind: "round_qa",
+        scope: `${stage_key}-R${round_no}`,
+        key: "qa.json",
+        content_hash: sha256_hex(ctx.bytes.get(path)!),
+        object_key: added.object_key,
+        version_key: added.version_key,
+        row: null,
+      });
+      continue;
+    }
+    const result_id = name.slice(0, -".json".length);
+    const item = ctx.items.get(stage_key)?.get(result_id);
+    if (item !== undefined && ctx.item_digest.get(`${stage_key}|${result_id}`) === digest(parsed)) {
+      add_file(ctx, item.version_key, path, "source");
+    } else {
+      plan_entry_category(ctx.entries, "unmapped_input", path);
+    }
+  }
+}
+
 function resolve_pending_relations(ctx: BuildContext): void {
   const resolved = new Set<string>();
   const unresolved = new Map<string, { path: string; pointer: string; raw: unknown }>();
@@ -2577,6 +2996,8 @@ function build_project(ctx: BuildContext): void {
   build_notes(ctx);
   build_stage_content(ctx);
   build_library(ctx);
+  build_snapshot_items(ctx);
+  build_round_files(ctx);
   resolve_pending_relations(ctx);
   build_ask_files(ctx);
   build_feedback(ctx);
@@ -2731,6 +3152,7 @@ function build_plan(dir: string): PreparedImport {
     citations: [],
     relations: [],
     version_files: [],
+    round_contents: [],
     question_sets: [],
     submissions: [],
     mappings: [],
@@ -2743,6 +3165,10 @@ function build_plan(dir: string): PreparedImport {
     parsed,
     entries,
     project_raw,
+    forms: [],
+    question_reuse: new Map(),
+    item_digest: new Map(),
+    object_rows: new Map(),
     items: new Map(),
     questions: new Map(),
     ask_sets: new Map(),
