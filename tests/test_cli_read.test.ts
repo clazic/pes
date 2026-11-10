@@ -128,6 +128,31 @@ test("읽기 13개는 pes.py CMDS 에 그대로 있고, 새 코어 명령은 더
 // ---------------------------------------------------------------------------
 // 1 · 플래그 없음: v0.15 와 바이트 단위로 같다 (A1 방식)
 
+/**
+ * stdout 비교. 유일하게 허용하는 차이: `watch` 의 경로에 역슬래시가 있으면(Windows 임시 경로 C:\\Users\\…) 새 출력은
+ * v0.15 출력의 그 경로 단어를 작은따옴표로 감싼 것이다 — 그 밖의 어떤 차이도 허용하지 않는다.
+ */
+function expect_same_stdout(command: string, now: string, base: string, label: string): void {
+  if (command === "watch" && now !== base) {
+    const m = base.match(/^tail -n0 -F (.+) \| grep --line-buffered FEEDBACK\n$/);
+    assert.ok(m && m[1]!.includes("\\") && !m[1]!.includes("'"), `${label}: 달라진 이유가 역슬래시 경로 quoting 이 아니다\n새:  ${now}기준: ${base}`);
+    assert.equal(now, `tail -n0 -F '${m[1]}' | grep --line-buffered FEEDBACK\n`, `${label}: 경로 단어만 작은따옴표로 감싼다`);
+    return;
+  }
+  assert.equal(now, base, `${label}: stdout`);
+}
+
+test("A1b watch 비교 허용 규칙: 역슬래시 경로의 작은따옴표만 허용하고 다른 차이는 거부한다 (Windows 대비, 플랫폼 무관)", () => {
+  const base = "tail -n0 -F <ROOT>\\pes-projects\\p/feedback.log | grep --line-buffered FEEDBACK\n";
+  expect_same_stdout("watch", "tail -n0 -F '<ROOT>\\pes-projects\\p/feedback.log' | grep --line-buffered FEEDBACK\n", base, "허용");
+  expect_same_stdout("watch", base, base, "같음");
+  assert.throws(() => expect_same_stdout("watch", "tail -n0 -F '<ROOT>\\pes-projects\\other/feedback.log' | grep --line-buffered FEEDBACK\n", base, "x"), "경로가 다르면 거부");
+  assert.throws(() => expect_same_stdout("watch", "tail -n0 -F \"<ROOT>\\pes-projects\\p/feedback.log\" | grep --line-buffered FEEDBACK\n", base, "x"), "큰따옴표는 거부");
+  const plain = "tail -n0 -F <ROOT>/pes-projects/p/feedback.log | grep --line-buffered FEEDBACK\n";
+  assert.throws(() => expect_same_stdout("watch", `tail -n0 -F '<ROOT>/pes-projects/p/feedback.log' | grep --line-buffered FEEDBACK\n`, plain, "x"), "역슬래시 없는 경로의 따옴표는 거부");
+  assert.throws(() => expect_same_stdout("status", "a\n", "b\n", "x"), "watch 아닌 명령은 항상 엄격");
+});
+
 test("A1 플래그 없음: 읽기·보고서 명령의 출력·종료 코드·만든 파일이 v0.15(03fc81b)와 같고 DB는 불변", async () => {
   const base = baseline_dir();
   assert.notEqual(base, null, "기준 커밋 03fc81b 가 이 저장소에 없다 (얕은 복제? actions/checkout 에 fetch-depth: 0 필요)");
@@ -167,7 +192,7 @@ test("A1 플래그 없음: 읽기·보고서 명령의 출력·종료 코드·�
       const b = run_py(old, args, { ...OFF, script: old_py });
       const label = args.join(" ");
       assert.equal(a.status, b.status, `${label}: 종료 코드`);
-      assert.equal(normalize(a.stdout, roots_now), normalize(b.stdout, roots_old), `${label}: stdout`);
+      expect_same_stdout(args[0]!, normalize(a.stdout, roots_now), normalize(b.stdout, roots_old), label);
       const last = (s: string, r: string[]) => normalize(s, r).trim().split("\n").pop() ?? "";
       assert.equal(last(a.stderr, roots_now), last(b.stderr, roots_old), `${label}: stderr 마지막 줄`);
     }
