@@ -237,7 +237,7 @@ function ApprovalStep({ ws }: { ws: WorkspaceView }) {
   const reasons = [...approvalReasons, ...blocking.map((p) => p.title)];
   const why = !owner ? "단계 승인은 소유자만 할 수 있습니다." : blockerTotal ? `승인을 막는 것 ${blockerTotal}건: ${reasons.join(" · ")}` : approve.pending ? "접수 확인 중입니다" : null;
   return (
-    <Card className="gap-0 px-5" aria-labelledby="ap-t">
+    <Card size="compact" aria-labelledby="ap-t">
       <CardHead eyebrow="다음 마일스톤 · 단계 승인" title={`${ws.approval.stage_label} 단계 승인`} titleId="ap-t" right={!owner ? <Tag>소유자만</Tag> : <StatusFrom s={reasons.length ? { domain: "generic", value: "notyet", label: "아직" } : { domain: "turn", value: "approve" }} />} />
       <KV
         items={[
@@ -347,7 +347,7 @@ function ProblemStep({ ws, step, onResolved }: { ws: WorkspaceView; step: TaskSt
   const p = ws.problems.find((x) => x.id === step.problem_id);
   if (!p) return <EmptyState title="이 문제는 이미 풀렸습니다" body="해결 기록에서 고른 것과 접수 번호를 볼 수 있습니다." action={<Button asChild size="sm"><Link to={`/p/${ws.slug}/problems#pb-log`}>해결 기록</Link></Button>} />;
   return (
-    <Card id={step.kind === "sync" ? "sync" : undefined} className="gap-0 px-5" aria-labelledby={`ps-${p.id}`}>
+    <Card id={step.kind === "sync" ? "sync" : undefined} size="compact" aria-labelledby={`ps-${p.id}`}>
       <ResolveFlow ws={ws} p={p} headingAs="h3" headingId={`ps-${p.id}`} onResolved={onResolved} />
     </Card>
   );

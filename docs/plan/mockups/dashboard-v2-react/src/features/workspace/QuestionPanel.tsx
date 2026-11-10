@@ -358,7 +358,7 @@ export function QuestionPanel({ ws }: { ws: WorkspaceView }) {
   const showTools = usePhoneTools();
 
   return (
-    <Card className="gap-0 px-5">
+    <Card size="compact">
       <CardHead
         eyebrow="질문·답"
         title={ws.form.total ? `답할 질문 ${ws.form.answerable} / 전체 ${ws.form.total}` : "열린 질문 없음"}
