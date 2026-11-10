@@ -61,16 +61,15 @@ def _route_pattern(template):
     return method, re.compile("[^/]+".join(re.escape(part) for part in parts))
 
 
-# 시험 전용 조이기 변수: 환경 변수에 JSON 객체를 주면 Node 가 내준 한도를 더 작게만 덮어쓴다(풀 수는 없다).
+# 시험 전용 조이기 변수: 환경 변수에 JSON 객체를 주면 Node 가 내준 요청 개수 한도를 더 작게만 덮어쓴다(풀 수는 없다).
+# 받는 키는 개수 4종뿐이다. window_ms·min_poll_interval_ms 는 줄이면 오히려 한도가 풀리므로 받지 않는다(모르는 키로 거부).
 # 변수가 없으면 아무것도 바뀌지 않는다. 잘못된 값은 조용히 무시하지 않고 서버를 띄우지 않는다.
 BUDGET_OVERRIDE_ENV = "PES_API_BUDGET_TEST_OVERRIDE"
 _BUDGET_OVERRIDE_KEYS = (
-    "window_ms",
     "agent_requests_per_minute",
     "agent_control_requests_per_minute",
     "owner_requests_per_minute",
     "coarse_requests_per_minute",
-    "min_poll_interval_ms",
 )
 
 
