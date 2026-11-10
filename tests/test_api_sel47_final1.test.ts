@@ -206,7 +206,8 @@ test("F2 the human's answer reaches the agent: inputs names the answer object, t
     assert.ok(data.content && typeof data.content === "object", "data.content exists");
     assert.equal(data.content.question_version_id, q.question_version_id);
     assert.equal(data.content.value, "a");
-    assert.equal(data.content.state, item.state);
+    // content.state is the ANSWER VERSION state; item.state is the run's receipt state ('new') — different things.
+    assert.equal(data.content.state, "submitted");
     assert.equal(data.content.comment, comment);
     // The owner reads the same thing.
     const owner = assert_ok(await call(env, { method: "GET", path: P(env, `/objects/${item.object_id}/versions/${item.input_version_id}`), auth: "owner" }));

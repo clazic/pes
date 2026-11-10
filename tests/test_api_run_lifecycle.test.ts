@@ -467,8 +467,11 @@ test("inputs: the answers to the run's own questions, pure read, resumable by cu
     const res = await call(env, { method: "GET", path: `${path}?cursor=${encodeURIComponent(empty.next_cursor)}`, auth: { token: agent.token } });
     const data = assert_ok(res);
     assert.equal(data.inputs.length, 1);
-    const { available_at, ...item } = data.inputs[0];
+    const { available_at, object_id, ...item } = data.inputs[0];
     assert.deepEqual(item, { input_version_id: answered, kind: "answer", question_id: set.question_id, state: "new" });
+    // Codex final 1/2 F2: each input names the answer object so its exact version can be read.
+    assert.equal(typeof object_id, "string");
+    assert.ok(object_id.length > 0);
     assert.ok(Number.isSafeInteger(available_at));
     assert.equal(state_signature(env.db), sig_before, "reading inputs writes nothing: no receipt, no heartbeat");
     assert.deepEqual(table_counts(env.db), counts);
