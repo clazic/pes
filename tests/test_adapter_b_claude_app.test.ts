@@ -6,10 +6,8 @@
  * docs/plan/stage-2.md row 20a are the source.
  *
  * 해석 (continued, numbered on):
- *  해석 11 `new ClaudeAppAdapter({ api, project_id, device_token, device_actor_id, owner_session })` — `api` is
- *          ApiApp-shaped; `device_token` is the project agent token of the connected device (the only
- *          credential API rules allow to write results); `owner_session` is the human's local session, which
- *          is what approves the import (the human pressed "가져오기").
+ *  해석 11 `new ClaudeAppAdapter({ api, project_id, owner_session })` — `api` is ApiApp-shaped; `owner_session`
+ *          is the human owner's local session. There is NO device token and no device claim (leader 결정).
  *  해석 12 `await adapter.export_bundle({stage_id, round_id})` → `{bundle, text}`; `text` is the JSON the
  *          human copies. bundle = {format_version:"1.0", kind:"pes.handoff", project_id, edition_id,
  *          stage_id, stage_key, round_id, base_control_rev (decimal string), base_versions:[{object_id,
@@ -17,16 +15,15 @@
  *          read: no run, no lease, no row; it holds no token, session secret, lease_id or fence.
  *  해석 13 `await adapter.import_result({bundle_text, result_text, attachments?})`; result_text is JSON
  *          {results:[{op:"append_version", object_id, title, ...}], attachments?:[{name}], claimed?:{tool, model}}.
- *          It returns {status:"imported", run_id, results, adopted_by, provenance}. Underneath: the owner
- *          session creates a mode-B run for the device actor (runtime "claude_app_handoff", provider
- *          "anthropic", model "unknown"), the device claims it (a NEW claim, new fence), submits, completes —
- *          all with the idempotency key derived from request_id.
- *  해석 14 Who is who: the results receipt's actor is the device actor (API rules: only an agent token submits
- *          results); `adopted_by` is the owner actor (the human who imported); `provenance` = {source:
- *          "manual_import", claimed_tool, claimed_model, verified:false}. A direct MCP run has runtime
- *          "claude_code"; the imported one has "claude_app_handoff" and model "unknown" (the pasted model
- *          claim is never trusted). NOTE for the leader: stage-1 B3 says "실제 제출 actor는 사람"; the
- *          current API cannot record a human as the writer of a result, so this suite pins the split above.
+ *          It returns {status:"imported", run_id, results, adopted_by, via:"import", provenance}. The owner
+ *          session creates the handoff run (mode B, runtime "claude_app_handoff", provider "anthropic",
+ *          model "unknown") and the result is recorded AS THE OWNER (a human actor) through the import path
+ *          only — no agent claim, no `run.claimed`. The generic API results route still accepts agent
+ *          tokens only (an owner session posting results there stays 403).
+ *  해석 14 Who is who (leader 결정, like PR20c "수동 전달은 human"): run.actor_id, the results receipt actor and
+ *          `adopted_by` are all the owner; the receipt has via='import'; provenance = {source:"manual_import",
+ *          claimed_tool, claimed_model, verified:false}. A direct MCP run has runtime "claude_code" and an agent
+ *          actor; the imported one is told apart by runtime "claude_app_handoff", model "unknown", via 'import'.
  *  해석 15 Refusals are thrown as an error with a string `code` and Korean `message`, and write NOTHING:
  *          bundle_invalid (not JSON / missing or wrong-typed field / unknown kind), bundle_hash_mismatch (any
  *          field edited after export), bundle_wrong_project, bundle_stale (control_rev or a base version moved
@@ -54,11 +51,13 @@ function adapter(env: AdapterEnv, overrides: Record<string, unknown> = {}): Clau
   return new ClaudeAppAdapter({
     api: env.app,
     project_id: env.p.project_id,
-    device_token: env.agent.token,
-    device_actor_id: env.agent.actor_id,
     owner_session: SESSION_SECRET,
     ...overrides,
   } as any);
+}
+
+function direct_actor(env: AdapterEnv, run_id: string): string {
+  return env.db.get<{ actor_id: string }>("SELECT actor_id FROM runs WHERE id = ?", run_id)!.actor_id;
 }
 
 const exported = (env: AdapterEnv, a = adapter(env)) => a.export_bundle({ stage_id: env.stage.plan, round_id: env.round_id });
@@ -144,22 +143,27 @@ test("round trip: import adopts the pasted result as a new claim; actors and pro
       { mode: "B", runtime: "claude_app_handoff", provider: "anthropic", model: "unknown", status: "succeeded" },
       "the pasted model claim is not trusted",
     );
-    assert.equal(run.actor_id, env.agent.actor_id);
+    assert.equal(run.actor_id, env.p.actor_id, "the handoff run is the owner's own");
     const direct_run = env.db.get<{ runtime: string }>("SELECT runtime FROM runs WHERE id = ?", direct.run_id)!;
     assert.notEqual(direct_run.runtime, run.runtime, "a direct app/tool run and a pasted result are distinguishable");
 
-    const receipt = env.db.get<{ actor_id: string }>(
-      "SELECT m.actor_id AS actor_id FROM mutation_commits m JOIN events e ON e.tx_id = m.id AND e.project_id = m.project_id WHERE e.project_id = ? AND e.type = 'result.submitted' AND e.run_id = ?",
+    const receipt = env.db.get<{ actor_id: string; via: string }>(
+      "SELECT m.actor_id AS actor_id, m.via AS via FROM mutation_commits m JOIN events e ON e.tx_id = m.id AND e.project_id = m.project_id WHERE e.project_id = ? AND e.type = 'result.submitted' AND e.run_id = ?",
       env.p.project_id,
       out.run_id,
     )!;
-    assert.equal(receipt.actor_id, env.agent.actor_id, "the results receipt is the device actor's");
-    assert.equal(out.adopted_by, env.p.actor_id, "the human owner who imported is named separately");
-    assert.notEqual(out.adopted_by, receipt.actor_id);
+    assert.equal(receipt.actor_id, env.p.actor_id, "the results receipt is the human owner's");
+    assert.equal(receipt.via, "import", "marked as an import");
+    assert.equal(out.via, "import");
+    assert.equal(out.adopted_by, env.p.actor_id);
+    assert.notEqual(receipt.actor_id, direct_actor(env, direct.run_id), "told apart from the direct agent run");
     assert.deepEqual(out.provenance, { source: "manual_import", claimed_tool: "claude_app", claimed_model: "claude-sonnet-5-5", verified: false });
     // import is not approval
     assert.equal(table_counts(env.db).approvals, 0n);
-    assert.equal(events_of_type(env, "run.claimed").length, 2, "the import made its own claim (a new fence), the direct run another");
+    assert.equal(events_of_type(env, "run.claimed").length, 1, "only the direct run was claimed: the import has no agent claim");
+    // the generic results route is still agents-only: the owner session cannot post to a run
+    const generic = await call(env, { method: "POST", path: P(env, `/runs/${direct.run_id}/results`), auth: "owner", body: { lease_id: "x", fence: "1", results: [] } });
+    assert.equal(generic.status, 403);
   });
 });
 
@@ -209,26 +213,20 @@ test("an edited bundle is refused: the hash catches accidents, and malformed bun
   });
 });
 
-test("the hash is not authentication: a pristine bundle gets no right from a wrong or weak credential", async () => {
+test("the hash is not authentication: a pristine bundle gets no right from a wrong credential", async () => {
   await with_cleanup(async (env) => {
     const { text } = await exported(env);
     const sig = state_signature(env.db);
 
-    // a token that is not valid for this project
-    const stranger = adapter(env, { device_token: "synthetic-not-a-token" });
-    await refused(stranger.import_result({ bundle_text: text, result_text: result_text(env) }), "unauthenticated");
-    assert.equal(state_signature(env.db), sig);
-
-    // a real token without the right to claim or submit
-    const weak = await make_agent(env, "weak", ["context:read"]);
-    const weak_adapter = adapter(env, { device_token: weak.token, device_actor_id: weak.actor_id });
-    await assert.rejects(weak_adapter.import_result({ bundle_text: text, result_text: result_text(env) }), (error: any) => error.code === "forbidden");
-    assert.equal(events_of_type(env, "result.submitted").length, 0, "no result without the scope");
-    assert.equal(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM runs WHERE status = 'running'")?.n, 0n, "no run left running");
-
     // no owner session: nobody approved the import
-    const no_owner = adapter(env, { owner_session: "synthetic-wrong-session" });
-    await assert.rejects(no_owner.import_result({ bundle_text: text, result_text: result_text(env) }), (error: any) => error.code === "unauthenticated" || error.code === "forbidden");
+    for (const owner_session of ["synthetic-wrong-session", ""]) {
+      const no_owner = adapter(env, { owner_session });
+      await assert.rejects(
+        no_owner.import_result({ bundle_text: text, result_text: result_text(env) }),
+        (error: any) => error.code === "unauthenticated" || error.code === "forbidden",
+      );
+    }
+    assert.equal(state_signature(env.db), sig, "nothing written without the owner's session");
     assert.equal(events_of_type(env, "result.submitted").length, 0);
   });
 });
@@ -241,8 +239,6 @@ test("a bundle from another project, or one made stale by a later change, is ref
     const other_adapter = new ClaudeAppAdapter({
       api: env.app,
       project_id: other.project_id,
-      device_token: other.token,
-      device_actor_id: other.device_actor_id,
       owner_session: SESSION_SECRET,
     } as any);
     const other_round = assert_ok(
