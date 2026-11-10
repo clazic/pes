@@ -1,0 +1,3 @@
+{"pes": 1, "topic": "합성 부분 손상", "slug": "synthetic-legacy-broken-parts", "created": "2026-03-01",
+ "current": "plan", "complete": false, "settings": {}, "processed": [],
+ "stages": {"plan": {"status": "active", "round": 1, "items": [{"id": 1, "title": "합성 항목", "kind": "rq", "status": "new"}]}}}

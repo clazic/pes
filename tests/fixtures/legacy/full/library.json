@@ -1,0 +1,13 @@
+{
+ "source": "synthetic-research-loop",
+ "imported": "2026-01-04 08:00",
+ "round": 3,
+ "topic": "합성 원천 주제",
+ "settings": {"tone": "plain"},
+ "library_unknown_key": true,
+ "warnings": ["합성 경고 하나"],
+ "items": [
+  {"id": 1, "title": "합성 참고 하나", "kind": "topic", "status": "done", "summary": "합성 참고 요약", "shots": ["library/shots/lib-1.png"]},
+  {"id": 2, "title": "합성 제거 참고", "kind": "topic", "status": "removed"}
+ ]
+}

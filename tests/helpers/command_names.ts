@@ -26,6 +26,7 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "file.gc_orphans",
   "file.quarantine",
   "file.reserve_upload",
+  "legacy.import_project",
   "policy.set",
   "project.bootstrap",
   "project.set_topic",
