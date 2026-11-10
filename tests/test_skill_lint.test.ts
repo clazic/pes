@@ -428,54 +428,75 @@ interface Need {
   file: string;
   id: string;
   re: RegExp;
+  /** 있으면 이 제목(## / ###)의 절 안에서만 찾는다 — 같은 낱말이 다른 절에도 있어서 한 줄을 지워도 안 걸리는 것을 막는다. */
+  sec?: RegExp;
+}
+
+/** 제목 줄이 heading 에 맞는 절: 그 제목 줄부터 같은 단계 이하(#의 수가 같거나 적은) 다음 제목 앞까지. 없으면 빈 문자열. */
+function section_of(markdown: string, heading: RegExp): string {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((l) => heading.test(l));
+  if (start < 0) return "";
+  const level = /^(#+)/.exec(lines[start]!)![1]!.length;
+  let end = lines.length;
+  let fenced = false;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i]!)) fenced = !fenced;
+    const h = fenced ? null : /^(#+)\s/.exec(lines[i]!);
+    if (h !== null && h[1]!.length <= level) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
 }
 
 const NEEDS: Need[] = [
   // --- 독립 검토 (core) ---
-  { file: "skills/core/SKILL.md", id: "독립 검토는 모든 단계·모든 라운드, 생략하지 않는다", re: /독립 검토[\s\S]{0,40}(모든 단계|모든 라운드)|생략하지 않는다/ },
+  { file: "skills/core/SKILL.md", id: "독립 검토는 모든 단계·모든 라운드, 생략하지 않는다", re: /^###\s+독립 검토[^\n]*(모든 단계|모든 라운드)[^\n]*생략하지 않는다/m, sec: /^###\s+독립 검토/ },
   { file: "skills/core/SKILL.md", id: "자체 점검만으로 끝내지 않고 다른 에이전트가 다시 본다", re: /다른 에이전트가 다시 본다|자체 점검[^\n]{0,20}(만으로|끝내지)/ },
-  { file: "skills/core/SKILL.md", id: "검토 지시문 만들기 qa-brief", re: /qa-brief/ },
-  { file: "skills/core/SKILL.md", id: "검토원은 reviewer 서브에이전트", re: /reviewer/ },
+  { file: "skills/core/SKILL.md", id: "검토 지시문 만들기 qa-brief", re: /qa-brief <dir>/, sec: /^###\s+독립 검토/ },
+  { file: "skills/core/SKILL.md", id: "검토원은 reviewer 서브에이전트", re: /reviewer 역할/, sec: /^###\s+독립 검토/ },
   { file: "skills/core/SKILL.md", id: "메인의 결론·기대를 검토원에 넘기지 않는다", re: /결론[·과 ]*기대를[^\n]{0,20}(쓰지|넘기지|주지) ?않/ },
-  { file: "skills/core/SKILL.md", id: "검토 결과 기록 qa", re: /`qa <dir> <stage>`|\bqa\b[^\n]{0,30}기록/ },
+  { file: "skills/core/SKILL.md", id: "검토 결과 기록 qa", re: /`qa <dir> <stage>`|\bqa\b[^\n]{0,30}기록/, sec: /^###\s+독립 검토/ },
   { file: "skills/core/SKILL.md", id: "high 지적과 놓친 것은 점검 질문에 반영", re: /missed_by_self_review/ },
   { file: "skills/core/SKILL.md", id: "판정 fail 이면 승인을 권하지 않는다", re: /fail[^\n]{0,30}승인을 권하지 않는다/ },
   // --- 근거 기록 (core) ---
   { file: "skills/core/SKILL.md", id: "사실·수치는 sources 에 있어야 한다", re: /sources[^\n]{0,30}있어야 한다/ },
   { file: "skills/core/SKILL.md", id: "출처 없는 판단·추정 표시", re: /\(판단\)[\s\S]{0,20}\(추정\)/ },
-  { file: "skills/core/SKILL.md", id: "요약 줄마다 근거 항목 표기", re: /\(근거: 조사 #/ },
+  { file: "skills/core/SKILL.md", id: "요약 줄마다 근거 항목 표기", re: /\(근거: 조사 #/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "원문 확인으로 치는 method (browser·kosis·law·vworld)", re: /browser[·, ]*kosis[·, ]*law[·, ]*vworld/ },
   // --- 점검·해석·보고서 (core) ---
   { file: "skills/core/SKILL.md", id: "AI 점검 gap.kind 6종", re: /conflict[\s\S]{0,400}weak[\s\S]{0,400}blank[\s\S]{0,400}stale[\s\S]{0,400}decide[\s\S]{0,400}scope/ },
   { file: "skills/core/SKILL.md", id: "모호한 답은 점검 질문으로 되묻는다", re: /모호할 때만/ },
   { file: "skills/core/SKILL.md", id: "서브에이전트 결과는 파일에 쓰고 한 줄만 돌려준다", re: /rounds\/<단계>-R<n>\/<id>\.json[^\n]{0,40}한 줄/ },
-  { file: "skills/core/SKILL.md", id: "통째로 읽지 않고 digest·show 로 본다", re: /digest[\s\S]{0,60}show/ },
+  { file: "skills/core/SKILL.md", id: "통째로 읽지 않고 digest·show 로 본다", re: /digest[\s\S]{0,60}show/, sec: /^##\s+토큰 절약/ },
   { file: "skills/core/SKILL.md", id: "단계 보고서 report (md·html·eli5)", re: /report <dir> <단계>/ },
-  { file: "skills/core/SKILL.md", id: "승인 전 남은 일은 carry_over 로 넘기고 지우지 않는다", re: /carry_over/ },
+  { file: "skills/core/SKILL.md", id: "승인 전 남은 일은 carry_over 로 넘기고 지우지 않는다", re: /`set <dir> <단계> carry_over/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "다른 세션 잠금은 억지로 풀지 않는다", re: /억지로 풀지/ },
   { file: "skills/core/SKILL.md", id: "HWP 출처도 열어 읽는다", re: /HWP/ },
   { file: "skills/core/SKILL.md", id: "CAPTCHA 는 풀지 않는다", re: /보안문자/ },
   // --- plan ---
   { file: "skills/plan/SKILL.md", id: "연구 질문·목차·조사 항목·일정 종류", re: /`rq`[\s\S]{0,300}`chapter`[\s\S]{0,300}`topic`[\s\S]{0,300}`schedule`/ },
   { file: "skills/plan/SKILL.md", id: "topic 은 chapter 와 연결, chapter 마다 근거 topic", re: /최소 한 chapter[\s\S]{0,80}근거가 될 topic/ },
-  { file: "skills/plan/SKILL.md", id: "기존 조사(reuse) 대조", re: /reuse/ },
+  { file: "skills/plan/SKILL.md", id: "기존 조사(reuse) 대조", re: /"reuse": <library id>/, sec: /^##\s+R1에 만드는 것/ },
   { file: "skills/plan/SKILL.md", id: "기획 단계에서는 새 조사를 하지 않는다", re: /새 조사를 하지 않는다/ },
   { file: "skills/plan/SKILL.md", id: "승인 전 독립 검토 확인", re: /독립 검토/ },
   { file: "skills/plan/SKILL.md", id: "승인 approve <dir> plan", re: /approve <dir> plan/ },
   // --- research ---
   { file: "skills/research/SKILL.md", id: "항목당 researcher 서브에이전트 병렬, 최대 5개", re: /researcher[\s\S]{0,60}(최대 5개|5개)/ },
-  { file: "skills/research/SKILL.md", id: "서브에이전트 지시문에 이미 확인한 출처·범위 밖·도구 규칙", re: /이미 확인한 출처[\s\S]{0,1500}범위 밖[\s\S]{0,600}도구 규칙/ },
-  { file: "skills/research/SKILL.md", id: "사용자 제공 링크는 반드시 열어 읽는다", re: /반드시 열어 읽/ },
+  { file: "skills/research/SKILL.md", id: "서브에이전트 지시문에 이미 확인한 출처·범위 밖·도구 규칙", re: /\[이미 확인한 출처\][\s\S]{0,1500}\[범위 밖\][\s\S]{0,600}\[도구 규칙\]/, sec: /^###\s+서브에이전트 지시문/ },
+  { file: "skills/research/SKILL.md", id: "사용자 제공 링크는 반드시 열어 읽는다", re: /반드시 열어 읽/, sec: /^##\s+사용자 제공 링크·자료/ },
   { file: "skills/research/SKILL.md", id: "병합 뒤 digest 로 항목 사이 충돌을 찾아 conflicts 에 기록", re: /digest[\s\S]{0,120}충돌[\s\S]{0,60}conflicts/ },
-  { file: "skills/research/SKILL.md", id: "법령은 인용 조문 검증(verify_citations)", re: /verify_citations/ },
-  { file: "skills/research/SKILL.md", id: "parallel=max 면 승인 전 verifier", re: /max[\s\S]{0,40}verifier/ },
+  { file: "skills/research/SKILL.md", id: "법령은 인용 조문 검증(verify_citations)", re: /verify_citations/, sec: /^###\s+법령/ },
+  { file: "skills/research/SKILL.md", id: "parallel=max 면 승인 전 verifier", re: /max[\s\S]{0,40}verifier/, sec: /^##\s+라운드/ },
   { file: "skills/research/SKILL.md", id: "남은 conflicts·원문 미확인 비율을 정직하게 적는다", re: /원문 미확인 비율[\s\S]{0,40}정직하게/ },
   { file: "skills/research/SKILL.md", id: "국내 자료는 브라우저로 원문 대조", re: /원문 대조/ },
-  { file: "skills/research/SKILL.md", id: "KOSIS 가공은 AI 가공을 conflicts 에 남긴다", re: /AI 가공/ },
+  { file: "skills/research/SKILL.md", id: "KOSIS 가공은 AI 가공을 conflicts 에 남긴다", re: /AI 가공/, sec: /^##\s+도구 규칙/ },
   { file: "skills/research/SKILL.md", id: "승인 approve <dir> research", re: /approve <dir> research/ },
   // --- analyze ---
   { file: "skills/analyze/SKILL.md", id: "새 사실을 만들지 않는다", re: /새 사실을 만들지 않는다/ },
-  { file: "skills/analyze/SKILL.md", id: "쟁점·비교표는 links.research 로 근거 연결", re: /links\.research/ },
+  { file: "skills/analyze/SKILL.md", id: "쟁점·비교표는 links.research 로 근거 연결", re: /`issue`[^\n]*links\.research[^\n]*\n[^\n]*`table`[^\n]*links\.research/, sec: /^##\s+라운드에서 만드는 것/ },
   { file: "skills/analyze/SKILL.md", id: "연구 질문마다 issue 하나 이상", re: /연구 질문\(rq\)마다 최소 하나의 issue/ },
   { file: "skills/analyze/SKILL.md", id: "통계 가공은 계산 방법을 적는다", re: /계산 방법을 적/ },
   { file: "skills/analyze/SKILL.md", id: "승인 전 독립 검토 확인", re: /독립 검토/ },
@@ -484,23 +505,23 @@ const NEEDS: Need[] = [
   { file: "skills/write/SKILL.md", id: "문장마다 각주 [^k] 로 출처 연결", re: /\[\^k\]/ },
   { file: "skills/write/SKILL.md", id: "수치·조문은 근거 항목에 있는 값만", re: /근거 항목에 있는 값/ },
   { file: "skills/write/SKILL.md", id: "장마다 writer 서브에이전트", re: /writer/ },
-  { file: "skills/write/SKILL.md", id: "원고 조립 assemble", re: /assemble/ },
+  { file: "skills/write/SKILL.md", id: "원고 조립 assemble", re: /assemble <dir>/, sec: /^##\s+라운드/ },
   { file: "skills/write/SKILL.md", id: "모든 chapter 에 section, section 에 links.analyze·sources", re: /links\.analyze[\s\S]{0,20}sources/ },
   { file: "skills/write/SKILL.md", id: "승인 전 독립 검토 확인", re: /독립 검토/ },
   { file: "skills/write/SKILL.md", id: "승인 approve <dir> write", re: /approve <dir> write/ },
   // --- verify ---
-  { file: "skills/verify/SKILL.md", id: "주장 claim 항목을 뽑는다", re: /`claim`/ },
+  { file: "skills/verify/SKILL.md", id: "주장 claim 항목을 뽑는다", re: /kind=`claim`/, sec: /^##\s+주장 항목/ },
   { file: "skills/verify/SKILL.md", id: "verifier 서브에이전트에 결론·기대를 주지 않는다", re: /verifier[\s\S]{0,200}결론이나 기대하는 답을 주지 않는다/ },
-  { file: "skills/verify/SKILL.md", id: "판정 supported/partial/unsupported", re: /supported[\s\S]{0,30}partial[\s\S]{0,30}unsupported/ },
+  { file: "skills/verify/SKILL.md", id: "판정 supported/partial/unsupported", re: /supported[\s\S]{0,30}partial[\s\S]{0,30}unsupported/, sec: /^##\s+주장 항목/ },
   { file: "skills/verify/SKILL.md", id: "법령 인용 verify_citations", re: /verify_citations/ },
-  { file: "skills/verify/SKILL.md", id: "unsupported 는 재조사·완화·삭제를 점검 질문으로", re: /재조사[\s\S]{0,20}완화[\s\S]{0,20}삭제/ },
+  { file: "skills/verify/SKILL.md", id: "unsupported 는 재조사·완화·삭제를 점검 질문으로", re: /재조사[\s\S]{0,20}완화[\s\S]{0,20}삭제/, sec: /^##\s+처리/ },
   { file: "skills/verify/SKILL.md", id: "승인 전 독립 검토 확인", re: /독립 검토/ },
   { file: "skills/verify/SKILL.md", id: "승인 approve <dir> verify", re: /approve <dir> verify/ },
   // --- publish ---
   { file: "skills/publish/SKILL.md", id: "먼저 assemble 로 최신 원고", re: /assemble/ },
   { file: "skills/publish/SKILL.md", id: "형식 hwpx·docx·pdf·web·slides", re: /hwpx[\s\S]{0,1200}docx[\s\S]{0,400}pdf[\s\S]{0,800}web[\s\S]{0,1200}slides/ },
   { file: "skills/publish/SKILL.md", id: "웹 보고서는 HTML 을 직접 쓰지 않고 web 명령", re: /HTML을 직접 쓰지 않는다/ },
-  { file: "skills/publish/SKILL.md", id: "부록: 출처 확인됨/미확인 구분", re: /확인됨\/미확인/ },
+  { file: "skills/publish/SKILL.md", id: "부록: 출처 확인됨/미확인 구분", re: /appendix-sources\.md[^\n]*확인됨\/미확인/, sec: /^##\s+라운드/ },
   { file: "skills/publish/SKILL.md", id: "산출물마다 output 항목", re: /`output`/ },
   { file: "skills/publish/SKILL.md", id: "승인 전 독립 검토로 승인된 원고와 같은지 확인", re: /독립 검토[\s\S]{0,120}승인된 원고와 같은지/ },
   { file: "skills/publish/SKILL.md", id: "최종 승인 approve <dir> publish", re: /approve <dir> publish/ },
@@ -508,22 +529,22 @@ const NEEDS: Need[] = [
   { file: "agents/researcher.md", id: "한 항목만 조사한다", re: /한 항목만/ },
   { file: "agents/researcher.md", id: "이미 확인한 출처는 다시 확인하지 않는다", re: /이미 확인한 출처[^\n]{0,30}다시 확인하지 않는다/ },
   { file: "agents/researcher.md", id: "찾지 못한 것은 open_questions 에 남긴다", re: /찾지 못함/ },
-  { file: "agents/researcher.md", id: "출처 method 구분 (search 는 원문 미확인, browser 는 원문 확인)", re: /search[\s\S]{0,200}fetch[\s\S]{0,200}browser[\s\S]{0,200}kosis[\s\S]{0,100}law[\s\S]{0,100}vworld/ },
+  { file: "agents/researcher.md", id: "출처 method 구분 (search 는 원문 미확인, browser 는 원문 확인)", re: /검색 결과 요약만 봤으면 search[\s\S]{0,200}fetch[\s\S]{0,200}browser[\s\S]{0,200}kosis[\s\S]{0,100}law[\s\S]{0,100}vworld/ },
   { file: "agents/researcher.md", id: "스크립트 계산은 AI 가공 표시", re: /AI 가공/ },
   { file: "agents/researcher.md", id: "사용자 제공 링크는 모두 열어 읽는다", re: /모두 열어 읽는다/ },
   { file: "agents/researcher.md", id: "결과는 지정 파일에 쓰고 한 줄만 반환", re: /결과 파일[\s\S]{0,400}한 줄/ },
   { file: "agents/researcher.md", id: "보안문자는 풀지 않고 건너뛴다", re: /보안문자[^\n]{0,30}(풀지 말고|풀지 않)/ },
   { file: "agents/reviewer.md", id: "독립 검토원: 메인 결론에 맞춰 주지 않는다", re: /맞춰 주지 않는다/ },
-  { file: "agents/reviewer.md", id: "QC 와 QA 를 나눠 본다", re: /QC[\s\S]{0,400}QA/ },
+  { file: "agents/reviewer.md", id: "QC 와 QA 를 나눠 본다", re: /### QC[\s\S]{0,1200}### QA/, sec: /^##\s+보는 것/ },
   { file: "agents/reviewer.md", id: "자체 점검 초안은 마지막에 읽는다", re: /마지막에\*\* 읽는다|마지막에 읽는다/ },
   { file: "agents/reviewer.md", id: "핵심 주장 3~5개는 출처 원문을 직접 연다 (표본 대조)", re: /3~5개[\s\S]{0,60}원문을 직접 연다/ },
-  { file: "agents/reviewer.md", id: "표본 결과 match/differ/unreachable", re: /match[\s\S]{0,20}differ[\s\S]{0,20}unreachable/ },
+  { file: "agents/reviewer.md", id: "표본 결과 match/differ/unreachable", re: /match[\s\S]{0,20}differ[\s\S]{0,20}unreachable/, sec: /^###\s+표본 대조/ },
   { file: "agents/reviewer.md", id: "판정 pass/pass_with_issues/fail", re: /pass[\s\S]{0,10}pass_with_issues[\s\S]{0,10}fail/ },
   { file: "agents/reviewer.md", id: "놓친 것·근거 없는 문장 기록", re: /missed_by_self_review[\s\S]{0,200}evidence_gaps/ },
   { file: "agents/reviewer.md", id: "항목 본문을 고치지 않고 판단만 기록", re: /고치지 않는다[^\n]{0,20}판단만/ },
   { file: "agents/reviewer.md", id: "추측은 쓰지 않는다(evidence 칸 필수)", re: /evidence 칸은 반드시 채운다/ },
-  { file: "agents/verifier.md", id: "출처를 직접 열어 확인한다", re: /출처 원문을 직접 열어 확인한다|출처를 직접 연다/ },
-  { file: "agents/verifier.md", id: "판정 supported/partial/unsupported", re: /supported[\s\S]{0,60}partial[\s\S]{0,80}unsupported/ },
+  { file: "agents/verifier.md", id: "출처를 직접 열어 확인한다", re: /출처 원문을 직접 열어 확인한다[\s\S]*출처를 직접 연다/ },
+  { file: "agents/verifier.md", id: "판정 supported/partial/unsupported", re: /판정: supported[\s\S]{0,60}partial[\s\S]{0,80}unsupported/ },
   { file: "agents/verifier.md", id: "추측하지 않는다", re: /추측하지 않는다/ },
   { file: "agents/verifier.md", id: "보안문자는 partial + 열람 불가 표기", re: /열람 불가\(보안문자\)/ },
   { file: "agents/writer.md", id: "근거 자료에 있는 사실·수치만, 새 검색 없음", re: /근거 자료에 있는 사실·수치만[\s\S]{0,40}새 검색은 하지 않는다/ },
@@ -538,8 +559,30 @@ test("필수 절차 목록이 지금 문서에서 뽑은 것임을 확인한다 
 
 for (const need of NEEDS) {
   test(`절차 유지: ${need.file} — ${need.id}`, () => {
-    const text = repo_doc(need.file);
-    assert.match(text, need.re, `${need.file} 에서 절차가 사라졌다: ${need.id}`);
+    const text = need.sec === undefined ? repo_doc(need.file) : section_of(repo_doc(need.file), need.sec);
+    assert.match(text, need.re, `${need.file} 에서 절차가 사라졌다${need.sec === undefined ? "" : ` (절 ${need.sec})`}: ${need.id}`);
+  });
+}
+
+// 모든 필수 절차: 일치한 구간의 첫 줄(또는 끝 줄)을 지우면 반드시 실패해야 한다 — 같은 낱말이 다른 곳에도 있어서 지워도 통과하는 정규식을 막는다.
+// (그런 것은 sec 로 절을 좁히거나 정규식을 그 한 줄에 맞게 좁힌다. 좁히기는 약화가 아니다 — 새 정규식·절은 원래보다 같거나 더 구체적이다.)
+for (const need of NEEDS) {
+  test(`절차 유지 날카로움: ${need.file} — ${need.id} (일치한 줄을 지우면 실패한다)`, () => {
+    const text = need.sec === undefined ? repo_doc(need.file) : section_of(repo_doc(need.file), need.sec);
+    const hit = need.re.exec(text);
+    assert.ok(hit !== null, "지금 문서에서 통과해야 한다");
+    const flags = need.re.flags.replace("g", "");
+    const re = new RegExp(need.re.source, flags);
+    const first_from = text.lastIndexOf("\n", hit.index) + 1;
+    const last_pos = hit.index + Math.max(hit[0].length - 1, 0);
+    const last_from = text.lastIndexOf("\n", last_pos) + 1;
+    const cut_line = (from: number): string => {
+      let to = text.indexOf("\n", from);
+      if (to < 0) to = text.length;
+      return text.slice(0, from) + text.slice(to);
+    };
+    assert.ok(!re.test(cut_line(first_from)), `일치 구간의 첫 줄을 지워도 통과한다 — 같은 절차를 다른 줄도 만족시킨다: ${need.id}`);
+    assert.ok(!re.test(cut_line(last_from)), `일치 구간의 끝 줄을 지워도 통과한다: ${need.id}`);
   });
 }
 
