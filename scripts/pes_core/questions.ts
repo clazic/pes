@@ -105,16 +105,17 @@ export function resume_ready(
   const required = db.all<RequiredQuestionRow>(
     `SELECT DISTINCT m.question_id AS question_id,
             o.current_version_id AS question_version_id
-       FROM question_sets s
-       JOIN (
+       FROM (
            SELECT stage_id, form_key, MAX(version_no) AS version_no
              FROM question_sets
-            WHERE project_id = ? AND round_id = ?
+            WHERE project_id = ?
             GROUP BY stage_id, form_key
        ) latest
-         ON latest.stage_id = s.stage_id
-        AND latest.form_key = s.form_key
-        AND latest.version_no = s.version_no
+       JOIN question_sets s
+         ON s.project_id = ?
+        AND s.stage_id = latest.stage_id
+        AND s.form_key = latest.form_key
+        AND s.version_no = latest.version_no
        JOIN question_set_members m
          ON m.project_id = s.project_id AND m.set_id = s.id
        JOIN objects o
@@ -122,11 +123,10 @@ export function resume_ready(
         AND o.kind = 'question'
        JOIN question_versions qv
          ON qv.project_id = o.project_id AND qv.version_id = o.current_version_id
-      WHERE s.project_id = ? AND s.round_id = ?
+      WHERE s.round_id = ?
         AND qv.required = 1 AND qv.state = 'open'
       ORDER BY m.question_id`,
     project_id,
-    round_id,
     project_id,
     round_id,
   );
