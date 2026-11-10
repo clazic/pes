@@ -17,7 +17,7 @@
  *           '각주' = 마크다운 「출처」 절 번호(처음 나온 순서·중복 제거, v0.15 와 같음).
  *   해석 5  새 코어 명령은 없다(EXPECTED_COMMAND_NAMES 불변). report/assemble/web 의 쓰기는 기존 content.*·file.* 명령만 지난다.
  *   해석 6  `assemble`/`web` 은 artifact(kind 'output') 한 객체에 새 버전을 쌓는다. 파일 이름은 report.md·sources.json·report.html.
- *           내용이 같은 재실행이 새 버전을 만드는지는 고정하지 않는다(v0.15 는 항상 덮어썼음).
+ *           내용이 같은 재실행도 새 버전이다(leader 결정).
  *   해석 7  report/output artifact 는 render 봉인 목록과 approve plan 인계에 들어가지 않는다.
  *   해석 8  `watch` 는 같은 출력 형식(`tail -n0 -F <따옴표 처리한 경로>/feedback.log | grep --line-buffered FEEDBACK` 한 줄)을
  *           유지한다. 입력 long-poll 은 PR18 몫이라 여기서는 고정하지 않는다(이슈: '같은 출력 형식이나 long-poll').
@@ -28,7 +28,7 @@
  *           '작성 …' 시각 줄은 비교에서 무시한다. html 도 같은 규칙(시각 정규화 뒤 같아야 함). `regeneration_format` 은 더는
  *           "provisional" 이 아니다. 이 시험은 기존 S4b(provisional 단언)·'손으로 고친 보고서도 validated'·`full` 픽스처의
  *           손글씨 reports/plan/report.md 와 부딪친다 — 구현 PR 에서 그 시험·픽스처를 함께 바꿔야 한다(leader 결정).
- *   해석 11 DB 모드의 report 가 프로젝트 폴더 reports/ 에도 파일을 쓰는지는 고정하지 않는다.
+ *   해석 11 DB 모드는 프로젝트 폴더 reports/·out/ 에 쓰지 않는다. 출력에 새 버전 id 와 파일 이름·blob id 를 보인다.
  *   해석 12 `hub`·`open` 은 서버·브라우저를 띄우므로 이 시험에서 실행하지 않는다.
  */
 
@@ -417,12 +417,16 @@ test("report: 실행마다 새 버전 — 옛 버전과 옛 파일은 그대로,
     const json_sig = c.sig(c.project_json);
 
     const first = ok(run_py(c, ["report", SLUG, "plan"]), "report 1");
-    assert.match(first.stdout, /^기획보고서: .*마크다운.*웹 보고서/m, "옛 출력 형식 '<이름>: <라벨> <경로>, …'");
+    assert.match(first.stdout, /^기획보고서:/m, "옛 출력의 머리말 '<이름>:' 유지");
     const object_id = report_object(c, "report", "plan");
     assert.ok(object_id, "기획 단계의 보고서 artifact (kind report)");
     const v1 = versions_of(c, object_id);
     assert.equal(v1.length, 1);
+    assert.ok(first.stdout.includes(v1[0]!.id), `출력에 새 버전 id: ${first.stdout}`);
     const files1 = rendered_of(c, v1[0]!.id);
+    const blob_rows = c.env.db.all<{ id: string; original_name: string }>("SELECT b.id, b.original_name FROM version_files vf JOIN blobs b ON b.id = vf.blob_id WHERE vf.version_id = ?", v1[0]!.id);
+    for (const b of blob_rows) assert.ok(first.stdout.includes(b.original_name) && first.stdout.includes(b.id), `출력에 파일 이름과 위치(blob id): ${b.original_name}`);
+    assert.ok(!existsSync(join(c.folder, "reports")), "DB 모드는 프로젝트 폴더 reports/ 에 쓰지 않는다 (원본은 DB·객체 저장소)");
     const md1 = file_named(files1, "report.md");
     file_named(files1, "report.html");
     assert.match(md1.text, /^# 합성 파일 주제 — 기획보고서$/m);
@@ -554,6 +558,9 @@ test("assemble: 각주를 출처 순서로 다시 매기고(같은 URL·제목�
     const md2 = file_named(rendered_of(c, v2[1]!.id), "report.md").text;
     assert.match(md2, /둘째 장 \[\^2\] \[\^1\]/, "장 안의 번호는 전체 각주 번호로 바뀐다 (C=2, A=1)");
     assert.equal(file_named(rendered_of(c, v1[0]!.id), "report.md").text, md, "버전 1 파일은 그대로");
+    ok(run_py(c, ["assemble", SLUG]), "assemble 3 (내용 같음)");
+    assert.equal(versions_of(c, object_id).length, 3, "내용이 같아도 실행마다 새 버전 (보고서처럼)");
+    assert.ok(!existsSync(join(c.folder, "out")), "DB 모드는 프로젝트 폴더 out/ 에 쓰지 않는다");
     assert.deepEqual(c.sig(c.project_json), json_sig, "project.json 불변");
   }));
 
@@ -576,6 +583,10 @@ test("web: 최종 웹 보고서를 새 버전의 report.html 로 쌓고 출력 �
     const count = versions_of(c, object_id).length;
     ok(run_py(c, ["web", SLUG, "--assemble"]), "web --assemble");
     assert.ok(versions_of(c, object_id).length > count, "--assemble 은 새 조립본(새 버전)을 만든다");
+    const before = versions_of(c, object_id).length;
+    ok(run_py(c, ["web", SLUG]), "web 다시 (내용 같음)");
+    assert.equal(versions_of(c, object_id).length, before + 1, "web 도 내용이 같아도 실행마다 새 버전");
+    assert.ok(!existsSync(join(c.folder, "out")), "DB 모드는 프로젝트 폴더 out/ 에 쓰지 않는다");
   }));
 
 // ---------------------------------------------------------------------------
@@ -716,6 +727,9 @@ setInterval(()=>{},1000);`,
     ],
     { stdio: ["ignore", "pipe", "inherit"] },
   );
+  const tool = process.platform === "darwin" ? ["lsof", ["-v"]] : process.platform === "win32" ? ["netstat", ["-h"]] : ["ss", ["--version"]];
+  const probe = spawnSync(tool[0] as string, tool[1] as string[], { encoding: "utf8" });
+  const owner_tool_missing = probe.error !== undefined && (probe.error as NodeJS.ErrnoException).code === "ENOENT";
   const c = await make_cli_env();
   try {
     const held: number[] = await new Promise((resolve, reject) => {
@@ -737,7 +751,8 @@ setInterval(()=>{},1000);`,
       const row = rows.find((r) => r.group === "서버" && r.title.includes(`:${port}`));
       assert.ok(row, `포트 ${port} 점유 행: ${JSON.stringify(rows.filter((r) => r.group === "서버"))}`);
       assert.equal(row.level, "warn", "PES 가 아닌 프로그램이 쥔 포트는 주의");
-      assert.ok(row.detail.includes(String(holder.pid)), `소유 프로세스 pid ${holder.pid} 를 알린다: ${row.detail}`);
+      if (owner_tool_missing) assert.ok(row.detail.includes(String(holder.pid)) || row.detail.includes("확인 불가"), `소유 도구가 없으면 '확인 불가' 허용: ${row.detail}`);
+      else assert.ok(row.detail.includes(String(holder.pid)), `소유 프로세스 pid ${holder.pid} 를 알린다: ${row.detail}`);
     }
   } finally {
     holder.kill();
