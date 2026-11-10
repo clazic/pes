@@ -45,6 +45,7 @@ import {
   type ApiEnv,
 } from "./helpers/api_env.ts";
 import { new_artifact, more_version } from "./helpers/blob_env.ts";
+import { set_current } from "../scripts/pes_core/content.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
 
 const P = (env: ApiEnv, rest = "") => project_path(env, rest);
@@ -162,10 +163,19 @@ test("context digest is stable across reads and changes when a version is added;
       "the manifest lists the exact version",
     );
     const v2 = await more_version(env, "ctx2", v1.object_id);
+    // SEL-46 final review F4: append and adoption are separate; the manifest follows objects.current_version_id.
+    const pointer = () =>
+      env.db.get<{ current_version_id: string }>("SELECT current_version_id FROM objects WHERE id = ?", v1.object_id)?.current_version_id;
+    assert.equal(pointer(), v1.version_id, "append alone leaves the pointer on v1");
+    const unadopted = await read();
+    assert.equal(unadopted.digest, c.digest, "an unadopted append does not change the digest");
+    assert.ok(!unadopted.manifest.some((m: { version_id: string }) => m.version_id === v2.version_id), "an unadopted version is not in the manifest");
+    await set_current(env.service, env.ctx("ctx-adopt"), { object_id: v1.object_id, version_id: v2.version_id });
+    assert.equal(pointer(), v2.version_id);
     const d = await read();
     assert.notEqual(d.digest, c.digest);
     assert.ok(d.manifest.some((m: { version_id: string }) => m.version_id === v2.version_id));
-    assert.ok(!d.manifest.some((m: { version_id: string }) => m.version_id === v1.version_id), "only the current version");
+    assert.ok(!d.manifest.some((m: { version_id: string }) => m.version_id === v1.version_id), "only the current version (the pointer's version)");
   });
 });
 
