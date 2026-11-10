@@ -3293,6 +3293,20 @@ export function prepare_import_plan(dir: string, owner_actor_id: string): Prepar
   return prepared;
 }
 
+/**
+ * Build the plan for a source folder without handing it to the importer. The
+ * migration validator (PR12) compares this plan with what the import wrote.
+ * Read only: the folder is scanned and read, never changed.
+ */
+export function build_validation_plan(dir: string): PreparedImport {
+  return build_plan(dir);
+}
+
+/** True for source files that are rebuilt by the old tool and are not part of the fingerprint. */
+export function is_regenerable_source_path(path: string): boolean {
+  return classify_file(path).regenerable;
+}
+
 function prepared_key(owner_actor_id: string, fingerprint: string): string {
   return `${owner_actor_id}:${fingerprint}`;
 }
@@ -3326,8 +3340,18 @@ export async function import_project(
       { source_fingerprint: fingerprint },
     );
     const result = outcome.result as ImportResult;
+    let state = result.state;
+    if (outcome.replayed && state !== "failed") {
+      // A receipt replay returns what the first call saw. A batch that was
+      // rolled back since (PR12) is failed now and is not silently revived.
+      const current = service.read((db) =>
+        db.get<{ state: string }>("SELECT state FROM import_batches WHERE id = ?", result.batch_id),
+      );
+      if (current?.state === "failed") state = "failed";
+    }
     return {
       ...result,
+      state,
       replayed: outcome.replayed || result.replayed === true,
     };
   } finally {

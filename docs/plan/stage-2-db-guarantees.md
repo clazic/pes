@@ -240,3 +240,24 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
   - `items[].path`는 안전한 상대 경로만 읽어 `rendered`로 연결하고, 없거나 안전하지 않으면 `missing_file`과 `legacy_extra.missing_paths`로 남긴다(안전하지 않은 경로는 중립화).
   - `rounds/<stage>-R<n>/qa.json`은 그 라운드 review artifact(`metadata.qa`)다. 결과 JSON은 canonical hash가 항목 record와 같을 때만 `source`로 연결하고, 아니면 원문 blob만 두고 `unmapped_input`으로 보고한다.
   - 출처·`user_links`의 미지 하위 필드는 `locator.legacy_extra`에 보존하고 JSON 포인터로 `unknown_field`를 남긴다.
+
+### 8.10 이전 검증·활성화·되돌리기(PR12)
+
+`scripts/pes_core/migration.ts`가 공개 경계(`validate_import`·`activate_import`·`rollback_before_write`·`restore_project`·읽기 전용 `serving_path`)이고, 쓰기 SQL은 `scripts/pes_core/commands/migration.ts`의 닫힌 명령 4개(`legacy.validate_import`·`legacy.activate_import`·`legacy.rollback_before_write`·`legacy.restore_project`)에만 있다. 모두 `owner` 범위 명령이며 실행자는 **그 프로젝트의 사람 owner**여야 한다(에이전트·옛 작성자·다른 프로젝트의 사람·모르는 actor는 `forbidden`, 행 없음). 한 단계 = `service.execute` 1회 = 한 tx. 호출마다 새 요청 키를 쓰므로(검증은 다시 돌릴 수 있어야 한다) 영수증 재생에 기대지 않고, 상태 전이표가 중복 실행을 `conflict`로 막는다.
+
+- **상태 전이**(스키마 값만 쓴다, `rolled_back` 없음):
+
+  | 명령 | 배치 상태 → | 프로젝트 |
+  |---|---|---|
+  | validate (문제 없음) | staging·validated → validated | staging |
+  | validate (문제 있음) | staging → staging, validated → **staging**(더는 믿을 수 없다) | staging |
+  | activate | validated → activated | active |
+  | rollback_before_write | staging·validated·activated(새 쓰기 없음) → **failed** | **archived** |
+  | restore_project | 번들 시점의 상태로 | 번들 시점의 상태로 |
+  | 그 밖 | `conflict`, 아무것도 안 바뀐다 | |
+
+  failed·activated 배치의 validate, staging 배치의 activate, failed 배치의 rollback은 `conflict`다. 같은 원본을 다시 가져오면(PR11) 영수증 재생이 옛 결과(staging)를 돌려주므로, `import_project`가 `CommandService.read`(SELECT 전용 핸들)로 현재 상태를 보고 rollback된 배치는 `failed`로 알린다. 되살리지 않는다.
+- **validate_import**: `import_batches.source_fingerprint`가 지금 원본 폴더의 지문과 같을 때만 비교한다(다르면 `source_changed` 문제만 나열). 같으면 원본에서 다시 만든 계획(`build_validation_plan`, 읽기 전용)을 DB와 맞춘다. `counts`(표·단계별·역할별 개수)·`bodies`(제목·요약·본문·질문·답·메시지·이월 설명을 hash로, 버전 `content_hash`)·`ids`(계획의 모든 `legacy_mappings`가 같은 자리로 풀리는지, 배치의 모든 mapping 행이 실제 행으로 풀리는지)·`links`(관계·인용·라운드 내용·이월·스레드·세트 구성원이 같은 프로젝트의 행을 가리키는지)·`footnotes`(`citation_no`)·`files`(blob 행 ↔ 원본 바이트 sha256/크기, 디스크 파일 바이트, 첨부 행)·`unprocessed_answers`(`processed`에 없는 `feedback/*.json`의 제출·답 개수)·`reports_regeneration`(`reports/<단계>/report.md·html`을 다시 만들어 비교; **보고만, 문제가 아니다**)·`source_changed`. 문제가 있어도 던지지 않고 `ok=false`와 문제 목록(최대 500)을 돌려주며 사건 `legacy.import_validation_failed`를 남긴다. 사건·결과에는 원본의 절대 경로를 넣지 않는다. 보고서 재생성은 PR16 TS 보고서 생성기 전까지 같은 계획에서 만든 구조만 같은 최소 형태라 옛 보고서와는 대개 다르다(`matches=false`).
+- **activate_import**: 검증을 통과한(validated) 배치만. 백업 폴더가 PES 홈 안·그 부모, OneDrive 폴더(경로 마디가 `OneDrive…`), 객체 저장소 안이면 `invalid_payload`이고 아무것도 쓰지 않는다. 같은 tx 안에서 **그 프로젝트 하나**를 PR3 번들로 내보내(`export_project_in_tx`, 상태를 바꾸기 전 모습) `verify_bundle`로 확인한 뒤에야 상태를 바꾼다. 번들을 못 쓰면 활성화되지 않는다. 경로는 모두 인자로 받고 환경 변수·`~/`·실제 홈은 읽지 않는다.
+- **rollback_before_write**: 활성화 뒤 새 쓰기(영수증 `legacy.*`가 아닌 `mutation_commits`)가 하나라도 있으면 `conflict`이며 `restore_project`를 안내한다. 이전 증거(`legacy_mappings`·staging 행)는 지우지 않고 보관한다. 원본 폴더는 건드리지 않는다.
+- **restore_project**: 프로젝트 하나를 PR3 번들의 상태로 되돌린다. 번들은 `verify_bundle`·manifest·행·blob 행↔객체 파일 대조를 통과해야 하고(다른 프로젝트의 번들·다른 DB의 번들·손상·없는 번들은 거부), 한 tx 안에서 그 프로젝트의 행만 지우고 번들 행을 넣는다(다른 프로젝트·`users`·`actors`는 그대로, `database_instance_id` 유지, `cursor_epoch + 1`). 전부 아니면 전무: 외래 키가 깨지면 파일을 만지기 전에 거부한다. 객체 파일은 마지막에 PR9 helper로 번들 바이트에 맞춘다(없는 건 복구, 다른 건 덮어쓰기, 번들에 없는 건 삭제). 결과는 번들 뒤에 있던 업무 쓰기(`lost_writes`, 오래된 순)와 함께 되돌려진 이전 단계(`reverted_steps`, 예 `legacy.activate_import`), 커서 세대 전후(10진 문자열)를 알린다. 번들 뒤의 감사 기록(영수증·사건)은 번들의 것으로 바뀌므로 복원 사건 `legacy.project_restored`에 손실 목록을 함께 남긴다. 활성화 직전 번들로 돌아가면 파일럿 이후 기록이 사라진다.

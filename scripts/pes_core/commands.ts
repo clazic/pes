@@ -25,6 +25,7 @@ import { CONTENT_COMMAND_ENTRIES, RESULT_COMMAND_ENTRIES } from "./commands/cont
 import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { LEGACY_COMMAND_ENTRIES } from "./commands/legacy.ts";
+import { MIGRATION_COMMAND_ENTRIES } from "./commands/migration.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
@@ -33,6 +34,7 @@ import {
   is_record,
   register_object_store,
   with_readonly_db,
+  type ReadonlyDbHandle,
   require_non_empty_string,
   require_record,
   require_well_formed,
@@ -495,6 +497,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...EDITION_COMMAND_ENTRIES,
   ...FILE_COMMAND_ENTRIES,
   ...LEGACY_COMMAND_ENTRIES,
+  ...MIGRATION_COMMAND_ENTRIES,
   ...ACTOR_COMMAND_ENTRIES,
   ...POLICY_COMMAND_ENTRIES,
   ...QUESTION_COMMAND_ENTRIES,
@@ -616,6 +619,16 @@ export class CommandService {
   /** The objects folder given at construction, or null when none was injected. */
   get object_store_dir(): string | null {
     return this.#objects_dir;
+  }
+
+  /**
+   * Read-only view of the database for public wrappers that must look at the
+   * current state outside a command (for example to tell a replayed receipt
+   * from a state that has moved on). SELECT/WITH only; the handle is dead once
+   * fn returns, and no write is possible through it.
+   */
+  read<T>(fn: (db: ReadonlyDbHandle) => T): T {
+    return with_readonly_db(this.#db, fn);
   }
 
   /**
