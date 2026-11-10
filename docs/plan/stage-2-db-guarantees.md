@@ -206,3 +206,18 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **완료 해제·스냅숏**: `edition.release_completion`은 `completed` 판만 `active`로 되돌리며, 완료가 아니거나 다른 활성 판이 있으면 `conflict`다. `edition.snapshot`은 `scope='edition'|'stage'` 스냅숏을 만들고, manifest blob·버전 검사와 해시는 봉인과 같다(빈 `versions`는 `invalid_payload`). `through_event_seq`는 그 명령이 실행될 때 존재하던 마지막 사건 번호, `control_rev`는 `projects.control_rev`다. 스냅숏 행은 나중에 새 버전이 생겨도 바뀌지 않는다.
 - **이월 두 갈래**: `edition.carry_over`의 `kind='topic'`은 `artifacts(kind='topic')`의 정확한 `source_version_id`에서 새 artifact 객체·버전 1·`artifacts(origin_version_id=source_version_id)`·`version_relations(derived_from)`를 만든다. 원본과 그 뒤 버전은 바뀌지 않는다. `kind='tasks'`는 같은 판 안에서 `from_stage`보다 뒤 단계로만 이월하며(다른 판이면 `conflict`), 현재 버전이 `next_round_task`이고 `target_stage_id=from_stage`이며 상태가 `proposed`·`accepted`·`running`·`deferred`인 follow-up마다 `version_no+1`, `based_on_version_id=옛 버전`, 같은 kind/state/description/base/proposed, `target_stage_id=to_stage`, `target_round_id=NULL`인 새 버전을 붙이고 객체의 현재 포인터를 옮긴다. `applied`·`rejected`·`cancelled`는 이월하지 않고, `followups.origin_*`는 건드리지 않는다. 다음 라운드의 R1 목록은 `open_tasks_for_round`가 읽는다.
 - **세 사건의 분리**: `run.complete`는 `run.completed`, `round.seal`은 `round.sealed`, `stage.approve`는 `stage.approved`를 남기며 서로의 상태를 바꾸지 않는다. 거부·검증 실패는 영수증도 사건도 남기지 않고, 모든 성공 명령은 영수증과 사건을 같은 tx에 남긴다.
+
+### 8.8 질문·답(PR8)
+
+`scripts/pes_core/commands/questions.ts`가 `question.publish_set`·`question.revise`·`answer.submit` 3개 명령을 정의하고, `scripts/pes_core/questions.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 읽기 전용 `validate_submission`·`resume_ready`는 직접 SQL을 읽기만 하며 쓰지 않는다. 질문·답 표의 INSERT/UPDATE는 `commands/questions.ts`에만 있다.
+
+- **본 버전 고정**: 제출은 그 폼(`question_sets`)의 구성원과 사람이 실제로 본 질문 버전(`question_set_members.question_version_id`)에 고정된다. 질문이 그 뒤 개정되어 구성원 버전이 현재 버전과 다르면 낡은 폼으로 보고 `conflict`로 거부한다(아무것도 쓰지 않음).
+- **개정·재확인**: `question.revise`는 새 질문 버전을 append하고 `objects.current_version_id`만 옮긴다. 옛 버전 행·옛 답·옛 폼 구성은 그대로 두며, 새 버전은 옛 답을 승계하지 않는다. `resume_ready`는 현재 답 버전이 `submitted`이면서 질문의 현재 버전에 고정된 경우에만 충족으로 본다. 옛 버전에만 답이 있으면 `needs_reconfirmation`, 답이 없으면 `unanswered`다.
+- **덧붙임**: `other`(레거시 `__other`)는 답 값이 아니다. `allow_comment_as_answer=1`인 질문에서만 덧붙임만으로 답 버전(`value` JSON null)을 만들고, 아니면 답 없이 최소 `threads`/`messages`/`message_versions` 행으로만 보존한다. 새 질문 스펙에서 이 필드를 생략하면 0(덧붙임만으로는 답이 아님)이다. `__other`가 추천 선택지 동의로 바뀌지 않는다.
+- **기본값·추천**: 서버는 답 초안을 만들지 않는다. `used_default`는 사람이 기본값을 골랐고 제출 값이 그 기본값과 같을 때만 1이며, 보내지 않으면 0이다. 추천 선택지는 평범한 선택일 뿐 자동 답이 되지 않는다.
+- **묶음 원자성**: 한 제출의 제출 행·답 버전·의견 스레드는 한 tx다. 한 항목이라도 잘못되면 제출·답·의견·영수증·사건이 모두 롤백된다. 같은 키의 재요청은 저장된 결과를 재생하고, 실패한 시도는 영수증을 남기지 않아 같은 키로 다시 실행할 수 있다.
+- **판·라운드 경계**: 게시는 stage의 판이 `active`이고 프로젝트의 활성 판과 같으며 라운드가 `open`일 때만, 제출은 세트의 판이 `active`이고 세트 라운드가 봉인되지 않았으며 그 `(stage_id, form_key)`의 최신 세트일 때만 된다. 아니면 `conflict`다.
+- **필수 답**: `required=1` 질문에 빈 문자열·공백뿐인 문자열·빈 배열을 보내면 `invalid_payload`이고 묶음 전체를 거부한다.
+- **읽기 함수 계약**: `resume_ready`·`validate_submission`은 행위자·멤버십을 스스로 확인하지 않는 읽기 함수다. 이들을 노출하는 API/CLI 층이 프로젝트 멤버십과 행위자를 먼저 확인해야 한다.
+- **stage_start 세트**: `round_id`가 NULL인 stage_start 세트는 어느 라운드에도 속하지 않으므로 `resume_ready`의 라운드 재개 판정 밖이다.
+- **행위자**: `question.publish_set`·`question.revise`는 사람 멤버 또는 활성 lease guard(`run_id`·`lease_id`·`fence`)를 가진 에이전트만, `answer.submit`은 사람만 실행한다. 에이전트는 lease가 있어도 답할 수 없다.

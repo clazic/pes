@@ -25,6 +25,7 @@ import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
 import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
+import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
@@ -483,6 +484,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...FILE_COMMAND_ENTRIES,
   ...ACTOR_COMMAND_ENTRIES,
   ...POLICY_COMMAND_ENTRIES,
+  ...QUESTION_COMMAND_ENTRIES,
 ]);
 
 /**
