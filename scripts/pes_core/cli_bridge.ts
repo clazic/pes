@@ -890,7 +890,7 @@ function find_previous(s: Session, project: ProjectInfo, stage: StageInfo, legac
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
       WHERE o.project_id = ? AND a.stage_id = ? AND o.kind = 'artifact' AND a.kind NOT IN ('note', 'review')
-        AND json_extract(v.metadata_json, '$.legacy_id') = ?
+        AND COALESCE(json_extract(v.metadata_json, '$.legacy_id'), json_extract(v.metadata_json, '$.legacy_extra.legacy_id')) = ?
       LIMIT 1`,
     project.id,
     stage.id,
@@ -1060,13 +1060,23 @@ const merge: Handler = async (s, req) => {
     const control_only = is_control_only(raw);
     const given = typeof raw.status === "string" && raw.status.length > 0 ? raw.status : null;
     const status = given ?? (control_only ? prev?.status ?? "new" : "done");
+    // An item imported from a v0.15 file keeps its old values in legacy_extra (kind_original, depth,
+    // links, shots, status_original, confidence_original); the first merge carries them over here.
+    const prev_extra: Record<string, unknown> = is_record(prev_meta.legacy_extra) ? { ...prev_meta.legacy_extra } : {};
+    // the old view prefers status_original/confidence_original: drop them once this merge sets a new value
+    if (given !== null || !control_only) delete prev_extra.status_original;
+    if (typeof raw.confidence === "string" && raw.confidence.length > 0) delete prev_extra.confidence_original;
+    const prev_kind = prev_meta.legacy_kind ?? prev_extra.kind_original;
     const metadata: Record<string, unknown> = {
       ...prev_meta,
-      legacy_id: legacy_id ?? prev_meta.legacy_id ?? null,
-      legacy_kind: typeof raw.kind === "string" ? raw.kind : prev_meta.legacy_kind ?? "",
-      depth: Number(prev_meta.depth ?? 0) + (control_only ? 0 : 1),
+      legacy_id: legacy_id ?? prev_meta.legacy_id ?? prev_extra.legacy_id ?? null,
+      legacy_kind: typeof raw.kind === "string" ? raw.kind : typeof prev_kind === "string" ? prev_kind : "",
+      depth: Number(prev_meta.depth ?? prev_extra.depth ?? 0) + (control_only ? 0 : 1),
       stage: stage.key,
     };
+    if (prev_meta.links === undefined && is_record(prev_extra.links)) metadata.links = prev_extra.links;
+    if (prev_meta.shots === undefined && Array.isArray(prev_extra.shots)) metadata.shots = prev_extra.shots;
+    if (prev_meta.legacy_extra !== undefined) metadata.legacy_extra = prev_extra;
     for (const key of ["order", "verdict", "path", "open_questions", "reuse", "model"]) {
       if (raw[key] !== undefined && raw[key] !== null && raw[key] !== "") metadata[key] = raw[key];
     }
@@ -1074,8 +1084,8 @@ const merge: Handler = async (s, req) => {
     if (typeof raw.request === "string") metadata.request = raw.request;
     if (Array.isArray(raw.user_links)) metadata.user_links = merge_user_links(prev_meta.user_links, raw.user_links);
     // shots and links accumulate across rounds like the old merge (no duplicates).
-    if (Array.isArray(raw.shots) && raw.shots.length > 0) metadata.shots = union_json(prev_meta.shots, raw.shots);
-    if (is_record(raw.links) && Object.keys(raw.links).length > 0) metadata.links = union_links(prev_meta.links, raw.links);
+    if (Array.isArray(raw.shots) && raw.shots.length > 0) metadata.shots = union_json(metadata.shots, raw.shots);
+    if (is_record(raw.links) && Object.keys(raw.links).length > 0) metadata.links = union_links(metadata.links, raw.links);
     const confidence =
       typeof raw.confidence === "string" && raw.confidence.length > 0 ? raw.confidence : prev_fields.confidence ?? null;
     const fields: Record<string, unknown> = {
@@ -1226,7 +1236,7 @@ const qa_data: Handler = async (s, req) => {
     `SELECT o.id AS object_id, o.display_no AS display_no, a.kind AS kind, v.title AS title,
             v.status AS status, v.summary AS summary, v.confidence AS confidence,
             (SELECT count(*) FROM citations c WHERE c.project_id = v.project_id AND c.artifact_version_id = v.version_id) AS sources,
-            json_extract(v.metadata_json, '$.legacy_id') AS legacy_id
+            COALESCE(json_extract(v.metadata_json, '$.legacy_id'), json_extract(v.metadata_json, '$.legacy_extra.legacy_id')) AS legacy_id
        FROM objects o
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
