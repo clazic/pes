@@ -597,6 +597,11 @@ def pending_files(d, p):
 def cmd_status(args):
     d = pdir(args[0])
     p = load(d)
+    show_status(d, p, [(f, json.loads(f.read_text(encoding="utf-8"))) for f in pending_files(d, p)])
+
+
+def show_status(d, p, pend):
+    """status 출력. pend = [(표시할 경로, 답 내용 dict)] — 옛 방식은 feedback 파일, DB 방식은 DB 의 처리 안 한 답."""
     print(f"주제: {p['topic']}  ({d})")
     print(f"현재 단계: {LABEL[p['current']]}" + ("  · 전체 완료" if p.get("complete") else ""))
     for k, v in STAGES:
@@ -613,10 +618,8 @@ def cmd_status(args):
         print(f"인계 메모 {len(p['notes'])}개 (최근 5):")
         for n in p["notes"][-5:]:
             print(f"  - [{n.get('time')}] {n.get('text')}")
-    pend = pending_files(d, p)
     print(f"처리 안 한 답: {len(pend)}개")
-    for f in pend:
-        x = json.loads(f.read_text(encoding="utf-8"))
+    for f, x in pend:
         first = (x.get("text") or "").splitlines()[:1]
         print(f"  - {f}  [{x.get('stage','')}/{x.get('kind','')}/R{x.get('round',0)}] {first[0][:80] if first else ''}")
     url = server_url(d)
@@ -662,7 +665,10 @@ def first_line(t, n=160):
 
 def cmd_digest(args):
     d, s = pdir(args[0]), stage_arg(args[1])
-    p = load(d)
+    show_digest(load(d), s, args)
+
+
+def show_digest(p, s, args):
     st = p["stages"][s]
     rnd = int(args[args.index("--round") + 1]) if "--round" in args else None
     items = [i for i in st["items"] if i.get("status") != "removed" and (rnd is None or i.get("updated_round") == rnd)]
@@ -696,7 +702,10 @@ def cmd_digest(args):
 
 def cmd_show(args):
     d, s = pdir(args[0]), stage_arg(args[1])
-    p = load(d)
+    show_items(load(d), s, args)
+
+
+def show_items(p, s, args):
     rest = args[2:]
     fields = None
     if "--fields" in rest:
@@ -1161,7 +1170,7 @@ LEGACY_PORTS = range(8765, 8776)
 
 def serve_root(d: Path) -> Path:
     """d 를 서빙할 서버의 루트: 프로젝트면 그 부모(홈), 아니면 d 자신."""
-    return d.parent if (d / "project.json").exists() else d
+    return d.parent if (d / "project.json").exists() or is_db_served(d) else d
 
 
 def root_port(root: Path):
@@ -1262,9 +1271,17 @@ def stop_server(root: Path, old=False):
     return not alive()
 
 
+SHELL_SAFE = re.compile(r"[\w@%+=:,./\\~-]+")
+
+
+def shell_quote(text: str) -> str:
+    """셸 한 단어로: 공백·따옴표·괄호 같은 문자가 없으면 그대로, 있으면 작은따옴표로 감싼다."""
+    return text if SHELL_SAFE.fullmatch(text) else "'" + text.replace("'", "'\\''") + "'"
+
+
 def cmd_watch(args):
     d = pdir(args[0])
-    print(f"tail -n0 -F {d}/feedback.log | grep --line-buffered FEEDBACK")
+    print(f"tail -n0 -F {shell_quote(f'{d}/feedback.log')} | grep --line-buffered FEEDBACK")
 
 
 # ---------- 여러 프로젝트 ----------
@@ -1280,14 +1297,22 @@ def projects_root(args):
 
 def brief(d: Path) -> dict:
     p = load(d)
+    pend = pending_files(d, p)
+    lk = lock_info(d)
+    times = [f.stat().st_mtime for f in [d / "project.json", *(d / "feedback").glob("*.json")] if f.exists()] if (d / "feedback").exists() else [(d / "project.json").stat().st_mtime]
+    outs = ", ".join(f.name for f in sorted((d / "out").glob("*")) if f.is_file()) if (d / "out").exists() else "-"
+    return brief_of(d, p, len(pend), {"owner": str(lk.get("owner"))[:8], "since": lk.get("since")} if lk and lk["live"] else None,
+                    time.strftime("%Y-%m-%d %H:%M", time.localtime(max(times))), outs)
+
+
+def brief_of(d: Path, p: dict, npend: int, lock, updated: str, outs: str) -> dict:
     cur = p.get("current", "plan")
     x = p["stages"][cur]
-    pend = pending_files(d, p)
     L = LABEL[cur]
     if p.get("complete"):
-        who, todo = "done", "완료 — 최종 결과물: " + (", ".join(f.name for f in sorted((d / "out").glob("*")) if f.is_file()) if (d / "out").exists() else "-")
-    elif pend:
-        who, todo = "ai", f"받은 답 {len(pend)}개 처리 대기"
+        who, todo = "done", "완료 — 최종 결과물: " + outs
+    elif npend:
+        who, todo = "ai", f"받은 답 {npend}개 처리 대기"
     elif x["status"] == "asking":
         who, todo = "you", f"{L} 시작 질문에 답하기"
     elif x["status"] == "active" and x.get("review") and int(x["review"].get("round") or 0) == x["round"]:
@@ -1296,26 +1321,33 @@ def brief(d: Path) -> dict:
         who, todo = "ai", f"{L} R{x['round'] or 1} 작업 중"
     else:
         who, todo = "you", f"{L} 시작"
-    lk = lock_info(d)
-    times = [f.stat().st_mtime for f in [d / "project.json", *(d / "feedback").glob("*.json")] if f.exists()] if (d / "feedback").exists() else [(d / "project.json").stat().st_mtime]
     return {"slug": d.name, "path": str(d), "topic": p.get("topic", d.name), "created": p.get("created", ""), "current": cur,
             "stages": [{"key": k, "label": v, "status": p["stages"][k]["status"], "round": p["stages"][k]["round"],
                         "stale": p["stages"][k].get("stale"), "reports": [r["format"] for r in p["stages"][k].get("reports", [])]}
                        for k, v in STAGES],
-            "complete": bool(p.get("complete")), "who": who, "todo": todo, "pending": len(pend),
-            "updated": time.strftime("%Y-%m-%d %H:%M", time.localtime(max(times))),
-            "lock": {"owner": str(lk.get("owner"))[:8], "since": lk.get("since")} if lk and lk["live"] else None}
+            "complete": bool(p.get("complete")), "who": who, "todo": todo, "pending": npend,
+            "updated": updated, "lock": lock}
 
 
 def all_briefs(root: Path):
     out = []
+    db_here = db_core() and root.exists() and root.resolve() == pes_home()
+    served = db_served_slugs() if db_here else set()
     for f in sorted(root.glob("*/project.json")):
+        if f.parent.name in served:
+            continue  # 이 프로젝트는 DB 에서 읽는다 (폴더에 옛 project.json 이 남아 있어도 한 번만)
         try:
             out.append(brief(f.parent))
         except SystemExit:
             continue
         except Exception as e:
             out.append({"slug": f.parent.name, "topic": f.parent.name, "error": str(e)[:200], "stages": [], "who": "err", "todo": "읽기 실패"})
+    for slug in sorted(served):
+        data = bridge_soft("read_project", slug)
+        if data is None:
+            out.append({"slug": slug, "topic": slug, "error": "DB 읽기 실패", "stages": [], "who": "err", "todo": "읽기 실패"})
+            continue
+        out.append(brief_of(root / slug, data["project"], len(data["pending"]), data.get("lock"), data.get("updated", ""), "-"))
     rank = {"you": 0, "ai": 1, "err": 2, "done": 3}
     out.sort(key=lambda b: b.get("updated", ""), reverse=True)
     out.sort(key=lambda b: rank.get(b.get("who"), 9))
@@ -1578,6 +1610,7 @@ def doctor_env(R):
         if not shutil.which(tool):
             R.add("도구", "bad", f"{tool} 없음", "답 자동 수신(Monitor)에 필요 — Windows는 Git Bash")
     # 서버 (홈마다 포트 하나)
+    owners = listening_owners(set(HUB_PORTS)) if db_core() else {}  # 소켓에 접속하기 전에 먼저 소유자를 알아 둔다
     hubs = [(pt, whoami(pt)) for pt in HUB_PORTS]
     for pt, root in hubs:
         if root and not Path(root).exists():
@@ -1590,10 +1623,117 @@ def doctor_env(R):
     if legacy:
         R.add("서버", "warn", f"예전 방식 프로젝트별 서버 {len(legacy)}개", ", ".join(f":{pt}" for pt, _ in legacy) + " — 이제 포트 하나로 충분",
               fix=lambda: [stop_legacy(Path(r)) for _, r in legacy])
+    if db_core():
+        for pt, root in hubs:
+            if root is None and port_busy(pt):
+                R.add("서버", "warn", f":{pt} 다른 프로그램이 사용 중", port_owner_text(owners.get(pt)))
     on = root_port(h)
     if not on and not any(whoami(pt) is None and not port_busy(pt) for pt in HUB_PORTS):
         R.add("서버", "bad", f"포트 {HUB_PORTS.start}~{HUB_PORTS.stop - 1} 모두 사용 중", "다른 프로그램이 쓰고 있음")
     R.add("서버", "ok" if on else "info", f"PES 서버 {'http://127.0.0.1:%d/ (목록과 모든 프로젝트)' % on if on else '꺼짐'}", "" if on else "/pes:list 로 켜기")
+
+
+RISKY_PATH = re.compile(r"[\s'\"`()$&;|<>*?\[\]{}!#^]")
+
+
+def listening_owners(ports):
+    """{포트: [(pid, 이름)]} — 그 포트를 LISTEN 중인 프로세스. 한 번만 묻고, 소켓에 접속하지 않는다.
+    (접속하면 점유한 쪽 프로그램이 놀라 죽을 수 있다 — 소유자를 먼저 알아낸 뒤에 whoami 로 확인한다.)
+    macOS lsof(없으면 netstat -anv) · Linux ss · Windows netstat -ano. 도구가 없거나 못 알아내면 그 포트는 목록에 없다."""
+    lo, hi = min(ports), max(ports)
+    found = {}
+    try:
+        if sys.platform == "darwin":
+            if shutil.which("lsof"):
+                _, out = run_quiet(["lsof", "-nP", f"-iTCP:{lo}-{hi}", "-sTCP:LISTEN", "-Fpcn"], 20)
+                pid = name = None
+                for line in out.splitlines():
+                    if line.startswith("p") and line[1:].isdigit():
+                        pid, name = line[1:], ""
+                    elif line.startswith("c") and pid:
+                        name = line[1:]
+                    elif line.startswith("n") and pid:
+                        m = re.search(r":(\d+)$", line)
+                        if m and int(m.group(1)) in ports and (pid, name) not in found.setdefault(int(m.group(1)), []):
+                            found[int(m.group(1))].append((pid, name))
+            if not found and shutil.which("netstat"):
+                _, out = run_quiet(["netstat", "-anv", "-p", "tcp"], 20)
+                for m in re.finditer(r"^tcp\S*\s+\d+\s+\d+\s+\S+\.(\d+)\s+\S+\s+LISTEN\s.*?\s(\S+):(\d+)\s", out, re.M):
+                    if int(m.group(1)) in ports:
+                        found.setdefault(int(m.group(1)), []).append((m.group(3), m.group(2)))
+        elif os.name == "nt":
+            if shutil.which("netstat"):
+                _, out = run_quiet(["netstat", "-ano", "-p", "TCP"], 15)
+                for m in re.finditer(r"^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)", out, re.M):
+                    if int(m.group(1)) in ports:
+                        name = ""
+                        if shutil.which("tasklist"):
+                            _, t = run_quiet(["tasklist", "/FI", f"PID eq {m.group(2)}", "/FO", "CSV", "/NH"], 10)
+                            tm = re.match(r'"([^"]+)"', t.strip())
+                            name = tm.group(1) if tm else ""
+                        found.setdefault(int(m.group(1)), []).append((m.group(2), name))
+        elif shutil.which("ss"):
+            _, out = run_quiet(["ss", "-ltnpH"], 10)
+            for line in out.splitlines():
+                m = re.search(r":(\d+)\s", line)
+                if m and int(m.group(1)) in ports:
+                    for um in re.finditer(r'\("([^"]+)",pid=(\d+)', line):
+                        found.setdefault(int(m.group(1)), []).append((um.group(2), um.group(1)))
+    except Exception:
+        return {}
+    return found
+
+
+def port_owner_text(owners):
+    if not owners:
+        return "PES 가 아닌 프로그램이 쓰는 중 — 소유 프로세스 확인 불가 (lsof·ss·netstat 이 없거나 권한이 없음)"
+    return "PES 가 아닌 프로그램이 쓰는 중 — 소유 프로세스 " + ", ".join(f"pid {pid}" + (f" ({name})" if name else "") for pid, name in owners)
+
+
+def doctor_db(R, h: Path):
+    """2단계 DB 진단: 데이터베이스 상태(읽기만 — 스스로 고치지 않는다)와 PES 홈 경로의 명령 quoting 위험."""
+    db_file = Path.home() / ".pes" / "pes.db"
+    st = bridge_soft("db_status")
+    if st is None:
+        R.add("데이터베이스", "bad", f"데이터베이스를 점검하지 못함 {db_file}", "코어(node)를 실행하지 못했습니다 — Node 26 이상이 필요합니다")
+    elif st.get("state") == "missing":
+        R.add("데이터베이스", "info", f"데이터베이스 아직 없음 {db_file}", "첫 init 이나 이전 때 만들어집니다")
+    elif st.get("state") == "broken":
+        R.add("데이터베이스", "bad", f"데이터베이스를 열 수 없음 {db_file}", f"{st.get('message', '')} — doctor 는 DB 를 고치지 않습니다. 백업에서 복원하거나 파일을 옮겨 두고 다시 시작하세요")
+    elif not st.get("schema_current"):
+        R.add("데이터베이스", "warn", f"데이터베이스 스키마가 최신이 아님 {db_file}", "새 코어 버전으로 DB 를 올려야 합니다")
+    else:
+        R.add("데이터베이스", "ok", f"데이터베이스 {db_file}", f"프로젝트 {st.get('projects', 0)}개 · 스키마 최신")
+    if RISKY_PATH.search(str(h)):
+        R.add("환경", "warn", "PES 홈 경로에 공백·따옴표·괄호 같은 특수 문자가 있음 (명령 quoting 위험)",
+              f"{h} — Monitor 에 넣는 watch 명령처럼 셸에 붙이는 경로는 따옴표가 필요합니다. 공백·따옴표 없는 폴더로 `home` 명령으로 옮기는 편이 안전합니다")
+
+
+def doctor_project_db(R, d: Path):
+    tag = d.name
+    data = bridge_soft("read_project", tag)
+    if data is None:
+        R.add(tag, "bad", "DB 에서 프로젝트를 읽지 못함", "")
+        return
+    p, pend = data["project"], data["pending"]
+    R.add(tag, "ok", f"{p.get('topic', '')}", f"현재 {LABEL.get(p.get('current'), p.get('current'))} · DB")
+    cur = p.get("current")
+    if cur in KEYS:
+        ci = KEYS.index(cur)
+        for k in KEYS[:ci]:
+            if p["stages"][k]["status"] != "approved":
+                R.add(tag, "warn", f"{LABEL[k]}이(가) 승인되지 않았는데 뒤 단계가 현재", f"{LABEL[k]}: {p['stages'][k]['status']}")
+    for k in KEYS:
+        st = p["stages"][k]
+        if st["status"] == "approved" and not st.get("reports"):
+            R.add(tag, "warn", f"{LABEL[k]} 승인됐는데 단계 보고서 없음", f"report {tag} {k}")
+    if pend:
+        R.add(tag, "warn", f"처리 안 한 답 {len(pend)}개", f"/pes:run {tag}")
+    lk = data.get("lock")
+    if lk and lk.get("owner") != os.environ.get("PES_OWNER"):
+        R.add(tag, "info", "다른 세션이 사용 중", f"{str(lk.get('owner'))[:8]}… · {lk.get('since')}부터")
+    url = server_url(d)
+    R.add(tag, "ok" if url else "info", f"대시보드 {url or '서버 꺼짐'}", "" if url else f"/pes:status {tag}")
 
 
 def doctor_project(R, d: Path):
@@ -1706,14 +1846,24 @@ def cmd_doctor(args):
     R = DocReport()
     doctor_env(R)
     h = pes_home()
-    dirs = [pdir(tgt[0])] if tgt else (sorted(f.parent for f in h.glob("*/project.json")) if h.exists() else [])
+    if db_core() and not tgt:
+        doctor_db(R, h)  # DB 상태는 홈 전체 진단에서만 (프로젝트 하나를 지정하면 그 프로젝트만)
+    served = db_served_slugs() if db_core() else set()
+    if tgt:
+        dirs = [pdir(tgt[0])]
+    else:
+        names = {f.parent.name for f in h.glob("*/project.json")} | served if h.exists() else set(served)
+        dirs = [h / n for n in sorted(names)]
     for d in dirs:
+        if d.parent == h and d.name in served:
+            doctor_project_db(R, d)
+            continue
         if not (d / "project.json").exists():
             R.add(d.name, "bad", "project.json 없음", str(d))
             continue
         doctor_project(R, d)
     if not tgt and h.exists():
-        stray = [x.name for x in h.iterdir() if x.is_dir() and not (x / "project.json").exists() and not x.name.startswith(".")]
+        stray = [x.name for x in h.iterdir() if x.is_dir() and not (x / "project.json").exists() and not x.name.startswith(".") and x.name not in served]
         if stray:
             R.add("환경", "info", "PES 홈에 프로젝트가 아닌 폴더", ", ".join(stray))
     fixed = []
@@ -1733,6 +1883,8 @@ def cmd_doctor(args):
                 pass
     if as_json:
         print(json.dumps([{k: v for k, v in r.items() if k != "fix"} | {"fixable": bool(r["fix"])} for r in R.rows], ensure_ascii=False, indent=1))
+        if db_core() and any(r["level"] == "bad" for r in R.rows):
+            sys.exit(1)  # DB 경로: 문제가 있으면 --json 도 종료 1
         return
     MARK = {"ok": "[정상]", "info": "[참고]", "warn": "[주의]", "bad": "[문제]"}
     last = None
@@ -1792,6 +1944,17 @@ def db_core() -> bool:
 def need_db_core(name):
     if not db_core():
         die(f"{name}: PES_DB_CORE=1 일 때만 쓸 수 있는 명령입니다 (개발 플래그 — 2단계 DB 경로)", 2)
+
+
+def bridge_soft(op, slug=None, args=None):
+    """bridge 와 같지만 실패해도 아무것도 출력하지 않고 None 을 돌려준다 (읽기 전용 점검용)."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            return bridge(op, slug, args)
+    except SystemExit:
+        return None
 
 
 def bridge(op, slug=None, args=None):
@@ -1975,7 +2138,7 @@ def db_render(args):
     s = stage_arg(args[1]) if len(args) > 1 else None
     data = bridge("render", d.name, {"stage": s})
     st = data.get("stage") or s
-    print(f"{LABEL[st]} R{data['round_no']} 봉인: 스냅샷 {str(data['snapshot_id'])[:8]} (항목 {data['versions']}개)")
+    print(f"{LABEL[st]} R{data['round_no']} 봉인: 스냅샷 {str(data['snapshot_id'])[:8]} (항목 {data.get('items', data['versions'])}개)")
 
 
 def db_approve(args):
@@ -2192,10 +2355,134 @@ def db_home(args):
     print("Monitor 가 옛 경로의 feedback.log 를 보고 있었다면 새 경로로 다시 거세요.")
 
 
+
+# ---------- DB 읽기 경로 (PES_DB_CORE=1 일 때만) ----------
+# 읽기는 PR12 serving_path 를 따른다: 프로젝트가 DB 에 있고 active 이면 DB, 그 밖(DB 에 없음·staging·failed·archived)은
+# 옛 project.json 을 읽는다 (바이트·mtime 불변). 옛 프로젝트의 쓰기(report·assemble·web 포함)는 '이전' 안내로 막는다.
+_SERVING = {}
+
+
+def serving(slug) -> str:
+    """'database' | 'legacy'(DB 에 있으나 아직 active 아님) | 'none'(DB 에 없음). 플래그가 꺼져 있으면 항상 'none'."""
+    if not db_core():
+        return "none"
+    if slug not in _SERVING:
+        data = bridge_soft("route", slug)
+        _SERVING[slug] = (data or {}).get("serving", "none")
+    return _SERVING[slug]
+
+
+def is_db_served(d: Path) -> bool:
+    return db_core() and d.parent == pes_home() and serving(d.name) == "database"
+
+
+def db_served_slugs():
+    data = bridge_soft("active_slugs")
+    return set((data or {}).get("slugs") or [])
+
+
+def refuse_legacy_write(name, d: Path):
+    die(f"{name}: {d.name} 는 아직 DB 로 이전하지 않은 옛 project.json 프로젝트라 쓸 수 없습니다 — 먼저 이전(import → 검증 → 활성화)하세요. "
+        f"읽기(status·digest·show 등)는 그대로 됩니다", 2)
+
+
+def read_db_project(d: Path):
+    """DB 에서 옛 project.json 모양으로 다시 만든 프로젝트와 처리 안 한 답."""
+    data = bridge("read_project", d.name)
+    return data["project"], data["pending"]
+
+
+def db_pending_entries(d: Path, pend):
+    return [(d / "feedback" / e["name"], e) for e in pend]
+
+
+def dbr_status(args):
+    d = pdir(args[0])
+    if not is_db_served(d):
+        return cmd_status(args)
+    p, pend = read_db_project(d)
+    show_status(d, p, db_pending_entries(d, pend))
+
+
+def dbr_pending(args):
+    d = pdir(args[0])
+    if not is_db_served(d):
+        return cmd_pending(args)
+    _, pend = read_db_project(d)
+    for f, _ in db_pending_entries(d, pend):
+        print(f)
+
+
+def dbr_digest(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    if not is_db_served(d):
+        return cmd_digest(args)
+    show_digest(read_db_project(d)[0], s, args)
+
+
+def dbr_show(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    if not is_db_served(d):
+        return cmd_show(args)
+    show_items(read_db_project(d)[0], s, args)
+
+
+def dbr_report(args):
+    d, s = pdir(args[0]), stage_arg(args[1])
+    if not is_db_served(d):
+        refuse_legacy_write("report", d)
+    eli5 = None
+    ej = d / "reports" / s / "eli5.json"
+    if ej.exists():  # 읽기만 한다 — 폴더에는 아무것도 쓰지 않는다
+        eli5 = read_json_file(ej, "eli5.json")
+    data = bridge("report", d.name, {"stage": s, "eli5": eli5})
+    lines = [f"{REPORT_NAME[s]}: 새 버전 {data['version_id']} (v{data['version_no']})"]
+    lines += [f"  {f['name']} → blob {f['blob_id']}" for f in data["files"]]
+    if not data.get("eli5") and "eli5" in data.get("formats", []):
+        lines.append(f"eli5: {ej} 를 써야 합니다 (스키마는 pes:core 「단계 보고서」) — 쓴 뒤 report 를 다시 실행")
+    for x in data.get("formats", []):
+        if x not in ("md", "html", "eli5"):
+            lines.append(f"{x}: 아직 없음 — report.md 로 해당 스킬을 써서 만든 뒤 file.attach_version 으로 붙이세요")
+    print("\n".join(lines))
+
+
+def print_output_files(data):
+    for f in data["files"]:
+        print(f"  {f['name']} → blob {f['blob_id']}")
+
+
+def dbr_assemble(args):
+    d = pdir(args[0])
+    if not is_db_served(d):
+        refuse_legacy_write("assemble", d)
+    data = bridge("assemble", d.name)
+    for w in data.get("warnings") or []:
+        print(w, file=sys.stderr)
+    print(f"최종 보고서 새 버전 {data['version_id']} (v{data['version_no']})  (장·절 {data['sections']}개, 각주 {data['footnotes']}개)")
+    print_output_files(data)
+
+
+def dbr_web(args):
+    d = pdir(args[0])
+    if not is_db_served(d):
+        refuse_legacy_write("web", d)
+    od = d / "out"
+    cover = read_json_file(od / "cover.json", "out/cover.json") if (od / "cover.json").exists() else {}
+    appendix = (od / "appendix.md").read_text(encoding="utf-8") if (od / "appendix.md").exists() else None
+    data = bridge("web", d.name, {"assemble": "--assemble" in args, "cover": cover, "appendix": appendix})
+    for w in data.get("warnings") or []:
+        print(w, file=sys.stderr)
+    print(f"최종 웹 보고서 새 버전 {data['version_id']} (v{data['version_no']})  (출처 {data['sources']}개 · 확인됨 {data['verified']}개"
+          f"{'' if cover else ' · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다'})")
+    print_output_files(data)
+
+
 DB_CMDS = {"init": db_init, "ask-prep": db_ask_prep, "ask": db_ask, "round-start": db_round_start, "merge": db_merge,
            "render": db_render, "approve": db_approve, "reopen": db_reopen, "mark": db_mark, "chat": db_chat,
            "note": db_note, "qa-brief": db_qa_brief, "qa": db_qa, "serve": db_serve, "stop": db_stop,
-           "home": db_home, "lock": db_lock, "unlock": db_unlock}
+           "home": db_home, "lock": db_lock, "unlock": db_unlock,
+           "status": dbr_status, "pending": dbr_pending, "digest": dbr_digest, "show": dbr_show,
+           "report": dbr_report, "assemble": dbr_assemble, "web": dbr_web}
 
 
 # ---------- 새 CLI 명령 5개 (PES_DB_CORE=1 전용): 에이전트가 PES_TOKEN 으로 쓴다 ----------
