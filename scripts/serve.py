@@ -185,7 +185,8 @@ class ApiBudget:
         """Give the slot back for a request refused over its own input; note empty polls and proven credentials.
 
         `verified` 는 Node 브리지의 내부 표지다: 이 요청에서 자격 검증을 통과했을 때만 True.
-        인증 전에 나오는 404(라우트)·405·400·429·401 은 False 라서 가짜 자격을 '검증됨'으로 올리지 않는다.
+        인증 전에 나오는 404(라우트)·405·401·자격 확인 전 입력 오류(400)는 False 라서 가짜 자격을 '검증됨'으로 올리지 않는다.
+        Node 의 429 는 자격 확인 뒤에 나므로 True 다.
         """
         if ticket is None:
             return

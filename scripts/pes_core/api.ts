@@ -97,7 +97,8 @@ export interface ApiResponse {
    * session) passed verification. The bridge passes it to serve.py beside the
    * response (never as a header); serve.py uses it to move the credential out
    * of the server-wide unverified bucket. Pre-auth refusals (404 route, 405,
-   * 401, malformed input before auth) leave it false.
+   * 401, malformed input before the credential check) leave it false; a 429
+   * from the per-credential budget comes after the check, so it is true.
    */
   credential_verified?: boolean;
 }
