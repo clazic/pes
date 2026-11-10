@@ -27,6 +27,10 @@ from urllib.parse import unquote, urlsplit
 
 MAX_BODY = 256 * 1024
 MAX_API_BODY = 2 * MAX_BODY
+# 상한을 넘는 본문이라도 이 크기 안이면 읽어 버린 뒤 413 을 보낸다(보내는 중인 클라이언트가 끊기지 않게).
+DRAIN_LIMIT = 8 * 1024 * 1024
+DRAIN_CHUNK = 64 * 1024
+DRAIN_IO_TIMEOUT = 10
 NODE_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "api_bridge.ts"
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
@@ -102,7 +106,7 @@ def main():
             self.send_header("Cache-Control", "no-store")
             super().end_headers()
 
-        def _json(self, code, obj, cors=False):
+        def _json(self, code, obj, cors=False, close=False):
             body = json.dumps(obj, ensure_ascii=False).encode()
             self.send_response(code)
             o = self.headers.get("Origin") or ""
@@ -110,8 +114,30 @@ def main():
                 self.send_header("Access-Control-Allow-Origin", o)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            if close:
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
             self.wfile.write(body)
+
+        def _reject_oversize(self, length, respond):
+            """상한을 넘는 본문 거부: 드레인 한도 안이면 남은 본문을 읽어 버린 뒤 413, 넘으면 바로 413 후 닫는다."""
+            self.close_connection = True
+            if 0 < length <= DRAIN_LIMIT:
+                try:
+                    self.connection.settimeout(DRAIN_IO_TIMEOUT)
+                    left = length
+                    while left > 0:
+                        chunk = self.rfile.read(min(DRAIN_CHUNK, left))
+                        if not chunk:
+                            return None
+                        left -= len(chunk)
+                except (OSError, ValueError):
+                    return None
+            try:
+                return respond()
+            except OSError:
+                return None
 
         def list_directory(self, path):  # 폴더 목록은 보여 주지 않는다
             self.send_error(404)
@@ -122,7 +148,7 @@ def main():
             self.send_header("Location", to)
             self.end_headers()
 
-        def _api_error(self, code, message, status):
+        def _api_error(self, code, message, status, close=False):
             request_id = f"serve-{time.time_ns()}"
             return self._json(status, {
                 "format_version": "1.0",
@@ -135,7 +161,7 @@ def main():
                     "next_action": None,
                 },
                 "request_id": request_id,
-            })
+            }, close=close)
 
         def _origin_allowed(self):
             origin = self.headers.get("Origin") or ""
@@ -178,7 +204,8 @@ def main():
             except (TypeError, ValueError):
                 length = 0
             if length < 0 or length > MAX_API_BODY:
-                return self._api_error("payload_too_large", "the request body is too large", 413)
+                return self._reject_oversize(length, lambda: self._api_error(
+                    "payload_too_large", "the request body is too large", 413, close=True))
             body = self.rfile.read(length) if length > 0 else b""
             migration_error = self._ensure_api_db()
             if migration_error is not None:
@@ -269,7 +296,7 @@ def main():
                 return self._json(403, {"ok": False, "error": "origin", "hint": "pes remote add " + origin})
             n = int(self.headers.get("Content-Length") or 0)
             if n <= 0 or n > MAX_BODY:
-                return self._json(413, {"ok": False})
+                return self._reject_oversize(n, lambda: self._json(413, {"ok": False}, close=True))
             try:
                 data = json.loads(self.rfile.read(n))
                 text = str(data.get("text", "")).strip()
