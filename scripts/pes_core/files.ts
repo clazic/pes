@@ -415,6 +415,36 @@ export function read_storage_bytes(
   }
 }
 
+/**
+ * The one root rule for every cleanup path (gc scan/delete, restore sweep and
+ * its pre-check): the objects root must be a real directory (lstat: no link, no
+ * file, no lstat failure), and this project's folder, when it exists, too.
+ * Nothing below a link is ever scanned or removed.
+ */
+type ProjectFolder = { kind: "unsafe" } | { kind: "missing" } | { kind: "dir"; path: string };
+
+function project_folder(objects_dir: string, project_id: string): ProjectFolder {
+  try {
+    const root = resolve_objects_dir(objects_dir);
+    const root_stat = lstatSync(root);
+    if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return { kind: "unsafe" };
+    const path = join(root, project_id);
+    const stat = lstat_or_undefined(path);
+    if (stat === undefined) return { kind: "missing" };
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { kind: "unsafe" };
+    return { kind: "dir", path };
+  } catch {
+    return { kind: "unsafe" };
+  }
+}
+
+/** Restore pre-check (before any row changes): refuse a store the sweep could not trust. */
+export function assert_project_folder_safe(objects_dir: string, project_id: string): void {
+  if (project_folder(objects_dir, project_id).kind === "unsafe") {
+    throw new ApiError("conflict", "the object store folder is not a real directory");
+  }
+}
+
 /** True only for a regular file at a safe storage path (no symlink at any level). */
 export function storage_file_is_regular(
   objects_dir: string,
@@ -423,11 +453,10 @@ export function storage_file_is_regular(
 ): boolean {
   try {
     const parts = storage_segments(storage_key, project_id);
-    const root = resolve_objects_dir(objects_dir);
-    const root_stat = lstatSync(root);
-    if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return false;
-    let current = root;
-    for (let index = 0; index < parts.length; index += 1) {
+    const folder = project_folder(objects_dir, project_id);
+    if (folder.kind !== "dir") return false;
+    let current = folder.path;
+    for (let index = 1; index < parts.length; index += 1) {
       current = join(current, parts[index]!);
       const stat = lstatSync(current);
       if (stat.isSymbolicLink()) return false;
@@ -442,17 +471,9 @@ export function storage_file_is_regular(
 
 /** Every regular file below this project's folder, without following symlinks. */
 function scan_project_files_inner(objects_dir: string, project_id: string): ProjectFile[] {
-  let root: string;
-  try {
-    root = resolve_objects_dir(objects_dir);
-  } catch {
-    return [];
-  }
-  const root_stat = lstat_or_undefined(root);
-  if (root_stat === undefined || root_stat.isSymbolicLink() || !root_stat.isDirectory()) return [];
-  const project_dir = join(root, project_id);
-  const stat = lstat_or_undefined(project_dir);
-  if (stat === undefined || stat.isSymbolicLink() || !stat.isDirectory()) return [];
+  const folder = project_folder(objects_dir, project_id);
+  if (folder.kind !== "dir") return [];
+  const project_dir = folder.path;
 
   const files: ProjectFile[] = [];
   const walk = (directory: string, prefix: string): void => {
@@ -513,16 +534,10 @@ export function sweep_project_files_strict(
   keep: ReadonlySet<string>,
 ): string[] {
   const failed: string[] = [];
-  let root: string;
-  try {
-    root = resolve_objects_dir(objects_dir);
-  } catch {
-    return [project_id];
-  }
-  const project_dir = join(root, project_id);
-  const project_stat = lstat_or_undefined(project_dir);
-  if (project_stat === undefined) return keep.size === 0 ? [] : [project_id];
-  if (project_stat.isSymbolicLink() || !project_stat.isDirectory()) return [project_id];
+  const folder = project_folder(objects_dir, project_id);
+  if (folder.kind === "unsafe") return [project_id];
+  if (folder.kind === "missing") return keep.size === 0 ? [] : [project_id];
+  const project_dir = folder.path;
 
   // Folders that lead to a kept file (relative to the project folder).
   const kept_dirs = new Set<string>();

@@ -30,6 +30,7 @@ import {
 } from "../backup.ts";
 import { ApiError } from "../errors.ts";
 import {
+  assert_project_folder_safe,
   read_storage_bytes,
   sha256_hex,
   stage_storage_bytes,
@@ -417,6 +418,9 @@ function stage_object_files(
   project_id: string,
   prepared: PreparedProjectRestore,
 ): StagedRestoreFiles {
+  // Same root rule as the sweep, checked before the rows commit: an object-less
+  // bundle never reaches the PR9 helpers, so this is its only guard.
+  assert_project_folder_safe(objects_dir, project_id);
   const keep = new Set<string>();
   const staged: StagedStorageFile[] = [];
   try {
