@@ -18,7 +18,7 @@ import { test } from "node:test";
 
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, PES_PY, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
-import { normalize, PY, plain_json_legacy, run_py, shell_words, write_legacy } from "./helpers/cli_read_env.ts";
+import { normalize, PY, plain_json_legacy, read_lf, run_py, shell_words, write_legacy } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
@@ -184,12 +184,12 @@ test("H2 같은 자료의 DB 보고서·assemble·sources.json 이 v0.15 결과�
       ok(run_py(c, ["assemble", SLUG], { flag }), "assemble");
     }
     const md_db = latest_files(now, "report", "plan").get("report.md");
-    const md_old = readFileSync(join(old.folder, "reports", "plan", "report.md"), "utf8");
+    const md_old = read_lf(join(old.folder, "reports", "plan", "report.md")) /* Windows v0.15 파일은 CRLF — 줄바꿈만 정규화 */;
     assert.ok(md_db);
     assert.equal(strip_written(md_db), strip_written(md_old), "단계 보고서 마크다운");
     const out = latest_files(now, "output", null);
-    assert.equal(out.get("report.md"), readFileSync(join(old.folder, "out", "report.md"), "utf8"), "assemble 마크다운(각주 재매김·범위 밖 번호 유지)");
-    assert.equal(out.get("sources.json"), readFileSync(join(old.folder, "out", "sources.json"), "utf8"), "sources.json");
+    assert.equal(out.get("report.md"), read_lf(join(old.folder, "out", "report.md")), "assemble 마크다운(각주 재매김·범위 밖 번호 유지)");
+    assert.equal(out.get("sources.json"), read_lf(join(old.folder, "out", "sources.json")), "sources.json");
     assert.doesNotMatch(out.get("report.md")!, /보이면 안 됨/);
   } finally {
     now.close();

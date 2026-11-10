@@ -20,7 +20,7 @@ import { test } from "node:test";
 import { create_edition } from "../scripts/pes_core/editions.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { REPO, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
-import { baseline_dir, run_py, write_legacy, type HomeLike } from "./helpers/cli_read_env.ts";
+import { baseline_dir, read_lf, run_py, write_legacy, type HomeLike } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -83,7 +83,7 @@ test("R1 설정 표: EXTRA 필드(client_city·asof·official)는 v0.15 처럼 �
       p.stages.plan.settings = { client_city: "ulsan", asof: "2026-01-01", official: "self", seoul_station: "split" };
       return JSON.stringify(p);
     });
-    const original = readFileSync(join(dir, "reports", "plan", "report.md"), "utf8");
+    const original = read_lf(join(dir, "reports", "plan", "report.md")); // Windows v0.15 파일은 CRLF
     assert.match(original, /^\| client_city \| ulsan \|$/m, "v0.15 는 EXTRA 라벨을 쓰지 않는다 (키 그대로)");
     assert.match(original, /^\| asof \| 2026-01-01 \|$/m);
     const { val } = await import_validate(c, dir);
@@ -194,7 +194,7 @@ test("R4 stats 값 12.0 은 v0.15 처럼 12.0 이다: 검증이 거짓 불일치
       p.stages.plan.items[0].stats = [{ name: "합성 지표", value: "__F12__", unit: "%", period: "2025", method: "추정" }, { name: "정수 지표", value: "__F7__", unit: "개", period: "2025", method: "추정" }];
       return JSON.stringify(p).replace('"__F12__"', "12.0").replace('"__F7__"', "7");
     });
-    const original = readFileSync(join(dir, "reports", "plan", "report.md"), "utf8");
+    const original = read_lf(join(dir, "reports", "plan", "report.md")); // Windows v0.15 파일은 CRLF
     assert.match(original, /^\| 합성 지표 \| 12\.0 % \|/m, "v0.15 는 12.0");
     assert.match(original, /^\| 정수 지표 \| 7 개 \|/m);
     const { imp, val, mig } = await import_validate(c, dir);
@@ -421,7 +421,7 @@ test("R4b stats 값 5e-05·1e16·-0.0·12.0 은 v0.15 표기와 같다: 검증 �
       for (const [ph, raw] of tokens) out = out.replace(`"${ph}"`, raw);
       return out;
     });
-    const original = readFileSync(join(dir, "reports", "plan", "report.md"), "utf8");
+    const original = read_lf(join(dir, "reports", "plan", "report.md")); // Windows v0.15 파일은 CRLF
     const line = (md: string, name: string) => md.split("\n").find((l) => l.startsWith(`| ${name} |`));
     const expected: Record<string, string> = {};
     for (const [, , name] of tokens) {

@@ -11,11 +11,11 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { PES_PY, REPO, type CliResult } from "./cli_write_env.ts";
+import { PES_PY, REPO, SLUG, type CliEnv, type CliResult } from "./cli_write_env.ts";
 
 /** The last main commit whose read commands are pure v0.15 (project.json readers). */
 export const READ_BASELINE_REF = "03fc81b";
@@ -226,4 +226,75 @@ export function parent_of(path: string): string {
 /** Minimal legacy project.json with the DB project's topic (for side-by-side runs). */
 export function plain_json_legacy(slug: string): Record<string, unknown> {
   return { pes: 1, topic: RICH_TOPIC, slug, current: "plan", processed: [], notes: [], stages: {} };
+}
+
+// ---------------------------------------------------------------------------
+// Shared by the test_cli_read_*.test.ts files
+
+/** Read a v0.15-written file with CRLF (Windows text mode) normalised to LF. Only the line ending is normalised. */
+export function read_lf(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+export const OFF = { flag: undefined } as const;
+
+export function ok(res: CliResult, what: string): CliResult {
+  assert.equal(res.status, 0, `${what}: exit ${res.status}\n${res.stderr}${res.stdout}`);
+  assert.doesNotMatch(res.stderr, /Traceback/, `${what}: 스택 추적이 아니라 분명한 메시지여야 한다`);
+  return res;
+}
+
+export function write_json(c: { env: { home: { root: string } } }, name: string, value: unknown): string {
+  const file = join(c.env.home.root, name);
+  writeFileSync(file, JSON.stringify(value), "utf8");
+  return file;
+}
+
+export const PLAN_ITEMS = [
+  {
+    id: 1,
+    kind: "topic",
+    title: "합성 기획 항목 하나",
+    summary: "합성 요약 하나",
+    confidence: "high",
+    status: "done",
+    sources: [
+      { title: "합성 출처 A", url: "https://example.invalid/a", method: "law", date: "2026-01-02" },
+      { title: "합성 출처 B", url: "https://example.invalid/b", method: "search" },
+    ],
+  },
+  { id: 2, kind: "topic", title: "합성 기획 항목 둘", summary: "합성 요약 둘", status: "deepen" },
+];
+
+export const WRITE_ITEMS = [
+  {
+    id: 1,
+    kind: "section",
+    title: "1장",
+    order: 1,
+    status: "done",
+    details: "첫 장 본문입니다 [^1] 그리고 [^2] 끝.",
+    sources: [
+      { title: "합성 출처 A", url: "https://example.invalid/a", method: "law", date: "2026-01-02" },
+      { title: "합성 출처 C", url: "https://example.invalid/c", method: "search" },
+    ],
+  },
+];
+
+/** 같은 쓰기를 한 환경에 한다. flag 가 undefined 이면 v0.15(project.json), "1" 이면 DB. */
+export function seed(c: CliEnv, flag: string | undefined): void {
+  const run = (args: string[]) => ok(run_py(c, args, { flag }), args.join(" "));
+  run(["round-start", SLUG, "plan"]);
+  run(["merge", SLUG, "plan", write_json(c, "seed-plan.json", PLAN_ITEMS)]);
+  run(["merge", SLUG, "write", write_json(c, "seed-write.json", WRITE_ITEMS)]);
+  run(["note", SLUG, "합성 인계 메모 하나"]);
+  run(["note", SLUG, "합성 인계 메모 둘"]);
+}
+
+export function plain_legacy(slug: string): Record<string, unknown> {
+  return { pes: 1, topic: RICH_TOPIC, slug, current: "plan", processed: [], notes: [], stages: {} };
+}
+
+export function folder_of(c: CliEnv, slug: string): string {
+  return join(c.env.home.env.PES_HOME as string, slug);
 }
