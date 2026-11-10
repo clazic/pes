@@ -72,6 +72,14 @@ function forbidden_actor(): never {
   throw new ApiError("forbidden", "the actor is not allowed in this project");
 }
 
+/** Caller-supplied clock values must be a non-negative safe integer before BigInt(). */
+function require_now_ms(now_ms: unknown): number {
+  if (typeof now_ms !== "number" || !Number.isSafeInteger(now_ms) || now_ms < 0) {
+    throw new ApiError("invalid_payload", "now_ms must be a non-negative safe integer");
+  }
+  return now_ms;
+}
+
 /** Fresh random secret. Only the return value of token.issue carries the raw text. */
 export function generate_agent_token(): string {
   return `${TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
@@ -88,6 +96,7 @@ export function agent_token_hash(token: string): string {
  * wrong project, disabled actor, or broken scopes JSON.
  */
 export function verify_agent_token(db: ReadDb, token: unknown, options: TokenOptions): VerifiedToken {
+  const now_ms = require_now_ms(options.now_ms);
   if (
     typeof token !== "string" ||
     token.length === 0 ||
@@ -105,13 +114,22 @@ export function verify_agent_token(db: ReadDb, token: unknown, options: TokenOpt
   if (row.project_id !== options.project_id) return invalid_token();
   if (row.revoked_at !== null) return invalid_token();
   if (row.expires_at === null || typeof row.expires_at !== "bigint") return invalid_token();
-  if (BigInt(options.now_ms) >= row.expires_at) return invalid_token();
+  if (BigInt(now_ms) >= row.expires_at) return invalid_token();
 
-  const actor = db.get<{ disabled_at: bigint | null }>(
-    "SELECT disabled_at FROM actors WHERE id = ?",
+  const actor = db.get<{ disabled_at: bigint | null; user_id: string | null }>(
+    "SELECT disabled_at, user_id FROM actors WHERE id = ?",
     row.actor_id,
   );
   if (actor === undefined || actor.disabled_at !== null) return invalid_token();
+  // A token of an actor whose user is disabled is dead even while the actor row
+  // itself is still enabled.
+  if (actor.user_id !== null) {
+    const user = db.get<{ disabled_at: bigint | null }>(
+      "SELECT disabled_at FROM users WHERE id = ?",
+      actor.user_id,
+    );
+    if (user === undefined || user.disabled_at !== null) return invalid_token();
+  }
 
   let parsed: unknown;
   try {
@@ -140,6 +158,7 @@ export function resolve_actor(db: ReadDb, lookup: ActorLookup, now_ms: number): 
   if (lookup === null || typeof lookup !== "object") {
     throw new ApiError("invalid_payload", "an actor lookup object is required");
   }
+  const at = require_now_ms(now_ms);
   const project_id = lookup.project_id;
   if (typeof project_id !== "string" || project_id.length === 0) {
     throw new ApiError("invalid_payload", "project_id must be a non-empty string");
@@ -162,7 +181,7 @@ export function resolve_actor(db: ReadDb, lookup: ActorLookup, now_ms: number): 
     }
     actor_id = lookup.actor_id;
   } else {
-    const verified = verify_agent_token(db, lookup.token, { project_id, now_ms });
+    const verified = verify_agent_token(db, lookup.token, { project_id, now_ms: at });
     actor_id = verified.actor_id;
     token_id = verified.token_id;
   }
@@ -173,6 +192,11 @@ export function resolve_actor(db: ReadDb, lookup: ActorLookup, now_ms: number): 
   );
   if (actor === undefined || actor.disabled_at !== null) return forbidden_actor();
   if (actor.user_id === null) return forbidden_actor();
+  const user = db.get<{ disabled_at: bigint | null }>(
+    "SELECT disabled_at FROM users WHERE id = ?",
+    actor.user_id,
+  );
+  if (user === undefined || user.disabled_at !== null) return forbidden_actor();
   const member = db.get<{ role: string }>(
     "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
     project_id,

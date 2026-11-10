@@ -130,16 +130,23 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
   if (project === null || actor_id === null) {
     throw new ApiError("forbidden", "a human project owner is required");
   }
-  const row = runtime.db.get<{ kind: string; role: string | null }>(
-    `SELECT a.kind AS kind, m.role AS role
+  const row = runtime.db.get<{ kind: string; role: string | null; user_disabled_at: bigint | null }>(
+    `SELECT a.kind AS kind, m.role AS role, u.disabled_at AS user_disabled_at
        FROM actors a
        LEFT JOIN project_members m
          ON m.project_id = ? AND m.user_id = a.user_id
+       LEFT JOIN users u
+         ON u.id = a.user_id
       WHERE a.id = ?`,
     project.id,
     actor_id,
   );
-  if (row === undefined || row.kind !== "human" || row.role !== "owner") {
+  if (
+    row === undefined ||
+    row.kind !== "human" ||
+    row.role !== "owner" ||
+    row.user_disabled_at !== null
+  ) {
     throw new ApiError("forbidden", "a human project owner is required");
   }
   return actor_id;

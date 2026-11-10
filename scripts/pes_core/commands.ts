@@ -709,6 +709,13 @@ export class CommandService {
     if (actor.user_id === null) {
       throw new ApiError("forbidden", "the actor has no user");
     }
+    const user = this.#db.get<{ disabled_at: bigint | null }>(
+      "SELECT disabled_at FROM users WHERE id = ?",
+      actor.user_id,
+    );
+    if (user === undefined || user.disabled_at !== null) {
+      throw new ApiError("forbidden", "the actor's user is disabled");
+    }
     const member = this.#db.get<{ ok: bigint }>(
       "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?",
       project.id,
