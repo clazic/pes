@@ -484,7 +484,8 @@ test("report: 쓰기는 PR9 경계(content.append_version 과 file.reserve_uploa
     ok(run_py(c, ["report", SLUG, "plan"]), "report");
     const added = c.commits_since(n);
     const actions = added.map((m) => m.action);
-    for (const want of ["content.append_version", "file.reserve_upload", "file.complete_upload", "file.attach_version"]) {
+    // 영수증 action 은 명령 이름이 아니라 definition.action(사건 이름)이다: content.append_version → content.version_appended 등.
+    for (const want of ["content.version_appended", "file.upload_reserved", "file.upload_completed", "file.version_attached"]) {
       assert.ok(actions.includes(want), `${want} 영수증: [${actions}]`);
     }
     assert.ok(actions.every((a) => a.startsWith("content.") || a.startsWith("file.")), `report 는 content.*·file.* 만 쓴다: [${actions}]`);
@@ -571,7 +572,7 @@ test("web: 최종 웹 보고서를 새 버전의 report.html 로 쌓고 출력 �
     const res = ok(run_py(c, ["web", SLUG]), "web");
     assert.match(res.stdout, /\(출처 2개 · 확인됨 1개/, `옛 출력: ${res.stdout}`);
     const actions = c.commits_since(n).map((m) => m.action);
-    assert.ok(actions.includes("file.attach_version") && actions.every((a) => a.startsWith("content.") || a.startsWith("file.")), `PR9 경계만: [${actions}]`);
+    assert.ok(actions.includes("file.version_attached") && actions.every((a) => a.startsWith("content.") || a.startsWith("file.")), `PR9 경계만: [${actions}]`);
     const object_id = report_object(c, "output", null);
     assert.ok(object_id);
     const latest = versions_of(c, object_id).at(-1)!;
