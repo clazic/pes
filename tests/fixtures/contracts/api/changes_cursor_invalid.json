@@ -19,7 +19,7 @@
             "retryable": false,
             "target": "$.query.cursor",
             "details": "$any",
-            "next_action": "resync"
+            "next_action": "reread_context"
           },
           "$absent": [
             "data"

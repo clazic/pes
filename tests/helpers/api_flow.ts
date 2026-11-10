@@ -10,11 +10,13 @@
 //     retryable   true only for rate_limited and 503; every other code is false.
 //     target      JSON path of the faulty field ("$.body.snapshot_id", "$.query.cursor",
 //                 "$.headers.idempotency-key") or null when no single field is at fault.
-//     next_action a short English token, never null: see NEXT_ACTION below.
+//     next_action a short English token, never null: see NEXT_ACTION below (names from docs/plan/fixtures/api-v1).
+//   Request bodies may carry "format_version": "1.0" (the documents' examples do); any other value is 400.
 //   Credential order: the request is authenticated BEFORE the project is looked up, so an
 //   unauthenticated caller cannot tell a missing project from an existing one (401 first, 404 after).
 
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { ApiApp } from "../../scripts/pes_core/api.ts";
 import {
@@ -27,19 +29,33 @@ import {
 
 export const P = (env: ApiEnv, rest = ""): string => project_path(env, rest);
 
-/** The tokens `next_action` takes for the codes the tests pin. */
+/**
+ * The tokens `next_action` takes. Names follow docs/plan/fixtures/api-v1 (the language-neutral contract);
+ * the few the documents do not name (conflict, key reuse, 501, 429) are this suite's choice.
+ */
 export const NEXT_ACTION = {
   unauthenticated: "authenticate",
-  forbidden_human_only: "use_owner_session",
+  human_required: "use_owner_session", // 403 human_required / owner_required / forbidden on owner-only actions
+  forbidden_holder: "use_current_holder", // handoffs by someone who is not the lease holder
   rev_conflict: "reread_context",
   conflict: "reread_context",
   not_found: "reread_context",
   policy_blocked: "owner_enable_policy",
   invalid_payload: "fix_request",
+  validation_failed: "fix_request",
   rate_limited: "retry_after",
-  cursor_invalid: "resync",
+  cursor_invalid: "reread_context",
+  cursor_expired: "resync",
   idempotency_key_reuse: "use_new_key",
   not_supported: "see_capabilities",
+  lease_lost: "reclaim_run",
+  run_terminal: "create_new_run",
+  question_version_changed: "reread_question",
+  question_rev_conflict: "reread_question",
+  stale_stage: "reread_stage",
+  stage_not_active: "reread_stage",
+  already_sealed: "reread_round",
+  input_not_visible: "check_run_targets",
 } as const;
 
 const HANGUL = /[가-힣]/;
@@ -141,3 +157,20 @@ export const EXPECTED_UNSUPPORTED: readonly string[] = [
   "POST /api/v1/projects/{id}/decisions",
   "POST /api/v1/projects/{id}/reflections",
 ];
+
+/**
+ * The documents' own contract: every docs/plan/fixtures/api-v1/*.json with its operation name, method and
+ * path (project id normalised to {id}). capabilities must say supported:true exactly for the operations whose
+ * route is in the closed 2단계 list, and false for the rest.
+ */
+export function doc_operations(): Array<{ operation: string; route: string }> {
+  const dir = new URL("../../docs/plan/fixtures/api-v1/", import.meta.url);
+  const out: Array<{ operation: string; route: string }> = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const doc = JSON.parse(readFileSync(new URL(name, dir), "utf8")) as { operation: string; method: string; path: string };
+    const path = doc.path.replace("/api/v1/projects/{project_id}", "/api/v1/projects/{id}").replace(/\/api\/v1\/projects\/\{project_id\}$/, "/api/v1/projects/{id}");
+    out.push({ operation: doc.operation, route: `${doc.method} ${path}` });
+  }
+  return out;
+}

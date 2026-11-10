@@ -15,11 +15,19 @@
  *     min_poll_interval_ms: an empty GET inputs again sooner than this is 429 (details.scope "poll").
  *
  *   GET /api/v1/capabilities (no credential): data {
- *     format_version, routes: ["METHOD /api/v1/..."] (== the closed 2단계 list == the OpenAPI operations),
- *     unsupported: ["METHOD /api/v1/..."] (later-stage actions; each answers 501 `not_supported`, writes
- *     nothing), scopes, human_only: [routes only an owner session may call], error_codes, limits {
- *     max_body_bytes, max_results_per_batch, list_max_items, long_poll_max_ms, min_poll_interval_ms,
- *     agent_requests_per_minute, owner_requests_per_minute } }. No server answer-draft route anywhere.
+ *     format_version, server:"pes-local", api_version:"v1",
+ *     routes: ["METHOD /api/v1/..."] (== the closed 2단계 list == the OpenAPI operations),
+ *     unsupported: ["METHOD /api/v1/..."] (every other route of docs/plan/fixtures/api-v1; each answers 501
+ *       `not_supported`, writes nothing), scopes, human_only: [routes only an owner session may call],
+ *     limits {max_body_bytes, max_results_per_batch, list_max_items, long_poll_max_ms, min_poll_interval_ms,
+ *       agent_requests_per_minute, owner_requests_per_minute},
+ *     capabilities: {                                   (the document shape of capabilities.json)
+ *       operations: { "<operation>": {supported: bool} } for every `operation` named by docs/plan/fixtures/api-v1
+ *         (supported exactly when its route is in the closed list),
+ *       limits {long_poll_max_ms, request_body_max_bytes, results_per_submit, list_max_items,
+ *         agent_requests_per_minute},
+ *       error_codes: [every code of the documents and of this suite] } }.
+ *   No server answer-draft route anywhere.
  */
 
 import assert from "node:assert/strict";
@@ -37,7 +45,7 @@ import {
   type ApiEnv,
 } from "./helpers/api_env.ts";
 import { new_artifact, wrap_db } from "./helpers/blob_env.ts";
-import { EXPECTED_ROUTES, EXPECTED_UNSUPPORTED, NEXT_ACTION, P, assert_final_error } from "./helpers/api_flow.ts";
+import { EXPECTED_ROUTES, EXPECTED_UNSUPPORTED, NEXT_ACTION, P, assert_final_error, doc_operations } from "./helpers/api_flow.ts";
 import { parse_yaml } from "./helpers/mini_yaml.ts";
 import { state_signature } from "./helpers/state_signature.ts";
 
@@ -259,6 +267,8 @@ test("capabilities is open, complete, and says what is not supported", async () 
     const res = await call(env, { method: "GET", path: "/api/v1/capabilities" });
     const data = assert_ok(res);
     assert.equal(data.format_version, "1.0");
+    assert.equal(data.server, "pes-local");
+    assert.equal(data.api_version, "v1");
     assert.deepEqual([...data.routes].sort(), [...EXPECTED_ROUTES], "capabilities lists exactly the closed 2단계 routes");
     assert.equal(new Set(data.routes).size, data.routes.length, "no duplicate route");
     assert.deepEqual([...data.scopes].sort(), [...ALL_AGENT_SCOPES].sort());
@@ -282,18 +292,56 @@ test("capabilities is open, complete, and says what is not supported", async () 
       assert.ok(data.human_only.includes(route), `human_only lists ${route}`);
     }
     for (const route of data.human_only) assert.ok(data.routes.includes(route));
+
+    // The document shape (docs/plan/fixtures/api-v1/capabilities.json): operations, limits, error codes.
+    const caps = data.capabilities;
+    assert.equal(caps.limits.request_body_max_bytes, 256 * 1024);
+    assert.equal(caps.limits.results_per_submit, 20);
+    assert.equal(caps.limits.long_poll_max_ms, 25_000);
+    assert.equal(caps.limits.list_max_items, 100);
+    assert.equal(caps.limits.agent_requests_per_minute, 60);
+    const supported = new Set((data.routes as string[]).map(norm));
+    const unsupported = new Set((data.unsupported as string[]).map(norm));
+    const documented = doc_operations().filter((o) => o.operation !== "uploads.put"); // doc path /api/v1/uploads/{upload_id} contradicts PR13's P/uploads/{b}; reported
+    assert.ok(documented.length >= 35);
+    for (const { operation, route } of documented) {
+      const entry = caps.operations[operation];
+      assert.ok(entry !== undefined, `capabilities.operations names ${operation}`);
+      assert.equal(typeof entry.supported, "boolean");
+      assert.equal(entry.supported, supported.has(norm(route)), `${operation} (${route}) supported flag`);
+      if (!entry.supported) assert.ok(unsupported.has(norm(route)), `${operation} (${route}) is listed as unsupported`);
+    }
+    for (const op of ["runs.heartbeat", "runs.inputs", "runs.input_receipts", "submissions.create", "questions.create", "stages.approve", "changes.list", "rounds.seal", "runs.handoff", "runs.cancel"]) {
+      assert.equal(caps.operations[op].supported, true, op);
+    }
+    for (const op of ["exports.create", "threads.create", "decisions.create", "reflections.create", "assumptions.create", "projects.delete"]) {
+      assert.equal(caps.operations[op].supported, false, op);
+    }
     for (const code of [
-      "unauthenticated", "forbidden", "not_found", "method_not_allowed", "invalid_payload", "payload_too_large",
-      "idempotency_key_reuse", "rev_conflict", "conflict", "policy_blocked", "cursor_invalid", "rate_limited",
-      "input_not_visible", "not_supported", "internal_error",
+      "unauthenticated", "forbidden", "not_found", "method_not_allowed", "invalid_payload", "validation_failed", "payload_too_large",
+      "idempotency_key_reuse", "rev_conflict", "conflict", "policy_blocked", "cursor_invalid", "cursor_expired", "rate_limited",
+      "input_not_visible", "not_supported", "internal_error", "human_required", "owner_required", "lease_lost", "run_terminal",
+      "question_version_changed", "stale_stage", "stage_not_active", "already_sealed",
     ]) {
-      assert.ok(data.error_codes.includes(code), `error_codes lists ${code}`);
+      assert.ok(caps.error_codes.includes(code), `error_codes lists ${code}`);
     }
     // No server-side answer drafts, and no singular /handoff, anywhere in what the server announces.
     const text = JSON.stringify(res.json);
     assert.doesNotMatch(text, /answer-drafts|answer_drafts/);
     assert.doesNotMatch(text, /\/handoff["\s{]/);
     assert.doesNotMatch(text, /\/runs\/\{[^}]+\}\/claims/, "the canonical claim is POST P/claims");
+  });
+});
+
+test("every documented route outside the closed list is announced as unsupported", async () => {
+  await with_api(async (env) => {
+    const data = assert_ok(await call(env, { method: "GET", path: "/api/v1/capabilities" }));
+    const listed = new Set((data.unsupported as string[]).map(norm));
+    const closed = new Set(EXPECTED_ROUTES.map(norm));
+    for (const { operation, route } of doc_operations()) {
+      if (operation === "uploads.put" || closed.has(norm(route))) continue;
+      assert.ok(listed.has(norm(route)), `${operation}: ${route} is in capabilities.unsupported`);
+    }
   });
 });
 

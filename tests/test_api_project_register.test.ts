@@ -97,10 +97,10 @@ test("the returned token works as an ordinary agent token and nothing more", asy
 
     const sig = state_signature(env.db);
     const plan = data.stage_ids.plan as string;
-    assert_final_error(await call(env, { method: "POST", path: proj(`/stages/${plan}/approve`), auth: bearer, body: { snapshot_id: "x" } }), 403, "forbidden", {
-      next_action: NEXT_ACTION.forbidden_human_only,
+    assert_final_error(await call(env, { method: "POST", path: proj(`/stages/${plan}/approve`), auth: bearer, body: { snapshot_id: "x" } }), 403, "human_required", {
+      next_action: NEXT_ACTION.human_required,
     });
-    assert_final_error(await call(env, { method: "POST", path: proj("/policies/opencode-go/revisions"), auth: bearer, body: { reason: "x", allow_opencode_go: false } }), 403, "forbidden");
+    assert_final_error(await call(env, { method: "POST", path: proj("/policies/opencode-go/revisions"), auth: bearer, body: { reason: "x", allow_opencode_go: false } }), 403, "owner_required");
     assert_final_error(await call(env, { method: "POST", path: proj("/runs"), auth: bearer, body: { actor_id: data.device_actor_id, mode: "B", runtime: "r", provider: "p", model: "m" } }), 403, "forbidden");
     assert_final_error(await call(env, { method: "POST", path: REGISTER, auth: bearer, body: { ...BODY, slug: "second-by-token" } }), 401, "unauthenticated");
     assert_final_error(await call(env, { method: "POST", path: "/api/v1/projects", auth: bearer, body: { slug: "second-by-token", topic: "합성", owner_display_name: "x" } }), 401, "unauthenticated");

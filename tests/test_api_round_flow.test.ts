@@ -33,7 +33,7 @@ test("one round from the question to the approval, over HTTP only", async () => 
     const gap = assert_ok(await call(env, { method: "GET", path: "/api/v1/capabilities" })).limits.min_poll_interval_ms as number;
 
     // -- the owner opens the round and queues the run
-    const round = assert_ok(await call(env, { method: "POST", path: P(env, `/stages/${s.plan}/rounds`), auth: "owner", body: {} }), 201);
+    const round = assert_ok(await call(env, { method: "POST", path: P(env, `/stages/${s.plan}/rounds`), auth: "owner", body: {} }), 201).round;
     const queued = assert_ok(
       await call(env, {
         method: "POST",
@@ -59,7 +59,7 @@ test("one round from the question to the approval, over HTTP only", async () => 
         method: "POST",
         path: P(env, "/questions"),
         auth: { token: agent.token },
-        body: { stage_id: s.plan, round_id: round.round_id, purpose: "review", form_key: "flow", questions: [single_spec("흐름 시험 질문")], ...guard1 },
+        body: { stage_id: s.plan, round_id: round.id, purpose: "review", form_key: "flow", question: single_spec("흐름 시험 질문"), ...guard1 },
       }),
       201,
     );
@@ -77,11 +77,14 @@ test("one round from the question to the approval, over HTTP only", async () => 
         method: "POST",
         path: P(env, "/submissions"),
         auth: "owner",
-        body: { set_id: asked.set_id, answers: [{ question_id: asked.members[0].question_id, value: "a", other: "합성 의견" }] },
+        body: {
+          set_id: asked.question_set_id,
+          answers: [{ question_id: asked.question.id, question_version_id: asked.question.version_id, value: "a", comment: "합성 의견" }],
+        },
       }),
       201,
     );
-    const input_version_id = submission.answers[0].version_id as string;
+    const input_version_id = submission.answers[0].answer_version_id as string;
 
     // -- the agent reads the answer without any lease (a pure read), then resumes with a new fence
     const inputs = assert_ok(await call(env, { method: "GET", path: P(env, `/runs/${queued.run_id}/inputs?wait_ms=0`), auth: { token: agent.token } }));
@@ -131,15 +134,15 @@ test("one round from the question to the approval, over HTTP only", async () => 
     // -- the owner seals; the agent cannot approve; the owner can
     const versions = [{ object_id: art.object_id, version_id }];
     const manifest_blob_id = await manifest_blob(env, versions, "flow-manifest");
-    const sealed = assert_ok(await call(env, { method: "POST", path: P(env, `/rounds/${round.round_id}/seal`), auth: "owner", body: { manifest_blob_id, versions } }));
+    const sealed = assert_ok(await call(env, { method: "POST", path: P(env, `/rounds/${round.id}/seal`), auth: "owner", body: { manifest_blob_id, versions } }));
     assert.equal(table_counts(env.db).approvals, 0n, "sealing is not approving");
     const approve_path = P(env, `/stages/${s.plan}/approve`);
-    assert_final_error(await call(env, { method: "POST", path: approve_path, auth: { token: agent.token }, body: { snapshot_id: sealed.snapshot_id } }), 403, "forbidden", {
-      next_action: NEXT_ACTION.forbidden_human_only,
+    assert_final_error(await call(env, { method: "POST", path: approve_path, auth: { token: agent.token }, body: { snapshot_id: sealed.round.sealed_snapshot_id } }), 403, "human_required", {
+      next_action: NEXT_ACTION.human_required,
     });
-    const approved = assert_ok(await call(env, { method: "POST", path: approve_path, auth: "owner", body: { snapshot_id: sealed.snapshot_id } }));
-    assert.equal(approved.stage_id, s.plan);
-    assert.equal(approved.next_stage_id, s.research);
+    const approved = assert_ok(await call(env, { method: "POST", path: approve_path, auth: "owner", body: { snapshot_id: sealed.round.sealed_snapshot_id } }));
+    assert.equal(approved.stage.id, s.plan);
+    assert.equal(approved.stage.status, "approved");
 
     // -- the context and the feed agree with what happened
     const final = assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: { token: agent.token } }));

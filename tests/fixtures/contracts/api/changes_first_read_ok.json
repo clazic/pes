@@ -18,15 +18,16 @@
               "$array_of": {
                 "event_seq": "$dec",
                 "type": "$string",
-                "tx_id": "$string",
+                "object_id": "$any",
+                "before_version_id": "$any",
+                "after_version_id": "$any",
                 "at": "$int"
               },
               "min": 1
             },
             "next_cursor": "$string",
             "has_more": "$bool",
-            "epoch": "$dec",
-            "resync": false
+            "epoch": "$dec"
           }
         }
       }

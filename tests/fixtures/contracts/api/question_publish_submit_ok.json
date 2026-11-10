@@ -21,36 +21,35 @@
         "path": "/api/v1/projects/${project}/questions",
         "auth": "owner",
         "body": {
+          "format_version": "1.0",
           "stage_id": "${stage}",
           "round_id": null,
           "purpose": "stage_start",
-          "form_key": "main",
-          "questions": [
-            {
-              "text": "합성 질문입니다",
-              "type": "single",
-              "required": true,
-              "allow_comment_as_answer": false,
-              "options": [
-                {
-                  "value": "a",
-                  "label": "합성 A",
-                  "recommended": true
-                },
-                {
-                  "value": "b",
-                  "label": "합성 B"
-                }
-              ],
-              "default_value": "b"
-            }
-          ]
+          "direction": "agent_to_human",
+          "question": {
+            "text": "합성 질문입니다",
+            "type": "single",
+            "required": true,
+            "allow_comment_as_answer": false,
+            "options": [
+              {
+                "value": "a",
+                "label": "합성 A",
+                "recommended": true
+              },
+              {
+                "value": "b",
+                "label": "합성 B"
+              }
+            ],
+            "default_value": "b"
+          }
         }
       },
       "save": {
-        "set": "data.set_id",
-        "question": "data.members.0.question_id",
-        "question_version": "data.members.0.question_version_id"
+        "set": "data.question_set_id",
+        "question": "data.question.id",
+        "question_version": "data.question.version_id"
       },
       "expect": {
         "status": 201,
@@ -59,19 +58,14 @@
           "request_id": "$string",
           "replayed": false,
           "data": {
-            "project_id": "${project}",
-            "set_id": "$string",
-            "set_version_no": 1,
-            "stage_id": "${stage}",
-            "form_key": "main",
-            "members": {
-              "$array_of": {
-                "question_id": "$string",
-                "question_version_id": "$string",
-                "position": "$int"
-              },
-              "min": 1,
-              "max": 1
+            "question_set_id": "$string",
+            "question": {
+              "id": "$string",
+              "version_id": "$string",
+              "version_no": "1",
+              "state": "open",
+              "asked_by_actor_id": "${owner_actor}",
+              "intended_actor_id": "$any"
             }
           }
         }
@@ -83,14 +77,18 @@
         "path": "/api/v1/projects/${project}/submissions",
         "auth": "owner",
         "body": {
+          "format_version": "1.0",
           "set_id": "${set}",
           "answers": [
             {
               "question_id": "${question}",
+              "question_version_id": "${question_version}",
               "value": "a",
-              "other": "합성 의견"
+              "comment": "합성 의견"
             }
-          ]
+          ],
+          "submitted_via": "web",
+          "client_request_id": "subreq-fixture-1"
         }
       },
       "expect": {
@@ -99,13 +97,16 @@
           "format_version": "1.0",
           "request_id": "$string",
           "data": {
-            "submission_id": "$string",
-            "set_id": "${set}",
+            "submission": {
+              "id": "$string",
+              "received_at": "$int",
+              "state": "accepted"
+            },
             "answers": {
               "$array_of": {
                 "question_id": "${question}",
-                "question_version_id": "${question_version}",
-                "version_id": "$string"
+                "answer_version_id": "$string",
+                "state": "submitted"
               },
               "min": 1,
               "max": 1
