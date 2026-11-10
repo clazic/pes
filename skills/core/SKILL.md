@@ -39,6 +39,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `lock <dir> [--force]` · `unlock <dir>` | 세션 표시 (PES_OWNER) — 잠금 파일을 직접 만들거나 지우지 않는다 |
 | `digest <dir> <stage> [--round N]` · `show <dir> <stage> [id…] [--fields a,b]` | 점검용 압축 요약 · 필요한 부분만 보기 |
 | `note <dir> "메모"` | 인계 메모 (새 세션이 먼저 읽음) |
+| `set <dir> <단계> <필드> <파일>` · `set <dir> project <필드> <파일>` | 허용된 필드 하나를 통째로 바꾼다 (파일 자리에 `-`면 표준 입력). 단계 필드: summary·changes·carry_over·settings·review, 프로젝트 필드: executive_summary·conclusion — 아래 「상태 읽기와 검증된 제출」 |
 | `report <dir> <stage>` | 단계 보고서 생성·등록 (reports/<stage>/: report.md·report.html·eli5.html·기타 형식) |
 | `reopen <dir> <stage>` | 앞 단계 다시 열기, 뒤 단계에 '다시 확인 필요' |
 | `status` / `pending` / `mark <파일…>` | 요약 / 처리 안 한 답 / 처리 완료 표시 |
@@ -70,14 +71,25 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 | 현재 상태·맥락 읽기 | `status` · `context <dir>` · `digest` · `show` (파일을 통째로 읽지 않는다) |
 | 항목 만들기·고치기 (기획 항목, 조사 결과, 쟁점, 원고, 주장 판정, 산출물) | 결과를 **제안 파일**(JSON)로 쓰고 `merge <dir> <단계> <파일…>`. 토큰을 가진 작업자는 `claim` 후 `submit` |
 | 항목 상태 바꾸기 (심화·수정·삭제·원문 확인) | 항목의 `status`·`request`를 제안 파일에 담아 `merge` |
-| 사람에게 묻기 (시작 질문·AI 점검 질문) | 질문 명세 파일을 만들고 `ask <dir> <명세>` (AI 점검 질문은 명세의 `kind`를 `review`로) |
+| 사람에게 묻기 (시작 질문) | 질문 명세 파일을 만들고 `ask <dir> <명세>` |
 | 받은 답·채팅 지시 처리 | `pending`으로 읽고 처리한 뒤 `mark`, 채팅 지시는 `chat` |
-| 인계 메모·라운드 변경점·단계 요약 | `note` |
+| 인계 메모 (대화에서 나온 결정·선호) | `note` |
+| 단계 요약·라운드 변경점·남은 일(`carry_over`)·단계 설정·AI 점검 기록, 프로젝트 최종 요약·결론 | `set` (아래 예) |
 | 독립 검토 결과 | `qa` |
 | 승인·다시 열기 | `approve` · `reopen` (사람이 하는 일 — 에이전트 토큰으로는 거부된다) |
 
 - 제안 파일은 작업 산출물이다(`rounds/<단계>-R<n>/` 아래 결과 JSON, 질문 명세 `ask/<id>.json`, `reports/<단계>/eli5.json`, `out/cover.json`). 상태가 아니라 PES에 넘길 입력이며, 반영되는 것은 위 명령이 검증을 통과한 뒤뿐이다.
-- 지금 전용 명령이 없는 것 — 라운드 변경점·단계 요약·남은 일(`carry_over`)·시작 질문 설정값을 상태에 직접 쓰는 일 — 은 쓰지 않는다. 변경점과 요약은 `note`로 남기고, 시작 질문 설정값은 받은 답(`pending`·`context`)에서 읽어 쓴다. 이 한계는 어댑터 노트에도 적혀 있다.
+- `set`은 허용 목록의 필드만 쓴다. 목록 밖 필드(항목·상태·라운드·승인·검토 기록 등)와 형식이 틀린 값은 한국어 이유와 함께 거부되고 아무것도 바뀌지 않는다. 값은 필드를 **통째로 바꾼다**(덧붙이지 않는다). 텍스트 필드(summary·executive_summary·conclusion)는 파일 내용 그대로, changes는 문자열 배열 JSON, carry_over는 객체 배열 JSON, settings·review는 JSON 객체다.
+
+```bash
+$PES set "$DIR" plan summary "$DIR/rounds/plan-R1/summary.txt"        # 단계 요약 (근거 표기 포함, 텍스트)
+$PES set "$DIR" plan changes "$DIR/rounds/plan-R1/changes.json"       # 라운드 변경점 (["라벨: 내용", …])
+$PES set "$DIR" plan carry_over "$DIR/rounds/plan-R1/carry.json"      # 남은 일 ([{"item": 3, "title": "", "request": "", "from": "plan"}])
+$PES set "$DIR" plan settings "$DIR/rounds/plan-R1/settings.json"     # 시작 질문 답으로 정한 단계 설정 (JSON 객체)
+$PES set "$DIR" plan review "$DIR/rounds/plan-R1/review.json"         # AI 점검 (JSON 객체, 아래 「AI 점검」)
+$PES set "$DIR" project executive_summary "$DIR/out/summary.txt"      # 최종 보고서의 요약 (텍스트)
+$PES set "$DIR" project conclusion -                                  # 최종 보고서의 결론 (표준 입력)
+```
 
 항목 스키마 (제안 파일의 항목 형식 — 모든 단계 공통):
 ```json
@@ -122,15 +134,15 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 ## 단계 생명주기 (모든 단계 스킬이 따른다)
 
 1. **시작 질문** (status=asking): `ask-prep` → 명세 다듬기(이미 정해진 것은 지우고 `inherited`로 — 항목은 `{"label": "주제", "value": "…"}` 또는 `"주제: …"` 문자열, `_when`이 안 맞는 질문 삭제, 추천을 주제에 맞게) → `ask` → `serve` → 브라우저로 연다 → 답 대기(`watch`, 아래 「답 받기」). 채팅엔 한 줄: "질문 폼을 열었습니다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 보내 주세요."
-2. **답(kind=stage_start)** → PES가 받은 답을 기록한다. `pending`·`context`로 읽어 이 단계의 설정으로 삼고(따로 저장하는 명령은 없다) → `mark`.
-3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge`, 토큰 작업자는 `submit`) → 라운드 변경점 3~5줄(각 줄 `짧은 라벨: 내용` 형식)을 `note`로 → **AI 점검(자체 검토) 작성** — 사용자가 정할 질문을 `ask`로 게시 → **독립 검토(QC/QA)** (아래) → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개, 독립 검토 결과를 올렸습니다."
+2. **답(kind=stage_start)** → `pending`·`context`로 읽은 answers를 `set <dir> <단계> settings <파일>`로 단계 설정에 저장 → `mark`.
+3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge`, 토큰 작업자는 `submit`) → 라운드 변경점 3~5줄(각 줄 `짧은 라벨: 내용` 형식)을 `set <dir> <단계> changes <파일>`로 → **AI 점검(자체 검토) 작성** — `set <dir> <단계> review <파일>` → **독립 검토(QC/QA)** (아래) → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개, 독립 검토 결과를 올렸습니다."
 
 ### 독립 검토 (QC/QA) — 모든 단계·모든 라운드, 생략하지 않는다
 자체 점검(review)만으로 끝내지 않는다. 자체 점검을 쓴 뒤 **다른 에이전트가 다시 본다** (사용자 지시, 2026-11-02).
 1. `qa-brief <dir> <stage>` → `rounds/<stage>-R<n>/qa-brief.md` (digest·자체 점검 초안·사용자 기준 포함).
 2. reviewer 역할(`agents/reviewer.md`)의 서브에이전트를 가장 강한 모델로 1개 띄운다: "지시문 파일을 읽고 따르라"만 넘긴다. **메인의 결론·기대를 프롬프트에 쓰지 않는다** (자체 점검 초안은 파일로만, 검토원이 마지막에 읽음).
 3. 끝나면 `qa <dir> <stage>` → PES가 검토 결과를 그 단계에 기록한다(그때의 자체 점검도 함께 남는다). 대시보드 단계 탭에 '독립 검토' 칸이 생긴다.
-4. 반영: severity high와 `missed_by_self_review`는 **점검 질문에 추가**(gap.kind는 지적의 kind, label 앞에 "[QA]")하거나, 사실 오류처럼 답이 분명한 것은 바로 다음 라운드 할 일(revise/browser)로 건다(`merge`). 반영한 것과 반영하지 않은 것(이유)을 변경점(`note`)에 한 줄.
+4. 반영: severity high와 `missed_by_self_review`는 **점검 질문에 추가**(gap.kind는 지적의 kind, label 앞에 "[QA]")하거나, 사실 오류처럼 답이 분명한 것은 바로 다음 라운드 할 일(revise/browser)로 건다(`merge`). 반영한 것과 반영하지 않은 것(이유)을 변경점(`set <dir> <단계> changes`)에 한 줄.
 5. 판정이 fail이면 승인을 권하지 않는다(마지막 질문을 "한 라운드 더"로 추천).
 
 ### 근거 기록 — 보고서에 쓰는 모든 내용
@@ -138,7 +150,7 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 - 단계 요약(보고서 첫 장)의 각 줄 끝에 근거 항목을 붙인다: `… 2곳이다 (근거: 조사 #7·#8)`.
 - 단계 보고서는 항목마다 「근거 출처」 번호(원문 확인 여부)와 「검토 기록」(자체 점검 → 독립 검토 지적·근거·표본 대조)을 자동으로 싣는다. 출처 없는 항목은 '근거 없음 ⚠'으로 드러난다 — 승인 전에 채우거나 이유를 적는다.
 4. **답(kind=review/feedback)** → 아래 「답 해석」대로 항목 status/request를 제안 파일에 담아 `merge` → `mark` → 계획 3~5줄을 채팅에 밝히고 바로 다음 라운드. 할 일 항목(new·deepen·revise·browser)만 작업, done은 건드리지 않는다.
-5. **승인(kind=approve)** → 단계 스킬의 「승인 전 마무리」(할 일·독립 검토 지적이 남았는데 사용자가 승인했으면 지우지 말고 `carry_over`(남은 일: 항목·제목·요청·어느 단계에서 왔는지)로 인계 메모 `note`에 적어 다음 단계 R1에서 먼저 처리한다 — 항목 본문에서 지우지 않는다) → `approve` → **단계 보고서**(아래) → 다음 단계의 1로. 사용자가 채팅으로 "승인"이라고 해도 같다(`chat … approve`로 기록).
+5. **승인(kind=approve)** → 단계 스킬의 「승인 전 마무리」(할 일·독립 검토 지적이 남았는데 사용자가 승인했으면 지우지 말고 `set <dir> <단계> carry_over <파일>`로 `{item, title, request, from}` 목록(남은 일)을 남기고 항목 status는 done — 보고서 「남은 일」에 실리고, 다음 단계 R1에서 먼저 처리한다) → `approve` → **단계 보고서**(아래) → 다음 단계의 1로. 사용자가 채팅으로 "승인"이라고 해도 같다(`chat … approve`로 기록).
 6. **다시 열기(kind=reopen)**: 대시보드의 승인된 단계 탭에서 '이 단계 다시 열기' + 고칠 내용이 온다 → `reopen <dir> <단계>` → `mark` → 고칠 내용을 그 단계 항목의 request/status로 `merge` → `round-start` → 라운드(3) → 다시 승인되면 단계 보고서를 새로 만들고, 뒤 단계는 '다시 확인 필요' 항목부터 처리한다.
 7. 앞 단계를 바꿔야 하면 `reopen` 후 그 단계 라운드를 돌리고, 영향 받는 뒤 단계 항목에 `revise`를 `merge`로 건다.
 
@@ -147,7 +159,7 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 단계를 승인하면 그 단계의 결과를 독립 보고서로 남긴다: 기획보고서·조사보고서·분석·종합보고서·원고 검토본·검증보고서·산출 보고서.
 형식은 기획 시작 질문의 `stage_reports` 답이다 (기본 `html, eli5, md`).
 
-1. 단계 요약을 5~8줄로 쓴다 (이 단계에서 정한 것·찾은 것·남은 문제). `note`로 남기며 보고서 첫 장의 재료가 된다. **줄마다 근거 항목 표기** `(근거: 조사 #3·#7)`. 승인 라운드의 독립 검토(qa)가 기록돼 있어야 한다.
+1. 단계 요약을 5~8줄로 쓴다 (이 단계에서 정한 것·찾은 것·남은 문제). `set <dir> <단계> summary <파일>`로 쓰면 보고서 첫 장이 된다. **줄마다 근거 항목 표기** `(근거: 조사 #3·#7)`. 승인 라운드의 독립 검토(qa)가 기록돼 있어야 한다.
 2. `report <dir> <단계>` → `reports/<단계>/report.md`(원본)·`report.html`(웹 보고서: 목차·표·출처 확인됨/미확인).
 3. **eli5** (형식에 있으면): eli5 원칙대로 — 큰 그림, 적은 글, 비유 하나로 일관. 이 단계의 결과를 처음 보는 사람이 1분에 이해하게. `reports/<단계>/eli5.json`(제안 파일)을 쓰고 `report`를 다시 실행 → `eli5.html`.
    ```json
@@ -175,7 +187,7 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 
 ## AI 점검 (라운드마다, render 직전)
 
-결과를 스스로 점검해 **다음 라운드 전에 사용자가 정해야 할 것**을 질문 명세(JSON)로 쓰고 `ask <dir> <명세>`로 게시한다. 명세의 `kind`는 `review`다. 대시보드 맨 위 'AI 점검' 칸에 폼으로 뜨고, 항목 피드백과 함께 한 번에 온다(kind=review).
+결과를 스스로 점검해 **다음 라운드 전에 사용자가 정해야 할 것**을 질문으로 쓰고 `set <dir> <단계> review <파일>`로 남긴다. 대시보드 맨 위 'AI 점검' 칸에 폼으로 뜨고, 항목 피드백과 함께 한 번에 온다(kind=review). 이 기록은 독립 검토의 `qa-brief`가 자체 점검 초안으로 읽는다.
 
 | gap.kind | 찾는 것 |
 |---|---|
@@ -187,20 +199,20 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 | `scope` 범위 이탈 | 주제와 관계가 약한 내용 |
 
 ```json
-{"id": "review-research-r2", "kind": "review", "stage": "research", "round": 2, "title": "R2 점검 질문", "summary": "한 줄", "questions": [
+{"round": 2, "summary": "한 줄", "questions": [
   {"id": "g-1", "label": "질문", "type": "single|multi|text", "required": false, "other": true,
    "gap": {"kind": "conflict", "item": 2, "detail": "실제 수치·출처 수를 적은 근거 한 줄"},
    "options": [{"value": "a", "label": "…", "desc": "…", "recommended": true}]}]}
 ```
 - 3~8개, 중요한 것부터. 선택지 2~4개, 추천 1개(미리 선택됨 → 동의하면 보내기만). 마지막은 보통 "다음 라운드에서 더 할 것"(multi) 또는 "이 단계를 승인할까요?"(충분하면).
-- detail과 선택지에 사실이 아닌 것을 쓰지 않는다. 명세의 `round`는 현재 라운드와 같아야 표시된다.
+- detail과 선택지에 사실이 아닌 것을 쓰지 않는다. `round`는 현재 라운드와 같아야 표시된다.
 - 조건부 질문은 `show_if: {"id": "<질문 id>", "in": ["값"]}`.
 
 ## 답 해석
 
 | 받은 것 | 처리 |
 |---|---|
-| 질문 폼 답의 `<질문 id>__other` | 그 질문에 붙인 **기타·덧붙일 말(요청사항)** — 선택한 답보다 구체적인 조건이므로 그대로 반영하고, 반영 방식을 라운드 변경점(`note`)에 한 줄로 적는다 |
+| 질문 폼 답의 `<질문 id>__other` | 그 질문에 붙인 **기타·덧붙일 말(요청사항)** — 선택한 답보다 구체적인 조건이므로 그대로 반영하고, 반영 방식을 라운드 변경점(`set <dir> <단계> changes`)에 한 줄로 적는다 |
 | "N번 심화: …" | status=deepen, request=지시 |
 | "N번 삭제" / "N번 복구" | removed / done |
 | "N번 수정: …" | status=revise, request=지시 |

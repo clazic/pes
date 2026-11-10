@@ -14,12 +14,12 @@ description: PES 조사 단계 — 기획에서 넘어온 조사 항목을 서�
 4. vworld: 키까지 있으면 `vworld_install` 질문 삭제. **없으면 설치하지 말고 시작 질문의 `vworld_install`로 묻는다**
 5. 결과를 질문 desc에 반영 ("설치 필요", "API 키 필요").
 
-`ask-prep <dir> research` → 다듬기(기획에서 정해진 범위를 inherited로) → 받은 답은 `pending`·`context`로 읽어 이 단계의 설정(도구·통계·법령 범위·병렬·모델)으로 삼는다.
+`ask-prep <dir> research` → 다듬기(기획에서 정해진 범위를 inherited로) → 받은 답(도구·통계·법령 범위·병렬·모델)은 `pending`·`context`로 읽어 `set <dir> research settings <파일>`로 저장한다.
 
 ## 사용자 제공 링크·자료
 
 - 출처: 시작 질문 `user_links`(settings) 또는 대시보드 '추가 요청'의 `조사 링크: 주소 | 항목 | 메모` 줄.
-- 줄마다 파싱해 `{"url": 주소 또는 파일 경로, "memo": …}`로 정리한다. 항목 번호가 없으면 내용(제목·메모·주소 도메인)에 맞는 항목에 배정하고, 맞는 항목이 없으면 새 항목(new)으로 만든다. 배정 결과를 변경점(`note`)에 한 줄.
+- 줄마다 파싱해 `{"url": 주소 또는 파일 경로, "memo": …}`로 정리한다. 항목 번호가 없으면 내용(제목·메모·주소 도메인)에 맞는 항목에 배정하고, 맞는 항목이 없으면 새 항목(new)으로 만든다. 배정 결과를 변경점(`set <dir> research changes <파일>`)에 한 줄.
 - 링크가 붙은 항목은 그 라운드의 할 일이 된다: 항목의 `request`에 "사용자 제공 링크 확인: 주소 | 메모"를 적고 done이면 deepen으로 제안 파일에 담아 `merge`한다.
 - 서브에이전트 지시문 [사용자 제공 링크]에 넣는다 — **반드시 열어 읽고**(웹은 ego-browser, 로컬 파일은 Read/pdf 스킬), sources에 `note: "사용자 제공"`과 실제 method로 남긴다. 열 수 없으면(로그인·삭제·권한) open_questions에 "사용자 제공 링크 열지 못함: 주소 — 이유".
 - 병합 뒤 링크를 열었는지는 결과의 sources(note "사용자 제공")와 open_questions로 확인한다. 열지 못한 링크는 AI 점검 질문(weak)으로 물어 다른 주소나 파일을 받는다.
@@ -29,7 +29,7 @@ description: PES 조사 단계 — 기획에서 넘어온 조사 항목을 서�
 
 - 할 일 항목(new·deepen·revise·browser)만 조사. status=deepen + links.library가 있는 항목은 **기존 내용을 이어받아** 기획의 question에 맞게 보완하고, 원문 미확인 출처와 conflicts를 다시 확인한다.
 - parallel=auto: 할 일 항목이 2개 이상이면 항목당 `pes:researcher` 서브에이전트 1개, 한 번에 최대 5개, **한 메시지에 함께** 보낸다. sequential이면 메인이 직접. max면 + 승인 전 `pes:verifier`.
-- 서브에이전트는 결과를 제안 파일 `<dir>/rounds/research-R<n>/<id>.json`에 쓰고 한 줄만 돌려준다 → `merge <dir> research <dir>/rounds/research-R<n>/*.json` → **`digest <dir> research --round <n>`으로** 항목 사이 충돌을 찾아 conflicts에 기록(해당 항목의 `conflicts`를 제안 파일에 담아 `merge`) → 변경점(`note`) → AI 점검(`ask`) → render. 결과 파일 본문을 통째로 읽지 않는다(필요한 항목만 `show`).
+- 서브에이전트는 결과를 제안 파일 `<dir>/rounds/research-R<n>/<id>.json`에 쓰고 한 줄만 돌려준다 → `merge <dir> research <dir>/rounds/research-R<n>/*.json` → **`digest <dir> research --round <n>`으로** 항목 사이 충돌을 찾아 conflicts에 기록(해당 항목의 `conflicts`를 제안 파일에 담아 `merge`) → 변경점(`set <dir> research changes`) → AI 점검(`set <dir> research review`) → render. 결과 파일 본문을 통째로 읽지 않는다(필요한 항목만 `show`).
 - **조사 모델** (settings.model): `mixed`(기본) = 기존 조사를 이어받는 항목(status=deepen이고 links.library 있음)과 단순 수집·원문 확인은 `model: "sonnet"`, 새 조사·법령 해석·판단이 많은 항목(울산 진단·정책 대안 등)과 revise는 `model: "opus"`. `opus`·`sonnet`이면 전부 그것. 서브에이전트를 띄울 때 모델로 정하고(환경별 모델 이름은 어댑터 노트), 항목에 `"model"` 필드로 남긴다(변경점에 모델별 항목 수 한 줄).
 - 실패한 항목은 그 항목만 재시도하거나 status=failed로 두고 알린다.
 
@@ -104,7 +104,7 @@ $V staticmap "<x,y>" --zoom 14 --size 800,600 -o <dir>/shots/<id>-1.png
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
 1. parallel=max면 pes:verifier로 핵심 주장 검증. 법령 인용 verify_citations.
-2. 남은 conflicts·원문 미확인 비율을 조사 단계 요약(`note`)에 정직하게 적는다.
+2. 남은 conflicts·원문 미확인 비율을 단계 요약에 정직하게 적는다 (`set <dir> research summary <파일>`).
 3. `approve <dir> research` → pes:analyze 시작 질문.
 
 ## 단계 보고서

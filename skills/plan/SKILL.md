@@ -13,7 +13,7 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 - 요청에 주제가 있으면 `topic` 질문 삭제, `inherited`에 주제.
 - `project.library`가 없으면 `library` 질문 삭제. 있으면 inherited에 "기존 조사: 항목 N개(R{round}까지)".
 - 형식이 연구보고서가 아닐 법하면 `research_type`·`team` 삭제.
-- 답은 PES가 받아 기록한다. 받은 답을 `pending`·`context`로 읽어 기획 결정(주제·목적·독자·형식·범위)으로 삼는다.
+- 답(주제·목적·독자·형식·범위)은 `pending`·`context`로 읽어 `set <dir> plan settings <파일>`로 저장한다.
 
 ## R1에 만드는 것 (항목 kind)
 
@@ -42,7 +42,7 @@ pes:core의 단계 생명주기를 따른다. 이 문서는 기획에서 **무�
 0. 마지막 라운드의 **독립 검토(QC/QA)**가 `qa`로 기록돼 있고, high 지적이 처리됐는지(고쳤거나 이유를 남겼는지) 확인한다 (pes:core 「독립 검토」).
 
 1. topic마다 question·links가 있는지 확인(`show <dir> plan --fields question,links`). 기획 결정은 받은 답에서 읽은 대로 정리한다.
-2. 기획 요약 3~5줄 (연구 질문·장 수·조사 항목 수·재사용 수)을 `note`로 남긴다.
+2. 기획 요약 3~5줄 (연구 질문·장 수·조사 항목 수·재사용 수)을 `set <dir> plan summary <파일>`로 쓴다.
 3. `approve <dir> plan` → 조사 항목이 생성된다(재사용 항목은 status=deepen과 보완 요청이 붙는다).
 4. 바로 pes:research의 시작 질문으로 이어간다.
 

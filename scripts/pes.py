@@ -20,6 +20,9 @@
   digest <dir> <stage> [--round N]     AI 점검용 압축 요약 (항목별 요약 첫 줄·수치·충돌·신뢰도·출처 확인율·남은 질문)
   show <dir> <stage> [id...] [--fields a,b]  필요한 항목·필드만 보기 (project.json 을 통째로 읽지 않는다)
   note <dir> "메모"                     인계 메모 추가 (대화에서 나온 결정·선호 — 새 세션이 먼저 읽는다)
+  set <dir> <stage> <field> <file|->   단계 필드 하나를 통째로 바꾼다 (허용: summary·changes·carry_over·settings·review — 값은 파일 또는 `-`(표준 입력);
+                                       summary 는 텍스트, changes 는 문자열 배열, carry_over 는 객체 배열, settings·review 는 JSON 객체)
+  set <dir> project <field> <file|->   프로젝트 필드 하나를 바꾼다 (허용: executive_summary·conclusion — 텍스트). 허용 밖 필드는 거부
   report <dir> <stage>                 단계 보고서: reports/<stage>/report.md·report.html 생성, eli5.json 이 있으면
                                        eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
   assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리) + out/sources.json
@@ -731,6 +734,58 @@ def cmd_note(args):
     p["notes"].append({"time": now(), "stage": p.get("current"), "text": " ".join(args[1:]).strip()})
     save(d, p)
     print(f"인계 메모 {len(p['notes'])}개")
+
+
+# ---------- set: 허용 필드 화이트리스트 ----------
+SET_STAGE_FIELDS = {"summary": "text", "changes": "str_list", "carry_over": "obj_list", "settings": "object", "review": "object"}
+SET_PROJECT_FIELDS = {"executive_summary": "text", "conclusion": "text"}
+SET_USAGE = ("사용법: set <dir> <단계> <필드> <파일|->  (필드: " + "·".join(SET_STAGE_FIELDS) + ")\n"
+             "        set <dir> project <필드> <파일|->  (필드: " + "·".join(SET_PROJECT_FIELDS) + ")")
+
+
+def set_parse_check(kind, field, raw):
+    """값 파일의 내용을 필드 형식에 맞게 해석한다. 맞지 않으면 한국어 이유로 거부한다."""
+    if kind == "text":
+        text = raw.replace("\r\n", "\n").rstrip()
+        if not text:
+            die(f"set: {field} 값이 비어 있습니다 — 텍스트를 담은 파일을 주세요", 2)
+        return text
+
+    def bad_const(name):
+        raise ValueError(name)
+    try:
+        value = json.loads(raw, parse_constant=bad_const)
+    except ValueError as e:
+        die(f"set: {field} 값이 올바른 JSON 이 아닙니다 ({e})", 2)
+    shape = {"str_list": ("문자열 배열", lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v)),
+             "obj_list": ("객체 배열", lambda v: isinstance(v, list) and all(isinstance(x, dict) for x in v)),
+             "object": ("JSON 객체", lambda v: isinstance(v, dict))}[kind]
+    if not shape[1](value):
+        die(f"set: {field} 값은 {shape[0]}이어야 합니다", 2)
+    return value
+
+
+def cmd_set(args):
+    if len(args) != 4:
+        die("set: 인자가 맞지 않습니다\n" + SET_USAGE, 2)
+    d, target, field, src = pdir(args[0]), args[1], args[2], args[3]
+    if target == "project":
+        kinds = SET_PROJECT_FIELDS
+    elif target in KEYS:
+        kinds = SET_STAGE_FIELDS
+    else:
+        die(f"set: 대상은 단계 이름({', '.join(KEYS)}) 또는 project 여야 합니다: {target!r}\n" + SET_USAGE, 2)
+    if field not in kinds:
+        die(f"set: {target} 에서 쓸 수 있는 필드는 {', '.join(kinds)} 뿐입니다: {field!r}", 2)
+    try:
+        raw = sys.stdin.buffer.read().decode("utf-8") if src == "-" else Path(src).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        die(f"set: 값을 읽지 못했습니다 ({src}): {e}", 2)
+    value = set_parse_check(kinds[field], field, raw)
+    p = load(d)
+    (p if target == "project" else p["stages"][target])[field] = value
+    save(d, p)
+    print(f"{'프로젝트' if target == 'project' else LABEL[target]} {field} 저장")
 
 
 # ---------- 단계 보고서 ----------
@@ -2104,6 +2159,11 @@ def db_slugs():
         return set()
 
 
+def db_set(args):
+    die("set: PES_DB_CORE=1 에서는 아직 쓸 수 없습니다 — 단계 요약·변경점·남은 일·설정·점검과 최종 요약·결론에 대응하는 DB 명령이 아직 없습니다 "
+        "(DB 는 바뀌지 않았습니다). 플래그 없이(v0.15) 쓰거나 이후 PR 을 기다리세요", 2)
+
+
 def db_name(arg) -> str:
     d = pdir(arg)
     if d.parent != pes_home():
@@ -2592,12 +2652,12 @@ def dbr_web(args):
 
 
 DB_PROJECT_WRITES = {"ask-prep", "ask", "round-start", "merge", "render", "approve", "reopen", "mark", "chat", "note",
-                     "qa-brief", "qa", "lock", "unlock", "report", "assemble", "web"}
+                     "qa-brief", "qa", "lock", "unlock", "report", "assemble", "web", "set"}
 
 DB_CMDS = {"init": db_init, "ask-prep": db_ask_prep, "ask": db_ask, "round-start": db_round_start, "merge": db_merge,
            "render": db_render, "approve": db_approve, "reopen": db_reopen, "mark": db_mark, "chat": db_chat,
            "note": db_note, "qa-brief": db_qa_brief, "qa": db_qa, "serve": db_serve, "stop": db_stop,
-           "home": db_home, "lock": db_lock, "unlock": db_unlock,
+           "home": db_home, "lock": db_lock, "unlock": db_unlock, "set": db_set,
            "status": dbr_status, "pending": dbr_pending, "digest": dbr_digest, "show": dbr_show,
            "report": dbr_report, "assemble": dbr_assemble, "web": dbr_web}
 
@@ -2677,7 +2737,7 @@ def cmd_complete(args):
 CMDS = {"init": cmd_init, "ask-prep": cmd_ask_prep, "ask": cmd_ask, "round-start": cmd_round_start,
         "merge": cmd_merge, "render": cmd_render, "approve": cmd_approve, "reopen": cmd_reopen,
         "status": cmd_status, "pending": cmd_pending, "mark": cmd_mark, "chat": cmd_chat,
-        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
+        "assemble": cmd_assemble, "report": cmd_report, "digest": cmd_digest, "show": cmd_show, "note": cmd_note, "set": cmd_set, "web": cmd_web, "remote": cmd_remote, "qa-brief": cmd_qa_brief, "qa": cmd_qa, "serve": cmd_serve, "stop": cmd_stop, "watch": cmd_watch,
         "list": cmd_list, "hub": cmd_hub, "home": cmd_home, "open": cmd_open, "doctor": cmd_doctor, "which": cmd_which, "lock": cmd_lock, "unlock": cmd_unlock,
         "context": cmd_context, "claim": cmd_claim, "submit": cmd_submit, "wait": cmd_wait, "complete": cmd_complete}
 
