@@ -880,6 +880,8 @@ interface PendingRelation {
   pointer: string;
   path: string;
   raw: unknown;
+  /** Set for an old (snapshot) item version: relations resolve inside that round's snapshot only. */
+  round_key?: string;
 }
 
 /** A question form (ask file or project.json review) and the question versions it showed. */
@@ -898,6 +900,9 @@ interface BuildContext {
   question_reuse: Map<string, { object_key: string; version_key: string }>;
   item_digest: Map<string, string>;
   item_versions: Map<string, Map<string, string>>;
+  /** `${round_key}|${stage}|${legacy_id}` -> the version a snapshot round selected. */
+  round_selected: Map<string, string>;
+  placeholders: Map<string, { object_key: string; version_key: string }>;
   object_rows: Map<string, PlanObjectRow>;
   bytes: Map<string, Uint8Array>;
   parsed: Map<string, unknown>;
@@ -1428,6 +1433,7 @@ function item_extras(
   raw: Record<string, unknown>,
   report_path: string,
   item_pointer: string,
+  snapshot_round_key?: string,
 ): void {
   const sources = as_array(raw.sources);
   for (const [source_index, source_value] of sources.entries()) {
@@ -1570,6 +1576,7 @@ function item_extras(
         pointer: `${item_pointer}/reuse`,
         path: report_path,
         raw: raw.reuse,
+        round_key: snapshot_round_key,
       });
     } else {
       plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/reuse`, raw.reuse);
@@ -1603,6 +1610,7 @@ function item_extras(
               pointer: `${item_pointer}/links`,
               path: report_path,
               raw: raw.links,
+              round_key: snapshot_round_key,
             });
           } else {
             report_links();
@@ -1842,10 +1850,13 @@ function ensure_import_question(
   ctx: BuildContext,
   stage_key: LegacyStageKey | null,
   question_id: string,
+  placeholder_only = false,
 ): { object_key: string; version_key: string } {
   const scope = stage_key ?? "unknown";
   const index = question_index(ctx, scope);
-  const existing = index.get(question_id);
+  const existing = placeholder_only
+    ? ctx.placeholders.get(`${scope}|${question_id}`)
+    : index.get(question_id) ?? ctx.placeholders.get(`${scope}|${question_id}`);
   if (existing !== undefined) return existing;
   const key = `import-question:${scope}:${question_id}`;
   const added = add_question(ctx, {
@@ -1864,7 +1875,8 @@ function ensure_import_question(
     created_at: 0,
     mapping: { scope, key: question_id, raw: { import_placeholder: true, question_id } },
   });
-  index.set(question_id, added);
+  ctx.placeholders.set(`${scope}|${question_id}`, added);
+  if (!placeholder_only) index.set(question_id, added);
   return added;
 }
 
@@ -2107,9 +2119,10 @@ function build_suggestions(
 }
 
 /**
- * The forms a feedback file can have answered, best first: the form named by
- * `spec`, then forms of the same purpose/stage/round, then the same purpose and
- * stage in any round (latest round first).
+ * The forms a feedback file can have answered: only forms proven by kind,
+ * stage and round (a form named by `spec` first). A form of another round or
+ * another kind is never a substitute. Only review/resume/stage_start answers
+ * are proven this way; other kinds return null (no form is claimed).
  */
 function candidate_forms(
   ctx: BuildContext,
@@ -2117,24 +2130,19 @@ function candidate_forms(
   kind: string,
   spec: string,
   round_no: number,
-): FormRef[] {
-  if (stage_key === null) return [];
-  const purpose = kind === "review" || kind === "resume" || kind === "stage_start" ? kind : null;
-  const in_stage = ctx.forms.filter((form) => form.stage_key === stage_key);
-  const ordered: FormRef[] = [];
-  const add = (forms: FormRef[]): void => {
-    for (const form of forms) if (!ordered.includes(form)) ordered.push(form);
-  };
-  if (spec.length > 0) add(in_stage.filter((form) => form.names.includes(spec)));
-  if (purpose !== null) {
-    add(in_stage.filter((form) => form.purpose === purpose && form.round_no === round_no));
-    add(
-      in_stage
-        .filter((form) => form.purpose === purpose)
-        .sort((left, right) => right.round_no - left.round_no),
-    );
-  }
-  return ordered;
+): FormRef[] | null {
+  if (stage_key === null) return null;
+  if (kind !== "review" && kind !== "resume" && kind !== "stage_start") return null;
+  const proven = ctx.forms.filter(
+    (form) =>
+      form.stage_key === stage_key &&
+      form.purpose === kind &&
+      (form.round_no === round_no || (kind === "stage_start" && form.round_no === 0)),
+  );
+  return [
+    ...proven.filter((form) => spec.length > 0 && form.names.includes(spec)),
+    ...proven.filter((form) => !(spec.length > 0 && form.names.includes(spec))),
+  ];
 }
 
 function build_feedback(ctx: BuildContext): void {
@@ -2182,14 +2190,16 @@ function build_feedback(ctx: BuildContext): void {
       (name_stamp === null ? 0 : parse_time_utc(`${name_stamp[2]}-${name_stamp[3]}`) ?? 0);
     const submission = ctx.plan.submissions.find((entry) => entry.key === submission_key);
     if (submission !== undefined) submission.received_at = received_at;
-    const forms = candidate_forms(
+    const proven = candidate_forms(
       ctx,
       stage_key,
       kind,
       typeof parsed.spec === "string" ? parsed.spec : "",
       integer_or(parsed.round, 0),
     );
+    const forms = proven ?? [];
     let chosen: FormRef | null = null;
+    let mismatch_reported = false;
     const find_question = (question_id: string): { object_key: string; version_key: string } => {
       for (const form of forms) {
         const found = form.questions.get(question_id);
@@ -2198,7 +2208,18 @@ function build_feedback(ctx: BuildContext): void {
           return found;
         }
       }
-      return ensure_import_question(ctx, stage_key, question_id);
+      if (proven === null) return ensure_import_question(ctx, stage_key, question_id);
+      if (forms.length === 0 && !mismatch_reported) {
+        mismatch_reported = true;
+        plan_entry_category(ctx.entries, "unknown_field", path, "/round", {
+          kind,
+          stage: stage_key,
+          round: parsed.round ?? null,
+          spec: parsed.spec ?? null,
+          reason: "no form of this kind, stage and round",
+        });
+      }
+      return ensure_import_question(ctx, stage_key, question_id, true);
     };
     ctx.plan.events.push({
       type: "legacy.feedback_file",
@@ -2238,10 +2259,8 @@ function build_feedback(ctx: BuildContext): void {
       }
     }
     if (submission !== undefined) {
-      const exact = chosen ?? forms.find((form) => form.names.includes(typeof parsed.spec === "string" ? parsed.spec : "")) ?? null;
-      submission.set_key =
-        (exact as FormRef | null)?.set_key ??
-        (kind === "stage_start" && stage_key !== null ? ctx.ask_sets.get(stage_key) ?? null : null);
+      const picked = (chosen as FormRef | null) ?? forms[0] ?? null;
+      submission.set_key = picked?.set_key ?? null;
     }
 
     const text = typeof parsed.text === "string" ? parsed.text : "";
@@ -2363,8 +2382,14 @@ function build_review(
   stage_key: LegacyStageKey,
   review: Record<string, unknown>,
   pointer: string,
+  snapshot?: { path: string; round_no: number },
 ): void {
-  const round_no = integer_or(review.round, 0);
+  const report_path = snapshot === undefined ? "project.json" : snapshot.path;
+  const tag = snapshot === undefined ? "" : `@R${snapshot.round_no}`;
+  const round_no = snapshot === undefined ? integer_or(review.round, 0) : snapshot.round_no;
+  if (snapshot !== undefined && review.round !== undefined && integer_or(review.round, 0) !== round_no) {
+    plan_entry_category(ctx.entries, "unknown_field", report_path, `${pointer}/round`, review.round);
+  }
   const stage_plan = ctx.plan.stages.find((stage) => stage.key === stage_key);
   const round_key =
     round_no >= 1 && stage_plan !== undefined && stage_plan.rounds.some((round) => round.round_no === round_no)
@@ -2374,9 +2399,9 @@ function build_review(
   const questions_value = review.questions;
   const questions = as_array(questions_value);
   if (questions_value !== undefined && !Array.isArray(questions_value)) {
-    plan_entry_category(ctx.entries, "unknown_field", "project.json", `${pointer}/questions`, questions_value);
+    plan_entry_category(ctx.entries, "unknown_field", report_path, `${pointer}/questions`, questions_value);
   }
-  if (summary.trim().length > 0 || questions.length > 0) {
+  if (snapshot === undefined && (summary.trim().length > 0 || questions.length > 0)) {
     add_artifact(ctx, {
       key: `stage-review-summary:${stage_key}`,
       stage_key,
@@ -2398,11 +2423,11 @@ function build_review(
   }
   const members: PlanQuestionSet["members"] = [];
   const form: FormRef = {
-    set_key: `review-set:${stage_key}`,
+    set_key: `review-set:${stage_key}${tag}`,
     stage_key,
     purpose: "review",
     round_no,
-    names: [`${stage_key}-R${round_no}-review`, `review/${stage_key}`],
+    names: [`${stage_key}-R${round_no}-review`, `review/${stage_key}${tag}`],
     questions: new Map(),
   };
   for (const [index, value] of questions.entries()) {
@@ -2411,7 +2436,7 @@ function build_review(
       plan_entry_category(
         ctx.entries,
         "unknown_field",
-        "project.json",
+        report_path,
         `${pointer}/questions/${index}`,
         value,
       );
@@ -2420,12 +2445,12 @@ function build_review(
     const question_id = text_or(question.id, `rq${index + 1}`);
     const defaults = question_defaults(
       ctx,
-      "project.json",
+      report_path,
       `${pointer}/questions/${index}`,
       question,
     );
     const added = add_question(ctx, {
-      key: `review-question:${stage_key}:${index}:${question_id}`,
+      key: `review-question:${stage_key}${tag}:${index}:${question_id}`,
       stage_key,
       bank_key: typeof question.id === "string" ? question.id : null,
       origin: "review",
@@ -2451,11 +2476,11 @@ function build_review(
   if (members.length > 0) {
     ctx.forms.push(form);
     ctx.plan.question_sets.push({
-      key: `review-set:${stage_key}`,
+      key: `review-set:${stage_key}${tag}`,
       stage_key,
       round_key,
       purpose: "review",
-      form_key: `review/${stage_key}`,
+      form_key: `review/${stage_key}${tag}`,
       version_no: 1,
       published_at: 0,
       members,
@@ -2745,6 +2770,17 @@ function build_snapshot_items(ctx: BuildContext): void {
       const snapshot = ctx.plan.snapshots.find((entry) => entry.key === round.snapshot_key);
       if (snapshot === undefined || snapshot.source.kind !== "file") continue;
       const state = as_record(as_record(ctx.parsed.get(snapshot.source.path))?.state);
+      if (state !== null && state.review !== undefined) {
+        const snapshot_review = as_record(state.review);
+        if (snapshot_review === null) {
+          plan_entry_category(ctx.entries, "unknown_field", snapshot.source.path, "/state/review", state.review);
+        } else {
+          build_review(ctx, stage_key, snapshot_review, "/state/review", {
+            path: snapshot.source.path,
+            round_no: round.round_no,
+          });
+        }
+      }
       if (state === null || !Array.isArray(state.items)) continue;
       const taken = new Set<string>();
       for (const [index, value] of state.items.entries()) {
@@ -2754,7 +2790,10 @@ function build_snapshot_items(ctx: BuildContext): void {
           continue;
         }
         const legacy_id = raw.id === undefined || raw.id === null ? String(index + 1) : String(raw.id);
-        if (taken.has(legacy_id)) continue;
+        if (taken.has(legacy_id)) {
+          plan_entry_category(ctx.entries, "unknown_field", snapshot.source.path, `/state/items/${index}`, raw);
+          continue;
+        }
         taken.add(legacy_id);
         const list = groups.get(legacy_id) ?? [];
         groups.set(legacy_id, list);
@@ -2779,7 +2818,7 @@ function build_snapshot_items(ctx: BuildContext): void {
         const input = make_input(entry, object_key, entry.round_key);
         const version_key = add_earlier_version(ctx, object_key, label, input);
         versions.set(entry.digest, version_key);
-        item_extras(ctx, `${object_key}@${label}`, version_key, entry.raw, entry.path, `/state/items/${entry.index}`);
+        item_extras(ctx, `${object_key}@${label}`, version_key, entry.raw, entry.path, `/state/items/${entry.index}`, entry.round_key);
         ctx.plan.mappings.push({
           kind: "item",
           scope: stage_key,
@@ -2808,7 +2847,7 @@ function build_snapshot_items(ctx: BuildContext): void {
           version_key: created.version_key,
           row: null,
         });
-        item_extras(ctx, key, created.version_key, latest.raw, latest.path, `/state/items/${latest.index}`);
+        item_extras(ctx, key, created.version_key, latest.raw, latest.path, `/state/items/${latest.index}`, latest.round_key);
         versions.set(latest.digest, created.version_key);
         current = created;
       }
@@ -2818,6 +2857,7 @@ function build_snapshot_items(ctx: BuildContext): void {
         if (!versions.has(entry.digest)) {
           add_old(entry, object_key, `old${(ctx.object_rows.get(object_key)?.earlier?.length ?? 0) + 1}`);
         }
+        ctx.round_selected.set(`${entry.round_key}|${stage_key}|${legacy_id}`, versions.get(entry.digest)!);
         ctx.plan.round_contents.push({
           round_key: entry.round_key,
           object_key,
@@ -2908,7 +2948,13 @@ function resolve_pending_relations(ctx: BuildContext): void {
   const resolved = new Set<string>();
   const unresolved = new Map<string, { path: string; pointer: string; raw: unknown }>();
   for (const pending of ctx.pending_relations) {
-    const target = ctx.items.get(pending.scope)?.get(pending.key);
+    const target =
+      pending.round_key === undefined
+        ? ctx.items.get(pending.scope)?.get(pending.key)
+        : (() => {
+            const selected = ctx.round_selected.get(`${pending.round_key}|${pending.scope}|${pending.key}`);
+            return selected === undefined ? undefined : { object_key: "", version_key: selected };
+          })();
     if (target !== undefined && target.version_key !== pending.from_version_key) {
       const key = `${pending.from_version_key}|${target.version_key}|${pending.kind}`;
       if (!resolved.has(key)) {
@@ -3187,6 +3233,8 @@ function build_plan(dir: string): PreparedImport {
     question_reuse: new Map(),
     item_digest: new Map(),
     item_versions: new Map(),
+    round_selected: new Map(),
+    placeholders: new Map(),
     object_rows: new Map(),
     items: new Map(),
     questions: new Map(),
