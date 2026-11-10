@@ -70,7 +70,8 @@ export interface ImportOptions {
 export interface ImportResult {
   batch_id: string;
   project_id: string;
-  state: "staging" | "failed";
+  /** For a replayed answer: the batch state right now (it may have moved on since the first import). */
+  state: "staging" | "validated" | "activated" | "failed";
   replayed: boolean;
   source_fingerprint: string;
   report: UnknownReport;
@@ -3293,6 +3294,20 @@ export function prepare_import_plan(dir: string, owner_actor_id: string): Prepar
   return prepared;
 }
 
+/**
+ * Build the plan for a source folder without handing it to the importer. The
+ * migration validator (PR12) compares this plan with what the import wrote.
+ * Read only: the folder is scanned and read, never changed.
+ */
+export function build_validation_plan(dir: string): PreparedImport {
+  return build_plan(dir);
+}
+
+/** True for source files that are rebuilt by the old tool and are not part of the fingerprint. */
+export function is_regenerable_source_path(path: string): boolean {
+  return classify_file(path).regenerable;
+}
+
 function prepared_key(owner_actor_id: string, fingerprint: string): string {
   return `${owner_actor_id}:${fingerprint}`;
 }
@@ -3326,9 +3341,27 @@ export async function import_project(
       { source_fingerprint: fingerprint },
     );
     const result = outcome.result as ImportResult;
+    let state = result.state;
+    const replayed = outcome.replayed || result.replayed === true;
+    if (replayed) {
+      // A receipt replay returns what the first call saw. The batch may have moved
+      // on since (validated, activated, rolled back in PR12): show where it is now.
+      const current = service.read((db) =>
+        db.get<{ state: string }>("SELECT state FROM import_batches WHERE id = ?", result.batch_id),
+      );
+      if (
+        current?.state === "staging" ||
+        current?.state === "validated" ||
+        current?.state === "activated" ||
+        current?.state === "failed"
+      ) {
+        state = current.state;
+      }
+    }
     return {
       ...result,
-      replayed: outcome.replayed || result.replayed === true,
+      state,
+      replayed,
     };
   } finally {
     drop_prepared_import(owner_actor_id, fingerprint);

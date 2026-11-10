@@ -27,6 +27,8 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  rmdirSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -208,22 +210,30 @@ function ensure_objects_root(objects_dir: string): string {
   return root;
 }
 
-/** Write bytes to the path derived from storage_key, atomically, without following links. */
-function write_storage_bytes_inner(
+interface StorageTarget {
+  dir: string;
+  target: string;
+  /** Folders this call had to create, outermost first. */
+  created: string[];
+}
+
+/** Check (and create the folders of) the path derived from storage_key, without following links. */
+function prepare_storage_target(
   objects_dir: string,
   project_id: string,
   storage_key: string,
-  bytes: Uint8Array,
-): void {
+): StorageTarget {
   const parts = storage_segments(storage_key, project_id);
   let current = ensure_objects_root(objects_dir);
+  const created: string[] = [];
   for (let index = 0; index < parts.length - 1; index += 1) {
     current = join(current, parts[index]!);
     const stat = lstat_or_undefined(current);
     if (stat === undefined) {
       mkdirSync(current);
-      const created = lstat_or_undefined(current);
-      if (created === undefined || created.isSymbolicLink() || !created.isDirectory()) {
+      created.push(current);
+      const made = lstat_or_undefined(current);
+      if (made === undefined || made.isSymbolicLink() || !made.isDirectory()) {
         throw unsafe("a storage folder could not be created safely");
       }
       continue;
@@ -233,27 +243,118 @@ function write_storage_bytes_inner(
     }
   }
   const target = join(current, parts[parts.length - 1]!);
+  check_storage_target(target);
+  return { dir: current, target, created };
+}
+
+function check_storage_target(target: string): void {
   const existing = lstat_or_undefined(target);
   if (existing !== undefined) {
     if (existing.isSymbolicLink()) throw unsafe("the storage target is a symbolic link");
     if (!existing.isFile()) throw unsafe("the storage target is not a regular file");
   }
+}
+
+function remove_quietly(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    // Best effort; a leftover temporary file is swept by a later gc.
+  }
+}
+
+function remove_created_dirs(created: readonly string[]): void {
+  for (const dir of [...created].reverse()) {
+    try {
+      rmdirSync(dir); // only an empty folder goes; anything else stays
+    } catch {
+      // Not empty or already gone.
+    }
+  }
+}
+
+/** Write bytes to the path derived from storage_key, atomically, without following links. */
+function write_storage_bytes_inner(
+  objects_dir: string,
+  project_id: string,
+  storage_key: string,
+  bytes: Uint8Array,
+): void {
+  const { dir, target } = prepare_storage_target(objects_dir, project_id, storage_key);
 
   // A same-directory temporary file plus rename keeps a failed write from
   // leaving a partial blob behind. The temporary file is always removed.
-  const temporary = join(current, `.upload-${globalThis.crypto.randomUUID()}.tmp`);
+  const temporary = join(dir, `.upload-${globalThis.crypto.randomUUID()}.tmp`);
   try {
     writeFileSync(temporary, bytes, { flag: "wx" });
     renameSync(temporary, target);
   } finally {
     // A cleanup failure must not turn a successful rename into an error; a
     // leftover temp file is swept by a later gc like any other stray file.
-    try {
-      rmSync(temporary, { force: true });
-    } catch {
-      // Best effort.
-    }
+    remove_quietly(temporary);
   }
+}
+
+/**
+ * A file that is fully written next to its target but not yet in place.
+ * `commit` swaps it in (rename over the target); `discard` throws it away and
+ * removes the folders that staging created. Neither follows a link.
+ */
+export interface StagedStorageFile {
+  readonly storage_key: string;
+  commit(): void;
+  discard(): void;
+}
+
+/**
+ * First half of a replace: validate the target and write the bytes to a
+ * temporary file in the same folder. The target itself is not touched, so a
+ * caller can stage many files and commit them only when every one was staged.
+ */
+export function stage_storage_bytes(
+  objects_dir: string,
+  project_id: string,
+  storage_key: string,
+  bytes: Uint8Array,
+): StagedStorageFile {
+  let prepared: StorageTarget;
+  try {
+    prepared = prepare_storage_target(objects_dir, project_id, storage_key);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("conflict", "the object store is not writable");
+  }
+  const { dir, target, created } = prepared;
+  const temporary = join(dir, `.upload-${globalThis.crypto.randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, bytes, { flag: "wx" });
+  } catch {
+    remove_quietly(temporary);
+    remove_created_dirs(created);
+    throw new ApiError("conflict", "the object store is not writable");
+  }
+  let finished = false;
+  return {
+    storage_key,
+    commit(): void {
+      if (finished) return;
+      finished = true;
+      try {
+        check_storage_target(target); // re-checked: a link or folder may have appeared since
+        renameSync(temporary, target);
+      } catch (error) {
+        remove_quietly(temporary);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError("conflict", "the object store is not writable");
+      }
+    },
+    discard(): void {
+      if (finished) return;
+      finished = true;
+      remove_quietly(temporary);
+      remove_created_dirs(created);
+    },
+  };
 }
 
 export function write_storage_bytes(
@@ -314,6 +415,40 @@ export function read_storage_bytes(
   }
 }
 
+/**
+ * The one root rule for every cleanup path (gc scan/delete, blob delete,
+ * restore sweep and its pre-check). A root or project folder that does not
+ * exist (ENOENT) is "missing" (nothing to clean; a write creates it later). A
+ * link, a non-directory or any other lstat error is "unsafe". Nothing below a
+ * link is ever scanned or removed. Check-then-act is not atomic (Node has no
+ * openat/O_NOFOLLOW): a swap after the check needs another process of the same
+ * user, which `pes stop` before restore rules out.
+ */
+type ProjectFolder = { kind: "unsafe" } | { kind: "missing" } | { kind: "dir"; path: string };
+
+function project_folder(objects_dir: string, project_id: string): ProjectFolder {
+  try {
+    const root = resolve_objects_dir(objects_dir);
+    const root_stat = lstat_or_undefined(root);
+    if (root_stat === undefined) return { kind: "missing" };
+    if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return { kind: "unsafe" };
+    const path = join(root, project_id);
+    const stat = lstat_or_undefined(path);
+    if (stat === undefined) return { kind: "missing" };
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { kind: "unsafe" };
+    return { kind: "dir", path };
+  } catch {
+    return { kind: "unsafe" };
+  }
+}
+
+/** Restore pre-check (inside the restore tx; a refusal rolls it back): refuse a store the sweep could not trust. */
+export function assert_project_folder_safe(objects_dir: string, project_id: string): void {
+  if (project_folder(objects_dir, project_id).kind === "unsafe") {
+    throw new ApiError("conflict", "the object store folder is not a real directory");
+  }
+}
+
 /** True only for a regular file at a safe storage path (no symlink at any level). */
 export function storage_file_is_regular(
   objects_dir: string,
@@ -322,11 +457,10 @@ export function storage_file_is_regular(
 ): boolean {
   try {
     const parts = storage_segments(storage_key, project_id);
-    const root = resolve_objects_dir(objects_dir);
-    const root_stat = lstatSync(root);
-    if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return false;
-    let current = root;
-    for (let index = 0; index < parts.length; index += 1) {
+    const folder = project_folder(objects_dir, project_id);
+    if (folder.kind !== "dir") return false;
+    let current = folder.path;
+    for (let index = 1; index < parts.length; index += 1) {
       current = join(current, parts[index]!);
       const stat = lstatSync(current);
       if (stat.isSymbolicLink()) return false;
@@ -341,17 +475,9 @@ export function storage_file_is_regular(
 
 /** Every regular file below this project's folder, without following symlinks. */
 function scan_project_files_inner(objects_dir: string, project_id: string): ProjectFile[] {
-  let root: string;
-  try {
-    root = resolve_objects_dir(objects_dir);
-  } catch {
-    return [];
-  }
-  const root_stat = lstat_or_undefined(root);
-  if (root_stat === undefined || root_stat.isSymbolicLink() || !root_stat.isDirectory()) return [];
-  const project_dir = join(root, project_id);
-  const stat = lstat_or_undefined(project_dir);
-  if (stat === undefined || stat.isSymbolicLink() || !stat.isDirectory()) return [];
+  const folder = project_folder(objects_dir, project_id);
+  if (folder.kind !== "dir") return [];
+  const project_dir = folder.path;
 
   const files: ProjectFile[] = [];
   const walk = (directory: string, prefix: string): void => {
@@ -396,6 +522,79 @@ export function scan_project_files(objects_dir: string, project_id: string): Pro
 }
 
 /**
+ * Restore only (PR12): make this project's folder hold nothing but `keep`
+ * (storage keys `<project_id>/...`), and say what could not be done. Unlike gc
+ * (scan_project_files + delete_project_file, best effort) nothing is hidden:
+ * - a regular file outside `keep` is removed; a removal that fails is reported;
+ * - a folder that leads to no kept key, a symlink or any other entry outside
+ *   `keep` is an abnormal state of the store: it is reported and left as it is
+ *   (never removed recursively, never followed);
+ * - a folder that cannot be read is reported.
+ * Returns the storage keys that are still out of line (empty = done).
+ */
+export function sweep_project_files_strict(
+  objects_dir: string,
+  project_id: string,
+  keep: ReadonlySet<string>,
+): string[] {
+  const failed: string[] = [];
+  const folder = project_folder(objects_dir, project_id);
+  if (folder.kind === "unsafe") return [project_id];
+  if (folder.kind === "missing") return keep.size === 0 ? [] : [project_id];
+  const project_dir = folder.path;
+
+  // Folders that lead to a kept file (relative to the project folder).
+  const kept_dirs = new Set<string>();
+  for (const key of keep) {
+    const parts = key.split("/").slice(1, -1);
+    for (let index = 1; index <= parts.length; index += 1) kept_dirs.add(parts.slice(0, index).join("/"));
+  }
+
+  const walk = (directory: string, prefix: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      failed.push(prefix === "" ? project_id : `${project_id}/${prefix}`);
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(directory, entry.name);
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      const key = `${project_id}/${relative}`;
+      let stat: ReturnType<typeof lstatSync>;
+      try {
+        stat = lstatSync(full);
+      } catch {
+        failed.push(key);
+        continue;
+      }
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        if (kept_dirs.has(relative)) walk(full, relative);
+        else failed.push(key);
+        continue;
+      }
+      if (keep.has(key)) {
+        if (!stat.isFile() || stat.isSymbolicLink()) failed.push(key);
+        continue;
+      }
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        failed.push(key);
+        continue;
+      }
+      try {
+        unlinkSync(full);
+      } catch {
+        failed.push(key);
+      }
+    }
+  };
+  walk(project_dir, "");
+  failed.sort();
+  return failed;
+}
+
+/**
  * Remove one file returned by scan_project_files. The objects root, the
  * project folder and every intermediate directory are re-checked with lstat
  * so a symlink that appeared after the scan is never followed.
@@ -423,23 +622,10 @@ export function delete_storage_file(
   project_id: string,
   storage_key: string,
 ): void {
+  // Same root and per-segment rule as every other cleanup path (project_folder).
+  if (!storage_file_is_regular(objects_dir, project_id, storage_key)) return;
   try {
-    const parts = storage_segments(storage_key, project_id);
-    const root = resolve_objects_dir(objects_dir);
-    const root_stat = lstatSync(root);
-    if (root_stat.isSymbolicLink() || !root_stat.isDirectory()) return;
-    let current = root;
-    for (let index = 0; index < parts.length; index += 1) {
-      current = join(current, parts[index]!);
-      const stat = lstatSync(current);
-      if (stat.isSymbolicLink()) return;
-      if (index === parts.length - 1) {
-        if (!stat.isFile()) return;
-        rmSync(current, { force: true });
-        return;
-      }
-      if (!stat.isDirectory()) return;
-    }
+    rmSync(join(resolve_objects_dir(objects_dir), ...storage_key.split("/")), { force: true });
   } catch {
     // Best effort; the next gc reconciles the DB and the disk.
   }

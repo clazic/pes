@@ -509,6 +509,7 @@ claim·heartbeat·wait·complete·인계를 원자적으로 만들고, 질문 �
 - [ ] legacy는 읽기만 하고 쓰기는 이전 안내로 막는다.
 - [ ] `pes watch`가 같은 출력 형식이나 입력 long-poll로 유지된다.
 - [ ] `report/assemble/web`의 쓰기가 PR9 경계를 지난다.
+- [ ] PR12 `validate_import`의 보고서 재생성(`regeneration_format: "provisional"`)을 실제 생성기로 바꾸고 옛 보고서와의 불일치를 문제로 올린다.
 
 **선행**: PR7·9·15
 

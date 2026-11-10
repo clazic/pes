@@ -264,7 +264,7 @@ library 항목은 프로젝트 공통 참고자료이므로 `objects.edition_id=
 7. **승인**: 옛 승인은 `legacy_unverified`로. 승인 스냅숏이 없으면 현재 상태에서 합성하고 `legacy_unverified` 표식을 manifest에 남긴다.
 8. **검증**: 9절. 통과 전에는 `activated`로 바꾸지 않는다.
 9. **활성화**: `import_batches.state='validated'` → `'activated'`, `projects.status='active'`. 이후 원본 JSON은 읽기 전용(`DB:131`).
-10. **되돌리기**: 새 쓰기 전에는 원본 재연결, 새 쓰기 뒤에는 DB 백업에서 복구. 옛 JSON으로 무손실 복귀를 보장하지 않는다(`DB:132`).
+10. **되돌리기**: 새 쓰기 전에는 원본 재연결, 새 쓰기 뒤에는 DB 백업에서 복구. 옛 JSON으로 무손실 복귀를 보장하지 않는다(`DB:132`). 구현(PR12)은 `docs/plan/stage-2-db-guarantees.md` 8.10: 새 쓰기 전은 `rollback_before_write`(배치 `failed`·프로젝트 `archived`), 새 쓰기 뒤는 `restore_project`(번들 시점으로 복귀, 손실 범위·`cursor_epoch + 1` 보고).
 11. **범위**: 실제 프로젝트 이전은 사용자가 따로 허용한 범위에서만. 2단계 시험은 합성 fixture(`DB:134`).
 
 ## 9. 검증과 이전 보고서

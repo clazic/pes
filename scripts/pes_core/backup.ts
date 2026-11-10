@@ -374,7 +374,32 @@ export function export_project(
   assert_out_dir_usable(out_dir);
 
   const snapshot = tx(db, () => read_snapshot(db, project_id));
+  return write_export(snapshot, objects_dir, project_id, out_dir);
+}
 
+/**
+ * Same bundle as export_project, for a caller that already holds the write
+ * transaction (a command). The rows are read from that transaction's view, so
+ * the bundle is exactly the state before the command changes anything. It does
+ * not open a transaction itself (tx() cannot nest).
+ */
+export function export_project_in_tx(
+  db: Db,
+  objects_dir: string,
+  project_id: string,
+  out_dir: string,
+): ExportResult {
+  assert_out_dir_usable(out_dir);
+  const snapshot = read_snapshot(db, project_id);
+  return write_export(snapshot, objects_dir, project_id, out_dir);
+}
+
+function write_export(
+  snapshot: ExportSnapshot,
+  objects_dir: string,
+  project_id: string,
+  out_dir: string,
+): ExportResult {
   const doc: RowsDoc = {
     format_version: BACKUP_FORMAT_VERSION,
     project_id,
@@ -1011,7 +1036,15 @@ function relink_missing_references(db: Db, table: RowsTable): unknown[][] {
   });
 }
 
-function insert_rows(db: Db, table: RowsTable, rows: unknown[][]): void {
+/**
+ * How rows of the shared users/actors tables meet rows that already exist:
+ * "match" (import_bundle) skips an identical row and refuses a different one;
+ * "keep" (project restore) leaves the current row exactly as it is, whatever
+ * it holds now, and only adds a row that is missing.
+ */
+type SharedRowMode = "match" | "keep";
+
+function insert_rows(db: Db, table: RowsTable, rows: unknown[][], shared: SharedRowMode = "match"): void {
   const names = table.columns.map((column) => column.name);
   const quoted_names = names.map((name) => `"${escape_identifier(name)}"`).join(", ");
   const placeholders = names.map(() => "?").join(", ");
@@ -1033,7 +1066,7 @@ function insert_rows(db: Db, table: RowsTable, rows: unknown[][]): void {
         values[id_index]!,
       );
       if (existing !== undefined) {
-        if (row_matches(existing, values, names)) continue;
+        if (shared === "keep" || row_matches(existing, values, names)) continue;
         throw new BackupError("project_conflict", `${table.name} id ${String(values[id_index])} already exists with different values`);
       }
     }
@@ -1281,7 +1314,7 @@ function writeAll(fd: number, bytes: Uint8Array): void {
   }
 }
 
-function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint {
+function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest, shared: SharedRowMode = "match"): bigint {
   // Rows contain cycles (projects <-> project_members/editions, editions <->
   // stages), so per-statement foreign key checks cannot work with any single
   // insertion order. Deferring enforcement until COMMIT keeps the whole restore
@@ -1326,7 +1359,7 @@ function insert_bundle(db: Db, tables: RowsTable[], manifest: Manifest): bigint 
       const rows = table.name === "project_references"
         ? relink_missing_references(db, table)
         : remap_event_columns(table, seq_map);
-      insert_rows(db, table, rows);
+      insert_rows(db, table, rows, shared);
     }
   }
 
@@ -1408,6 +1441,176 @@ export function import_bundle(db: Db, objects_dir: string, bundle_dir: string): 
     }
     throw translate_import_error(error);
   }
+}
+
+// ---------------------------------------------------------------------------
+// project restore (stage 2 PR12)
+//
+// A project is put back to the state of one of its bundles. Unlike
+// import_bundle the project exists: its rows are replaced inside the caller's
+// transaction (a command), so a failed restore leaves the database untouched.
+// Object files are applied by the caller through the PR9 file helpers, after
+// the rows, because a file write cannot be rolled back with the transaction.
+
+/** A bundle that passed every verification step, with its object bytes in memory. */
+export interface PreparedProjectRestore {
+  manifest: Manifest;
+  tables: RowsTable[];
+  objects: Array<{ storage_key: string; bytes: Uint8Array }>;
+  /** ids of the mutation_commits rows the bundle holds (what existed at bundle time). */
+  commit_ids: string[];
+}
+
+/**
+ * Verify a bundle and read everything a restore needs, without touching the
+ * database or the objects folder. Throws BackupError("bundle_invalid") with the
+ * list of problems for a missing, damaged or tampered bundle.
+ */
+export function prepare_project_restore(bundle_dir: string): PreparedProjectRestore {
+  const report = verify_bundle(bundle_dir);
+  if (!report.ok) {
+    throw new BackupError("bundle_invalid", "bundle failed verification", report.problems);
+  }
+  const manifest = read_manifest(bundle_dir);
+  const tables = read_bundle_rows(bundle_dir, manifest);
+  require_project_row(tables, manifest.project_id);
+  validate_bundle_blob_rows(tables, manifest);
+
+  const objects: Array<{ storage_key: string; bytes: Uint8Array }> = [];
+  for (const file of manifest.files) {
+    if (!file.path.startsWith("objects/")) continue;
+    const storage_key = file.path.slice("objects/".length);
+    if (!is_safe_bundle_path(storage_key)) {
+      throw new BackupError("bundle_invalid", `unsafe object path: ${file.path}`, [
+        { code: "path_unsafe", path: file.path, message: `unsafe object path: ${file.path}` },
+      ]);
+    }
+    const object_check = check_bundle_file(bundle_dir, file.path);
+    if (object_check.kind !== "ok") {
+      throw new BackupError("bundle_invalid", `object file is not a regular file: ${file.path}`, [
+        {
+          code: object_check.kind === "symlink" ? "path_unsafe" : "file_missing",
+          path: file.path,
+          message: `object file is not a regular file: ${file.path}`,
+        },
+      ]);
+    }
+    const bytes = new Uint8Array(readFileSync(join(bundle_dir, ...file.path.split("/"))));
+    if (sha256_hex(bytes) !== file.sha256) {
+      throw new BackupError("bundle_invalid", `object hash changed: ${file.path}`, [
+        { code: "hash_mismatch", path: file.path, message: `object hash changed: ${file.path}` },
+      ]);
+    }
+    objects.push({ storage_key, bytes });
+  }
+
+  const commit_ids: string[] = [];
+  const commits = tables.find((table) => table.name === "mutation_commits");
+  if (commits !== undefined) {
+    const id_index = commits.columns.findIndex((column) => column.name === "id");
+    if (id_index >= 0) {
+      for (const row of commits.rows) {
+        const id = row[id_index];
+        if (typeof id === "string") commit_ids.push(id);
+      }
+    }
+  }
+  return { manifest, tables, objects, commit_ids };
+}
+
+/**
+ * Stricter than verify_bundle (PR12): every object file of a prepared bundle
+ * must be the bytes its own blobs row names (sha256 and size), not only the
+ * bytes the manifest lists. A manifest rewritten to match other bytes passes
+ * verify_bundle; it does not pass this. Throws BackupError("bundle_invalid")
+ * listing every object that differs. Reads nothing; changes nothing.
+ */
+export function assert_objects_match_blob_rows(prepared: PreparedProjectRestore): void {
+  const blobs = prepared.tables.find((table) => table.name === "blobs");
+  const expected = new Map<string, { sha256: unknown; size: unknown }>();
+  if (blobs !== undefined) {
+    const key_index = blobs.columns.findIndex((column) => column.name === "storage_key");
+    const sha_index = blobs.columns.findIndex((column) => column.name === "sha256");
+    const size_index = blobs.columns.findIndex((column) => column.name === "size");
+    if (key_index < 0 || sha_index < 0 || size_index < 0) {
+      throw invalid_row("blobs table lacks storage_key, sha256 or size");
+    }
+    for (const row of blobs.rows) {
+      const key = row[key_index];
+      if (typeof key === "string") expected.set(key, { sha256: row[sha_index], size: row[size_index] });
+    }
+  }
+  const problems: BundleProblem[] = [];
+  for (const object of prepared.objects) {
+    const path = `objects/${object.storage_key}`;
+    const row = expected.get(object.storage_key);
+    if (row === undefined) {
+      problems.push({ code: "extra_file", path, message: `object file has no blobs row: ${object.storage_key}` });
+      continue;
+    }
+    const size = row.size;
+    const size_text = typeof size === "string" || typeof size === "number" || typeof size === "bigint" ? String(size) : "";
+    if (size_text !== String(object.bytes.byteLength)) {
+      problems.push({ code: "size_mismatch", path, message: `object size differs from its blobs row: ${object.storage_key}` });
+    } else if (row.sha256 !== sha256_hex(object.bytes)) {
+      problems.push({ code: "hash_mismatch", path, message: `object hash differs from its blobs row: ${object.storage_key}` });
+    }
+  }
+  if (problems.length > 0) {
+    throw new BackupError("bundle_invalid", "object files differ from their blobs rows", problems);
+  }
+}
+
+/**
+ * Replace the rows of one project with the bundle's rows. The caller holds the
+ * write transaction. Other projects are never touched; users and actors are
+ * neither compared nor replaced: an existing row stays exactly as it is now
+ * (a renamed user or a disabled actor does not block a restore) and only a
+ * missing row is added.
+ * Returns the new cursor_epoch (max(target, bundle) + 1).
+ */
+export function replace_project_rows_in_tx(
+  db: Db,
+  prepared: PreparedProjectRestore,
+  project_id: string,
+): bigint {
+  const manifest = prepared.manifest;
+  if (manifest.project_id !== project_id) {
+    throw new BackupError("project_mismatch", "the bundle belongs to another project");
+  }
+  const meta = db.get<{ database_instance_id: string }>(
+    "SELECT database_instance_id FROM db_meta WHERE id = 1",
+  );
+  if (meta === undefined) throw new Error("db_meta row with id = 1 is missing");
+  if (meta.database_instance_id !== manifest.database_instance_id) {
+    throw new BackupError("instance_mismatch", "the bundle was made by another database");
+  }
+  if (db.get("SELECT 1 AS present FROM projects WHERE id = ?", project_id) === undefined) {
+    throw new BackupError("project_not_found", `project ${project_id} does not exist`);
+  }
+
+  try {
+    // RESTRICT foreign keys and the project/member and question/version cycles
+    // make a fixed delete order impossible; deferring enforcement to COMMIT
+    // lets the rows go in any order, and the same rows (or the bundle's) are
+    // back before the transaction ends.
+    db.exec("PRAGMA defer_foreign_keys = ON");
+    for (const name of list_data_tables(db)) {
+      if (name === "projects") continue;
+      if (!table_columns(db, name).some((column) => column.name === "project_id")) continue;
+      db.run(`DELETE FROM "${escape_identifier(name)}" WHERE project_id = ?`, project_id);
+    }
+    db.run('DELETE FROM "projects" WHERE id = ?', project_id);
+    // users and actors are shared by every project: the current rows stay as they are.
+    return insert_bundle(db, prepared.tables, manifest, "keep");
+  } catch (error) {
+    throw translate_import_error(error);
+  }
+}
+
+/** True when no foreign key is violated now (checked before irreversible file work). */
+export function foreign_keys_hold(db: Db): boolean {
+  return db.all("PRAGMA foreign_key_check").length === 0;
 }
 
 // ---------------------------------------------------------------------------
