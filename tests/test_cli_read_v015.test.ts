@@ -71,9 +71,10 @@ test("읽기 13개는 pes.py CMDS 에 그대로 있고, 새 코어 명령은 더
  */
 function expect_same_stdout(command: string, now: string, base: string, label: string): void {
   if (command === "watch" && now !== base) {
-    const m = base.match(/^tail -n0 -F (.+) \| grep --line-buffered FEEDBACK\n$/);
+    // Windows 의 print 는 줄 끝이 \r\n 이다 — 줄 끝은 기준본과 같아야 하고, 경로 단어만 다를 수 있다.
+    const m = base.match(/^tail -n0 -F (.+) \| grep --line-buffered FEEDBACK(\r?\n)$/);
     assert.ok(m && m[1]!.includes("\\") && !m[1]!.includes("'"), `${label}: 달라진 이유가 역슬래시 경로 quoting 이 아니다\n새:  ${now}기준: ${base}`);
-    assert.equal(now, `tail -n0 -F '${m[1]}' | grep --line-buffered FEEDBACK\n`, `${label}: 경로 단어만 작은따옴표로 감싼다`);
+    assert.equal(now, `tail -n0 -F '${m[1]}' | grep --line-buffered FEEDBACK${m[2]}`, `${label}: 경로 단어만 작은따옴표로 감싼다`);
     return;
   }
   assert.equal(now, base, `${label}: stdout`);
@@ -83,6 +84,10 @@ test("A1b watch 비교 허용 규칙: 역슬래시 경로의 작은따옴표만 
   const base = "tail -n0 -F <ROOT>\\pes-projects\\p/feedback.log | grep --line-buffered FEEDBACK\n";
   expect_same_stdout("watch", "tail -n0 -F '<ROOT>\\pes-projects\\p/feedback.log' | grep --line-buffered FEEDBACK\n", base, "허용");
   expect_same_stdout("watch", base, base, "같음");
+  // Windows 줄 끝(\r\n): 같은 규칙, 줄 끝은 기준본과 같아야 한다.
+  const crlf = base.replace(/\n$/, "\r\n");
+  expect_same_stdout("watch", "tail -n0 -F '<ROOT>\\pes-projects\\p/feedback.log' | grep --line-buffered FEEDBACK\r\n", crlf, "허용(CRLF)");
+  assert.throws(() => expect_same_stdout("watch", "tail -n0 -F '<ROOT>\\pes-projects\\p/feedback.log' | grep --line-buffered FEEDBACK\n", crlf, "x"), "줄 끝이 기준본과 다르면 거부");
   assert.throws(() => expect_same_stdout("watch", "tail -n0 -F '<ROOT>\\pes-projects\\other/feedback.log' | grep --line-buffered FEEDBACK\n", base, "x"), "경로가 다르면 거부");
   assert.throws(() => expect_same_stdout("watch", "tail -n0 -F \"<ROOT>\\pes-projects\\p/feedback.log\" | grep --line-buffered FEEDBACK\n", base, "x"), "큰따옴표는 거부");
   const plain = "tail -n0 -F <ROOT>/pes-projects/p/feedback.log | grep --line-buffered FEEDBACK\n";
