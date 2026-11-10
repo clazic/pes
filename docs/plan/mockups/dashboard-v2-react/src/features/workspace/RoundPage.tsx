@@ -367,17 +367,17 @@ export function RoundPage() {
   const tasks = ws.tasks;
   const want = sp.get("t") ?? stepForHash(location.hash, tasks);
   // 이 탭에서 본 단계 — 있던 단계가 사라지면(풀림) “마쳤습니다”를 보인다
-  // (ref를 그리기 중에 읽지 않고, 단계 목록이 바뀔 때 상태로 제목을 기억한다)
-  const [seen, setSeen] = React.useState<Record<string, string>>(() => Object.fromEntries(tasks.map((t) => [t.id, t.title])));
+  // (ref를 그리기 중에 읽지 않고, 단계 목록이 바뀔 때 상태로 제목을 기억한다. Map이라 ?t=constructor 같은 상속 이름을 단계로 오인하지 않는다)
+  const [seen, setSeen] = React.useState<Map<string, string>>(() => new Map(tasks.map((t) => [t.id, t.title])));
   const [seenTasks, setSeenTasks] = React.useState(tasks);
   if (seenTasks !== tasks) {
     setSeenTasks(tasks);
-    const next = { ...seen };
-    for (const t of tasks) next[t.id] = t.title;
+    const next = new Map(seen);
+    for (const t of tasks) next.set(t.id, t.title);
     setSeen(next);
   }
   const found = want ? tasks.find((t) => t.id === want) : undefined;
-  const finished = Boolean(want && !found && seen[want] !== undefined);
+  const finished = Boolean(want && !found && seen.has(want));
   const cur = found ?? (finished ? null : (tasks.find((t) => t.counted) ?? tasks[0] ?? null));
   // 방금 보낸 답 확인 — 질문 단계를 떠나면 지운다
   const sent = useAnswersSent();
@@ -455,7 +455,7 @@ export function RoundPage() {
       <div className="mt-2 flex justify-end desk:hidden">
         <PhoneToolsToggle />
       </div>
-      {sentHere ? <SentPanel ws={ws} tasks={tasks} roundPath={roundPath} note={sentHere} /> : finished ? <DonePanel ws={ws} tasks={tasks} roundPath={roundPath} doneTitle={seen[want!] ?? "이 일"} /> : <div className="mt-4 min-w-0">{body}</div>}
+      {sentHere ? <SentPanel ws={ws} tasks={tasks} roundPath={roundPath} note={sentHere} /> : finished ? <DonePanel ws={ws} tasks={tasks} roundPath={roundPath} doneTitle={seen.get(want!) ?? "이 일"} /> : <div className="mt-4 min-w-0">{body}</div>}
     </>
   );
 }

@@ -45,6 +45,7 @@ function subscribeNow(cb: () => void) {
   tickListeners.add(cb);
   if (ticker === undefined) {
     ticker = window.setInterval(() => {
+      clock = Date.now();
       tickListeners.forEach((l) => l());
     }, 15000);
   }
@@ -57,14 +58,21 @@ function subscribeNow(cb: () => void) {
   };
 }
 /**
- * 그릴 때의 지금 시각 — 바깥(시계)에서 읽는 값이라 useSyncExternalStore로 읽는다.
- * 15초 타이머가 다시 그리게 하고, 초 단위로 잘라 한 번 그리는 동안 같은 값을 돌려준다.
+ * 그릴 때의 지금 시각(밀리초 보존) — 바깥(시계)에서 읽는 값이라 useSyncExternalStore로 읽는다.
+ * 스냅숏 값은 저장해 두고 15초 틱마다 새로 잡는다(매 getSnapshot 호출에서 Date.now를 부르지 않는다).
+ * 새 자료로 다시 그릴 때는 그때의 시각을 쓰도록, 지난 스냅숏에서 100ms 넘게 흘렀을 때만 미리 새로 잡는다.
  */
-function nowSnapshot() {
-  return Math.floor(Date.now() / 1000) * 1000;
+let clock = Date.now();
+function refreshClock() {
+  const t = Date.now();
+  if (Math.abs(t - clock) >= 100) clock = t;
+}
+function clockSnapshot() {
+  return clock;
 }
 export function useNow() {
-  return React.useSyncExternalStore(subscribeNow, nowSnapshot, nowSnapshot);
+  refreshClock();
+  return React.useSyncExternalStore(subscribeNow, clockSnapshot, clockSnapshot);
 }
 
 function minutesBetween(fromIso: string, now: number) {
