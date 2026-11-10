@@ -25,6 +25,7 @@ import { canonical_object_store_dir } from "./commands/shared.ts";
 import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { read_storage_bytes, sha256_hex } from "./files.ts";
+import { float_pointers, parse_legacy_json } from "./report.ts";
 
 // ---------------------------------------------------------------------------
 // Public shapes (the test interface lives in tests/helpers/legacy_env.ts)
@@ -1343,6 +1344,8 @@ interface ItemCore {
 }
 
 /** The artifact-version fields of one old item record (no rows are written here). */
+const FLOATS_KEY = "project.json#float-tokens";
+
 function item_core(
   ctx: BuildContext,
   index: number,
@@ -1385,6 +1388,16 @@ function item_core(
   }
   if (raw.request !== undefined) {
     plan_entry_category(ctx.entries, "unknown_field", report_path, `${item_pointer}/request`, raw.request);
+  }
+  const floats = ctx.parsed.get(FLOATS_KEY);
+  if (report_path === "project.json" && floats instanceof Set && Array.isArray(raw.stats)) {
+    const written: string[] = [];
+    raw.stats.forEach((stat, i) => {
+      if (stat !== null && typeof stat === "object") {
+        for (const field of Object.keys(stat)) if (floats.has(`${item_pointer}/stats/${i}/${field}`)) written.push(`${i}/${field}`);
+      }
+    });
+    if (written.length > 0) metadata_extra.stat_floats = written;
   }
   // items[].path: the original relative path is kept; a missing file is listed.
   if (raw.path !== undefined) {
@@ -3221,6 +3234,8 @@ function build_plan(dir: string): PreparedImport {
     }
     try {
       parsed.set(path, JSON.parse(text));
+      // "value": 12.0 reads as 12; the old report printed 12.0, so remember which stats numbers were written that way.
+      if (path === "project.json") parsed.set(FLOATS_KEY, float_pointers(parse_legacy_json(text)));
     } catch {
       plan_entry_category(entries, "parse_error", path);
     }

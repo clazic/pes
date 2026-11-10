@@ -14,16 +14,17 @@
 
 import type { Db } from "./db.ts";
 import { read_storage_bytes } from "./files.ts";
-import { blank_item, feedback_entries, local_stamp, new_stage, STAGE_KEYS, truthy, type Dict, type FeedbackEntry } from "./report.ts";
+import { blank_item, feedback_entries, local_stamp, new_stage, PyFloat, STAGE_KEYS, truthy, type Dict, type FeedbackEntry } from "./report.ts";
 
 type Row = Record<string, unknown>;
 
-/** Roles of artifacts the report commands write; they are never project items. */
-export const REPORT_ROLES = ["stage_report", "final_output"] as const;
-
-/** SQL fragment: the artifact version `v` is not one of the generated report files. */
-export const NOT_A_REPORT_SQL =
-  "COALESCE(json_extract(v.metadata_json, '$.role'), '') NOT IN ('stage_report', 'final_output')";
+/**
+ * SQL fragment: the artifact version aliased `alias` is not one of the generated report files
+ * (metadata.role stage_report / final_output). The report commands tag their artifacts with that role.
+ */
+export function not_a_report_sql(alias: string): string {
+  return `COALESCE(json_extract(${alias}.metadata_json, '$.role'), '') NOT IN ('stage_report', 'final_output')`;
+}
 
 function num(value: unknown): number {
   return typeof value === "bigint" ? Number(value) : typeof value === "number" ? value : 0;
@@ -115,7 +116,7 @@ export function build_project_view(
     pes: 1,
     topic: project.topic,
     slug: project.slug,
-    created: num(project.created_at) > 0 ? new Date(num(project.created_at)).toISOString().slice(0, 10) : "",
+    created: num(project.created_at) > 0 ? local_stamp(num(project.created_at)).slice(0, 10) : "",
     current: STAGE_KEYS[0],
     complete: edition?.status === "completed",
     settings: Object.fromEntries(Object.entries(edition_settings).filter(([key]) => key !== "legacy_extra")),
@@ -283,6 +284,15 @@ export function build_project_view(
     item.details = typeof row.body_md === "string" ? row.body_md : "";
     item.sources = citations.get(String(row.version_id)) ?? [];
     item.stats = parse(row.stats, []);
+    // numbers the old file wrote as 12.0 (the importer remembers which) are shown as 12.0 again
+    if (Array.isArray(extra.stat_floats) && Array.isArray(item.stats)) {
+      for (const mark of extra.stat_floats) {
+        const [index, ...field] = String(mark).split("/");
+        const stat = (item.stats as unknown[])[Number(index)];
+        const name = field.join("/");
+        if (stat !== null && typeof stat === "object" && typeof (stat as Dict)[name] === "number") (stat as Dict)[name] = new PyFloat((stat as Dict)[name] as number);
+      }
+    }
     const shots = get("shots");
     item.shots = Array.isArray(shots) ? shots : [];
     item.confidence = "confidence_original" in extra ? extra.confidence_original : (row.confidence ?? "");
@@ -357,28 +367,36 @@ export function build_project_view(
   // unprocessed answers: imported answer files that nobody marked as processed
   const pending: PendingAnswer[] = [];
   const files: Array<{ name: string; text: string }> = [];
-  for (const row of db.all<{ original_name: string | null; storage_key: string }>(
-    `SELECT b.original_name AS original_name, b.storage_key AS storage_key
-       FROM submissions s JOIN blobs b ON b.project_id = s.project_id AND b.id = s.raw_blob_id
-      WHERE s.project_id = ? AND s.via = 'import' AND b.original_name IS NOT NULL
-      ORDER BY b.original_name`,
+  // Every submission counts, whatever its channel (import, web, cli, http ...). One that kept its raw
+  // answer file is named by that file; one that did not is named submission-<id>.json.
+  for (const row of db.all<{ id: string; original_name: string | null; storage_key: string | null; stage_key: string | null; purpose: string | null }>(
+    `SELECT s.id AS id, b.original_name AS original_name, b.storage_key AS storage_key,
+            st.key AS stage_key, qs.purpose AS purpose
+       FROM submissions s
+       LEFT JOIN blobs b ON b.project_id = s.project_id AND b.id = s.raw_blob_id
+       LEFT JOIN question_sets qs ON qs.project_id = s.project_id AND qs.id = s.set_id
+       LEFT JOIN stages st ON st.project_id = qs.project_id AND st.id = qs.stage_id
+      WHERE s.project_id = ?
+      ORDER BY coalesce(b.original_name, 'submission-' || s.id || '.json')`,
     project_id,
   )) {
-    const name = row.original_name as string;
+    const name = row.original_name ?? `submission-${row.id}.json`;
     let text = "";
     let doc: Dict = {};
-    try {
-      text = new TextDecoder().decode(read_storage_bytes(objects_dir, project_id, row.storage_key));
-      doc = record(JSON.parse(text));
-    } catch {
-      doc = {};
+    if (row.storage_key !== null) {
+      try {
+        text = new TextDecoder().decode(read_storage_bytes(objects_dir, project_id, row.storage_key));
+        doc = record(JSON.parse(text));
+      } catch {
+        doc = {};
+      }
+      files.push({ name, text });
     }
-    files.push({ name, text });
     if (processed.has(name)) continue;
     pending.push({
       name,
-      stage: typeof doc.stage === "string" ? doc.stage : "",
-      kind: typeof doc.kind === "string" ? doc.kind : "feedback",
+      stage: typeof doc.stage === "string" ? doc.stage : (row.stage_key ?? ""),
+      kind: typeof doc.kind === "string" ? doc.kind : (row.purpose ?? "feedback"),
       round: typeof doc.round === "number" ? doc.round : 0,
       text: typeof doc.text === "string" ? doc.text : "",
     });

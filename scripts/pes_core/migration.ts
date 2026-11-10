@@ -25,7 +25,7 @@ import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { read_storage_bytes, sha256_hex } from "./files.ts";
 import { new_id } from "./ids.ts";
-import { feedback_entries, normalize_project, stage_report, without_report_time, type Dict, type FeedbackEntry } from "./report.ts";
+import { feedback_entries, normalize_project, parse_legacy_json, stage_report, without_report_time, type Dict, type FeedbackEntry } from "./report.ts";
 import {
   build_validation_plan,
   is_regenerable_source_path,
@@ -1674,13 +1674,13 @@ function legacy_project_from_bytes(bytes: Map<string, Uint8Array>): Dict | null 
   const raw = bytes.get("project.json");
   if (raw === undefined) return null;
   try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(raw));
+    const parsed: unknown = parse_legacy_json(new TextDecoder().decode(raw));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     let library: Dict | null = null;
     const library_bytes = bytes.get("library.json");
     if (library_bytes !== undefined) {
       try {
-        const lib: unknown = JSON.parse(new TextDecoder().decode(library_bytes));
+        const lib: unknown = parse_legacy_json(new TextDecoder().decode(library_bytes));
         if (lib !== null && typeof lib === "object" && !Array.isArray(lib)) library = lib as Dict;
       } catch {
         library = null;

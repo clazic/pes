@@ -57,20 +57,6 @@ const KIND_TXT: Record<string, string> = {
   output: "산출물",
   schedule: "일정",
 };
-const EXTRA_LABELS: Record<string, string> = {
-  client_city: "발주처 도시",
-  "client_city=ulsan": "울산",
-  seoul_station: "서울 역세권형 집계",
-  "seoul_station=split": "유형 분리",
-  "seoul_station=merge": "합산",
-  asof: "기준일",
-  official: "집계 근거",
-  "official=self": "고시 원문 전수 대조",
-  "official=foia": "정보공개청구 병행",
-  outside: "특·광역시 밖 사례",
-  "outside=compare": "제언 장에서 인용만",
-  "outside=full": "현황까지 포함",
-};
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..", "..");
@@ -78,12 +64,31 @@ const REPO_ROOT = join(HERE, "..", "..");
 // ---------------------------------------------------------------------------
 // Python-compatible helpers
 
+/**
+ * A JSON number written with a decimal point whose value is a whole number (12.0, 3.50 is not one).
+ * JavaScript would read it as the integer 12 and print "12"; Python prints "12.0". The legacy
+ * project reader keeps the difference so the regenerated report matches what the old tool wrote.
+ */
+export class PyFloat {
+  readonly v: number;
+  constructor(v: number) {
+    this.v = v;
+  }
+  valueOf(): number {
+    return this.v;
+  }
+  toString(): string {
+    return `${this.v}.0`;
+  }
+}
+
 function is_dict(value: unknown): value is Dict {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof PyFloat);
 }
 
 /** Python truthiness: None, False, 0, "", [] and {} are false. */
 export function truthy(value: unknown): boolean {
+  if (value instanceof PyFloat) return value.v !== 0;
   if (value === null || value === undefined || value === false || value === 0 || value === "") return false;
   if (Array.isArray(value)) return value.length > 0;
   if (is_dict(value)) return Object.keys(value).length > 0;
@@ -106,6 +111,7 @@ export function py_str(value: unknown): string {
   if (value === true) return "True";
   if (value === false) return "False";
   if (typeof value === "string") return value;
+  if (value instanceof PyFloat) return value.toString();
   if (Array.isArray(value)) return `[${value.map(py_repr).join(", ")}]`;
   if (is_dict(value)) {
     return `{${Object.entries(value)
@@ -143,6 +149,7 @@ export function py_json(value: unknown): string {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
   if (typeof value === "bigint") return value.toString();
+  if (value instanceof PyFloat) return value.toString();
   if (typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(py_json).join(", ")}]`;
   if (is_dict(value)) {
@@ -232,6 +239,93 @@ function show_val(qid: string, value: unknown, opt: Map<string, unknown>): strin
   }
   const key = `${qid}\u0000${py_str(value)}`;
   return py_str(opt.has(key) ? opt.get(key) : value);
+}
+
+
+/** JSON pointers (`/a/0/b`) of every whole-number float token in a value read by parse_legacy_json. */
+export function float_pointers(value: unknown, prefix = "", out: Set<string> = new Set()): Set<string> {
+  if (value instanceof PyFloat) out.add(prefix);
+  else if (Array.isArray(value)) value.forEach((entry, index) => float_pointers(entry, `${prefix}/${index}`, out));
+  else if (is_dict(value)) for (const [key, entry] of Object.entries(value)) float_pointers(entry, `${prefix}/${key}`, out);
+  return out;
+}
+
+/**
+ * JSON.parse that keeps whole-number floats ("12.0") as PyFloat. Exponent forms (1e3) are plain numbers.
+ * Used for the project files an old tool wrote; any malformed text throws like JSON.parse.
+ */
+export function parse_legacy_json(text: string): unknown {
+  JSON.parse(text); // reject malformed input exactly as JSON.parse does
+  let i = 0;
+  const skip = (): void => {
+    while (i < text.length && " \t\n\r".includes(text[i]!)) i += 1;
+  };
+  const value = (): unknown => {
+    skip();
+    const c = text[i]!;
+    if (c === "{") {
+      i += 1;
+      const out: Dict = {};
+      skip();
+      if (text[i] === "}") {
+        i += 1;
+        return out;
+      }
+      for (;;) {
+        skip();
+        const key = string_token();
+        skip();
+        i += 1; // ':'
+        out[key] = value();
+        skip();
+        if (text[i] === ",") i += 1;
+        else {
+          i += 1; // '}'
+          return out;
+        }
+      }
+    }
+    if (c === "[") {
+      i += 1;
+      const out: unknown[] = [];
+      skip();
+      if (text[i] === "]") {
+        i += 1;
+        return out;
+      }
+      for (;;) {
+        out.push(value());
+        skip();
+        if (text[i] === ",") i += 1;
+        else {
+          i += 1; // ']'
+          return out;
+        }
+      }
+    }
+    if (c === '"') return string_token();
+    const m = text.slice(i, i + 64).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    if (m !== null) {
+      i += m[0].length;
+      const n = Number(m[0]);
+      return /^-?\d+\.\d+$/.test(m[0]) && Number.isInteger(n) ? new PyFloat(n) : n;
+    }
+    for (const word of ["true", "false", "null"]) {
+      if (text.startsWith(word, i)) {
+        i += word.length;
+        return word === "true" ? true : word === "false" ? false : null;
+      }
+    }
+    throw new Error("unexpected JSON token");
+  };
+  const string_token = (): string => {
+    const start = i;
+    i += 1;
+    while (text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+    i += 1;
+    return JSON.parse(text.slice(start, i)) as string;
+  };
+  return value();
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +499,7 @@ export function stage_markdown(p: Dict, stage: string, feedback: ReadonlyArray<F
   if (sets.length > 0) {
     L.push("## 2. 이 단계에서 정한 것 (시작 질문 답)", "", "| 질문 | 답 |", "|---|---|");
     for (const [k, v] of sets) {
-      const label = lab.has(k) ? lab.get(k) : (EXTRA_LABELS[k] ?? k);
+      const label = lab.has(k) ? lab.get(k) : k;
       L.push(`| ${py_str(label)} | ${show_val(k, v, opt).replace(/\|/g, "/")} |`);
     }
     L.push("");
@@ -660,7 +754,8 @@ const BUILT_FIELD = /"built": "\d{4}-\d{2}-\d{2} \d{2}:\d{2}"/g;
 
 /** The "작성 <시각>" line and the page's built time are not part of the comparison. */
 export function without_report_time(text: string): string {
-  return text.replace(WRITTEN_AT_LINE, "작성 <시각> · PES").replace(BUILT_FIELD, '"built": "<시각>"');
+  // A report the old tool wrote on Windows has CRLF line ends; the comparison does not care.
+  return text.replace(/\r\n/g, "\n").replace(WRITTEN_AT_LINE, "작성 <시각> · PES").replace(BUILT_FIELD, '"built": "<시각>"');
 }
 
 /** Format epoch milliseconds like pes.py `now()`: local "YYYY-MM-DD HH:MM". */

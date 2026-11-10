@@ -912,6 +912,12 @@ def stage_md(d: Path, p: dict, s: str) -> str:
     return "\n".join(L) + "\n"
 
 
+def write_lf(path: Path, text: str):
+    """보고서 파일은 플랫폼과 무관하게 LF 로 쓴다 (Windows 에서 write_text 는 \\n 을 \\r\\n 으로 바꾼다)."""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def cmd_report(args):
     d, s = pdir(args[0]), stage_arg(args[1])
     p = load(d)
@@ -920,18 +926,18 @@ def cmd_report(args):
     rd.mkdir(parents=True, exist_ok=True)
     fm = report_formats(p)
     txt = stage_md(d, p, s)
-    (rd / "report.md").write_text(txt, encoding="utf-8")
+    write_lf(rd / "report.md", txt)
     title = f"{p.get('topic', '')} — {REPORT_NAME[s]}"
     meta = {"title": title, "stage": s, "label": LABEL[s], "name": REPORT_NAME[s], "md": txt, "built": now(),
             "round": st["round"], "approved_at": st.get("approved_at")}
-    (rd / "report.html").write_text(fill(TPL / "stage-report.html", title, meta), encoding="utf-8")
+    write_lf(rd / "report.html", fill(TPL / "stage-report.html", title, meta))
     notes = []
     ej = rd / "eli5.json"
     if ej.exists():
         e = json.loads(ej.read_text(encoding="utf-8"))
         e.setdefault("title", REPORT_NAME[s])
         e["stage_label"], e["topic"], e["name"] = LABEL[s], p.get("topic", ""), REPORT_NAME[s]
-        (rd / "eli5.html").write_text(fill(TPL / "eli5.html", e["title"], e), encoding="utf-8")
+        write_lf(rd / "eli5.html", fill(TPL / "eli5.html", e["title"], e))
     elif "eli5" in fm:
         notes.append(f"eli5: {ej} 를 써야 합니다 (스키마는 pes:core 「단계 보고서」) — 쓴 뒤 report 를 다시 실행")
     reg = []
@@ -987,9 +993,9 @@ def cmd_assemble(args):
         out += [""] + notes
     (d / "out").mkdir(exist_ok=True)
     f = d / "out" / "report.md"
-    f.write_text("\n".join(out) + "\n", encoding="utf-8")
+    write_lf(f, "\n".join(out) + "\n")
     print(f"{f}  (장·절 {len(items)}개, 각주 {len(notes)}개)")
-    (d / "out" / "sources.json").write_text(json.dumps(srcs_out, ensure_ascii=False, indent=1), encoding="utf-8")
+    write_lf(d / "out" / "sources.json", json.dumps(srcs_out, ensure_ascii=False, indent=1))
 
 
 VERIFIED_METHODS = VERIFIED  # 원문·원자료를 직접 확인한 방법 (대시보드와 같은 기준)
@@ -1013,7 +1019,7 @@ def cmd_web(args):
         cover = json.loads((od / "cover.json").read_text(encoding="utf-8"))
     data = {"topic": p.get("topic", ""), "md": md, "sources": srcs, "cover": cover, "built": now(), "built_date": now()[:10]}
     f = od / "report.html"
-    f.write_text(fill(TPL / "final-report.html", cover.get("title") or p.get("topic", "최종 보고서"), data), encoding="utf-8")
+    write_lf(f, fill(TPL / "final-report.html", cover.get("title") or p.get("topic", "최종 보고서"), data))
     ok = sum(1 for s in srcs if s.get("verified"))
     print(f"{f}  (출처 {len(srcs)}개 · 확인됨 {ok}개{'' if cover else ' · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다'})")
 
@@ -1664,7 +1670,7 @@ def listening_owners(ports):
         elif os.name == "nt":
             if shutil.which("netstat"):
                 _, out = run_quiet(["netstat", "-ano", "-p", "TCP"], 15)
-                for m in re.finditer(r"^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)", out, re.M):
+                for m in re.finditer(r"^\s*TCP\s+\S+:(\d+)\s+(?:0\.0\.0\.0:0|\[::\]:0)\s+\S+\s+(\d+)", out, re.M):  # 상태 문구는 로캘마다 다르다: 외부 주소가 *:0 이면 LISTEN
                     if int(m.group(1)) in ports:
                         name = ""
                         if shutil.which("tasklist"):
@@ -1706,7 +1712,7 @@ def doctor_db(R, h: Path):
         R.add("데이터베이스", "ok", f"데이터베이스 {db_file}", f"프로젝트 {st.get('projects', 0)}개 · 스키마 최신")
     if RISKY_PATH.search(str(h)):
         R.add("환경", "warn", "PES 홈 경로에 공백·따옴표·괄호 같은 특수 문자가 있음 (명령 quoting 위험)",
-              f"{h} — Monitor 에 넣는 watch 명령처럼 셸에 붙이는 경로는 따옴표가 필요합니다. 공백·따옴표 없는 폴더로 `home` 명령으로 옮기는 편이 안전합니다")
+              f"{h} — watch 는 경로를 스스로 따옴표로 묶지만, 이 경로를 셸 명령에 직접 붙이는 다른 곳(Monitor 명령·스크립트)에는 따옴표가 필요합니다. 공백·따옴표 없는 폴더로 `home` 명령으로 옮기는 편이 안전합니다")
 
 
 def doctor_project_db(R, d: Path):
@@ -1830,19 +1836,21 @@ class DocReport:
     def __init__(self):
         self.rows = []
         self.no_fix = False  # True 동안 더하는 행은 진단만 하고 --fix 대상에서 뺀다
+        self.ro = False  # True 동안 더하는 행은 고칠 수 있다고 알리되 --fix 로는 고치지 않는다 (이전 전 프로젝트)
 
     def add(self, group, level, title, detail="", fix=None):
         if self.no_fix:
             fix = None
-        self.rows.append({"group": group, "level": level, "title": title, "detail": detail, "fix": fix})
+        self.rows.append({"group": group, "level": level, "title": title, "detail": detail, "fix": fix, "ro": self.ro and fix is not None})
 
 
 NET = False
 
 
 def cmd_doctor(args):
-    global NET
+    global NET, SOFT_DB
     NET = "--net" in args
+    SOFT_DB = True
     fix = "--fix" in args
     as_json = "--json" in args
     tgt = [a for a in args if not a.startswith("--")]
@@ -1868,10 +1876,12 @@ def cmd_doctor(args):
         if outside:
             R.add(d.name, "info", "PES 홈 밖을 가리키는 폴더(심볼릭 링크)", f"{d} — 진단만 하고 --fix 로 고치지 않습니다 (임시 파일·잠금·서버 기록을 지우지 않음)")
         R.no_fix = bool(outside)
+        R.ro = db_core() and not outside  # 이 줄에 닿은 폴더는 DB 가 서비스하는 프로젝트가 아니다: 진단만 하고 쓰지 않는다
         try:
             doctor_project(R, d)
         finally:
             R.no_fix = False
+            R.ro = False
     if not tgt and h.exists():
         stray = [x.name for x in h.iterdir() if x.is_dir() and not (x / "project.json").exists() and not x.name.startswith(".") and x.name not in served]
         if stray:
@@ -1879,7 +1889,9 @@ def cmd_doctor(args):
     fixed = []
     if fix:
         for r in R.rows:
-            if r["fix"]:
+            if r["fix"] and r.get("ro"):
+                r["skipped"] = "이전 전 프로젝트라 고치지 않음 — 먼저 이전하세요"
+            elif r["fix"]:
                 try:
                     r["fix"]()
                     r["fixed"] = True
@@ -1892,7 +1904,7 @@ def cmd_doctor(args):
             except Exception:
                 pass
     if as_json:
-        print(json.dumps([{k: v for k, v in r.items() if k != "fix"} | {"fixable": bool(r["fix"])} for r in R.rows], ensure_ascii=False, indent=1))
+        print(json.dumps([{k: v for k, v in r.items() if k not in ("fix", "ro")} | {"fixable": bool(r["fix"])} for r in R.rows], ensure_ascii=False, indent=1))
         if db_core() and any(r["level"] == "bad" for r in R.rows):
             sys.exit(1)  # DB 경로: 문제가 있으면 --json 도 종료 1
         return
@@ -1902,7 +1914,7 @@ def cmd_doctor(args):
         if r["group"] != last:
             print(f"\n■ {r['group']}")
             last = r["group"]
-        tail = " → 고침" if r.get("fixed") else (" (--fix 로 고칠 수 있음)" if r["fix"] else "")
+        tail = " → 고침" if r.get("fixed") else (f" ({r['skipped']})" if r.get("skipped") else (" (--fix 로 고칠 수 있음)" if r["fix"] else ""))
         print(f"  {MARK[r['level']]} {r['title']}" + (f" — {r['detail']}" if r["detail"] else "") + tail)
     cnt = {k: sum(1 for r in R.rows if r["level"] == k) for k in MARK}
     nfix = sum(1 for r in R.rows if r["fix"] and not r.get("fixed"))
@@ -1960,10 +1972,13 @@ def bridge_soft(op, slug=None, args=None):
     """bridge 와 같지만 실패해도 아무것도 출력하지 않고 None 을 돌려준다 (읽기 전용 점검용)."""
     import contextlib
     import io
+    global _LAST_BRIDGE_ERROR
+    buf = io.StringIO()
     try:
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(buf):
             return bridge(op, slug, args)
     except SystemExit:
+        _LAST_BRIDGE_ERROR = (buf.getvalue().strip().splitlines() or [""])[0][:120]
         return None
 
 
@@ -2373,15 +2388,27 @@ def db_home(args):
 # 읽기는 PR12 serving_path 를 따른다: 프로젝트가 DB 에 있고 active 이면 DB, 그 밖(DB 에 없음·staging·failed·archived)은
 # 옛 project.json 을 읽는다 (바이트·mtime 불변). 옛 프로젝트의 쓰기(report·assemble·web 포함)는 '이전' 안내로 막는다.
 _SERVING = {}
+_LAST_BRIDGE_ERROR = ""
+SOFT_DB = False  # doctor 만 True: DB 를 못 읽어도 진단을 계속한다
+
+
+def db_unreadable(why=""):
+    die("DB 를 읽지 못했습니다 — `doctor` 로 확인하세요" + (f" ({why})" if why else "") + ". "
+        "읽을 수 없는 DB 를 없는 것으로 보고 옛 project.json 을 현재 상태처럼 보여 주지 않습니다", 1)
 
 
 def serving(slug) -> str:
-    """'database' | 'legacy'(DB 에 있으나 아직 active 아님) | 'none'(DB 에 없음). 플래그가 꺼져 있으면 항상 'none'."""
+    """'database' | 'legacy'(DB 에 있으나 아직 active 아님) | 'none'(DB 에 없음). 플래그가 꺼져 있으면 항상 'none'.
+    DB 파일이 없을 때만 코어가 'none' 으로 답한다. DB 를 열지 못하거나 스키마가 덜 올라갔으면(판정 실패) 종료 1."""
     if not db_core():
         return "none"
     if slug not in _SERVING:
         data = bridge_soft("route", slug)
-        _SERVING[slug] = (data or {}).get("serving", "none")
+        if data is None:
+            if not SOFT_DB:
+                db_unreadable(_LAST_BRIDGE_ERROR)
+            return "none"
+        _SERVING[slug] = data.get("serving", "none")
     return _SERVING[slug]
 
 
@@ -2391,6 +2418,8 @@ def is_db_served(d: Path) -> bool:
 
 def db_served_slugs():
     data = bridge_soft("active_slugs")
+    if data is None and not SOFT_DB:
+        db_unreadable(_LAST_BRIDGE_ERROR)
     return set((data or {}).get("slugs") or [])
 
 

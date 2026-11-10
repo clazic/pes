@@ -43,8 +43,9 @@ import { connect, load_migrations, migrate, probe_database, type Db } from "./db
 import { approve_stage, reopen_stage, seal_round, start_round } from "./editions.ts";
 import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
-import { attach_version, complete_upload, read_storage_bytes, reserve_upload, store_blob, sha256_hex } from "./files.ts";
-import { build_project_view, NOT_A_REPORT_SQL } from "./legacy_view.ts";
+import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex } from "./files.ts";
+import { serving_path } from "./migration.ts";
+import { build_project_view, not_a_report_sql } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -146,6 +147,8 @@ class Session {
   readonly clock = new SystemClock();
   readonly service: CommandService;
   readonly objects: string;
+  /** Object files this run wrote; they are removed again when the run fails (the rows roll back). */
+  readonly fresh_files: Array<{ project_id: string; storage_key: string }> = [];
 
   constructor(env: Environment, db: Db) {
     this.env = env;
@@ -162,6 +165,15 @@ class Session {
 
   now(): number {
     return this.clock.now_ms();
+  }
+
+  /** After a failed run: delete the object files it wrote unless a committed blob row now claims them. */
+  discard_fresh_files(): void {
+    for (const file of this.fresh_files) {
+      const claimed = this.db.get("SELECT 1 AS ok FROM blobs WHERE storage_key = ?", file.storage_key);
+      if (claimed === undefined) delete_storage_file(this.objects, file.project_id, file.storage_key);
+    }
+    this.fresh_files.length = 0;
   }
 
   unit<T>(fn: () => Promise<T>): Promise<T> {
@@ -516,7 +528,7 @@ function manifest_parts(
       WHERE o.project_id = ? AND o.edition_id = ? AND a.stage_id = ?
         AND o.kind = 'artifact' AND a.kind NOT IN ('note', 'review')
         AND o.archived_at IS NULL AND o.current_version_id IS NOT NULL
-        AND ${NOT_A_REPORT_SQL.replaceAll("v.", "cv.")}
+        AND ${not_a_report_sql("cv")}
       ORDER BY o.display_no`,
     project.id,
     stage.edition_id,
@@ -1116,7 +1128,7 @@ const qa_data: Handler = async (s, req) => {
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
       WHERE o.project_id = ? AND a.stage_id = ? AND o.kind = 'artifact'
         AND a.kind NOT IN ('note', 'review') AND v.status <> 'removed'
-        AND ${NOT_A_REPORT_SQL}
+        AND ${not_a_report_sql("v")}
       ORDER BY o.display_no`,
     project.id,
     stage.id,
@@ -1346,8 +1358,9 @@ const route: Handler = async (s, req) => {
   if (typeof req.slug !== "string" || req.slug.length === 0) {
     throw new Refusal("invalid_payload", "프로젝트 이름이 필요합니다", 2);
   }
-  const row = s.db.get<{ status: string }>("SELECT status FROM projects WHERE slug = ?", req.slug);
-  return { serving: row === undefined ? "none" : row.status === "active" ? "database" : "legacy" };
+  const row = s.db.get<{ id: string }>("SELECT id FROM projects WHERE slug = ?", req.slug);
+  if (row === undefined) return { serving: "none" };
+  return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy" };
 };
 
 const active_slugs: Handler = async (s) => {
@@ -1393,18 +1406,21 @@ function find_report_object(
   project: ProjectInfo,
   role: "stage_report" | "final_output",
   stage: StageInfo | null,
+  edition_id: string,
 ): { object_id: string; version_id: string } | undefined {
   const row = s.db.get<{ object_id: string; version_id: string }>(
     `SELECT o.id AS object_id, o.current_version_id AS version_id
        FROM objects o
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
-      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = ?
+      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = ? AND o.edition_id = ?
         AND ((? IS NULL AND a.stage_id IS NULL) OR a.stage_id = ?)
         AND json_extract(v.metadata_json, '$.role') = ?
+      ORDER BY o.display_no
       LIMIT 1`,
     project.id,
     role === "stage_report" ? "report" : "output",
+    edition_id,
     stage === null ? null : stage.id,
     stage === null ? null : stage.id,
     role,
@@ -1422,7 +1438,7 @@ function item_versions(s: Session, project: ProjectInfo, stage: StageInfo): stri
          JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
         WHERE o.project_id = ? AND o.edition_id = ? AND a.stage_id = ? AND o.kind = 'artifact'
           AND a.kind NOT IN ('note', 'review') AND o.archived_at IS NULL AND v.status <> 'removed'
-          AND ${NOT_A_REPORT_SQL}
+          AND ${not_a_report_sql("v")}
         ORDER BY o.display_no`,
       project.id,
       stage.edition_id,
@@ -1450,7 +1466,7 @@ async function write_report_version(
   },
 ): Promise<Record<string, unknown>> {
   return s.unit(async () => {
-    const existing = find_report_object(s, project, input.role, input.stage);
+    const existing = find_report_object(s, project, input.role, input.stage, input.edition_id);
     const fields = {
       title: input.title,
       summary: "",
@@ -1493,6 +1509,8 @@ async function write_report_version(
     }
     const stored: Array<{ name: string; blob_id: string }> = [];
     for (const file of input.files) {
+      const known_before =
+        s.db.get("SELECT 1 AS ok FROM blobs WHERE project_id = ? AND sha256 = ? AND size = ?", project.id, sha256_hex(file.bytes), file.bytes.byteLength) !== undefined;
       const reserved = result_of(
         await reserve_upload(s.service, s.ctx(project, auth), {
           sha256: sha256_hex(file.bytes),
@@ -1503,6 +1521,7 @@ async function write_report_version(
       );
       const blob_id = String(reserved.blob_id);
       if (reserved.state !== "ready") {
+        if (!known_before) s.fresh_files.push({ project_id: project.id, storage_key: `${project.id}/${sha256_hex(file.bytes)}` });
         await store_blob({ db: s.db, objects_dir: s.objects }, project.id, blob_id, file.bytes);
         await complete_upload(s.service, { db: s.db, objects_dir: s.objects }, s.ctx(project, auth), { blob_id });
       }
@@ -1563,7 +1582,7 @@ async function output_run(s: Session, req: Request, web: boolean): Promise<Recor
   const { project, auth } = await write_auth(s, req);
   const args = req.args ?? {};
   const write = s.stage(project, "write");
-  const existing = find_report_object(s, project, "final_output", null);
+  const existing = find_report_object(s, project, "final_output", null, write.edition_id);
   const assemble_now = !web || existing === undefined || args.assemble === true;
   const built = local_stamp(s.now());
   let markdown: Uint8Array;
@@ -1588,6 +1607,7 @@ async function output_run(s: Session, req: Request, web: boolean): Promise<Recor
     if (md === undefined) throw new Refusal("conflict", "조립본(report.md)을 찾을 수 없습니다 — web --assemble 로 다시 조립하세요");
     markdown = md;
     sources_json = src ?? utf8("[]");
+    derived = [found.version_id]; // the new version builds on the assembly it reuses
   }
   const files: RenderedFile[] = [
     { name: "report.md", media_type: "text/markdown", bytes: markdown },
@@ -1621,7 +1641,7 @@ async function output_run(s: Session, req: Request, web: boolean): Promise<Recor
     files,
   });
   const verified = sources.filter((x) => is_record(x) && x.verified === true).length;
-  return { ...out, sections, footnotes, warnings, sources: sources.length, verified, has_cover: is_record(args.cover) && Object.keys(args.cover).length > 0, assembled: assemble_now };
+  return { ...out, sections, footnotes, warnings, sources: sources.length, verified };
 }
 
 const assemble_op: Handler = (s, req) => output_run(s, req, false);
@@ -1726,16 +1746,22 @@ async function main(): Promise<void> {
   }
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
   const db = connect(file);
+  let session: Session | undefined;
   try {
     if (creating) migrate(db);
     else if (!schema_is_current(db)) {
       reply({ ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 });
       return;
     }
-    const session = new Session(env, db);
+    session = new Session(env, db);
     const data = await handler(session, request);
     reply({ ok: true, data });
   } catch (error) {
+    try {
+      session?.discard_fresh_files();
+    } catch {
+      // best effort: the next gc removes an orphan file
+    }
     if (error instanceof Refusal) {
       reply({ ok: false, code: error.code, message: error.message, exit: error.exit });
     } else if (error instanceof ApiError) {
