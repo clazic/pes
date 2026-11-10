@@ -241,16 +241,16 @@ test("C: a running run of the reopened stage itself or of an earlier stage is no
 /** plan reopened with a new open plan round while research still has its old open round. */
 async function two_open_rounds(env: Env) {
   const s = stage_ids(env.db, env.p.edition_id);
-  await drive_stage(env, s.plan, "plan");
+  const first_plan = await drive_stage(env, s.plan, "plan");
   const research_round = await start(env, s.research, "research-start");
   await reopen_stage(env.service, env.ctx("reopen-plan"), { stage_id: s.plan });
   const plan_round = await start(env, s.plan, "plan2-start");
-  return { s, research_round, plan_round };
+  return { s, research_round, plan_round, old_plan_round: first_plan.round };
 }
 
 test("D: an agent cannot seal a round that belongs to another stage or round than its run; nothing is written", async () => {
   await with_env(async (env) => {
-    const { s, research_round, plan_round } = await two_open_rounds(env);
+    const { s, research_round, plan_round, old_plan_round } = await two_open_rounds(env);
     const base = add_agent(env);
     const lease = await agent_claim(env, base, "claim-1");
     const guard = { run_id: lease.run_id, lease_id: lease.lease_id, fence: lease.fence };
@@ -268,12 +268,14 @@ test("D: an agent cannot seal a round that belongs to another stage or round tha
     assert.equal(round_row(env.db, research_round.round_id).state, "open");
 
     // a run of the same stage but another round is refused too
-    aim_run(env, lease.run_id, s.plan, research_round.round_id, null);
+    assert.notEqual(old_plan_round.round_id, plan_round.round_id);
+    aim_run(env, lease.run_id, s.plan, old_plan_round.round_id, null);
+    const before_other = state_signature(env.db); // aim_run itself rewrites the run row
     await rejects_api(
       seal_round(env.service, agent_ctx(base, "other-round-seal"), { round_id: plan_round.round_id, manifest_blob_id: m, versions, ...guard }),
       "forbidden",
     );
-    assert.equal(state_signature(env.db), before);
+    assert.equal(state_signature(env.db), before_other);
 
     // control: the run's own round can be sealed
     aim_run(env, lease.run_id, s.plan, plan_round.round_id, null);
