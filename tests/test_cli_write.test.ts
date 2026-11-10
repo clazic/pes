@@ -293,7 +293,8 @@ test("pes home은 프로젝트 폴더만 옮기고 DB·객체는 그대로 둔�
     assert.deepEqual(c.listing(c.env.objects), objects, "객체 폴더 불변");
     assert.equal(c.env.db.path, db_file);
     const config = JSON.parse(readFileSync(join(c.env.home.env.HOME as string, ".pes", "config.json"), "utf8"));
-    assert.equal(realpathSync(config.home), realpathSync(target));
+    // Windows 의 짧은 이름(RUNNER~1)과 긴 이름을 같게 보려면 native realpath 가 필요하다.
+    assert.equal(realpathSync.native(config.home), realpathSync.native(target));
     const shown = c.run(["home"], { PES_HOME: undefined });
     assert.equal(shown.status, 0);
     assert.match(shown.stdout, /PES 홈:/);

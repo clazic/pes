@@ -57,7 +57,7 @@ function no_crash(res: CliResult, what: string): void {
 }
 
 /** 어떤 PATH·플래그로도 실행하는 러너 (하니스의 run()은 PATH를 못 바꾼다: python3도 PATH로 찾기 때문). */
-function run_with(c: CliEnv, args: string[], extra: Record<string, string | undefined> = {}, script = PES_PY, python = PY): CliResult {
+function run_with(c: CliEnv, args: string[], extra: Record<string, string | undefined> = {}, script = PES_PY, python = PY, py_flags: string[] = []): CliResult {
   const child: Record<string, string | undefined> = {
     ...c.env.home.env,
     PYTHONIOENCODING: "utf-8",
@@ -67,7 +67,7 @@ function run_with(c: CliEnv, args: string[], extra: Record<string, string | unde
     ...extra,
   };
   for (const key of Object.keys(child)) if (child[key] === undefined) delete child[key];
-  const r = spawnSync(python, ["-I", script, ...args], {
+  const r = spawnSync(python, ["-I", ...py_flags, script, ...args], {
     env: child as NodeJS.ProcessEnv,
     cwd: c.env.home.root,
     encoding: "utf8",
@@ -187,8 +187,10 @@ test("A1 플래그 없음: 쓰기 명령의 출력·종료 코드·project.json�
     const seen = [] as string[];
     for (const [args, extra] of steps) {
       const label = `${args.join(" ")} ${JSON.stringify(extra)}`;
-      const a = run_with(now, args, { ...OFF, ...extra });
-      const b = run_with(old, args, { ...OFF, ...extra }, old_py);
+      // v0.15 기준본은 stdout 을 UTF-8 로 바꾸지 않아 Windows(cp1252)에서 한글 print 가 죽는다.
+      // 의미 비교를 위해 양쪽 모두 -X utf8 로 띄운다(인코딩 자체는 test_cli_write_stdout_encoding 이 지킨다).
+      const a = run_with(now, args, { ...OFF, ...extra }, PES_PY, PY, ["-X", "utf8"]);
+      const b = run_with(old, args, { ...OFF, ...extra }, old_py, PY, ["-X", "utf8"]);
       assert.equal(a.status, b.status, `${label}: 종료 코드`);
       assert.equal(normalize(a.stdout, roots_now), normalize(b.stdout, roots_old), `${label}: stdout`);
       // 오류 문구는 경로·임시 이름만 다를 수 있다 (스택 추적 줄 번호는 제외)
