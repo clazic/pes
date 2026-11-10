@@ -319,6 +319,95 @@ function approval_invalidation_seq(
   return Number(row.n);
 }
 
+/**
+ * Every earlier stage of the edition must be approved and clean. A stale
+ * approved stage is not a valid basis for the next stage (leader ruling A/B).
+ */
+function require_earlier_stages_approved(
+  runtime: CommandRuntime,
+  project_id: string,
+  stage: StageRow,
+): void {
+  const earlier = runtime.db.get<{ ok: bigint }>(
+    `SELECT 1 AS ok FROM stages
+      WHERE project_id = ? AND edition_id = ? AND ordinal < ?
+        AND (status <> 'approved' OR stale_since_event_seq IS NOT NULL)
+      LIMIT 1`,
+    project_id,
+    stage.edition_id,
+    Number(stage.ordinal),
+  );
+  if (earlier !== undefined) {
+    throw new ApiError("conflict", "an earlier stage is not approved");
+  }
+}
+
+interface GuardRunRow {
+  id: string;
+  edition_id: string;
+  stage_id: string | null;
+  round_id: string | null;
+}
+
+function read_guard_run(
+  runtime: CommandRuntime,
+  project_id: string,
+  guard: LeaseGuard,
+): GuardRunRow | undefined {
+  return runtime.db.get<GuardRunRow>(
+    "SELECT id, edition_id, stage_id, round_id FROM runs WHERE project_id = ? AND id = ?",
+    project_id,
+    guard.run_id,
+  );
+}
+
+/**
+ * An agent may seal only the round its run is working on. A run that has not
+ * been aimed at a stage/round yet (both NULL, as right after claim) may seal
+ * the round it is about to work on; once aimed, the target must match.
+ */
+function require_guard_run_round(
+  runtime: CommandRuntime,
+  project_id: string,
+  guard: LeaseGuard,
+  round: RoundRow,
+): void {
+  const run = read_guard_run(runtime, project_id, guard);
+  if (
+    run === undefined ||
+    run.edition_id !== round.edition_id ||
+    (run.round_id !== null && run.round_id !== round.id) ||
+    (run.stage_id !== null && run.stage_id !== round.stage_id)
+  ) {
+    throw new ApiError("forbidden", "the lease run is not for this round");
+  }
+}
+
+function require_guard_run_stage(
+  runtime: CommandRuntime,
+  project_id: string,
+  guard: LeaseGuard,
+  edition_id: string,
+  stage_id: string,
+): void {
+  const run = read_guard_run(runtime, project_id, guard);
+  if (run === undefined || run.edition_id !== edition_id || run.stage_id !== stage_id) {
+    throw new ApiError("forbidden", "the lease run is not for this stage");
+  }
+}
+
+function require_guard_run_edition(
+  runtime: CommandRuntime,
+  project_id: string,
+  guard: LeaseGuard,
+  edition_id: string,
+): void {
+  const run = read_guard_run(runtime, project_id, guard);
+  if (run === undefined || run.edition_id !== edition_id) {
+    throw new ApiError("forbidden", "the lease run is not for this edition");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // edition.create
 
@@ -425,8 +514,8 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
   if (stage.edition_id !== active.active_edition_id) {
     throw new ApiError("conflict", "the stage is not in the active edition");
   }
-  const edition = runtime.db.get<{ current_stage_id: string | null; status: string }>(
-    "SELECT current_stage_id, status FROM editions WHERE project_id = ? AND id = ?",
+  const edition = runtime.db.get<{ status: string }>(
+    "SELECT status FROM editions WHERE project_id = ? AND id = ?",
     project.id,
     stage.edition_id,
   );
@@ -448,31 +537,7 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the stage already has an open round");
   }
 
-  const ordinal = Number(stage.ordinal);
-  if (ordinal > 1) {
-    const previous = runtime.db.get<{ status: string }>(
-      "SELECT status FROM stages WHERE project_id = ? AND edition_id = ? AND ordinal = ?",
-      project.id,
-      stage.edition_id,
-      ordinal - 1,
-    );
-    if (previous === undefined || previous.status !== "approved") {
-      throw new ApiError("conflict", "the previous stage is not approved");
-    }
-  }
-  if (stage.id !== edition.current_stage_id) {
-    const earlier = runtime.db.get<{ ok: bigint }>(
-      `SELECT 1 AS ok FROM stages
-        WHERE project_id = ? AND edition_id = ? AND ordinal < ? AND status <> 'approved'
-        LIMIT 1`,
-      project.id,
-      stage.edition_id,
-      ordinal,
-    );
-    if (earlier !== undefined) {
-      throw new ApiError("conflict", "an earlier stage is not approved");
-    }
-  }
+  require_earlier_stages_approved(runtime, project.id, stage);
 
   const base = runtime.db.get<{ sealed_snapshot_id: string | null }>(
     `SELECT sealed_snapshot_id FROM rounds
@@ -566,6 +631,20 @@ function run_round_seal(runtime: CommandRuntime): CommandResult {
   if (round.state !== "open") {
     throw new ApiError("conflict", "the round is not open");
   }
+  const edition = runtime.db.get<{ status: string }>(
+    "SELECT status FROM editions WHERE project_id = ? AND id = ?",
+    project.id,
+    round.edition_id,
+  );
+  if (edition === undefined) {
+    throw new ApiError("not_found", "edition not found");
+  }
+  if (edition.status !== "active") {
+    throw new ApiError("conflict", "the edition is not active");
+  }
+  if (guard !== null) {
+    require_guard_run_round(runtime, project.id, guard, round);
+  }
   require_ready_manifest(runtime, project.id, manifest_blob_id);
   const versions = parse_versions(runtime, project.id, payload);
   const snapshot_id = runtime.new_id();
@@ -650,6 +729,19 @@ function run_stage_approve(runtime: CommandRuntime): CommandResult {
   const snapshot_id = require_non_empty_string(payload, "snapshot_id");
   const note = optional_text(payload, "note");
   const stage = read_stage(runtime, project.id, stage_id);
+
+  const edition = runtime.db.get<{ status: string }>(
+    "SELECT status FROM editions WHERE project_id = ? AND id = ?",
+    project.id,
+    stage.edition_id,
+  );
+  if (edition === undefined) {
+    throw new ApiError("not_found", "edition not found");
+  }
+  if (edition.status !== "active") {
+    throw new ApiError("conflict", "the edition is not active");
+  }
+  require_earlier_stages_approved(runtime, project.id, stage);
 
   if (stage.status === "approved" && stage.stale_since_event_seq === null) {
     throw new ApiError("conflict", "the stage is already approved");
@@ -802,6 +894,9 @@ function run_stage_reopen(runtime: CommandRuntime): CommandResult {
   if (edition === undefined) {
     throw new ApiError("not_found", "edition not found");
   }
+  if (edition.status !== "active" && edition.status !== "completed") {
+    throw new ApiError("conflict", "the edition cannot be reopened in its current status");
+  }
   if (edition.status === "completed") {
     const active = runtime.db.get<{ ok: bigint }>(
       "SELECT 1 AS ok FROM editions WHERE project_id = ? AND status = 'active' AND id <> ?",
@@ -837,7 +932,14 @@ function run_stage_reopen(runtime: CommandRuntime): CommandResult {
     stage.edition_id,
     Number(stage.ordinal),
   );
+  const active_lease = runtime.db.get<{ lease_id: string; run_id: string | null }>(
+    `SELECT lease_id, run_id FROM project_leases
+      WHERE project_id = ? AND state = 'active' AND expires_at > ?`,
+    project.id,
+    runtime.now_ms,
+  );
   const cancelled = runs.filter((run) => CANCELLABLE_RUN_STATUSES.has(run.status));
+  const running = runs.filter((run) => run.status === "running");
   const cancelled_run_ids = cancelled.map((run) => run.id);
   const next_seq = next_event_seq(runtime);
   const edition_status = edition.status === "completed" ? "active" : edition.status;
@@ -910,6 +1012,41 @@ function run_stage_reopen(runtime: CommandRuntime): CommandResult {
     }
     events.push({
       type: "run.invalidated",
+      run_id: run.id,
+      payload: { run_id: run.id, reason: "stage_reopened", stage_id },
+    });
+  }
+  let lease_id = active_lease?.lease_id ?? null;
+  let lease_run_id = active_lease?.run_id ?? null;
+  for (const run of running) {
+    if (lease_id !== null && lease_run_id === run.id) {
+      const released = runtime.db.run(
+        `UPDATE project_leases SET state = 'released'
+          WHERE project_id = ? AND lease_id = ? AND state = 'active' AND expires_at > ?`,
+        project.id,
+        lease_id,
+        runtime.now_ms,
+      );
+      if (released.changes !== 1n) {
+        throw new ApiError("conflict", "the lease is not current");
+      }
+      lease_id = null;
+      lease_run_id = null;
+    }
+    const interrupted = runtime.db.run(
+      `UPDATE runs
+          SET status = 'interrupted', ended_at = ?,
+              go_block_reason = NULL, go_blocked_at = NULL, go_block_reset_at = NULL
+        WHERE project_id = ? AND id = ? AND status = 'running'`,
+      runtime.now_ms,
+      project.id,
+      run.id,
+    );
+    if (interrupted.changes !== 1n) {
+      throw new ApiError("conflict", "the run was not interrupted");
+    }
+    events.push({
+      type: "run.interrupted",
       run_id: run.id,
       payload: { run_id: run.id, reason: "stage_reopened", stage_id },
     });
@@ -1025,6 +1162,17 @@ function run_edition_snapshot(runtime: CommandRuntime): CommandResult {
       throw new ApiError("conflict", "the project has no active edition");
     }
     edition_id = active.active_edition_id;
+  }
+
+  if (guard !== null) {
+    if (scope === "stage") {
+      if (stage_id === null) {
+        throw new Error("a stage snapshot must resolve its stage");
+      }
+      require_guard_run_stage(runtime, project.id, guard, edition_id, stage_id);
+    } else {
+      require_guard_run_edition(runtime, project.id, guard, edition_id);
+    }
   }
 
   require_ready_manifest(runtime, project.id, manifest_blob_id);
