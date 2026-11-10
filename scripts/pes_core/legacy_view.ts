@@ -74,8 +74,12 @@ function parse(text: unknown, fallback: unknown): unknown {
   }
 }
 
+function is_dict(value: unknown): value is Dict {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function record(value: unknown): Dict {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Dict) : {};
+  return is_dict(value) ? value : {};
 }
 
 export interface PendingAnswer {
@@ -102,10 +106,19 @@ interface StageRow {
   settings_json: string;
 }
 
+export interface ViewOptions {
+  /**
+   * Show these exact versions (object id -> version id) instead of the current ones, and only these objects:
+   * what a sealed round showed. Everything that is not an item of a stage (notes, reports, answers) is left out.
+   */
+  pin?: ReadonlyMap<string, string>;
+}
+
 export function build_project_view(
   db: Pick<Db, "get" | "all">,
   project_id: string,
   objects_dir: string,
+  options: ViewOptions = {},
 ): ProjectView {
   const project = db.get<{ slug: string; topic: string; created_at: bigint; active_edition_id: string | null }>(
     "SELECT slug, topic, created_at, active_edition_id FROM projects WHERE id = ?",
@@ -181,6 +194,10 @@ export function build_project_view(
     if (stage !== undefined) {
       const list = rounds_by_stage.get(stage.id) ?? [];
       st.status = stage.status;
+      // v0.15 `ask` flips a pending stage to "asking" once its start-question form is out
+      if (stage.status === "pending" && db.get("SELECT 1 AS ok FROM question_sets WHERE project_id = ? AND stage_id = ? AND purpose = 'stage_start'", project_id, stage.id) !== undefined) {
+        st.status = "asking";
+      }
       st.round = list.reduce((top, r) => Math.max(top, r.no), 0);
       st.stale = stage.stale !== null;
       const settings = record(parse(stage.settings_json, {}));
@@ -192,21 +209,31 @@ export function build_project_view(
     p.stages[key] = st;
   }
 
-  // artifacts: every current version of the project's artifact objects
+  // artifacts: every current version of the project's artifact objects (or the pinned versions of a sealed round)
+  const pin = options.pin;
+  const pin_entries = pin === undefined ? [] : [...pin.entries()];
+  const pin_params: string[] = [];
+  let pin_with = "";
+  if (pin !== undefined) {
+    pin_with = `WITH pinned(object_id, version_id) AS (VALUES ${pin_entries.map(() => "(?, ?)").join(", ") || "(NULL, NULL)"}) `;
+    for (const [object_id, version_id] of pin_entries) pin_params.push(object_id, version_id);
+  }
   const artifacts = db.all<Row>(
-    `SELECT o.id AS object_id, o.display_no AS display_no, a.kind AS kind, a.stage_id AS stage_id,
+    `${pin_with}SELECT o.id AS object_id, o.display_no AS display_no, a.kind AS kind, a.stage_id AS stage_id,
             v.version_id AS version_id, v.title AS title, v.question AS question, v.summary AS summary,
             v.body_md AS body_md, v.status AS status, v.confidence AS confidence, v.stats AS stats,
             v.conflicts AS conflicts, v.verify AS verify, v.metadata_json AS metadata_json,
             ov.created_in_round_id AS created_in_round_id, ov.created_at AS created_at,
             mc.rowid AS tx_rowid, ov.rowid AS version_rowid
        FROM objects o
+       ${pin === undefined ? "" : "JOIN pinned ON pinned.object_id = o.id"}
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
-       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = ${pin === undefined ? "o.current_version_id" : "pinned.version_id"}
        JOIN object_versions ov ON ov.project_id = v.project_id AND ov.id = v.version_id
        JOIN mutation_commits mc ON mc.project_id = ov.project_id AND mc.id = ov.tx_id
       WHERE o.project_id = ? AND o.kind = 'artifact'
       ORDER BY o.display_no`,
+    ...pin_params,
     project_id,
   );
   const round_no_by_id = new Map<string, number>();
@@ -351,6 +378,32 @@ export function build_project_view(
     ((p.stages[stage_key] as Dict).items as Dict[]).push(item);
   }
 
+  // The newest AI-check (purpose review) question set of each stage is the stage's review box.
+  if (pin === undefined) {
+    for (const stage of stages) {
+      const set = db.get<{ id: string; form_key: string; round_id: string | null }>(
+        `SELECT id, form_key, round_id FROM question_sets
+          WHERE project_id = ? AND stage_id = ? AND purpose = 'review' ORDER BY rowid DESC LIMIT 1`,
+        project_id,
+        stage.id,
+      );
+      if (set === undefined) continue;
+      const questions = review_questions(db, project_id, set.id);
+      if (questions.length === 0) continue;
+      const st = p.stages[stage.key] as Dict;
+      // The round the check is about: the round open when it was published; else the `-r<N>` of the form id; else the newest round.
+      const tail = set.form_key.match(/-r(\d+)$/i);
+      const round = set.round_id !== null && round_no_by_id.has(set.round_id)
+        ? (round_no_by_id.get(set.round_id) as number)
+        : tail !== null
+          ? Number(tail[1])
+          : num(st.round);
+      // form_key·set_id: the screen sends them with the answer, so an answer to a revised form is refused (409) by the
+      // same newest-version check the command makes, instead of being stored without its form version.
+      st.review = { round, questions, form_key: set.form_key, set_id: set.id };
+    }
+  }
+
   notes.sort((a, b) => a.rowid - b.rowid);
   p.notes = notes.map((entry) => entry.note);
   for (const key of STAGE_KEYS) {
@@ -434,4 +487,158 @@ export function build_project_view(
     });
   }
   return { project: p, pending, feedback: feedback_entries(files, processed) };
+}
+
+/**
+ * The questions of one published set in the shape the dashboard's review box reads (label, options, show_if, ...).
+ * A question's id is its DB question id, and so is every `show_if.id`: the form author wrote `show_if` against the
+ * spec's own question ids, which the DB does not keep. `pes ask` stores the referenced question's place in the same form
+ * (`show_if.position`); a migrated v0.15 question keeps its spec id as `bank_key`. A reference that cannot be resolved
+ * is dropped (the question is always shown) rather than left pointing at no question, which would hide it for good
+ * and let a required question go unanswered.
+ */
+export function review_questions(db: Pick<Db, "all">, project_id: string, set_id: string): Dict[] {
+  const rows = db.all<{ id: string; version_id: string; bank_key: string | null; text: string; type: string; required: bigint; other: bigint; options: string; show_if: string; help: string | null }>(
+    `SELECT m.question_id AS id, m.question_version_id AS version_id, q.bank_key AS bank_key, qv.text AS text, qv.type AS type,
+            qv.required AS required, qv.allow_comment_as_answer AS other, qv.options AS options, qv.show_if AS show_if, qv.help AS help
+       FROM question_set_members m
+       JOIN question_versions qv ON qv.project_id = m.project_id AND qv.version_id = m.question_version_id
+       LEFT JOIN questions q ON q.project_id = m.project_id AND q.object_id = m.question_id
+      WHERE m.project_id = ? AND m.set_id = ?
+      ORDER BY m.position`,
+    project_id,
+    set_id,
+  );
+  const ids = new Set(rows.map((row) => row.id));
+  const by_bank_key = new Map<string, string>();
+  for (const row of rows) if (typeof row.bank_key === "string" && !by_bank_key.has(row.bank_key)) by_bank_key.set(row.bank_key, row.id);
+  // `position` is a place in the set where this question version was first published. In that set it is used as is;
+  // in another set (the same version re-used by question_id) only when the question it named there sits at the same
+  // place here, or the question at that place carries the referenced spec id as bank_key. Otherwise: id, then bank_key.
+  const first_target = (version_id: string, position: number): { set_id: string; question_id: string | null } | null => {
+    const first = db.all<{ set_id: string }>(
+      `SELECT m.set_id AS set_id FROM question_set_members m
+         JOIN question_sets s ON s.project_id = m.project_id AND s.id = m.set_id
+        WHERE m.project_id = ? AND m.question_version_id = ?
+        ORDER BY s.rowid LIMIT 1`,
+      project_id,
+      version_id,
+    )[0];
+    if (first === undefined) return null;
+    const at = db.all<{ question_id: string }>(
+      "SELECT question_id FROM question_set_members WHERE project_id = ? AND set_id = ? AND position = ?",
+      project_id,
+      first.set_id,
+      position,
+    )[0];
+    return { set_id: first.set_id, question_id: at?.question_id ?? null };
+  };
+  const resolve = (row: { version_id: string }, show_if: Record<string, unknown>): string | null => {
+    const position = show_if.position;
+    const ref = show_if.id;
+    if (typeof position === "number" && Number.isInteger(position) && position >= 0 && position < rows.length) {
+      const here = rows[position] as { id: string; bank_key: string | null };
+      const first = first_target(row.version_id, position);
+      if (first !== null && first.set_id === set_id) return here.id;
+      if (first !== null && first.question_id === here.id) return here.id;
+      if (typeof ref === "string" && here.bank_key === ref) return here.id;
+    }
+    if (typeof ref !== "string") return null;
+    if (ids.has(ref)) return ref;
+    return by_bank_key.get(ref) ?? null;
+  };
+  return rows.map((row) => {
+    const question: Dict = { id: row.id, type: row.type, label: row.text, required: num(row.required) === 1, other: num(row.other) === 1 };
+    const options = parse(row.options, []);
+    if (Array.isArray(options) && options.length > 0) question.options = options;
+    const show_if = parse(row.show_if, null);
+    if (is_dict(show_if)) {
+      const target = resolve(row, show_if);
+      if (target !== null && target !== row.id) {
+        const { position: _position, ...rest } = show_if;
+        question.show_if = { ...rest, id: target };
+      }
+    }
+    if (typeof row.help === "string" && row.help.length > 0) question.help = row.help;
+    return question;
+  });
+}
+
+export interface SnapshotEntry {
+  stage: string;
+  round: number;
+  time: string;
+  state: Dict;
+}
+
+const SLIM_FIELDS = ["id", "title", "kind", "status", "request", "depth", "updated_round", "summary", "confidence", "conflicts", "verdict"];
+
+/**
+ * pes.py `build_index` snapshots: one slim state per sealed round (what that round showed), stage order then round.
+ * The sealed round's own items are the versions in its round_contents. `changes` was a project.json list the DB does not keep.
+ */
+export function build_snapshots(db: Pick<Db, "get" | "all">, project_id: string, objects_dir: string): SnapshotEntry[] {
+  const rows = db.all<{ round_id: string; round_no: bigint; stage_key: string; ordinal: bigint; at: bigint | null }>(
+    `SELECT r.id AS round_id, r.round_no AS round_no, st.key AS stage_key, st.ordinal AS ordinal,
+            (SELECT mc.created_at FROM mutation_commits mc
+              WHERE mc.project_id = r.project_id AND mc.action = 'round.sealed'
+                AND json_extract(mc.result_json, '$.round_id') = r.id) AS at
+       FROM rounds r
+       JOIN stages st ON st.project_id = r.project_id AND st.id = r.stage_id
+       JOIN projects p ON p.id = r.project_id AND p.active_edition_id = r.edition_id
+      WHERE r.project_id = ? AND r.state = 'sealed'
+      ORDER BY st.ordinal, r.round_no`,
+    project_id,
+  );
+  const out: SnapshotEntry[] = [];
+  for (const row of rows) {
+    const pin = new Map<string, string>();
+    for (const content of db.all<{ object_id: string; version_id: string }>(
+      "SELECT object_id, version_id FROM round_contents WHERE project_id = ? AND round_id = ? ORDER BY position",
+      project_id,
+      row.round_id,
+    )) {
+      pin.set(content.object_id, content.version_id);
+    }
+    const view = build_project_view(db, project_id, objects_dir, { pin });
+    const stage = view.project.stages[row.stage_key] as Dict;
+    const items = ((stage.items as Dict[] | undefined) ?? []).map((item) => {
+      const slim: Dict = {};
+      for (const field of SLIM_FIELDS) slim[field] = field in item ? item[field] : null;
+      slim.n_sources = Array.isArray(item.sources) ? item.sources.length : 0;
+      slim.n_stats = Array.isArray(item.stats) ? item.stats.length : 0;
+      slim.details_len = typeof item.details === "string" ? item.details.length : 0;
+      return slim;
+    });
+    out.push({
+      stage: row.stage_key,
+      round: num(row.round_no),
+      time: local_stamp(num(row.at)),
+      state: {
+        round: num(row.round_no),
+        status: "active",
+        changes: [],
+        items,
+        n_suggestions: Array.isArray(stage.suggestions) ? stage.suggestions.length : 0,
+        review: null,
+      },
+    });
+  }
+  return out;
+}
+
+/** The files of the project's current final report, as the old `out/<name>` list the dashboard shows. */
+export function output_names(db: Pick<Db, "get" | "all">, project_id: string): string[] {
+  const row = db.get<{ version_id: string }>(
+    `SELECT o.current_version_id AS version_id
+       FROM objects o
+       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = 'output'
+        AND json_extract(v.metadata_json, '$.role') = 'final_output'
+      ORDER BY o.display_no LIMIT 1`,
+    project_id,
+  );
+  if (row === undefined) return [];
+  return rendered_files(db, project_id, row.version_id).map((file) => `out/${file.name}`).sort();
 }

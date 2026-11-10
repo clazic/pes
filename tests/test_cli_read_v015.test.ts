@@ -43,6 +43,7 @@ import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult, LEGACY_JSON } from "./helpers/cli_write_env.ts";
+import { url_fix_diffs } from "./helpers/web_env.ts";
 import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { copy_fixture, has_problem, migration, with_migration, owner_of, pes_home_of, backup_dir_of, batch_row } from "./helpers/migration_env.ts";
@@ -149,7 +150,8 @@ test("A1 플래그 없음: 읽기·보고서 명령의 출력·종료 코드·�
       const a = existsSync(join(now.folder, rel)) ? normalize(readFileSync(join(now.folder, rel), "utf8"), roots_now) : null;
       const b = existsSync(join(old.folder, rel)) ? normalize(readFileSync(join(old.folder, rel), "utf8"), roots_old) : null;
       assert.notEqual(a, null, `${rel} 를 v0.15 처럼 만든다`);
-      assert.equal(a, b, `${rel}: 내용`);
+      if (rel === "index.html") assert.deepEqual(url_fix_diffs(b!, a!), [], `${rel}: 내용 (대시보드 path·shots 링크 안전화 줄 차이만 허용)`);
+      else assert.equal(a, b, `${rel}: 내용`);
     }
     assert.equal(state_signature(now.env.db), signature, "플래그 없음 — DB 불변");
   } finally {

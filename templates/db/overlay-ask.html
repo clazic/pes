@@ -1,0 +1,94 @@
+<!-- PES_DB_CORE=1 질문 폼 보강: 초안 보존(sessionStorage) · 서버 영수증 뒤에만 성공 표시 · 충돌/실패 안내. 템플릿(ask.html)은 v0.15 그대로다. -->
+<script>
+(() => {
+  const KEY = 'pes-draft:' + location.pathname;
+  const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
+  // 영수증을 받은 내용(보낸 그대로의 초안)은 다시 남기지 않는다 — 새로 불러올 때 pagehide 가 보낸 답을 되살리지 않게.
+  // 보낸 뒤(또는 응답을 기다리는 동안) 바뀐 내용은 그것과 다르므로 계속 저장한다.
+  let delivered = null;
+  const snapshot = () => {
+    const items = [...document.querySelectorAll('[data-q],[data-qo]')].map(el => ({ q: el.dataset.q ?? null, o: el.dataset.qo ?? null, v: el.value, c: !!el.checked, t: el.type }));
+    const free = document.getElementById('free');
+    return JSON.stringify({ free: free ? free.value : '', items });
+  };
+  const save = () => {
+    try {
+      const now = snapshot();
+      if (now === delivered) return;
+      sessionStorage.setItem(KEY, now);
+    } catch (e) {}
+  };
+  // 보낸 초안만 정리한다: 저장소의 초안이 보내기 시작할 때와 같을 때만 지운다
+  const clearSent = sentDraft => { try { if (sessionStorage.getItem(KEY) === sentDraft) sessionStorage.removeItem(KEY); } catch (e) {} };
+  const pick = (d, x) => [...document.querySelectorAll(d.q !== null ? `[data-q="${CSS.escape(d.q)}"]` : `[data-qo="${CSS.escape(d.o)}"]`)].filter(el => x.t === 'radio' || x.t === 'checkbox' ? el.value === x.v : true);
+  const draft = load();
+  if (draft) {
+    const free = document.getElementById('free');
+    if (free) free.value = draft.free || '';
+    const seen = new Set();
+    for (const x of draft.items || []) {
+      const key = x.q !== null ? 'q:' + x.q : 'o:' + x.o;
+      if ((x.t === 'radio' || x.t === 'checkbox') && !seen.has(key + ':' + x.v)) {
+        // 라디오·체크박스는 질문마다 처음 만나는 저장 항목이 그 질문의 고른 상태를 정한다 (추천 미리 선택도 덮어쓴다)
+        if (!seen.has(key)) { seen.add(key); document.querySelectorAll(`[data-q="${CSS.escape(x.q)}"]`).forEach(el => { el.checked = false; }); }
+        seen.add(key + ':' + x.v);
+      }
+      for (const el of pick(x.q !== null ? { q: x.q, o: null } : { q: null, o: x.o }, x)) {
+        if (x.t === 'radio' || x.t === 'checkbox') el.checked = x.c; else el.value = x.v;
+      }
+    }
+    try { QF.applyShow(root(), qs); } catch (e) {}
+  }
+  document.addEventListener('input', save, true);
+  document.addEventListener('change', save, true);
+  window.addEventListener('pagehide', save);
+
+  // ---- 자기 제출은 '새 결과'가 아니다: 영수증의 v(커밋 뒤 커서)까지는 이 탭이 이미 아는 값으로 본다 ----
+  let own = 0, floor = null;
+  const realFetch = window.fetch.bind(window);
+  realFetch('version', { cache: 'no-store' }).then(r => r.json()).then(j => { if (typeof j.v === 'number' && floor === null) floor = j.v; }).catch(() => {});
+  window.fetch = async (url, init) => {
+    const r = await realFetch(url, init);
+    if (String(url) !== 'version' || own === 0 || !r.ok) return r;
+    try {
+      const j = await r.clone().json();
+      if (typeof j.v === 'number' && j.v <= own && floor !== null && floor <= j.v) return new Response(JSON.stringify({ v: floor }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (e) {}
+    return r;
+  };
+  const seen = j => { if (typeof j.v === 'number' && j.v > own) own = j.v; };
+
+  const FAIL = '보내지 못했습니다. 입력한 내용은 그대로 남아 있습니다 — 다시 보내거나, 화면의 복사 버튼으로 복사해 채팅에 붙여넣어 주세요.';
+  const CONFLICT = '보낼 수 없습니다(충돌): 그동안 질문이 바뀌었습니다. 입력한 내용은 그대로 남아 있습니다 — 화면을 새로 불러와 새 판에서 다시 보내 주세요.';
+  sendBtn.onclick = async () => {
+    const p = payload();
+    if (p.c.missing.length) { root().querySelector('.q-missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('필수 질문(*)에 답해 주세요.'); }
+    if (D.set_id) p.body.set_id = D.set_id;
+    if (D.form_key) p.body.spec = D.form_key;
+    save();
+    let sentDraft = null;
+    try { sentDraft = sessionStorage.getItem(KEY); } catch (e) {}
+    sendBtn.disabled = true;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.body), signal: ctl.signal });
+      let j = null;
+      try { j = await r.json(); } catch (e) {}
+      if (r.status === 409) { sendBtn.disabled = false; return toast(CONFLICT); }
+      if (!r.ok || !j || j.ok !== true || typeof j.file !== 'string') throw new Error('no receipt');
+      seen(j);
+      delivered = sentDraft;
+      clearSent(sentDraft);
+      sendBtn.textContent = '보냈습니다 ✓';
+      document.getElementById('hint').textContent = 'Claude가 답을 받아 다음 작업을 시작합니다. 결과가 준비되면 대시보드에 나타납니다.';
+      toast('Claude에게 보냈습니다.');
+    } catch (e) {
+      sendBtn.disabled = false;
+      toast(FAIL);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+})();
+</script>

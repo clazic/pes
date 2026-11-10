@@ -14,7 +14,7 @@
   approve <dir> <stage>                단계 승인 → 다음 단계로 (기획→조사는 조사 항목 자동 생성)
   reopen <dir> <stage>                 앞 단계 다시 열기 (뒤 단계에 '다시 확인 필요' 표시)
   status <dir>                         한눈 요약 (단계·라운드·받지 않은 답)
-  pending <dir>                        처리 안 한 답 파일 경로 목록
+  pending <dir> [--show [이름...]]     처리 안 한 답 목록 (옛 방식은 파일 경로, DB 방식은 읽을 이름). --show 는 답 원문을 읽는다(이름 없으면 처리 안 한 것 전부)
   mark <dir> <feedback 파일...>         처리 완료 표시
   chat <dir> <stage> "텍스트" [kind]    채팅으로 받은 지시를 답 파일로 기록 (처리 완료로)
   digest <dir> <stage> [--round N]     AI 점검용 압축 요약 (항목별 요약 첫 줄·수치·충돌·신뢰도·출처 확인율·남은 질문)
@@ -304,6 +304,13 @@ def fill(tpl: Path, title: str, data: dict) -> str:
             .replace("/*__DATA__*/null", blob))
 
 
+def with_overlay(page: str, name: str) -> str:
+    """PES_DB_CORE=1 화면: 템플릿(v0.15 바이트 그대로)은 두고, 끝에 DB 화면 보강(초안 보존·영수증·충돌 안내·run 표시)을 붙인다."""
+    extra = (TPL / "db" / name).read_text(encoding="utf-8")
+    head, sep, tail = page.rpartition("</body>")
+    return head + extra + "\n" + sep + tail if sep else page + extra
+
+
 # ---------- 라운드 ----------
 def cmd_round_start(args):
     d, s = pdir(args[0]), stage_arg(args[1])
@@ -518,6 +525,17 @@ def cmd_render(args):
     print(build_index(d, p))
 
 
+def library_view(p):
+    """대시보드에 싣는 프로젝트: 라이브러리 항목은 본문을 빼고 요약 240자만 (옛 방식·DB 방식 화면이 같이 쓴다)."""
+    pv = dict(p)
+    if p.get("library"):
+        L = p["library"]
+        pv["library"] = {k: v for k, v in L.items() if k != "items"} | {"items": [
+            {"id": i["id"], "title": i["title"], "summary": (i.get("summary") or "")[:240], "confidence": i.get("confidence"),
+             "sources": [{"method": x.get("method")} for x in i.get("sources") or []]} for i in L.get("items", [])]}
+    return pv
+
+
 def build_index(d: Path, p: dict) -> Path:
     snap_dir = d / "snapshots"
     latest = {}
@@ -541,13 +559,7 @@ def build_index(d: Path, p: dict) -> Path:
     snaps.sort(key=lambda x: (KEYS.index(x["stage"]) if x["stage"] in KEYS else 9, x["round"]))
     asks = sorted(x.name for x in d.glob("ask-*.html"))
     outs = sorted(str(x.relative_to(d)) for x in (d / "out").glob("*") if x.is_file()) if (d / "out").exists() else []
-    pv = dict(p)
-    if p.get("library"):
-        L = p["library"]
-        pv["library"] = {k: v for k, v in L.items() if k != "items"} | {"items": [
-            {"id": i["id"], "title": i["title"], "summary": (i.get("summary") or "")[:240], "confidence": i.get("confidence"),
-             "sources": [{"method": x.get("method")} for x in i.get("sources") or []]} for i in L.get("items", [])]}
-    data = {"project": pv, "stages": [{"key": k, "label": v} for k, v in STAGES], "snapshots": snaps,
+    data = {"project": library_view(p), "stages": [{"key": k, "label": v} for k, v in STAGES], "snapshots": snaps,
             "feedback": load_feedback(d, set(p.get("processed", []))), "asks": asks, "outputs": outs, "built": now(), "qlabels": all_qlabels()}
     out = d / "index.html"
     out.write_text(fill(TPL / "dashboard.html", p.get("topic", "프로젝트") + " · PES", data), encoding="utf-8")
@@ -673,9 +685,32 @@ def show_status(d, p, pend):
     print(f"대시보드: {url or '서버 꺼짐 — serve ' + d.name}")
 
 
+def answer_names(opts):
+    """`pending <프로젝트> --show [<이름>…]` 의 이름들 (경로로 줘도 파일 이름만 쓴다)."""
+    return [re.split(r"[\\/]", a)[-1] for a in opts if a != "--show"]
+
+
+def print_answers(items):
+    """받은 답 원문 출력. 하나면 원문 그대로, 여럿이면 `=== 이름 ===` 머리글을 붙인다."""
+    for name, text in items:
+        if len(items) > 1:
+            print(f"=== {name} ===")
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+
+
 def cmd_pending(args):
     d = pdir(args[0])
-    for f in pending_files(d, load(d)):
+    p = load(d)
+    if "--show" in args[1:]:
+        names = answer_names(args[1:]) or [f.name for f in pending_files(d, p)]
+        items = []
+        for n in names:
+            f = d / "feedback" / n
+            if not n.endswith(".json") or not f.is_file():
+                die(f"받은 답이 없습니다: {n}", 2)
+            items.append((n, f.read_text(encoding="utf-8")))
+        return print_answers(items)
+    for f in pending_files(d, p):
         print(f)
 
 
@@ -1550,7 +1585,14 @@ def cmd_open(args):
     a = args[0]
     if not a.startswith("http"):
         d = pdir(a)
-        a = server_url(d) or (d / "index.html").as_uri()
+        a = server_url(d)
+        if not a:  # 서버 없이 파일로 연다: DB 방식은 index.html 이 마지막 render 때 값이라 여는 순간 DB 에서 다시 쓴다
+            if db_core() and is_db_served(d):
+                try:
+                    (d / "index.html").write_text(db_dashboard_html(d), encoding="utf-8")
+                except (OSError, SystemExit):
+                    pass
+            a = (d / "index.html").as_uri()
     webbrowser.open(a)
     print(a)
 
@@ -2312,6 +2354,9 @@ def db_init(args):
         print(f"참고자료로 가져옴: 항목 {len(lib['items'])}개 (R{lib['round']}까지, {lib['source']})")
 
 
+FORM_KEY_MAX = 80  # serve.py·cli_bridge web_feedback 이 답의 spec 을 자르는 길이와 같다
+
+
 def legacy_question(q: dict) -> dict:
     """옛 질문 은행 항목 -> question.publish_set 의 새 질문. 답은 채우지 않는다(추천 표시만 옵션에 남긴다)."""
     qt = q.get("type") if q.get("type") in NEW_QUESTION_TYPES else "text"
@@ -2357,19 +2402,38 @@ def db_ask(args):
     if not isinstance(spec, dict):
         die(f"질문 폼 파일은 JSON 객체여야 합니다: {spec_path}", 2)
     sid = re.sub(r"[^a-z0-9-]", "-", str(spec.get("id") or spec.get("stage") or "ask").lower()).strip("-") or "ask"
+    if len(sid) > FORM_KEY_MAX:
+        # 화면이 답에 싣는 폼 키(spec)는 서버·브리지가 80자로 자른다 — 더 긴 폼 키는 판 검사(개정 뒤 409)를 비켜 가므로 받지 않는다
+        die(f"질문 폼 id 가 너무 깁니다: {len(sid)}자 (최대 {FORM_KEY_MAX}자) — 폼 id 를 줄여 다시 ask 하세요", 2)
     stage = spec.get("stage") if spec.get("stage") in KEYS else None
     purpose = spec.get("kind") if spec.get("kind") in ASK_PURPOSES else "stage_start"
-    questions = [legacy_question(q) for q in spec.get("questions") or [] if isinstance(q, dict)]
+    raw = [q for q in spec.get("questions") or [] if isinstance(q, dict)]
+    questions = [legacy_question(q) for q in raw]
     if not questions:
         die("질문 폼에 질문이 없습니다", 2)
-    bridge("ask", d.name, {"stage": stage, "purpose": purpose, "form_key": sid, "questions": questions})
+    # show_if 는 spec 의 질문 id 를 가리키는데 DB 질문은 그 id 를 갖지 않는다: 가리키는 질문의 폼 안 자리(position)를
+    # 함께 둔다 — 대시보드(review_questions)가 그 자리의 DB 질문 id 로 바꿔 질문 id 와 같은 체계로 보인다
+    where = {}
+    for i, q in enumerate(raw):
+        if isinstance(q.get("id"), str) and q["id"] not in where:
+            where[q["id"]] = i
+    for out in questions:
+        cond = out.get("show_if")
+        if isinstance(cond, dict) and isinstance(cond.get("id"), str) and cond["id"] in where:
+            out["show_if"] = {**cond, "position": where[cond["id"]]}
+    made = bridge("ask", d.name, {"stage": stage, "purpose": purpose, "form_key": sid, "questions": questions})
     ov = bridge("overview", d.name)
     status = {x["key"]: x["status"] for x in ov["stages"]}
+    if stage and purpose == "stage_start" and status.get(stage) == "pending":
+        status[stage] = "asking"  # v0.15 cmd_ask 와 같다: 시작 질문 폼이 나가면 대기 단계가 '질문 중'
     data = {"spec": spec, "topic": ov["topic"], "built": now(),
             "stages": [{"key": k, "label": v, "status": status.get(k, "pending")} for k, v in STAGES]}
+    if made.get("set_id"):
+        data["set_id"] = made["set_id"]  # 화면이 답에 싣는다 — 폼이 그 뒤에 고쳐졌으면 서버가 거절한다
+    data["form_key"] = sid  # 게시한 정규 폼 키: 화면은 원래 spec.id 대신 이 값을 spec 으로 보낸다(서버·브리지가 같은 키를 찾는다)
     out = d / f"ask-{sid}.html"
     d.mkdir(parents=True, exist_ok=True)
-    out.write_text(fill(TPL / "ask.html", spec.get("title", "질문"), data), encoding="utf-8")
+    out.write_text(with_overlay(fill(TPL / "ask.html", spec.get("title", "질문"), data), "overlay-ask.html"), encoding="utf-8")
     print(out)
 
 
@@ -2402,6 +2466,38 @@ def db_render(args):
     data = bridge("render", d.name, {"stage": s})
     st = data.get("stage") or s
     print(f"{LABEL[st]} R{data['round_no']} 봉인: 스냅샷 {str(data['snapshot_id'])[:8]} (항목 {data.get('items', data['versions'])}개)")
+    write_db_screens(d)
+
+
+
+
+def db_dashboard_html(d: Path) -> str:
+    """DB 프로젝트의 대시보드 HTML — 요청 때마다 DB 에서 짓는다 (화면 파일은 상태가 아니다)."""
+    sc = bridge("screen", d.name)
+    p = sc["project"]
+    asks = sorted(x.name for x in d.glob("ask-*.html")) if d.exists() else []
+    data = {"project": library_view(p), "stages": [{"key": k, "label": v} for k, v in STAGES], "snapshots": sc["snapshots"],
+            "feedback": sc["feedback"], "asks": asks, "outputs": sc["outputs"], "built": now(), "qlabels": all_qlabels(),
+            "runs": sc.get("runs") or [], "dispatches": sc.get("dispatches") or []}
+    return with_overlay(fill(TPL / "dashboard.html", p.get("topic", "프로젝트") + " · PES", data), "overlay-dashboard.html")
+
+
+def db_hub_html(root: Path) -> str:
+    bs = all_briefs(root)
+    data = {"projects": bs, "root": str(root), "built": now(), "stages": [{"key": k, "label": v} for k, v in STAGES]}
+    return fill(TPL / "hub.html", "PES 프로젝트", data)
+
+
+def write_db_screens(d: Path):
+    """render 가 남기는 화면 파일: index.html(첫 render 표지 — 서버는 이 파일이 있으면 DB 에서 새로 지어 내준다)과 홈 허브.
+    둘 다 화면용 파일일 뿐 상태가 아니다. 쓰기에 실패해도 render(봉인)는 이미 끝났으므로 오류로 보지 않는다."""
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.html").write_text(db_dashboard_html(d), encoding="utf-8")
+        if (d.parent / ".pes-hub").exists():
+            build_hub(d.parent)
+    except (OSError, SystemExit):
+        pass
 
 
 def db_approve(args):
@@ -2670,7 +2766,8 @@ def read_db_project(d: Path):
 
 
 def db_pending_entries(d: Path, pend):
-    return [(d / "feedback" / e["name"], e) for e in pend]
+    """DB 방식의 처리 안 한 답은 폴더에 파일이 없다: 경로 대신 읽을 이름(`pending <프로젝트> --show <이름>`)을 보인다."""
+    return [(e["name"], e) for e in pend]
 
 
 def dbr_status(args):
@@ -2686,6 +2783,12 @@ def dbr_pending(args):
     if not is_db_served(d):
         return cmd_pending(args)
     _, pend = read_db_project(d)
+    if "--show" in args[1:]:
+        names = answer_names(args[1:]) or [e["name"] for e in pend]
+        if not names:
+            return
+        print_answers([(a["name"], a["text"]) for a in bridge("answer_texts", d.name, {"names": names})["answers"]])
+        return
     for f, _ in db_pending_entries(d, pend):
         print(f)
 
