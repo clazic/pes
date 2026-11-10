@@ -26,4 +26,4 @@
 - 변환 스킬이나 `Monitor`가 없는 설정에서는 자동으로 대신해 주지 않는다. 필요한 만큼 사람이 직접 처리한다.
 - 문서를 다른 환경 표기로 자동 변환하는 기능은 지원하지 않는다.
 - `set`(단계 요약·변경점·남은 일·설정·점검, 최종 요약·결론)은 지금 옛 방식(v0.15) 프로젝트에서만 쓸 수 있다. DB 경로(`PES_DB_CORE=1`)에서는 대응 명령이 생길 때까지 한국어 이유와 함께 거부되고 아무것도 바뀌지 않는다 — 우회해서 다른 명령에 끼워 넣지 않는다.
-- `context`·`claim`·`submit`·`wait`·`complete`는 DB 경로(`PES_DB_CORE=1`, 작업 토큰을 받은 작업자)에서만 동작한다. 기본 경로에서는 거부되므로 `status`·`digest`·`show`와 `pending`이 알려 준 답 파일(`feedback/*.json`)로 읽고, 결과는 `merge`로 낸다.
+- `context`·`claim`·`submit`·`wait`·`complete`는 DB 경로(`PES_DB_CORE=1`, 작업 토큰을 받은 작업자)에서만 동작한다. 기본 경로에서는 거부되므로 `status`·`digest`·`show`와 `pending`이 알려 준 답 파일(`feedback/*.json`)로 읽고, 결과는 `merge`로 낸다. DB 경로에서도 스킬의 제안 파일은 `merge`로 넘긴다 — `submit`은 DB 결과 형식(`op: append_version`, 이미 있는 `object_id`) 전용이다.

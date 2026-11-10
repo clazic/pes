@@ -94,26 +94,8 @@ export function code_segments(markdown: string): Segment[] {
 const PROJECT_JSON = /(?<![\w.-])project\.json(?![\w.])/i;
 const LOCK_FILE = /(?<![\w-])\.pes-lock(?![\w])/i;
 
-/** 쓰기·삭제를 뜻하는 낱말 (프로젝트 JSON·잠금 파일 공통). 복사·이동·이름 바꾸기는 도착지를 따로 본다(destination_hits·call_dest_hits). */
-const WRITE_VERB = new RegExp(
-  [
-    String.raw`\.write_text\(`, String.raw`\.write_bytes\(`, String.raw`\bjson\.dump\(`, String.raw`\.unlink\(`,
-    String.raw`\bos\.(?:remove|unlink)\(`,
-    String.raw`\bwriteFile(?:Sync)?\(`, String.raw`\bappendFile(?:Sync)?\(`, String.raw`\bcreateWriteStream\(`,
-    String.raw`\brenameSync\(`, String.raw`\bunlinkSync\(`, String.raw`\brmSync\(`,
-    String.raw`\bSet-Content\b`, String.raw`\bAdd-Content\b`, String.raw`\bClear-Content\b`, String.raw`\bOut-File\b`,
-    String.raw`\bRemove-Item\b`, String.raw`\bRename-Item\b`, String.raw`\bNew-Item\b`,
-    String.raw`\b(?:WriteAll(?:Text|Bytes|Lines)|AppendAll(?:Text|Lines))\(`,
-    String.raw`\bsed\s+(?:-[A-Za-z]*i|--in-place)`, String.raw`\bperl\s+-[A-Za-z]*i`,
-    String.raw`\btee\b`, String.raw`\bsponge\b`, String.raw`\btruncate\b`,
-    String.raw`\bdd\b[^\n]*\bof=`,
-    String.raw`\bcurl\b[^\n]*\s(?:-o|-O|--output)\b`, String.raw`\bwget\b[^\n]*\s(?:-O|--output-document)\b`,
-    String.raw`\bopen\(.*,\s*(?:mode\s*=\s*)?["'](?:[wax+][bt]?\+?|r[bt]?\+[bt]?)["']`, String.raw`\bmode\s*=\s*["'](?:[wax+]|r[bt]?\+)`,
-    // pathlib: (Path(d) / "project.json").open("w") — 모드가 첫 인자
-    String.raw`\.open\(\s*["'](?:[wax+][bt]?\+?|r[bt]?\+[bt]?)["']`,
-  ].join("|"),
-  "i",
-);
+/** 쓰기 모드 문자열 ("w"·"a"·"x"·"r+"·"wb"…). 읽기 모드("r"·"rb")는 아니다. */
+const WRITE_MODE = /^\s*(?:mode\s*=\s*)?["'](?:[wax+][bt]?\+?|r[bt]?\+[bt]?)["']\s*$/i;
 
 type Named = (word: string) => boolean;
 
@@ -193,9 +175,11 @@ function call_args(text: string, open: number): string[] {
 
 /** Python 의 shutil.copy*(원본, 도착지)·shutil.move·os.rename·os.replace: 복사는 도착지만, 이동은 둘 다 본다. */
 function call_dest_hits(text: string, named: Named): boolean {
-  for (const m of text.matchAll(/\b(shutil\.(?:copy2?|copyfile|copyfileobj|copytree|move)|os\.(?:rename|replace))\(/g)) {
+  const CALLS =
+    /(?<![\w.])(shutil\.(?:copy2?|copyfile|copyfileobj|copytree|move)|os\.(?:rename|replace|renames|link|symlink)|(?:fs\.(?:promises\.)?)?(?:copyFile(?:Sync)?|cpSync|cp|renameSync|rename|linkSync|symlinkSync)|(?:\[(?:System\.)?IO\.File\]::)(?:Copy|Move|Replace))\(/g;
+  for (const m of text.matchAll(CALLS)) {
     const args = call_args(text, m.index! + m[0].length - 1);
-    const move = /move|rename|replace/.test(m[1]!);
+    const move = /move|rename|replace|Move|Replace/.test(m[1]!);
     if (args.length >= 2 && (named(args[1]!) || (move && named(args[0]!)))) return true;
   }
   return false;
@@ -250,8 +234,126 @@ function statements(seg: Segment): Statement[] {
   return out;
 }
 
+/** `.메서드(` 앞의 수신 식(점 이음·괄호·문자열 포함)을 뒤로 걸어가며 꺼낸다: `Path(d, "x").write_text` → `Path(d, "x")`. */
+function receiver(text: string, dot: number): string {
+  let i = dot - 1;
+  while (i >= 0 && /\s/.test(text[i]!)) i -= 1; // 줄을 나눈 `.메서드` 이어 쓰기
+  const end = i + 1;
+  while (i >= 0) {
+    const ch = text[i]!;
+    if (ch === ")" || ch === "]") {
+      let depth = 0;
+      let quote: string | null = null;
+      for (; i >= 0; i -= 1) {
+        const c = text[i]!;
+        if (quote !== null) {
+          if (c === quote) quote = null;
+          continue;
+        }
+        if (c === '"' || c === "'") quote = c;
+        else if (c === ")" || c === "]") depth += 1;
+        else if (c === "(" || c === "[") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      i -= 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i -= 1;
+      while (i >= 0 && text[i] !== ch) i -= 1;
+      i -= 1;
+      continue;
+    }
+    if (/[\w.$]/.test(ch)) {
+      i -= 1;
+      continue;
+    }
+    break;
+  }
+  return text.slice(i + 1, end);
+}
+
+/**
+ * 쓰기 대상만 본다(읽기 인자에 나오는 이름은 위반이 아니다).
+ *  - 메서드: 수신 객체가 대상인 `.write_text(`·`.write_bytes(`·`.unlink(`·`.touch(`·`.open(<쓰기 모드>)`,
+ *    pathlib `.replace(도착지)`·`.rename(도착지)`(인자 하나 — 원본도 사라지므로 수신·도착지 둘 다)
+ *  - 함수: `open(경로, <쓰기 모드>)`, `json.dump(값, 파일)`의 파일, Node `writeFile*`·`appendFile*`·`createWriteStream`·
+ *    `unlink*`·`rm*`·`truncate*`, Python `os.remove`·`os.unlink`·`os.truncate`, .NET `WriteAll*`·`AppendAll*`의 첫 인자
+ */
+function write_call_hits(text: string, named: Named): boolean {
+  for (const m of text.matchAll(/\.(write_text|write_bytes|unlink|touch|open|replace|rename)\(/g)) {
+    const open = m.index! + m[0].length - 1;
+    const args = call_args(text, open);
+    const recv = receiver(text, m.index!);
+    const method = m[1]!;
+    if (method === "open") {
+      if (recv !== "" && !/^(?:os|io|codecs|builtins)$/.test(recv) && named(recv) && args.some((a) => WRITE_MODE.test(a))) return true;
+      continue;
+    }
+    if (method === "replace" || method === "rename") {
+      if (args.length === 1 && args[0] !== "" && (named(recv) || named(args[0]!))) return true;
+      continue;
+    }
+    if (named(recv)) return true;
+  }
+  for (const m of text.matchAll(/(?<![\w.])(?:io\.|codecs\.|builtins\.)?open\(/g)) {
+    const args = call_args(text, m.index! + m[0].length - 1);
+    if (args.length >= 2 && named(args[0]!) && args.slice(1).some((a) => WRITE_MODE.test(a))) return true;
+  }
+  for (const m of text.matchAll(/\bjson\.dump\(/g)) {
+    const args = call_args(text, m.index! + m[0].length - 1);
+    if (args.length >= 2 && named(args[1]!)) return true;
+  }
+  const FIRST_ARG =
+    /(?<![\w])(?:fs\.(?:promises\.)?)?(?:writeFile(?:Sync)?|appendFile(?:Sync)?|createWriteStream|unlink(?:Sync)?|rm(?:Sync)?|truncate(?:Sync)?|os\.(?:remove|unlink|truncate)|(?:\[(?:System\.)?IO\.File\]::)?(?:WriteAll(?:Text|Bytes|Lines)|AppendAll(?:Text|Lines)))\(/g;
+  for (const m of text.matchAll(FIRST_ARG)) {
+    if (text[m.index! - 1] === ".") continue; // pathlib .unlink( 은 위에서 수신 객체로 본다
+    const args = call_args(text, m.index! + m[0].length - 1);
+    if (args.length >= 1 && named(args[0]!)) return true;
+  }
+  return false;
+}
+
+/** 쉘·PowerShell 명령 조각에서 쓰기 대상 인자만 본다 (파이프 앞의 읽기 명령은 다른 조각이다). */
+function shell_write_hits(text: string, named: Named): boolean {
+  for (const piece of text.split(/&&|\|\||;|\|/)) {
+    const words = piece.trim().match(/"[^"]*"|'[^']*'|\S+/g);
+    if (words === null) continue;
+    const cmd = words[0]!.replace(/^[$>]+/, "").toLowerCase();
+    const rest = words.slice(1);
+    const plain = rest.filter((w) => !w.startsWith("-"));
+    if (/^(?:tee|sponge|truncate)$/.test(cmd) && plain.some(named)) return true;
+    if (cmd === "sed" && rest.some((w) => /^-[A-Za-z]*i|^--in-place/.test(w)) && plain.some(named)) return true;
+    if (cmd === "perl" && rest.some((w) => /^-[A-Za-z]*i/.test(w)) && plain.some(named)) return true;
+    if (cmd === "dd" && rest.some((w) => w.startsWith("of=") && named(w.slice(3)))) return true;
+    if (cmd === "curl" || cmd === "wget") {
+      rest.forEach((w, k) => {
+        if (/^(?:-o|-O|--output|--output-document)$/.test(w) && rest[k + 1] !== undefined && named(rest[k + 1]!)) throw HIT;
+        if (/^--output(?:-document)?=/.test(w) && named(w.slice(w.indexOf("=") + 1))) throw HIT;
+      });
+    }
+    if (/^(?:set-content|add-content|clear-content|out-file|remove-item|rename-item|new-item)$/.test(cmd)) {
+      // -Value 뒤의 값은 쓰는 내용이지 대상이 아니다
+      const targets = rest.filter((w, k) => !w.startsWith("-") && !/^-(?:value|encoding|itemtype|newname)$/i.test(rest[k - 1] ?? ""));
+      if (targets.some(named)) return true;
+      if (cmd === "rename-item" || cmd === "move-item") continue;
+    }
+  }
+  return false;
+}
+
+const HIT = new Error("hit");
+
 function touch_reason(text: string, named: Named): string | null {
-  if (WRITE_VERB.test(text)) return "쓰기·삭제 명령";
+  if (write_call_hits(text, named)) return "쓰기·삭제 명령";
+  try {
+    if (shell_write_hits(text, named)) return "쓰기·삭제 명령";
+  } catch (e) {
+    if (e === HIT) return "쓰기·삭제 명령";
+    throw e;
+  }
   if (redirect_hits(text, named)) return "리다이렉트로 덮어쓰기";
   if (destination_hits(text, named) || call_dest_hits(text, named)) return "복사·이동의 도착지";
   if (any_arg_hits(text, named)) return "삭제·생성 명령";

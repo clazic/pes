@@ -25,7 +25,7 @@ description: PES 집필 단계 — 기획 목차대로 장·절 원고(section �
 
 - order=chapter: 라운드마다 장 1~2개씩. draft: R1에 전체 초안, 이후 장별 수정.
 - 장이 3개 이상이면 장마다 `pes:writer` 서브에이전트를 한 메시지에 함께 보낸다. 넘길 것: 전체 목차, 이 장의 chapter 항목, 근거 issue·table·insight 본문, 근거 조사 항목의 summary와 sources, 문체 규칙, 다른 장 제목(겹치지 않게).
-- 결과 병합: 제안 파일을 `merge <dir> write <파일들>`로 넘긴다 (section의 details·sources·links). 토큰을 가진 작업자는 `claim` → `submit`.
+- 결과 병합: 제안 파일을 `merge <dir> write <파일들>`로 넘긴다 (section의 details·sources·links).
 - 렌더 전 `assemble <dir>`로 `out/report.md`를 갱신한다.
 - 요약(settings.summary=one)은 마지막 라운드에서 `set <dir> project executive_summary <파일>`로, 결론은 `set <dir> project conclusion <파일>`로 쓴다 (텍스트). 요약·결론에는 각주를 달지 않는다(번호를 매길 출처가 없음 — 근거는 본문 장에서).
 

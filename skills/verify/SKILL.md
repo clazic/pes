@@ -18,7 +18,7 @@ description: PES 검증 단계 — 원고에서 수치·법령 조문·핵심 �
 2. claim 항목: title=주장 문장(원문 그대로), links.write=[section], sources=그 문장의 각주 출처, `question`=확인할 점(값·기준일·조문 번호).
 3. 장별로 묶어 `pes:verifier` 서브에이전트에 넘긴다 (한 메시지에 여러 개). **결론이나 기대하는 답을 주지 않는다** — 주장 + 출처 URL + 기준일만.
 4. 법령 인용은 korean-law `legal_analysis --mode verify_citations`로도 확인한다 (asof=today면 현행 기준).
-5. 결과 병합: 제안 파일을 `merge <dir> verify <파일들>`로 넘긴다 → claim의 `verdict`(supported|partial|unsupported), `verify`(근거·원문 발췌), confidence. 토큰을 가진 작업자는 `claim` → `submit`.
+5. 결과 병합: 제안 파일을 `merge <dir> verify <파일들>`로 넘긴다 → claim의 `verdict`(supported|partial|unsupported), `verify`(근거·원문 발췌), confidence.
 
 ## 처리
 

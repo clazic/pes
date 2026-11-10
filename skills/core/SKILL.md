@@ -47,7 +47,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `assemble <dir>` | 집필 원고 → `out/report.md` (각주 번호 정리) |
 | `qa-brief <dir> <stage>` · `qa <dir> <stage>` | 독립 검토(QC/QA) 지시문 만들기 · 결과 기록 (reviewer 역할) |
 | `context <dir>` | **DB 경로에서 쓰는 명령** — 작업 토큰을 받은 작업자가 읽는 현재 맥락 (단계·라운드·할 일·인계 메모). 기본 경로에서는 `status`·`digest`·`show`로 읽는다 |
-| `claim <dir> [--mode …]` → `submit <dir> --run <run> --lease <lease> --fence <fence> --file <결과.json>` → `complete <dir> --run … --lease … --fence …` | **DB 경로에서 쓰는 명령** — 에이전트 작업 경로: 작업 맡기(run·lease·fence를 받음) → 검증된 결과 제출 → 끝내기. 사람에게 물을 때는 `wait <dir> --run … --lease … --fence … [--reason …]`. 기본 경로에서는 거부되므로 결과는 `merge`로 넘긴다 |
+| `claim <dir> [--mode …]` → `submit <dir> --run <run> --lease <lease> --fence <fence> --file <결과.json>` → `complete <dir> --run … --lease … --fence …` | **DB 경로에서 쓰는 명령** — 작업 맡기(run·lease·fence를 받음) → 이미 있는 항목에 새 판 더하기 → 끝내기. 사람에게 물을 때는 `wait <dir> --run … --lease … --fence … [--reason …]`. `submit`의 결과 파일은 DB 결과 형식 전용이다: `{"results": [{"op": "append_version", "object_id": …, "based_on_version_id": …, 코어 필드(`body_md`·`summary`·`metadata` 등)}]}` (1~20개, 새 항목은 만들지 않는다). 스킬의 제안 파일(`id`·`details`·`sources` …)은 이 형식이 아니므로 `submit`으로 내지 않고 `merge`로 넘긴다. 기본 경로에서는 다섯 명령 모두 거부된다 |
 | `web <dir> [--assemble]` | 최종 웹 보고서 `out/report.html` (`templates/final-report.html`; 표지 정보 `out/cover.json`, 출처 확인 여부 `out/sources.json` — assemble 이 만든다) |
 | `serve` / `stop` / `watch` | 로컬 서버 — 홈마다 포트 하나(127.0.0.1:8760, 프로젝트는 `/<slug>/`) / 종료(홈 전체) / 답 대기 명령 |
 
@@ -68,8 +68,8 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 
 | 하려는 일 | 쓰는 명령 |
 |---|---|
-| 현재 상태·맥락 읽기 | `status` · `digest` · `show` (파일을 통째로 읽지 않는다). DB 경로의 작업자는 `context <dir>` |
-| 항목 만들기·고치기 (기획 항목, 조사 결과, 쟁점, 원고, 주장 판정, 산출물) | 결과를 **제안 파일**(JSON)로 쓰고 `merge <dir> <단계> <파일…>`. DB 경로에서 토큰을 가진 작업자는 `claim` 후 `submit` |
+| 현재 상태·맥락 읽기 | `status` · `digest` · `show` (파일을 통째로 읽지 않는다), 받은 답은 `pending`이 알려 준 답 파일, 참고자료(library)는 대시보드 기획 탭 또는 가져온 원래 조사 폴더(기획 스킬). DB 경로의 작업자는 `context <dir>` |
+| 항목 만들기·고치기 (기획 항목, 조사 결과, 쟁점, 원고, 주장 판정, 산출물) | 결과를 **제안 파일**(JSON)로 쓰고 `merge <dir> <단계> <파일…>` (서브에이전트는 파일을 메인에 돌려주고 메인이 `merge`) |
 | 항목 상태 바꾸기 (심화·수정·삭제·원문 확인) | 항목의 `status`·`request`를 제안 파일에 담아 `merge` |
 | 사람에게 묻기 (시작 질문) | 질문 명세 파일을 만들고 `ask <dir> <명세>` |
 | 받은 답·채팅 지시 처리 | `pending`이 알려 준 답 파일(`feedback/*.json`)의 kind·text·answers를 읽고 처리한 뒤 `mark`, 채팅 지시는 `chat` |
@@ -138,7 +138,7 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 
 1. **시작 질문** (status=asking): `ask-prep` → 명세 다듬기(이미 정해진 것은 지우고 `inherited`로 — 항목은 `{"label": "주제", "value": "…"}` 또는 `"주제: …"` 문자열, `_when`이 안 맞는 질문 삭제, 추천을 주제에 맞게) → `ask` → `serve` → 브라우저로 연다 → 답 대기(`watch`, 아래 「답 받기」). 채팅엔 한 줄: "질문 폼을 열었습니다. 추천 답이 골라져 있으니 바꿀 것만 바꾸고 보내 주세요."
 2. **답(kind=stage_start)** → `pending`이 알려 준 답 파일(`feedback/<단계>-R<n>-<시각>.json`)의 answers를 읽어 `set <dir> <단계> settings <파일>`로 단계 설정에 저장(기획 답은 프로젝트 설정에도 함께 들어간다) → `mark`.
-3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge`, 토큰 작업자는 `submit`) → 라운드 변경점 3~5줄(각 줄 `짧은 라벨: 내용` 형식)을 `set <dir> <단계> changes <파일>`로 → **AI 점검(자체 검토) 작성** — `set <dir> <단계> review <파일>` → **독립 검토(QC/QA)** (아래) → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개, 독립 검토 결과를 올렸습니다."
+3. **라운드**: `round-start` → 단계 스킬대로 작업 → 결과 병합(`merge`) → 라운드 변경점 3~5줄(각 줄 `짧은 라벨: 내용` 형식)을 `set <dir> <단계> changes <파일>`로 → **AI 점검(자체 검토) 작성** — `set <dir> <단계> review <파일>` → **독립 검토(QC/QA)** (아래) → `render` → 사용자에게 3~5줄 + "대시보드에 R{n} 결과와 점검 질문 {k}개, 독립 검토 결과를 올렸습니다."
 
 ### 독립 검토 (QC/QA) — 모든 단계·모든 라운드, 생략하지 않는다
 자체 점검(review)만으로 끝내지 않는다. 자체 점검을 쓴 뒤 **다른 에이전트가 다시 본다** (사용자 지시, 2026-11-02).

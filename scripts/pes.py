@@ -2409,8 +2409,8 @@ def db_approve(args):
     data = bridge("approve", d.name, {"stage": s})
     msg = [f"{LABEL[s]} 승인"]
     if s == "plan" and isinstance(data.get("handed_over"), int):
-        # v0.15 handoff_plan 과 같은 줄. 기존 조사 재사용(라이브러리)은 DB 경로에 아직 없어 0개다.
-        msg.append(f"조사 항목 {data['handed_over']}개 생성 (기존 조사 재사용 0개)")
+        # v0.15 handoff_plan 과 같은 줄 (reuse 로 참고자료를 이어받은 항목 수 포함)
+        msg.append(f"조사 항목 {data['handed_over']}개 생성 (기존 조사 재사용 {data.get('reused') or 0}개)")
     if data.get("next"):
         nxt = data["next"]
         msg.append(f"다음 단계: {LABEL[nxt['key']]} (상태 {nxt['status']})")

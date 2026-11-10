@@ -620,7 +620,7 @@ async function hand_over_plan(
   auth: Auth,
   plan: StageInfo,
   snapshot_id: string,
-): Promise<number> {
+): Promise<{ made: number; reused: number }> {
   const research = s.stage(project, "research");
   const topics = s.db.all<{
     title: string;
@@ -660,6 +660,7 @@ async function hand_over_plan(
   }
   let next_id = max_legacy_id(s, project, research);
   let made = 0;
+  let reused = 0;
   for (const topic of topics) {
     if (topic.status === "removed") continue;
     const meta = parse_json_field(topic.metadata_json, {}) as Record<string, unknown>;
@@ -685,6 +686,7 @@ async function hand_over_plan(
     };
     const metadata: Record<string, unknown> = { legacy_id: next_id, legacy_kind: "topic", depth: 0, stage: "research", links };
     if (lib !== undefined) {
+      reused += 1;
       links.library = [reuse];
       metadata.request =
         `기존 조사(라이브러리 #${String(reuse)}) 재사용 — 기획의 조사 질문에 맞게 보완하고, ` +
@@ -692,7 +694,12 @@ async function hand_over_plan(
       const lib_extra = (parse_json_field(lib.metadata_json, {}) as Record<string, unknown>).legacy_extra;
       if (is_record(lib_extra) && Array.isArray(lib_extra.shots)) metadata.shots = lib_extra.shots;
       // a confidence the old file wrote outside high/medium/low ("중간") stays as written, like the old copy
-      if (is_record(lib_extra) && "confidence" in lib_extra) metadata.legacy_extra = { confidence_original: lib_extra.confidence };
+      // (init --import keeps it as legacy_extra.confidence, a whole v0.15 project import as legacy_extra.confidence_original)
+      if (is_record(lib_extra) && "confidence_original" in lib_extra) {
+        metadata.legacy_extra = { confidence_original: lib_extra.confidence_original };
+      } else if (is_record(lib_extra) && "confidence" in lib_extra) {
+        metadata.legacy_extra = { confidence_original: lib_extra.confidence };
+      }
     }
     const added = await add_artifact(s.service, s.ctx(project, auth), {
       object_id: String(result_of(created).object_id),
@@ -729,7 +736,7 @@ async function hand_over_plan(
     linked.add(String(topic_id));
     made += 1;
   }
-  return made;
+  return { made, reused };
 }
 
 /** An imported library item (an artifact outside every stage) by its old id, as `handoff_plan` looked it up. */
@@ -766,7 +773,7 @@ const approve: Handler = async (s, req) => {
   if (round === undefined || round.state !== "sealed" || round.sealed_snapshot_id === null) {
     throw new Refusal("conflict", "봉인된 라운드가 없어 승인할 수 없습니다 — render 먼저");
   }
-  let made: number | null = null;
+  let made: { made: number; reused: number } | null = null;
   const out = await s.unit(async () => {
     const approved = await approve_stage(s.service, s.ctx(project, auth), {
       stage_id: stage.id,
@@ -787,7 +794,7 @@ const approve: Handler = async (s, req) => {
     );
     next = row === undefined ? null : { ...row };
   }
-  return { next, complete: result.edition_completed === true, handed_over: made };
+  return { next, complete: result.edition_completed === true, handed_over: made === null ? null : (made as { made: number }).made, reused: made === null ? null : (made as { reused: number }).reused };
 };
 
 const reopen: Handler = async (s, req) => {
