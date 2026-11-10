@@ -117,3 +117,19 @@ describe("밀리초가 있는 시각(최종 리뷰 회귀)", () => {
     expect(screen.getByText("3분째")).toBeInTheDocument();
   });
 });
+
+describe("저장된 시각 갱신 생략 경계(최종 리뷰 2/2 회귀)", () => {
+  it("직전 그림과 50ms 차이로 새 자료가 오면 그때의 정확한 밀리초 분 경계로 센다", () => {
+    const now = Date.parse("2026-03-10T12:00:00.500Z");
+    const since = "2026-03-10T11:57:00.500Z";
+    // 앞선 시험이 남긴 저장 시각에 기대지 않도록, 멀리 떨어진 시각에 한 번 그렸다 지운다
+    vi.setSystemTime(now - 10 * 60 * 1000);
+    render(ui({ side: "ai", since, fresh: true })).unmount();
+    vi.setSystemTime(now - 50);
+    const { rerender } = render(ui({ side: "ai", since, fresh: true }));
+    expect(screen.getByText("2분째")).toBeInTheDocument();
+    vi.setSystemTime(now);
+    rerender(ui({ side: "ai", since, last_signal: "2026-03-10T11:42:00.500Z", fresh: true }));
+    expect(screen.getByText("3분째 · 소식 18분 전")).toBeInTheDocument();
+  });
+});
