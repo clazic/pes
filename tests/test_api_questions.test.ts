@@ -151,10 +151,11 @@ test("an agent publishes only while it holds the lease and names it: lease field
 test("publish credentials: none -> 401, a wrong session -> 401, a token without run:submit -> 403", async () => {
   await with_api(async (env) => {
     const body = await publish_body(env);
+    // Make the reader before measuring: creating it writes actor/token rows by itself.
+    const reader = await make_agent(env, "reader-only", ["context:read"]);
     const sig = state_signature(env.db);
     assert_final_error(await call(env, { method: "POST", path: P(env, "/questions"), body }), 401, "unauthenticated", { next_action: NEXT_ACTION.unauthenticated });
     assert_final_error(await call(env, { method: "POST", path: P(env, "/questions"), headers: { "x-pes-session": "wrong" }, body }), 401, "unauthenticated");
-    const reader = await make_agent(env, "reader-only", ["context:read"]);
     assert_final_error(await call(env, { method: "POST", path: P(env, "/questions"), auth: { token: reader.token }, body }), 403, "forbidden");
     assert.equal(state_signature(env.db), sig);
   });

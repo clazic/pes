@@ -369,7 +369,9 @@ test("bridge: a current database is left exactly as it was by a request", () => 
     const child = run_bridge(home.env, CONTEXT_REQUEST);
     assert.equal(child.status, 0, child.stderr);
     const out = JSON.parse(child.stdout) as { status: number; body_b64: string };
-    assert.equal(out.status, 404);
+    // PR14: credentials are checked before the project lookup, so an unauthenticated request is 401 even for an
+    // unknown project. The point of this test is unchanged: a current database answers and is not migrated.
+    assert.equal(out.status, 401);
     assert.equal(schema_snapshot(file), before);
   } finally {
     home.cleanup();
