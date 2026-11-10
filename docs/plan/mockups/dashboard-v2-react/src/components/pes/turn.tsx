@@ -69,7 +69,8 @@ function clockSnapshot() {
 }
 export function useNow(input?: string) {
   const now = React.useSyncExternalStore(subscribeNow, clockSnapshot, clockSnapshot);
-  React.useEffect(() => {
+  // 첫 그림 전에 그때의 시각으로 맞춘다(그림 뒤 effect면 한 프레임 옛 시각이 보인다)
+  React.useLayoutEffect(() => {
     clock = Date.now();
     tickListeners.forEach((l) => l());
   }, [input]);

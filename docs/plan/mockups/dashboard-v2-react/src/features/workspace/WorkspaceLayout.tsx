@@ -45,8 +45,8 @@ function FocusBar() {
       <strong className="font-semibold text-primary-ink">집중 모드</strong>
       <span>사이드 칸을 접었습니다</span>
       {ui.jk ? (
-        <span className="inline-flex items-center gap-1">
-          <Kbd>J</Kbd> 다음 · <Kbd>K</Kbd> 이전 항목
+        <span className="inline-flex flex-wrap items-center gap-1">
+          <Kbd>J</Kbd> 다음 · <Kbd>K</Kbd> 이전 항목 · <Kbd>1</Kbd>~<Kbd>4</Kbd> 선택지
         </span>
       ) : (
         <span>한 글자 단축키 꺼짐</span>
@@ -58,7 +58,7 @@ function FocusBar() {
         <span className="inline-flex items-center gap-1.5">
           <Switch id="jk-keys" checked={ui.jk} onCheckedChange={(c) => researchUi.set({ jk: c })} />
           <Label htmlFor="jk-keys" className="text-meta font-medium">
-            J/K 단축키
+            한 글자 단축키(J/K · 1~4)
           </Label>
         </span>
         <Button size="xs" onClick={() => researchUi.set({ focus: false })}>

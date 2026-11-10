@@ -221,6 +221,16 @@ export function useLastLocation(slug: string): LastLocation | null {
 const TYPING = "input, textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox']";
 const OVERLAY = "[role='dialog'][data-state='open'], [role='alertdialog'][data-state='open'], [role='menu'][data-state='open'], [role='listbox'][data-state='open'], [data-slot='popover-content'][data-state='open']";
 
+/** 입력 칸·글 상자 안인가 — 한 글자 단축키를 무시한다(3.9) */
+export function isTypingTarget(target: EventTarget | null) {
+  return Boolean((target as HTMLElement | null)?.closest?.(TYPING));
+}
+
+/** 대화 상자·메뉴가 열려 있는가 — 한 글자 단축키를 무시한다(3.9) */
+export function hasOpenOverlay() {
+  return Boolean(document.querySelector(OVERLAY));
+}
+
 function visible(el: HTMLElement) {
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
@@ -254,9 +264,8 @@ export function useResearchKeys(active: boolean) {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229 || e.defaultPrevented) return;
       if (e.altKey || e.ctrlKey || e.metaKey) return;
-      const t = e.target as HTMLElement | null;
-      const typing = Boolean(t?.closest?.(TYPING));
-      const overlay = Boolean(document.querySelector(OVERLAY));
+      const typing = isTypingTarget(e.target);
+      const overlay = hasOpenOverlay();
       const ui = researchUi.get();
       if (e.key === "Escape") {
         if (!ui.focus || typing || overlay) return;

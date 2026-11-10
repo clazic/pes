@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useMatch, useNavigate } from "react-router";
 import { useWorkspace } from "@/api/queries";
+import { Kbd } from "@/components/pes/bits";
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { aiSheet, researchUi, useResearchUi } from "@/lib/research-ui";
 
@@ -89,6 +90,15 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
           </CommandGroup>
         ))}
       </CommandList>
+      {/* 단축키 도움말 — 같은 표를 설계 18.10 · 16.5의 집중 보조와 맞춘다 */}
+      <div className="border-t border-line px-3 py-2.5 text-caption text-ink-2">
+        <p className="flex flex-wrap items-center gap-1">
+          <Kbd>1</Kbd>~<Kbd>4</Kbd> 선택지 고르기 · 질문 카드 안에서
+        </p>
+        <p className="mt-1 flex flex-wrap items-center gap-1">
+          <Kbd>⌘</Kbd>/<Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd> 답 검토 후 보내기
+        </p>
+      </div>
       </Command>
     </CommandDialog>
   );
