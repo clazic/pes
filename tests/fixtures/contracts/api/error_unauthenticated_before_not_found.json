@@ -1,0 +1,56 @@
+{
+  "name": "error_unauthenticated_before_not_found",
+  "description": "자격이 없으면 없는 프로젝트도 있는 프로젝트와 똑같이 401이다. 404는 인증된 뒤에만 나온다.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/no-such-project/context",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "unauthenticated",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "authenticate"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "unauthenticated",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "authenticate"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

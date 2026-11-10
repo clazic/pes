@@ -25,24 +25,23 @@
       }
     },
     "response": {
-      "status": 201,
+      "status": 200,
       "headers": {
         "Content-Type": "application/json"
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_handoff_01J9Z3K7QN",
         "data": {
-          "parent_run_id": "run_01J9Z3K7Q6",
-          "new_run_id": "run_01J9Z3K7QT",
+          "run_id": "run_01J9Z3K7Q6",
           "status": "queued",
           "lease": {
             "released": true,
             "fence": "3"
           },
-          "pending_input_count": 1
-        },
-        "meta": {
-          "request_id": "req_handoff_01J9Z3K7QN"
+          "pending_input_count": 1,
+          "target_mode": "B",
+          "target_actor_id": "act_01J9Z3K7Q8"
         }
       }
     }
@@ -84,6 +83,45 @@
             "actor_id": "act_01J9Z3K7Q7"
           },
           "next_action": "use_current_holder"
+        }
+      }
+    }
+  },
+  "scenes": {
+    "target_mismatch": {
+      "request": {
+        "path_params": {
+          "project_id": "prj_01J9Z3K7Q2",
+          "run_id": "run_01J9Z3K7Q6"
+        },
+        "headers": {
+          "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "idem_handoff_mismatch_01J9Z3K7Q2"
+        },
+        "body": {
+          "format_version": "1.0",
+          "target_actor_id": "act_01J9Z3K7Q8",
+          "reason": "다른 actor로 인계 시도(같은 run 반납이라 바꿀 수 없음)"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "format_version": "1.0",
+          "request_id": "req_handoff_mismatch_01J9Z3K7QN",
+          "error": {
+            "code": "invalid_payload",
+            "message": "요청 내용이 올바르지 않습니다. ($.body.target_actor_id)",
+            "retryable": false,
+            "target": "$.body.target_actor_id",
+            "details": null,
+            "next_action": "fix_request"
+          }
         }
       }
     }

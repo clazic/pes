@@ -386,6 +386,30 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
   return actor_id;
 }
 
+/** True when the command's actor is the project's human owner (no throw). */
+export function is_human_owner_actor(runtime: CommandRuntime): boolean {
+  try {
+    require_human_owner_actor(runtime);
+    return true;
+  } catch (error) {
+    // Only "not a human owner" means false; a database error must surface.
+    if (error instanceof ApiError && error.code === "forbidden") return false;
+    throw error;
+  }
+}
+
+/**
+ * An optional revision field given as a normalized decimal string (or a safe
+ * integer in-process). Absent/null means "no check".
+ */
+export function optional_rev(payload: Record<string, unknown>, field: string): bigint | null {
+  const value = payload[field];
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return BigInt(value);
+  if (typeof value === "string" && NORMALIZED_DECIMAL.test(value)) return BigInt(value);
+  throw new ApiError("invalid_payload", `${field} must be a normalized decimal string`);
+}
+
 export interface LeaseGuard {
   run_id: string;
   lease_id: string;

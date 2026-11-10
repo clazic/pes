@@ -9,7 +9,8 @@
         "project_id": "prj_01J9Z3K7Q2"
       },
       "headers": {
-        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
         "Accept": "application/json",
         "Content-Type": "application/json",
         "Idempotency-Key": "idem_q_01J9Z3K7Q2"
@@ -22,7 +23,7 @@
         "purpose": "review",
         "question": {
           "text": "2장의 정책 대안을 A/B로 나눌까요?",
-          "type": "single_choice",
+          "type": "single",
           "importance": "high",
           "required": true,
           "default_value": "A",
@@ -47,19 +48,17 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_q_01J9Z3K7QN",
         "data": {
+          "question_set_id": "qset_01J9Z3K7QD",
           "question": {
-            "id": "qst_01J9Z3K7QB",
-            "version_id": "qvr_01J9Z3K7QC",
+            "id": "id_01J9Z3K7QZ",
+            "version_id": "ver_01J9Z3K7QA",
             "version_no": "1",
             "state": "open",
-            "asked_by_actor_id": "act_01J9Z3K7Q7",
-            "intended_actor_id": "act_01J9Z3K7Q8"
-          },
-          "question_set_id": "qset_01J9Z3K7QD"
-        },
-        "meta": {
-          "request_id": "req_q_01J9Z3K7QN"
+            "asked_by_actor_id": "id_01J9Z3K7QZ",
+            "intended_actor_id": null
+          }
         }
       }
     }
@@ -70,7 +69,8 @@
         "project_id": "prj_01J9Z3K7Q2"
       },
       "headers": {
-        "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
         "Accept": "application/json",
         "Content-Type": "application/json"
       },
@@ -82,7 +82,7 @@
         "purpose": "review",
         "question": {
           "text": "선택지 값이 중복된 합성 질문",
-          "type": "single_choice",
+          "type": "single",
           "importance": "high",
           "required": true,
           "default_value": "A",
@@ -109,7 +109,7 @@
         "request_id": "req_q_err_01J9Z3K7QN",
         "error": {
           "code": "validation_failed",
-          "message": "요청 형식이 올바르지 않습니다.",
+          "message": "입력 값이 규칙에 맞지 않습니다. ($.body.question.options[1].value)",
           "retryable": false,
           "target": "$.body.question.options[1].value",
           "details": {

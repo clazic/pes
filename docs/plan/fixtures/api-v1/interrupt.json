@@ -29,14 +29,12 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_int_01J9Z3K7QN",
         "data": {
           "operation_id": "op_01J9Z3K7QR",
           "run_id": "run_01J9Z3K7Q6",
           "state": "pending",
           "accepted": true
-        },
-        "meta": {
-          "request_id": "req_int_01J9Z3K7QN"
         }
       }
     }

@@ -29,6 +29,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_reopen_01J9Z3K7QN",
         "data": {
           "stage": {
             "id": "stg_01J9Z3K7Q4",
@@ -39,9 +40,6 @@
             "prior_approval_id": "apr_01J9Z3K7Q2",
             "stale_after_stage_ordinal": 2
           }
-        },
-        "meta": {
-          "request_id": "req_reopen_01J9Z3K7QN"
         }
       }
     }

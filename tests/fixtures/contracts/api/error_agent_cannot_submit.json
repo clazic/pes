@@ -1,0 +1,109 @@
+{
+  "name": "error_agent_cannot_submit",
+  "description": "에이전트 토큰은 모든 권한을 가져도 답을 제출할 수 없다: 403 human_required, 소유자 세션을 쓰라는 안내.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "owner"
+      },
+      "save": {
+        "stage": "data.stages.0.stage_id"
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/questions",
+        "auth": "owner",
+        "body": {
+          "format_version": "1.0",
+          "stage_id": "${stage}",
+          "round_id": null,
+          "purpose": "stage_start",
+          "direction": "agent_to_human",
+          "question": {
+            "text": "합성 질문입니다",
+            "type": "single",
+            "required": true,
+            "allow_comment_as_answer": false,
+            "options": [
+              {
+                "value": "a",
+                "label": "합성 A",
+                "recommended": true
+              },
+              {
+                "value": "b",
+                "label": "합성 B"
+              }
+            ],
+            "default_value": "b"
+          }
+        }
+      },
+      "save": {
+        "set": "data.question_set_id",
+        "question": "data.question.id",
+        "question_version": "data.question.version_id"
+      },
+      "expect": {
+        "status": 201
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/submissions",
+        "auth": "agent:agent",
+        "body": {
+          "format_version": "1.0",
+          "set_id": "${set}",
+          "answers": [
+            {
+              "question_id": "${question}",
+              "question_version_id": "${question_version}",
+              "value": "a"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 403,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "human_required",
+            "message": "$string",
+            "retryable": false,
+            "target": "$.headers.Authorization",
+            "details": {
+              "required": "human_owner",
+              "actor_kind": "external_agent"
+            },
+            "next_action": "use_owner_session"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

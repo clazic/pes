@@ -19,6 +19,7 @@ import { ApiError } from "../errors.ts";
 import { current_policy } from "../policy.ts";
 import {
   insert_receipt,
+  optional_rev,
   reject_unknown_fields,
   require_human_owner_actor,
   require_non_empty_string,
@@ -37,6 +38,7 @@ const POLICY_SET_FIELDS = [
   "allow_opencode_go",
   "go_usage_stop_percent",
   "mode_a_model",
+  "expected_policy_rev",
 ] as const;
 const DISPATCH_PREPARE_FIELDS = [
   "run_id",
@@ -286,6 +288,13 @@ function run_policy_set(runtime: CommandRuntime): CommandResult {
   const scope = require_scope(runtime);
   require_human_owner_actor(runtime);
   const current = current_policy(runtime.db, scope.project_id);
+  const expected_policy_rev = optional_rev(payload, "expected_policy_rev");
+  if (expected_policy_rev !== null && expected_policy_rev !== BigInt(current.policy_rev)) {
+    throw new ApiError("rev_conflict", "the policy revision is stale", {
+      expected: expected_policy_rev.toString(),
+      current: String(current.policy_rev),
+    });
+  }
   const owner = runtime.db.get<{ owner_user_id: string }>(
     "SELECT owner_user_id FROM projects WHERE id = ?",
     scope.project_id,

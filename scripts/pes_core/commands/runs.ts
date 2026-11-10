@@ -13,6 +13,7 @@
 import { read_credential_actor } from "../actors.ts";
 import {
   insert_receipt,
+  is_human_owner_actor,
   reject_unknown_fields,
   require_base_control_rev,
   require_human_owner_actor,
@@ -100,7 +101,11 @@ function is_live_lease(lease: LeaseRow, now_ms: number): boolean {
 }
 
 /** The only accepted guard: the project's active, unexpired lease with the exact id and fence. */
-function require_current_lease(runtime: CommandRuntime, guard: LeaseGuard): LeaseRow {
+function require_current_lease(
+  runtime: CommandRuntime,
+  guard: LeaseGuard,
+  allow_owner = false,
+): LeaseRow {
   const scope = require_scope(runtime);
   const lease = read_lease(runtime, scope.project_id);
   if (
@@ -109,7 +114,7 @@ function require_current_lease(runtime: CommandRuntime, guard: LeaseGuard): Leas
     lease.lease_id !== guard.lease_id ||
     Number(lease.fence) !== guard.fence ||
     lease.run_id !== guard.run_id ||
-    lease.owner_actor_id !== scope.actor_id
+    (lease.owner_actor_id !== scope.actor_id && !(allow_owner && is_human_owner_actor(runtime)))
   ) {
     throw new ApiError("conflict", "the lease is not current");
   }
@@ -655,10 +660,51 @@ function finish_run(
   action: string,
   status: string,
   end_run: boolean,
+  allow_owner = false,
 ): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
   const guard = require_guard(payload);
-  require_current_lease(runtime, guard);
+  const lease = require_current_lease(runtime, guard, allow_owner);
+  const by_owner = lease.owner_actor_id !== scope.actor_id;
+
+  // Optional context recorded on the event only.
+  const extra: Record<string, unknown> = {};
+  if (allow_owner) {
+    const reason = optional_string(payload, "reason");
+    if (reason !== null) extra.reason = reason;
+    if (action === "run.handed_off") {
+      const mode = payload.target_mode;
+      if (mode !== undefined && mode !== "A" && mode !== "B") {
+        throw new ApiError("invalid_payload", 'target_mode must be "A" or "B"');
+      }
+      if (mode !== undefined) extra.target_mode = mode;
+      const target = optional_string(payload, "target_actor_id");
+      if (target !== null) {
+        const actor = read_credential_actor(runtime.db, target);
+        const member =
+          actor === undefined
+            ? undefined
+            : runtime.db.get<{ ok: bigint }>(
+                "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?",
+                scope.project_id,
+                actor.user_id,
+              );
+        if (member === undefined) {
+          throw new ApiError("not_found", "the target actor is not a member of the project");
+        }
+        extra.target_actor_id = target;
+      }
+      if (
+        payload.include_pending_inputs !== undefined &&
+        typeof payload.include_pending_inputs !== "boolean"
+      ) {
+        throw new ApiError("invalid_payload", "include_pending_inputs must be a boolean");
+      }
+      if (payload.include_pending_inputs !== undefined) {
+        extra.include_pending_inputs = payload.include_pending_inputs;
+      }
+    }
+  }
 
   write_run_status(
     runtime,
@@ -670,19 +716,21 @@ function finish_run(
   release_lease(runtime, guard);
 
   const result = guarded_result(scope, guard, { status });
+  // mutation_commits (project_id, run_id, actor_id) must match runs.actor_id, so
+  // an owner acting on an agent's run records the run in the result and event only.
   insert_receipt(runtime, {
     project_id: scope.project_id,
     actor_id: scope.actor_id,
     action,
     base_control_rev: null,
-    run_id: guard.run_id,
+    run_id: by_owner ? null : guard.run_id,
     lease_id: guard.lease_id,
     fence: guard.fence,
     result,
   });
   return {
     result,
-    events: [{ type: action, run_id: guard.run_id, payload: { status } }],
+    events: [{ type: action, run_id: guard.run_id, payload: { status, ...extra } }],
   };
 }
 
@@ -691,25 +739,99 @@ function run_release(runtime: CommandRuntime): CommandResult {
 }
 
 function run_handoff(runtime: CommandRuntime): CommandResult {
-  return finish_run(runtime, "run.handed_off", "queued", false);
+  return finish_run(runtime, "run.handed_off", "queued", false, true);
 }
 
 function run_interrupt(runtime: CommandRuntime): CommandResult {
-  return finish_run(runtime, "run.interrupted", "interrupted", true);
+  return finish_run(runtime, "run.interrupted", "interrupted", true, true);
 }
 
-function run_record_receipt(runtime: CommandRuntime): CommandResult {
+const CANCEL_TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
+
+/**
+ * Cancel a run: the human owner may cancel any run, an agent only its own
+ * (the run's actor). A queued run needs no lease; an active lease of this run
+ * is released. A finished run is a conflict that names its status.
+ */
+function run_cancel(runtime: CommandRuntime): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
-  const guard = require_guard(payload);
-  const input_version_id = require_non_empty_string(payload, "input_version_id");
-  const state = payload.state;
+  reject_unknown_fields(payload, ["run_id", "reason"]);
+  const run_id = require_non_empty_string(payload, "run_id");
+  const reason = optional_string(payload, "reason");
+  const run = runtime.db.get<RunRow>(
+    "SELECT id, actor_id, status, parent_run_id FROM runs WHERE project_id = ? AND id = ?",
+    scope.project_id,
+    run_id,
+  );
+  if (run === undefined) throw new ApiError("not_found", "run not found");
+  const owner = is_human_owner_actor(runtime);
+  if (!owner && run.actor_id !== scope.actor_id) {
+    throw new ApiError("forbidden", "only the owner or the run's own actor may cancel it");
+  }
+  if (CANCEL_TERMINAL_STATUSES.has(run.status)) {
+    throw new ApiError("conflict", "the run is already finished", {
+      reason: "run_terminal",
+      run_id,
+      status: run.status,
+    });
+  }
+  write_run_status(runtime, scope.project_id, run_id, "cancelled", runtime.now_ms);
+  const lease = read_lease(runtime, scope.project_id);
+  let lease_id: string | null = null;
+  let fence: number | null = null;
+  if (lease !== undefined && lease.run_id === run_id && lease.state === "active") {
+    runtime.db.run(
+      "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND state = 'active'",
+      scope.project_id,
+      lease.lease_id,
+    );
+    lease_id = lease.lease_id;
+    fence = Number(lease.fence);
+  }
+  const result = { project_id: scope.project_id, run_id, status: "cancelled" };
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    action: "run.cancelled",
+    base_control_rev: null,
+    run_id: run.actor_id === scope.actor_id ? run_id : null,
+    lease_id,
+    fence,
+    result,
+  });
+  return {
+    result,
+    events: [
+      {
+        type: "run.cancelled",
+        run_id,
+        payload: { status: "cancelled", ...(reason === null ? {} : { reason }) },
+      },
+    ],
+  };
+}
+
+interface ReceiptOutcome {
+  result: Record<string, unknown>;
+  event: EventDraft;
+}
+
+/** One input receipt inside the caller's transaction (no mutation receipt written here). */
+function record_one(
+  runtime: CommandRuntime,
+  scope: Scope,
+  guard: LeaseGuard,
+  item: Record<string, unknown>,
+): ReceiptOutcome {
+  const input_version_id = require_non_empty_string(item, "input_version_id");
+  const state = item.state;
   if (typeof state !== "string" || !INPUT_RECEIPT_STATES.has(state)) {
     throw new ApiError("invalid_payload", 'state must be "seen", "applied" or "ignored"');
   }
-  const reason = optional_string(payload, "reason");
+  const reason = optional_string(item, "reason");
   let applied_tx_id: string | null = null;
   if (state === "applied") {
-    applied_tx_id = require_non_empty_string(payload, "applied_tx_id");
+    applied_tx_id = require_non_empty_string(item, "applied_tx_id");
     const evidence = runtime.db.get<{ ok: bigint }>(
       "SELECT 1 AS ok FROM mutation_commits WHERE project_id = ? AND id = ?",
       scope.project_id,
@@ -724,33 +846,20 @@ function run_record_receipt(runtime: CommandRuntime): CommandResult {
 
   const already = applied_receipt(runtime, scope.project_id, guard.run_id, input_version_id);
   if (already !== undefined) {
-    const result = {
-      project_id: scope.project_id,
-      run_id: guard.run_id,
-      input_version_id,
-      state: "applied",
-      applied_tx_id: already.applied_tx_id,
-      already_applied: true,
-    };
-    insert_receipt(runtime, {
-      project_id: scope.project_id,
-      actor_id: scope.actor_id,
-      action: "run.input_receipt_recorded",
-      base_control_rev: null,
-      run_id: guard.run_id,
-      lease_id: guard.lease_id,
-      fence: guard.fence,
-      result,
-    });
     return {
-      result,
-      events: [
-        {
-          type: "run.input_receipt_recorded",
-          run_id: guard.run_id,
-          payload: { input_version_id, state: "applied", already_applied: true },
-        },
-      ],
+      result: {
+        project_id: scope.project_id,
+        run_id: guard.run_id,
+        input_version_id,
+        state: "applied",
+        applied_tx_id: already.applied_tx_id,
+        already_applied: true,
+      },
+      event: {
+        type: "run.input_receipt_recorded",
+        run_id: guard.run_id,
+        payload: { input_version_id, state: "applied", already_applied: true },
+      },
     };
   }
 
@@ -785,15 +894,64 @@ function run_record_receipt(runtime: CommandRuntime): CommandResult {
       input_version_id,
     );
   }
-
-  const result = {
-    project_id: scope.project_id,
-    run_id: guard.run_id,
-    input_version_id,
-    state,
-    applied_tx_id,
-    already_applied: false,
+  return {
+    result: {
+      project_id: scope.project_id,
+      run_id: guard.run_id,
+      input_version_id,
+      state,
+      applied_tx_id,
+      already_applied: false,
+    },
+    event: {
+      type: "run.input_receipt_recorded",
+      run_id: guard.run_id,
+      payload: { input_version_id, state, already_applied: false },
+    },
   };
+}
+
+/**
+ * One receipt (fields at the top level) or a bundle (`receipts`, 1..20): all or
+ * nothing in one transaction with one mutation receipt.
+ */
+function run_record_receipt(runtime: CommandRuntime): CommandResult {
+  const { scope, payload } = claim_runtime_scope(runtime);
+  const guard = require_guard(payload);
+
+  if (payload.receipts !== undefined) {
+    reject_unknown_fields(payload, ["run_id", "lease_id", "fence", "receipts"]);
+    const list = payload.receipts;
+    if (!Array.isArray(list) || list.length < 1 || list.length > 20) {
+      throw new ApiError("invalid_payload", "receipts must be an array of 1 to 20 items");
+    }
+    const items = list.map((entry) => require_record(entry));
+    require_current_lease(runtime, guard);
+    const outcomes = items.map((item) => record_one(runtime, scope, guard, item));
+    const result = {
+      project_id: scope.project_id,
+      run_id: guard.run_id,
+      accepted: outcomes.map((o) => ({
+        input_version_id: o.result.input_version_id,
+        state: o.result.state,
+        already_applied: o.result.already_applied,
+      })),
+    };
+    insert_receipt(runtime, {
+      project_id: scope.project_id,
+      actor_id: scope.actor_id,
+      action: "run.input_receipt_recorded",
+      base_control_rev: null,
+      run_id: guard.run_id,
+      lease_id: guard.lease_id,
+      fence: guard.fence,
+      result,
+    });
+    return { result, events: outcomes.map((o) => o.event) };
+  }
+
+  // Single form.
+  const outcome = record_one(runtime, scope, guard, payload);
   insert_receipt(runtime, {
     project_id: scope.project_id,
     actor_id: scope.actor_id,
@@ -802,18 +960,9 @@ function run_record_receipt(runtime: CommandRuntime): CommandResult {
     run_id: guard.run_id,
     lease_id: guard.lease_id,
     fence: guard.fence,
-    result,
+    result: outcome.result,
   });
-  return {
-    result,
-    events: [
-      {
-        type: "run.input_receipt_recorded",
-        run_id: guard.run_id,
-        payload: { input_version_id, state, already_applied: false },
-      },
-    ],
-  };
+  return { result: outcome.result, events: [outcome.event] };
 }
 
 function definition(action: string, run: (runtime: CommandRuntime) => CommandResult): CommandDefinition {
@@ -830,6 +979,7 @@ const RUN_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> = 
   ["run.handoff", definition("run.handed_off", run_handoff)],
   ["run.interrupt", definition("run.interrupted", run_interrupt)],
   ["run.record_receipt", definition("run.input_receipt_recorded", run_record_receipt)],
+  ["run.cancel", definition("run.cancelled", run_cancel)],
 ];
 
 /**

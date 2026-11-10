@@ -12,7 +12,7 @@
  *
  * 읽기 규칙 (본문이 나가는 길이 넓어지므로 기존 규칙이 그대로 적용돼야 한다):
  *   - 토큰은 context:read 필요(없으면 403), 프로젝트 소속 불일치는 404, Go OFF 에서 internal_ai 는
- *     403 policy_denied. 거부 응답 어디에도 본문 문자열이 없다.
+ *     403 policy_blocked. 거부 응답 어디에도 본문 문자열이 없다.
  *   - ai_access='deny' 인 blob(file_policies / 최신 file_ai_access_versions)은 에이전트 토큰의 응답에서
  *     files 목록에 나오지 않고 blob_id 도 응답 어디에도 없으며, 같은 blob 의 파일 경로 읽기도 403.
  *     사람 owner 는 규칙대로 그대로 본다.
@@ -238,7 +238,7 @@ test("F3 exposure (2): another project's token, and another project's object/ver
   });
 });
 
-test("F3 exposure (3): Go OFF blocks internal_ai with 403 policy_denied and no content; external agent and owner still read", async () => {
+test("F3 exposure (3): Go OFF blocks internal_ai with 403 policy_blocked and no content; external agent and owner still read", async () => {
   await with_api(async (env) => {
     const a = await make_artifact(env, "g-art");
     const s = await make_source(env, "g-src");
@@ -248,7 +248,7 @@ test("F3 exposure (3): Go OFF blocks internal_ai with 403 policy_denied and no c
     for (const v of [a, s]) {
       const path = VPATH(env, v.object_id, v.version_id);
       const denied = await call(env, { method: "GET", path, auth: { token: internal.token } });
-      assert.equal(assert_error(denied, 403, "policy_denied").retryable, false);
+      assert.equal(assert_error(denied, 403, "policy_blocked").retryable, false);
       no_markers(denied);
       const ext = assert_ok(await call(env, { method: "GET", path, auth: { token: external.token } }));
       assert.ok(ext.content, "external agent still gets content");

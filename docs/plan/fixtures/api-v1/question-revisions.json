@@ -21,8 +21,8 @@
         "base_version_id": "qvr_01J9Z3K7QC",
         "question": {
           "text": "2장의 정책 대안을 A/B/C로 나눌까요?",
-          "type": "single_choice",
-          "importance": "medium",
+          "type": "single",
+          "importance": "normal",
           "required": false,
           "default_value": null,
           "options": [
@@ -49,18 +49,16 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_qrev_01J9Z3K7QN",
         "data": {
           "question": {
-            "id": "qst_01J9Z3K7QB",
-            "version_id": "qvr_01J9Z3K7QZ",
+            "id": "id_01J9Z3K7QZ",
+            "version_id": "ver_01J9Z3K7QA",
             "version_no": "2",
             "state": "open"
           },
           "recheck_required": true,
           "previous_answers_preserved": true
-        },
-        "meta": {
-          "request_id": "req_qrev_01J9Z3K7QN"
         }
       }
     }
@@ -82,8 +80,8 @@
         "base_version_id": "qvr_stale_01J9Z3K7Q2",
         "question": {
           "text": "오래된 기반 버전으로 수정 시도",
-          "type": "single_choice",
-          "importance": "medium",
+          "type": "single",
+          "importance": "normal",
           "required": false,
           "options": [
             {
@@ -104,12 +102,12 @@
         "request_id": "req_qrev_err_01J9Z3K7QN",
         "error": {
           "code": "rev_conflict",
-          "message": "질문 버전이 이미 바뀌었습니다.",
+          "message": "기준 버전이 현재와 다릅니다.",
           "retryable": false,
           "target": "$.body.base_version_id",
           "details": {
             "expected": "qvr_stale_01J9Z3K7Q2",
-            "current": "qvr_01J9Z3K7QC"
+            "current": "id_01J9Z3K7QZ"
           },
           "next_action": "reread_question"
         }

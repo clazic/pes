@@ -25,10 +25,12 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_inputs_01J9Z3K7QN",
         "data": {
           "inputs": [
             {
               "input_version_id": "ver_01J9Z3K7QA",
+              "object_id": "ans_01J9Z3K7QC",
               "kind": "answer",
               "question_id": "qst_01J9Z3K7QB",
               "available_at": 1762312000000,
@@ -38,9 +40,6 @@
           "next_cursor": "cur_01J9Z3K7QZ",
           "has_more": false,
           "epoch": "2"
-        },
-        "meta": {
-          "request_id": "req_inputs_01J9Z3K7QN"
         }
       }
     }

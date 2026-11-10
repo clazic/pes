@@ -1,6 +1,6 @@
 {
-  "name": "error_policy_denied",
-  "description": "Go가 꺼져 있으면 A 방식 claim은 403 policy_denied, 재시도 표시 없음.",
+  "name": "error_policy_blocked",
+  "description": "Go가 꺼져 있으면 A 방식 claim은 403 policy_blocked, 재시도 표시 없음, 소유자에게 정책을 켜라고 안내한다.",
   "agents": {
     "agent": {
       "kind": "internal_ai",
@@ -35,12 +35,12 @@
           "format_version": "1.0",
           "request_id": "$string",
           "error": {
-            "code": "policy_denied",
+            "code": "policy_blocked",
             "message": "$string",
             "retryable": false,
             "target": "$any",
             "details": "$any",
-            "next_action": "$any"
+            "next_action": "owner_enable_policy"
           },
           "$absent": [
             "data"

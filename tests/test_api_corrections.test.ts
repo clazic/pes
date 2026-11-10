@@ -274,14 +274,14 @@ test("the matching rev still passes on claims and results (current rev as a deci
 // ---------------------------------------------------------------------------
 // 4) POST /runs mode A + Go OFF
 
-test("POST /runs mode A with Go OFF is 403 policy_denied and writes nothing; mode B and Go ON still work", async () => {
+test("POST /runs mode A with Go OFF is 403 policy_blocked and writes nothing; mode B and Go ON still work", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "goruns", undefined, "internal_ai");
     const mode_a = { actor_id: agent.actor_id, mode: "A", runtime: "synthetic-runtime", provider: "opencode-go", model: "opencode-go/synthetic" };
     await go_off(env);
     const before = state_signature(env.db);
     const denied = await call(env, { method: "POST", path: P(env, "/runs"), auth: "owner", body: mode_a });
-    const error = assert_error(denied, 403, "policy_denied");
+    const error = assert_error(denied, 403, "policy_blocked");
     assert.equal(error.retryable, false);
     assert.equal(state_signature(env.db), before, "no run, receipt, or event");
     // mode B is not a Go run
@@ -369,7 +369,9 @@ test("bridge: a current database is left exactly as it was by a request", () => 
     const child = run_bridge(home.env, CONTEXT_REQUEST);
     assert.equal(child.status, 0, child.stderr);
     const out = JSON.parse(child.stdout) as { status: number; body_b64: string };
-    assert.equal(out.status, 404);
+    // PR14: credentials are checked before the project lookup, so an unauthenticated request is 401 even for an
+    // unknown project. The point of this test is unchanged: a current database answers and is not migrated.
+    assert.equal(out.status, 401);
     assert.equal(schema_snapshot(file), before);
   } finally {
     home.cleanup();

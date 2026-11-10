@@ -28,6 +28,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_msg_01J9Z3K7QN",
         "data": {
           "thread_id": "thr_01J9Z3K7QH",
           "message": {
@@ -35,9 +36,6 @@
             "version_no": "2",
             "author_actor_id": "act_01J9Z3K7Q7"
           }
-        },
-        "meta": {
-          "request_id": "req_msg_01J9Z3K7QN"
         }
       }
     }

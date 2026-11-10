@@ -31,6 +31,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_hb_01J9Z3K7QN",
         "data": {
           "run_id": "run_01J9Z3K7Q6",
           "lease": {
@@ -39,9 +40,6 @@
             "expires_at": 1762311770000
           },
           "server_time": 1762311655000
-        },
-        "meta": {
-          "request_id": "req_hb_01J9Z3K7QN"
         }
       }
     }

@@ -11,29 +11,15 @@
       },
       "headers": {
         "Authorization": "Bearer ${PES_AGENT_TOKEN}",
-        "Accept": "application/json"
+        "Accept": "application/octet-stream"
       }
     },
     "response": {
       "status": 200,
       "headers": {
-        "Content-Type": "application/json",
-        "X-PES-Original-Content-Type": "image/png"
+        "Content-Type": "application/octet-stream"
       },
-      "body": {
-        "format_version": "1.0",
-        "data": {
-          "blob_id": "blb_01J9Z3K7QF",
-          "media_type": "image/png",
-          "filename": "synthetic-figure.png",
-          "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-          "size_bytes": 12345,
-          "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z1ioAAAAASUVORK5CYII="
-        },
-        "meta": {
-          "request_id": "req_file_01J9Z3K7QN"
-        }
-      }
+      "body_base64": "Bw4VHCMqMTg/Rk1UW2JpcHd+hYyTmqGor7a9xMvS2eDn7vUBCA8WHSQrMjlAR05VXGNqcXh/ho2Um6KpsLe+xQ=="
     }
   },
   "error": {
@@ -44,7 +30,7 @@
       },
       "headers": {
         "Authorization": "Bearer ${PES_AGENT_TOKEN}",
-        "Accept": "application/json"
+        "Accept": "application/octet-stream"
       }
     },
     "response": {
@@ -57,14 +43,10 @@
         "request_id": "req_file_err_01J9Z3K7QN",
         "error": {
           "code": "policy_blocked",
-          "message": "OpenCode Go 전송이 꺼져 있어 에이전트의 파일 읽기를 차단했습니다.",
+          "message": "프로젝트 정책이 이 요청을 막고 있습니다.",
           "retryable": false,
-          "target": "$.path.blob_id",
-          "details": {
-            "policy": "opencode_go",
-            "allow": false,
-            "blob_id": "blb_01J9Z3K7QF"
-          },
+          "target": null,
+          "details": null,
           "next_action": "owner_enable_policy"
         }
       }

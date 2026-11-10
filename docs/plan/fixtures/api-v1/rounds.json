@@ -18,9 +18,7 @@
       },
       "body": {
         "format_version": "1.0",
-        "base_stage_rev": "3",
-        "purpose": "review",
-        "question_set_id": "qset_01J9Z3K7QD"
+        "base_stage_rev": "3"
       }
     },
     "response": {
@@ -30,16 +28,14 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_round_01J9Z3K7QN",
         "data": {
           "round": {
-            "id": "rnd_01J9Z3K7Q5",
-            "round_no": "2",
+            "id": "id_01J9Z3K7QZ",
+            "round_no": "1",
             "state": "open",
             "stage_id": "stg_01J9Z3K7Q4"
           }
-        },
-        "meta": {
-          "request_id": "req_round_01J9Z3K7QN"
         }
       }
     }
@@ -57,10 +53,7 @@
         "Content-Type": "application/json"
       },
       "body": {
-        "format_version": "1.0",
-        "base_stage_rev": "2",
-        "purpose": "review",
-        "question_set_id": "qset_01J9Z3K7QD"
+        "format_version": "1.0"
       }
     },
     "response": {
@@ -73,12 +66,12 @@
         "request_id": "req_round_err_01J9Z3K7QN",
         "error": {
           "code": "stage_not_active",
-          "message": "단계가 활성 상태가 아닙니다.",
+          "message": "진행 중이 아닌 단계입니다.",
           "retryable": false,
           "target": "$.path.stage_id",
           "details": {
             "stage_id": "stg_01J9Z3K7Q4",
-            "stage_status": "approved"
+            "stage_status": "pending"
           },
           "next_action": "reread_stage"
         }

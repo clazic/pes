@@ -22,40 +22,21 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_ver_01J9Z3K7QN",
         "data": {
-          "object": {
-            "id": "obj_01J9Z3K7Q9",
-            "kind": "artifact",
-            "display_no": "12",
-            "current_version_id": "ver_01J9Z3K7QA",
-            "rev": "7"
-          },
-          "version": {
-            "id": "ver_01J9Z3K7QA",
-            "version_no": "3",
-            "based_on_version_id": "ver_01J9Z3K7Q0",
-            "content_hash": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
-            "created_at": 1762311600000,
-            "actor_id": "act_01J9Z3K7Q7",
-            "run_id": "run_01J9Z3K7Q6"
-          },
-          "artifact": {
-            "kind": "chapter",
+          "project_id": "prj_01J9Z3K7Q2",
+          "object_id": "obj_01J9Z3K7Q9",
+          "kind": "artifact",
+          "version_id": "ver_01J9Z3K7QA",
+          "version_no": 1,
+          "is_current": true,
+          "content_hash": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+          "content": {
             "title": "2장 합성 정책 분석",
-            "body_md": "## 2. 합성 정책 분석\n\n이 문단은 계약 시험용 합성 자료입니다.",
-            "status": "draft"
+            "summary": "합성 요약",
+            "body_md": null
           },
-          "files": [
-            {
-              "blob_id": "blb_01J9Z3K7QF",
-              "role": "figure",
-              "sha256": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
-              "size_bytes": 12345
-            }
-          ]
-        },
-        "meta": {
-          "request_id": "req_ver_01J9Z3K7QN"
+          "files": []
         }
       }
     }
@@ -81,15 +62,107 @@
         "format_version": "1.0",
         "request_id": "req_ver_err_01J9Z3K7QN",
         "error": {
-          "code": "version_not_found",
-          "message": "요청한 객체 버전을 찾을 수 없습니다.",
+          "code": "not_found",
+          "message": "요청한 대상을 찾을 수 없습니다.",
           "retryable": false,
-          "target": "$.path.version_id",
-          "details": {
+          "target": null,
+          "details": null,
+          "next_action": "reread_context"
+        }
+      }
+    }
+  },
+  "scenes": {
+    "answer": {
+      "request": {
+        "path_params": {
+          "project_id": "prj_01J9Z3K7Q2",
+          "object_id": "obj_01J9Z3K7Q9",
+          "version_id": "ver_01J9Z3K7QA"
+        },
+        "headers": {
+          "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "format_version": "1.0",
+          "request_id": "req_ver_ans_01J9Z3K7QN",
+          "data": {
+            "project_id": "prj_01J9Z3K7Q2",
             "object_id": "obj_01J9Z3K7Q9",
-            "version_id": "ver_missing_01J9Z3K7Q2"
-          },
-          "next_action": "reread_object_versions"
+            "kind": "answer",
+            "version_id": "ver_01J9Z3K7QA",
+            "version_no": 1,
+            "is_current": true,
+            "content_hash": "8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b",
+            "content": {
+              "question_version_id": "qvr_01J9Z3K7QC",
+              "value": "A",
+              "state": "submitted",
+              "comment": "합성 의견"
+            },
+            "files": []
+          }
+        }
+      }
+    },
+    "question": {
+      "request": {
+        "path_params": {
+          "project_id": "prj_01J9Z3K7Q2",
+          "object_id": "qst_01J9Z3K7QB",
+          "version_id": "qvr_01J9Z3K7QC"
+        },
+        "headers": {
+          "Authorization": "Bearer ${PES_AGENT_TOKEN}",
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "format_version": "1.0",
+          "request_id": "req_ver_qst_01J9Z3K7QN",
+          "data": {
+            "project_id": "prj_01J9Z3K7Q2",
+            "object_id": "qst_01J9Z3K7QB",
+            "kind": "question",
+            "version_id": "qvr_01J9Z3K7QC",
+            "version_no": 1,
+            "is_current": true,
+            "content_hash": "7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
+            "content": {
+              "text": "계약 시험 질문 장면",
+              "type": "single",
+              "state": "open",
+              "importance": "normal",
+              "required": true,
+              "allow_comment_as_answer": false,
+              "default_value": "B",
+              "options": [
+                {
+                  "value": "A",
+                  "label": "합성 A"
+                },
+                {
+                  "value": "B",
+                  "label": "합성 B"
+                }
+              ],
+              "show_if": null,
+              "help": null
+            },
+            "files": []
+          }
         }
       }
     }

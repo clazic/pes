@@ -30,6 +30,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_approve_01J9Z3K7QN",
         "data": {
           "stage": {
             "id": "stg_01J9Z3K7Q4",
@@ -41,9 +42,6 @@
             "assurance": "verified",
             "human_user_id": "usr_01J9Z3K7QQ"
           }
-        },
-        "meta": {
-          "request_id": "req_approve_01J9Z3K7QN"
         }
       }
     }
@@ -77,13 +75,13 @@
         "request_id": "req_approve_err_01J9Z3K7QN",
         "error": {
           "code": "stale_stage",
-          "message": "앞 단계가 다시 열려 이 승인은 재확인이 필요합니다.",
+          "message": "단계가 그사이 바뀌었습니다. 다시 읽어 주세요.",
           "retryable": false,
-          "target": "$.body.snapshot_id",
+          "target": "$.body.expected_stage_rev",
           "details": {
-            "stage_status": "asking",
-            "stale_since_event_seq": "51",
-            "current_rev": "4"
+            "expected": "2",
+            "current_rev": "0",
+            "stage_status": "pending"
           },
           "next_action": "reread_stage"
         }

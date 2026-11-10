@@ -1,0 +1,79 @@
+{
+  "name": "error_register_without_session",
+  "description": "세션 없이 등록하려 하면 401. 프로젝트 토큰으로도 등록할 수 없다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/project-registrations",
+        "auth": "none",
+        "body": {
+          "slug": "fixture-registered",
+          "topic": "합성 등록 주제",
+          "owner_display_name": "합성 등록 소유자",
+          "device_label": "합성 기기"
+        }
+      },
+      "expect": {
+        "status": 401,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "unauthenticated",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "authenticate"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/project-registrations",
+        "auth": "agent:agent",
+        "body": {
+          "slug": "fixture-registered",
+          "topic": "합성 등록 주제",
+          "owner_display_name": "합성 등록 소유자",
+          "device_label": "합성 기기"
+        }
+      },
+      "expect": {
+        "status": 401,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "unauthenticated",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "authenticate"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

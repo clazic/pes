@@ -24,7 +24,7 @@
  *     files: [ { blob_id: string, role: string } ],   // version_files 행. 그 밖의 필드는 더해도 된다.
  *   }
  *   소속이 맞지 않는 (프로젝트, 객체, 버전) 조합은 404 not_found, 권한 없음은 403 forbidden,
- *   Go OFF 에서 internal_ai 는 context 와 같은 403 policy_denied.
+ *   Go OFF 에서 internal_ai 는 context 와 같은 403 policy_blocked.
  */
 
 import assert from "node:assert/strict";
@@ -313,7 +313,7 @@ test("F3: credentials — no credentials 401, a token without context:read 403, 
   });
 });
 
-test("F3: Go OFF follows the context rule — internal_ai 403 policy_denied, external agent and owner still read", async () => {
+test("F3: Go OFF follows the context rule — internal_ai 403 policy_blocked, external agent and owner still read", async () => {
   await with_api(async (env) => {
     const v = await new_artifact(env, "f3-go");
     const path = VERSION_PATH(env, v.object_id, v.version_id);
@@ -322,7 +322,7 @@ test("F3: Go OFF follows the context rule — internal_ai 403 policy_denied, ext
     assert_ok(await call(env, { method: "GET", path, auth: { token: internal.token } }));
     await go_off(env);
     const denied = await call(env, { method: "GET", path, auth: { token: internal.token } });
-    assert.equal(assert_error(denied, 403, "policy_denied").retryable, false);
+    assert.equal(assert_error(denied, 403, "policy_blocked").retryable, false);
     assert_ok(await call(env, { method: "GET", path, auth: { token: external.token } }));
     assert_ok(await call(env, { method: "GET", path, auth: "owner" }));
   });

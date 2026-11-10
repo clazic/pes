@@ -78,3 +78,11 @@ export function record_receipt(
 ): Promise<CommandOutcome> {
   return service.execute(ctx, "run.record_receipt", input);
 }
+
+export function cancel(
+  service: CommandService,
+  ctx: MutationContext,
+  input: unknown,
+): Promise<CommandOutcome> {
+  return service.execute(ctx, "run.cancel", input);
+}

@@ -16,24 +16,212 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_cap_01J9Z3K7QN",
         "data": {
+          "format_version": "1.0",
           "server": "pes-local",
           "api_version": "v1",
+          "routes": [
+            "GET /api/v1/capabilities",
+            "POST /api/v1/projects",
+            "POST /api/v1/project-registrations",
+            "GET /api/v1/projects/{id}/context",
+            "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
+            "GET /api/v1/projects/{id}/changes",
+            "POST /api/v1/projects/{id}/runs",
+            "POST /api/v1/projects/{id}/claims",
+            "POST /api/v1/projects/{id}/runs/{r}/wait",
+            "POST /api/v1/projects/{id}/runs/{r}/results",
+            "POST /api/v1/projects/{id}/runs/{r}/complete",
+            "POST /api/v1/projects/{id}/runs/{r}/heartbeat",
+            "POST /api/v1/projects/{id}/runs/{r}/release",
+            "POST /api/v1/projects/{id}/runs/{r}/handoffs",
+            "POST /api/v1/projects/{id}/runs/{r}/interrupt",
+            "POST /api/v1/projects/{id}/runs/{r}/cancel",
+            "GET /api/v1/projects/{id}/runs/{r}/inputs",
+            "POST /api/v1/projects/{id}/runs/{r}/input-receipts",
+            "GET /api/v1/projects/{id}/operations/{op}",
+            "GET /api/v1/projects/{id}/requests/{key}",
+            "POST /api/v1/projects/{id}/questions",
+            "POST /api/v1/projects/{id}/questions/{q}/revisions",
+            "POST /api/v1/projects/{id}/submissions",
+            "POST /api/v1/projects/{id}/stages/{s}/rounds",
+            "POST /api/v1/projects/{id}/rounds/{rd}/seal",
+            "POST /api/v1/projects/{id}/stages/{s}/approve",
+            "POST /api/v1/projects/{id}/stages/{s}/reopen",
+            "POST /api/v1/projects/{id}/policies/opencode-go/revisions",
+            "POST /api/v1/projects/{id}/uploads",
+            "PUT /api/v1/projects/{id}/uploads/{b}",
+            "POST /api/v1/projects/{id}/uploads/{b}/complete",
+            "GET /api/v1/projects/{id}/files/{b}/content"
+          ],
+          "unsupported": [
+            "POST /api/v1/projects/{id}/exports",
+            "POST /api/v1/projects/{id}/threads",
+            "POST /api/v1/projects/{id}/threads/{t}/messages",
+            "POST /api/v1/projects/{id}/threads/{t}/resolutions",
+            "POST /api/v1/projects/{id}/assumptions",
+            "POST /api/v1/projects/{id}/decisions",
+            "POST /api/v1/projects/{id}/reflections",
+            "POST /api/v1/projects/{id}/editions",
+            "POST /api/v1/projects/{id}/agent-tokens",
+            "POST /api/v1/projects/{id}/followups/{f}/apply",
+            "DELETE /api/v1/projects/{id}"
+          ],
+          "scopes": [
+            "context:read",
+            "run:claim",
+            "run:submit",
+            "file:write",
+            "file:read"
+          ],
+          "human_only": [
+            "POST /api/v1/projects",
+            "POST /api/v1/project-registrations",
+            "POST /api/v1/projects/{id}/runs",
+            "POST /api/v1/projects/{id}/submissions",
+            "POST /api/v1/projects/{id}/stages/{s}/approve",
+            "POST /api/v1/projects/{id}/stages/{s}/reopen",
+            "POST /api/v1/projects/{id}/policies/opencode-go/revisions"
+          ],
+          "limits": {
+            "max_body_bytes": 262144,
+            "max_results_per_batch": 20,
+            "list_max_items": 100,
+            "long_poll_max_ms": 25000,
+            "min_poll_interval_ms": 1000,
+            "agent_requests_per_minute": 60,
+            "owner_requests_per_minute": 600
+          },
           "capabilities": {
             "operations": {
+              "capabilities.get": {
+                "supported": true
+              },
+              "projects.create": {
+                "supported": true
+              },
+              "project_registrations.create": {
+                "supported": true
+              },
               "context.get": {
+                "supported": true
+              },
+              "object.version.get": {
+                "supported": true
+              },
+              "changes.list": {
                 "supported": true
               },
               "runs.create": {
                 "supported": true
               },
+              "runs.claim": {
+                "supported": true
+              },
+              "runs.wait": {
+                "supported": true
+              },
               "results.submit": {
+                "supported": true
+              },
+              "runs.complete": {
+                "supported": true
+              },
+              "runs.heartbeat": {
+                "supported": true
+              },
+              "runs.release": {
+                "supported": true
+              },
+              "runs.handoff": {
+                "supported": true
+              },
+              "runs.interrupt": {
+                "supported": true
+              },
+              "runs.cancel": {
+                "supported": true
+              },
+              "runs.inputs": {
+                "supported": true
+              },
+              "runs.input_receipts": {
+                "supported": true
+              },
+              "operations.get": {
+                "supported": true
+              },
+              "requests.get": {
+                "supported": true
+              },
+              "questions.create": {
+                "supported": true
+              },
+              "questions.revise": {
+                "supported": true
+              },
+              "submissions.create": {
+                "supported": true
+              },
+              "rounds.create": {
+                "supported": true
+              },
+              "rounds.seal": {
+                "supported": true
+              },
+              "stages.approve": {
+                "supported": true
+              },
+              "stages.reopen": {
+                "supported": true
+              },
+              "policies.opencode_go.revise": {
+                "supported": true
+              },
+              "uploads.create": {
+                "supported": true
+              },
+              "uploads.put": {
+                "supported": true
+              },
+              "uploads.complete": {
+                "supported": true
+              },
+              "files.content": {
                 "supported": true
               },
               "exports.create": {
                 "supported": false
               },
-              "webmcp": {
+              "threads.create": {
+                "supported": false
+              },
+              "threads.messages.create": {
+                "supported": false
+              },
+              "threads.resolutions.create": {
+                "supported": false
+              },
+              "assumptions.create": {
+                "supported": false
+              },
+              "decisions.create": {
+                "supported": false
+              },
+              "reflections.create": {
+                "supported": false
+              },
+              "editions.create": {
+                "supported": false
+              },
+              "agent_tokens.create": {
+                "supported": false
+              },
+              "followups.apply": {
+                "supported": false
+              },
+              "projects.delete": {
                 "supported": false
               }
             },
@@ -42,45 +230,38 @@
               "request_body_max_bytes": 262144,
               "results_per_submit": 20,
               "list_max_items": 100,
+              "min_poll_interval_ms": 1000,
               "agent_requests_per_minute": 60
             },
             "error_codes": [
-              "rev_conflict",
-              "lease_lost",
+              "unauthenticated",
+              "forbidden",
+              "human_required",
+              "owner_required",
               "policy_blocked",
-              "cursor_invalid"
+              "input_not_visible",
+              "not_found",
+              "method_not_allowed",
+              "invalid_payload",
+              "cursor_invalid",
+              "validation_failed",
+              "payload_too_large",
+              "idempotency_key_reuse",
+              "rev_conflict",
+              "conflict",
+              "lease_lost",
+              "run_terminal",
+              "question_version_changed",
+              "stale_stage",
+              "stage_not_active",
+              "already_sealed",
+              "cursor_expired",
+              "rate_limited",
+              "not_supported",
+              "internal_error",
+              "schema_not_ready"
             ]
           }
-        },
-        "meta": {
-          "request_id": "req_cap_01J9Z3K7QN"
-        }
-      }
-    }
-  },
-  "error": {
-    "request": {
-      "headers": {
-        "Accept": "application/json"
-      }
-    },
-    "response": {
-      "status": 401,
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "body": {
-        "format_version": "1.0",
-        "request_id": "req_cap_err_01J9Z3K7QN",
-        "error": {
-          "code": "unauthorized",
-          "message": "인증 정보가 없거나 만료되었습니다.",
-          "retryable": false,
-          "target": "$.headers.Authorization",
-          "details": {
-            "reason": "missing_bearer_token"
-          },
-          "next_action": "reauthenticate"
         }
       }
     }

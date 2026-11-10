@@ -37,6 +37,7 @@
       },
       "body": {
         "format_version": "1.0",
+        "request_id": "req_sub_01J9Z3K7QN",
         "data": {
           "submission": {
             "id": "sub_01J9Z3K7QE",
@@ -50,9 +51,6 @@
               "state": "submitted"
             }
           ]
-        },
-        "meta": {
-          "request_id": "req_sub_01J9Z3K7QN"
         }
       }
     }
