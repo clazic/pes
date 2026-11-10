@@ -282,15 +282,20 @@ test("different bundles imported at the same moment keep version numbers unique 
 
 test("raw API: the same Idempotency-Key replays; the same key with other content is refused; a replay writes nothing", async () => {
   await with_cleanup(async (env) => {
-    const first = assert_ok(await post_import(env, raw_body(env), { key: "raw-key-1" }), 201);
+    const first = assert_ok(await post_import(env, raw_body(env), { key: "import-raw-request-0001" }), 201);
     assert.equal(first.mode, "B");
     const sig = state_signature(env.db);
-    const again = await post_import(env, raw_body(env), { key: "raw-key-1" });
+    const again = await post_import(env, raw_body(env), { key: "import-raw-request-0001" });
     assert.equal(again.status, 201);
     assert.equal(again.json.replayed, true);
     assert.equal(again.json.data.run_id, first.run_id);
-    const other = await post_import(env, raw_body(env, { results: [{ op: "append_version", object_id: env.object_id, title: "다른 내용" }] }), { key: "raw-key-1" });
+    const other = await post_import(env, raw_body(env, { results: [{ op: "append_version", object_id: env.object_id, title: "다른 내용" }] }), { key: "import-raw-request-0001" });
     assert.equal(other.json.error?.code, "idempotency_key_reuse");
+    assert.equal(state_signature(env.db), sig);
+    // the server forces the key import-<request_id>: any other key for the same request_id is refused, nothing is written
+    const wrong = await post_import(env, raw_body(env), { key: "raw-key-1" });
+    assert.equal(wrong.status, 400, JSON.stringify(wrong.json));
+    assert.equal(wrong.json.error.code, "invalid_payload");
     assert.equal(state_signature(env.db), sig);
     // no key at all is refused (a write without a key cannot be retried safely)
     const nokey = await post_import(env, raw_body(env, { request_id: "raw-request-nokey" }), { key: null });
@@ -299,7 +304,7 @@ test("raw API: the same Idempotency-Key replays; the same key with other content
     // a stale revision is refused with no write
     await bump_control_rev(env);
     const bumped = state_signature(env.db);
-    const stale = await post_import(env, raw_body(env, { expected_control_rev: "0", request_id: "raw-request-stale" }), { key: "raw-key-stale" });
+    const stale = await post_import(env, raw_body(env, { expected_control_rev: "0", request_id: "raw-request-stale" }), { key: "import-raw-request-stale" });
     assert.equal(stale.status, 409, JSON.stringify(stale.json));
     assert.equal(stale.json.error.code, "rev_conflict");
     assert.equal(state_signature(env.db), bumped);
@@ -380,14 +385,25 @@ test("an import writes into no SEALED round (a human closed it; an agent's quest
 test("an import writes into no APPROVED stage: a human must reopen it first", async () => {
   await with_cleanup(async (env) => {
     const a = adapter(env);
+    const copied = await export_for(env, a);
     const { snapshot_id } = await seal_plan_round(env);
     assert_ok(await call(env, { method: "POST", path: P(env, `/stages/${env.stage.plan}/approve`), auth: "owner", body: { snapshot_id } }));
-    const bundle = await export_for(env, a);
     const sig = state_signature(env.db);
-    await refused(a.import_result({ bundle_text: bundle.text, result_text: paste(env.object_id, "승인된 단계") }), ["conflict", "forbidden"]);
+    await refused(a.import_result({ bundle_text: copied.text, result_text: paste(env.object_id, "승인된 단계") }), "conflict");
     assert.equal(state_signature(env.db), sig, "an approved stage took no hand-off run");
     assert.equal(env.db.get<{ status: string }>("SELECT status FROM stages WHERE id = ?", env.stage.plan)?.status, "approved");
     assert.equal(table_counts(env.db).runs, 0n);
+  });
+});
+
+test("an approved stage cannot be copied out either (conflict), and nothing is written", async () => {
+  await with_cleanup(async (env) => {
+    const a = adapter(env);
+    const { snapshot_id } = await seal_plan_round(env);
+    assert_ok(await call(env, { method: "POST", path: P(env, `/stages/${env.stage.plan}/approve`), auth: "owner", body: { snapshot_id } }));
+    const sig = state_signature(env.db);
+    await refused(export_for(env, a), "conflict");
+    assert.equal(state_signature(env.db), sig);
   });
 });
 

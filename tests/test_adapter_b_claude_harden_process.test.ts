@@ -194,7 +194,7 @@ test("the token goes in the Authorization header to the configured address only;
     }
     const claim = pes.seen.find((r) => r.method === "POST" && r.url.endsWith("/claims"))!;
     assert.equal(claim.headers["idempotency-key"], "proc-claim");
-    assert.deepEqual(JSON.parse(claim.body), { mode: "B", runtime: "claude_code", provider: "anthropic", model: "unknown" }, "documented defaults");
+    assert.deepEqual(JSON.parse(claim.body), { mode: "B", runtime: "mcp", provider: "unknown", model: "unknown" }, "documented defaults");
   } finally {
     await pes.close();
   }

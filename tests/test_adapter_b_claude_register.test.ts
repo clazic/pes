@@ -170,7 +170,9 @@ test("the Claude Code entry passes the token by reference and touches no file", 
   assert.equal(entry.command, process.execPath, "the node path is given, never looked up with which");
   assert.equal(entry.args.length, 1);
   assert.match(entry.args[0]!, /mcp_server\.ts$/);
-  assert.deepEqual(Object.keys(entry.env).sort(), ["PES_AGENT_TOKEN", "PES_API_BASE_URL", "PES_PROJECT_ID"]);
+  assert.deepEqual(Object.keys(entry.env).sort(), ["PES_AGENT_TOKEN", "PES_API_BASE_URL", "PES_PROJECT_ID", "PES_PROVIDER", "PES_RUNTIME"]);
+  assert.equal(entry.env.PES_RUNTIME, "claude_code");
+  assert.equal(entry.env.PES_PROVIDER, "anthropic");
   assert.equal(entry.env.PES_PROJECT_ID, "synthetic-project-id");
   assert.equal(entry.env.PES_API_BASE_URL, "http://127.0.0.1:8760");
   assert.equal(entry.env.PES_AGENT_TOKEN, "${PES_AGENT_TOKEN}", "by reference, not by value");
