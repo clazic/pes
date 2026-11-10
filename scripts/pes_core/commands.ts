@@ -26,7 +26,7 @@ import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
   is_record,
-  readonly_db,
+  with_readonly_db,
   require_non_empty_string,
   require_record,
   require_well_formed,
@@ -563,7 +563,6 @@ export class CommandService {
   readonly #policy: PolicyChecker;
   readonly #new_id: () => string;
   readonly #run_config: RunConfig;
-  readonly #read_db: Pick<Db, "get" | "all">;
 
   constructor(db: Db, options: CommandServiceOptions) {
     this.#db = db;
@@ -573,7 +572,6 @@ export class CommandService {
     // Validate and copy the injected timing once. The service never reads the
     // ambient environment; a composition point resolves env explicitly.
     this.#run_config = Object.freeze(resolve_run_config(options.run_config, {}));
-    this.#read_db = readonly_db(db);
   }
 
   /**
@@ -637,11 +635,8 @@ export class CommandService {
     // anything other than an explicit boolean true as a denial. It also gets a
     // read-only handle to this transaction so a real policy reads uncommitted
     // state without being able to write.
-    const decision: unknown = this.#policy.check(
-      clone_context(ctx),
-      command,
-      copy_snapshot(payload),
-      this.#read_db,
+    const decision: unknown = with_readonly_db(this.#db, (read_db) =>
+      this.#policy.check(clone_context(ctx), command, copy_snapshot(payload), read_db),
     );
     if (!policy_allows(decision)) {
       throw new ApiError("policy_denied", policy_denial_reason(decision));

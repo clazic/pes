@@ -5,7 +5,12 @@
 // stores a result without it, events name the token by id, and the table keeps
 // only the SHA-256 hash. A replay returns the stored (hash-free) result.
 
-import { AGENT_TOKEN_TTL_MS, agent_token_hash, generate_agent_token } from "../actors.ts";
+import {
+  AGENT_TOKEN_TTL_MS,
+  agent_token_hash,
+  generate_agent_token,
+  read_credential_actor,
+} from "../actors.ts";
 import { ApiError } from "../errors.ts";
 import {
   insert_receipt,
@@ -83,6 +88,20 @@ function run_token_issue(runtime: CommandRuntime): CommandResult {
   }
   if (target.disabled_at !== null) {
     throw new ApiError("forbidden", "the actor is disabled");
+  }
+  // Same eligibility rule as token verification: an enabled actor of an
+  // enabled user who is a member of this project. Otherwise no row is written.
+  const eligible = read_credential_actor(runtime.db, target.id);
+  const member =
+    eligible === undefined
+      ? undefined
+      : runtime.db.get<{ role: string }>(
+          "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
+          scope.project_id,
+          eligible.user_id,
+        );
+  if (eligible === undefined || member === undefined) {
+    throw new ApiError("forbidden", "the actor is not allowed in this project");
   }
 
   const token_id = runtime.new_id();

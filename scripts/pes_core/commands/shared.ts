@@ -70,17 +70,114 @@ export function require_well_formed(value: string, field: string): string {
 }
 
 /**
- * The policy checker's view of a transaction: reads only. The object exposes
- * get/all and no run/exec/prepare, so a checker cannot write through it even
- * though it is called inside the transaction.
+ * Strip comments and whitespace and decide whether `sql` is exactly one
+ * SELECT / WITH statement. String and quoted-identifier literals are skipped
+ * so a ";" inside them is not a statement separator. Anything else (PRAGMA,
+ * ATTACH, BEGIN, writes, several statements, empty text) is refused; the
+ * SQLite connection additionally runs with query_only=ON while a checker
+ * holds the handle, so a write hidden behind WITH still fails.
  */
-export function readonly_db(db: Db): Pick<Db, "get" | "all"> {
-  return Object.freeze({
-    get: <T = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
-      db.get<T>(sql, ...params),
-    all: <T = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
-      db.all<T>(sql, ...params),
+export function assert_single_read_statement(sql: unknown): void {
+  if (typeof sql !== "string") {
+    throw new Error("the policy checker handle accepts only a SELECT/WITH text");
+  }
+  let code = "";
+  let i = 0;
+  let statements_end = -1;
+  while (i < sql.length) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+    if (ch === "-" && next === "-") {
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      code += " ";
+    } else if (ch === "/" && next === "*") {
+      const close = sql.indexOf("*/", i + 2);
+      i = close === -1 ? sql.length : close + 2;
+      code += " ";
+    } else if (ch === "'" || ch === '"' || ch === "`" || ch === "[") {
+      const closer = ch === "[" ? "]" : ch;
+      let j = i + 1;
+      for (;;) {
+        const at = sql.indexOf(closer, j);
+        if (at === -1) {
+          j = sql.length;
+          break;
+        }
+        if (closer !== "]" && sql[at + 1] === closer) {
+          j = at + 2;
+          continue;
+        }
+        j = at + 1;
+        break;
+      }
+      code += "x";
+      i = j;
+    } else if (ch === ";") {
+      if (statements_end !== -1) {
+        throw new Error("the policy checker handle accepts a single statement only");
+      }
+      statements_end = code.length;
+      code += ";";
+      i += 1;
+    } else {
+      code += ch;
+      i += 1;
+    }
+  }
+  const trimmed = code.trim();
+  if (statements_end !== -1) {
+    const after = code.slice(statements_end + 1).trim();
+    if (after.length > 0) {
+      throw new Error("the policy checker handle accepts a single statement only");
+    }
+  }
+  if (!/^(select|with)(?![A-Za-z0-9_$])/i.test(trimmed)) {
+    throw new Error("the policy checker handle accepts only SELECT/WITH statements");
+  }
+}
+
+export interface ReadonlyDbHandle extends Pick<Db, "get" | "all"> {}
+
+/**
+ * Run `fn` with the checker's view of a transaction: get/all only, single
+ * SELECT/WITH statements only, SQLite query_only=ON while it is open (restored
+ * afterwards, also when fn throws), and a handle that is dead once fn returns.
+ */
+export function with_readonly_db<T>(db: Db, fn: (handle: ReadonlyDbHandle) => T): T {
+  let open = true;
+  const guarded = <R>(sql: string, run: () => R): R => {
+    if (!open) {
+      throw new Error("the policy checker handle is closed");
+    }
+    assert_single_read_statement(sql);
+    return run();
+  };
+  const handle: ReadonlyDbHandle = Object.freeze({
+    get: <R = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
+      guarded(sql, () => db.get<R>(sql, ...params)),
+    all: <R = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
+      guarded(sql, () => db.all<R>(sql, ...params)),
   });
+
+  let previous: bigint | null = null;
+  try {
+    const row = db.get<{ query_only: bigint }>("PRAGMA query_only");
+    previous = row === undefined ? null : BigInt(row.query_only);
+  } catch {
+    previous = null; // not a SQLite connection: the statement check still applies
+  }
+  if (previous !== null) {
+    db.exec("PRAGMA query_only = ON");
+  }
+  try {
+    return fn(handle);
+  } finally {
+    open = false;
+    if (previous !== null) {
+      db.exec(`PRAGMA query_only = ${previous === 0n ? "OFF" : "ON"}`);
+    }
+  }
 }
 
 export function is_record(value: unknown): value is Record<string, unknown> {

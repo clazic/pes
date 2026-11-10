@@ -81,9 +81,113 @@ interface DispatchRow {
   id: string;
   run_id: string;
   state: string;
+  has_evidence: bigint;
 }
 
 const BLOCKABLE_STATES = new Set(["prepared", "authorized"]);
+
+/**
+ * An authorized row that carries sent_at or external_request_id may already
+ * have reached the provider. It is never reported as "blocked" (not sent):
+ * it becomes "unknown" with its evidence kept. Selection and the conditional
+ * UPDATE use this same predicate.
+ */
+const HAS_SEND_EVIDENCE_SQL =
+  "(state = 'authorized' AND (sent_at IS NOT NULL OR external_request_id IS NOT NULL))";
+
+interface StopRow {
+  id: string;
+  run_id: string;
+  has_evidence: bigint;
+}
+
+type StopOutcome = "blocked" | "unknown";
+
+/** Stop one unsent dispatch (blocked) or keep its send evidence (unknown). */
+function stop_dispatch(
+  runtime: CommandRuntime,
+  project_id: string,
+  dispatch: { id: string; has_evidence: boolean },
+  reason: string,
+): StopOutcome {
+  if (dispatch.has_evidence) {
+    const kept = runtime.db.run(
+      `UPDATE outbound_dispatches
+          SET state = 'unknown', unknown_at = ?, unknown_reason = ?
+        WHERE project_id = ? AND id = ? AND ${HAS_SEND_EVIDENCE_SQL}`,
+      runtime.now_ms,
+      reason,
+      project_id,
+      dispatch.id,
+    );
+    if (kept.changes !== 1n) {
+      throw new Error("a dispatch with send evidence was not marked unknown");
+    }
+    return "unknown";
+  }
+  const written = runtime.db.run(
+    `UPDATE outbound_dispatches SET state = 'blocked'
+      WHERE project_id = ? AND id = ? AND state IN ('prepared', 'authorized')
+        AND NOT ${HAS_SEND_EVIDENCE_SQL}`,
+    project_id,
+    dispatch.id,
+  );
+  if (written.changes !== 1n) {
+    throw new Error("a dispatch was not blocked");
+  }
+  return "blocked";
+}
+
+interface GoRunLease {
+  lease_id: string;
+  run_id: string;
+  run_status: string;
+}
+
+/**
+ * Turning Go OFF ends the project's active lease when it belongs to a mode A
+ * (Go) run: the lease is released (fence kept), a running run becomes
+ * interrupted, and one run.interrupted event names the run. Mode B runs,
+ * finished runs and already released leases are left alone. A later ON does
+ * not revive anything: only a new claim (new fence) can continue the run.
+ */
+function revoke_go_lease(runtime: CommandRuntime, project_id: string): EventDraft[] {
+  const held = runtime.db.get<GoRunLease>(
+    `SELECT l.lease_id AS lease_id, l.run_id AS run_id, r.status AS run_status
+       FROM project_leases l
+       JOIN runs r ON r.project_id = l.project_id AND r.id = l.run_id
+      WHERE l.project_id = ? AND l.state = 'active' AND r.mode = 'A'`,
+    project_id,
+  );
+  if (held === undefined) return [];
+  const released = runtime.db.run(
+    "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND state = 'active'",
+    project_id,
+    held.lease_id,
+  );
+  if (released.changes !== 1n) {
+    throw new Error("the Go lease was not released");
+  }
+  const was_running = held.run_status === "running";
+  if (was_running) {
+    const interrupted = runtime.db.run(
+      "UPDATE runs SET status = 'interrupted', ended_at = ? WHERE project_id = ? AND id = ? AND status = 'running'",
+      runtime.now_ms,
+      project_id,
+      held.run_id,
+    );
+    if (interrupted.changes !== 1n) {
+      throw new Error("the Go run was not interrupted");
+    }
+  }
+  return [
+    {
+      type: "run.interrupted",
+      run_id: held.run_id,
+      payload: { reason: "policy_off", lease_id: held.lease_id, status_before: held.run_status, was_running },
+    },
+  ];
+}
 
 function invalid_payload(message: string): never {
   throw new ApiError("invalid_payload", message);
@@ -130,7 +234,8 @@ function require_current_lease(runtime: CommandRuntime, scope: Scope, guard: Lea
 
 function read_dispatch(runtime: CommandRuntime, project_id: string, dispatch_id: string): DispatchRow | undefined {
   return runtime.db.get<DispatchRow>(
-    "SELECT id, run_id, state FROM outbound_dispatches WHERE project_id = ? AND id = ?",
+    `SELECT id, run_id, state, ${HAS_SEND_EVIDENCE_SQL} AS has_evidence
+       FROM outbound_dispatches WHERE project_id = ? AND id = ?`,
     project_id,
     dispatch_id,
   );
@@ -197,14 +302,16 @@ function run_policy_set(runtime: CommandRuntime): CommandResult {
 
   // Collect first so the result can name the blocked dispatches; the updates
   // happen below in the same transaction, after policy.changed.
-  const to_block: Array<{ id: string; run_id: string }> = allow
+  const to_stop: StopRow[] = allow
     ? []
-    : runtime.db.all<{ id: string; run_id: string }>(
-        `SELECT id, run_id FROM outbound_dispatches
+    : runtime.db.all<StopRow>(
+        `SELECT id, run_id, ${HAS_SEND_EVIDENCE_SQL} AS has_evidence FROM outbound_dispatches
           WHERE project_id = ? AND state IN ('prepared', 'authorized')
           ORDER BY rowid`,
         scope.project_id,
       );
+  const to_block = to_stop.filter((dispatch) => Number(dispatch.has_evidence) === 0);
+  const to_keep = to_stop.filter((dispatch) => Number(dispatch.has_evidence) !== 0);
 
   const result = {
     project_id: scope.project_id,
@@ -262,18 +369,21 @@ function run_policy_set(runtime: CommandRuntime): CommandResult {
       },
     },
   ];
+  if (!allow) {
+    events.push(...revoke_go_lease(runtime, scope.project_id));
+  }
   for (const dispatch of to_block) {
-    const written = runtime.db.run(
-      `UPDATE outbound_dispatches SET state = 'blocked'
-        WHERE project_id = ? AND id = ? AND state IN ('prepared', 'authorized')`,
-      scope.project_id,
-      dispatch.id,
-    );
-    if (written.changes !== 1n) {
-      throw new Error("a dispatch was not blocked");
-    }
+    stop_dispatch(runtime, scope.project_id, { id: dispatch.id, has_evidence: false }, "policy_off");
     events.push({
       type: "dispatch.blocked",
+      run_id: dispatch.run_id,
+      payload: { dispatch_id: dispatch.id, reason: "policy_off" },
+    });
+  }
+  for (const dispatch of to_keep) {
+    stop_dispatch(runtime, scope.project_id, { id: dispatch.id, has_evidence: true }, "policy_off");
+    events.push({
+      type: "dispatch.unknown",
       run_id: dispatch.run_id,
       payload: { dispatch_id: dispatch.id, reason: "policy_off" },
     });
@@ -504,17 +614,19 @@ function run_dispatch_block(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the dispatch cannot be blocked in its current state");
   }
 
-  const written = runtime.db.run(
-    `UPDATE outbound_dispatches SET state = 'blocked'
-      WHERE project_id = ? AND id = ? AND state IN ('prepared', 'authorized')`,
-    scope.project_id,
-    dispatch_id,
-  );
-  if (written.changes !== 1n) {
+  let outcome: StopOutcome;
+  try {
+    outcome = stop_dispatch(
+      runtime,
+      scope.project_id,
+      { id: dispatch_id, has_evidence: Number(dispatch.has_evidence) !== 0 },
+      "manual_block",
+    );
+  } catch {
     throw new ApiError("conflict", "the dispatch cannot be blocked in its current state");
   }
 
-  const result = { project_id: scope.project_id, dispatch_id, state: "blocked" };
+  const result = { project_id: scope.project_id, dispatch_id, state: outcome };
   insert_receipt(runtime, {
     project_id: scope.project_id,
     actor_id: scope.actor_id,
@@ -526,7 +638,7 @@ function run_dispatch_block(runtime: CommandRuntime): CommandResult {
     result,
     events: [
       {
-        type: "dispatch.blocked",
+        type: outcome === "blocked" ? "dispatch.blocked" : "dispatch.unknown",
         run_id: dispatch.run_id,
         payload: { dispatch_id, reason },
       },
