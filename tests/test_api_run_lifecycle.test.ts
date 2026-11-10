@@ -215,11 +215,15 @@ test("handoffs: the holder or the owner returns the same run to the queue (200);
     const target = await make_agent(env, "handee");
     const lease = await agent_claims(env, agent);
     const path = P(env, `/runs/${lease.run_id}/handoffs`);
-    const body = { target_mode: "B", target_actor_id: target.actor_id, reason: "합성 인계", include_pending_inputs: true };
+    // SEL-47 최종 1/2 S1: a handoff gives the SAME run back, so a target other than the run's own actor/mode is
+    // refused (400, see test_api_sel47_final1.test.ts). The target fields that name the run's own actor and mode
+    // keep their old behaviour.
+    const body = { target_mode: "B", target_actor_id: agent.actor_id, reason: "합성 인계", include_pending_inputs: true };
+    const stranger_body = { target_mode: "B", reason: "합성 인계" };
     const sig = state_signature(env.db);
 
     assert_final_error(await call(env, { method: "POST", path: P(env, `/runs/${lease.run_id}/handoff`), auth: { token: agent.token }, body }), 404, "not_found");
-    const denied = assert_final_error(await call(env, { method: "POST", path, auth: { token: target.token }, body }), 403, "forbidden", {
+    const denied = assert_final_error(await call(env, { method: "POST", path, auth: { token: target.token }, body: stranger_body }), 403, "forbidden", {
       target: "$.path.run_id",
       next_action: NEXT_ACTION.forbidden_holder,
     });
@@ -238,7 +242,7 @@ test("handoffs: the holder or the owner returns the same run to the queue (200);
     assert.equal(handed.lease.fence, lease.fence);
     assert.ok(Number.isSafeInteger(handed.pending_input_count) && handed.pending_input_count >= 0);
     assert.equal(handed.target_mode, "B");
-    assert.equal(handed.target_actor_id, target.actor_id);
+    assert.equal(handed.target_actor_id, agent.actor_id);
     assert.equal(handed.new_run_id, undefined);
     assert.equal(handed.parent_run_id, undefined);
     assert.equal(table_counts(env.db).runs, runs_before, "no child run is made");
@@ -248,7 +252,7 @@ test("handoffs: the holder or the owner returns the same run to the queue (200);
 
     // The owner (a human) may hand off a run that another agent holds.
     const held = await agent_claims(env, target);
-    const forced = assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${held.run_id}/handoffs`), auth: "owner", body: { target_mode: "B", target_actor_id: agent.actor_id, reason: "합성 강제 인계" } }), 200);
+    const forced = assert_ok(await call(env, { method: "POST", path: P(env, `/runs/${held.run_id}/handoffs`), auth: "owner", body: { target_mode: "B", target_actor_id: target.actor_id, reason: "합성 강제 인계" } }), 200);
     assert.equal(forced.run_id, held.run_id);
     assert.equal(forced.status, "queued");
     assert.equal(assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: "owner" })).lease, null);
