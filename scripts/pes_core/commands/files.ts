@@ -24,6 +24,7 @@
 
 import { ApiError } from "../errors.ts";
 import {
+  is_safe_media_type,
   read_storage_bytes,
   require_safe_id,
   scan_project_files,
@@ -194,6 +195,9 @@ function run_reserve_upload(runtime: CommandRuntime): CommandResult {
   const sha256 = require_sha256(payload);
   const size = require_size(payload.size, "size");
   const media_type = require_non_empty_string(payload, "media_type");
+  if (!is_safe_media_type(media_type)) {
+    throw new ApiError("invalid_payload", "media_type must be a plain MIME type such as text/plain");
+  }
   const original_name = optional_text(payload, "original_name");
   const scope = scope_of(runtime);
 

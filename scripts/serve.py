@@ -11,10 +11,13 @@
  - 홈 폴더 자체가 프로젝트면(예전 방식) POST /feedback 도 받는다.
  - 다른 출처(Origin)의 POST 는 거부한다.
 """
+import base64
 import json
 import os
 import re
+import shutil
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -23,6 +26,12 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 MAX_BODY = 256 * 1024
+MAX_API_BODY = 2 * MAX_BODY
+# 상한을 넘는 본문이라도 이 크기 안이면 읽어 버린 뒤 413 을 보낸다(보내는 중인 클라이언트가 끊기지 않게).
+DRAIN_LIMIT = 8 * 1024 * 1024
+DRAIN_CHUNK = 64 * 1024
+DRAIN_IO_TIMEOUT = 10
+NODE_BRIDGE = Path(__file__).resolve().parent / "pes_core" / "api_bridge.ts"
 KINDS = {"feedback", "review", "stage_start", "approve", "resume", "reopen"}
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 # feedback.log 한 줄이 이 서버 프로세스의 요청 스레드 사이에서 섞이지 않게 한다.
@@ -38,6 +47,15 @@ class LocalHTTPServer(ThreadingHTTPServer):
     (actions/runner-images#12162). serve.py 는 server_name 을 쓰지 않으므로
     host 주소를 그대로 쓴다.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The API database is migrated lazily on the first API request that
+        # reaches the bridge (a GET, which has no Origin check, also does it).
+        # A cross-origin POST rejected by the origin check must not create
+        # ~/.pes or the database file. Only a successful migrate is cached.
+        self.api_db_ready = False
+        self.api_db_lock = threading.Lock()
 
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
@@ -88,7 +106,7 @@ def main():
             self.send_header("Cache-Control", "no-store")
             super().end_headers()
 
-        def _json(self, code, obj, cors=False):
+        def _json(self, code, obj, cors=False, close=False):
             body = json.dumps(obj, ensure_ascii=False).encode()
             self.send_response(code)
             o = self.headers.get("Origin") or ""
@@ -96,8 +114,30 @@ def main():
                 self.send_header("Access-Control-Allow-Origin", o)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            if close:
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
             self.wfile.write(body)
+
+        def _reject_oversize(self, length, respond):
+            """상한을 넘는 본문 거부: 드레인 한도 안이면 남은 본문을 읽어 버린 뒤 413, 넘으면 바로 413 후 닫는다."""
+            self.close_connection = True
+            if 0 < length <= DRAIN_LIMIT:
+                try:
+                    self.connection.settimeout(DRAIN_IO_TIMEOUT)
+                    left = length
+                    while left > 0:
+                        chunk = self.rfile.read(min(DRAIN_CHUNK, left))
+                        if not chunk:
+                            return None
+                        left -= len(chunk)
+                except (OSError, ValueError):
+                    return None
+            try:
+                return respond()
+            except OSError:
+                return None
 
         def list_directory(self, path):  # 폴더 목록은 보여 주지 않는다
             self.send_error(404)
@@ -108,8 +148,117 @@ def main():
             self.send_header("Location", to)
             self.end_headers()
 
+        def _api_error(self, code, message, status, close=False):
+            request_id = f"serve-{time.time_ns()}"
+            return self._json(status, {
+                "format_version": "1.0",
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "retryable": False,
+                    "target": None,
+                    "details": None,
+                    "next_action": None,
+                },
+                "request_id": request_id,
+            }, close=close)
+
+        def _origin_allowed(self):
+            origin = self.headers.get("Origin") or ""
+            return origin == "" or origin in allowed or origin in trusted()
+
+        def _ensure_api_db(self):
+            """Migrate the API database once, on the first accepted API request."""
+            srv = self.server
+            if srv.api_db_ready:
+                return None
+            with srv.api_db_lock:
+                if srv.api_db_ready:
+                    return None
+                node = shutil.which("node")
+                if node is None:
+                    return ("internal_error", "internal error", 500)
+                failed = ("schema_not_ready", "the PES database could not be migrated", 503)
+                try:
+                    proc = subprocess.run(
+                        [node, str(NODE_BRIDGE), "--migrate"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=60,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    return failed
+                if proc.returncode != 0:
+                    return failed
+                srv.api_db_ready = True
+                return None
+
+        def _api(self, method, path):
+            """Pass /api/v1/* to the Node ApiApp and relay its raw response.
+
+            The Python server keeps its static-file and feedback duties; the API
+            contract, credentials, transactions, and envelopes live in Node.
+            """
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                length = 0
+            if length < 0 or length > MAX_API_BODY:
+                return self._reject_oversize(length, lambda: self._api_error(
+                    "payload_too_large", "the request body is too large", 413, close=True))
+            body = self.rfile.read(length) if length > 0 else b""
+            migration_error = self._ensure_api_db()
+            if migration_error is not None:
+                return self._api_error(*migration_error)
+            node = shutil.which("node")
+            if node is None:
+                return self._api_error("internal_error", "internal error", 500)
+            request = {
+                "method": method,
+                "path": path,
+                "headers": {name.lower(): value for name, value in self.headers.items()},
+                "body_b64": base64.b64encode(body).decode("ascii"),
+            }
+            try:
+                proc = subprocess.run(
+                    [node, str(NODE_BRIDGE)],
+                    input=json.dumps(request).encode("utf-8"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return self._api_error("internal_error", "internal error", 500)
+            if proc.returncode != 0:
+                return self._api_error("internal_error", "internal error", 500)
+            try:
+                response = json.loads(proc.stdout.decode("utf-8"))
+                status = int(response["status"])
+                headers = response.get("headers") or {}
+                payload = base64.b64decode(response.get("body_b64") or "")
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return self._api_error("internal_error", "internal error", 500)
+            self.send_response(status)
+            for name, value in headers.items():
+                if name.lower() in ("content-length", "connection", "transfer-encoding"):
+                    continue
+                name, value = str(name), str(value)
+                if not name or any(c in name for c in "\r\n\0:") or any(c in value for c in "\r\n\0"):
+                    continue
+                self.send_header(name, value)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            if payload:
+                self.wfile.write(payload)
+            return None
+
+        def _is_api_path(self, path):
+            return path == "/api/v1" or path.startswith("/api/v1/")
+
         def do_GET(self):
             path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("GET", path)
             if path == "/whoami":
                 return self._json(200, {"root": str(root), "single": True}, cors=True)
             if path == "/version" or path.endswith("/version"):  # 열린 화면이 새 결과를 알아채도록 (index.html·ask-*.html 수정 시각)
@@ -132,6 +281,10 @@ def main():
 
         def do_POST(self):
             path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                if not self._origin_allowed():
+                    return self._api_error("forbidden", "origin is not allowed", 403)
+                return self._api("POST", path)
             d, rest = project_of(path)
             if d is None and path == "/feedback":  # 0.8 이전에 만든 화면: 보낸 페이지 주소로 프로젝트를 찾는다
                 d, _ = project_of(urlsplit(self.headers.get("Referer") or "").path)
@@ -143,7 +296,7 @@ def main():
                 return self._json(403, {"ok": False, "error": "origin", "hint": "pes remote add " + origin})
             n = int(self.headers.get("Content-Length") or 0)
             if n <= 0 or n > MAX_BODY:
-                return self._json(413, {"ok": False})
+                return self._reject_oversize(n, lambda: self._json(413, {"ok": False}, close=True))
             try:
                 data = json.loads(self.rfile.read(n))
                 text = str(data.get("text", "")).strip()
@@ -196,6 +349,26 @@ def main():
                 with (d / "feedback.log").open("a", encoding="utf-8") as f:
                     f.write(f"FEEDBACK {stage} R{rnd} {kind} {fp}\n")
             return self._json(200, {"ok": True, "file": fp.name})
+
+        def do_PUT(self):
+            path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                if not self._origin_allowed():
+                    return self._api_error("forbidden", "origin is not allowed", 403)
+                return self._api("PUT", path)
+            return self._json(405, {"ok": False})
+
+        def do_DELETE(self):
+            path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("DELETE", path)
+            return self.send_error(501, "Unsupported method ('DELETE')")
+
+        def do_PATCH(self):
+            path = urlsplit(self.path).path
+            if self._is_api_path(path):
+                return self._api("PATCH", path)
+            return self.send_error(501, "Unsupported method ('PATCH')")
 
     srv = LocalHTTPServer(("127.0.0.1", port), H)
     print(f"serving {root} at http://127.0.0.1:{port}/", flush=True)

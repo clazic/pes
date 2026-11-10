@@ -18,7 +18,12 @@ export interface MutationContext {
   actor_id: string | null;
   via: CommandVia;
   client_request_id: string;
-  base_control_rev?: number;
+  /**
+   * Optional CAS base. HTTP uses a normalized decimal string so revisions
+   * beyond the JS safe integer range are compared exactly; in-process callers
+   * may pass a non-negative safe integer.
+   */
+  base_control_rev?: number | string;
 }
 
 export interface ProjectRow {
@@ -278,6 +283,53 @@ export function require_record(payload: unknown): Record<string, unknown> {
   return payload;
 }
 
+const NORMALIZED_DECIMAL = /^(0|[1-9][0-9]*)$/;
+
+/**
+ * One CAS-base parser shared by every command that accepts
+ * ctx.base_control_rev. A normalized decimal string is compared as BigInt, so
+ * values at or beyond 2^53 (and beyond int64) are still exact; an in-process
+ * caller may pass a non-negative safe integer. Null/undefined means no check.
+ */
+export function parse_base_control_rev(value: unknown): bigint | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ApiError("invalid_payload", "base_control_rev must be a non-negative safe integer");
+    }
+    return BigInt(value);
+  }
+  if (typeof value === "string") {
+    if (!NORMALIZED_DECIMAL.test(value)) {
+      throw new ApiError("invalid_payload", "base_control_rev must be a normalized decimal string");
+    }
+    return BigInt(value);
+  }
+  throw new ApiError("invalid_payload", "base_control_rev must be a decimal string or safe integer");
+}
+
+/**
+ * Compare an optional base with the project's control_rev in the command's own
+ * transaction (after receipt replay). A mismatch is rev_conflict with exact
+ * decimal text on both sides. Returns the parsed base for the receipt, or null
+ * when no check was requested.
+ */
+export function require_base_control_rev(runtime: CommandRuntime, value: unknown): bigint | null {
+  const expected = parse_base_control_rev(value);
+  if (expected === null) return null;
+  const project = runtime.project;
+  if (project === null) {
+    throw new Error("a base_control_rev check requires a project");
+  }
+  if (expected !== project.control_rev) {
+    throw new ApiError("rev_conflict", "base_control_rev is stale", {
+      expected: expected.toString(),
+      current: project.control_rev.toString(),
+    });
+  }
+  return expected;
+}
+
 export function require_non_empty_string(payload: Record<string, unknown>, field: string): string {
   const value = payload[field];
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -401,7 +453,7 @@ export function insert_receipt(
     project_id: string;
     actor_id: string;
     action: string;
-    base_control_rev: number | null;
+    base_control_rev: number | bigint | null;
     result: unknown;
     run_id?: string | null;
     lease_id?: string | null;

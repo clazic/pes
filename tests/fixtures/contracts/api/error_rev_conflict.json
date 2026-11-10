@@ -1,0 +1,55 @@
+{
+  "name": "error_rev_conflict",
+  "description": "expected_control_rev가 낡으면 409 rev_conflict, details의 rev는 10진 문자열이고 아무것도 저장하지 않는다.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "before": [
+        "bump_rev"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/claims",
+        "auth": "agent:agent",
+        "body": {
+          "mode": "B",
+          "runtime": "synthetic-runtime",
+          "provider": "synthetic",
+          "model": "synthetic-model",
+          "expected_control_rev": "0"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "rev_conflict",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": {
+              "expected": "0",
+              "current": "1"
+            },
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

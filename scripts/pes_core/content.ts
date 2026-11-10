@@ -39,6 +39,8 @@ export function append_version(
   return service.execute(ctx, "content.append_version", input);
 }
 
+export { submit_results } from "./results.ts";
+
 export function set_current(
   service: CommandService,
   ctx: MutationContext,

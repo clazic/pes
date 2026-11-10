@@ -1,0 +1,31 @@
+{
+  "name": "error_wrong_method",
+  "description": "아는 경로에 다른 메서드는 405 method_not_allowed + Allow.",
+  "steps": [
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/projects/${project}/context",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 405,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "method_not_allowed",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

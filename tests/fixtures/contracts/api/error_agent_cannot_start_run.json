@@ -1,0 +1,49 @@
+{
+  "name": "error_agent_cannot_start_run",
+  "description": "run 시작은 사람만: 에이전트 토큰은 403.",
+  "agents": {
+    "agent": {
+      "scopes": [
+        "context:read",
+        "run:claim",
+        "run:submit",
+        "file:write",
+        "file:read"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/${project}/runs",
+        "auth": "agent:agent",
+        "body": {
+          "actor_id": "${agent:agent.actor_id}",
+          "mode": "B",
+          "runtime": "synthetic-runtime",
+          "provider": "synthetic",
+          "model": "synthetic-model"
+        }
+      },
+      "expect": {
+        "status": 403,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "error": {
+            "code": "forbidden",
+            "message": "$string",
+            "retryable": false,
+            "target": "$any",
+            "details": "$any",
+            "next_action": "$any"
+          },
+          "$absent": [
+            "data"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -21,7 +21,7 @@ import { ApiError } from "./errors.ts";
 import { new_id } from "./ids.ts";
 import { read_credential_actor } from "./actors.ts";
 import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
-import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
+import { CONTENT_COMMAND_ENTRIES, RESULT_COMMAND_ENTRIES } from "./commands/content.ts";
 import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
@@ -144,6 +144,13 @@ function validate_context(ctx: MutationContext): void {
       throw new ApiError("invalid_payload", "actor_id must be a string or null");
     }
     require_well_formed(ctx.actor_id, "actor_id");
+  }
+  if (
+    ctx.base_control_rev !== undefined &&
+    typeof ctx.base_control_rev !== "number" &&
+    typeof ctx.base_control_rev !== "string"
+  ) {
+    throw new ApiError("invalid_payload", "base_control_rev must be a decimal string or safe integer");
   }
 }
 
@@ -421,6 +428,9 @@ function run_set_topic(runtime: CommandRuntime): CommandResult {
   if (project === null || actor_id === null || base_control_rev === undefined) {
     throw new ApiError("invalid_payload", "project.set_topic needs a project, actor, and base_control_rev");
   }
+  if (typeof base_control_rev !== "number") {
+    throw new ApiError("invalid_payload", "project.set_topic needs a numeric base_control_rev");
+  }
 
   const changed = runtime.db.run(
     "UPDATE projects SET topic = ?, control_rev = control_rev + 1 WHERE id = ? AND control_rev = ?",
@@ -480,6 +490,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ["project.set_topic", SET_TOPIC_COMMAND],
   ...RUN_COMMAND_ENTRIES,
   ...CONTENT_COMMAND_ENTRIES,
+  ...RESULT_COMMAND_ENTRIES,
   ...EDITION_COMMAND_ENTRIES,
   ...FILE_COMMAND_ENTRIES,
   ...ACTOR_COMMAND_ENTRIES,
@@ -787,7 +798,7 @@ export class CommandService {
     if (base === undefined) {
       throw new ApiError("invalid_payload", "base_control_rev is required for this command");
     }
-    if (!Number.isSafeInteger(base) || base < 0) {
+    if (typeof base !== "number" || !Number.isSafeInteger(base) || base < 0) {
       throw new ApiError("invalid_payload", "base_control_rev must be a non-negative safe integer");
     }
     const actual = Number(project.control_rev);

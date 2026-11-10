@@ -7,6 +7,14 @@
 
 import type { CommandOutcome, CommandService, MutationContext } from "./commands.ts";
 
+export function create_run(
+  service: CommandService,
+  ctx: MutationContext,
+  input: unknown,
+): Promise<CommandOutcome> {
+  return service.execute(ctx, "run.create", input);
+}
+
 export function claim(
   service: CommandService,
   ctx: MutationContext,

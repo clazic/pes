@@ -100,6 +100,20 @@ export function require_safe_id(value: unknown, field: string): string {
   return value;
 }
 
+const MEDIA_TYPE_TOKEN = "[A-Za-z0-9!#$&^_.+-]+";
+const SAFE_MEDIA_TYPE = new RegExp(
+  `^${MEDIA_TYPE_TOKEN}/${MEDIA_TYPE_TOKEN}(?:[ \\t]*;[\\x20-\\x7e]*)?$`,
+);
+
+/**
+ * True when a media type is plain MIME syntax (type/subtype plus optional
+ * printable-ASCII parameters). Control characters, CR/LF and non-ASCII text
+ * are never allowed, so a stored value can be sent as a header value safely.
+ */
+export function is_safe_media_type(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 255 && SAFE_MEDIA_TYPE.test(value);
+}
+
 export function sha256_hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }

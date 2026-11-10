@@ -1,0 +1,67 @@
+{
+  "name": "project_create_ok",
+  "description": "프로젝트 생성: 소유자·초기 정책·첫 판이 한 번에 만들어진다.",
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects",
+        "auth": "owner",
+        "body": {
+          "slug": "synthetic-fixture",
+          "topic": "합성 예제 주제",
+          "owner_display_name": "합성 예제 소유자"
+        }
+      },
+      "save": {
+        "created": "data.project_id"
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "project_id": "$string",
+            "owner_user_id": "$string",
+            "owner_actor_id": "$string",
+            "edition_id": "$string",
+            "policy_id": "$string",
+            "stage_ids": {
+              "plan": "$string",
+              "research": "$string",
+              "analyze": "$string",
+              "write": "$string",
+              "verify": "$string",
+              "publish": "$string"
+            }
+          },
+          "replayed": false
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${created}/context",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "project_id": "${created}",
+            "topic": "합성 예제 주제",
+            "control_rev": "0",
+            "policy": {
+              "policy_rev": "1",
+              "allow_opencode_go": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

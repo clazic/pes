@@ -1,0 +1,21 @@
+{
+  "name": "capabilities_ok",
+  "description": "capabilities 라우트는 자격 없이 열려 있고 공통 봉투로 답한다. 내용 완성은 PR14.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/capabilities",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {}
+        }
+      }
+    }
+  ]
+}
