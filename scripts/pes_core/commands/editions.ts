@@ -364,7 +364,8 @@ function read_guard_run(
 /**
  * An agent may seal only the round its run is working on. A run that has not
  * been aimed at a stage/round yet (both NULL, as right after claim) may seal
- * the round it is about to work on; once aimed, the target must match.
+ * the round it is about to work on, and that first seal binds it there; once
+ * aimed, the target must match.
  */
 function require_guard_run_round(
   runtime: CommandRuntime,
@@ -644,6 +645,18 @@ function run_round_seal(runtime: CommandRuntime): CommandResult {
   }
   if (guard !== null) {
     require_guard_run_round(runtime, project.id, guard, round);
+    // An unaimed run is bound to this stage/round by its first seal (same tx),
+    // so it cannot later seal a different stage or round.
+    runtime.db.run(
+      `UPDATE runs
+          SET stage_id = COALESCE(stage_id, ?), round_id = COALESCE(round_id, ?)
+        WHERE project_id = ? AND id = ?
+          AND (stage_id IS NULL OR round_id IS NULL)`,
+      round.stage_id,
+      round.id,
+      project.id,
+      guard.run_id,
+    );
   }
   require_ready_manifest(runtime, project.id, manifest_blob_id);
   const versions = parse_versions(runtime, project.id, payload);
@@ -1033,20 +1046,20 @@ function run_stage_reopen(runtime: CommandRuntime): CommandResult {
       lease_id = null;
       lease_run_id = null;
     }
-    const interrupted = runtime.db.run(
+    const ended = runtime.db.run(
       `UPDATE runs
-          SET status = 'interrupted', ended_at = ?,
+          SET status = 'cancelled', ended_at = ?,
               go_block_reason = NULL, go_blocked_at = NULL, go_block_reset_at = NULL
         WHERE project_id = ? AND id = ? AND status = 'running'`,
       runtime.now_ms,
       project.id,
       run.id,
     );
-    if (interrupted.changes !== 1n) {
-      throw new ApiError("conflict", "the run was not interrupted");
+    if (ended.changes !== 1n) {
+      throw new ApiError("conflict", "the run was not cancelled");
     }
     events.push({
-      type: "run.interrupted",
+      type: "run.invalidated",
       run_id: run.id,
       payload: { run_id: run.id, reason: "stage_reopened", stage_id },
     });
