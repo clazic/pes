@@ -19,7 +19,7 @@
 
 import { read_credential_actor } from "../actors.ts";
 import { ApiError } from "../errors.ts";
-import { sha256_hex, store_blob } from "../files.ts";
+import { sha256_hex, write_storage_bytes } from "../files.ts";
 import { FILE_COMMAND_ENTRIES } from "./files.ts";
 import {
   take_prepared_import,
@@ -288,7 +288,6 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
   // this transaction with a per-command receipt/event; the main import receipt
   // remains the legacy transaction every content row points at.
   let file_command_seq = 0;
-  const file_store = { db: runtime.db, objects_dir };
   const run_file_command = (name: string, command_payload: unknown): unknown => {
     file_command_seq += 1;
     const file_tx_id = runtime.new_id();
@@ -315,6 +314,25 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
     const outcome = file_command(name).run(file_runtime);
     write_events(file_runtime, project_id, outcome.events);
     return outcome.result;
+  };
+  /** The synchronous part of PR9 store_blob: reservation check, then bytes. */
+  const store_reserved_bytes = (blob_id: string, bytes: Uint8Array): void => {
+    const row = runtime.db.get<{
+      storage_key: string;
+      state: string;
+      sha256: string;
+      size: bigint;
+    }>(
+      "SELECT storage_key, state, sha256, size FROM blobs WHERE project_id = ? AND id = ?",
+      project_id,
+      blob_id,
+    );
+    if (row === undefined) throw new ApiError("not_found", "blob not found");
+    if (row.state !== "staging") throw new ApiError("conflict", "only a staging blob takes bytes");
+    if (bytes.byteLength !== Number(row.size) || sha256_hex(bytes) !== row.sha256) {
+      throw new ApiError("invalid_payload", "the bytes do not match the reservation");
+    }
+    write_storage_bytes(objects_dir, project_id, row.storage_key, bytes);
   };
   const create_blob = (
     key: string,
@@ -350,7 +368,7 @@ function run_import_project(runtime: CommandRuntime): CommandResult {
     }) as { blob_id: string; state: string };
     blob_ids.set(key, reserved.blob_id);
     if (reserved.state === "staging") {
-      void store_blob(file_store, project_id, reserved.blob_id, bytes);
+      store_reserved_bytes(reserved.blob_id, bytes);
       if (desired_state === "quarantined") {
         run_file_command("file.quarantine", {
           blob_id: reserved.blob_id,

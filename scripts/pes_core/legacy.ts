@@ -549,26 +549,47 @@ function parse_time_utc(value: unknown): number | null {
   if (typeof value !== "string") return null;
   let match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (match !== null) {
-    const ms = Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4]),
-      Number(match[5]),
-      Number(match[6] ?? "0"),
-    );
-    return Number.isFinite(ms) ? ms : null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6] ?? "0");
+    const ms = Date.UTC(year, month - 1, day, hour, minute, second);
+    const check = new Date(ms);
+    if (
+      check.getUTCFullYear() !== year ||
+      check.getUTCMonth() + 1 !== month ||
+      check.getUTCDate() !== day ||
+      check.getUTCHours() !== hour ||
+      check.getUTCMinutes() !== minute ||
+      check.getUTCSeconds() !== second
+    ) {
+      return null;
+    }
+    return ms;
   }
   match = value.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
   if (match !== null) {
-    return Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4]),
-      Number(match[5]),
-      Number(match[6]),
-    );
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6]);
+    const ms = Date.UTC(year, month - 1, day, hour, minute, second);
+    const check = new Date(ms);
+    if (
+      check.getUTCFullYear() !== year ||
+      check.getUTCMonth() + 1 !== month ||
+      check.getUTCDate() !== day ||
+      check.getUTCHours() !== hour ||
+      check.getUTCMinutes() !== minute ||
+      check.getUTCSeconds() !== second
+    ) {
+      return null;
+    }
+    return ms;
   }
   return null;
 }
@@ -613,6 +634,29 @@ function media_type_for(path: string): string {
   }
 }
 
+function reference_basename(path: string): string {
+  const parts = path.split(/[\\/]/);
+  const last = parts[parts.length - 1] ?? "";
+  return last.length > 0 ? last : "(file)";
+}
+
+function is_absolute_reference(path: string): boolean {
+  return path.startsWith("/") || path.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+/**
+ * A report never carries a user's absolute path or a parent-relative escape.
+ * Absolute/Windows paths become "<absolute>/<basename>", parent-relative paths
+ * "<parent>/<basename>" and other backslash forms "<relative>/<basename>".
+ * Safe source-relative paths are kept exactly as written.
+ */
+function safe_reference_path(path: string): string {
+  if (is_absolute_reference(path)) return `<absolute>/${reference_basename(path)}`;
+  if (path.split(/[\\/]/).includes("..")) return `<parent>/${reference_basename(path)}`;
+  if (path.includes("\\")) return `<relative>/${reference_basename(path)}`;
+  return path;
+}
+
 // ---------------------------------------------------------------------------
 // scan_project
 
@@ -648,6 +692,37 @@ function walk_files(dir: string): string[] {
   };
   walk(dir);
   return out.sort();
+}
+
+/** Every symlink below the source, without following one. Targets never leave. */
+function list_source_symlinks(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (current: string, prefix: string): void => {
+    let names: string[];
+    try {
+      names = readdirSync(current);
+    } catch {
+      return;
+    }
+    names.sort();
+    for (const name of names) {
+      const full = join(current, name);
+      const path = prefix === "" ? name : `${prefix}/${name}`;
+      let stat;
+      try {
+        stat = lstatSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink()) {
+        out.push(path);
+      } else if (stat.isDirectory()) {
+        walk(full, path);
+      }
+    }
+  };
+  walk(dir, "");
+  return out;
 }
 
 export function scan_project(dir: string): LegacyScan {
@@ -905,14 +980,34 @@ function build_rounds(
 
 function build_stages(ctx: BuildContext): void {
   const stages_raw = project_stages(ctx);
+  if (stages_raw === null) {
+    const raw_stages = ctx.project_raw === null ? undefined : ctx.project_raw.stages;
+    if (raw_stages !== undefined) {
+      const edition_extra = as_record(ctx.plan.edition_settings.legacy_extra);
+      if (edition_extra !== null) edition_extra.stages_original = raw_stages;
+    }
+  } else {
+    const unknown: Record<string, unknown> = {};
+    for (const key of Object.keys(stages_raw)) {
+      if (STAGE_KEY_SET.has(key)) continue;
+      unknown[key] = stages_raw[key];
+      plan_entry_category(ctx.entries, "unknown_field", "project.json", `/stages/${key}`);
+    }
+    if (Object.keys(unknown).length > 0) {
+      const edition_extra = as_record(ctx.plan.edition_settings.legacy_extra);
+      if (edition_extra !== null) edition_extra.unknown_stages = unknown;
+    }
+  }
+
   for (const stage_key of LEGACY_STAGE_KEYS) {
     const raw_value = stages_raw === null ? undefined : stages_raw[stage_key];
-    const raw = as_record(raw_value) ?? {};
-    const missing = raw_value === undefined;
-    const status = stage_status(raw);
+    const raw = as_record(raw_value);
+    const missing = raw === null;
+    const stage = raw ?? {};
+    const status = stage_status(stage);
     const approved = status === "approved";
-    const approved_at_ms = approved ? parse_time_utc(raw.approved_at) : null;
-    const rounds = build_rounds(ctx, stage_key, raw, approved);
+    const approved_at_ms = approved ? parse_time_utc(stage.approved_at) : null;
+    const rounds = build_rounds(ctx, stage_key, stage, approved);
     let approval_snapshot_key: string | null = null;
     if (approved) {
       const sealed = rounds.filter((round) => round.sealed);
@@ -934,20 +1029,24 @@ function build_stages(ctx: BuildContext): void {
         stage_key,
         snapshot_key: approved_snapshot_key,
         approved_at_ms,
-        note: typeof raw.approved_at === "string" ? raw.approved_at : null,
+        note: typeof stage.approved_at === "string" ? stage.approved_at : null,
       });
     }
-    const settings = as_record(raw.settings) ?? {};
-    const extras = stage_extras(ctx, stage_key, raw);
+    const settings = as_record(stage.settings) ?? {};
+    const extras = stage_extras(ctx, stage_key, stage);
     if (missing) {
       extras.stage_defaults = true;
+      if (raw_value !== undefined) extras.stage_original = raw_value;
       plan_entry_category(ctx.entries, "default_filled", "project.json", `/stages/${stage_key}`);
+    }
+    if (approved && approved_at_ms === null) {
+      extras.legacy_unverified = true;
     }
     ctx.plan.stages.push({
       key: stage_key,
       status,
       settings: { ...settings, legacy_extra: extras },
-      stale: raw.stale === true,
+      stale: stage.stale === true,
       approved_at_ms,
       approval_snapshot_key,
       rounds,
@@ -1199,7 +1298,7 @@ function add_item(
     if (ctx.bytes.has(shot)) {
       add_file(ctx, artifact.version_key, shot, "image");
     } else {
-      plan_entry_category(ctx.entries, "missing_file", shot);
+      plan_entry_category(ctx.entries, "missing_file", safe_reference_path(shot));
     }
   }
 
@@ -1721,7 +1820,7 @@ function build_stage_content(ctx: BuildContext): void {
       if (ctx.bytes.has(path)) {
         add_file(ctx, added.version_key, path, "rendered");
       } else {
-        plan_entry_category(ctx.entries, "missing_file", path);
+        plan_entry_category(ctx.entries, "missing_file", safe_reference_path(path));
       }
     }
 
@@ -1854,8 +1953,9 @@ function build_project(ctx: BuildContext): void {
   };
   const settings = as_record(raw.settings) ?? {};
   const legacy_extra = add_top_level_extras(ctx);
-  if (raw.created === undefined || parse_date_utc(raw.created) === null) {
-    legacy_extra.created_unverified = true;
+  const created_valid = raw.created !== undefined && parse_date_utc(raw.created) !== null;
+  if (!created_valid) {
+    legacy_extra.legacy_unverified = true;
   }
   ctx.plan.edition_settings = { ...settings, legacy_extra };
   ctx.plan.edition_status = ctx.plan.failed
@@ -1865,6 +1965,9 @@ function build_project(ctx: BuildContext): void {
       : "active";
 
   build_stages(ctx);
+  if (raw.complete === true && ctx.plan.approvals.length === 0) {
+    legacy_extra.legacy_unverified = true;
+  }
 
   // File mappings for recognised inputs (the source manifest always lists all files).
   for (const file of ctx.plan.manifest_files) {
@@ -2004,6 +2107,9 @@ function build_plan(dir: string): PreparedImport {
     }
   }
   const entries: ReportEntry[] = [];
+  for (const path of list_source_symlinks(dir)) {
+    plan_entry_category(entries, "unmapped_input", path);
+  }
   const parsed = new Map<string, unknown>();
   for (const [path, content] of bytes) {
     if (!path.endsWith(".json")) continue;
