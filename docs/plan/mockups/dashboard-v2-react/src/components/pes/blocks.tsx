@@ -162,10 +162,12 @@ export function LoadError({ what, lastReceived, code, onRetry }: { what: string;
         다른 영역은 그대로 쓸 수 있습니다. 마지막으로 받은 시각 {lastReceived} · 오류 번호 {code}. 입력 중인 초안은 지우지 않습니다.
       </p>
       {onRetry ? (
-        <Button size="sm" className="mt-2" onClick={onRetry}>
-          <RotateCcwIcon aria-hidden="true" />
-          다시 시도
-        </Button>
+        <div className="mt-2">
+          <Button size="sm" onClick={onRetry}>
+            <RotateCcwIcon aria-hidden="true" />
+            다시 시도
+          </Button>
+        </div>
       ) : null}
     </div>
   );

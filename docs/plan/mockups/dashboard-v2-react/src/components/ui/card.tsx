@@ -6,7 +6,7 @@ type CardTone = "default" | "primary" | "ok" | "warn" | "bad"
 type CardVariant = "default" | "metric"
 
 type CardProps = React.ComponentProps<"div"> & {
-  /** compact = 지금 화면의 gap-0 px-5 · flush = 안쪽 여백을 내용이 직접 잡는 카드(요약 카드) */
+  /** compact = 지금 화면의 gap-0 px-5 · flush = 안쪽 여백을 내용이 직접 잡는 카드(StatCard 전용, 겉모습 보존) */
   size?: CardSize
   tone?: CardTone
   variant?: CardVariant
@@ -21,7 +21,7 @@ const CARD_TONE: Record<CardTone, string> = {
   bad: "border-bad-line bg-bad-soft",
 }
 
-/** 표면 변형 — 요약 카드의 옅은 위쪽 그라데이션. */
+/** 표면 변형 — metric 은 StatCard(요약 카드) 전용, 기존 위쪽 그라데이션 겉모습 보존용. */
 const CARD_VARIANT: Record<CardVariant, string> = {
   default: "",
   metric: "bg-linear-to-t from-primary/5 to-card dark:bg-card dark:bg-none",
