@@ -51,7 +51,7 @@ jobs:
         run: python -m pytest -q -p no:cacheprovider
 
   typescript:
-    name: ${{ matrix.os }} / Node 26
+    name: ${{ matrix.os }} / Node 26 (${{ matrix.shard }}/3)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -60,6 +60,9 @@ jobs:
         os:
           - windows-latest
           - macos-latest
+        # CLI 시험은 명령마다 Python·Node 브리지를 띄워 Windows 에서 느리다. 시험 파일을 3조각으로 나눠 병렬로 돌린다
+        # (시험·상한은 그대로, 조각 합 = 전체 — node --test --test-shard).
+        shard: [1, 2, 3]
 
     steps:
       - name: Check out repository
@@ -81,5 +84,5 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Run tests
-        run: npm test
+      - name: Run tests (shard ${{ matrix.shard }}/3)
+        run: node --test --test-shard=${{ matrix.shard }}/3 "tests/**/*.test.ts"
