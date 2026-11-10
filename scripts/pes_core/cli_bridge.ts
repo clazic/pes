@@ -1398,7 +1398,8 @@ interface RenderedFile {
   bytes: Uint8Array;
 }
 
-const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+/** A rendered file's bytes: UTF-8 with LF line ends on every platform (a CR from any input is not kept). */
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text.replace(/\r\n?/g, "\n"));
 
 /** The artifact object of one report role (stage report of a stage, or the project's final output), if it exists. */
 function find_report_object(

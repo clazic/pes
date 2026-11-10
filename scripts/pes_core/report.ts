@@ -65,9 +65,33 @@ const REPO_ROOT = join(HERE, "..", "..");
 // Python-compatible helpers
 
 /**
- * A JSON number written with a decimal point whose value is a whole number (12.0, 3.50 is not one).
- * JavaScript would read it as the integer 12 and print "12"; Python prints "12.0". The legacy
- * project reader keeps the difference so the regenerated report matches what the old tool wrote.
+ * Python's repr(float) (also str() and json.dumps): the shortest round-trip digits like JavaScript,
+ * but fixed notation only while -4 < decimal point position <= 16, otherwise "1e-05" / "1e+16"
+ * (exponent with a sign and at least two digits); whole numbers keep ".0" and the sign of -0.0 stays.
+ */
+export function py_float_repr(v: number): string {
+  if (Number.isNaN(v)) return "nan";
+  if (!Number.isFinite(v)) return v > 0 ? "inf" : "-inf";
+  if (v === 0) return Object.is(v, -0) ? "-0.0" : "0.0";
+  const sign = v < 0 ? "-" : "";
+  const [mantissa, exp] = Math.abs(v).toExponential().split("e") as [string, string];
+  const digits = mantissa.replace(".", "");
+  const point = Number(exp) + 1; // the value is 0.<digits> x 10^point
+  if (point > -4 && point <= 16) {
+    if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+    if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}.0`;
+    return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+  }
+  const e = point - 1;
+  const lead = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : digits;
+  return `${sign}${lead}e${e < 0 ? "-" : "+"}${String(Math.abs(e)).padStart(2, "0")}`;
+}
+
+/**
+ * A JSON float token (written with a decimal point or an exponent) whose Python form differs from
+ * JavaScript's String(number): 12.0 (JS "12"), 5e-05 (JS "0.00005"), 1e+16 (JS "10000000000000000"),
+ * -0.0 (JS "0"). The legacy project reader keeps these as PyFloat so the regenerated report prints
+ * what the old tool (Python) wrote. Floats both languages print alike (3.5) stay plain numbers.
  */
 export class PyFloat {
   readonly v: number;
@@ -78,7 +102,7 @@ export class PyFloat {
     return this.v;
   }
   toString(): string {
-    return `${this.v}.0`;
+    return py_float_repr(this.v);
   }
 }
 
@@ -178,7 +202,8 @@ const template_cache = new Map<string, string>();
 function template(name: string): string {
   let text = template_cache.get(name);
   if (text === undefined) {
-    text = readFileSync(join(REPO_ROOT, "templates", name), "utf8");
+    // a Windows checkout (core.autocrlf) has CRLF templates; pes.py reads them in text mode, which gives LF
+    text = readFileSync(join(REPO_ROOT, "templates", name), "utf8").replace(/\r\n?/g, "\n");
     template_cache.set(name, text);
   }
   return text;
@@ -251,7 +276,8 @@ export function float_pointers(value: unknown, prefix = "", out: Set<string> = n
 }
 
 /**
- * JSON.parse that keeps whole-number floats ("12.0") as PyFloat. Exponent forms (1e3) are plain numbers.
+ * JSON.parse that keeps float tokens Python prints differently from JavaScript ("12.0", "5e-05", "1e16", "-0.0")
+ * as PyFloat; integer tokens and floats both print alike (3.5) are plain numbers.
  * Used for the project files an old tool wrote; any malformed text throws like JSON.parse.
  */
 export function parse_legacy_json(text: string): unknown {
@@ -308,7 +334,8 @@ export function parse_legacy_json(text: string): unknown {
     if (m !== null) {
       i += m[0].length;
       const n = Number(m[0]);
-      return /^-?\d+\.\d+$/.test(m[0]) && Number.isInteger(n) ? new PyFloat(n) : n;
+      // Python's json reads a token with "." or an exponent as float; keep it when its print differs
+      return /[.eE]/.test(m[0]) && py_float_repr(n) !== String(n) ? new PyFloat(n) : n;
     }
     for (const word of ["true", "false", "null"]) {
       if (text.startsWith(word, i)) {
@@ -754,8 +781,9 @@ const BUILT_FIELD = /"built": "\d{4}-\d{2}-\d{2} \d{2}:\d{2}"/g;
 
 /** The "작성 <시각>" line and the page's built time are not part of the comparison. */
 export function without_report_time(text: string): string {
-  // A report the old tool wrote on Windows has CRLF line ends; the comparison does not care.
-  return text.replace(/\r\n/g, "\n").replace(WRITTEN_AT_LINE, "작성 <시각> · PES").replace(BUILT_FIELD, '"built": "<시각>"');
+  // A report the old tool wrote on Windows has CRLF line ends (an edited one may mix CR, CRLF and LF,
+  // or carry CR CR LF); line ends are not compared: any run of CRs before LF, and a lone CR, is one LF.
+  return text.replace(/\r+\n/g, "\n").replace(/\r/g, "\n").replace(WRITTEN_AT_LINE, "작성 <시각> · PES").replace(BUILT_FIELD, '"built": "<시각>"');
 }
 
 /** Format epoch milliseconds like pes.py `now()`: local "YYYY-MM-DD HH:MM". */

@@ -912,12 +912,6 @@ def stage_md(d: Path, p: dict, s: str) -> str:
     return "\n".join(L) + "\n"
 
 
-def write_lf(path: Path, text: str):
-    """보고서 파일은 플랫폼과 무관하게 LF 로 쓴다 (Windows 에서 write_text 는 \\n 을 \\r\\n 으로 바꾼다)."""
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
-
-
 def cmd_report(args):
     d, s = pdir(args[0]), stage_arg(args[1])
     p = load(d)
@@ -926,18 +920,18 @@ def cmd_report(args):
     rd.mkdir(parents=True, exist_ok=True)
     fm = report_formats(p)
     txt = stage_md(d, p, s)
-    write_lf(rd / "report.md", txt)
+    (rd / "report.md").write_text(txt, encoding="utf-8")
     title = f"{p.get('topic', '')} — {REPORT_NAME[s]}"
     meta = {"title": title, "stage": s, "label": LABEL[s], "name": REPORT_NAME[s], "md": txt, "built": now(),
             "round": st["round"], "approved_at": st.get("approved_at")}
-    write_lf(rd / "report.html", fill(TPL / "stage-report.html", title, meta))
+    (rd / "report.html").write_text(fill(TPL / "stage-report.html", title, meta), encoding="utf-8")
     notes = []
     ej = rd / "eli5.json"
     if ej.exists():
         e = json.loads(ej.read_text(encoding="utf-8"))
         e.setdefault("title", REPORT_NAME[s])
         e["stage_label"], e["topic"], e["name"] = LABEL[s], p.get("topic", ""), REPORT_NAME[s]
-        write_lf(rd / "eli5.html", fill(TPL / "eli5.html", e["title"], e))
+        (rd / "eli5.html").write_text(fill(TPL / "eli5.html", e["title"], e), encoding="utf-8")
     elif "eli5" in fm:
         notes.append(f"eli5: {ej} 를 써야 합니다 (스키마는 pes:core 「단계 보고서」) — 쓴 뒤 report 를 다시 실행")
     reg = []
@@ -993,9 +987,9 @@ def cmd_assemble(args):
         out += [""] + notes
     (d / "out").mkdir(exist_ok=True)
     f = d / "out" / "report.md"
-    write_lf(f, "\n".join(out) + "\n")
+    f.write_text("\n".join(out) + "\n", encoding="utf-8")
     print(f"{f}  (장·절 {len(items)}개, 각주 {len(notes)}개)")
-    write_lf(d / "out" / "sources.json", json.dumps(srcs_out, ensure_ascii=False, indent=1))
+    (d / "out" / "sources.json").write_text(json.dumps(srcs_out, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 VERIFIED_METHODS = VERIFIED  # 원문·원자료를 직접 확인한 방법 (대시보드와 같은 기준)
@@ -1019,7 +1013,7 @@ def cmd_web(args):
         cover = json.loads((od / "cover.json").read_text(encoding="utf-8"))
     data = {"topic": p.get("topic", ""), "md": md, "sources": srcs, "cover": cover, "built": now(), "built_date": now()[:10]}
     f = od / "report.html"
-    write_lf(f, fill(TPL / "final-report.html", cover.get("title") or p.get("topic", "최종 보고서"), data))
+    f.write_text(fill(TPL / "final-report.html", cover.get("title") or p.get("topic", "최종 보고서"), data), encoding="utf-8")
     ok = sum(1 for s in srcs if s.get("verified"))
     print(f"{f}  (출처 {len(srcs)}개 · 확인됨 {ok}개{'' if cover else ' · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다'})")
 
@@ -1904,6 +1898,7 @@ def cmd_doctor(args):
             except Exception:
                 pass
     if as_json:
+        # --json 은 legacy 읽기가 v0.15 와 같은 출력이어야 해서 이전 전 프로젝트(ro) 행도 v0.15 처럼 fixable 로 둔다 (본문·요약만 구분)
         print(json.dumps([{k: v for k, v in r.items() if k not in ("fix", "ro")} | {"fixable": bool(r["fix"])} for r in R.rows], ensure_ascii=False, indent=1))
         if db_core() and any(r["level"] == "bad" for r in R.rows):
             sys.exit(1)  # DB 경로: 문제가 있으면 --json 도 종료 1
@@ -1914,12 +1909,15 @@ def cmd_doctor(args):
         if r["group"] != last:
             print(f"\n■ {r['group']}")
             last = r["group"]
-        tail = " → 고침" if r.get("fixed") else (f" ({r['skipped']})" if r.get("skipped") else (" (--fix 로 고칠 수 있음)" if r["fix"] else ""))
+        tail = " → 고침" if r.get("fixed") else (f" ({r['skipped']})" if r.get("skipped") else (
+            " (이전 후 --fix 로 고칠 수 있음)" if r["fix"] and r.get("ro") else (" (--fix 로 고칠 수 있음)" if r["fix"] else "")))
         print(f"  {MARK[r['level']]} {r['title']}" + (f" — {r['detail']}" if r["detail"] else "") + tail)
     cnt = {k: sum(1 for r in R.rows if r["level"] == k) for k in MARK}
-    nfix = sum(1 for r in R.rows if r["fix"] and not r.get("fixed"))
+    nfix = sum(1 for r in R.rows if r["fix"] and not r.get("fixed") and not r.get("ro"))  # 이전 전 프로젝트의 행은 --fix 가 건너뛰므로 세지 않는다
+    nlater = sum(1 for r in R.rows if r["fix"] and r.get("ro"))
     print(f"\n요약: 문제 {cnt['bad']} · 주의 {cnt['warn']} · 참고 {cnt['info']} · 정상 {cnt['ok']}"
-          + (f" · 고친 것 {len(fixed)}" if fix else (f" · --fix 로 고칠 수 있는 것 {nfix}" if nfix else "")))
+          + (f" · 고친 것 {len(fixed)}" if fix else (f" · --fix 로 고칠 수 있는 것 {nfix}" if nfix else ""))
+          + (f" · 이전 후 고칠 수 있는 것 {nlater}" if nlater else ""))
     if cnt["bad"]:
         sys.exit(1)
 
