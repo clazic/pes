@@ -18,11 +18,15 @@ import { resolve_run_config, type RunConfig } from "./config.ts";
 import { tx, type Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { new_id } from "./ids.ts";
+import { read_credential_actor } from "./actors.ts";
+import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
 import { CONTENT_COMMAND_ENTRIES } from "./commands/content.ts";
+import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
   is_record,
+  with_readonly_db,
   require_non_empty_string,
   require_record,
   require_well_formed,
@@ -73,11 +77,19 @@ export const OBJECT_KINDS = [
 export type PolicyDecision = { allowed: true } | { allowed: false; reason: string };
 
 /**
- * PR4 defines the seam only; PR10 supplies the real policy implementation.
+ * The policy seam. The command service calls check() inside the command
+ * transaction, before receipt replay, and hands over a read-only database
+ * handle (get / all only) from that same transaction so a real checker can
+ * read the current project policy without racing another connection.
  * A denial surfaces as ApiError code "policy_denied".
  */
 export interface PolicyChecker {
-  check(ctx: MutationContext, command: string, payload: unknown): PolicyDecision;
+  check(
+    ctx: MutationContext,
+    command: string,
+    payload: unknown,
+    db: Pick<Db, "get" | "all">,
+  ): PolicyDecision;
 }
 
 export interface CommandServiceOptions {
@@ -92,12 +104,6 @@ export interface CommandServiceOptions {
 export interface CommandOutcome {
   result: unknown;
   replayed: boolean;
-}
-
-interface ActorRow {
-  id: string;
-  user_id: string | null;
-  disabled_at: bigint | null;
 }
 
 interface ResolvedScope {
@@ -454,6 +460,8 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ["project.set_topic", SET_TOPIC_COMMAND],
   ...RUN_COMMAND_ENTRIES,
   ...CONTENT_COMMAND_ENTRIES,
+  ...ACTOR_COMMAND_ENTRIES,
+  ...POLICY_COMMAND_ENTRIES,
 ]);
 
 /**
@@ -624,8 +632,12 @@ export class CommandService {
 
     // The checker is external code: give it copies so a mutation cannot move
     // the receipt key or change what the original payload stores, and treat
-    // anything other than an explicit boolean true as a denial.
-    const decision: unknown = this.#policy.check(clone_context(ctx), command, copy_snapshot(payload));
+    // anything other than an explicit boolean true as a denial. It also gets a
+    // read-only handle to this transaction so a real policy reads uncommitted
+    // state without being able to write.
+    const decision: unknown = with_readonly_db(this.#db, (read_db) =>
+      this.#policy.check(clone_context(ctx), command, copy_snapshot(payload), read_db),
+    );
     if (!policy_allows(decision)) {
       throw new ApiError("policy_denied", policy_denial_reason(decision));
     }
@@ -674,18 +686,11 @@ export class CommandService {
     if (ctx.actor_id === null || ctx.actor_id.length === 0) {
       throw new ApiError("forbidden", "an actor is required");
     }
-    const actor = this.#db.get<ActorRow>(
-      "SELECT id, user_id, disabled_at FROM actors WHERE id = ?",
-      ctx.actor_id,
-    );
+    // One shared credential rule: the actor must exist, be enabled, have a
+    // user, and that user must be enabled.
+    const actor = read_credential_actor(this.#db, ctx.actor_id);
     if (actor === undefined) {
-      throw new ApiError("forbidden", `actor not found: ${ctx.actor_id}`);
-    }
-    if (actor.disabled_at !== null) {
-      throw new ApiError("forbidden", "the actor is disabled");
-    }
-    if (actor.user_id === null) {
-      throw new ApiError("forbidden", "the actor has no user");
+      throw new ApiError("forbidden", "the actor is not allowed in this project");
     }
     const member = this.#db.get<{ ok: bigint }>(
       "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?",
@@ -695,7 +700,7 @@ export class CommandService {
     if (member === undefined) {
       throw new ApiError("forbidden", "the actor is not a member of the project");
     }
-    return { project, actor_id: actor.id };
+    return { project, actor_id: actor.actor_id };
   }
 
   #replayed_result(

@@ -7,8 +7,9 @@
 // shares.
 
 import type { RunConfig } from "../config.ts";
-import type { Db } from "../db.ts";
+import type { Db, SqlValue } from "../db.ts";
 import { ApiError } from "../errors.ts";
+import { read_credential_actor } from "../actors.ts";
 
 export type CommandVia = "web" | "cli" | "http" | "mcp" | "webmcp" | "import";
 
@@ -68,6 +69,176 @@ export function require_well_formed(value: string, field: string): string {
   return value;
 }
 
+/**
+ * Strip comments and whitespace and decide whether `sql` is exactly one
+ * SELECT / WITH statement. String and quoted-identifier literals are skipped
+ * so a ";" inside them is not a statement separator. Anything else (PRAGMA,
+ * ATTACH, BEGIN, writes, several statements, empty text) is refused; the
+ * SQLite connection additionally runs with query_only=ON while a checker
+ * holds the handle, so a write hidden behind WITH still fails.
+ */
+export function assert_single_read_statement(sql: unknown): void {
+  if (typeof sql !== "string") {
+    throw new Error("the policy checker handle accepts only a SELECT/WITH text");
+  }
+  let code = "";
+  let i = 0;
+  let statements_end = -1;
+  while (i < sql.length) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+    if (ch === "-" && next === "-") {
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      code += " ";
+    } else if (ch === "/" && next === "*") {
+      const close = sql.indexOf("*/", i + 2);
+      i = close === -1 ? sql.length : close + 2;
+      code += " ";
+    } else if (ch === "'" || ch === '"' || ch === "`" || ch === "[") {
+      const closer = ch === "[" ? "]" : ch;
+      let j = i + 1;
+      for (;;) {
+        const at = sql.indexOf(closer, j);
+        if (at === -1) {
+          j = sql.length;
+          break;
+        }
+        if (closer !== "]" && sql[at + 1] === closer) {
+          j = at + 2;
+          continue;
+        }
+        j = at + 1;
+        break;
+      }
+      code += "x";
+      i = j;
+    } else if (ch === ";") {
+      if (statements_end !== -1) {
+        throw new Error("the policy checker handle accepts a single statement only");
+      }
+      statements_end = code.length;
+      code += ";";
+      i += 1;
+    } else {
+      code += ch;
+      i += 1;
+    }
+  }
+  const trimmed = code.trim();
+  if (statements_end !== -1) {
+    const after = code.slice(statements_end + 1).trim();
+    if (after.length > 0) {
+      throw new Error("the policy checker handle accepts a single statement only");
+    }
+  }
+  if (!/^(select|with)(?![A-Za-z0-9_$])/i.test(trimmed)) {
+    throw new Error("the policy checker handle accepts only SELECT/WITH statements");
+  }
+  if (/^with(?![A-Za-z0-9_$])/i.test(trimmed)) {
+    assert_with_ends_in_select(trimmed);
+  }
+}
+
+/**
+ * A WITH statement is read-only only when the statement after the CTE list is
+ * a SELECT. Walk the text at parenthesis depth 0: the first
+ * SELECT/INSERT/UPDATE/DELETE/REPLACE/VALUES keyword there is the final one.
+ */
+function assert_with_ends_in_select(code: string): void {
+  let depth = 0;
+  const word = /[A-Za-z_][A-Za-z0-9_$]*/y;
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === "(") {
+      depth += 1;
+      i += 1;
+    } else if (ch === ")") {
+      depth -= 1;
+      i += 1;
+    } else if (/[A-Za-z_]/.test(ch)) {
+      word.lastIndex = i;
+      const match = word.exec(code);
+      const text = (match === null ? ch : match[0]).toLowerCase();
+      i += text.length;
+      if (depth === 0 && ["select", "insert", "update", "delete", "replace", "values"].includes(text)) {
+        if (text !== "select") {
+          throw new Error("a WITH statement must end in a SELECT for the policy checker handle");
+        }
+        return;
+      }
+    } else {
+      i += 1;
+    }
+  }
+  throw new Error("a WITH statement must end in a SELECT for the policy checker handle");
+}
+
+function restore_query_only(db: Db, previous: bigint): void {
+  try {
+    db.exec(`PRAGMA query_only = ${previous === 0n ? "OFF" : "ON"}`);
+  } catch {
+    // nothing more can be done; the next command re-checks the guard
+  }
+}
+
+export interface ReadonlyDbHandle extends Pick<Db, "get" | "all"> {}
+
+/**
+ * Run `fn` with the checker's view of a transaction: get/all only, single
+ * SELECT/WITH statements only, SQLite query_only=ON while it is open (restored
+ * afterwards, also when fn throws), and a handle that is dead once fn returns.
+ */
+export function with_readonly_db<T>(db: Db, fn: (handle: ReadonlyDbHandle) => T): T {
+  let open = true;
+  const guarded = <R>(sql: string, run: () => R): R => {
+    if (!open) {
+      throw new Error("the policy checker handle is closed");
+    }
+    assert_single_read_statement(sql);
+    return run();
+  };
+  const handle: ReadonlyDbHandle = Object.freeze({
+    get: <R = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
+      guarded(sql, () => db.get<R>(sql, ...params)),
+    all: <R = Record<string, SqlValue>>(sql: string, ...params: SqlValue[]) =>
+      guarded(sql, () => db.all<R>(sql, ...params)),
+  });
+
+  // Fail closed: the statement check alone is not read-only (WITH ... UPDATE
+  // was once let through), so the checker never runs unless query_only can be
+  // read, set, and read back as ON.
+  const unavailable = (): never => {
+    throw new ApiError("policy_denied", "the read-only database guard is not available");
+  };
+  let previous: bigint;
+  try {
+    const row = db.get<{ query_only: bigint | number }>("PRAGMA query_only");
+    if (row === undefined) return unavailable();
+    previous = BigInt(row.query_only);
+  } catch {
+    return unavailable();
+  }
+  let engaged = false;
+  try {
+    db.exec("PRAGMA query_only = ON");
+    engaged = true;
+    const after = db.get<{ query_only: bigint | number }>("PRAGMA query_only");
+    if (after === undefined || BigInt(after.query_only) !== 1n) return unavailable();
+  } catch {
+    open = false;
+    if (engaged || previous === 0n) restore_query_only(db, previous);
+    return unavailable();
+  }
+  try {
+    return fn(handle);
+  } finally {
+    open = false;
+    restore_query_only(db, previous);
+  }
+}
+
 export function is_record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -90,6 +261,45 @@ export function require_non_empty_string(payload: Record<string, unknown>, field
     throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
   }
   return value;
+}
+
+/** Reject a payload key that the command does not define (closed command surface). */
+export function reject_unknown_fields(
+  payload: Record<string, unknown>,
+  allowed: readonly string[],
+): void {
+  const known = new Set(allowed);
+  for (const key of Object.keys(payload)) {
+    if (!known.has(key)) {
+      throw new ApiError("invalid_payload", `unknown field: ${key}`);
+    }
+  }
+}
+
+/**
+ * The command's actor must be a human project member with role "owner". The
+ * service has already checked membership and disabled state; this adds the
+ * kind/role rule that an agent sharing the owner's user must still fail.
+ */
+export function require_human_owner_actor(runtime: CommandRuntime): string {
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  const actor = read_credential_actor(runtime.db, actor_id);
+  if (actor === undefined || actor.kind !== "human") {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  const member = runtime.db.get<{ role: string }>(
+    "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
+    project.id,
+    actor.user_id,
+  );
+  if (member === undefined || member.role !== "owner") {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  return actor_id;
 }
 
 export function insert_receipt(

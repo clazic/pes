@@ -12,6 +12,11 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "content.import_library",
   "content.link_relation",
   "content.set_current",
+  "dispatch.authorize",
+  "dispatch.block",
+  "dispatch.mark_sent",
+  "dispatch.prepare",
+  "policy.set",
   "project.bootstrap",
   "project.set_topic",
   "run.claim",
@@ -22,4 +27,6 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "run.record_receipt",
   "run.release",
   "run.wait",
+  "token.issue",
+  "token.revoke",
 ];

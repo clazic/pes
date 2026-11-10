@@ -1,0 +1,267 @@
+// Actors and project-scoped agent tokens (stage 2 PR10).
+//
+// The write path lives in commands/actors.ts: issue_agent_token and
+// revoke_agent_token are thin wrappers that call CommandService.execute once.
+// The functions here are read-only: they resolve an actor for a project,
+// require a human owner, and verify a presented token. No business table is
+// written outside the command service, and no raw token is ever stored,
+// logged, or echoed in an error.
+
+import { createHash, randomBytes } from "node:crypto";
+
+import type { CommandOutcome, CommandService, MutationContext } from "./commands.ts";
+import type { Db } from "./db.ts";
+import { ApiError } from "./errors.ts";
+
+/** Project token lifetime: exactly 30 days in milliseconds. */
+export const AGENT_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const TOKEN_PREFIX = "pes_";
+const MAX_PRESENTED_TOKEN_LENGTH = 4096;
+
+type ReadDb = Pick<Db, "get" | "all">;
+
+export interface ActorLookup {
+  project_id: string;
+  actor_id?: string | null;
+  token?: string | null;
+}
+
+export interface ResolvedActor {
+  actor_id: string;
+  kind: string;
+  user_id: string;
+  membership_role: string;
+  token_id: string | null;
+}
+
+export interface TokenOptions {
+  project_id: string;
+  now_ms: number;
+}
+
+export interface VerifiedToken {
+  token_id: string;
+  actor_id: string;
+  project_id: string;
+  scopes: string[];
+}
+
+interface TokenRow {
+  id: string;
+  project_id: string;
+  actor_id: string;
+  scopes: string;
+  expires_at: bigint | null;
+  revoked_at: bigint | null;
+}
+
+interface CredentialActorRow {
+  id: string;
+  kind: string;
+  user_id: string;
+  disabled_at: bigint | null;
+  user_disabled_at: bigint | null;
+}
+
+export interface CredentialActor {
+  actor_id: string;
+  kind: string;
+  user_id: string;
+}
+
+function invalid_token(): never {
+  // Deliberately carries no token text and no table/column names.
+  throw new ApiError("forbidden", "the agent token is not valid");
+}
+
+function invalid_payload(message: string): never {
+  throw new ApiError("invalid_payload", message);
+}
+
+function forbidden_actor(): never {
+  throw new ApiError("forbidden", "the actor is not allowed in this project");
+}
+
+/** Caller-supplied clock values must be a non-negative safe integer before BigInt(). */
+function require_now_ms(now_ms: unknown): number {
+  if (typeof now_ms !== "number" || !Number.isSafeInteger(now_ms) || now_ms < 0) {
+    return invalid_payload("now_ms must be a non-negative safe integer");
+  }
+  return now_ms;
+}
+
+function require_token_options(options: unknown): TokenOptions {
+  if (options === null || typeof options !== "object" || Array.isArray(options)) {
+    return invalid_payload("token options must be an object");
+  }
+  const record = options as Record<string, unknown>;
+  const project_id = record.project_id;
+  if (typeof project_id !== "string" || project_id.length === 0) {
+    return invalid_payload("project_id must be a non-empty string");
+  }
+  return { project_id, now_ms: require_now_ms(record.now_ms) };
+}
+
+/**
+ * The one actor-credential rule shared by token verification, actor
+ * resolution, the command service scope check, and the human-owner check:
+ * the actor must exist, be enabled, belong to an existing user, and that user
+ * must be enabled. A userless agent actor can never authenticate.
+ */
+export function read_credential_actor(db: ReadDb, actor_id: string): CredentialActor | undefined {
+  if (typeof actor_id !== "string" || actor_id.length === 0) return undefined;
+  const row = db.get<CredentialActorRow>(
+    `SELECT a.id AS id, a.kind AS kind, a.user_id AS user_id,
+            a.disabled_at AS disabled_at, u.disabled_at AS user_disabled_at
+       FROM actors a
+       JOIN users u ON u.id = a.user_id
+      WHERE a.id = ?`,
+    actor_id,
+  );
+  if (row === undefined || row.disabled_at !== null || row.user_disabled_at !== null) {
+    return undefined;
+  }
+  return { actor_id: row.id, kind: row.kind, user_id: row.user_id };
+}
+
+/** Fresh random secret. Only the return value of token.issue carries the raw text. */
+export function generate_agent_token(): string {
+  return `${TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+/** One-way hash used as the only persisted form of the token. */
+export function agent_token_hash(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+/**
+ * Verify a presented token for one project. Every failure is the same
+ * forbidden error: unknown, malformed, revoked, expired (now >= expires_at),
+ * wrong project, disabled actor, or broken scopes JSON.
+ */
+export function verify_agent_token(db: ReadDb, token: unknown, options: TokenOptions): VerifiedToken {
+  const checked = require_token_options(options);
+  if (
+    typeof token !== "string" ||
+    token.length === 0 ||
+    token.length > MAX_PRESENTED_TOKEN_LENGTH ||
+    !token.isWellFormed()
+  ) {
+    return invalid_token();
+  }
+  const row = db.get<TokenRow>(
+    `SELECT id, project_id, actor_id, scopes, expires_at, revoked_at
+       FROM agent_tokens WHERE token_hash = ?`,
+    agent_token_hash(token),
+  );
+  if (row === undefined) return invalid_token();
+  if (row.project_id !== checked.project_id) return invalid_token();
+  if (row.revoked_at !== null) return invalid_token();
+  if (row.expires_at === null || typeof row.expires_at !== "bigint") return invalid_token();
+  if (BigInt(checked.now_ms) >= row.expires_at) return invalid_token();
+
+  // Same actor rule as resolve_actor and the command service: disabled actor,
+  // disabled user, or no user at all -> no usable credential.
+  if (read_credential_actor(db, row.actor_id) === undefined) return invalid_token();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.scopes);
+  } catch {
+    return invalid_token();
+  }
+  if (!Array.isArray(parsed) || parsed.some((scope) => typeof scope !== "string")) {
+    return invalid_token();
+  }
+  return {
+    token_id: row.id,
+    actor_id: row.actor_id,
+    project_id: row.project_id,
+    scopes: parsed as string[],
+  };
+}
+
+/**
+ * Resolve exactly one credential (actor id or agent token) to an enabled,
+ * member actor of the project. A token resolves to its own actor. The
+ * returned membership_role comes from the project member row of the actor's
+ * user; an agent sharing the owner's user still has kind != "human".
+ */
+export function resolve_actor(db: ReadDb, lookup: ActorLookup, now_ms: number): ResolvedActor {
+  if (lookup === null || typeof lookup !== "object") {
+    throw new ApiError("invalid_payload", "an actor lookup object is required");
+  }
+  const at = require_now_ms(now_ms);
+  const project_id = lookup.project_id;
+  if (typeof project_id !== "string" || project_id.length === 0) {
+    throw new ApiError("invalid_payload", "project_id must be a non-empty string");
+  }
+  const has_actor = lookup.actor_id !== undefined && lookup.actor_id !== null;
+  const has_token = lookup.token !== undefined && lookup.token !== null;
+  if (has_actor === has_token) {
+    throw new ApiError("invalid_payload", "exactly one of actor_id or token is required");
+  }
+
+  let actor_id: string;
+  let token_id: string | null = null;
+  if (has_actor) {
+    if (
+      typeof lookup.actor_id !== "string" ||
+      lookup.actor_id.length === 0 ||
+      !lookup.actor_id.isWellFormed()
+    ) {
+      throw new ApiError("invalid_payload", "actor_id must be a non-empty string");
+    }
+    actor_id = lookup.actor_id;
+  } else {
+    const verified = verify_agent_token(db, lookup.token, { project_id, now_ms: at });
+    actor_id = verified.actor_id;
+    token_id = verified.token_id;
+  }
+
+  const actor = read_credential_actor(db, actor_id);
+  if (actor === undefined) return forbidden_actor();
+  const member = db.get<{ role: string }>(
+    "SELECT role FROM project_members WHERE project_id = ? AND user_id = ?",
+    project_id,
+    actor.user_id,
+  );
+  if (member === undefined) return forbidden_actor();
+  return {
+    actor_id: actor.actor_id,
+    kind: actor.kind,
+    user_id: actor.user_id,
+    membership_role: member.role,
+    token_id,
+  };
+}
+
+/** Policy changes and token management are reserved for a human owner. */
+export function require_human_owner(resolved: ResolvedActor): ResolvedActor {
+  if (
+    resolved === null ||
+    typeof resolved !== "object" ||
+    resolved.kind !== "human" ||
+    resolved.membership_role !== "owner"
+  ) {
+    throw new ApiError("forbidden", "a human project owner is required");
+  }
+  return resolved;
+}
+
+export function issue_agent_token(
+  service: CommandService,
+  ctx: MutationContext,
+  input: unknown,
+): Promise<CommandOutcome> {
+  return service.execute(ctx, "token.issue", input);
+}
+
+export function revoke_agent_token(
+  service: CommandService,
+  ctx: MutationContext,
+  input: unknown,
+): Promise<CommandOutcome> {
+  return service.execute(ctx, "token.revoke", input);
+}
