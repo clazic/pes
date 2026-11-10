@@ -1690,6 +1690,72 @@ def port_owner_text(owners):
     return "PES 가 아닌 프로그램이 쓰는 중 — 소유 프로세스 " + ", ".join(f"pid {pid}" + (f" ({name})" if name else "") for pid, name in owners)
 
 
+SQLITE_SHM_DMS = 128  # -shm 의 DMS 잠금 바이트: 연결이 열려 있는 동안 그 연결이 공유 잠금을 쥔다
+SQLITE_RESERVED_BYTE = 0x40000001  # DB 파일의 RESERVED 잠금 바이트: 쓰기 트랜잭션 중인 연결이 쥔다
+
+
+def lock_held_elsewhere(path: Path, offset: int):
+    """다른 프로세스가 path 의 offset 바이트에 SQLite 잠금을 쥐고 있으면 True, 아니면 False, 알 수 없으면 None.
+    배타 잠금을 잠깐 시도하고 바로 푼다 — 파일 내용·mtime 은 바꾸지 않는다."""
+    try:
+        with open(path, "r+b") as fh:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(offset)
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return True
+                fh.seek(offset)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                return False
+            import fcntl
+            try:
+                fcntl.lockf(fh, fcntl.LOCK_EX | fcntl.LOCK_NB, 1, offset)
+            except OSError:
+                return True
+            fcntl.lockf(fh, fcntl.LOCK_UN, 1, offset)
+            return False
+    except OSError:
+        return None
+
+
+def db_journal_residue():
+    """DB 곁에 남은 -wal·-journal 중 연결을 여는 순간 SQLite 가 DB 에 반영(복구·checkpoint)할 것의 파일 이름들.
+    기본 doctor 는 이때 DB 를 열지 않는다(원본 불변). 빈(0바이트) -wal 은 정상이라 세지 않는다. 다른 PES 가 지금 그 DB 를
+    열고 있으면(-wal: -shm 의 DMS 잠금, -journal: DB 의 RESERVED 잠금) 실행 중인 정상 상태라 복구가 일어나지 않으므로 세지 않는다."""
+    db_file = Path.home() / ".pes" / "pes.db"
+    out = []
+    for suffix in ("-wal", "-journal"):
+        f = db_file.with_name(db_file.name + suffix)
+        try:
+            if not (f.is_file() and f.stat().st_size > 0):
+                continue
+        except OSError:
+            continue
+        if suffix == "-wal":
+            shm = db_file.with_name(db_file.name + "-shm")
+            live = lock_held_elsewhere(shm, SQLITE_SHM_DMS) if shm.is_file() else False
+        else:
+            live = lock_held_elsewhere(db_file, SQLITE_RESERVED_BYTE)
+        if live is not True:
+            out.append(f.name)
+    return out
+
+
+def doctor_db_residue(R, residue):
+    db_file = Path.home() / ".pes" / "pes.db"
+    R.add("데이터베이스", "warn", f"다른 PES 가 실행 중이거나 비정상 종료 흔적 {db_file}",
+          f"{', '.join(residue)} 가 남아 있음 — 진단이 DB 를 열면 SQLite 가 이를 DB 에 반영하므로 기본 진단은 DB 를 열지 않았습니다(프로젝트 진단도 건너뜀). "
+          f"다른 PES(서버·명령)를 끈 뒤 doctor 를 다시 실행하고, 그래도 남으면 doctor --fix(또는 pes 명령 한 번)로 정상 복구하세요")
+
+
+def doctor_path_risk(R, h: Path):
+    if RISKY_PATH.search(str(h)):
+        R.add("환경", "warn", "PES 홈 경로에 공백·따옴표·괄호 같은 특수 문자가 있음 (명령 quoting 위험)",
+              f"{h} — watch 는 경로를 스스로 따옴표로 묶지만, 이 경로를 셸 명령에 직접 붙이는 다른 곳(Monitor 명령·스크립트)에는 따옴표가 필요합니다. 공백·따옴표 없는 폴더로 `home` 명령으로 옮기는 편이 안전합니다")
+
+
 def doctor_db(R, h: Path):
     """2단계 DB 진단: 데이터베이스 상태(읽기만 — 스스로 고치지 않는다)와 PES 홈 경로의 명령 quoting 위험."""
     db_file = Path.home() / ".pes" / "pes.db"
@@ -1704,9 +1770,7 @@ def doctor_db(R, h: Path):
         R.add("데이터베이스", "warn", f"데이터베이스 스키마가 최신이 아님 {db_file}", "새 코어 버전으로 DB 를 올려야 합니다")
     else:
         R.add("데이터베이스", "ok", f"데이터베이스 {db_file}", f"프로젝트 {st.get('projects', 0)}개 · 스키마 최신")
-    if RISKY_PATH.search(str(h)):
-        R.add("환경", "warn", "PES 홈 경로에 공백·따옴표·괄호 같은 특수 문자가 있음 (명령 quoting 위험)",
-              f"{h} — watch 는 경로를 스스로 따옴표로 묶지만, 이 경로를 셸 명령에 직접 붙이는 다른 곳(Monitor 명령·스크립트)에는 따옴표가 필요합니다. 공백·따옴표 없는 폴더로 `home` 명령으로 옮기는 편이 안전합니다")
+    doctor_path_risk(R, h)
 
 
 def doctor_project_db(R, d: Path):
@@ -1851,10 +1915,18 @@ def cmd_doctor(args):
     R = DocReport()
     doctor_env(R)
     h = pes_home()
-    if db_core() and not tgt:
+    # 기본 진단(--fix 아님)은 원본을 바꾸지 않는다: DB 곁에 남은 -wal·-journal 은 연결을 여는 순간 DB 에 반영되므로 DB 를 열지 않는다
+    residue = db_journal_residue() if db_core() and not fix else []
+    if residue:
+        doctor_db_residue(R, residue)
+        if not tgt:
+            doctor_path_risk(R, h)
+    elif db_core() and not tgt:
         doctor_db(R, h)  # DB 상태는 홈 전체 진단에서만 (프로젝트 하나를 지정하면 그 프로젝트만)
-    served = db_served_slugs() if db_core() else set()
-    if tgt:
+    served = db_served_slugs() if db_core() and not residue else set()
+    if residue:
+        dirs = []  # 어느 프로젝트가 DB 프로젝트인지 DB 를 열지 않고는 모른다
+    elif tgt:
         dirs = [pdir(tgt[0])]
     else:
         names = {f.parent.name for f in h.glob("*/project.json")} | served if h.exists() else set(served)
@@ -1876,7 +1948,7 @@ def cmd_doctor(args):
         finally:
             R.no_fix = False
             R.ro = False
-    if not tgt and h.exists():
+    if not tgt and h.exists() and not residue:
         stray = [x.name for x in h.iterdir() if x.is_dir() and not (x / "project.json").exists() and not x.name.startswith(".") and x.name not in served]
         if stray:
             R.add("환경", "info", "PES 홈에 프로젝트가 아닌 폴더", ", ".join(stray))
