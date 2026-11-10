@@ -229,6 +229,27 @@ export function connect(path: string, options: ConnectOptions = {}): SqliteDb {
   }
 }
 
+/**
+ * A query-only connection to an existing database file, for commands that only read (status, list,
+ * doctor, ...). Unlike connect() it creates no folder and does not switch the journal mode, and any
+ * write through it fails (PRAGMA query_only). It is not opened with SQLite's read-only flag: on a WAL
+ * database a read-only handle leaves a -shm file behind, while a normal handle's -wal/-shm are removed
+ * again when the last connection closes, so the database folder stays as it was.
+ */
+export function connect_read_only(path: string): SqliteDb {
+  const db = new SqliteDb(path);
+  try {
+    db.exec("PRAGMA query_only = ON");
+    assert_foreign_keys(db);
+    assert_busy_timeout(db);
+    assert_sqlite_runtime(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
 const active_transactions = new WeakSet<Db>();
 
 function is_thenable(value: unknown): boolean {

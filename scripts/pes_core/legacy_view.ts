@@ -26,6 +26,41 @@ export function not_a_report_sql(alias: string): string {
   return `COALESCE(json_extract(${alias}.metadata_json, '$.role'), '') NOT IN ('stage_report', 'final_output')`;
 }
 
+/**
+ * The rendered files of one version under the names that version gave them. A blob is shared by
+ * content (PR9 reuses one blob per project, sha256 and size and keeps its first upload name), so the
+ * blob's original_name is not the file's name in this version: a report version records
+ * metadata.files = [{name, sha256, size}] when it is written, and the name comes from there.
+ * A version without that record (the importer's) falls back to the blob's name.
+ */
+export function rendered_files(db: Pick<Db, "all" | "get">, project_id: string, version_id: string): Array<{ name: string; storage_key: string | null; size: number }> {
+  const rows = db.all<{ original_name: string | null; storage_key: string | null; sha256: string; size: bigint }>(
+    `SELECT b.original_name AS original_name, b.storage_key AS storage_key, b.sha256 AS sha256, b.size AS size
+       FROM version_files vf JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
+      WHERE vf.project_id = ? AND vf.version_id = ? AND vf.role = 'rendered'`,
+    project_id,
+    version_id,
+  );
+  const meta = db.get<{ metadata_json: string | null }>(
+    "SELECT metadata_json FROM artifact_versions WHERE project_id = ? AND version_id = ?",
+    project_id,
+    version_id,
+  );
+  const recorded = record(parse(meta?.metadata_json, {})).files;
+  const out: Array<{ name: string; storage_key: string | null; size: number }> = [];
+  if (Array.isArray(recorded) && recorded.length > 0) {
+    for (const entry of recorded) {
+      const file = record(entry);
+      if (typeof file.name !== "string") continue;
+      const row = rows.find((r) => r.sha256 === file.sha256 && Number(r.size) === Number(file.size));
+      if (row !== undefined) out.push({ name: file.name, storage_key: row.storage_key, size: num(row.size) });
+    }
+  } else {
+    for (const row of rows) out.push({ name: row.original_name ?? "", storage_key: row.storage_key, size: num(row.size) });
+  }
+  return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
 function num(value: unknown): number {
   return typeof value === "bigint" ? Number(value) : typeof value === "number" ? value : 0;
 }
@@ -329,16 +364,10 @@ export function build_project_view(
   // registered report files (the current version of each stage's report object)
   for (const entry of report_versions) {
     if (entry.role !== "stage_report" || entry.stage_key === null) continue;
-    const files = db.all<{ original_name: string | null; size: bigint }>(
-      `SELECT b.original_name AS original_name, b.size AS size
-         FROM version_files vf JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
-        WHERE vf.project_id = ? AND vf.version_id = ? AND vf.role = 'rendered' ORDER BY b.original_name`,
-      project_id,
-      entry.version_id,
-    );
+    const files = rendered_files(db, project_id, entry.version_id);
     const st = p.stages[entry.stage_key] as Dict;
     st.reports = files.map((file) => {
-      const name = file.original_name ?? "";
+      const name = file.name;
       const stem = name.replace(/\.[^.]+$/, "");
       const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
       return { format: stem === "eli5" ? "eli5" : ext, label: name, path: `reports/${entry.stage_key}/${name}`, bytes: num(file.size), round: st.round };

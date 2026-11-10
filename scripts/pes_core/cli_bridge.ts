@@ -39,13 +39,13 @@ import {
   set_current,
   submit_results,
 } from "./content.ts";
-import { connect, load_migrations, migrate, probe_database, type Db } from "./db.ts";
+import { connect, connect_read_only, load_migrations, migrate, probe_database, type Db } from "./db.ts";
 import { approve_stage, reopen_stage, seal_round, start_round } from "./editions.ts";
 import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
 import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex } from "./files.ts";
 import { serving_path } from "./migration.ts";
-import { build_project_view, not_a_report_sql } from "./legacy_view.ts";
+import { build_project_view, not_a_report_sql, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -150,11 +150,12 @@ class Session {
   /** Object files this run wrote; they are removed again when the run fails (the rows roll back). */
   readonly fresh_files: Array<{ project_id: string; storage_key: string }> = [];
 
-  constructor(env: Environment, db: Db) {
+  /** `writable` false: a read-only command — the objects folder is not created (nothing on disk changes). */
+  constructor(env: Environment, db: Db, writable = true) {
     this.env = env;
     this.db = new UnitOfWorkDb(db);
     this.objects = objects_dir(env);
-    mkdirSync(this.objects, { recursive: true });
+    if (writable) mkdirSync(this.objects, { recursive: true });
     this.service = new CommandService(this.db, {
       clock: this.clock,
       policy: new DbPolicyChecker(),
@@ -1478,7 +1479,12 @@ async function write_report_version(
       stats: [],
       conflicts: [],
       verify: null,
-      metadata: { ...input.metadata, role: input.role },
+      // each file's name in this version (the shared blob keeps only its first upload name)
+      metadata: {
+        ...input.metadata,
+        role: input.role,
+        files: input.files.map((file) => ({ name: file.name, sha256: sha256_hex(file.bytes), size: file.bytes.byteLength })),
+      },
     };
     let object_id: string;
     let version_id: string;
@@ -1568,15 +1574,8 @@ const report: Handler = async (s, req) => {
 
 /** The bytes of one rendered file (by name) of an output version, or undefined. */
 function rendered_bytes(s: Session, project: ProjectInfo, version_id: string, name: string): Uint8Array | undefined {
-  const row = s.db.get<{ storage_key: string }>(
-    `SELECT b.storage_key AS storage_key
-       FROM version_files vf JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
-      WHERE vf.project_id = ? AND vf.version_id = ? AND vf.role = 'rendered' AND b.original_name = ?`,
-    project.id,
-    version_id,
-    name,
-  );
-  return row === undefined ? undefined : read_storage_bytes(s.objects, project.id, row.storage_key);
+  const row = rendered_files(s.db, project.id, version_id).find((file) => file.name === name);
+  return row === undefined || row.storage_key === null ? undefined : read_storage_bytes(s.objects, project.id, row.storage_key);
 }
 
 async function output_run(s: Session, req: Request, web: boolean): Promise<Record<string, unknown>> {
@@ -1651,6 +1650,9 @@ const web_op: Handler = (s, req) => output_run(s, req, true);
 function in_unit(handler: Handler): Handler {
   return (s, req) => s.unit(() => handler(s, req));
 }
+
+/** Operations that only read: they use a read-only connection and change nothing on disk. */
+const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "live_locks", "overview", "context", "qa-data"]);
 
 const HANDLERS: Record<string, Handler> = {
   slugs,
@@ -1746,7 +1748,8 @@ async function main(): Promise<void> {
     return;
   }
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
-  const db = connect(file);
+  const read_only = READ_ONLY_OPS.has(request.op);
+  const db = read_only ? connect_read_only(file) : connect(file);
   let session: Session | undefined;
   try {
     if (creating) migrate(db);
@@ -1754,7 +1757,7 @@ async function main(): Promise<void> {
       reply({ ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 });
       return;
     }
-    session = new Session(env, db);
+    session = new Session(env, db, !read_only);
     const data = await handler(session, request);
     reply({ ok: true, data });
   } catch (error) {

@@ -330,7 +330,9 @@ export function parse_legacy_json(text: string): unknown {
       }
     }
     if (c === '"') return string_token();
-    const m = text.slice(i, i + 64).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    // the whole number token, however long (a JSON number has no length limit)
+    NUMBER_TOKEN.lastIndex = i;
+    const m = text.match(NUMBER_TOKEN); // sticky: matches at i only
     if (m !== null) {
       i += m[0].length;
       const n = Number(m[0]);
@@ -352,8 +354,13 @@ export function parse_legacy_json(text: string): unknown {
     i += 1;
     return JSON.parse(text.slice(start, i)) as string;
   };
-  return value();
+  const out = value();
+  skip();
+  if (i !== text.length) throw new Error("JSON scan did not reach the end of the text");
+  return out;
 }
+
+const NUMBER_TOKEN = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
 
 // ---------------------------------------------------------------------------
 // the legacy project shape
