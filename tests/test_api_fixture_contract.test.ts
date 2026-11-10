@@ -32,7 +32,7 @@ import {
 } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { new_artifact } from "./helpers/blob_env.ts";
-import { drive_stage, make_content, seal, start, stage_ids, type SealResult } from "./helpers/editions_env.ts";
+import { drive_stage, make_content, manifest_blob, seal, start, stage_ids, type SealResult } from "./helpers/editions_env.ts";
 import { single_spec } from "./helpers/questions_env.ts";
 
 const FIXTURE_DIR = new URL("../docs/plan/fixtures/api-v1/", import.meta.url);
@@ -54,7 +54,7 @@ const UNSUPPORTED = new Set([
 
 interface FixtureCase {
   request: { path_params?: Record<string, string>; query?: Record<string, unknown> | null; headers: Record<string, string>; body?: unknown };
-  response: { status: number; body: any };
+  response: { status: number; headers?: Record<string, string>; body: any; body_base64?: string };
 }
 interface Fixture {
   operation: string;
@@ -119,7 +119,7 @@ interface Scene {
   agent?: Agent;
 }
 
-type Builder = (env: ApiEnv, agent: Agent) => Promise<Scene>;
+type Builder = (env: ApiEnv, agent: Agent, c: FixtureCase) => Promise<Scene>;
 
 const PH = {
   project: "prj_01J9Z3K7Q2",
@@ -169,13 +169,13 @@ async function ask(env: ApiEnv, stage_id: string, round_id: string | null) {
   return { set_id: data.question_set_id as string, question_id: data.question.id as string, version_id: data.question.version_id as string };
 }
 
-async function reserved_blob(env: ApiEnv, bytes: Uint8Array, stage: "reserved" | "stored" | "ready") {
+async function reserved_blob(env: ApiEnv, bytes: Uint8Array, stage: "reserved" | "stored" | "ready", media_type = "application/octet-stream") {
   const r = assert_ok(
     await call(env, {
       method: "POST",
       path: P(env, "/uploads"),
       auth: "owner",
-      body: { sha256: sha_hex(bytes), size: bytes.byteLength, media_type: "application/octet-stream", original_name: "합성.bin" },
+      body: { sha256: sha_hex(bytes), size: bytes.byteLength, media_type, original_name: "합성.bin" },
     }),
     201,
   );
@@ -424,8 +424,13 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
     normal: async (env) => {
       const s = stage_ids(env.db, env.p.edition_id);
       const round = await start(env, s.plan, "seal-n-start");
-      await make_content(env, "seal-n");
-      return { subst: { [PH.round]: round.round_id }, live_revs: { expected_round_rev: project_rev(env, "SELECT rev FROM rounds WHERE id = ?", round.round_id) } };
+      const content = await make_content(env, "seal-n");
+      // a seal needs a ready manifest blob listing the exact versions (the fixture's manifest_blob_id / versions are replaced by real ones)
+      const manifest_blob_id = await manifest_blob(env, [{ object_id: content.object_id, version_id: content.version_id }], "seal-n");
+      return {
+        subst: { [PH.round]: round.round_id, [PH.object]: content.object_id, [PH.version]: content.version_id, blb_01J9Z3K7QM: manifest_blob_id },
+        live_revs: { expected_round_rev: project_rev(env, "SELECT rev FROM rounds WHERE id = ?", round.round_id) },
+      };
     },
     error: async (env) => {
       const s = stage_ids(env.db, env.p.edition_id);
@@ -498,8 +503,11 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
     },
   },
   "files.content": {
-    normal: async (env) => {
-      const blob = await reserved_blob(env, synthetic_bytes(64, 7), "ready");
+    normal: async (env, _agent, c) => {
+      // GET file content is a raw-bytes response (PR13): the blob holds exactly the bytes the fixture's body_base64 states
+      assert.ok(c.response.body_base64, "the fixture states body_base64");
+      const bytes = new Uint8Array(Buffer.from(c.response.body_base64, "base64"));
+      const blob = await reserved_blob(env, bytes, "ready", "application/octet-stream");
       return { subst: { [PH.blob_get]: blob } };
     },
     error: async (env) => {
@@ -580,6 +588,17 @@ async function send(env: ApiEnv, fx: Fixture, c: FixtureCase, scene: Scene, auth
 function compare(res: Awaited<ReturnType<typeof call>>, expected: FixtureCase["response"], method: string): void {
   const where = `${res.status} ${JSON.stringify(res.json)}`;
   assert.equal(res.status, expected.status, `status: ${where}`);
+  if (res.json === null && res.bytes !== null) {
+    // raw-bytes response: no JSON envelope. Check content-type, the bytes and (when the fixture states it) the size.
+    const media = (v: string | undefined) => (v ?? "").split(";")[0]!.trim().toLowerCase();
+    const want_type = Object.entries(expected.headers ?? {}).find(([k]) => k.toLowerCase() === "content-type")?.[1];
+    const got_type = Object.entries(res.headers).find(([k]) => k.toLowerCase() === "content-type")?.[1];
+    assert.ok(want_type, "the fixture states a Content-Type for the bytes response");
+    assert.equal(media(got_type), media(want_type), "content-type");
+    assert.ok(expected.body_base64 !== undefined, "the fixture states body_base64");
+    assert.deepEqual(Buffer.from(res.bytes), Buffer.from(expected.body_base64, "base64"), "bytes");
+    return;
+  }
   const body = res.json;
   assert.ok(body, "a JSON body");
   assert.equal(body.format_version, expected.body.format_version, "format_version");
@@ -616,7 +635,7 @@ for (const [file, fx] of fixtures()) {
         const entry = SCENES[fx.operation];
         assert.ok(entry, `no scene for ${fx.operation}: add one to SCENES`);
         const builder = kind === "normal" ? entry.normal : (entry.error ?? entry.normal);
-        const scene = await builder(env, agent);
+        const scene = await builder(env, agent, c);
         const who = scene.agent ?? agent;
         const normal_auth = auth_of(fx.normal ?? c, who, "owner");
         const res = await send(env, fx, c, scene, fx.operation === "capabilities.get" ? "none" : auth_of(c, who, normal_auth), kind === "normal");
