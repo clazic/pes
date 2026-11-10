@@ -644,3 +644,116 @@ for (const [file, fx] of fixtures()) {
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// extra scenes (SEL-47 r1-3 N4): 한 파일에 normal/error 말고도 장면을 더 적는다.
+//
+// 형식: 픽스처 JSON 최상위의 `scenes: { "<이름>": { request, response } }` (FixtureCase 와 같은 모양).
+// 필수 장면 (이름은 시험이 정한다):
+//   versions.json  scenes.answer          GET 사람 답 버전 → 200, data.kind "answer", data.content 에 question_version_id·value·state·comment
+//                  scenes.question        GET 질문 버전    → 200, data.kind "question", data.content 에 text·type·options·required·default_value
+//   handoffs.json  scenes.target_mismatch POST 다른 actor 로 인계 → 400 invalid_payload (target 은 $.body.target_actor_id)
+// 플레이스홀더: 답 장면은 object=PH.object, version=PH.version. 질문 장면은 object=PH.question(또는 PH.object),
+// version=PH.qversion(또는 PH.version). 인계 장면은 run=PH.run(현재 holder 의 run), target_actor_id=PH.actor(다른 actor).
+
+function extra_scenes(file: string): Record<string, FixtureCase> {
+  const fx = JSON.parse(readFileSync(new URL(file, FIXTURE_DIR), "utf8")) as Fixture & { scenes?: Record<string, FixtureCase> };
+  return fx.scenes ?? {};
+}
+
+const EXTRA: Array<{ file: string; name: string; status: number; check: (c: FixtureCase) => void }> = [
+  {
+    file: "versions.json",
+    name: "answer",
+    status: 200,
+    check: (c) => {
+      const data = c.response.body.data;
+      assert.equal(data.kind, "answer");
+      for (const key of ["question_version_id", "value", "state", "comment"]) assert.ok(key in data.content, `answer content.${key}`);
+    },
+  },
+  {
+    file: "versions.json",
+    name: "question",
+    status: 200,
+    check: (c) => {
+      const data = c.response.body.data;
+      assert.equal(data.kind, "question");
+      for (const key of ["text", "type", "options", "required", "default_value"]) assert.ok(key in data.content, `question content.${key}`);
+    },
+  },
+  {
+    file: "handoffs.json",
+    name: "target_mismatch",
+    status: 400,
+    check: (c) => {
+      assert.equal(c.response.body.error.code, "invalid_payload");
+      assert.equal(c.response.body.error.target, "$.body.target_actor_id");
+    },
+  },
+];
+
+const EXTRA_BUILDERS: Record<string, Builder> = {
+  "versions.json#answer": async (env, agent) => {
+    const lease = await agent_claims(env, agent);
+    const round = await open_round(env);
+    const q = assert_ok(
+      await call(env, {
+        method: "POST",
+        path: P(env, "/questions"),
+        auth: { token: agent.token },
+        body: { stage_id: round.stage_id, round_id: round.round_id, purpose: "review", form_key: "ask", question: single_spec("계약 시험 답 장면 질문", { options: [{ value: "A", label: "합성 A" }, { value: "B", label: "합성 B" }], default_value: "B" }), run_id: lease.run_id, lease_id: lease.lease_id, fence: lease.fence },
+      }),
+      201,
+    );
+    const sub = assert_ok(
+      await call(env, {
+        method: "POST",
+        path: P(env, "/submissions"),
+        auth: "owner",
+        body: { set_id: q.question_set_id, answers: [{ question_id: q.question.id, question_version_id: q.question.version_id, value: "A", comment: "합성 의견" }] },
+      }),
+      201,
+    );
+    const version_id = sub.answers[0].answer_version_id as string;
+    const inputs = assert_ok(await call(env, { method: "GET", path: P(env, `/runs/${lease.run_id}/inputs`), auth: { token: agent.token } })).inputs as Array<{ input_version_id: string; object_id: string }>;
+    const item = inputs.find((i) => i.input_version_id === version_id);
+    assert.ok(item, "inputs names the answer");
+    return { subst: { [PH.object]: item.object_id, [PH.version]: version_id } };
+  },
+  "versions.json#question": async (env, agent) => {
+    const lease = await agent_claims(env, agent);
+    const round = await open_round(env);
+    const q = assert_ok(
+      await call(env, {
+        method: "POST",
+        path: P(env, "/questions"),
+        auth: { token: agent.token },
+        body: { stage_id: round.stage_id, round_id: round.round_id, purpose: "review", form_key: "ask", question: single_spec("계약 시험 질문 장면", { options: [{ value: "A", label: "합성 A" }, { value: "B", label: "합성 B" }], default_value: "B" }), run_id: lease.run_id, lease_id: lease.lease_id, fence: lease.fence },
+      }),
+      201,
+    );
+    return { subst: { [PH.object]: q.question.id, [PH.question]: q.question.id, [PH.version]: q.question.version_id, [PH.qversion]: q.question.version_id } };
+  },
+  "handoffs.json#target_mismatch": async (env, agent) => {
+    const other = await make_agent(env, "mismatch-other");
+    const lease = await agent_claims(env, agent);
+    return { subst: { [PH.run]: lease.run_id, [PH.actor]: other.actor_id } };
+  },
+};
+
+for (const spec of EXTRA) {
+  test(`contract extra scene ${spec.file}#${spec.name}: the fixture states it (${spec.status}) and the real app answers the same`, async () => {
+    const c = extra_scenes(spec.file)[spec.name];
+    assert.ok(c, `${spec.file} has scenes.${spec.name}`);
+    assert.equal(c.response.status, spec.status);
+    spec.check(c);
+    const fx = JSON.parse(readFileSync(new URL(spec.file, FIXTURE_DIR), "utf8")) as Fixture;
+    await with_api(async (env) => {
+      const agent = await make_agent(env, "contract");
+      const scene = await EXTRA_BUILDERS[`${spec.file}#${spec.name}`]!(env, agent, c);
+      const res = await send(env, fx, c, scene, auth_of(c, agent, "owner"), spec.status === 200);
+      compare(res, c.response, fx.method);
+    });
+  });
+}
