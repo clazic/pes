@@ -857,7 +857,7 @@ function next_version_no(
   return Number(row?.max_no ?? 0n) + 1;
 }
 
-interface AppendPlan {
+export interface AppendPlan {
   object_id: string;
   version_id: string;
   version_no: number;
@@ -931,7 +931,7 @@ function plan_append_version(
 }
 
 /** Write a planned version; the caller has already written its receipt. */
-function write_append_plan(
+export function write_append_plan(
   runtime: CommandRuntime,
   plan: AppendPlan,
   actor_id: string,
@@ -1006,6 +1006,35 @@ const RESULT_ITEM_FIELDS = [
   ...SOURCE_COMMON_FIELDS,
 ] as const;
 
+/** Validate the shape of a results list (1 to 20 append_version items); returns the items without `op`. */
+export function parse_result_items(results: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(results) || results.length < 1 || results.length > 20) {
+    throw new ApiError("invalid_payload", "results must be an array of 1 to 20 items");
+  }
+  return results.map((item) => {
+    if (!is_record(item)) {
+      throw new ApiError("invalid_payload", "each result item must be a JSON object");
+    }
+    reject_unknown_fields(item, RESULT_ITEM_FIELDS);
+    if (item.op !== "append_version") {
+      throw new ApiError("invalid_payload", 'result op must be "append_version"');
+    }
+    const { op: _op, ...fields } = item;
+    return fields;
+  });
+}
+
+/** Plan every item of a validated results list without writing (versions of one object chain in order). */
+export function plan_result_items(runtime: CommandRuntime, items: Record<string, unknown>[]): AppendPlan[] {
+  const reserved = new Map<string, number>();
+  const previous = new Map<string, AppendPlan>();
+  return items.map((item) => {
+    const plan = plan_append_version(runtime, item, reserved, previous);
+    previous.set(plan.object_id, plan);
+    return plan;
+  });
+}
+
 /**
  * Submit a small atomic batch of version appends for one run. The project's
  * current lease (exact run/lease/fence and owner) is required; an optional
@@ -1023,31 +1052,11 @@ function run_submit_results(runtime: CommandRuntime): CommandResult {
   const scope = content_scope(runtime);
 
   // An empty list is a payload error and must win over a stale rev.
-  const results = payload.results;
-  if (!Array.isArray(results) || results.length < 1 || results.length > 20) {
-    throw new ApiError("invalid_payload", "results must be an array of 1 to 20 items");
-  }
-  const items: Record<string, unknown>[] = results.map((item) => {
-    if (!is_record(item)) {
-      throw new ApiError("invalid_payload", "each result item must be a JSON object");
-    }
-    reject_unknown_fields(item, RESULT_ITEM_FIELDS);
-    if (item.op !== "append_version") {
-      throw new ApiError("invalid_payload", 'result op must be "append_version"');
-    }
-    const { op: _op, ...fields } = item;
-    return fields;
-  });
+  const items = parse_result_items(payload.results);
 
   const base = require_base_control_rev(runtime, runtime.ctx.base_control_rev);
   require_current_lease(runtime, guard);
-  const reserved = new Map<string, number>();
-  const previous = new Map<string, AppendPlan>();
-  const plans = items.map((item) => {
-    const plan = plan_append_version(runtime, item, reserved, previous);
-    previous.set(plan.object_id, plan);
-    return plan;
-  });
+  const plans = plan_result_items(runtime, items);
 
   const result = {
     project_id: scope.project_id,

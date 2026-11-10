@@ -1,0 +1,194 @@
+// Owner import of a pasted result for an explicit hand-off (stage 2 PR20a, SEL-53).
+//
+// Method B with an AI app that has no connection to PES (the Claude app) works by an explicit hand-off:
+// the human copies a bundle out, the app answers in its own window, and the human pastes the answer back.
+// That pasted text is not an agent's write. It is the human owner's, recorded as an import:
+//
+//   - one transaction creates the owner's own hand-off run (runtime claude_app_handoff, model unknown),
+//     appends the pasted results and ends the run as succeeded;
+//   - the run, the receipt and the versions all belong to the owner (a human actor); the receipt's via is
+//     'import', and the events carry the provenance (claimed tool/model, verified:false);
+//   - there is no agent claim, no lease, no fence. The owner can only import into a run this very command
+//     creates, so the owner never writes into someone else's run;
+//   - the generic results route stays agents-only.
+//
+// This is a branch of the closed `run.create` command (a payload with an `import` object), not a new command:
+// the registry and the HTTP route table stay as they were. The branch is reachable only with via 'import'.
+
+import { ApiError } from "../errors.ts";
+import { parse_result_items, plan_result_items, write_append_plan } from "./content.ts";
+import {
+  insert_receipt,
+  is_record,
+  reject_unknown_fields,
+  require_base_control_rev,
+  require_human_owner_actor,
+  require_non_empty_string,
+  require_record,
+  type CommandResult,
+  type CommandRuntime,
+} from "./shared.ts";
+
+export const HANDOFF_RUNTIME = "claude_app_handoff";
+export const HANDOFF_PROVIDER = "anthropic";
+export const HANDOFF_MODEL = "unknown";
+
+const IMPORT_FIELDS = ["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model"] as const;
+const MAX_CLAIM_CHARS = 200;
+
+/** A text the pasted result claims about itself. It is stored as a claim, never trusted. */
+function optional_claim(source: Record<string, unknown>, field: string): string | null {
+  const value = source[field];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_CLAIM_CHARS || !value.isWellFormed()) {
+    throw new ApiError("invalid_payload", `${field} must be a short well-formed string`);
+  }
+  return value;
+}
+
+export function run_import_handoff(runtime: CommandRuntime): CommandResult {
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new Error("a run command must resolve a project and actor first");
+  }
+  if (runtime.ctx.via !== "import") {
+    throw new ApiError("forbidden", "a hand-off import is accepted only through the import path");
+  }
+  require_human_owner_actor(runtime);
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, ["import"]);
+  const source = payload.import;
+  if (!is_record(source)) {
+    throw new ApiError("invalid_payload", "import must be a JSON object");
+  }
+  reject_unknown_fields(source, IMPORT_FIELDS);
+
+  const request_id = require_non_empty_string(source, "request_id");
+  const claimed_tool = optional_claim(source, "claimed_tool");
+  const claimed_model = optional_claim(source, "claimed_model");
+  const items = parse_result_items(source.results);
+
+  // A stale copy never reaches a write: the base is checked in this transaction.
+  const base = require_base_control_rev(runtime, runtime.ctx.base_control_rev);
+
+  const edition = runtime.db.get<{ active_edition_id: string | null }>(
+    "SELECT active_edition_id FROM projects WHERE id = ?",
+    project.id,
+  );
+  if (edition === undefined || edition.active_edition_id === null) {
+    throw new ApiError("conflict", "the project has no active edition");
+  }
+
+  let stage_id: string | null = null;
+  let round_id: string | null = null;
+  if (source.stage_id !== undefined && source.stage_id !== null) {
+    stage_id = require_non_empty_string(source, "stage_id");
+    const stage = runtime.db.get<{ id: string }>(
+      "SELECT id FROM stages WHERE project_id = ? AND edition_id = ? AND id = ?",
+      project.id,
+      edition.active_edition_id,
+      stage_id,
+    );
+    if (stage === undefined) throw new ApiError("not_found", "the stage is not part of the active edition");
+  }
+  if (source.round_id !== undefined && source.round_id !== null) {
+    if (stage_id === null) throw new ApiError("invalid_payload", "round_id needs stage_id");
+    round_id = require_non_empty_string(source, "round_id");
+    const round = runtime.db.get<{ id: string }>(
+      "SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
+      project.id,
+      stage_id,
+      round_id,
+    );
+    if (round === undefined) throw new ApiError("not_found", "the round does not belong to the stage");
+  }
+
+  const plans = plan_result_items(runtime, items);
+
+  const run_id = runtime.new_id();
+  const written = runtime.db.run(
+    `INSERT INTO runs
+       (id, project_id, edition_id, stage_id, round_id, actor_id, mode, runtime, provider, model, role,
+        status, parent_run_id, base_control_rev, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'B', ?, ?, ?, 'worker', 'succeeded', NULL, ?, ?, ?)`,
+    run_id,
+    project.id,
+    edition.active_edition_id,
+    stage_id,
+    round_id,
+    actor_id,
+    HANDOFF_RUNTIME,
+    HANDOFF_PROVIDER,
+    HANDOFF_MODEL,
+    project.control_rev,
+    runtime.now_ms,
+    runtime.now_ms,
+  );
+  if (written.changes !== 1n) {
+    throw new Error("the hand-off run was not created");
+  }
+
+  const provenance = {
+    source: "manual_import",
+    claimed_tool,
+    claimed_model,
+    verified: false,
+  };
+  const results = plans.map((plan) => ({
+    object_id: plan.object_id,
+    version_id: plan.version_id,
+    version_no: plan.version_no,
+  }));
+  const result = {
+    project_id: project.id,
+    run_id,
+    actor_id,
+    status: "succeeded",
+    via: "import",
+    adopted_by: actor_id,
+    request_id,
+    results,
+    provenance,
+  };
+  // The owner is both the run's actor and the receipt's actor, so the receipt may name the run. There is no
+  // lease and no fence: nothing here was ever claimed.
+  insert_receipt(runtime, {
+    project_id: project.id,
+    actor_id,
+    action: "run.created",
+    base_control_rev: base ?? null,
+    run_id,
+    result,
+  });
+  for (const plan of plans) {
+    write_append_plan(runtime, plan, actor_id, run_id);
+  }
+  return {
+    result,
+    events: [
+      {
+        type: "run.created",
+        run_id,
+        payload: { run_id, actor_id, mode: "B", runtime: HANDOFF_RUNTIME, via: "import", request_id },
+      },
+      ...plans.map((plan) => ({
+        type: "result.submitted",
+        run_id,
+        payload: {
+          object_id: plan.object_id,
+          version_id: plan.version_id,
+          version_no: plan.version_no,
+          kind: plan.kind,
+          via: "import",
+          provenance,
+        },
+      })),
+      {
+        type: "run.completed",
+        run_id,
+        payload: { status: "succeeded", via: "import" },
+      },
+    ],
+  };
+}

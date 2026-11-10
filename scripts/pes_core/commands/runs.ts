@@ -25,6 +25,7 @@ import {
   type EventDraft,
 } from "./shared.ts";
 import { ApiError } from "../errors.ts";
+import { run_import_handoff } from "./handoff_import.ts";
 
 const CLAIMABLE_RUN_STATUSES = new Set(["queued", "waiting_human", "blocked_usage", "interrupted"]);
 const COMPLETE_RUN_STATUSES = new Set(["succeeded", "failed"]);
@@ -481,6 +482,8 @@ function run_create(runtime: CommandRuntime): CommandResult {
   const scope = require_scope(runtime);
   require_human_owner_actor(runtime);
   const payload = require_record(runtime.payload);
+  // An explicit hand-off import is the owner's own run and result in one step (no agent, no lease).
+  if (Object.hasOwn(payload, "import")) return run_import_handoff(runtime);
   reject_unknown_fields(payload, CREATE_RUN_FIELDS);
 
   const actor_id = require_non_empty_string(payload, "actor_id");
@@ -565,9 +568,34 @@ function run_create(runtime: CommandRuntime): CommandResult {
   };
 }
 
+/**
+ * An optional progress note on a heartbeat: a phase name and when it was
+ * observed (defaults to the server clock). Progress and schedule events of
+ * every adapter share this one shape and the same event type.
+ */
+function optional_progress(
+  payload: Record<string, unknown>,
+  now_ms: number,
+): { phase: string; observed_at: number } | null {
+  const value = payload.progress;
+  if (value === undefined || value === null) return null;
+  const progress = require_record(value);
+  reject_unknown_fields(progress, ["phase", "observed_at"]);
+  const phase = progress.phase;
+  if (typeof phase !== "string" || phase.length === 0 || !phase.isWellFormed()) {
+    throw new ApiError("invalid_payload", "progress.phase must be a non-empty string");
+  }
+  const observed_at = progress.observed_at === undefined ? now_ms : progress.observed_at;
+  if (typeof observed_at !== "number" || !Number.isSafeInteger(observed_at) || observed_at < 0) {
+    throw new ApiError("invalid_payload", "progress.observed_at must be a non-negative safe integer");
+  }
+  return { phase, observed_at };
+}
+
 function run_heartbeat(runtime: CommandRuntime): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
   const guard = require_guard(payload);
+  const progress = optional_progress(payload, runtime.now_ms);
   require_current_lease(runtime, guard);
 
   const expires_at = runtime.now_ms + runtime.run_config.lease_ttl_ms;
@@ -584,7 +612,7 @@ function run_heartbeat(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the lease is not current");
   }
 
-  const result = guarded_result(scope, guard, { expires_at });
+  const result = guarded_result(scope, guard, progress === null ? { expires_at } : { expires_at, progress });
   insert_receipt(runtime, {
     project_id: scope.project_id,
     actor_id: scope.actor_id,
@@ -597,7 +625,13 @@ function run_heartbeat(runtime: CommandRuntime): CommandResult {
   });
   return {
     result,
-    events: [{ type: "run.heartbeat", run_id: guard.run_id, payload: { expires_at } }],
+    events: [
+      {
+        type: "run.heartbeat",
+        run_id: guard.run_id,
+        payload: progress === null ? { expires_at } : { expires_at, progress },
+      },
+    ],
   };
 }
 

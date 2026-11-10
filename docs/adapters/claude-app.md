@@ -19,9 +19,30 @@
 | 서브에이전트 | 앱이 `Agent` 도구를 제공하는 설정에서만 reviewer·researcher를 띄운다 |
 | 형식 변환 | 앱에 `anthropic-skills:*`가 설치되어 있어야 hwpx·docx·pdf·pptx를 만든다 |
 
+## 명시적 전달: 앱이 PES에 접속하지 못해도 같은 일을 한다 (PR20a)
+
+Claude 앱이 PES에 직접 접속하는 연결은 검증하지 않았다(아래 한계). 대신 **명시적 전달**로 한 번의 왕복을 같은 뜻으로 한다: 사람이 PES에서 묶음을 복사해 앱에 붙이고, 앱의 답을 PES에 붙여 가져온다. 구현은 `scripts/pes_core/adapters/claude_app.ts`, 공통 규칙은 [adapter-contract.md](adapter-contract.md) 6절이다.
+
+1. **복사** — `export_bundle`이 묶음(JSON 글)을 만든다. 읽기뿐이라 실행도 lease도 행도 생기지 않고, 앱과 오래 이야기해도 만료되는 것이 없다. 묶음에는 프로젝트·판·단계·라운드·기반 버전·`control_rev`·요청 ID·`manifest_hash`와 앱에게 줄 안내(어떤 모양의 JSON으로 답할지)가 있다. 토큰·세션 비밀·lease는 없다.
+2. **앱과 대화** — 앱이 안내대로 JSON 한 개로 답한다(`results`, 선택으로 `claimed`). 이 단계에서 PES에는 아무 일도 없다 — 복사는 제출이 아니다.
+3. **가져오기** — 사람이 `import_result`로 묶음과 앱의 답을 PES에 붙인다. 소유자 세션이 이 행위를 승인한다.
+
+가져온 결과는 앱이나 에이전트의 제출이 **아니라 사람(소유자)이 가져온 것**으로 남는다:
+
+| 항목 | 값 |
+|---|---|
+| 실행 | 소유자 자신의 전달용 실행: `mode B`, `runtime = claude_app_handoff`, `provider = anthropic`, `model = unknown` |
+| 영수증 행위자 · `adopted_by` | 소유자(사람) |
+| 영수증 `via` | `import` (직접 MCP로 한 제출은 `mcp`가 아니라 에이전트 토큰의 `http`이고 행위자가 에이전트다) |
+| 출처 표지 | `provenance = {source: manual_import, claimed_tool, claimed_model, verified: false}` — 앱이 말한 도구·모델은 주장일 뿐 믿지 않는다 |
+| 에이전트 claim | 없다(`run.claimed` 사건 없음). 소유자는 이 가져오기가 만든 자기 실행에만 이 경로로 결과를 낸다. 일반 결과 제출 경로는 에이전트 토큰 전용 그대로다 |
+
+거부는 모두 아무것도 쓰지 않는다: `bundle_invalid`, `bundle_hash_mismatch`(묶음 일부가 복사 뒤 바뀜), `bundle_wrong_project`, `bundle_stale`(복사 뒤 프로젝트나 기반 버전이 바뀜 — 다시 복사), `duplicate_import`(같은 묶음을 두 번 — 내용이 달라도), `result_out_of_scope`(묶음에 없는 자료), `attachment_missing`, `attachment_unsupported`. 거부된 묶음은 소모되지 않는다. **`manifest_hash`는 인증이 아니다** — 사고를 잡는 무결성 검사일 뿐이고 아무 권한도 주지 않는다.
+
 ## 한계 (아직 안 되는 것)
 
-- Claude 앱 전용 연결(앱 안에서 프로젝트를 열고 닫는 흐름, 재접속 뒤 이어하기)은 아직 검증하지 않았다. 이 노트는 확인된 동작이 아니라 Claude Code와의 차이를 적은 초안이다.
+- **미확인**: Claude 앱 전용 연결(앱 안에서 프로젝트를 열고 닫는 흐름, 재접속 뒤 이어하기)은 아직 검증하지 않았다. 시험은 명시적 전달(복사→가져오기)로 한 번의 왕복·서버 재시작 뒤 이어서 가져오기·중복 가져오기 0·누가 제출했는가의 구분을 확인할 뿐이다. 앱이 지속 heartbeat를 한다고 가정하지 않는다. 이 노트는 확인된 동작이 아니라 Claude Code와의 차이를 적은 초안이다.
+- 전달로 가져올 때는 첨부 파일을 저장하지 않는다(`attachment_unsupported`). 앱이 만든 파일은 사람이 PES에 따로 올린다.
 - 서브에이전트 도구가 없으면 독립 검토를 메인이 대신하지 않는다. 사용자에게 알리고, `qa-brief`가 만든 지시문 파일을 다른 세션이 읽고 결과 파일을 쓰게 한 뒤 `qa`로 기록한다.
 - 변환 스킬이나 `Monitor`가 없는 설정에서는 자동으로 대신해 주지 않는다. 필요한 만큼 사람이 직접 처리한다.
 - 문서를 다른 환경 표기로 자동 변환하는 기능은 지원하지 않는다.
