@@ -69,13 +69,14 @@ export function OverviewPage() {
 
         <Card size="compact" aria-labelledby="ov-where">
           <CardHead eyebrow="지금 어디까지" title={`${ws.current.label} · ${ws.edition}판`} titleId="ov-where" />
-          <ol aria-label="연구 흐름 6단계" className="grid grid-cols-3 gap-1.5 tab:grid-cols-6">
+          {/* 현재 단계 칸만 조금 넓혀 “현재 · 나의 할 일”이 1440px에서 세 줄로 접히지 않게 한다(UI7-3) */}
+          <ol aria-label="연구 흐름 6단계" className="grid grid-cols-3 gap-1.5 tab:flex">
             {ws.stages.map((s) => {
               const m = STAGE_MARK[s.view];
               const text = s.state_text ?? lookup("stage", s.view).label;
               const current = Boolean(s.rounds);
               return (
-                <li key={s.key} className="min-w-0">
+                <li key={s.key} className={cn("min-w-0", current ? "tab:basis-1/5" : "tab:basis-1/6")}>
                   <Link
                     to={current ? roundPath : `/p/${ws.slug}/s/${s.key}`}
                     aria-current={current ? "step" : undefined}
