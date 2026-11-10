@@ -910,7 +910,6 @@ interface BuildContext {
   project_raw: Record<string, unknown> | null;
   items: Map<string, Map<string, { object_key: string; version_key: string }>>;
   questions: Map<string, Map<string, { object_key: string; version_key: string }>>;
-  ask_sets: Map<string, string>;
   pending_relations: PendingRelation[];
 }
 
@@ -1839,9 +1838,6 @@ function build_ask_files(ctx: BuildContext): void {
         published_at: 0,
         members,
       });
-      if (purpose === "stage_start" && !ctx.ask_sets.has(stage_key)) {
-        ctx.ask_sets.set(stage_key, set_key);
-      }
     }
   }
 }
@@ -2139,10 +2135,8 @@ function candidate_forms(
       form.purpose === kind &&
       (form.round_no === round_no || (kind === "stage_start" && form.round_no === 0)),
   );
-  return [
-    ...proven.filter((form) => spec.length > 0 && form.names.includes(spec)),
-    ...proven.filter((form) => !(spec.length > 0 && form.names.includes(spec))),
-  ];
+  const named = proven.filter((form) => spec.length > 0 && form.names.includes(spec));
+  return named.length > 0 ? named : proven;
 }
 
 function build_feedback(ctx: BuildContext): void {
@@ -2386,9 +2380,16 @@ function build_review(
 ): void {
   const report_path = snapshot === undefined ? "project.json" : snapshot.path;
   const tag = snapshot === undefined ? "" : `@R${snapshot.round_no}`;
-  const round_no = snapshot === undefined ? integer_or(review.round, 0) : snapshot.round_no;
-  if (snapshot !== undefined && review.round !== undefined && integer_or(review.round, 0) !== round_no) {
-    plan_entry_category(ctx.entries, "unknown_field", report_path, `${pointer}/round`, review.round);
+  // The round the review itself names is the only proof of which round showed it.
+  const round_no = integer_or(review.round, 0);
+  if (snapshot !== undefined) {
+    if (round_no < 1) {
+      plan_entry_category(ctx.entries, "unknown_field", report_path, `${pointer}/round`, review.round ?? null);
+      return;
+    }
+    if (round_no !== snapshot.round_no) {
+      plan_entry_category(ctx.entries, "unknown_field", report_path, `${pointer}/round`, review.round);
+    }
   }
   const stage_plan = ctx.plan.stages.find((stage) => stage.key === stage_key);
   const round_key =
@@ -2765,6 +2766,8 @@ function build_snapshot_items(ctx: BuildContext): void {
       digest: string;
     }
     const groups = new Map<string, Seen[]>();
+    const home_round = new Map<string, string>();
+    const shared_checks: Array<{ entry: Seen; home: string }> = [];
     for (const round of stage_plan.rounds) {
       if (!round.sealed || round.snapshot_key === null) continue;
       const snapshot = ctx.plan.snapshots.find((entry) => entry.key === round.snapshot_key);
@@ -2818,6 +2821,7 @@ function build_snapshot_items(ctx: BuildContext): void {
         const input = make_input(entry, object_key, entry.round_key);
         const version_key = add_earlier_version(ctx, object_key, label, input);
         versions.set(entry.digest, version_key);
+        home_round.set(version_key, entry.round_key);
         item_extras(ctx, `${object_key}@${label}`, version_key, entry.raw, entry.path, `/state/items/${entry.index}`, entry.round_key);
         ctx.plan.mappings.push({
           kind: "item",
@@ -2849,11 +2853,14 @@ function build_snapshot_items(ctx: BuildContext): void {
         });
         item_extras(ctx, key, created.version_key, latest.raw, latest.path, `/state/items/${latest.index}`, latest.round_key);
         versions.set(latest.digest, created.version_key);
+        home_round.set(created.version_key, latest.round_key);
         current = created;
       }
       const object_key = current.object_key;
       ctx.item_versions.set(`${stage_key}|${legacy_id}`, versions);
       for (const entry of seen) {
+        const shared_home = home_round.get(versions.get(entry.digest) ?? "");
+        if (shared_home !== undefined && shared_home !== entry.round_key) shared_checks.push({ entry, home: shared_home });
         if (!versions.has(entry.digest)) {
           add_old(entry, object_key, `old${(ctx.object_rows.get(object_key)?.earlier?.length ?? 0) + 1}`);
         }
@@ -2865,6 +2872,31 @@ function build_snapshot_items(ctx: BuildContext): void {
           position: entry.index,
           role: "result",
         });
+      }
+    }
+
+    // A version shared by several rounds keeps the relations of the round that made it.
+    // Another round whose links/reuse select different targets cannot be expressed: report it.
+    for (const { entry, home } of shared_checks) {
+      const targets: Array<[string, string]> = [];
+      const links = as_record(entry.raw.links);
+      if (links !== null) {
+        for (const [scope, list] of Object.entries(links)) {
+          for (const target of Array.isArray(list) ? list : []) {
+            if (typeof target === "string" || typeof target === "number") targets.push([scope, String(target)]);
+          }
+        }
+      }
+      if (typeof entry.raw.reuse === "string" || typeof entry.raw.reuse === "number") {
+        targets.push(["library", String(entry.raw.reuse)]);
+      }
+      const differs = targets.some(
+        ([scope, key]) =>
+          ctx.round_selected.get(`${entry.round_key}|${scope}|${key}`) !==
+          ctx.round_selected.get(`${home}|${scope}|${key}`),
+      );
+      if (differs) {
+        plan_entry_category(ctx.entries, "unknown_field", entry.path, `/state/items/${entry.index}`, entry.raw);
       }
     }
   }
@@ -3238,7 +3270,6 @@ function build_plan(dir: string): PreparedImport {
     object_rows: new Map(),
     items: new Map(),
     questions: new Map(),
-    ask_sets: new Map(),
     pending_relations: [],
   };
   add_blobs(ctx);
