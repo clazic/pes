@@ -1,8 +1,8 @@
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, ScrollRestoration } from "react-router";
-import { createFakeClient } from "@/api/fake-client";
 import { ClientContext } from "@/api/queries";
+import { selectClient } from "@/api/select-client";
 import { readSidebarOpen, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ArrivalContext, useArrivalRoot } from "./arrival";
@@ -11,7 +11,7 @@ import { SiteHeader } from "./SiteHeader";
 
 /**
  * 서버 자료는 TanStack Query 가 맡는다(설계 12.5) — 폴링 없음 · 창 초점 재조회 없음 · 시간으로 다시 받지 않음.
- * U1a 의 클라이언트는 앱 안 가짜 클라이언트(합성 자료)다. 루트마다 새로 만들어 상태가 새지 않는다.
+ * 클라이언트는 selectClient 가 고른다 — 기본은 앱 안 가짜 클라이언트(합성 자료), window.__PES_APP__ 설정이 있으면 서버 HTTP 클라이언트(U1b). 루트마다 새로 만들어 상태가 새지 않는다.
  */
 function makeQueryClient() {
   return new QueryClient({
@@ -34,7 +34,7 @@ function initialSidebarOpen() {
  */
 export function RootLayout() {
   const [queryClient] = React.useState(makeQueryClient);
-  const [client] = React.useState(createFakeClient);
+  const [client] = React.useState(() => selectClient(window));
   const arrival = useArrivalRoot();
   const [sidebarOpen] = React.useState(initialSidebarOpen);
   return (

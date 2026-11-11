@@ -73,6 +73,7 @@ H = 사람(소유자), E = 프로젝트 토큰의 에이전트(내부 A·외부 
 | 답·의견 제출 | `POST P/submissions` | **H만**(에이전트는 403 `human_required`, 2026-11-10 SEL-47 결정. 에이전트는 답을 `inputs`로 읽기만 한다) | 불가(초안은 브라우저 폼) |
 | 입력 기다리기 / 영수증 | `GET P/runs/{r}/inputs?cursor=&wait_ms=` / `POST P/runs/{r}/input-receipts` | E | 불가 |
 | 변경분 | `GET P/changes?cursor=` | H/E/W | 선택 범위 읽기 |
+| 작업 공간 읽기 | `GET P/workspace` | H/E/W | 읽기 가능 — 3단계 U1b(SEL-82)에서 등록. 현재 단계·라운드·단계별 보기·차례·**권한별 가능 동작(+비활성 이유, 서버 검사 대체 아님)**·기록 개수(가정·결정·의견, 없으면 `empty`). 기계 값만(화면 글자는 앱이 만든다), 읽기 전용·새 표 없음, `context:read` |
 | 파일 | `POST P/uploads` → `PUT` → `POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | H/E | 불가 |
 | 첨언·답글 | `POST P/threads`, `P/threads/{t}/messages` | H/E/W | 가능 |
 | 해결·후속 적용 | `POST P/threads/{t}/resolutions`, `P/followups/{f}/apply` | H/허가된 E(reopen 적용은 H) | 불가 |
