@@ -1,4 +1,4 @@
-# PES 1단계 준비 (Windows): Git(Git Bash) · Node.js 26 이상 확인 후 없으면 winget 으로 설치
+﻿# PES 1단계 준비 (Windows): Git(Git Bash) · Node.js 26 이상 확인 후 없으면 winget 으로 설치
 # 사용: powershell -NoProfile -ExecutionPolicy Bypass -File bootstrap.ps1 [-CheckOnly]
 # 출력: 한 줄씩  "<OK|INSTALLED|MISSING|FAIL> <이름> <설명>"   마지막 줄 "NODE <실행 명령>" (Node.js 26 이상이 없으면 "NODE none")
 # 환경변수: PES_INSTALL_PATH_ONLY=1 — PATH 를 부른 쪽이 준 그대로 쓴다 (레지스트리 PATH 로 다시 읽지 않음; 시험·CI 용)

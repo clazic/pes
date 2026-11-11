@@ -1,4 +1,4 @@
-# PES 한 줄 설치 (Windows)
+﻿# PES 한 줄 설치 (Windows)
 #   irm https://raw.githubusercontent.com/clazic/pes/main/scripts/install.ps1 | iex
 #
 # 하는 일

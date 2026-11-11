@@ -252,7 +252,8 @@ jobs:
           PES_SKIP_TOOLS: "1"
         run: |
           $env:Path = (Join-Path $env:RUNNER_TEMP "fakebin") + ";" + (Get-Content (Join-Path $env:RUNNER_TEMP "path-dirs.txt") -Raw).Trim()
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+          # the README way (irm … | iex): the downloaded text with its UTF-8 BOM kept as a character, run by Invoke-Expression in Windows PowerShell 5.1
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '& { $s = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Resolve-Path scripts/install.ps1))); Invoke-Expression $s }'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 업그레이드 결과 확인
