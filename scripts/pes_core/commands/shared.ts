@@ -386,6 +386,29 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
   return actor_id;
 }
 
+/** The provider and model prefix of a Go (OpenCode Go) destination. */
+export const GO_PROVIDER = "opencode-go";
+export const GO_MODEL_PREFIX = "opencode-go/";
+
+/** A Go label: provider `opencode-go` or a model starting with `opencode-go/`. */
+export function is_go_label(provider: unknown, model: unknown): boolean {
+  return provider === GO_PROVIDER || (typeof model === "string" && model.startsWith(GO_MODEL_PREFIX));
+}
+
+/**
+ * SEL-68: a mode A run (the PES built-in runner) and any Go-labelled run belong to an internal_ai actor only.
+ * A claim, a run_id claim, or a run created for any other actor kind (external_agent, human) is 403 forbidden
+ * before anything is written. One rule for the HTTP API and the core commands (the CLI calls the commands).
+ */
+export function require_internal_ai_for_go_run(
+  actor_kind: string | null | undefined,
+  run: { mode: unknown; provider: unknown; model: unknown },
+): void {
+  if ((run.mode === "A" || is_go_label(run.provider, run.model)) && actor_kind !== "internal_ai") {
+    throw new ApiError("forbidden", "a mode A or OpenCode Go run belongs to an internal AI actor only");
+  }
+}
+
 /** True when the command's actor is the project's human owner (no throw). */
 export function is_human_owner_actor(runtime: CommandRuntime): boolean {
   try {

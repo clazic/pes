@@ -419,6 +419,8 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 
 기존 명령의 변경: `run.create`는 선택 필드 `ai_connection_id`·`stage_id`·`round_id`를 받는다(`runtime=pes_builtin`, mode A일 때만 연결 필드; 프로젝트의 현재 선택과 같은 연결·모델이어야 하고, 연결이 지원 형식·살아 있음·쓴 만큼 과금이면 단가와 같은 통화의 상한이 있어야 한다). `dispatch.prepare`는 provider `opencode-go` 말고 `ai_connection`도 받는다(그 run에 `ai_run_settings`가 있어야 한다).
 
+**mode A run은 internal_ai만 만든다(SEL-68)**: `run.claim`(새 run·`run_id` 이어받기)과 `run.create`는 mode A이거나 Go 라벨(provider `opencode-go` 또는 model `opencode-go/` 접두 — mode를 B로 적어도)이면 대상 actor 종류가 `internal_ai`가 아닐 때(external_agent 토큰·사람 세션) 403 `forbidden`(`retryable=false`)이다. 이 판정은 코어 명령(`commands/shared.ts`의 `require_internal_ai_for_go_run`)과 API 층이 같은 함수로 하므로 CLI·MCP도 같은 규칙을 지나며, run·lease·영수증·사건을 쓰기 전에 거절해 같은 Idempotency-Key를 다시 보내도 같은 거절이고 아무것도 쓰지 않는다. Go 정책(`allow_opencode_go`) 검사는 mode A 경로에서 호출자 종류와 무관하게 돌아, `internal_ai`가 Go OFF에서 요청하면 기존대로 `policy_blocked`다.
+
 **보장**
 
 - 키는 표·사건·영수증·명령 입력·로그·DTO·응답 어디에도 없다(표에는 끝 4자리와 저장 위치 이름만). 키 저장소는 인터페이스이고 로컬은 OS 비밀 저장소(구현만; 시험은 가짜 저장소).

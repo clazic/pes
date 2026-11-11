@@ -13,10 +13,13 @@
 import { read_credential_actor } from "../actors.ts";
 import {
   insert_receipt,
+  GO_MODEL_PREFIX,
+  GO_PROVIDER,
   is_human_owner_actor,
   reject_unknown_fields,
   require_base_control_rev,
   require_human_owner_actor,
+  require_internal_ai_for_go_run,
   require_non_empty_string,
   require_record,
   type CommandDefinition,
@@ -38,6 +41,13 @@ interface RunRow {
   actor_id: string;
   status: string;
   parent_run_id: string | null;
+}
+
+/** RunRow plus the labels the SEL-68 internal_ai rule reads. */
+interface ClaimedRunRow extends RunRow {
+  mode: string | null;
+  provider: string | null;
+  model: string | null;
 }
 
 interface LeaseRow {
@@ -259,14 +269,16 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     if (typeof requested_run_id !== "string" || requested_run_id.trim().length === 0) {
       throw new ApiError("invalid_payload", "run_id must be a non-empty string");
     }
-    const run = runtime.db.get<RunRow>(
-      "SELECT id, actor_id, status, parent_run_id FROM runs WHERE project_id = ? AND id = ?",
+    const run = runtime.db.get<ClaimedRunRow>(
+      "SELECT id, actor_id, status, parent_run_id, mode, provider, model FROM runs WHERE project_id = ? AND id = ?",
       scope.project_id,
       requested_run_id,
     );
     if (run === undefined) {
       throw new ApiError("not_found", `run not found: ${requested_run_id}`);
     }
+    // SEL-68: a mode A / Go-labelled run is taken by an internal_ai actor only (no lease, no receipt otherwise).
+    require_internal_ai_for_go_run(read_credential_actor(runtime.db, scope.actor_id)?.kind, run);
     if (!CLAIMABLE_RUN_STATUSES.has(run.status)) {
       throw new ApiError("conflict", "the run cannot be claimed in its current status");
     }
@@ -283,7 +295,13 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     const runtime_name = require_non_empty_string(payload, "runtime");
     const provider = require_non_empty_string(payload, "provider");
     const model = require_non_empty_string(payload, "model");
-    if (requested_mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
+    // SEL-68: mode A and a Go label are internal_ai only, whatever mode the caller wrote.
+    require_internal_ai_for_go_run(read_credential_actor(runtime.db, scope.actor_id)?.kind, {
+      mode: requested_mode,
+      provider,
+      model,
+    });
+    if (requested_mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
       throw new ApiError("invalid_payload", "mode A requires the opencode-go provider and model prefix");
     }
     fresh = { mode: requested_mode, runtime: runtime_name, provider, model };
@@ -502,7 +520,7 @@ function run_create(runtime: CommandRuntime): CommandResult {
     if (mode !== "A" || runtime_name !== BUILTIN_RUNTIME) {
       throw new ApiError("invalid_payload", "ai_connection_id belongs to a mode A pes_builtin run");
     }
-  } else if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
+  } else if (mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
     throw new ApiError("invalid_payload", "mode A requires the opencode-go provider and model prefix");
   } else if (runtime_name === BUILTIN_RUNTIME) {
     throw new ApiError("invalid_payload", "a pes_builtin run needs ai_connection_id");
@@ -514,6 +532,8 @@ function run_create(runtime: CommandRuntime): CommandResult {
   if (target === undefined) {
     throw new ApiError("not_found", "the run actor is not allowed in this project");
   }
+  // SEL-68: a mode A / Go-labelled run is created for an internal_ai actor only.
+  require_internal_ai_for_go_run(target.kind, { mode, provider, model });
   const member = runtime.db.get<{ ok: bigint }>(
     "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?",
     scope.project_id,

@@ -657,7 +657,7 @@ paths:
               schema: { $ref: "#/components/schemas/Success" }
         "400": { description: Invalid payload }
         "401": { description: Local session required }
-        "403": { description: Agent tokens cannot start runs }
+        "403": { description: "Agent tokens cannot start runs; a mode A or opencode-go run for a target actor that is not internal_ai is forbidden (SEL-68); Go policy denied" }
         "404": { description: Unknown project or target actor }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
@@ -681,7 +681,7 @@ paths:
               schema: { $ref: "#/components/schemas/Success" }
         "400": { description: Invalid payload }
         "401": { description: Missing or invalid credential }
-        "403": { description: Missing scope or Go policy denied }
+        "403": { description: "Missing scope, or Go policy denied for an internal_ai caller; a mode A or opencode-go (provider or model prefix) claim, or a claim by run_id of such a run, by any caller that is not internal_ai (external_agent token, human session) is forbidden (SEL-68)" }
         "404": { description: Unknown project }
         "409": { description: Live lease, stale revision, or idempotency key reuse }
         "413": { description: Payload too large (256 KiB JSON limit) }
