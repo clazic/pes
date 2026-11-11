@@ -1,5 +1,5 @@
 import * as React from "react";
-import { X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { QuestionView, RoundView } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { formatAt, IMPORTANCE_LABEL, SOURCE_LABEL } from "@/lib/labels";
@@ -10,12 +10,30 @@ import type { View } from "./paths";
  * 떠 있으면 그 아래 질문 칸에 초점이 가도 가려진다, WCAG 2.4.11). 화면의 나머지는 그대로 쓸 수 있다.
  * Esc · 닫기 · 뒤로 가기로 닫으면 연 단추로 초점이 돌아간다(작업 공간이 맡음). Esc 는 다른 층(메뉴 · 판)이 먼저 받았으면 넘긴다.
  * 주소의 peek 가 열림 상태다(딥링크 · 새로고침 · 뒤로 가기에 같은 화면).
+ * 순서 넘김(U1c): "이전 질문" · "다음 질문" 은 peek 만 옆 질문으로 바꾼다(replace). 첫/마지막에서는 숨기지 않고 aria-disabled.
+ * 넘겨도 초점은 누른 단추에 남고(대화 상자 안), 바뀐 질문 줄은 aria-live 로 읽힌다.
  */
-export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focusOnOpen: boolean; onClose: () => void }) {
+export function PeekDialog({
+  q,
+  questions,
+  focusToken,
+  onPage,
+  onClose,
+}: {
+  q: QuestionView;
+  questions: QuestionView[];
+  /** 0 이 아니면 그 값이 바뀔 때마다 대화 상자로 초점을 옮긴다(여는 동작) */
+  focusToken: number;
+  onPage: (id: string) => void;
+  onClose: () => void;
+}) {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
-    if (focusOnOpen) ref.current?.focus();
-  }, [focusOnOpen, q.id]);
+    if (focusToken) ref.current?.focus();
+  }, [focusToken]);
+  const at = questions.findIndex((x) => x.id === q.id);
+  const prevQ = at > 0 ? questions[at - 1] : undefined;
+  const nextQ = at >= 0 && at < questions.length - 1 ? questions[at + 1] : undefined;
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // 메뉴 · 판(radix 층)이 먼저 Esc 를 받아 닫았으면(defaultPrevented) 미리보기는 그대로 둔다
@@ -41,7 +59,7 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
           <h2 id={`peek-title-${q.id}`} className="text-title text-ink">
             미리보기
           </h2>
-          <p className="text-caption text-muted-foreground">
+          <p className="text-caption text-muted-foreground" aria-live="polite">
             질문 {q.number} · 버전 {q.version} · {SOURCE_LABEL[q.source]} · {q.required ? "필수" : "선택"} · 중요도 {IMPORTANCE_LABEL[q.importance]}
           </p>
         </div>
@@ -61,7 +79,41 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
       ) : (
         <p className="mt-3 text-caption text-muted-foreground">아직 보낸 답이 없습니다.</p>
       )}
+      {questions.length > 1 ? (
+        <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3">
+          <PageButton label="이전 질문" target={prevQ} onPage={onPage}>
+            <ChevronLeft aria-hidden="true" />
+            이전 질문
+          </PageButton>
+          <span className="text-caption text-muted-foreground tabular-nums" aria-hidden="true">
+            {at + 1} / {questions.length}
+          </span>
+          <PageButton label="다음 질문" target={nextQ} onPage={onPage}>
+            다음 질문
+            <ChevronRight aria-hidden="true" />
+          </PageButton>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** 순서 넘김 단추 — 갈 곳이 없으면 aria-disabled(초점은 받고, 눌러도 그대로) */
+function PageButton({ label, target, onPage, children }: { label: string; target?: QuestionView; onPage: (id: string) => void; children: React.ReactNode }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      aria-label={label}
+      aria-disabled={target ? undefined : "true"}
+      className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+      onClick={(e) => {
+        if (!target) return void e.preventDefault();
+        onPage(target.id);
+      }}
+    >
+      {children}
+    </Button>
   );
 }
 
@@ -69,12 +121,12 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
  * 인쇄 미리보기(설계 4.7 인쇄 · U6) — 주소의 print=1. 저절로 인쇄하지 않는다(사람이 “인쇄하기”를 눌러야 window.print).
  * 출력 시점 고정 · 보내지 않은 초안은 빼고, 보낸 답과 결과 글만.
  */
-export function PrintPreview({ round, title, headingRef, onClose }: { round: RoundView; title: string; headingRef: React.RefObject<HTMLHeadingElement | null>; onClose: () => void }) {
+export function PrintPreview({ round, title, onClose }: { round: RoundView; title: string; onClose: () => void }) {
   const sent = round.questions.filter((q) => q.sent);
   return (
     <section aria-label="인쇄 미리보기" data-print-preview="" className="border-b bg-surface-soft px-4 py-4 tab:px-6">
       <div className="flex flex-wrap items-center gap-2" data-print="hide">
-        <h2 ref={headingRef} tabIndex={-1} className="mr-auto text-title text-ink outline-none">
+        <h2 id="print-title" tabIndex={-1} className="mr-auto text-title text-ink outline-none">
           인쇄 미리보기
         </h2>
         <Button variant="default" size="sm" onClick={() => window.print()}>

@@ -116,19 +116,39 @@ function ResearchShell({ ws, roundPath }: { ws: WorkspaceView; roundPath: string
   const onRound = /\/e\/[^/]+\/s\/[^/]+\/r\/[^/]+/.test(pathname) || /^\/p\/[^/]+\/s\/[^/]+\/?$/.test(pathname);
   const roundCollapsed = desk && ui.aiPanel && !ui.focus && onRound && !ui.aiOnRound;
   const showPanel = desk && ui.aiPanel && !ui.focus && !roundCollapsed;
+  // 닫은 AI 동료 칸은 그 자리에 한 줄로 남겨 다시 열 곳을 보인다(머리 줄 단추만으로는 찾기 어렵다 — 사용자 2026-11-12)
+  const panelClosed = desk && !ui.aiPanel && !ui.focus;
+  // 닫힐 때 칸이 오른쪽으로 빠지며 사라진 뒤 상태를 바꾼다(움직임 줄이기면 바로)
+  const [closing, setClosing] = React.useState(false);
+  const closePanel = (next: Parameters<typeof researchUi.set>[0]) => {
+    if (closing) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return researchUi.set(next);
+    setClosing(true);
+    window.setTimeout(() => {
+      researchUi.set(next);
+      setClosing(false);
+    }, 150);
+  };
   return (
     <>
       <ProjectHead ws={ws} />
       {ui.focus ? <FocusBar /> : null}
-      {roundCollapsed ? <AiSummaryLine ws={ws} /> : null}
+      {roundCollapsed ? <AiSummaryLine ws={ws} label="AI 동료 펼치기" onOpen={() => researchUi.set({ aiOnRound: true })} /> : null}
+      {panelClosed ? <AiSummaryLine ws={ws} label="AI 동료 열기" onOpen={() => researchUi.set(onRound ? { aiPanel: true, aiOnRound: true } : { aiPanel: true })} /> : null}
       <div className={cn("mt-4 grid grid-cols-1 items-start gap-5", showPanel && "desk:grid-cols-[minmax(0,1fr)_320px] wide:grid-cols-[minmax(0,1fr)_368px] xwide:grid-cols-[minmax(0,1fr)_400px]")}>
         {/* data-page: 화면이 바뀌면 이 안의 첫 제목으로 초점이 간다(RootLayout 경로 초점 — 프로젝트 머리 h1은 화면마다 같으므로) */}
         <div data-page="" className={cn("min-w-0", ui.focus && "mx-auto w-full max-w-[60rem]")}>
           <Outlet context={{ ws, roundPath } satisfies WsContext} />
         </div>
         {showPanel ? (
-          <aside aria-label="AI 동료 칸" className="min-w-0 desk:sticky desk:top-16 desk:max-h-[calc(100svh-5rem)] desk:overflow-y-auto">
-            <AiPartner ws={ws} onCollapse={onRound ? () => researchUi.set({ aiOnRound: false }) : undefined} />
+          <aside
+            aria-label="AI 동료 칸"
+            className={cn(
+              "min-w-0 desk:sticky desk:top-16 desk:max-h-[calc(100svh-5rem)] desk:overflow-y-auto motion-reduce:animate-none",
+              closing ? "animate-out fade-out slide-out-to-right-4 fill-mode-forwards duration-150 ease-in" : "animate-in fade-in slide-in-from-right-4 duration-200 ease-out",
+            )}
+          >
+            <AiPartner ws={ws} onCollapse={() => closePanel(onRound ? { aiOnRound: false } : { aiPanel: false })} collapseLabel={onRound ? "접기" : "닫기"} />
           </aside>
         ) : null}
       </div>
@@ -158,19 +178,19 @@ function ResearchShell({ ws, roundPath }: { ws: WorkspaceView; roundPath: string
   );
 }
 
-/** 접힌 AI 동료 — 지금 AI 상태 한 줄 + 펼치기(지금 할 일 화면에서만) */
-function AiSummaryLine({ ws }: { ws: WorkspaceView }) {
+/** 접히거나 닫힌 AI 동료 — 지금 AI 상태 한 줄 + 펼치기/열기 */
+function AiSummaryLine({ ws, label, onOpen }: { ws: WorkspaceView; label: string; onOpen: () => void }) {
   const pending = ws.proposals.filter((p) => p.state.value === "proposed").length;
   return (
-    <section aria-label="AI 동료 요약" className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-lg border border-line bg-surface-soft px-3 py-2 text-meta text-ink">
+    <section aria-label="AI 동료 요약" className="mt-3 animate-in fade-in slide-in-from-top-1 duration-200 ease-out motion-reduce:animate-none flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-lg border border-line bg-surface-soft px-3 py-2 text-meta text-ink">
       <strong className="font-semibold">AI 동료</strong>
       <StatusFrom s={ws.ai_card.status} />
       <span className="min-w-0 flex-[1_1_16rem] text-ink-2">
         {ws.ai_card.line}
         {pending ? ` · 판단 전 가정·제안 ${pending}개` : ""}
       </span>
-      <Button size="xs" variant="outline" className="coarse:min-h-[44px]" aria-expanded="false" onClick={() => researchUi.set({ aiOnRound: true })}>
-        AI 동료 펼치기
+      <Button size="xs" variant="outline" className="coarse:min-h-[44px]" aria-expanded="false" onClick={onOpen}>
+        {label}
       </Button>
     </section>
   );

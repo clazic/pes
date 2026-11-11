@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, PesApiError, type ApiError, type CommandResult, type PesClient, type ProjectRef, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type PesClient, type ProjectRef, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -44,21 +44,10 @@ async function toApiError(res: Response): Promise<PesApiError> {
 const isNotFound = (e: unknown): boolean => e instanceof PesApiError && e.body.error.code === "not_found";
 
 /**
- * 변경 읽기(SEL-83 U1c 의 PesClient.getChanges 약속). SEL-83 이 아직 병합 전이라 types.ts 에는 없다 — 여기서 좁게 선언해 두고, 병합 뒤 types.ts 의 것으로 바꾼다.
- * 서버 events 에는 tx_id·stage·round 가 없다: 사건 하나 = tx 하나(tx_id = event_seq), touched 는 사건 type 만으로 정한다.
+ * 변경 읽기 — PesClient.getChanges(types.ts, SEL-83 U1c). cursor null = 기준만 받음(`?cursor=head` 한 번, txs 비어 있음), 문자열 = 그 커서 다음 한 쪽.
+ * 서버 events 에는 tx_id·stage·round 가 없다: 사건 하나 = tx 하나(tx_id = event_seq), touched 는 사건 type 만으로 정한다('round:*' = 어느 라운드인지 모름).
  */
-export interface ChangesTx {
-  tx_id: string;
-  touched: string[];
-}
-export interface ChangesRead {
-  cursor: string;
-  txs: ChangesTx[];
-}
-export type HttpClient = PesClient & {
-  /** cursor null = 기준만 받음(`?cursor=head` 한 번, txs 비어 있음), 문자열 = 그 커서 다음 한 쪽 */
-  getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>;
-};
+export type HttpClient = PesClient;
 
 /** 사건 type → 화면이 다시 읽을 자리. 모든 사건은 workspace, project·edition·policy 는 + projects, 라운드에 닿는 사건은 + 'round:*'(어느 라운드인지 events 에 없다) */
 function touchedBy(type: string): string[] {
@@ -106,7 +95,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const data = isRecord(body) ? body.data : undefined;
       if (!isRecord(data) || !Array.isArray(data.events) || typeof data.next_cursor !== "string") throw new PesApiError(fallbackBody(500));
       if (cursor === null) return { cursor: data.next_cursor, txs: [] };
-      const txs = data.events.flatMap((event): ChangesTx[] =>
+      const txs = data.events.flatMap((event): ChangeTx[] =>
         isRecord(event) && typeof event.event_seq === "string" && typeof event.type === "string" ? [{ tx_id: event.event_seq, touched: touchedBy(event.type) }] : [],
       );
       return { cursor: data.next_cursor, txs };

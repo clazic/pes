@@ -1,6 +1,6 @@
 // SEL-81 U1a (R1 필수 3·권장 7) — 앱 셸 구조: 사이드바 · 머리줄 · 랜드마크 · 상태 이름 (Vitest, jsdom).
 // 승인 시안(shadcn sidebar-07 앱 셸 + 머리줄 + 연구 공간 틀, 설계 12.9 · 결정 0017 영향 12)을 따른다. 계약 이름은 src/test/contract.ts 의 SHELL.
-// 명령 찾기·알림은 U1a 에 기능이 없다 → 자리만(aria-disabled + 이유). 기능은 U1c(명령 찾기)·U1d(알림) 몫.
+// 알림은 U1a 에 기능이 없다 → 자리만(aria-disabled + 이유). 기능은 U1d(알림) 몫. 명령 찾기는 SEL-83 U1c 에서 열린다(command-menu.test.tsx).
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -78,12 +78,12 @@ describe("머리줄", () => {
     expect(header.getByRole("button", { name: SHELL.user })).toBeInTheDocument();
   });
 
-  it("명령 찾기·알림은 U1a 에서 자리만: aria-disabled + 이유 글, 눌러도 아무것도 열리지 않는다", async () => {
+  it("알림은 U1a 에서 자리만: aria-disabled + 이유 글, 눌러도 아무것도 열리지 않는다 (명령 찾기는 U1c 에서 열림 — command-menu.test.tsx)", async () => {
     const user = userEvent.setup();
     await renderApp(CURRENT, { width: WIDTHS.wide1440 });
     await ready();
     const header = within(screen.getByRole("banner"));
-    for (const name of [SHELL.command, SHELL.notifications]) {
+    for (const name of [SHELL.notifications]) {
       const btn = header.getByRole("button", { name });
       expect(btn, String(name)).toHaveAttribute("aria-disabled", "true");
       expect(btn, String(name)).not.toBeDisabled(); // 초점을 받아 이유를 읽힌다
@@ -92,14 +92,6 @@ describe("머리줄", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.queryByRole("menu")).toBeNull();
     }
-  });
-
-  it("Ctrl+K 도 U1a 에서는 명령 창을 열지 않는다(U1c 몫)", async () => {
-    const user = userEvent.setup();
-    await renderApp(CURRENT, { width: WIDTHS.wide1440 });
-    await ready();
-    await user.keyboard("{Control>}k{/Control}");
-    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

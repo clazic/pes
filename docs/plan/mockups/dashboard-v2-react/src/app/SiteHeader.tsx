@@ -169,8 +169,7 @@ function AiPartnerToggle() {
     return (
       <Button variant="ghost" size="sm" aria-pressed={on} onClick={() => researchUi.set(ui.focus ? { focus: false, aiPanel: true } : { aiPanel: !ui.aiPanel })} className="h-9 gap-1.5 px-2.5">
         <BotIcon aria-hidden="true" />
-        <span className="hidden wide:inline">AI 동료</span>
-        <span className="sr-only wide:hidden">AI 동료</span>
+        <span>AI 동료</span>
       </Button>
     );
   }

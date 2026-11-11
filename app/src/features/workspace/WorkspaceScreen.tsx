@@ -3,7 +3,9 @@ import { useParams, useSearchParams } from "react-router";
 import { ArrowRight } from "lucide-react";
 import { useRound, useWorkspace } from "@/api/queries";
 import type { RoundView, WorkspaceView } from "@/api/types";
+import { workspaceActions } from "@/app/actions";
 import { useArrival } from "@/app/arrival";
+import { useRegisterActions } from "@/app/CommandMenu";
 import { NotFound } from "@/app/NotFound";
 import { Status, turnKey, turnLabel } from "@/components/pes/status";
 import { Button } from "@/components/ui/button";
@@ -53,9 +55,9 @@ export function WorkspaceScreen() {
   const print = sp.get("print") === "1";
   const peekParam = sp.get("peek");
   const search = sp.toString();
-  const [peekFocus, setPeekFocus] = React.useState(false);
+  /** 미리보기 대화 상자로 초점을 옮길 차례(여는 동작마다 하나씩 늘어난다 — 딥링크로 열린 것은 0) */
+  const [peekFocus, setPeekFocus] = React.useState(0);
   const askRef = React.useRef<HTMLElement>(null);
-  const printHeading = React.useRef<HTMLHeadingElement>(null);
 
   // 주소 검색어 바꾸기. 한 번의 동작에서 여러 번 바꿔도 앞의 변경을 잃지 않게 마지막 값을 따로 들고 있는다
   const latest = React.useRef(sp);
@@ -104,7 +106,7 @@ export function WorkspaceScreen() {
   }, [peekParam, print, ready]);
 
   const closePeek = React.useCallback(() => {
-    setPeekFocus(false);
+    setPeekFocus(0);
     setParams({ peek: null }, true);
   }, [setParams]);
 
@@ -125,6 +127,34 @@ export function WorkspaceScreen() {
   const w = ws.data;
   const round = rq.data;
   const title = round ? placeLabel(round.stage, round.round_id) : "";
+  const past = !!round && round.state !== "current";
+  const firstOpen = round?.questions.find((q) => !q.sent && q.required) ?? round?.questions.find((q) => !q.sent);
+
+  const onView = (v: View) => setParams({ view: v }, true);
+  const onPeek = (id: string) => {
+    setPeekFocus((n) => n + 1);
+    setParams({ peek: id }, false);
+  };
+  /** 미리보기 순서 넘김 — peek 만 바꾼다(기록을 쌓지 않음 · 다른 검색어와 경로 그대로 · 초점은 대화 상자 안에 남음) */
+  const onPagePeek = (id: string) => setParams({ peek: id }, true);
+  const onPrint = () => setParams({ print: "1" }, false, () => document.getElementById("print-title"));
+  const onClosePrint = () => setParams({ print: null }, true, () => document.getElementById("tool-print"));
+  const onGoToQuestions = firstOpen && !past ? () => setParams({ view: "ask", focus: firstOpen.id }, true, () => document.getElementById(firstOpen.id)) : undefined;
+  // 동작 목록 하나(명령 메뉴 · 질문 맥락 메뉴가 같이 쓴다). 동작은 실행할 때만 ref(latest)를 읽는다 — 그리는 동안 읽지 않음
+  const actions = round
+    ? // oxlint-disable-next-line react/refs
+      workspaceActions({
+        questions: round.questions,
+        goAsk: () =>
+          setParams({ view: "ask" }, true, () =>
+            firstOpen && !past ? document.getElementById(firstOpen.id) : (document.getElementById(`peek-${round.questions[0]?.id}`) ?? document.getElementById("ask-title")),
+          ),
+        goBody: () => setParams({ view: null }, true, () => document.querySelector<HTMLElement>("main [data-screen-title]")),
+        print: onPrint,
+        peek: onPeek,
+      })
+    : [];
+  useRegisterActions(actions);
   React.useEffect(() => {
     if (ready && w) document.title = `${title} · ${w.title} · PES`;
   }, [ready, title, w]);
@@ -149,21 +179,9 @@ export function WorkspaceScreen() {
     return <NotFound back={back} />;
   }
 
-  const past = round.state !== "current";
   const editBlocked = past ? PAST_REASON.edit : phone ? PHONE_REASON.edit : undefined;
   const annotateBlocked = past ? PAST_REASON.annotate : phone ? PHONE_REASON.annotate : undefined;
   const peekQ = peekParam ? round.questions.find((q) => q.id === peekParam) : undefined;
-  const draftScope = `${w.slug}:${w.edition}:${round.stage}:${round.round_id ?? "start"}:f${round.form_version}`;
-  const firstOpen = round.questions.find((q) => !q.sent && q.required) ?? round.questions.find((q) => !q.sent);
-
-  const onView = (v: View) => setParams({ view: v }, true);
-  const onPeek = (id: string) => {
-    setPeekFocus(true);
-    setParams({ peek: id }, false);
-  };
-  const onPrint = () => setParams({ print: "1" }, false, () => printHeading.current);
-  const onClosePrint = () => setParams({ print: null }, true, () => document.getElementById("tool-print"));
-  const onGoToQuestions = firstOpen && !past ? () => setParams({ view: "ask", focus: firstOpen.id }, true, () => document.getElementById(firstOpen.id)) : undefined;
 
   return (
     <div className="ws-frame">
@@ -171,14 +189,14 @@ export function WorkspaceScreen() {
       <div className="ws-grid" data-view={view} data-printing={print ? "" : undefined}>
         <main id="main" tabIndex={-1} className="ws-main">
           <ScreenHead ws={w} round={round} title={title} past={past} onGoToQuestions={onGoToQuestions} />
-          {print ? <PrintPreview round={round} title={`${w.title} — ${title}`} headingRef={printHeading} onClose={onClosePrint} /> : null}
+          {print ? <PrintPreview round={round} title={`${w.title} — ${title}`} onClose={onClosePrint} /> : null}
           <div data-area="body" className="min-w-0">
             <BodyPane ws={w} round={round} annotateBlocked={annotateBlocked} onPrint={onPrint} />
           </div>
         </main>
         <aside ref={askRef} aria-label="질문" data-area="ask">
-          {peekQ ? <PeekDialog q={peekQ} focusOnOpen={peekFocus} onClose={closePeek} /> : null}
-          <AskPane round={round} draftScope={draftScope} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} />
+          {peekQ ? <PeekDialog q={peekQ} questions={round.questions} focusToken={peekFocus} onPage={onPagePeek} onClose={closePeek} /> : null}
+          <AskPane round={round} project={w.slug} edition={w.edition} actions={actions} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} />
         </aside>
       </div>
     </div>

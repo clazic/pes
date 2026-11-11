@@ -1,5 +1,5 @@
 import { ROUNDS, WORKSPACE } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type CommandResult, type PesClient, type Receipt, type RoundView } from "./types";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type PesClient, type Receipt, type RoundView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
@@ -14,6 +14,8 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   invalid_payload: { message: "요청 내용이 올바르지 않습니다.", next_action: "fix_request" },
   idempotency_key_reuse: { message: "같은 Idempotency-Key로 다른 요청을 보냈습니다.", next_action: "use_new_key" },
   conflict: { message: "현재 상태에서는 처리할 수 없는 요청입니다.", next_action: "reread_context" },
+  cursor_expired: { message: "변경 기록이 너무 오래되어 이어 받을 수 없습니다.", next_action: "reread_context" },
+  cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
 };
 
 export function createFakeClient(): PesClient {
@@ -21,6 +23,8 @@ export function createFakeClient(): PesClient {
   /** 멱등 기록: 키 → (요청 지문, 처음 결과) */
   const commits = new Map<string, { request: string; result: CommandResult<{ alert_id: string }> }>();
   let seq = 900;
+  /** 공개 tx 기록(변경분 읽기) — 커서는 이 목록의 길이를 감싼 불투명 글자 */
+  const txLog: ChangeTx[] = [];
   let req = 0;
   const copy = <T,>(v: T) => Promise.resolve(structuredClone(v));
   const find = (slug: string, edition: number) => (slug === WORKSPACE.slug && edition === WORKSPACE.edition ? WORKSPACE : null);
@@ -58,9 +62,20 @@ export function createFakeClient(): PesClient {
       const n = String(++seq).padStart(4, "0");
       const receipt: Receipt = { receipt_no: n, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
       alert.acknowledged ??= { receipt_no: receipt.receipt_no, tx_id: receipt.tx_id, committed_at: receipt.committed_at };
+      const owner = rounds.find((r) => r.alerts.includes(alert));
+      txLog.push({ tx_id: receipt.tx_id, touched: owner ? [`round:${owner.stage}/${owner.round_id ?? "start"}`] : [] });
       const result: CommandResult<{ alert_id: string }> = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: { alert_id: alertId } };
       commits.set(idempotencyKey, { request, result });
       return copy(result);
+    },
+    getChanges(slug, edition, cursor) {
+      if (!find(slug, edition)) return reject("not_found", "$.project");
+      const head = `fake-${txLog.length}`;
+      if (cursor === null) return copy({ cursor: head, txs: [] });
+      const m = /^fake-(\d+)$/.exec(cursor);
+      const at = m ? Number(m[1]) : NaN;
+      if (!(at >= 0 && at <= txLog.length)) return reject("cursor_invalid", "$.cursor");
+      return copy({ cursor: head, txs: txLog.slice(at) });
     },
   };
 }
