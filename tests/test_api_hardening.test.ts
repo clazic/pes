@@ -154,17 +154,24 @@ test("results: an expired lease and a fence made stale by a re-claim save nothin
   });
 });
 
-test("results: a re-claim of the same run after expiry is refused while the run is still marked running", async () => {
+test("results: the same agent re-claims its dead running run by run_id after expiry (fence + 1, new lease); the old lease saves nothing", async () => {
   await with_api(async (env) => {
     const agent = await make_agent(env, "reclaim");
+    const a = await new_artifact(env, "rca");
     const lease = await agent_claims(env, agent);
+    const item = [{ op: "append_version", object_id: a.object_id, title: "t" }];
     const row = env.db.get<{ expires_at: bigint }>("SELECT expires_at FROM project_leases WHERE project_id = ?", env.p.project_id);
     assert.ok(row);
     env.clock.advance(Number(row.expires_at) - env.clock.now_ms());
-    const before = state_signature(env.db);
     const res = await call(env, { method: "POST", path: P(env, "/claims"), auth: { token: agent.token }, body: { run_id: lease.run_id } });
-    assert_error(res, 409, "conflict");
-    assert.equal(state_signature(env.db), before);
+    const again = assert_ok(res);
+    assert.equal(again.run_id, lease.run_id);
+    assert.equal(BigInt(again.fence), BigInt(lease.fence) + 1n);
+    assert.notEqual(again.lease_id, lease.lease_id);
+    const before = state_signature(env.db);
+    assert_error(await results_call(env, agent.token, lease, item), 409, "conflict");
+    assert.equal(state_signature(env.db), before, "old lease: nothing written");
+    assert_ok(await results_call(env, agent.token, again, item));
   });
 });
 

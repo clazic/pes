@@ -271,11 +271,49 @@ test("two claims racing for one project: exactly one wins, the other leaves noth
   });
 });
 
-test("claim of a queued run that is not queued-after-release (running) is refused", async () => {
+test("claim by run_id of a running run: refused while a live lease exists (even for the same actor), refused for another actor, taken over by the same actor once the lease expired", async () => {
   await with_env(async (env) => {
     const a = await claim_new(env, "r-a");
-    env.clock.advance(CFG.lease_ttl_ms + 1); // lease expired but run still 'running'
-    await rejects_code(claim(env.service, env.ctx("r-b"), { run_id: a.run_id }), "conflict");
+    const owner = env.db.get<{ user_id: string }>("SELECT user_id FROM actors WHERE id = ?", env.p.actor_id);
+    assert.ok(owner);
+    env.db.run(
+      "INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-other', 'internal_ai', ?, '합성 다른 AI')",
+      owner.user_id,
+    );
+    const stranger = { project_id: env.p.project_id, actor_id: "agent-other" };
+
+    // live lease: same actor is refused, state untouched
+    let sig = state_signature(env.db);
+    await rejects_code(claim(env.service, env.ctx("r-live"), { run_id: a.run_id }), "conflict");
+    assert.equal(state_signature(env.db), sig, "live lease: nothing changed");
+
+    // expired lease but run still 'running': another actor's run_id claim stays refused
+    env.clock.advance(CFG.lease_ttl_ms + 1);
+    assert.equal(run_status(env.db, a.run_id), "running");
+    sig = state_signature(env.db);
+    await rejects_code(claim(env.service, env.ctx("r-other", stranger), { run_id: a.run_id }), "conflict");
+    assert.equal(state_signature(env.db), sig, "another actor: nothing changed");
+
+    // the owner takes it back: same run, fence + 1, new lease_id, stale lease cleaned up
+    const b = (await claim(env.service, env.ctx("r-b"), { run_id: a.run_id })).result as Lease;
+    assert.equal(b.run_id, a.run_id);
+    assert.equal(b.fence, a.fence + 1);
+    assert.notEqual(b.lease_id, a.lease_id);
+    assert.equal(run_status(env.db, a.run_id), "running");
+    const row = lease_row(env.db, env.p.project_id);
+    assert.equal(row.state, "active");
+    assert.equal(row.lease_id, b.lease_id);
+    assert.equal(
+      env.db.all("SELECT 1 FROM events WHERE run_id = ? AND type = 'run.interrupted'", a.run_id).length,
+      1,
+      "the dead lease is closed with one run.interrupted event",
+    );
+    // the old lease cannot guard anything any more
+    sig = state_signature(env.db);
+    await rejects_code(heartbeat(env.service, env.ctx("r-old"), g(a)), "conflict");
+    assert.equal(state_signature(env.db), sig, "old lease: nothing changed");
+    // and the new one works
+    await heartbeat(env.service, env.ctx("r-new"), g(b));
   });
 });
 
