@@ -116,11 +116,13 @@ describe("단계·라운드 탐색 = 사이드바 연구 흐름 나무 · 과거
     const { router } = await renderApp(CURRENT);
     await title();
     await user.click(roundLinks(flow()).find((l) => /R1/.test(l.textContent ?? "") && /\/s\/research\//.test(l.getAttribute("href") ?? ""))!);
+    // 주소와 화면 둘 다 바뀔 때까지 기다린다(고정 시간 없음) — 제목은 라운드 자료가 도착해야 바뀐다. Windows CI 에서 주소만 바뀐 순간
+    // 제목이 아직 앞 화면("조사 R2")이라 한 번 실패했다(2026-11-12).
     await waitFor(() => expect(router.state.location.pathname).toBe(url("research", 1)));
-    expect((await title()).textContent).toContain("조사 R1");
+    await waitFor(() => expect(document.querySelector("main [data-screen-title]")?.textContent ?? "").toContain("조사 R1"));
     await router.navigate(-1);
     await waitFor(() => expect(router.state.location.pathname).toBe(CURRENT));
-    expect((await title()).textContent).toContain("조사 R2");
+    await waitFor(() => expect(document.querySelector("main [data-screen-title]")?.textContent ?? "").toContain("조사 R2"));
   });
 });
 

@@ -14,6 +14,10 @@ export const SESSION_SECRET = "synthetic-owner-session-secret-sel51-e2e";
 
 export interface Workspace {
   slug: string;
+  /** the project id the API paths use (SEL-82) */
+  project_id: string;
+  /** the owner session secret the server was started with (x-pes-session) */
+  session: string;
   base: string;
   port: number;
   pes(args: string[]): { status: number | null; stdout: string; stderr: string };
@@ -33,13 +37,14 @@ function free_port(): Promise<number> {
   });
 }
 
-export async function open_workspace(): Promise<Workspace> {
+/** `extra_env`: more variables for the server child only (SEL-82: PES_APP_DIR). */
+export async function open_workspace(extra_env: Record<string, string> = {}): Promise<Workspace> {
   const seeded = spawnSync(process.execPath, [join(REPO, "tests", "e2e", "helpers", "seed_workspace.ts")], { encoding: "utf8", cwd: REPO, timeout: 120_000 });
   if (seeded.status !== 0) throw new Error(`seed_workspace failed (${seeded.status}): ${seeded.stderr}`);
-  const info = JSON.parse(seeded.stdout.trim().split("\n").pop() as string) as { root: string; home: string; pes_home: string; slug: string };
+  const info = JSON.parse(seeded.stdout.trim().split("\n").pop() as string) as { root: string; home: string; pes_home: string; slug: string; project_id: string };
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^PES_/.test(k)) env[k] = v;
-  Object.assign(env, { HOME: info.home, USERPROFILE: info.home, PES_HOME: info.pes_home, PES_LOCAL_SESSION_SECRET: SESSION_SECRET });
+  Object.assign(env, { HOME: info.home, USERPROFILE: info.home, PES_HOME: info.pes_home, PES_LOCAL_SESSION_SECRET: SESSION_SECRET, ...extra_env });
   for (const guard of ["HOME", "USERPROFILE", "PES_HOME"]) {
     if (!env[guard] || !env[guard]!.startsWith(info.root)) throw new Error(`${guard} is not the isolated temporary folder`);
   }
@@ -77,6 +82,8 @@ export async function open_workspace(): Promise<Workspace> {
   };
   return {
     slug: info.slug,
+    project_id: info.project_id,
+    session: SESSION_SECRET,
     base,
     port,
     pes,

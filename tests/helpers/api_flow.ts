@@ -124,6 +124,8 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "GET /api/v1/projects/{id}/operations/{op}",
   "GET /api/v1/projects/{id}/requests/{key}",
   "GET /api/v1/projects/{id}/runs/{r}/inputs",
+  // SEL-82 U1b: the workspace read model joins the contract (OpenAPI path + capabilities route + route table)
+  "GET /api/v1/projects/{id}/workspace",
   "POST /api/v1/projects/{id}/claims",
   "POST /api/v1/projects/{id}/policies/opencode-go/revisions",
   "POST /api/v1/projects/{id}/questions",

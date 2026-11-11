@@ -40,10 +40,12 @@ describe("위생", () => {
   it("제품 소스가 있다(빈 골격이 아님)", () => {
     expect(files.some((f) => /app[\\/]routes\.tsx?$/.test(f))).toBe(true);
   });
-  it("U1a 는 네트워크 호출 코드가 없다(fetch·XMLHttpRequest·WebSocket·EventSource·sendBeacon, 외부 주소)", () => {
-    for (const f of files.filter((p) => /\.(ts|tsx)$/.test(p))) {
+  it("네트워크 호출 코드는 HTTP 클라이언트(src/api/http-client.ts) 한 곳에만 있다(U1b) — XMLHttpRequest·WebSocket·EventSource·sendBeacon 은 어디에도 없고, 외부 주소도 없다", () => {
+    const ts = files.filter((p) => /\.(ts|tsx)$/.test(p));
+    for (const f of ts) {
       const text = readFileSync(f, "utf8");
-      expect(text, f).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|new\s+WebSocket|new\s+EventSource|sendBeacon/);
+      expect(text, f).not.toMatch(/XMLHttpRequest|new\s+WebSocket|new\s+EventSource|sendBeacon/);
+      if (!/api[\\/]http-client\.tsx?$/.test(f)) expect(text, f).not.toMatch(/\bfetch\s*\(/);
     }
     for (const f of files) expect(readFileSync(f, "utf8"), f).not.toMatch(/https?:\/\/(?!www\.w3\.org|localhost|127\.0\.0\.1)/);
   });
