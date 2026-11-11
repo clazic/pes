@@ -1,0 +1,150 @@
+{
+ "id": "E08",
+ "steps": [
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "self"
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": true,
+    "file": "plan-R2-<TIME>.json"
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "https://remote.example"
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": true,
+    "file": "plan-R0-<TIME>.json"
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "https://evil.example"
+   },
+   "status": 403,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false,
+    "error": "origin",
+    "hint": "pes remote add https://evil.example"
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": null
+   },
+   "status": 403,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false,
+    "error": "origin",
+    "hint": "pes remote add "
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "self"
+   },
+   "status": 400,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false,
+    "error": "kind"
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "self"
+   },
+   "status": 400,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false,
+    "error": "empty"
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "self"
+   },
+   "status": 400,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false,
+    "error": "empty"
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "self"
+   },
+   "status": 400,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/synthetic/feedback",
+    "origin": "self"
+   },
+   "status": 413,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false
+   }
+  },
+  {
+   "step": {
+    "method": "POST",
+    "path": "/missing/feedback",
+    "origin": "self"
+   },
+   "status": 404,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": false
+   }
+  }
+ ],
+ "dto": null,
+ "files": {
+  "feedback/plan-R0-<TIME>.json": "a864dec2432ffa9b",
+  "feedback/plan-R2-<TIME>.json": "25d51f615549225a",
+  "feedback.log": "a63c1bd56d5ceb43"
+ }
+}

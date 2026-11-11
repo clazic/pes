@@ -1,0 +1,152 @@
+{
+ "id": "E13",
+ "steps": [
+  {
+   "step": {
+    "method": "GET",
+    "path": "/whoami",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "root": "<TMP>/pes-projects",
+    "single": true
+   }
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/ping",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": true
+   }
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/synthetic/ping",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "ok": true
+   }
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/version",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "v": 1600000020
+   }
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/synthetic/version",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "application/json; charset=utf-8",
+   "cache_control": "no-store",
+   "body": {
+    "v": 1600000010
+   }
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "text/html; charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<html>home</html>"
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/synthetic/",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "text/html; charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<html>synthetic</html>"
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/synthetic/ask-plan.html",
+    "origin": null
+   },
+   "status": 200,
+   "content_type": "text/html; charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<html>ask</html>"
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/synthetic/feedback/",
+    "origin": null
+   },
+   "status": 404,
+   "content_type": "text/html;charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<460 bytes sha:b47a55e09e9d3af6>"
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/nope/",
+    "origin": null
+   },
+   "status": 404,
+   "content_type": "text/html;charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<460 bytes sha:b47a55e09e9d3af6>"
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/..%2f..%2fetc/passwd",
+    "origin": null
+   },
+   "status": 404,
+   "content_type": "text/html;charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<460 bytes sha:b47a55e09e9d3af6>"
+  },
+  {
+   "step": {
+    "method": "GET",
+    "path": "/bad slug!/",
+    "origin": null
+   },
+   "status": 404,
+   "content_type": "text/html;charset=utf-8",
+   "cache_control": "no-store",
+   "body": "<460 bytes sha:b47a55e09e9d3af6>"
+  }
+ ],
+ "dto": null,
+ "files": {
+  "feedback.log": "empty"
+ }
+}

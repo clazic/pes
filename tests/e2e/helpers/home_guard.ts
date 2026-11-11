@@ -20,9 +20,13 @@ function list(dir: string, depth: number): string[] {
   return out;
 }
 
-export function snapshot_home(): Record<string, string[]> {
-  const home = homedir();
+/** The two protected folders of a given home (names / sizes / mtimes, depth 3). SEL-70 reuses this for the compat harness. */
+export function snapshot_of(home: string): Record<string, string[]> {
   return { ".pes": list(join(home, ".pes"), 3), "pes-projects": list(join(home, "pes-projects"), 3) };
+}
+
+export function snapshot_home(): Record<string, string[]> {
+  return snapshot_of(homedir());
 }
 
 export default async function global_setup(): Promise<() => Promise<void>> {

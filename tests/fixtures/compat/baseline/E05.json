@@ -1,0 +1,245 @@
+{
+ "id": "E05",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "<2 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획: 2건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "report",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획보고서: 웹 보고서 reports/plan/report.html, 마크다운 reports/plan/report.md",
+    "eli5: <PROJECT>/reports/plan/eli5.json 를 써야 합니다 (스키마는 pes:core 「단계 보고서」) — 쓴 뒤 report 를 다시 실행"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "report",
+    "{P}",
+    "nonsense"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  }
+ ],
+ "dto": {
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "plan",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [
+     {
+      "format": "html",
+      "label": "웹 보고서",
+      "path": "reports/plan/report.html",
+      "bytes": 10333,
+      "round": 1
+     },
+     {
+      "format": "md",
+      "label": "마크다운",
+      "path": "reports/plan/report.md",
+      "bytes": 761,
+      "round": 1
+     }
+    ],
+    "history": [],
+    "reports_built": "<TIME>",
+    "items": [
+     {
+      "id": 1,
+      "title": "연구 질문",
+      "kind": "rq",
+      "status": "done",
+      "summary": "질문 요약",
+      "details": "",
+      "sources": [
+       {
+        "url": "https://example.test/b",
+        "title": "출처 B"
+       },
+       {
+        "url": "https://example.test/a",
+        "title": "출처 A"
+       }
+      ],
+      "stats": [],
+      "links": {},
+      "updated_round": 1,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     },
+     {
+      "id": 2,
+      "title": "조사 범위",
+      "kind": "topic",
+      "status": "done",
+      "summary": "범위 요약",
+      "details": "",
+      "sources": [
+       {
+        "url": "https://example.test/c",
+        "title": "출처 C"
+       }
+      ],
+      "stats": [],
+      "links": {},
+      "updated_round": 1,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     }
+    ]
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "index.html": "579feb55054989dc",
+  "project.json": "315045878fad3063",
+  "reports/plan/report.html": "3c783963a2c10a6b",
+  "reports/plan/report.md": "da0d2230158386f2"
+ }
+}

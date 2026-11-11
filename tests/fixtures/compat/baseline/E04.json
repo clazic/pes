@@ -1,0 +1,524 @@
+{
+ "id": "E04",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제",
+    "--import",
+    "{T}/research-loop"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json",
+    "참고자료로 가져옴: 항목 1개 (R3까지, <TMP>/work/research-loop)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "<4 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획: 4건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 승인",
+    "조사 항목 2개 생성 (기존 조사 재사용 1개)",
+    "다음 단계: 조사 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> plan  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 승인",
+    "조사 항목 0개 생성 (기존 조사 재사용 0개)",
+    "다음 단계: 조사 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> plan  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 승인",
+    "다음 단계: 분석·종합 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> research  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "analyze"
+   ],
+   "exit": 0,
+   "stdout": [
+    "분석·종합 승인",
+    "다음 단계: 집필 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> analyze  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "reopen",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 다시 열림 · 다시 확인 필요 표시: 분석·종합, 집필"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 승인",
+    "다음 단계: 분석·종합 (상태 approved)",
+    "단계 보고서를 만드세요: report <PROJECT> research  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "analyze"
+   ],
+   "exit": 0,
+   "stdout": [
+    "분석·종합 승인",
+    "다음 단계: 집필 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> analyze  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "write"
+   ],
+   "exit": 0,
+   "stdout": [
+    "집필 승인",
+    "다음 단계: 검증 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> write  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "verify"
+   ],
+   "exit": 0,
+   "stdout": [
+    "검증 승인",
+    "다음 단계: 산출·공유 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> verify  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "publish"
+   ],
+   "exit": 0,
+   "stdout": [
+    "산출·공유 승인",
+    "모든 단계 완료",
+    "단계 보고서를 만드세요: report <PROJECT> publish  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 합성 주제  (<PROJECT>)",
+    "현재 단계: 산출·공유  · 전체 완료",
+    "    기획     approved R0 항목 3 (할 일 0)",
+    "    조사     approved R0 항목 2 (할 일 2)",
+    "    분석·종합  approved R0 항목 0 (할 일 0)",
+    "    집필     approved R0 항목 0 (할 일 0)",
+    "    검증     approved R0 항목 0 (할 일 0)",
+    "  ▶ 산출·공유  approved R0 항목 0 (할 일 0)",
+    "참고자료: 기존 조사 1개 항목 (<TMP>/work/research-loop)",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve 합성 프로젝트"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "reopen",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 다시 열림 · 다시 확인 필요 표시: 조사, 분석·종합, 집필, 검증, 산출·공유"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "reopen",
+    "{P}",
+    "nonsense"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  }
+ ],
+ "dto": {
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "plan",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": {
+   "source": "<TMP>/work/research-loop",
+   "imported": "<TIME>",
+   "round": 3,
+   "topic": "기존 조사",
+   "settings": {},
+   "items": [
+    {
+     "id": 5,
+     "title": "기존 조사 항목",
+     "summary": "기존 요약",
+     "details": "기존 상세",
+     "confidence": "high",
+     "status": "done",
+     "sources": [
+      {
+       "url": "https://library.test/5",
+       "title": "기존 출처",
+       "method": "browser"
+      }
+     ],
+     "stats": [
+      {
+       "name": "기존 지표",
+       "value": 5,
+       "unit": "개"
+      }
+     ],
+     "shots": [
+      "library/shot.png"
+     ],
+     "conflicts": [
+      "기존 충돌"
+     ]
+    }
+   ],
+   "suggestions": [],
+   "warnings": []
+  },
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)",
+     "승인 <TIME> (R0)",
+     "다시 열기 <TIME>"
+    ],
+    "items": [
+     {
+      "id": 1,
+      "title": "재사용 주제",
+      "kind": "topic",
+      "status": "done",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {},
+      "updated_round": 0,
+      "depth": 1,
+      "reuse": 5,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": "재사용 질문"
+     },
+     {
+      "id": 2,
+      "title": "새 주제",
+      "kind": "topic",
+      "status": "done",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {},
+      "updated_round": 0,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": "새 질문"
+     },
+     {
+      "id": 3,
+      "title": "제외 주제",
+      "kind": "topic",
+      "status": "removed",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {},
+      "updated_round": 0,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     },
+     {
+      "id": 4,
+      "title": "쟁점",
+      "kind": "issue",
+      "status": "done",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {},
+      "updated_round": 0,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     }
+    ]
+   },
+   "research": {
+    "status": "approved",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": true,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)",
+     "다시 열기 <TIME>",
+     "승인 <TIME> (R0)"
+    ],
+    "items": [
+     {
+      "id": 1,
+      "title": "재사용 주제",
+      "kind": "topic",
+      "status": "deepen",
+      "summary": "기존 요약",
+      "details": "기존 상세",
+      "sources": [
+       {
+        "url": "https://library.test/5",
+        "title": "기존 출처",
+        "method": "browser"
+       }
+      ],
+      "stats": [
+       {
+        "name": "기존 지표",
+        "value": 5,
+        "unit": "개"
+       }
+      ],
+      "links": {
+       "plan": [
+        1
+       ],
+       "library": [
+        5
+       ]
+      },
+      "updated_round": 0,
+      "depth": 0,
+      "request": "기존 조사(라이브러리 #5) 재사용 — 기획의 조사 질문에 맞게 보완하고, 원문 미확인 출처와 충돌(⚠)은 다시 확인",
+      "conflicts": [
+       "기존 충돌"
+      ],
+      "confidence": "high",
+      "question": "재사용 질문"
+     },
+     {
+      "id": 2,
+      "title": "새 주제",
+      "kind": "topic",
+      "status": "new",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {
+       "plan": [
+        2
+       ]
+      },
+      "updated_round": 0,
+      "depth": 0,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": "새 질문"
+     }
+    ]
+   },
+   "analyze": {
+    "status": "approved",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": true,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)",
+     "승인 <TIME> (R0)"
+    ],
+    "items": []
+   },
+   "write": {
+    "status": "approved",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": true,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)"
+    ],
+    "items": []
+   },
+   "verify": {
+    "status": "approved",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": true,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)"
+    ],
+    "items": []
+   },
+   "publish": {
+    "status": "approved",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": true,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)"
+    ],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "index.html": "ddd195bbed249594",
+  "library.json": "0220eea7c4917c13",
+  "project.json": "0023c246319d3973"
+ }
+}

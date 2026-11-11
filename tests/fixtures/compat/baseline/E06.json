@@ -1,0 +1,258 @@
+{
+ "id": "E06",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "write"
+   ],
+   "exit": 0,
+   "stdout": [
+    "집필 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "write",
+    "<2 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "집필: 2건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "assemble",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/out/report.md  (장·절 2개, 각주 3개)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "web",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/out/report.html  (출처 3개 · 확인됨 1개 · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "web",
+    "{P}",
+    "--assemble"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/out/report.md  (장·절 2개, 각주 3개)",
+    "<PROJECT>/out/report.html  (출처 3개 · 확인됨 1개 · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "assemble",
+    "{T}/없는 프로젝트"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는 프로젝트"
+   ]
+  }
+ ],
+ "dto": {
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "write",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "합성 요약",
+  "conclusion": "합성 결론",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 10,
+      "title": "둘째 장",
+      "kind": "section",
+      "status": "done",
+      "summary": "",
+      "details": "둘째 본문.[^1] 셋째 출처.[^2]",
+      "sources": [
+       {
+        "url": "https://example.test/a",
+        "title": "출처 A",
+        "method": "browser"
+       },
+       {
+        "url": "https://example.test/c",
+        "title": "출처 C"
+       }
+      ],
+      "stats": [],
+      "links": {},
+      "updated_round": 1,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "order": 2,
+      "question": ""
+     },
+     {
+      "id": 20,
+      "title": "첫째 장",
+      "kind": "section",
+      "status": "done",
+      "summary": "",
+      "details": "첫째 본문.[^1] 둘째 출처.[^2]",
+      "sources": [
+       {
+        "url": "https://example.test/a",
+        "title": "출처 A",
+        "method": "browser"
+       },
+       {
+        "url": "https://example.test/b",
+        "title": "출처 B"
+       }
+      ],
+      "stats": [],
+      "links": {},
+      "updated_round": 1,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "order": 1,
+      "question": ""
+     }
+    ]
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "out/report.html": "afe0f5a2e6fe236f",
+  "out/report.md": "c94fbb971899bfbf",
+  "out/sources.json": "63e3afb94de30a71",
+  "project.json": "7bf069c03a979649"
+ }
+}

@@ -1,0 +1,76 @@
+{
+ "id": "E14",
+ "steps": [
+  {
+   "step": [
+    "setup.py",
+    "needed"
+   ],
+   "exit": 1,
+   "stdout": [
+    "PES 설치 점검을 한 적이 없습니다 — /pes:setup"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "setup.py",
+    "check",
+    "--json"
+   ],
+   "exit": 0,
+   "stdout": [
+    "{\n \"groups\": [\n  \"기본\",\n  \"기본\",\n  \"기본\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"API 키\",\n  \"API 키\",\n  \"API 키\"\n ],\n \"keys_per_row\": [\n  \"detail\",\n  \"group\",\n  \"label\",\n  \"name\",\n  \"state\"\n ],\n \"names\": [\n  \"python\",\n  \"git\",\n  \"node\",\n  \"ego-browser\",\n  \"ego-browser-skill\",\n  \"kosis\",\n  \"vworld\",\n  \"korean-law\",\n  \"korean-law-mcp\",\n  \"key-kosis\",\n  \"key-vworld\",\n  \"key-law\"\n ],\n \"stable\": {\n  \"ego-browser\": \"user\",\n  \"key-kosis\": \"key\",\n  \"key-law\": \"key\",\n  \"key-vworld\": \"key\",\n  \"python\": \"ok\"\n }\n}"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "setup.py",
+    "mark"
+   ],
+   "exit": 0,
+   "stdout": [
+    "설치 완료 표시: <HOME>/.pes/setup.json (PES 0.15.6)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "setup.py",
+    "needed"
+   ],
+   "exit": 0,
+   "stdout": [
+    "OK"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "setup.py",
+    "bogus-command"
+   ],
+   "exit": 1,
+   "stdout": [
+    "PES 설치 도우미 — 필요한 도구(CLI·스킬·MCP)를 확인·설치하고, API 키를 로컬 웹 폼으로 받아 등록한다.",
+    "",
+    "사용: python3 -I setup.py <명령>",
+    "  check [--json]            설치·키 상태 (항목마다 ok|missing|user|optional)",
+    "  install <이름…|missing>    설치: kosis vworld korean-law korean-law-mcp ego-browser  (missing = 빠진 것 전부)",
+    "  upgrade [이름…|all]        이미 설치된 것을 최신으로: kosis(CLI+스킬) vworld(CLI+스킬) korean-law(CLI·MCP 공용 npm)",
+    "                            ego-browser(ego lite 앱) — 줄마다 \"UPGRADED|OK|FAIL|SKIP <이름> <버전>\"",
+    "  keys [--no-open] [--wait] API 키 입력 화면(127.0.0.1:<PORT>)을 띄우고 주소 출력. 결과는 ~/.pes/setup.log 에",
+    "                            \"SETUP keys …\" 한 줄로 남는다 (Monitor 로 기다린다). 키 값은 Claude 대화로 오지 않는다.",
+    "  mark                      설치 완료 표시 (~/.pes/setup.json) — 다른 PES 명령이 이것을 보고 setup 필요 여부를 안다",
+    "  needed                    setup 이 필요하면 이유를 출력하고 종료 코드 1, 아니면 0",
+    "",
+    "키 값은 화면 → 이 프로그램 → 각 도구(kosis·vworld 설정, Claude Code 설정 env)로만 간다. 출력에는 가린 값만.",
+    ""
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": null,
+ "files": {}
+}

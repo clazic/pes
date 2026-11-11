@@ -1,0 +1,370 @@
+{
+ "id": "E03",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "render",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/index.html"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "render",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/index.html"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 R2 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "nonsense"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "{T}/없는 결과.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/없는 결과.json'"
+   ]
+  }
+ ],
+ "dto": {
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "research",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "active",
+    "round": 2,
+    "settings": {},
+    "review": null,
+    "suggestions": [
+     "[#1] 추가 확인 필요"
+    ],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 1,
+      "title": "조사 항목",
+      "kind": "",
+      "status": "done",
+      "summary": "둘째 요약",
+      "details": "첫 상세",
+      "sources": [
+       {
+        "url": "https://example.test/a",
+        "title": "출처 A",
+        "method": "browser"
+       },
+       {
+        "url": "https://example.test/b",
+        "title": "출처 B"
+       },
+       {
+        "url": "https://example.test/c",
+        "title": "출처 C"
+       }
+      ],
+      "stats": [
+       {
+        "label": "합성 지표",
+        "value": 7,
+        "unit": "건",
+        "name": "합성 지표"
+       }
+      ],
+      "links": {
+       "plan": [
+        1,
+        2,
+        3
+       ],
+       "research": [
+        9
+       ]
+      },
+      "updated_round": 1,
+      "depth": 2,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     },
+     {
+      "id": 2,
+      "title": "번호 없는 항목",
+      "kind": "",
+      "status": "done",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {},
+      "updated_round": 1,
+      "depth": 1,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     },
+     {
+      "id": 7,
+      "title": "같은 결과",
+      "kind": "",
+      "status": "done",
+      "summary": "바뀐 요약",
+      "details": "",
+      "sources": [
+       {
+        "url": "https://example.test/same",
+        "title": "같은 출처"
+       }
+      ],
+      "stats": [],
+      "links": {},
+      "updated_round": 1,
+      "depth": 3,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     }
+    ]
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "index.html": "ef694c6780a41f52",
+  "project.json": "7c4dd643fec15ced",
+  "snapshots/research-R1/2.json": "6fdf0cfc39ccca00",
+  "snapshots/research-R1.json": "1b5c226956725e18"
+ }
+}

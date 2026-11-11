@@ -1,0 +1,285 @@
+{
+ "id": "E10",
+ "steps": [
+  {
+   "step": [
+    "lock",
+    "{T}/legacy-project"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "PES_OWNER 환경변수(이 세션 ID)가 필요합니다"
+   ]
+  },
+  {
+   "step": [
+    "lock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "alice-session"
+   },
+   "exit": 0,
+   "stdout": [
+    "잠금: legacy-project (세션 alice-se…)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "lock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 3,
+   "stdout": [],
+   "stderr": [
+    "다른 세션이 사용 중: alice-se… (<TIME>부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force"
+   ]
+  },
+  {
+   "step": [
+    "note",
+    "{T}/legacy-project",
+    "합성 메모"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 3,
+   "stdout": [],
+   "stderr": [
+    "다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 alice-se…, <TIME>부터, 마지막 기록 0분 전). 그 세션을 닫았다면 `lock <PROJECT> --force`로 가져오세요."
+   ]
+  },
+  {
+   "step": [
+    "unlock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 3,
+   "stdout": [],
+   "stderr": [
+    "다른 세션의 잠금입니다 (--force 로 해제)"
+   ]
+  },
+  {
+   "step": [
+    "lock",
+    "{T}/legacy-project",
+    "--force"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 0,
+   "stdout": [
+    "잠금: legacy-project (세션 bob-sess…)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "unlock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "alice-session"
+   },
+   "exit": 3,
+   "stdout": [],
+   "stderr": [
+    "다른 세션의 잠금입니다 (--force 로 해제)"
+   ]
+  },
+  {
+   "step": [
+    "unlock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 0,
+   "stdout": [
+    "잠금 해제"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "lock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "alice-session"
+   },
+   "exit": 0,
+   "stdout": [
+    "잠금: legacy-project (세션 alice-se…)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "lock",
+    "{T}/legacy-project"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 0,
+   "stdout": [
+    "잠금: legacy-project (세션 bob-sess…)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "note",
+    "{T}/legacy-project",
+    "만료 뒤 인계"
+   ],
+   "env": {
+    "PES_OWNER": "bob-session"
+   },
+   "exit": 0,
+   "stdout": [
+    "인계 메모 1개"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "topic": "합성 주제",
+  "processed": [],
+  "notes": [
+   {
+    "time": "<TIME>",
+    "stage": null,
+    "text": "만료 뒤 인계"
+   }
+  ],
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 1,
+      "title": "합성 항목",
+      "kind": "",
+      "status": "new",
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "links": {},
+      "updated_round": 0,
+      "depth": 0,
+      "request": "",
+      "conflicts": [],
+      "confidence": "",
+      "question": ""
+     }
+    ]
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  ".pes-lock": "701f57d7c2b8f033",
+  "project.json": "eb181e79d1f1b6d6"
+ }
+}

@@ -1,0 +1,1669 @@
+{
+  "doc": "docs/plan/migration-ts-equivalence.md 7.4 (E01~E15). 합성 입력만. steps 의 {P}=프로젝트 폴더, {T}=시험 임시 폴더, {R}=PES 홈, {PES}=저장소 루트. 기준값은 baseline/<id>.json (0.15 대상). ts.status 가 not_yet 인 사례는 TS 대상이 생길 때까지 '미구현'으로 명시 단언한다 — 구현되면 이 표에서 status 를 바꿔야 시험이 통과한다.",
+  "ts_not_yet_reason": "scripts/pes.ts·setup.ts·serve.ts 없음 (PR26 3~4단계, SEL-57)",
+  "cases": [
+    {
+      "id": "E01",
+      "title": "init — 한글·공백 경로, 중복 init, 주제 없음, --import 참고자료",
+      "section": "7.4 E01",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "차이 0(정규화). 중복 init 은 exit 2",
+      "diffs": [
+        "D02"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "다른 주제"
+          ]
+        },
+        {
+          "run": [
+            "init",
+            "{T}/no-topic"
+          ]
+        },
+        {
+          "run": [
+            "init",
+            "{T}/잘못된 인자",
+            "--topic",
+            "주제",
+            "--bogus",
+            "x"
+          ]
+        },
+        {
+          "write_json": "{T}/research-loop/state.json",
+          "json": {
+            "round": 3,
+            "topic": "기존 조사",
+            "settings": {},
+            "items": [
+              {
+                "id": 5,
+                "title": "기존 조사 항목",
+                "summary": "기존 요약",
+                "details": "기존 상세",
+                "confidence": "high",
+                "status": "done",
+                "sources": [
+                  {
+                    "url": "https://library.test/5",
+                    "title": "기존 출처",
+                    "method": "browser"
+                  }
+                ],
+                "stats": [
+                  {
+                    "name": "기존 지표",
+                    "value": 5,
+                    "unit": "개"
+                  }
+                ],
+                "shots": [
+                  "shot.png"
+                ],
+                "conflicts": [
+                  "기존 충돌"
+                ]
+              },
+              {
+                "id": 6,
+                "title": "삭제된 항목",
+                "status": "removed"
+              }
+            ],
+            "suggestions": [],
+            "warnings": []
+          }
+        },
+        {
+          "run": [
+            "init",
+            "{T}/가져온 프로젝트",
+            "--topic",
+            "가져오기 주제",
+            "--import",
+            "{T}/research-loop"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E02",
+      "title": "ask — 질문 은행 + 악성 </script> 라벨, ask-prep",
+      "section": "7.4 E02",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "data.spec·제목 escape·질문 순서·_ 키 제거·모듈 1회 (N6)",
+      "diffs": [],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "write_json": "{T}/evil.json",
+          "json": {
+            "id": "sel-70-evil",
+            "stage": "plan",
+            "kind": "stage_start",
+            "stage_label": "기획",
+            "round": 2,
+            "title": "합성 <질문> & \"제목\" '따옴표'",
+            "intro": "합성 소개",
+            "inherited": [
+              {
+                "label": "발주처",
+                "value": "합성 기관"
+              }
+            ],
+            "questions": [
+              {
+                "id": "q1",
+                "label": "필수 <b>질문</b>",
+                "type": "single",
+                "required": true,
+                "other": true,
+                "options": [
+                  {
+                    "value": "a",
+                    "label": "A </script><script>alert(1)</script>",
+                    "recommended": true
+                  },
+                  {
+                    "value": "b",
+                    "label": "B"
+                  }
+                ]
+              },
+              {
+                "id": "q2",
+                "label": "조건부",
+                "type": "text",
+                "show_if": {
+                  "id": "q1",
+                  "in": [
+                    "a"
+                  ]
+                },
+                "other": "직접 적기"
+              },
+              {
+                "id": "q5",
+                "label": "비공개 조건",
+                "type": "text",
+                "_when": {
+                  "id": "q1",
+                  "in": [
+                    "b"
+                  ]
+                }
+              }
+            ],
+            "_note": "렌더하지 않는 내부 메모"
+          }
+        },
+        {
+          "run": [
+            "ask",
+            "{P}",
+            "{T}/evil.json"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{P}",
+            "{PES}/questions/plan.json"
+          ]
+        },
+        {
+          "run": [
+            "ask-prep",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "ask-prep",
+            "{P}",
+            "resume"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{P}",
+            "{T}/없는 파일.json"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E03",
+      "title": "round-start 2회 + merge 2회 (출처 중복·stats·links), 같은 병합 재제출(depth), 같은 라운드 render 두 번(snapshot)",
+      "section": "7.4 E03",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "차이 0, 0.15 의 depth 결함(D06)·같은 라운드 snapshot 처리(D07)는 의도된 차이",
+      "diffs": [
+        "D01",
+        "D06",
+        "D07"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "조사 항목",
+                "summary": "첫 요약",
+                "details": "첫 상세",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A",
+                    "method": "browser"
+                  },
+                  {
+                    "url": "https://example.test/a",
+                    "title": "중복 A",
+                    "method": "browser"
+                  },
+                  {
+                    "url": "https://example.test/b",
+                    "title": "출처 B"
+                  }
+                ],
+                "stats": [
+                  {
+                    "label": "합성 지표",
+                    "value": 7,
+                    "unit": "건"
+                  }
+                ],
+                "links": {
+                  "plan": [
+                    1,
+                    2
+                  ]
+                },
+                "open_questions": [
+                  "추가 확인 필요"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "조사 항목",
+                "summary": "둘째 요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "다시 A"
+                  },
+                  {
+                    "url": "https://example.test/c",
+                    "title": "출처 C"
+                  }
+                ],
+                "links": {
+                  "plan": [
+                    2,
+                    3
+                  ],
+                  "research": [
+                    9
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "title": "번호 없는 항목"
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 7,
+                "title": "같은 결과",
+                "summary": "같은 요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/same",
+                    "title": "같은 출처"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 7,
+                "title": "같은 결과",
+                "summary": "같은 요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/same",
+                    "title": "같은 출처"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "render",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 7,
+                "title": "같은 결과",
+                "summary": "바뀐 요약"
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "render",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "nonsense"
+          ]
+        },
+        {
+          "run": [
+            "merge",
+            "{P}",
+            "research",
+            "{T}/없는 결과.json"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E04",
+      "title": "approve plan(조사 항목 생성·재사용)·reopen — stale·complete",
+      "section": "7.4 E04",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "차이 0 (research 항목 생성·재사용, stale·complete, stdout)",
+      "diffs": [
+        "D01"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "write_json": "{T}/research-loop/state.json",
+          "json": {
+            "round": 3,
+            "topic": "기존 조사",
+            "settings": {},
+            "items": [
+              {
+                "id": 5,
+                "title": "기존 조사 항목",
+                "summary": "기존 요약",
+                "details": "기존 상세",
+                "confidence": "high",
+                "status": "done",
+                "sources": [
+                  {
+                    "url": "https://library.test/5",
+                    "title": "기존 출처",
+                    "method": "browser"
+                  }
+                ],
+                "stats": [
+                  {
+                    "name": "기존 지표",
+                    "value": 5,
+                    "unit": "개"
+                  }
+                ],
+                "shots": [
+                  "shot.png"
+                ],
+                "conflicts": [
+                  "기존 충돌"
+                ]
+              }
+            ],
+            "suggestions": [],
+            "warnings": []
+          }
+        },
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제",
+            "--import",
+            "{T}/research-loop"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "plan",
+            "results": [
+              {
+                "id": 1,
+                "title": "재사용 주제",
+                "kind": "topic",
+                "question": "재사용 질문",
+                "reuse": 5
+              },
+              {
+                "id": 2,
+                "title": "새 주제",
+                "kind": "topic",
+                "question": "새 질문"
+              },
+              {
+                "id": 3,
+                "title": "제외 주제",
+                "kind": "topic",
+                "status": "removed"
+              },
+              {
+                "id": 4,
+                "title": "쟁점",
+                "kind": "issue"
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "analyze"
+          ]
+        },
+        {
+          "run": [
+            "reopen",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "analyze"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "write"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "verify"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "publish"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "reopen",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "reopen",
+            "{P}",
+            "nonsense"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E05",
+      "title": "report plan (rq/topic, 출처 중복)",
+      "section": "7.4 E05",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "report.md 정규화 텍스트·등록 형식 차이 0",
+      "diffs": [
+        "D02"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "plan",
+            "results": [
+              {
+                "id": 1,
+                "kind": "rq",
+                "title": "연구 질문",
+                "summary": "질문 요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/b",
+                    "title": "출처 B"
+                  },
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A"
+                  },
+                  {
+                    "url": "https://example.test/b",
+                    "title": "출처 B 중복"
+                  }
+                ]
+              },
+              {
+                "id": 2,
+                "kind": "topic",
+                "title": "조사 범위",
+                "summary": "범위 요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/c",
+                    "title": "출처 C"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "report",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{P}",
+            "nonsense"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E06",
+      "title": "assemble + web (각주·출처·표지)",
+      "section": "7.4 E06",
+      "group": "B",
+      "kind": "cli",
+      "criteria": "각주·출처·표지 동등 (out/report.md·sources.json·report.html)",
+      "diffs": [],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "write"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "write",
+            "results": [
+              {
+                "id": 10,
+                "order": 2,
+                "kind": "section",
+                "title": "둘째 장",
+                "details": "둘째 본문.[^1] 셋째 출처.[^2]",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A",
+                    "method": "browser"
+                  },
+                  {
+                    "url": "https://example.test/c",
+                    "title": "출처 C"
+                  }
+                ]
+              },
+              {
+                "id": 20,
+                "order": 1,
+                "kind": "section",
+                "title": "첫째 장",
+                "details": "첫째 본문.[^1] 둘째 출처.[^2]",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A",
+                    "method": "browser"
+                  },
+                  {
+                    "url": "https://example.test/b",
+                    "title": "출처 B"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "patch_project": {
+            "executive_summary": "합성 요약",
+            "conclusion": "합성 결론"
+          }
+        },
+        {
+          "run": [
+            "assemble",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "web",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "web",
+            "{P}",
+            "--assemble"
+          ]
+        },
+        {
+          "run": [
+            "assemble",
+            "{T}/없는 프로젝트"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E07",
+      "title": "status·digest·show --fields·pending·mark·note·chat",
+      "section": "7.4 E07",
+      "group": "B",
+      "kind": "cli",
+      "criteria": "stdout 정규화·상태 DTO 차이 0",
+      "diffs": [
+        "D03",
+        "D01"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "첫 항목",
+                "summary": "첫 요약\n둘째 줄",
+                "confidence": "high",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A",
+                    "method": "browser"
+                  }
+                ],
+                "stats": [
+                  {
+                    "label": "지표",
+                    "value": 3,
+                    "unit": "건"
+                  }
+                ],
+                "conflicts": [
+                  "충돌 하나"
+                ],
+                "open_questions": [
+                  "남은 질문"
+                ]
+              },
+              {
+                "id": 2,
+                "title": "둘째 항목",
+                "summary": "둘째 요약"
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "status",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "research",
+            "--round",
+            "1"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "research",
+            "1",
+            "--fields",
+            "title,summary"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "research",
+            "--fields",
+            "changes,settings"
+          ]
+        },
+        {
+          "run": [
+            "note",
+            "{P}",
+            "합성 메모"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}",
+            "research",
+            "합성 지시",
+            "feedback"
+          ]
+        },
+        {
+          "write_json": "{P}/feedback/plan-R0-20260101-000000.json",
+          "json": {
+            "stage": "plan",
+            "round": 0,
+            "kind": "feedback",
+            "text": "합성 답",
+            "via": "html"
+          }
+        },
+        {
+          "run": [
+            "pending",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "mark",
+            "{P}",
+            "plan-R0-20260101-000000.json"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{P}"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "E08",
+      "title": "POST …/feedback — 정상·Origin 거부·kind 오류·빈 본문·깨진 JSON·413·404, feedback.log",
+      "section": "7.4 E08",
+      "group": "C",
+      "kind": "http",
+      "criteria": "status·Content-Type·Cache-Control·JSON ok/오류 코드·feedback.log 줄 형식 차이 0",
+      "diffs": [
+        "D03"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "config": {
+            "trusted_origins": [
+              "https://remote.example"
+            ]
+          }
+        },
+        {
+          "start": true
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "round": 2,
+              "kind": "feedback",
+              "text": "합성 답변",
+              "answers": {
+                "purpose": "report",
+                "purpose__other": "덧붙임"
+              },
+              "spec": "plan-start"
+            },
+            "origin": "self"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "round": 0,
+              "text": "원격 답"
+            },
+            "origin": "https://remote.example"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "text": "거부"
+            },
+            "origin": "https://evil.example"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "text": "합성"
+            },
+            "origin": null
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "kind": "bogus",
+              "text": "합성"
+            },
+            "origin": "self"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "kind": "feedback",
+              "text": "   ",
+              "answers": {}
+            },
+            "origin": "self"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "json": {
+              "stage": "plan",
+              "kind": "feedback"
+            },
+            "origin": "self"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "raw": "{\"stage\": \"plan\", \"text\":",
+            "origin": "self"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/synthetic/feedback",
+            "raw_size": 262145,
+            "origin": "self"
+          }
+        },
+        {
+          "http": {
+            "method": "POST",
+            "path": "/missing/feedback",
+            "json": {
+              "stage": "plan",
+              "text": "합성"
+            },
+            "origin": "self"
+          }
+        }
+      ],
+      "project": "{R}/synthetic"
+    },
+    {
+      "id": "E09",
+      "title": "같은 초 동시 feedback 12개 — 답 유실 0",
+      "section": "7.4 E09",
+      "group": "C",
+      "kind": "http",
+      "criteria": "유실 0 (파일 수 12, 내용 12종). 0.15 결함 재현 금지",
+      "diffs": [
+        "D03"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "start": true
+        },
+        {
+          "burst": {
+            "count": 12,
+            "path": "/synthetic/feedback",
+            "stage": "plan",
+            "round": 1,
+            "text_prefix": "동시 답 "
+          }
+        }
+      ],
+      "project": "{R}/synthetic",
+      "files": "count"
+    },
+    {
+      "id": "E10",
+      "title": "lock/unlock — 다른 세션·만료·--force",
+      "section": "7.4 E10",
+      "group": "B",
+      "kind": "cli",
+      "criteria": "exit 2/3/0, owner·since 의미 동등 (lease 값 자체는 D04)",
+      "diffs": [
+        "D04"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "write_json": "{T}/legacy-project/project.json",
+          "json": {
+            "pes": 1,
+            "topic": "합성 주제",
+            "stages": {
+              "plan": {
+                "items": [
+                  {
+                    "id": 1,
+                    "title": "합성 항목"
+                  }
+                ]
+              }
+            }
+          },
+          "indent": null
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/legacy-project"
+          ]
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "alice-session"
+          }
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        },
+        {
+          "run": [
+            "note",
+            "{T}/legacy-project",
+            "합성 메모"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        },
+        {
+          "run": [
+            "unlock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/legacy-project",
+            "--force"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        },
+        {
+          "run": [
+            "unlock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "alice-session"
+          }
+        },
+        {
+          "run": [
+            "unlock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "alice-session"
+          }
+        },
+        {
+          "age_lock": 7210,
+          "project": "{T}/legacy-project"
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/legacy-project"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        },
+        {
+          "age_lock": 7210,
+          "project": "{T}/legacy-project"
+        },
+        {
+          "run": [
+            "note",
+            "{T}/legacy-project",
+            "만료 뒤 인계"
+          ],
+          "env": {
+            "PES_OWNER": "bob-session"
+          }
+        }
+      ],
+      "project": "{T}/legacy-project"
+    },
+    {
+      "id": "E11",
+      "title": "프로젝트 폴더 사본 이동 뒤 status/render/report/assemble/web",
+      "section": "7.4 E11",
+      "group": "B",
+      "kind": "cli",
+      "criteria": "상태 DTO·산출물 차이 0",
+      "diffs": [
+        "D02"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "plan",
+            "results": [
+              {
+                "id": 1,
+                "kind": "rq",
+                "title": "복원 질문",
+                "summary": "복원 요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/restore",
+                    "title": "복원 출처"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "write"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "write",
+            "results": [
+              {
+                "id": 1,
+                "kind": "section",
+                "title": "복원 장",
+                "details": "복원 본문.[^1]",
+                "sources": [
+                  {
+                    "url": "https://example.test/restore",
+                    "title": "복원 출처"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "move_project": {
+            "from": "{P}",
+            "to": "{T}/복원 위치/사본 프로젝트"
+          }
+        },
+        {
+          "run": [
+            "status",
+            "{T}/복원 위치/사본 프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "render",
+            "{T}/복원 위치/사본 프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{T}/복원 위치/사본 프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "assemble",
+            "{T}/복원 위치/사본 프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "web",
+            "{T}/복원 위치/사본 프로젝트"
+          ]
+        }
+      ],
+      "project": "{T}/복원 위치/사본 프로젝트"
+    },
+    {
+      "id": "E12",
+      "title": "깨진 project.json(status exit 1, 원본 불변) / 2MB 프로젝트",
+      "section": "7.4 E12",
+      "group": "B",
+      "kind": "cli",
+      "criteria": "stderr 유형·exit·원본 불변 동등",
+      "diffs": [],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "synthetic": "broken",
+          "as": "{T}/broken"
+        },
+        {
+          "run": [
+            "status",
+            "{T}/broken"
+          ]
+        },
+        {
+          "snapshot": "{T}/broken",
+          "name": "broken_after_status"
+        },
+        {
+          "synthetic": "large",
+          "as": "{T}/large"
+        },
+        {
+          "run": [
+            "status",
+            "{T}/large"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{T}/large",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{T}/large"
+          ]
+        }
+      ],
+      "project": "{T}/large"
+    },
+    {
+      "id": "E13",
+      "title": "serve.py 경로 — whoami·version·ping·정적 파일·디렉터리 목록 404·404 (open 은 브라우저를 띄워 제외)",
+      "section": "7.4 E13",
+      "group": "C",
+      "kind": "http",
+      "criteria": "경로·응답(status·Content-Type·Cache-Control·JSON) 동등",
+      "diffs": [
+        "D09",
+        "D05"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "set_mtimes": [
+            {
+              "path": "{R}/synthetic/index.html",
+              "epoch": 1600000000
+            },
+            {
+              "path": "{R}/synthetic/ask-plan.html",
+              "epoch": 1600000010
+            },
+            {
+              "path": "{R}/index.html",
+              "epoch": 1600000020
+            }
+          ]
+        },
+        {
+          "start": true
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/whoami"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/ping"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/synthetic/ping"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/version"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/synthetic/version"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/synthetic/"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/synthetic/ask-plan.html"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/synthetic/feedback/"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/nope/"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/..%2f..%2fetc/passwd"
+          }
+        },
+        {
+          "http": {
+            "method": "GET",
+            "path": "/bad slug!/"
+          }
+        }
+      ],
+      "project": "{R}/synthetic",
+      "excluded": [
+        {
+          "what": "pes open <주소>",
+          "why": "기본 브라우저를 띄운다 — 자동 시험에서 실행하지 않는다 (TS 대상이 생기면 '브라우저 실행기 주입' 방식으로 따로 시험)"
+        },
+        {
+          "what": "pes serve / hub / stop",
+          "why": "공용 포트 8760~8764 를 선점한다 (병렬 시험·개발 PC의 실제 서버와 충돌). serve.py 를 자유 포트로 직접 띄워 경로 계약만 고정한다"
+        }
+      ]
+    },
+    {
+      "id": "E14",
+      "title": "setup check --json · mark · needed (외부 도구 버전·경로 제외, 상태 이름만)",
+      "section": "7.4 E14",
+      "group": "C",
+      "kind": "setup",
+      "criteria": "상태 이름·exit 1/0 차이 0 (외부 도구 버전 제외)",
+      "diffs": [],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "setup": [
+            "needed"
+          ],
+          "narrow_path": true
+        },
+        {
+          "setup": [
+            "check",
+            "--json"
+          ],
+          "narrow_path": true,
+          "post": "setup_stable"
+        },
+        {
+          "setup": [
+            "mark"
+          ],
+          "narrow_path": true
+        },
+        {
+          "setup": [
+            "needed"
+          ],
+          "narrow_path": true
+        },
+        {
+          "setup": [
+            "bogus-command"
+          ],
+          "narrow_path": true
+        }
+      ],
+      "project": null
+    },
+    {
+      "id": "E15",
+      "title": "doctor --json 합성 홈 — 섹션·level·exit",
+      "section": "7.4 E15",
+      "group": "C",
+      "kind": "cli",
+      "criteria": "스키마 동등(group·level·title·detail·fixable), Python 전용 항목은 의도된 차이(D08)",
+      "diffs": [
+        "D08"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "doctor",
+            "--json"
+          ],
+          "narrow_path": true,
+          "post": "doctor_schema"
+        },
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "doctor",
+            "{P}",
+            "--json"
+          ],
+          "narrow_path": true,
+          "post": "doctor_schema"
+        }
+      ],
+      "project": "{P}"
+    }
+  ]
+}
