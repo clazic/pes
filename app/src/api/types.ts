@@ -18,7 +18,7 @@ export type IsoTime = string;
 /* ───────────── 봉투 · 오류 · 영수증 (API 결정 4 · 3절 오류 봉투) ───────────── */
 
 /** 2단계 코어(api_support.ts)의 닫힌 오류 코드 중 U1a 가짜 클라이언트가 쓰는 것 */
-export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict";
+export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "cursor_expired" | "cursor_invalid";
 
 export interface ApiError {
   format_version: typeof FORMAT_VERSION;
@@ -199,6 +199,21 @@ export interface ProjectRef {
   current: { stage: StageKey; round_id: number | null };
 }
 
+/**
+ * 변경분 읽기(U1c · 설계 12.5-2 · API 결정 13) — 공개 tx 묶음 단위.
+ *  - cursor: 서버가 주는 불투명 값. 화면은 해석하지 않고 다음 호출에 그대로 돌려준다. null = 처음(기준만 받음).
+ *  - txs[].touched: 그 tx 가 건드린 읽기 키 — "workspace" | "projects" | "round:<stage>/<round>"(round = 숫자 또는 start).
+ *  - 숨은 사건이면 txs 가 비고 cursor 만 앞으로 간다. 거절: cursor_expired(410) · cursor_invalid(400) → 화면은 재동기화한다.
+ */
+export interface ChangeTx {
+  tx_id: string;
+  touched: string[];
+}
+export interface ChangesRead {
+  cursor: string;
+  txs: ChangeTx[];
+}
+
 /** 가짜 클라이언트와 (U1b) HTTP 클라이언트가 같이 지키는 모양 */
 export interface PesClient {
   listProjects(): Promise<ProjectRef[]>;
@@ -208,4 +223,6 @@ export interface PesClient {
   getRound(slug: string, edition: number, stage: string, round: string): Promise<RoundView | null>;
   /** 오류 알림 확인 — 멱등 키 필수. 거절은 PesApiError */
   acknowledgeAlert(slug: string, edition: number, alertId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ alert_id: string }>>;
+  /** 변경분 읽기 — 커서 다음의 공개 tx 묶음. 거절은 PesApiError(cursor_expired · cursor_invalid) */
+  getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>;
 }
