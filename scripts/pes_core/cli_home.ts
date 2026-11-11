@@ -7,8 +7,29 @@ import { basename, dirname, join, relative, isAbsolute } from "node:path";
 import { Die, bridge, config_path, die, pdir, pes_home, read_config, resolve_path, say, write_config, write_text } from "./cli_support.ts";
 
 /** Hub ports of one PES home (HUB_PORTS in pes.py); 8765~8775 were the per-project servers of older versions. */
-export const HUB_PORTS: readonly number[] = [8760, 8761, 8762, 8763, 8764];
-export const LEGACY_PORTS: readonly number[] = Array.from({ length: 11 }, (_x, i) => 8765 + i);
+export const DEFAULT_HUB_PORTS: readonly number[] = [8760, 8761, 8762, 8763, 8764];
+
+/**
+ * The hub port range: 8760~8764, or the inclusive range of PES_HUB_PORTS="<first>-<last>" (a test or a second PES home that must not
+ * touch the real ports). A value that is not a range ends the command — silently falling back to the real ports would defeat its purpose.
+ */
+export function hub_ports(): readonly number[] {
+  const given = process.env.PES_HUB_PORTS;
+  if (given === undefined || given === "") return DEFAULT_HUB_PORTS;
+  const m = given.match(/^\s*(\d{1,5})\s*-\s*(\d{1,5})\s*$/);
+  const first = m === null ? 0 : Number(m[1]);
+  const last = m === null ? 0 : Number(m[2]);
+  if (m === null || first < 1 || last > 65535 || first > last || last - first > 63) {
+    die(`PES_HUB_PORTS 는 "<첫 포트>-<끝 포트>" 형식이어야 합니다 (예: 49200-49204, 최대 64개): ${given}`, 1);
+  }
+  return Array.from({ length: last - first + 1 }, (_x, i) => first + i);
+}
+const OLD_PORTS: readonly number[] = Array.from({ length: 11 }, (_x, i) => 8765 + i);
+
+/** The ports of the per-project servers of older versions (8765~8775). With an injected hub range nothing of the real range is asked. */
+export function legacy_ports(): readonly number[] {
+  return process.env.PES_HUB_PORTS !== undefined && process.env.PES_HUB_PORTS !== "" ? [] : OLD_PORTS;
+}
 
 /** `GET http://127.0.0.1:<port>/whoami` as JSON, or null when nothing answers (a refused connection is the normal "server off"). */
 export async function whoami_info(port: number): Promise<Record<string, unknown> | null> {
@@ -45,7 +66,7 @@ export async function serve_root(d: string): Promise<string> {
 }
 
 export async function root_port(root: string): Promise<number | null> {
-  for (const port of HUB_PORTS) {
+  for (const port of hub_ports()) {
     const info = (await whoami_info(port)) ?? {};
     if (info.root === root && info.single) return port;
   }
@@ -93,9 +114,12 @@ export async function stop_legacy(d: string): Promise<void> {
   const record = read_json_quiet(join(d, ".pes-server"));
   if (record !== undefined) kill_pid(record.pid);
   for (const name of [".pes-server", ".pes-port"]) unlink_quiet(join(d, name));
-  for (const port of LEGACY_PORTS) {
+  for (const port of legacy_ports()) {
     if ((await whoami(port)) === d) {
-      if (process.platform !== "win32") await pkill(`serve.py ${d} `);
+      if (process.platform !== "win32") {
+        await pkill(`serve.py ${d} `);
+        await pkill(`serve.ts ${d} `);
+      }
       break;
     }
   }
@@ -115,7 +139,7 @@ async function pkill(pattern: string): Promise<void> {
 export async function stop_server(root: string, old = false): Promise<boolean> {
   const alive = async (): Promise<boolean> => {
     if (old) {
-      for (const port of HUB_PORTS) if ((await whoami(port)) === root) return true;
+      for (const port of hub_ports()) if ((await whoami(port)) === root) return true;
       return false;
     }
     return (await root_port(root)) !== null;
@@ -128,7 +152,10 @@ export async function stop_server(root: string, old = false): Promise<boolean> {
     if (!(await alive())) return true;
     await sleep(100);
   }
-  if (process.platform !== "win32") await pkill(`serve.py ${root} `);
+  if (process.platform !== "win32") {
+    await pkill(`serve.py ${root} `);
+    await pkill(`serve.ts ${root} `);
+  }
   return !(await alive());
 }
 

@@ -342,3 +342,13 @@ PES 코어는 TypeScript 하나다(결정 0016). 이 저장소에서 Python 이 
   - E10: 손으로 쓴 최소 `project.json`(slug·created·settings·complete 없음)을 가져온 DB 의 상태 DTO 는 그 키들을 늘 채운다 — DB 에는 "원본에 없던 키"의 기록이 없다(slug 는 하네스가 사본에 직접 넣는다).
   - X04: `home` 이 폴더만 옮기고 DB 프로젝트는 그대로라, 옮긴 뒤에도 같은 이름의 DB 프로젝트가 읽힌다(0.15 기준값은 옛 폴더에 project.json 이 없어 DTO 가 null).
 
+
+## 13. PR26b-2(SEL-77) 진행 기록 — 읽기·보고서·서버·doctor 명령
+
+- 옮긴 것: `pending`·`digest`·`show`(`cli_read.ts`), `report`·`assemble`·`web`(같은 파일 — 상태는 코어의 새 버전, 사람이 보는 파일 `reports/<단계>/report.md·report.html·eli5.html`과 `out/report.md·sources.json·report.html` 은 코어가 저장한 그 바이트를 폴더에 0.15 처럼 UTF-8·LF 로 쓴다), `serve`·`hub`·`open`·`list`·`watch`·`which`(`cli_server.ts`), `doctor`(`cli_doctor.ts`). 이로써 `pes.py` 의 모든 명령 이름이 `pes.ts` 에 있다(`not_yet` 거절 없음).
+- 서버: `serve`·`hub` 는 `scripts/serve.ts` 를 떼어 낸 자식으로 띄우고(`node [현재 node 옵션] scripts/serve.ts <홈> <포트>`), `<홈>/.pes-hub-server = {"pid","port"}` 를 0.15 처럼 쓴 뒤 `/whoami` 가 이 홈으로 답할 때까지 기다려 주소를 찍는다. `stop` 은 그 파일로 끄고 `서버 종료 (…)` 문구는 0.15 그대로다.
+- 해석 I1~I3 (leader 수용): **I1** `PES_HUB_PORTS="<첫>-<끝>"`(포함 범위, 최대 64개)이 허브 포트 8760~8764 를 바꾼다. 값이 있으면 옛 프로젝트별 서버 포트(8765~8775)는 묻지 않는다 — 실제 PES 포트에는 접속 시도조차 하지 않는다. 값이 범위가 아니면 한국어 한 줄·exit 1(조용히 실제 포트로 돌아가지 않는다). **I2** `PES_NO_BROWSER=1` 이면 `open` 은 주소만 찍고 브라우저도 자식 프로세스도 만들지 않는다. **I3** 위 서버 기록 파일과 `/whoami` 대기.
+- D05: `watch` 는 0.15 의 `tail -n0 -F <feedback.log> | grep --line-buffered FEEDBACK` 한 줄 그대로(셸 한 단어 따옴표 규칙 포함). 프로젝트도 `project.json` 도 없는 이름은 0.15 와 달리 한국어 한 줄·exit 1 이다. 기다림 자체를 long-poll 로 바꾸는 것은 API 몫이다.
+- D08: `doctor` 의 환경 그룹에 `Python <버전>` 행이 없고 `Node <버전>` 행(ok, 빈 detail) 하나가 있다. 그 밖의 행(템플릿·PES 홈·PES_OWNER·서버·프로젝트)은 0.15 의 group·level·title·detail·fixable 과 같다. DB 프로젝트의 행은 0.15 `doctor_project` 의 것(주제 행, 단계 순서·보고서 빠짐·처리 안 한 답, 대시보드가 최신보다 오래됨(`--fix` = index.html 다시 만들기), 서버 행)이고 `데이터베이스` 그룹은 DB 가 깨졌거나 스키마가 낡았을 때만 나온다. 도구 그룹은 PC 마다 다르다. `bad` 행이 하나라도 있으면 exit 1(`--json` 도).
+- 깨진 `project.json`: 읽기·쓰기·보고서 명령 모두 exit 1·한국어 한 줄이고 폴더는 바뀌지 않는다(D11). doctor 는 같은 행을 0.15 처럼 보이며 detail 은 Python `json` 의 오류 문장(`Expecting value: line 1 column 21 (char 20)`)을 그대로 만든다(`cli_support.py_json_error`).
+- 읽기 모델 보정(`legacy_view.ts`): 등록된 보고서 파일의 `label` 은 0.15 의 이름(`마크다운`·`웹 보고서`·`그림 설명(eli5)`…)이고 단계에 `reports_built` 가 있다; `executive_summary`·`conclusion` 은 init 직후부터 빈 글로 있고 비어 있는 `qa`·`review_log` 키는 없다(0.15 는 첫 기록 때 키를 만들었다); `slug` 는 프로젝트를 만들 때의 이름이다(폴더를 옮겨 DB 이름이 바뀌어도 0.15 의 project.json 처럼 그대로). `report` 의 코어 호출은 `plain` 을 받으면 0.15 처럼 버전 표시 줄이 없는 보고서를 만든다(`pes.py` DB 경로는 그대로 버전 줄을 단다).

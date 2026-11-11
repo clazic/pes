@@ -1849,6 +1849,7 @@ const read_project: Handler = async (s, req) => {
     feedback: view.feedback,
     lock: lease === null ? null : { owner: lease.session ?? `agent-run:${lease.run_id}`, since: local_stamp(lease.heartbeat_at) },
     updated: local_stamp(Number(last?.at ?? 0n)),
+    updated_ms: Number(last?.at ?? 0n),
   };
 };
 
@@ -2047,7 +2048,8 @@ const report: Handler = async (s, req) => {
     project.id,
     stage.id,
   );
-  const made = stage_report(view.project, stage.key, view.feedback, built, eli5, Number(next?.n ?? 0n) + 1);
+  // `plain` (scripts/pes.ts): the report as 0.15 wrote it, without the version line — its files also sit in the project folder
+  const made = stage_report(view.project, stage.key, view.feedback, built, eli5, req.args?.plain === true ? null : Number(next?.n ?? 0n) + 1);
   const files: RenderedFile[] = [
     { name: "report.md", media_type: "text/markdown", bytes: utf8(made.markdown) },
     { name: "report.html", media_type: "text/html", bytes: utf8(made.html) },

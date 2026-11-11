@@ -5,6 +5,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { server_url } from "./cli_home.ts";
+import { load_for_read } from "./cli_legacy_read.ts";
 import {
   LABEL,
   STAGES,
@@ -18,6 +19,7 @@ import {
   norm_text,
   now,
   pdir,
+  py_json_error,
   say,
   stage_arg,
   write_text,
@@ -45,8 +47,18 @@ export async function project_exists(d: string): Promise<boolean> {
 export async function need_project(d: string, what = "쓰기"): Promise<string> {
   const slug = slug_of(d);
   if ((await db_slugs()).has(slug)) return slug;
-  if (existsSync(join(d, "project.json"))) {
-    die(`${what}: ${slug} 는 아직 DB 로 이전하지 않은 옛 project.json 프로젝트라 쓸 수 없습니다 — 먼저 이전(import → 검증 → 활성화)하세요. 읽기(status·digest·show 등)는 그대로 됩니다`, 2);
+  const legacy = join(d, "project.json");
+  if (existsSync(legacy)) {
+    // a project.json that cannot be read is a broken folder, not a project waiting for its migration: one plain line, the folder untouched (D11)
+    let broken: string | null = null;
+    try {
+      broken = py_json_error(readFileSync(legacy, "utf8"));
+    } catch (error) {
+      broken = `읽을 수 없음 (${(error as NodeJS.ErrnoException).code ?? "읽기 오류"})`;
+    }
+    if (broken !== null) die(`project.json 을 읽지 못했습니다: ${legacy} (${broken}) — 폴더는 그대로 두었습니다`, 1);
+    if (what === "읽기") die(`${what}: ${slug} 는 아직 DB 로 이전하지 않은 옛 project.json 프로젝트입니다 — 먼저 이전(import → 검증 → 활성화)하세요`, 2);
+    die(`${what}: ${slug} 는 아직 DB 로 이전하지 않은 옛 project.json 프로젝트라 쓸 수 없습니다 — 먼저 이전(import → 검증 → 활성화)하세요`, 2);
   }
   return die(`project.json 없음: ${d}`, 1);
 }
@@ -284,7 +296,7 @@ export async function cmd_unlock(args: string[]): Promise<void> {
 
 // ---------------------------------------------------------------- status
 
-function status_line(p: Record<string, unknown>, d: string, pend: Array<{ name: string; stage?: string; kind?: string; round?: number; text?: string }>, url: string | null): void {
+function status_line(p: Record<string, unknown>, d: string, pend: Array<{ name: string; stage?: string; kind?: string; round?: number; text?: string }>, url: string | null, name: string = slug_of(d)): void {
   const stages = p.stages as Record<string, Record<string, unknown>>;
   say(`주제: ${String(p.topic)}  (${d})`);
   say(`현재 단계: ${LABEL[String(p.current)]}${p.complete ? "  · 전체 완료" : ""}`);
@@ -312,7 +324,7 @@ function status_line(p: Record<string, unknown>, d: string, pend: Array<{ name: 
     const first = String(x.text ?? "").split(/\r?\n/)[0] ?? "";
     say(`  - ${x.name}  [${x.stage ?? ""}/${x.kind ?? ""}/R${x.round ?? 0}] ${Array.from(first).slice(0, 80).join("")}`);
   }
-  say(`대시보드: ${url ?? `서버 꺼짐 — serve ${slug_of(d)}`}`);
+  say(`대시보드: ${url ?? `서버 꺼짐 — serve ${name}`}`);
 }
 
 /** Python's `{v:<6}` pads by code points; the Hangul and the middle dot are one each. */
@@ -322,9 +334,8 @@ function width_of(text: string): number {
 
 export async function cmd_status(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "status"));
-  const slug = await need_project(d, "읽기");
-  const data = await bridge("read_project", slug);
-  const pend = (data.pending as Array<{ name: string; stage?: string; kind?: string; round?: number; text?: string }>) ?? [];
-  status_line(data.project as Record<string, unknown>, d, pend, await server_url(d));
+  const state = await load_for_read(d);
+  // an old folder is told by the name written in its project.json (a copy of the folder under another name still is that project)
+  const named = state.legacy && typeof state.project.slug === "string" && state.project.slug !== "" ? state.project.slug : slug_of(d);
+  status_line(state.project, d, state.pending, await server_url(d), named);
 }
-

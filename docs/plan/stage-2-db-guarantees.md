@@ -523,3 +523,12 @@ A(내장 실행기, `internal_ai`)와 B(MCP·HTTP, `external_agent` — 직접 �
 - **서버 꺼짐 판단**: `whoami` 를 허브 포트(8760~8764, 옛 8765~8775)에 `fetch` 로 물어 연결 거부(ECONNREFUSED)·시간 초과를 "서버 꺼짐"으로 본다(시험 가드가 막은 포트도 같다).
 
 알려진 한계: 같은 폴더 이름의 프로젝트는 PES 홈 밖에서도 하나로 본다(slug = 폴더 이름). 승인되지 않은 단계의 `reopen` 은 0.15 와 달리 "승인된 단계가 아니라 다시 열 수 없다"로 거절한다. 앞 단계가 승인되지 않은 `approve` 와 이미 승인된 단계의 `round-start` 도 0.15 와 달리 거절한다(D13, 위 두 줄 — 계약 사례 X08·X09 가 0.15 기준값과 ts 기대값을 함께 고정한다). 영어 `code: message` 로 나가는 코어 거절은 위에 적은 경로(approve·round-start·merge `sources`)만 한국어로 바꿨고, 나머지 코어 거절(예: 이미 있는 이름)은 이전처럼 코어 문구다. `init` 이 DB 에 프로젝트를 만든 뒤 하위 폴더 만들기·라이브러리 복사·`feedback.log` 쓰기에 실패하면 프로젝트는 DB 에 남는다(다시 `init` 하면 "이미 프로젝트가 있습니다"). Windows 의 읽기 권한 오류(EPERM)는 EACCES 와 같은 `[Errno 13] Permission denied` 한 줄이다. `qa-brief` 는 읽기 명령 `digest` 가 아직 없어 DB 방식 지시문(`pes.py` DB 경로와 같은 글)을 쓴다.
+
+### 8.22 TypeScript CLI — 읽기·보고서·서버·doctor 명령 (PR26b-2, SEL-77)
+
+`scripts/pes.ts` 에 남아 있던 명령(`pending`·`digest`·`show`·`report`·`assemble`·`web`·`serve`·`hub`·`open`·`list`·`watch`·`which`·`doctor`)이 들어와 `pes.py` 의 모든 명령 이름이 있다. 상태는 코어에서만 읽고 쓰며(8.21 과 같은 호출), 사람이 보는 파일만 폴더에 쓴다.
+
+- **보고서 파일**: `report`·`assemble`·`web` 은 코어에 새 버전을 쌓은 뒤 그 버전의 바이트를 `report_file` 로 읽어 `reports/<단계>/…`·`out/…` 에 UTF-8·LF 로 쓴다(폴더와 DB 가 같은 바이트). `report` 는 코어에 `plain: true` 를 보내 0.15 와 같은 보고서(버전 표시 줄 없음)를 받는다 — `pes.py` DB 경로는 그대로 버전 줄을 단다. `eli5.json`·`out/cover.json`·`out/appendix.md` 는 읽기만 한다. 0.15 처럼 `report` 는 `index.html` 을 다시 만들고 `assemble`·`web` 은 만들지 않는다.
+- **서버**: `serve.ts` 를 떼어 낸 자식으로 띄운다(현재 node 옵션을 그대로 넘긴다 — 시험의 권한 목록·가드도 따라간다). 허브 포트 범위는 `PES_HUB_PORTS`(migration-ts-equivalence 13절의 I1~I3), `PES_NO_BROWSER=1` 이면 `open` 은 아무것도 띄우지 않는다. `pkill` 은 `serve.py`·`serve.ts` 두 이름을 모두 찾는다.
+- **doctor**: 0.15 의 행을 같은 순서로 낸다. DB 프로젝트는 `project.json` 대신 코어의 읽기 모델(`read_project` 의 `updated_ms`)로 "대시보드가 최신 상태보다 오래됨" 을 판단한다(index.html 이 없거나 마지막 변경보다 1초 넘게 오래됨). 이전하지 않은 옛 `project.json` 프로젝트는 읽기만 하고 `--fix` 가 건드리지 않는다.
+- **읽기 모델**(`legacy_view.ts`)은 0.15 의 project.json 모양에 더 가깝다: 보고서 파일 `label`·단계 `reports_built`·최상위 빈 `executive_summary`/`conclusion`·빈 `qa`/`review_log` 키 없음·`slug` 는 만들 때의 이름.
