@@ -35,8 +35,3 @@ export function with_hidden_key(text: string): string {
 export function with_plain_key(text: string): string {
   return `${text} ${SYNTHETIC_KEY}`;
 }
-
-/** the time one answer of up to 20k pathological characters may take, whole run (today's code: 1-8 s; fixed: well under 0.5 s) */
-export const MAX_SMALL_SECONDS = 3;
-/** the time for the huge answers (200k / 3M chars); a square would take minutes */
-export const MAX_HUGE_SECONDS = 10;

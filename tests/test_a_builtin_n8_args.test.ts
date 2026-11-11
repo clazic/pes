@@ -3,12 +3,15 @@
 // plain): unknown + blocked_usage, reservation kept, no business command, key kept nowhere. Written BEFORE the fix.
 // Huge sizes (200k / 3M) live in test_a_builtin_n8_huge.test.ts.
 
+// SEL-76: no wall-clock limit on the whole run here (fake server, DB and CI load made it flaky on Windows). The
+// run is only guarded against a hang (run_timed, test timeout); the scan time is judged in test_a_builtin_n8_scan_time.test.ts.
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { FINISH, open_stage, ready_project, set_script, start_run, with_a_env, type Format, type ScriptedTurn } from "./helpers/a_builtin_env.ts";
 import { assert_held_unknown, assert_key_not_kept, assert_settled_not_sent, business_rows, run_timed } from "./helpers/a_big.ts";
-import { MAX_SMALL_SECONDS, PATHOLOGIES, with_hidden_key, with_plain_key } from "./helpers/a_pathology.ts";
+import { PATHOLOGIES, with_hidden_key, with_plain_key } from "./helpers/a_pathology.ts";
 
 const FORMATS: Format[] = ["openai_compatible", "anthropic"];
 const SIZES = [5_000, 20_000];
@@ -36,8 +39,7 @@ for (const format of FORMATS) {
             const before = business_rows(env);
             const label = `${format} ${n} ${p.label} ${shape.name}`;
             set_script(env, [turn_with_argument(format, shape.text), FINISH]);
-            const { res, seconds } = await run_timed(label, () => start_run(env, { stage_id: o.stage_id, round_id: o.round_id }));
-            assert.ok(seconds < MAX_SMALL_SECONDS, `${label}: took ${seconds.toFixed(1)}s (limit ${MAX_SMALL_SECONDS}s)`);
+            const { res } = await run_timed(label, () => start_run(env, { stage_id: o.stage_id, round_id: o.round_id }));
             if (shape.has_key) {
               assert_held_unknown(env, res, label);
               assert.deepEqual(business_rows(env), before, `${label}: no business command ran`);
