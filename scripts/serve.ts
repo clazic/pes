@@ -3,7 +3,7 @@
 //
 //  - GET /                  → the home's index.html (project list)
 //  - GET /<slug>/           → that project's index.html (newest ask-*.html when there is none yet)
-//  - GET /ping, /<slug>/ping → {"ok": true}            GET /whoami → {"root": "<home>", "single": true}
+//  - GET /ping, /<slug>/ping → {"ok": true}            GET /whoami → {"root": "<home>", "single": true, "pid": <this process>}
 //  - GET /version, /<slug>/version → {"v": <newest index.html / ask-*.html time, epoch seconds>}
 //  - POST /<slug>/feedback  {"stage","round","kind","text","answers",...}
 //      the answer is ONE submission written to the database in THIS process (no child process, no feedback/<name>.json file);
@@ -12,18 +12,40 @@
 //  - POST /feedback (screens made before 0.8) finds the project from the Referer.
 //  - A POST from another Origin is refused (403) unless ~/.pes/config.json lists it in trusted_origins (read on every request).
 //
-// Not here (SEL-77 and later, with scripts/pes.ts): the /api/v1/* pass-through, the DB-built dashboard and hub pages.
+//  - /api/v1/*  → the PES API (pes_core/api.ts, in this process), BEFORE any static file: a folder named api/v1 never shadows it. A request of
+//      another Origin (null included) is refused 403 `forbidden` before the database is even touched; a missing credential is the API's 401.
+//  - /<slug>/ and /<slug>/index.html, / and /index.html of a project (home) the database serves are BUILT FROM THE DATABASE on every request;
+//      the reports (/<slug>/reports/<stage>/<name>, /<slug>/out/<name>) are the database's reports and files, never a file of the folder.
+//  - /version, /<slug>/version = one integer: the database change cursor (the home's moves with any project's change).
 //
 // Safety: binds 127.0.0.1 only, never asks DNS for a host name (SEL-33: socket.getfqdn() stalled 30 s on some macOS runners), never
 // contacts the hub ports 8760~8775, never starts another program.
+import "./node_guard.ts"; // first: Node 26 미만이면 한국어 한 줄로 끝낸다 (exit 1)
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 
+import type { ApiApp } from "./pes_core/api.ts";
 import type { BridgeReply } from "./pes_core/cli_bridge.ts";
+import type { Db } from "./pes_core/db.ts";
 
 const MAX_BODY = 256 * 1024;
+const MAX_API_BODY = 2 * MAX_BODY;
+/** Query string limit of the API (a signed cursor, limit and wait_ms fit; the request stays small). */
+const MAX_API_QUERY = 2048;
+const REPORT_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8" };
+/** The API error texts the server itself gives (the envelope of ApiApp: Korean message, retryable only for 429/503, next_action a string). */
+const API_ERROR_TEXT: Record<string, [string, string]> = {
+  forbidden: ["이 요청은 허용되지 않습니다.", "use_owner_session"],
+  invalid_payload: ["요청 내용이 올바르지 않습니다.", "fix_request"],
+  payload_too_large: ["요청 본문이 너무 큽니다.", "fix_request"],
+  internal_error: ["서버 안에서 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"],
+  schema_not_ready: ["PES 데이터베이스가 아직 준비되지 않았습니다.", "migrate_database"],
+  unauthenticated: ["인증이 필요합니다. 올바른 자격으로 다시 요청해 주세요.", "authenticate"],
+};
 /** A body above MAX_BODY but within this size is read away before the 413 is sent (the sender is not cut off). */
 const DRAIN_LIMIT = 8 * 1024 * 1024;
 const DRAIN_IO_TIMEOUT_MS = 10_000;
@@ -196,12 +218,12 @@ function ask_forms(dir: string): string[] {
 type Answerer = (slug: string, args: Record<string, unknown>) => Promise<BridgeReply | null>;
 
 /** In-process access to the database: one request at a time (a burst of answers is written one after another, none lost). */
-function make_db(root: string): { route: (slug: string) => Promise<"database" | "none" | null>; feedback: Answerer } {
+function make_db(root: string): { route: (slug: string) => Promise<"database" | "none" | null>; feedback: Answerer; call: (op: string, slug: string | null, args?: Record<string, unknown>) => Promise<BridgeReply | null>; env: Record<string, string | undefined> } {
   const env: Record<string, string | undefined> = { ...process.env, PES_HOME: root };
   delete env.PES_TOKEN;
   delete env.PES_OWNER;
   let tail: Promise<unknown> = Promise.resolve();
-  const bridge = async (op: string, slug: string, args: Record<string, unknown>): Promise<BridgeReply | null> => {
+  const bridge = async (op: string, slug: string | null, args: Record<string, unknown>): Promise<BridgeReply | null> => {
     const run = async (): Promise<BridgeReply | null> => {
       try {
         const { handle_request } = await import("./pes_core/cli_bridge.ts");
@@ -219,17 +241,24 @@ function make_db(root: string): { route: (slug: string) => Promise<"database" | 
     return next;
   };
   return {
+    env,
+    // the project is served by the database once it is active; a name the database does not serve (yet) is an old folder. Asked every time: a project migrated while this server runs is served at once.
     route: async (slug) => {
       const res = await bridge("route", slug, {});
       if (res === null || !res.ok) return null;
       return (res.data as { serving?: string }).serving === "database" ? "database" : "none";
     },
     feedback: (slug, args) => bridge("web_feedback", slug, args),
+    call: (op, slug, args = {}) => bridge(op, slug, args),
   };
 }
 
 async function start(config: Config): Promise<void> {
   const { root, port } = config;
+  // the home this server serves is the PES home; the screens read and write as this computer's human owner, so no credential variable counts
+  process.env.PES_HOME = root;
+  delete process.env.PES_TOKEN;
+  delete process.env.PES_OWNER;
   // Load the database code BEFORE listening: otherwise the first answer waits for it. A failure here is not fatal: the first answer meets it again and is refused with 503.
   await import("./pes_core/cli_bridge.ts").catch(() => undefined);
   const allowed = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
@@ -280,6 +309,22 @@ async function start(config: Config): Promise<void> {
     return trailing ? `${full}/` : full;
   };
 
+  const real_root = ((): string => {
+    try {
+      return realpathSync.native(root);
+    } catch {
+      return root;
+    }
+  })();
+  const inside_home = (target: string): boolean => {
+    try {
+      const real = realpathSync.native(target);
+      return real === real_root || real.startsWith(real_root.endsWith(sep) ? real_root : `${real_root}${sep}`);
+    } catch {
+      return false;
+    }
+  };
+
   const serve_static = (req: IncomingMessage, res: ServerResponse): void => {
     const path = raw_path(req.url);
     let target = translate(path);
@@ -306,6 +351,11 @@ async function start(config: Config): Promise<void> {
       not_found(req, res);
       return;
     }
+    // a link inside the home that points out of it is not followed (the home is what is served, not the disk)
+    if (!inside_home(target)) {
+      not_found(req, res);
+      return;
+    }
     const headers = {
       "Content-Type": guess_type(target),
       "Content-Length": stat.size,
@@ -328,9 +378,155 @@ async function start(config: Config): Promise<void> {
     });
   };
 
-  const handle_get = (req: IncomingMessage, res: ServerResponse): void => {
+  const send_html = (req: IncomingMessage, res: ServerResponse, text: string): void => send(req, res, 200, { "Content-Type": "text/html; charset=utf-8" }, text);
+  const db_down = (req: IncomingMessage, res: ServerResponse): void => send_json(req, res, 503, { ok: false, error: "db" });
+
+  /**
+   * The screens the database builds. Returns true when it answered; false when the address is not one of them (an old project.json folder,
+   * a static file such as ask-*.html): the caller goes on with the folder.
+   */
+  /**
+   * A question form page of a project the database serves: the file `pes ask` wrote, with the form version it shows (set_id) and its form key
+   * put into its data and the DB screen additions (kept drafts, receipts, conflict notice) behind it — so an answer names the version it answered.
+   */
+  const serve_ask_form = async (req: IncomingMessage, res: ServerResponse, slug: string, dir: string, name: string, overlay: (page: string, file: string) => string): Promise<boolean> => {
+    const file = join(dir, name);
+    let page: string;
+    try {
+      if (!statSync(file).isFile() || !inside_home(file)) return false;
+      page = readFileSync(file, "utf8");
+    } catch {
+      return false;
+    }
+    const match = /<script id="data" type="application\/json">([\s\S]*?)<\/script>/.exec(page);
+    if (match === null) return false;
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(match[1] as string);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+      data = parsed as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    const form_key = name.slice("ask-".length, -".html".length);
+    const spec = data.spec !== null && typeof data.spec === "object" ? (data.spec as Record<string, unknown>) : {};
+    const reply = await db.call("form_set", slug, { form_key, ...(typeof spec.stage === "string" ? { stage: spec.stage } : {}) });
+    if (reply === null) {
+      db_down(req, res);
+      return true;
+    }
+    if (reply.ok && typeof (reply.data as { set_id?: unknown }).set_id === "string") data.set_id = (reply.data as { set_id: string }).set_id;
+    data.form_key = form_key;
+    const blob = JSON.stringify(data).replace(/<\//g, "<\\/");
+    const out = page.slice(0, match.index) + `<script id="data" type="application/json">${blob}</script>` + page.slice(match.index + match[0].length);
+    send_html(req, res, overlay(out, "overlay-ask.html"));
+    return true;
+  };
+
+  const handle_db_get = async (req: IncomingMessage, res: ServerResponse, path: string): Promise<boolean> => {
+    const parts = py_unquote(path).split("/").filter((part) => part !== "");
+    const screens = await import("./pes_core/cli_screens.ts");
+    const { Die } = await import("./pes_core/cli_support.ts");
+    try {
+      if (path === "/version" || (parts.length === 1 && parts[0] === "version")) {
+        const reply = await db.call("version", null);
+        if (reply === null || !reply.ok) return false; // no database yet: the old file time answers
+        send_json(req, res, 200, { v: Number((reply.data as { v?: unknown }).v ?? 0) });
+        return true;
+      }
+      if (parts.length === 0 || (parts.length === 1 && parts[0] === "index.html")) {
+        if (existsSync(join(root, "project.json"))) return false; // the home itself is a project (old way)
+        let any_dir = false;
+        try {
+          any_dir = readdirSync(root, { withFileTypes: true }).some((entry) => entry.isDirectory());
+        } catch {
+          any_dir = false;
+        }
+        if (!existsSync(join(root, "index.html")) && !any_dir) return false;
+        const { db_hub_html } = await import("./pes_core/cli_server.ts");
+        send_html(req, res, await db_hub_html(root));
+        return true;
+      }
+      const slug = parts[0] as string;
+      if (!SLUG.test(slug) || slug === "ping" || slug === "whoami") return false;
+      const tail = parts.slice(1);
+      const is_version = tail.length === 1 && tail[0] === "version";
+      const is_ping = tail.length === 1 && tail[0] === "ping";
+      const is_index = tail.length === 0 || (tail.length === 1 && tail[0] === "index.html");
+      const is_report = tail.length > 0 && (tail[0] === "reports" || tail[0] === "out");
+      const ask_name = tail.length === 1 && /^ask-.+\.html$/.test(tail[0] as string) ? (tail[0] as string) : null;
+      if (!is_version && !is_ping && !is_index && !is_report && ask_name === null) return false;
+      const serving = await db.route(slug);
+      if (serving === null) {
+        db_down(req, res);
+        return true;
+      }
+      if (serving !== "database") return false;
+      const dir = join(root, slug);
+      if (is_ping) {
+        send_json(req, res, 200, { ok: true });
+        return true;
+      }
+      if (ask_name !== null) return await serve_ask_form(req, res, slug, dir, ask_name, screens.with_overlay);
+      if (is_version) {
+        const reply = await db.call("version", slug);
+        if (reply === null || !reply.ok) {
+          db_down(req, res);
+          return true;
+        }
+        send_json(req, res, 200, { v: Number((reply.data as { v?: unknown }).v ?? 0) });
+        return true;
+      }
+      if (is_index) {
+        if (tail.length === 0) {
+          // before the first render the question form is the first page — only for /<slug>/; /<slug>/index.html is always the dashboard
+          const base = `/${slug}/`;
+          if (path !== base) return false; // /<slug> without the slash: the folder rules (301 for a folder, 302 for an old project.json project)
+          if (!existsSync(join(dir, "index.html"))) {
+            const asks = ask_forms(dir)
+              .map((name) => ({ name, at: mtime_ms(join(dir, name)) }))
+              .sort((a, b) => a.at - b.at || (a.name < b.name ? -1 : 1));
+            const newest = asks[asks.length - 1];
+            if (newest !== undefined) {
+              redirect(req, res, 302, base + encodeURI(newest.name));
+              return true;
+            }
+          }
+        }
+        send_html(req, res, await screens.db_dashboard_html(dir, slug));
+        return true;
+      }
+      // reports, eli5, final report: the database's rendered files at the same address
+      const reply = await db.call("report_file", slug, { path: tail.join("/") });
+      if (reply === null) {
+        db_down(req, res);
+        return true;
+      }
+      if (!reply.ok) {
+        // the address of a report / output is the database's, never a file of the folder (a link or a hand-copied file does not answer for it): no such report is the plain 404
+        if (reply.code !== "not_found") {
+          db_down(req, res);
+          return true;
+        }
+        not_found(req, res);
+        return true;
+      }
+      const data = reply.data as { name: string; bytes_b64: string };
+      send(req, res, 200, { "Content-Type": REPORT_TYPES[extname(data.name).toLowerCase()] ?? "application/octet-stream" }, Buffer.from(data.bytes_b64, "base64"));
+      return true;
+    } catch (error) {
+      if (error instanceof Die) {
+        db_down(req, res);
+        return true;
+      }
+      throw error;
+    }
+  };
+
+  const handle_get = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const path = raw_path(req.url);
-    if (path === "/whoami") return send_json(req, res, 200, { root, single: true }, { cors: true });
+    if (path === "/whoami") return send_json(req, res, 200, { root, single: true, pid: process.pid }, { cors: true });
+    if (await handle_db_get(req, res, path)) return;
     if (path === "/version" || path.endsWith("/version")) {
       const { dir } = project_of(path.slice(0, -"version".length) || "/");
       const base = dir ?? root;
@@ -353,10 +549,118 @@ async function start(config: Config): Promise<void> {
     return serve_static(req, res);
   };
 
+  // ---------------------------------------------------------------- /api/v1
+  const is_api_path = (path: string): boolean => path === "/api/v1" || path.startsWith("/api/v1/");
+
+  const api_error = (req: IncomingMessage, res: ServerResponse, status: number, code: string, options: { close?: boolean; target?: string | null } = {}): void => {
+    const [message, next_action] = API_ERROR_TEXT[code] ?? (API_ERROR_TEXT.internal_error as [string, string]);
+    const request_id = `serve-${process.hrtime.bigint()}`;
+    const body = JSON.stringify({ format_version: "1.0", error: { code, message, retryable: status === 429 || status === 503, target: options.target ?? null, details: null, next_action }, request_id });
+    const headers: Record<string, string> = { "Content-Type": "application/json; charset=utf-8", "x-request-id": request_id };
+    if (options.close === true) headers.Connection = "close";
+    send(req, res, status, headers, body);
+  };
+
+  /** One long-lived API app on its own connection: migrated on the first ACCEPTED API request (a refused cross-origin request never creates the database). */
+  let api: { app: ApiApp; db: Db } | "failed" | null = null;
+  const ensure_api = async (): Promise<{ app: ApiApp; db: Db } | "failed"> => {
+    if (api !== null && api !== "failed") return api;
+    try {
+      const [{ ApiApp: App }, { SystemClock }, { connect, migrate }, { db_path, objects_dir }, { local_session_secret }] = await Promise.all([
+        import("./pes_core/api.ts"),
+        import("./pes_core/clock.ts"),
+        import("./pes_core/db.ts"),
+        import("./pes_core/paths.ts"),
+        import("./pes_core/api_secret.ts"),
+      ]);
+      const env = db.env;
+      mkdirSync(dirname(db_path(env)), { recursive: true });
+      const handle = connect(db_path(env));
+      try {
+        migrate(handle);
+        api = { app: new App({ db: handle, clock: new SystemClock(), objects_dir: objects_dir(env), local_session_secret: local_session_secret(env) }), db: handle };
+      } catch (error) {
+        handle.close();
+        throw error;
+      }
+      return api;
+    } catch (error) {
+      process.stderr.write(`serve.ts: ${error instanceof Error ? error.message : String(error)}\n`);
+      return "failed"; // tried again by the next request
+    }
+  };
+
+  const origin_allowed = (req: IncomingMessage): boolean => {
+    const origin = header(req, "origin");
+    return origin === "" || allowed.has(origin) || trusted_origins().has(origin);
+  };
+
+  /** True when the database exists (not empty), or when the request carries the owner's local session secret (which may create it). */
+  const may_create_db = async (req: IncomingMessage): Promise<boolean> => {
+    try {
+      const [{ db_path }, { existing_local_session_secret }] = await Promise.all([import("./pes_core/paths.ts"), import("./pes_core/api_secret.ts")]);
+      try {
+        if (statSync(db_path(db.env)).size > 0) return true;
+      } catch {
+        // no database file
+      }
+      const secret = existing_local_session_secret(db.env);
+      const presented = header(req, "x-pes-session");
+      if (secret === null || presented === "") return false;
+      const digest = (text: string): Buffer => createHash("sha256").update(text, "utf8").digest();
+      return digest(presented).equals(digest(secret)) && presented.length === secret.length;
+    } catch {
+      return false;
+    }
+  };
+
+  const query_refused = (query: string): boolean => {
+    if (query === "") return false;
+    if (query.length > MAX_API_QUERY || /[^\x21-\x7e]/.test(query)) return true;
+    try {
+      decodeURIComponent(query.replace(/\+/g, "%2B"));
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  const handle_api = async (req: IncomingMessage, res: ServerResponse, method: string): Promise<void> => {
+    const path = raw_path(req.url);
+    const query = query_of(req.url).replace(/^\?/, "");
+    if (method !== "GET" && method !== "HEAD" && !origin_allowed(req)) return api_error(req, res, 403, "forbidden");
+    const length_text = header(req, "content-length");
+    const length = /^\d+$/.test(length_text) ? Number(length_text) : 0;
+    if (length > MAX_API_BODY) return reject_oversize(req, res, length, () => api_error(req, res, 413, "payload_too_large", { close: true }));
+    const body = length > 0 ? await read_body(req, length) : Buffer.alloc(0);
+    if (body === null) return;
+    if (query_refused(query)) return api_error(req, res, 400, "invalid_payload", { target: "$.query" });
+    // a home without a database (none, or an empty file) gets one only for the owner's session: any other request (an <img> of any page, a
+    // token — which no missing database can hold) is 401 before anything is created, so a GET never turns a 0.15 home into a database home (E15)
+    if ((api === null || api === "failed") && !(await may_create_db(req))) return api_error(req, res, 401, "unauthenticated");
+    const ready = await ensure_api();
+    if (ready === "failed") return api_error(req, res, 503, "schema_not_ready");
+    const headers_in: Record<string, string> = {};
+    for (const [name, value] of Object.entries(req.headers)) if (value !== undefined) headers_in[name.toLowerCase()] = Array.isArray(value) ? (value[0] ?? "") : value;
+    const response = await ready.app.handle({ method, path: query === "" ? path : `${path}?${query}`, headers: headers_in, body: new Uint8Array(body) });
+    const bytes = response.bytes !== null && response.bytes !== undefined ? Buffer.from(response.bytes) : Buffer.from(JSON.stringify(response.json), "utf8");
+    const out: Record<string, string | number> = {};
+    for (const [name, value] of Object.entries(response.headers)) {
+      const lower = name.toLowerCase();
+      if (lower === "content-length" || lower === "connection" || lower === "transfer-encoding") continue;
+      if (name === "" || /[\r\n\0:]/.test(name) || /[\r\n\0]/.test(String(value))) continue;
+      out[name] = String(value);
+    }
+    res.writeHead(response.status, { ...out, "Content-Length": bytes.length });
+    res.end(method === "HEAD" ? undefined : bytes);
+  };
+
   /** Over the size limit: read a body within the drain limit away first (an upload in progress is not cut off), then answer 413 and close. */
-  const reject_oversize = (req: IncomingMessage, res: ServerResponse, length: number): void => {
+  const reject_oversize = (req: IncomingMessage, res: ServerResponse, length: number, respond?: () => void): void => {
     const answer = (): void => {
-      if (!res.writableEnded) send_json(req, res, 413, { ok: false }, { close: true });
+      if (res.writableEnded) return;
+      if (respond !== undefined) respond();
+      else send_json(req, res, 413, { ok: false }, { close: true });
     };
     if (length <= 0 || length > DRAIN_LIMIT) return answer();
     let timer = setTimeout(() => req.destroy(), DRAIN_IO_TIMEOUT_MS);
@@ -475,7 +779,9 @@ async function start(config: Config): Promise<void> {
       // protocol-relative `//dir/` (another host) but to `/dir/` on this origin
       if (req.url?.startsWith("//")) req.url = `/${req.url.replace(/^\/+/, "")}`;
       const method = req.method ?? "GET";
-      if (method === "GET" || method === "HEAD") handle_get(req, res);
+      // /api/v1 first, whatever the folders are called (a folder api/v1 never shadows it)
+      if (is_api_path(raw_path(req.url)) && ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"].includes(method)) handle_api(req, res, method).catch(fail);
+      else if (method === "GET" || method === "HEAD") handle_get(req, res).catch(fail);
       else if (method === "POST") handle_post(req, res).catch(fail);
       else if (method === "PUT") send_json(req, res, 405, { ok: false });
       else send_error(req, res, 501, `Unsupported method ('${method}')`, "Server does not support this operation");

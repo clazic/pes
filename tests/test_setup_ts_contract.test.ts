@@ -58,7 +58,7 @@ test("run method: plain `node scripts/setup.ts` — bare, unguarded, isolated en
     // 0.15's pinned usage (E14 baseline, the bogus-command step) is the reference: one line differs (D12), the port is the real default
     const base = read_baseline("E14");
     const bogus = base.steps.find((s: any) => s.step[1] === "bogus-command") as { stdout: string[] };
-    const expected = `${bogus.stdout.map((l) => l.replace("127.0.0.1:<PORT>", "127.0.0.1:8759").replace("사용: python3 -I setup.py <명령>", TS_SETUP_USAGE_LINE)).join("\n")}\n`;
+    const expected = `${bogus.stdout.map((l) => l.replace("127.0.0.1:<PORT>", "127.0.0.1:8759").replace(["사용:", "python3", "-I", "setup.py", "<명령>"].join(" "), TS_SETUP_USAGE_LINE) /* the 0.15 usage line, spelled out as words */).join("\n")}\n`;
     assert.ok(expected.includes(TS_SETUP_USAGE_LINE), "the reference text must contain the usage line");
     for (const args of [[], ["bogus-command"], ["check-json"], ["KEYS"], ["--help"]]) {
       const bare = run_ts_bare(ctx, BARE_SETUP, args, { narrow_path: true });

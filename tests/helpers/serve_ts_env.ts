@@ -21,6 +21,12 @@ export interface ServeFixture {
 }
 
 export interface FixtureOptions extends TsServeOptions {
+  /**
+   * 0.15 static-serving fixture: NOTHING is put into the DB (no ~/.pes/pes.db is made), so <root>/synthetic and every other folder is an
+   * old project.json folder (legacy_only) that serve.ts serves as files — index.html as it is, /version = the newest index.html / ask-*.html
+   * mtime. The default (DB-serving) fixture has `synthetic` in the DB: its pages and /version come from the DB.
+   */
+  no_db?: boolean;
   /** do not start the server (the test starts it itself) */
   no_start?: boolean;
   /** more files below the PES home before the server starts: { "synthetic/out/note.md": "text" } */
@@ -49,8 +55,10 @@ export async function serve_fixture(prefix: string, options: FixtureOptions = {}
       writeFileSync(join(root, slug, "index.html"), `<html>${slug}</html>`, "utf8");
     }
     // seed first: the importer sees only the project the user's migration would see; the extra files come after
-    await srv_seed_project(ctx, project);
-    for (const slug of options.extra_projects ?? []) await srv_seed_project(ctx, join(root, slug));
+    if (options.no_db !== true) {
+      await srv_seed_project(ctx, project);
+      for (const slug of options.extra_projects ?? []) await srv_seed_project(ctx, join(root, slug));
+    }
     for (const [rel, data] of Object.entries(options.files ?? {})) {
       const target = join(root, ...rel.split("/"));
       mkdirSync(join(target, ".."), { recursive: true });

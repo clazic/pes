@@ -10,18 +10,18 @@
 | `skills/` | 단계별 스킬(`core`, `plan`, `research`, `analyze`, `write`, `verify`, `publish`) |
 | `agents/` | 서브에이전트 지침(researcher·writer·verifier·reviewer) |
 | `commands/` | `/pes:*` 명령 |
-| `scripts/` | `pes.py`(상태 CLI), `serve.py`(로컬 서버), 설치 스크립트 |
+| `scripts/` | `pes.ts`(상태 CLI), `serve.ts`(로컬 서버), `setup.ts`(설치 도우미), 설치 스크립트(`install.*`·`bootstrap.*`) |
 | `templates/` | 대시보드·질문 폼·보고서 HTML 템플릿 |
 | `questions/` | 단계별 시작 질문 은행 |
 | `docs/plan/` | 계획 문서. 읽는 순서: `00-brief.md` → `stage-0.md` → `stage-1-db.md`·`stage-1-api.md`·`stage-1-ui.md`·`stage-1-runners.md` (이후 `stage-N*.md`; `decisions/` 결정 기록, `discussion/` 논의안) |
 | `docs/archive/` | 더 이상 쓰지 않는 자료(예: 카드 재설계 시안) |
-| `tests/` | `pytest` 회귀 테스트와 합성 fixture |
+| `tests/` | `node:test` 회귀 테스트와 합성 fixture |
 
 ## 검사
 
-Python 3.9 이상과 Node 26 이상이 필요하다. Python 은 PES 0.15 도구(`pes.py`·`serve.py`·`setup.py`)와 0.15 테스트(PR26 이전)용이다 — PES TS 코어는 Python 을 실행하지 않는다(외부 Python 경계: [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절).
+Node 26 이상이 필요하다. PES 도구(`pes.ts`·`serve.ts`·`setup.ts`)는 모두 Node 로 돈다 — Python 은 필요 없다(0.15 Python 도구와 그 시험은 SEL-74 에서 지워졌다. 외부 Python 경계: [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절).
 
-TypeScript 코어·시험(Node 26, `node:sqlite`). `npm run check:ddl`은 DDL 초안 설계 검사(`scripts/check_ddl.ts`, Python 없이 `:memory:` SQLite)다:
+TypeScript 코어·시험(Node 26, `node:sqlite`). `npm run check:ddl`은 DDL 초안 설계 검사(`scripts/check_ddl.ts`, `:memory:` SQLite)다:
 
 macOS / Linux:
 
@@ -38,28 +38,12 @@ npm run typecheck
 npm run check:ddl
 ```
 
-Python 0.15 테스트(PR26 이전):
-
-macOS / Linux:
-
-```sh
-python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
-```
-
-Windows (PowerShell):
-
-```powershell
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.venv\Scripts\python.exe -m pytest -q
-```
-
 테스트 격리 원리와 한계는 [tests/README.md](tests/README.md)를 본다.
 
 ## 금지
 
 - 실제 `~/pes-projects`·`~/.pes/`를 읽거나 쓰지 않는다. 테스트·진단은 임시 `HOME`·`PES_HOME`으로 격리한다.
-- **`scripts/pes.py`(특히 `doctor`·`list`·`status`)·`scripts/serve.py`는 `HOME`(Windows `USERPROFILE`)과 `PES_HOME`을 둘 다 임시 폴더로 바꾼 상태에서만 실행한다.** 격리 없이 한 번이라도 실행하면 실제 프로젝트 이름·상태가 모델 대화로 나간다(2026-11-05 SEL-14 사고, `docs/plan/defects.md`). 격리 방법이 확실하지 않으면 실행하지 말고 코드를 읽는다.
+- **`scripts/pes.ts`(특히 `doctor`·`list`·`status`)·`scripts/serve.ts`는 `HOME`(Windows `USERPROFILE`)과 `PES_HOME`을 둘 다 임시 폴더로 바꾼 상태에서만 실행한다.** 격리 없이 한 번이라도 실행하면 실제 프로젝트 이름·상태가 모델 대화로 나간다(2026-11-05 SEL-14 사고, `docs/plan/defects.md`). 격리 방법이 확실하지 않으면 실행하지 말고 코드를 읽는다.
 - 실키, 기관 자료, 실제 프로젝트 내용을 fixture·로그·문서·커밋에 넣지 않는다.
 - 이 저장소는 **공개**다(2026-11-04 다시 공개로 전환, `docs/plan/00-brief.md` 1절). 커밋·이슈·PR에 올라가는 모든 내용이 공개된다고 가정한다.
 
@@ -76,13 +60,13 @@ python -m venv .venv
 
 ## 결함 기록
 
-진단은 기존 `python3 scripts/pes.py doctor`를 먼저 쓴다. `doctor`는 `~/.pes/config.json`과 `~/.claude/settings.json`도 읽으므로 `PES_HOME`만 바꿔서는 부족하다. 개발 중에는 `HOME`(Windows는 `USERPROFILE`)과 `PES_HOME`을 함께 임시 폴더로 두고 실행한다.
+진단은 `node scripts/pes.ts doctor`를 먼저 쓴다. `doctor`는 `~/.pes/config.json`과 `~/.claude/settings.json`도 읽으므로 `PES_HOME`만 바꿔서는 부족하다. 개발 중에는 `HOME`(Windows는 `USERPROFILE`)과 `PES_HOME`을 함께 임시 폴더로 두고 실행한다.
 
 macOS / Linux:
 
 ```sh
 review_home="$(mktemp -d)"
-HOME="$review_home" PES_HOME="$review_home/pes-projects" python3 scripts/pes.py doctor
+HOME="$review_home" PES_HOME="$review_home/pes-projects" node scripts/pes.ts doctor
 ```
 
 Windows (PowerShell):
@@ -93,7 +77,7 @@ New-Item -ItemType Directory -Path $reviewHome | Out-Null
 $env:HOME = $reviewHome
 $env:USERPROFILE = $reviewHome
 $env:PES_HOME = Join-Path $reviewHome "pes-projects"
-python scripts/pes.py doctor
+node scripts/pes.ts doctor
 ```
 
 확인된 결함은 [docs/plan/defects.md](docs/plan/defects.md)에 **버전 · OS · 명령 · 기대 결과 · 실제 결과 · 합성 재현 자료 · 심각도 · 처리 단계** 형식으로 적는다. 재현하지 못한 추정은 결함으로 적지 않는다.

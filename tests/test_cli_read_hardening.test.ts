@@ -11,20 +11,16 @@
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { disk_path } from "./helpers/blob_env.ts";
-import { expect_rejected, make_cli_env, PES_PY, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
-import { normalize, PY, plain_json_legacy, read_lf, run_py, shell_words, write_legacy, expect_staging } from "./helpers/cli_read_env.ts";
+import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
+import { expect_same_as_015, golden, plain_json_legacy, read_lf, run_cli, run_cli_async, shell_words, write_legacy, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
-import { hub_blocked_argv } from "./helpers/hub_block.ts";
-
-const OFF = { flag: undefined } as const;
 
 function ok(res: CliResult, what: string): CliResult {
   assert.equal(res.status, 0, `${what}: exit ${res.status}\n${res.stderr}${res.stdout}`);
@@ -58,13 +54,11 @@ async function import_full(c: CliEnv, slug = "synthetic-legacy-full") {
   return { dir, imp, mig, slug };
 }
 
+/** 읽기가 옛 project.json 을 읽는다: 0.15 가 같은 폴더에서 낸 출력(고정 기록 tests/fixtures/golden/h1-full-reads.json)과 같다. */
 function reads_equal_legacy(c: CliEnv, slug: string, what: string): void {
-  const roots = [c.env.home.root, `/private${c.env.home.root}`];
+  const rec = golden("h1-full-reads");
   for (const args of [["status", slug], ["pending", slug], ["digest", slug, "research"], ["show", slug, "plan"], ["show", slug, "plan", "1"]]) {
-    const on = run_py(c, args);
-    const off = run_py(c, args, { ...OFF });
-    assert.equal(on.status, off.status, `${what}: ${args.join(" ")} 종료 코드`);
-    assert.equal(normalize(on.stdout, roots), normalize(off.stdout, roots), `${what}: ${args.join(" ")} 은 project.json 을 읽는다`);
+    expect_same_as_015(c, args, rec[args.join(" ")], `${what}: ${args.join(" ")} 은 project.json 을 읽는다 (0.15 출력과 같다)`);
   }
 }
 
@@ -73,7 +67,7 @@ function writes_refused(c: CliEnv, slug: string, dir: string, what: string): voi
   const tree = tree_digest(dir);
   const signature = state_signature(c.env.db);
   for (const args of [["note", slug, "x"], ["round-start", slug, "research"], ["report", slug, "plan"], ["assemble", slug], ["web", slug]]) {
-    const res = run_py(c, args);
+    const res = run_cli(c, args);
     expect_rejected(res, `${what}: ${args[0]}`);
     assert.match(res.stderr, /이전/, `${what}: ${args[0]} 는 이전 안내`);
   }
@@ -95,10 +89,10 @@ test("H1 staging → validated → activated → rollback(failed/archived): 읽�
 
     await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, "h1"), pes_home: pes_home_of(c.env) });
     const json_sig = c.sig(join(dir, "project.json"));
-    ok(run_py(c, ["note", slug, "활성화 뒤 메모"]), "note (active)");
+    ok(run_cli(c, ["note", slug, "활성화 뒤 메모"]), "note (active)");
     assert.deepEqual(c.sig(join(dir, "project.json")), json_sig, "active: 쓰기는 DB 로, project.json 불변");
-    assert.match(ok(run_py(c, ["status", slug]), "status").stdout, /활성화 뒤 메모/, "active: 읽기는 DB (방금 쓴 메모가 보인다)");
-    assert.doesNotMatch(ok(run_py(c, ["status", slug], { ...OFF }), "status off").stdout, /활성화 뒤 메모/);
+    assert.match(ok(run_cli(c, ["status", slug]), "status").stdout, /활성화 뒤 메모/, "active: 읽기는 DB (방금 쓴 메모가 보인다)");
+    // (0.15 로 같은 폴더를 읽으면 옛 project.json 이 보인다는 줄은 지웠다: 0.15 모드가 없다. 활성화된 프로젝트의 project.json 불변은 위 json_sig 단언이 지킨다.)
 
     // 새 쓰기가 있으면 rollback 은 거부된다 → restore 가 아닌 한 failed 로 갈 수 없다. 새 쓰기 없는 두 번째 프로젝트로 rollback 을 본다.
     const second = await import_full(c, "synthetic-legacy-two");
@@ -113,7 +107,7 @@ test("H1 staging → validated → activated → rollback(failed/archived): 읽�
 test("H1b list: staging·archived 프로젝트는 project.json 으로 한 번씩, active DB 프로젝트는 DB 주제로 한 번만 나온다", () =>
   with_cli(async (c) => {
     const { slug } = await import_full(c);
-    const out = ok(run_py(c, ["list"]), "list").stdout;
+    const out = ok(run_cli(c, ["list"]), "list").stdout;
     const count = (s: string) => out.split("\n").filter((l) => l.includes(`(${s})`)).length;
     assert.equal(count(slug), 1, out);
     assert.equal(count(SLUG), 1);
@@ -174,47 +168,35 @@ function latest_files(c: CliEnv, kind: "report" | "output", stage: "plan" | null
 }
 
 test("H2 같은 자료의 DB 보고서·assemble·sources.json 이 v0.15 결과와 같다 (제거 항목·같은 URL·URL 없는 출처·수치·충돌·연결·각주 범위 밖)", async () => {
+  // 0.15 가 같은 입력으로 만든 파일: 고정 기록 tests/fixtures/golden/h2-rich-report.json (report_md 의 '작성 …' 줄은 <시각>)
+  const old = golden<{ report_md: string; out_report_md: string; out_sources_json: string }>("h2-rich-report");
   const now = await make_cli_env();
-  const old = await make_cli_env();
   try {
-    write_legacy(old.folder, plain_json_legacy(SLUG));
-    for (const [c, flag] of [[now, "1"], [old, undefined]] as const) {
-      ok(run_py(c, ["round-start", SLUG, "plan"], { flag }), "round-start");
-      ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "h2-plan.json", RICH_PLAN)], { flag }), "merge plan");
-      ok(run_py(c, ["merge", SLUG, "write", write_json(c, "h2-write.json", RICH_WRITE)], { flag }), "merge write");
-      ok(run_py(c, ["report", SLUG, "plan"], { flag }), "report");
-      ok(run_py(c, ["assemble", SLUG], { flag }), "assemble");
-    }
+    ok(run_cli(now, ["round-start", SLUG, "plan"]), "round-start");
+    ok(run_cli(now, ["merge", SLUG, "plan", write_json(now, "h2-plan.json", RICH_PLAN)]), "merge plan");
+    ok(run_cli(now, ["merge", SLUG, "write", write_json(now, "h2-write.json", RICH_WRITE)]), "merge write");
+    ok(run_cli(now, ["report", SLUG, "plan"]), "report");
+    ok(run_cli(now, ["assemble", SLUG]), "assemble");
     const md_db = latest_files(now, "report", "plan").get("report.md");
-    const md_old = read_lf(join(old.folder, "reports", "plan", "report.md")) /* Windows v0.15 파일은 CRLF — 줄바꿈만 정규화 */;
     assert.ok(md_db);
-    assert.equal(strip_written(md_db), strip_written(md_old), "단계 보고서 마크다운");
+    assert.equal(strip_written(md_db), old.report_md, "단계 보고서 마크다운");
     const out = latest_files(now, "output", null);
-    assert.equal(out.get("report.md"), read_lf(join(old.folder, "out", "report.md")), "assemble 마크다운(각주 재매김·범위 밖 번호 유지)");
-    assert.equal(out.get("sources.json"), read_lf(join(old.folder, "out", "sources.json")), "sources.json");
+    assert.equal(out.get("report.md"), old.out_report_md, "assemble 마크다운(각주 재매김·범위 밖 번호 유지)");
+    assert.equal(out.get("sources.json"), old.out_sources_json, "sources.json");
     assert.doesNotMatch(out.get("report.md")!, /보이면 안 됨/);
+    // pes.ts 는 0.15 호환으로 폴더에도 같은 파일을 둔다(D02)
+    assert.equal(strip_written(read_lf(join(now.folder, "reports", "plan", "report.md"))), old.report_md, "폴더의 단계 보고서도 같다");
+    assert.equal(read_lf(join(now.folder, "out", "report.md")), old.out_report_md, "폴더의 out/report.md 도 같다");
+    assert.equal(read_lf(join(now.folder, "out", "sources.json")), old.out_sources_json, "폴더의 out/sources.json 도 같다");
   } finally {
     now.close();
-    old.close();
   }
 });
 
 // ---------------------------------------------------------------------------
 // H3 · 동시 실행·부분 실패
 
-function run_async(c: CliEnv, args: string[]): Promise<CliResult> {
-  return new Promise((resolve, reject) => {
-    const env: Record<string, string | undefined> = { ...c.env.home.env, PES_DB_CORE: "1", PES_OWNER: undefined, PES_TOKEN: undefined };
-    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
-    const child = spawn(PY, hub_blocked_argv(["-I", "-X", "utf8", PES_PY, ...args]), { env: env as NodeJS.ProcessEnv, cwd: c.env.home.root });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-    child.once("error", reject);
-    child.once("close", (status) => resolve({ status, stdout, stderr }));
-  });
-}
+const run_async = run_cli_async;
 
 function staging_blobs(c: CliEnv): number {
   return Number(c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM blobs WHERE state <> 'ready'")?.n ?? 0n);
@@ -222,8 +204,8 @@ function staging_blobs(c: CliEnv): number {
 
 test("H3 report 를 동시에 4번 실행해도 버전 번호가 겹치지 않고 staging blob 이 남지 않으며 실패한 쪽은 분명한 오류다", () =>
   with_cli(async (c) => {
-    ok(run_py(c, ["round-start", SLUG, "plan"]), "round-start");
-    ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "h3.json", RICH_PLAN)]), "merge");
+    ok(run_cli(c, ["round-start", SLUG, "plan"]), "round-start");
+    ok(run_cli(c, ["merge", SLUG, "plan", write_json(c, "h3.json", RICH_PLAN)]), "merge");
     const results = await Promise.all([1, 2, 3, 4].map(() => run_async(c, ["report", SLUG, "plan"])));
     for (const r of results) assert.doesNotMatch(r.stderr, /Traceback/, r.stderr);
     const done = results.filter((r) => r.status === 0).length;
@@ -240,16 +222,16 @@ test("H3 report 를 동시에 4번 실행해도 버전 번호가 겹치지 않�
 
 test("H3b 객체 저장소에 쓸 수 없어 report 가 실패하면 버전·영수증·blob 이 하나도 남지 않는다 (고아 staging 없음)", { skip: WIN || process.getuid?.() === 0 }, () =>
   with_cli(async (c) => {
-    ok(run_py(c, ["round-start", SLUG, "plan"]), "round-start");
-    ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "h3b.json", RICH_PLAN)]), "merge");
-    ok(run_py(c, ["report", SLUG, "plan"]), "report 1 (프로젝트 객체 폴더를 만든다)");
+    ok(run_cli(c, ["round-start", SLUG, "plan"]), "round-start");
+    ok(run_cli(c, ["merge", SLUG, "plan", write_json(c, "h3b.json", RICH_PLAN)]), "merge");
+    ok(run_cli(c, ["report", SLUG, "plan"]), "report 1 (프로젝트 객체 폴더를 만든다)");
     const signature = state_signature(c.env.db);
     const folder = join(c.env.objects, c.env.p.project_id);
-    ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "h3b2.json", [{ id: 4, summary: "바뀐 요약" }])]), "merge 2");
+    ok(run_cli(c, ["merge", SLUG, "plan", write_json(c, "h3b2.json", [{ id: 4, summary: "바뀐 요약" }])]), "merge 2");
     const before = state_signature(c.env.db);
     chmodSync(folder, 0o500);
     try {
-      const res = run_py(c, ["report", SLUG, "plan"]);
+      const res = run_cli(c, ["report", SLUG, "plan"]);
       expect_rejected(res, "쓸 수 없는 객체 저장소");
       assert.doesNotMatch(res.stderr, /Traceback/);
     } finally {
@@ -258,7 +240,7 @@ test("H3b 객체 저장소에 쓸 수 없어 report 가 실패하면 버전·영
     assert.equal(state_signature(c.env.db), before, "실패한 report 는 DB 에 아무것도 남기지 않는다");
     assert.notEqual(signature, before);
     assert.equal(staging_blobs(c), 0);
-    ok(run_py(c, ["report", SLUG, "plan"]), "복구 뒤 다시 실행");
+    ok(run_cli(c, ["report", SLUG, "plan"]), "복구 뒤 다시 실행");
   }));
 
 // ---------------------------------------------------------------------------
@@ -274,7 +256,7 @@ test("H4 doctor --fix: PES 홈 안의 심볼릭 링크 너머(홈 밖) 폴더의
     writeFileSync(join(outside, ".pes-port"), "1", "utf8");
     symlinkSync(outside, join(c.env.home.env.PES_HOME as string, "linked"), "dir");
     const tree = tree_digest(outside);
-    const res = run_py(c, ["doctor", "--fix", "--json"]);
+    const res = run_cli(c, ["doctor", "--fix", "--json"]);
     assert.doesNotMatch(res.stderr, /Traceback/);
     assert.equal(tree_digest(outside), tree, "홈 밖 폴더가 바뀌지 않는다");
     assert.ok(existsSync(tmp));
@@ -282,12 +264,12 @@ test("H4 doctor --fix: PES 홈 안의 심볼릭 링크 너머(홈 밖) 폴더의
 
 test("H4b doctor --fix 는 DB 파일·객체 저장소·DB 프로젝트 폴더를 바꾸지 않는다", () =>
   with_cli(async (c) => {
-    ok(run_py(c, ["round-start", SLUG, "plan"]), "round-start");
-    ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "h4b.json", RICH_PLAN)]), "merge");
-    ok(run_py(c, ["report", SLUG, "plan"]), "report");
+    ok(run_cli(c, ["round-start", SLUG, "plan"]), "round-start");
+    ok(run_cli(c, ["merge", SLUG, "plan", write_json(c, "h4b.json", RICH_PLAN)]), "merge");
+    ok(run_cli(c, ["report", SLUG, "plan"]), "report");
     const signature = state_signature(c.env.db);
     const objects = tree_digest(c.env.objects);
-    const rows = JSON.parse(run_py(c, ["doctor", "--fix", "--json"]).stdout) as Array<{ group: string; level: string }>;
+    const rows = JSON.parse(run_cli(c, ["doctor", "--fix", "--json"]).stdout) as Array<{ group: string; level: string }>;
     assert.ok(Array.isArray(rows));
     assert.equal(state_signature(c.env.db), signature, "DB 불변");
     assert.equal(tree_digest(c.env.objects), objects, "객체 저장소 불변");
@@ -300,16 +282,18 @@ const NAMES = ["plain-name", "with space", "it's", 'dq"uote', "$HOME", "`tick`",
 
 test("H5 watch: 폴더 이름에 셸 특수문자가 있어도 한 단어로 읽히고, 안전한 이름은 v0.15 와 같은 출력이다", () =>
   with_cli(async (c) => {
+    let n = 0;
     for (const name of NAMES) {
       if (WIN && /[\\"*|\n]/.test(name)) continue; // Windows 폴더 이름에 쓸 수 없는 문자
       const home = join(c.env.home.root, `h_${name}`);
-      const flagged = run_py(c, ["watch", "p"], { extra: { PES_HOME: home } });
-      const off = run_py(c, ["watch", "p"], { ...OFF, extra: { PES_HOME: home } });
-      assert.equal(flagged.stdout, off.stdout, `${JSON.stringify(name)}: 플래그와 무관하게 같은 출력`);
+      const slug = `p${++n}`; // 한 DB 에 같은 슬러그를 두 번 만들 수 없다
+      // SEL-74: pes.ts 의 watch 는 없는 프로젝트를 거절한다(0.15 는 경로만 찍었다) → 프로젝트를 먼저 만든다
+      ok(run_cli(c, ["init", slug, "--topic", "합성"], { extra: { PES_HOME: home } }), `init (${JSON.stringify(name)})`);
+      const flagged = ok(run_cli(c, ["watch", slug], { extra: { PES_HOME: home } }), `watch (${JSON.stringify(name)})`);
       const words = shell_words(flagged.stdout.replace(/\n$/, ""));
       assert.deepEqual(words.slice(0, 3), ["tail", "-n0", "-F"], JSON.stringify(name));
       const got = words[3]!;
-      const want = `h_${name}/p/feedback.log`;
+      const want = `h_${name}/${slug}/feedback.log`;
       assert.ok(got.split("\\").join("/").endsWith(want.split("\\").join("/")) && (WIN || got.endsWith(want)), `${JSON.stringify(name)} 한 단어로 원래 경로: ${JSON.stringify(got)} <- ${flagged.stdout}`);
       assert.deepEqual(words.slice(4), ["|", "grep", "--line-buffered", "FEEDBACK"], JSON.stringify(name));
     }
@@ -320,14 +304,14 @@ test("H5 watch: 폴더 이름에 셸 특수문자가 있어도 한 단어로 읽
 
 test("H6 절대 경로로 DB 프로젝트를 불러도 DB 를 읽고, 다른 폴더의 같은 이름 project.json 은 그 폴더 것을 읽는다", () =>
   with_cli(async (c) => {
-    const by_slug = ok(run_py(c, ["digest", SLUG, "plan"]), "slug").stdout;
-    const by_path = ok(run_py(c, ["digest", c.folder, "plan"]), "path").stdout;
+    const by_slug = ok(run_cli(c, ["digest", SLUG, "plan"]), "slug").stdout;
+    const by_path = ok(run_cli(c, ["digest", c.folder, "plan"]), "path").stdout;
     assert.equal(by_path, by_slug, "절대 경로도 같은 DB 프로젝트");
     const other = join(c.env.home.root, "elsewhere", SLUG);
     write_legacy(other, { ...plain_json_legacy(SLUG), topic: "다른 곳의 같은 이름" });
-    const status = ok(run_py(c, ["status", other]), "other folder").stdout;
+    const status = ok(run_cli(c, ["status", other]), "other folder").stdout;
     assert.match(status, /주제: 다른 곳의 같은 이름/, "홈 밖 폴더는 DB 슬러그와 같은 이름이어도 그 폴더의 project.json");
-    const write = run_py(c, ["note", other, "x"]);
+    const write = run_cli(c, ["note", other, "x"]);
     expect_rejected(write, "홈 밖 폴더 쓰기");
     assert.equal(JSON.parse(readFileSync(join(other, "project.json"), "utf8")).notes.length, 0, "홈 밖 옛 폴더는 쓰이지 않는다");
   }));
@@ -338,13 +322,13 @@ test("H6 절대 경로로 DB 프로젝트를 불러도 DB 를 읽고, 다른 폴
 test("H7 토큰 에이전트가 claim 한 뒤에는 report 를 할 수 있고 영수증 actor 는 에이전트다", () =>
   with_cli(async (c) => {
     const agent = await c.agent("report-agent");
-    ok(run_py(c, ["round-start", SLUG, "plan"]), "round-start");
-    ok(run_py(c, ["merge", SLUG, "plan", write_json(c, "h7.json", RICH_PLAN)]), "merge");
-    const bare = run_py(c, ["report", SLUG, "plan"], { extra: { PES_TOKEN: agent.token } });
+    ok(run_cli(c, ["round-start", SLUG, "plan"]), "round-start");
+    ok(run_cli(c, ["merge", SLUG, "plan", write_json(c, "h7.json", RICH_PLAN)]), "merge");
+    const bare = run_cli(c, ["report", SLUG, "plan"], { extra: { PES_TOKEN: agent.token } });
     expect_rejected(bare, "claim 전");
-    ok(run_py(c, ["claim", SLUG], { extra: { PES_TOKEN: agent.token } }), "claim");
+    ok(run_cli(c, ["claim", SLUG], { extra: { PES_TOKEN: agent.token } }), "claim");
     const n = c.commits().length;
-    ok(run_py(c, ["report", SLUG, "plan"], { extra: { PES_TOKEN: agent.token } }), "report (agent)");
+    ok(run_cli(c, ["report", SLUG, "plan"], { extra: { PES_TOKEN: agent.token } }), "report (agent)");
     const added = c.commits_since(n);
     assert.ok(added.length >= 3);
     assert.ok(added.every((m) => m.actor_id === agent.actor_id && m.via === "cli"), "모든 영수증의 actor 는 에이전트");

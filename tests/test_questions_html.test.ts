@@ -1,12 +1,13 @@
 // tests/test_questions.py → TS (SEL-70, PR26a; table 8: test_questions_html + test_question_bank).
 // Question screens: the data JSON of ask-*.html, escaping, the shared question module, file-name sanitising.
-// The HTML is inspected as text and JSON only (no browser). Same synthetic specs as the pytest file.
+// The HTML is inspected as text and JSON only (no browser). Same synthetic specs as the 0.15 file. SEL-74: the project is a DB project made by
+// `pes init` (the 0.15 test used a hand-written project.json — an old folder is read-only for pes.ts now, D14).
 import assert from "node:assert/strict";
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { REPO, make_ctx, pes, synthetic_project, write_json } from "./helpers/compat_env.ts";
+import { REPO, init_project, make_ctx, pes, write_json } from "./helpers/compat_env.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { html_unescape } from "./helpers/compat_normalize.ts";
 
@@ -17,6 +18,9 @@ after(() => ctx.cleanup());
 
 /** Windows writes text files with CRLF (and a checkout may too): N7 compares LF. */
 const read_lf = (path: string): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+
+let project_seq = 0;
+const new_project = (): string => init_project(ctx, `질문-시험 ${++project_seq}`);
 
 const DATA_OPEN = '<script id="data" type="application/json">';
 
@@ -44,11 +48,6 @@ function ask(project: string, spec: unknown, name = "spec.json"): string {
   return run.out.trim();
 }
 
-/** The hand-written old project.json of tests/fixtures/generate.py ("legacy": no stage status yet) — the input the pytest file used. */
-function legacy_project(): string {
-  return synthetic_project(ctx, "legacy");
-}
-
 test("ask embeds the question data, escapes HTML in the title, and keeps </script> inside the data harmless", () => {
   const title = "합성 <질문> & \"제목\" '따옴표'";
   const spec = {
@@ -69,7 +68,7 @@ test("ask embeds the question data, escapes HTML in the title, and keeps </scrip
     ],
     _note: "렌더하지 않는 내부 메모",
   };
-  const project = legacy_project();
+  const project = new_project();
   const rendered = ask(project, spec);
   assert.equal(rendered, join(realpathSync.native(project), "ask-sel-13-ask.html"));
   const html = read_lf(rendered);
@@ -104,7 +103,7 @@ test("html_escape port agrees with the unescape helper", () => {
 });
 
 test("ask keeps the definitions of the real plan question bank (questions/plan.json) intact", () => {
-  const project = legacy_project();
+  const project = new_project();
   const bank = join(REPO, "questions", "plan.json");
   const source = JSON.parse(read_lf(bank));
   const run = pes(ctx, "ask", project, bank);
@@ -122,7 +121,7 @@ test("ask keeps the definitions of the real plan question bank (questions/plan.j
 });
 
 test("the shared question module is inserted once and keeps the other / required / conditional UI", () => {
-  const project = legacy_project();
+  const project = new_project();
   const run = pes(ctx, "ask", project, join(REPO, "questions", "plan.json"));
   assert.equal(run.code, 0, run.out + run.err);
   const html = read_lf(run.out.trim());
@@ -145,15 +144,15 @@ test("the shared question module is inserted once and keeps the other / required
 });
 
 test("the ask id is sanitised into the output file name (test_question_bank: file-name cleaning)", () => {
-  const project = legacy_project();
-  const rendered = ask(project, { id: "My Ask / 1", stage: "plan", kind: "stage_start", title: "합성", questions: [] });
+  const project = new_project();
+  const rendered = ask(project, { id: "My Ask / 1", stage: "plan", kind: "stage_start", title: "합성", questions: [{ id: "q1", type: "text", label: "합성 질문" }] }); // (pes.ts refuses a form without questions; 0.15 accepted it)
   const normalized = rendered.split("\\").join("/");
   assert.equal(normalized.slice(normalized.lastIndexOf("/") + 1), "ask-my-ask---1.html");
   assert.equal(normalized.slice(0, normalized.lastIndexOf("/")), realpathSync.native(project).split("\\").join("/"), "written next to project.json");
 });
 
 test("every question bank file renders (questions/*.json) and survives the data round trip", () => {
-  const project = legacy_project();
+  const project = new_project();
   for (const stage of ["plan", "research", "analyze", "write", "verify", "publish", "resume"]) {
     const prep = pes(ctx, "ask-prep", project, stage);
     assert.equal(prep.code, 0, `${stage}: ${prep.out}${prep.err}`);

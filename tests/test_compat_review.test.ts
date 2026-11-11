@@ -1,7 +1,7 @@
 // SEL-70 final review 1 (Opus): the four required fixes, each with the experiment that found it.
 //   1 N6 html summary sees the title escaping and the shared module count     2 N2 follows backslashes through folder names with spaces
 //   3 E15 (doctor) never connects to the real hub                              4 the state DTO covers every key of a 0.15 project.json
-//   5 a case env cannot switch the audit hook off
+//   5 a case env cannot switch the home guard off      (SEL-74: all of it runs on the ts target — the 0.15 Python side is gone)
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,10 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { file_digest, read_baseline, run_case } from "./helpers/compat_cases.ts";
-import { EXCLUDED_KEYS, ITEM_KEYS, PYTHON, REPO, STAGE_KEYS, TOP_KEYS, dto_from_project_json, make_ctx, project_json, run_pes, run_py_code, unmapped_keys } from "./helpers/compat_env.ts";
+import { assert_case, file_digest } from "./helpers/compat_cases.ts";
+import { EXCLUDED_KEYS, ITEM_KEYS, REPO, STAGE_KEYS, TOP_KEYS, dto_from_project_json, make_ctx, project_state, run_pes, unmapped_keys } from "./helpers/compat_env.ts";
 import { n2_paths } from "./helpers/compat_normalize.ts";
-import { hub_blocked_argv } from "./helpers/hub_block.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
@@ -115,10 +114,8 @@ test("E15 with a hub listening on 8760~8775: the record is the pinned one and th
   const dir = mkdtempSync(join(tmpdir(), "pes-fake-hub-"));
   const hub = await fake_hub(dir);
   try {
-    const outcome = await run_case("py", "E15");
-    assert.equal(outcome.kind, "ran");
-    if (outcome.kind !== "ran") return;
-    assert.deepEqual(JSON.parse(JSON.stringify(outcome.record)), read_baseline("E15"), "a running hub changed the doctor record");
+    // the ts record is compared with the frozen 0.15 one (D08: one Node row instead of the Python row) — the same comparison as the case test
+    await assert_case("ts", "E15");
     // (no hub-side count: other test files run pes children in parallel and probe the same ports. The proof is child-side: had E15
     // reached the stand-in, its server rows would show an extra "고아 서버" row and differ from the pinned "꺼짐" record above.)
   } finally {
@@ -132,8 +129,8 @@ test("positive control: an unblocked child does reach the stand-in hub (so '0 co
   const hub = await fake_hub(dir);
   const ctx = make_ctx("pes-compat-hubctl-");
   try {
-    const run = run_py_code(ctx, `import urllib.request\ntry:\n    urllib.request.urlopen("http://127.0.0.1:${hub.port}/whoami", timeout=2).read()\nexcept Exception as e:\n    print("failed", e)\n`);
-    assert.equal(run.status, 0);
+    const run = spawnSync(process.execPath, ["-e", `fetch("http://127.0.0.1:${hub.port}/whoami", { signal: AbortSignal.timeout(2000) }).then((r) => r.text()).catch((e) => console.log("failed", String(e)))`], { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+    assert.equal(run.status, 0, run.stderr);
     assert.ok(hub.connections() >= 1, "the control request must reach the stand-in hub");
   } finally {
     ctx.cleanup();
@@ -142,13 +139,13 @@ test("positive control: an unblocked child does reach the stand-in hub (so '0 co
   }
 });
 
-test("every pes.py child is hub-blocked: with a stand-in hub up, doctor reports no server; only allow_hub_port (that one port) lets it see the stand-in", async () => {
+test("every pes.ts child is hub-blocked: with a stand-in hub up, doctor reports no server; only allow_hub_port (that one port) lets it see the stand-in", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pes-fake-hub-"));
   const hub = await fake_hub(dir);
   const ctx = make_ctx("pes-compat-hubblock-");
   try {
     const seen = (options: { allow_hub_port?: number }): string => {
-      const run = run_pes("py", ctx, ["doctor", "--json"], { narrow_path: true, ...options });
+      const run = run_pes("ts", ctx, ["doctor", "--json"], { narrow_path: true, ...options });
       assert.ok(run.kind === "ran" && run.status === 0);
       return run.kind === "ran" ? run.stdout : "";
     };
@@ -168,7 +165,7 @@ test("every pes.py child is hub-blocked: with a stand-in hub up, doctor reports 
 test("a case / option env that turns PES_TEST_GUARD off is refused; no case in cases.json sets it", () => {
   const ctx = make_ctx("pes-compat-guardenv-");
   try {
-    for (const value of ["", "0", undefined]) assert.throws(() => run_pes("py", ctx, ["home"], { env: { PES_TEST_GUARD: value } }), /home guard off/);
+    for (const value of ["", "0", undefined]) assert.throws(() => run_pes("ts", ctx, ["home"], { env: { PES_TEST_GUARD: value } }), /home guard off/);
   } finally {
     ctx.cleanup();
   }
@@ -179,16 +176,14 @@ test("a case / option env that turns PES_TEST_GUARD off is refused; no case in c
 test("DTO: every top-level, stage and item key of a 0.15 project.json is mapped or explicitly excluded", () => {
   const ctx = make_ctx("pes-compat-dtokeys-");
   try {
-    const init = run_pes("py", ctx, ["init", ctx.project(), "--topic", "합성 주제"]);
+    const init = run_pes("ts", ctx, ["init", ctx.project(), "--topic", "합성 주제"]);
     assert.equal(init.kind === "ran" && init.status, 0);
-    const keys = run_py_code(
-      ctx,
-      `import importlib.util, json, sys\nspec = importlib.util.spec_from_file_location("pes_mod", sys.argv[1])\nm = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(m)\nprint(json.dumps({"item": list(m.blank_item(1, "t")), "stage": list(m.new_stage())}))\n`,
-      [join(REPO, "scripts", "pes.py")],
-    );
-    assert.equal(keys.status, 0, keys.stderr);
-    const made = JSON.parse(keys.stdout) as { item: string[]; stage: string[] };
-    const data = project_json(ctx.project());
+    // the key lists 0.15 had (pes.py blank_item() / new_stage(), recorded when the Python file still existed — SEL-74)
+    const made = {
+      item: ["id", "title", "kind", "question", "status", "request", "depth", "updated_round", "summary", "details", "sources", "stats", "shots", "confidence", "conflicts", "verify", "links", "user_links"],
+      stage: ["status", "round", "settings", "items", "review", "suggestions", "warnings", "changes", "history", "summary", "approved_at", "stale", "reports"],
+    };
+    const data = project_state(ctx, ctx.project()); // the 0.15-shaped state of the ts project (DB read model)
     const covered = (mapped: readonly string[], excluded: string[], found: string[], what: string): void => {
       const missing = found.filter((key) => !mapped.includes(key) && !excluded.includes(key));
       assert.deepEqual(missing, [], `0.15 ${what} keys neither in the DTO nor excluded`);
@@ -218,26 +213,5 @@ test("DTO: an unknown 0.15 key is reported (a new field cannot be dropped silent
   }
 });
 
-// ---------------------------------------------------------------- hub_blocked_argv wraps any python -I [-X utf8] child
-test("hub_blocked_argv: keeps flags + script + args, and the child cannot connect to 8760~8775 except the one allowed port", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pes-fake-hub-"));
-  const hub = await fake_hub(dir);
-  try {
-    const script = join(dir, "probe.py");
-    writeFileSync(script, `import socket, sys\nprobe = int(sys.argv[1])\ns = socket.socket()\nprint(sys.argv[1:], s.connect_ex(("127.0.0.1", probe)))\n`, "utf8");
-    const run = (allow?: number) => spawnSync(PYTHON, hub_blocked_argv(["-I", "-X", "utf8", script, String(hub.port)], allow), { encoding: "utf8" });
-    const blocked = run();
-    assert.equal(blocked.status, 0, blocked.stderr);
-    assert.match(blocked.stdout, /\['\d+'\] 111/);
-    assert.equal(hub.connections(), 0, "the blocked child reached the hub");
-    const open = run(hub.port);
-    assert.match(open.stdout, /\['\d+'\] 0/);
-    // SEL-78: the stand-in hub is another process that logs the connection a moment later; wait for the log (condition, bounded)
-    for (let i = 0; i < 200 && hub.connections() < 1; i += 1) await new Promise((r) => setTimeout(r, 25));
-    assert.ok(hub.connections() >= 1, "the open child never showed up in the stand-in hub log within 5 s");
-    assert.throws(() => hub_blocked_argv(["-I"]), /no script/);
-  } finally {
-    hub.stop();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+// (the `hub_blocked_argv` test — the Python wrapper that refused connections to 8760~8775 — is gone with Python; the same block for ts children is
+//  tested in test_pes_ts_guard.test.ts: "HUB_BLOCK for ts children: net.connect and fetch to 127.0.0.1:8760~8775 are refused and counted")

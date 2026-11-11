@@ -165,9 +165,9 @@ test("changes 를 '한 줄 더하기'는 읽고 전체 배열을 다시 쓰는 �
   });
 });
 
-test("show --fields changes 는 읽기 전용이다: project.json 이 바이트 그대로이고 빈 값도 JSON 으로 나온다", async () => {
+test("show --fields changes 는 읽기 전용이다: 상태가 그대로이고 빈 값도 JSON 으로 나온다", async () => {
   await with_mode("off", (m) => {
-    const read = () => readFileSync(join(m.folder, "project.json"), "utf8");
+    const read = () => JSON.stringify(m.state()); // 상태 전체 (pes.ts 의 원본은 DB — project.json 이 없다)
     const empty = show_stage(m, "changes");
     assert.ok(!/가: 나/.test(empty.text));
     maybe_shell_equals(empty.json, "changes", []);
@@ -175,7 +175,7 @@ test("show --fields changes 는 읽기 전용이다: project.json 이 바이트 
     const before = read();
     show_stage(m, "changes");
     show_stage(m, "changes", "research");
-    assert.equal(read(), before, "읽기는 파일을 바꾸지 않는다");
+    assert.equal(read(), before, "읽기는 상태를 바꾸지 않는다");
   });
 });
 
@@ -207,6 +207,7 @@ test("round-start 는 이전 라운드 changes 를 이력으로 넘기고 현재
   await with_mode("off", (m) => {
     ok(m.py(["round-start", m.slug, "plan"]), "R1");
     ok(m.py(["set", m.slug, "plan", "changes", m.json("c.json", ["가: 나"])]), "set");
+    ok(m.py(["render", m.slug, "plan"]), "render"); // pes.ts: 열린 라운드가 있으면 round-start 는 거절한다(conflict) — 0.15 는 연달아 열었다. 봉인한 뒤 연다.
     ok(m.py(["round-start", m.slug, "plan"]), "R2");
     const { text } = show_stage(m, "changes");
     assert.ok(!text.includes("가: 나"), "새 라운드의 changes 는 비어 있다");

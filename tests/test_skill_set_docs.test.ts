@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { code_segments, doc, fence, make_tree, mentioned_commands, PES_PY, pes_cmds, read_text, repo_doc, run_lint, target_docs } from "./helpers/skill_docs.ts";
+import { code_segments, doc, fence, make_tree, mentioned_commands, PES_USAGE, pes_cmds, read_text, repo_doc, run_lint, target_docs } from "./helpers/skill_docs.ts";
 
 const CMDS = pes_cmds();
 const STAGE_FIELDS = ["summary", "changes", "carry_over", "settings", "review"];
@@ -36,13 +36,12 @@ function set_calls(markdown: string): Array<{ target: string; field: string }> {
 
 const is_project = (t: string) => t === "project";
 
-test("pes.py CMDS 에 set 이 있다", () => {
-  assert.ok(CMDS.includes("set"), "scripts/pes.py CMDS 에 set 명령");
+test("pes.ts 명령표(CMDS)에 set 이 있다", () => {
+  assert.ok(CMDS.includes("set"), "scripts/pes_core/cli_main.ts CMDS 에 set 명령");
 });
 
-test("pes.py 사용법(맨 위 설명)에 set 두 꼴이 적혀 있다", () => {
-  const src = read_text(PES_PY);
-  const usage = src.slice(0, src.indexOf('"""', src.indexOf('"""') + 3));
+test("pes.ts 사용법에 set 두 꼴이 적혀 있다", () => {
+  const usage = PES_USAGE;
   assert.match(usage, /^\s*set <dir> <stage> <field>/m, "사용법: set <dir> <stage> <field> …");
   assert.match(usage, /set <dir> project <field>/, "사용법: set <dir> project <field> …");
 });

@@ -138,6 +138,11 @@ export function pdir(arg: string): string {
   return resolve_path(arg);
 }
 
+/** SEL-74 C: the one line a write on a not-migrated 0.15 folder ends with — it names the way out (`pes migrate`). */
+export function unmigrated_notice(what: string, slug: string): string {
+  return `${what}: 이 프로젝트는 아직 새 형식으로 옮기지 않았습니다 (${slug}) — 먼저 이전하세요 — pes migrate ${slug}`;
+}
+
 // ---------------------------------------------------------------- the core, in this process
 
 export interface BridgeData {

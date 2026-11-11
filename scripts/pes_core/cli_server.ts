@@ -9,9 +9,10 @@ import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { hub_ports, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
+import { hub_ports, kill_pid, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
 import { need_project, project_exists, slug_of } from "./cli_records.ts";
-import { build_index, fill } from "./cli_screens.ts";
+import { load_legacy } from "./cli_legacy_read.ts";
+import { build_index, fill, legacy_project } from "./cli_screens.ts";
 import { LABEL, ROOT, STAGES, Die, arg_at, bridge, bridge_soft, die, expanduser, home_dir, is_record, missing_args, now, pdir, pes_home, resolve_path, say, write_text } from "./cli_support.ts";
 
 type Dict = Record<string, any>;
@@ -87,7 +88,9 @@ export async function ensure_server(root: string): Promise<number> {
     await sleep(100);
   }
   if ((await whoami(free)) !== root) {
-    // the record of a server that never answered would outlive it and point at a pid some other program may get (final review 1 권장 4)
+    // the record of a server that never answered would outlive it and point at a pid some other program may get (final review 1 권장 4);
+    // SEL-74 G2: the child itself is ended too — a server that cannot answer must not outlive the failed command
+    kill_pid(pid);
     rmSync(record, { force: true });
     die(`서버가 시작되지 않았습니다 — ${join(root, ".pes-hub.out")} 를 보세요`, 1);
   }
@@ -135,15 +138,43 @@ function brief_of(slug: string, path: string, p: Dict, npend: number, lock: Dict
   };
 }
 
+/** 0.15 `time.strftime("%Y-%m-%d %H:%M", localtime)`. */
+function stamp(ms: number): string {
+  const d = new Date(ms);
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+/** An old project.json folder the database does not serve (not migrated, or staging / failed / archived): read from its file, once. */
+function legacy_brief(root: string, slug: string): Dict {
+  const d = join(root, slug);
+  try {
+    const state = load_legacy(d);
+    const times = [join(d, "project.json"), ...state.pending.map((x) => x.name)].map((p) => {
+      try {
+        return statSync(p).mtimeMs;
+      } catch {
+        return 0;
+      }
+    });
+    const outs = existsSync(join(d, "out")) ? readdirSync(join(d, "out"), { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort().join(", ") : "-";
+    return brief_of(slug, d, legacy_project(state.project) as Dict, state.pending.length, null, stamp(Math.max(...times)), outs === "" ? "-" : outs);
+  } catch (error) {
+    if (!(error instanceof Die)) throw error;
+    return { slug, topic: slug, error: error.message.slice(0, 200), stages: [], who: "err", todo: "읽기 실패 — 폴더를 확인하세요" };
+  }
+}
+
 /** The projects of a home: the ones the database serves; an old project.json folder the database does not serve yet is listed as an error row. */
 export async function all_briefs(root: string): Promise<Dict[]> {
   const out: Dict[] = [];
   const at_home = existsSync(root) && resolve_path(root) === pes_home();
-  const served = new Set<string>(at_home ? (((await bridge_soft("active_slugs"))?.slugs as string[] | undefined) ?? []) : []);
+  // active_slugs leaves out the project that only holds the owner of a fresh database (OWNER_STUB_SLUG, made by `migrate`)
+  const served = new Set<string>(at_home ? (((await bridge("active_slugs")).slugs as string[] | undefined) ?? []) : []);
   if (existsSync(root)) {
     for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       if (!entry.isDirectory() || served.has(entry.name) || !existsSync(join(root, entry.name, "project.json"))) continue;
-      out.push({ slug: entry.name, topic: entry.name, error: "DB 로 이전하지 않은 옛 project.json 프로젝트", stages: [], who: "err", todo: "읽기 실패 — DB 로 이전하세요" });
+      out.push(legacy_brief(root, entry.name));
     }
   }
   for (const slug of [...served].sort()) {
@@ -161,6 +192,12 @@ export async function all_briefs(root: string): Promise<Dict[]> {
   out.sort((a, b) => (String(a.updated ?? "") < String(b.updated ?? "") ? 1 : String(a.updated ?? "") > String(b.updated ?? "") ? -1 : 0));
   out.sort((a, b) => (rank[a.who] ?? 9) - (rank[b.who] ?? 9));
   return out;
+}
+
+/** The home page of the projects the database serves, built on every request. */
+export async function db_hub_html(root: string): Promise<string> {
+  const briefs = await all_briefs(root);
+  return fill("hub.html", "PES 프로젝트", { projects: briefs, root, built: now(), stages: STAGES.map(([key, label]) => ({ key, label })) });
 }
 
 export async function build_hub(root: string): Promise<string> {

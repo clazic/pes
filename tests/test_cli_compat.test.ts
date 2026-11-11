@@ -1,16 +1,17 @@
-// tests/test_project_basic.py → TS (SEL-70, PR26a; table 8: test_cli_compat). Runs the 0.15 CLI (python -I -X utf8 scripts/pes.py)
-// in an isolated HOME / USERPROFILE / PES_HOME, with the same synthetic input and the same assertions as the pytest file.
+// tests/test_project_basic.py → TS (SEL-70, PR26a; table 8: test_cli_compat). SEL-74: runs the TS CLI (node scripts/pes.ts) in an isolated
+// HOME / USERPROFILE / PES_HOME, with the same synthetic input and assertions; the state is read from the database (project_state).
 //
-// What did NOT move (Python-internal, no CLI form — they stay in pytest until PR26 removes it, see tests/README.md "TS 이전 대응"):
+// What never had a CLI form (Python-internal) and is gone with the Python file — see tests/README.md "SEL-74 처리표":
 //   test_isolated_home        pes.pes_home() / pes.CONFIG attributes      → the observable part is the `home` test below
 //   test_main_*_dispatch / *_does_not_mutate_argv / passes_multiple_arguments_unchanged   monkeypatched pes.CMDS
-//   test_guard_*              Python audit hook                           → tests/test_home_guard.test.ts
+//   test_guard_*              Python audit hook                           → tests/test_home_guard.test.ts, test_pes_ts_guard.test.ts
+// The usage text is compared with the frozen 0.15 record (baseline X01) by test_pes_ts_contract (the new lines of D15 aside).
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { PES_PY, STAGES, make_ctx, pes, project_json, read_json, run_pes, run_py_code } from "./helpers/compat_env.ts";
+import { STAGES, make_ctx, pes, project_state, run_pes } from "./helpers/compat_env.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
@@ -25,7 +26,7 @@ test("isolated home: PES_HOME wins; without it the default is <HOME>/pes-project
   assert.ok(set.out.includes(real(ctx.pes_home)), set.out);
   assert.match(set.out, /프로젝트 0개/);
 
-  const unset = run_pes("py", ctx, ["home"], { env: { PES_HOME: undefined } });
+  const unset = run_pes("ts", ctx, ["home"], { env: { PES_HOME: undefined } });
   assert.equal(unset.kind, "ran");
   if (unset.kind !== "ran") return;
   assert.equal(unset.status, 0, unset.stderr);
@@ -36,7 +37,7 @@ test("cli init creates the six-stage skeleton at a Korean path with spaces; a du
   const project = ctx.project("한글 공백 경로/새 프로젝트");
   const first = pes(ctx, "init", project, "--topic", "합성 주제");
   assert.equal(first.code, 0, first.out + first.err);
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.pes, 1);
   assert.equal(data.topic, "합성 주제");
   assert.equal(data.slug, "새 프로젝트");
@@ -48,37 +49,32 @@ test("cli init creates the six-stage skeleton at a Korean path with spaces; a du
   assert.deepEqual(data.settings, {});
   assert.equal(data.complete, false);
 
-  const before = readFileSync(join(project, "project.json"));
+  const before = JSON.stringify(project_state(ctx, project));
   const second = pes(ctx, "init", project, "--topic", "다른 주제");
   assert.equal(second.code, 2, second.out + second.err);
-  assert.deepEqual(readFileSync(join(project, "project.json")), before);
+  assert.equal(JSON.stringify(project_state(ctx, project)), before, "a refused init changes nothing");
 });
 
-/** `pes.__doc__.strip()` of the pytest original: the module docstring of scripts/pes.py, read without importing the script. */
-function pes_doc(): string {
-  const run = run_py_code(ctx, "import ast, sys; print(ast.get_docstring(ast.parse(open(sys.argv[1], encoding='utf-8').read()), clean=False), end='')", [PES_PY]);
-  assert.equal(run.status, 0, run.stderr);
-  assert.ok(run.stdout.trim().length > 100, "the docstring must be the whole usage text");
-  return run.stdout.trim();
-}
-
 test("no arguments and unknown commands print the usage text and exit 1", () => {
-  const doc = pes_doc();
   for (const args of [[], ["unknown", "project"]]) {
     const run = pes(ctx, ...args);
     assert.equal(run.code, 1);
-    assert.ok(run.out.includes(doc), "the whole module docstring is the usage text");
     assert.match(run.out, /^PES \(Project Execution System\) — 프로젝트 상태 CLI\./);
-    assert.match(run.out, /사용: python3 -I pes\.py <명령> <프로젝트 폴더> \[인자\]/);
+    assert.match(run.out, /사용: node scripts\/pes\.ts <명령> <프로젝트 폴더> \[인자\]/);
+    assert.ok(run.out.trim().split("\n").length > 20, "the whole usage text, not one line");
   }
+  const none = pes(ctx);
+  const unknown = pes(ctx, "unknown", "project");
+  assert.equal(none.out, unknown.out, "no arguments and an unknown command print the same page");
 });
 
 test("a single non-special command prints the usage and exits 1 (init, status, unknown)", () => {
+  const page = pes(ctx).out;
   for (const command of ["init", "status", "unknown"]) {
     const run = pes(ctx, command);
     assert.equal(run.code, 1, command);
     assert.match(run.out, /^PES \(Project Execution System\)/, command);
-    assert.ok(run.out.includes(pes_doc()), `${command}: the whole usage text`);
+    assert.equal(run.out, page, `${command}: the whole usage text`);
   }
 });
 
@@ -104,10 +100,6 @@ test("init with explicit path argument writes the topic (main with explicit argv
   const project = join(ctx.tmp, "명시 경로");
   const run = pes(ctx, "init", project, "--topic", "주제");
   assert.equal(run.code, 0, run.err);
-  assert.equal(read_json(join(project, "project.json")).topic, "주제");
+  assert.equal(project_state(ctx, project).topic, "주제");
   assert.equal(run.out.trim(), join(real(project), "project.json"));
-});
-
-test("PES_PY is the 0.15 script of this checkout", () => {
-  assert.match(PES_PY.split("\\").join("/"), /\/scripts\/pes\.py$/);
 });

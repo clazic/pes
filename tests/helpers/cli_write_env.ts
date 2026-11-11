@@ -1,12 +1,11 @@
 // Harness for the CLI write-conversion tests (stage 2 PR15, SEL-48). Everything is synthetic.
 //
-// How the CLI is run: as a subprocess, `python3 -I scripts/pes.py <args>`, with HOME, USERPROFILE and
+// How the CLI is run: as a subprocess, `node scripts/pes.ts <args>` (behind the TS child guard), with HOME, USERPROFILE and
 // PES_HOME all pointing at the temporary folders of an isolated_home. The database is the one at
 // HOME/.pes/pes.db, bootstrapped by the test through the command service; the project folder is
 // PES_HOME/<slug> and holds a legacy project.json fixture whose bytes and mtime must never change.
 //
-// Flag: the new DB write path exists only with PES_DB_CORE=1; run() sets it by default, and a test passes
-// { PES_DB_CORE: undefined } to run the CLI as v0.15.
+// There is no flag any more (SEL-74: the 0.15 Python CLI is gone, pes.ts always writes through the command service).
 //
 // Credentials (pinned by these tests):
 //   no PES_TOKEN  -> the CLI acts as the human owner of the local database (via = "cli")
@@ -16,7 +15,6 @@
 //   --run <run_id> --lease <lease_id> --fence <n>
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -25,11 +23,10 @@ import { fileURLToPath } from "node:url";
 import { issue_agent_token } from "../../scripts/pes_core/actors.ts";
 import { make_env, type Env } from "./blob_env.ts";
 import { stage_ids, type StageKey } from "./editions_env.ts";
-import { hub_blocked_argv } from "./hub_block.ts";
+import { ts_run } from "./sel74_env.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
-export const PES_PY = join(REPO, "scripts", "pes.py");
 export const SLUG = "synthetic-files";
 
 export const LEGACY_JSON = JSON.stringify(
@@ -112,27 +109,11 @@ export async function make_cli_env(): Promise<CliEnv> {
     project_json,
     stages,
     run(args, extra = {}) {
-      const child_env: Record<string, string | undefined> = {
-        ...env.home.env,
-        // `python3 -I`(아래)는 PYTHON* 환경 변수를 모두 무시하므로 이 값은 -I 실행에서는 효과가 없다.
-        // 한글 출력은 pes.py가 시작할 때 stdout·stderr를 스스로 UTF-8로 바꿔 지킨다 (cp1252 회귀 시험 참고).
-        PYTHONIOENCODING: "utf-8",
-        PES_OWNER: undefined,
-        PES_TOKEN: undefined,
-        PES_DB_CORE: "1",
-        ...extra,
-      };
-      for (const key of Object.keys(child_env)) if (child_env[key] === undefined) delete child_env[key];
-      assert.equal(child_env.HOME, env.home.env.HOME, "the CLI runs in the isolated HOME");
-      assert.equal(child_env.USERPROFILE, env.home.env.HOME);
-      const result = spawnSync("python3", hub_blocked_argv(["-I", PES_PY, ...args]), {
-        env: child_env as NodeJS.ProcessEnv,
-        cwd: env.home.root,
-        encoding: "utf8",
-        timeout: 60_000,
-      });
-      if (result.error !== undefined) throw result.error;
-      return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+      // PES_OWNER / PES_TOKEN never leak in from the caller (ts_run scrubs them unless `extra` names them). PES_DB_CORE is gone
+      // (there is no 0.15 mode any more) and is ignored when a test still passes it.
+      const { PES_DB_CORE: _flag, ...rest } = extra;
+      assert.equal(env.home.env.HOME, env.home.env.USERPROFILE, "the CLI runs in the isolated HOME");
+      return ts_run({ env }, args, rest);
     },
     commits,
     commits_since: (before) => commits().slice(before),

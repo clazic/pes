@@ -87,7 +87,9 @@ test("N8 scan time: the real scanner passes the meter that the fake square fails
 // SEL-78: a coarse OS clock (Windows, one tick ~15 ms) rounds a CPU reading down to whole ticks. Model it (tick_ms hook) and
 // show the meter still catches a square and still passes the real scanner.
 test("N8 scan time: mutation - on a 15 ms tick clock a quadratic scanner still fails the meter", () => {
-  const g = measure_growth(quadratic_scan, (n) => "\\".repeat(n), 4_000, 16_000, 3, 15);
+  // 6k → 24k (not 4k → 16k): on a 15 ms tick the small run is only a few ticks, so rounding could pull a true ×16 under ×9
+  // (windows-latest saw ×8.3, PR #58 run 43100106530). Bigger inputs keep the square well above the tick noise; the bar stays 9.
+  const g = measure_growth(quadratic_scan, (n) => "\\".repeat(n), 6_000, 24_000, 3, 15);
   assert.ok(g.ratio >= 9, `the fake square scanner must look quadratic on a coarse clock (ratio ${g.ratio.toFixed(1)})`);
   assert.throws(() => assert_not_quadratic("fake square, coarse clock", g, 1_000_000), /quadratic growth/);
 });

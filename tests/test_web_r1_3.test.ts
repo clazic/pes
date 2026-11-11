@@ -11,7 +11,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { run_py } from "./helpers/cli_read_env.ts";
+import { run_cli } from "./helpers/cli_read_env.ts";
 import { commit_count, db_with_form, feedback_files, http, page_data, step, sub_count, with_server, write_spec } from "./helpers/web_env.ts";
 import { raw_post } from "./helpers/web_raw.ts";
 import { SLUG } from "./helpers/cli_write_env.ts";
@@ -34,7 +34,7 @@ test("R1a 폼 id 가 80자를 넘으면 pes ask 는 거부한다 — 종료≠0,
     const ask_files = (): string[] => (existsSync(join(c.folder, "ask")) ? readdirSync(join(c.folder, "ask")).sort() : []);
     const files_before = ask_files();
     for (const id of [long_id, "x".repeat(81)]) {
-      const res = run_py(c, ["ask", SLUG, write_spec(c, spec_with(id, SIMPLE), "long.json")], { flag: "1" });
+      const res = run_cli(c, ["ask", SLUG, write_spec(c, spec_with(id, SIMPLE), "long.json")]);
       assert.notEqual(res.status, 0, `${id.length}자 폼 id 는 거부: ${res.stdout}`);
       assert.match(res.stderr + res.stdout, KOREAN, "거부 사유는 한국어로 안내한다");
       assert.equal(setcount(c), before.sets, "거부면 질문 세트 불변");
@@ -44,7 +44,7 @@ test("R1a 폼 id 가 80자를 넘으면 pes ask 는 거부한다 — 종료≠0,
     }
     // 경계: 정확히 80자는 받는다
     const ok_id = "c".repeat(80);
-    const res = run_py(c, ["ask", SLUG, write_spec(c, spec_with(ok_id, SIMPLE), "edge.json")], { flag: "1" });
+    const res = run_cli(c, ["ask", SLUG, write_spec(c, spec_with(ok_id, SIMPLE), "edge.json")]);
     assert.equal(res.status, 0, `80자 폼 id 는 받는다: ${res.stderr}${res.stdout}`);
     assert.equal(setcount(c) - before.sets, 1);
   } finally {
@@ -56,11 +56,13 @@ test("R1a' 80자 폼은 끝까지 맞물린다 — 대시보드가 보낸 spec·
   const c = await db_with_form();
   try {
     const id = "d".repeat(80);
-    step(c, "1", ["ask", SLUG, write_spec(c, spec_with(id, SIMPLE), "e1.json")]);
+    step(c, ["ask", SLUG, write_spec(c, spec_with(id, SIMPLE), "e1.json")]);
+    step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
     await with_server(c, {}, async (s) => {
       const review = page_data((await http(s, `/${SLUG}/`)).text).project.stages.plan.review;
       assert.ok(review?.set_id, "점검 질문에 set_id 가 실린다");
-      step(c, "1", ["ask", SLUG, write_spec(c, spec_with(id, [{ ...SIMPLE[0], label: "개정 질문" }]), "e2.json")]);
+      step(c, ["ask", SLUG, write_spec(c, spec_with(id, [{ ...SIMPLE[0], label: "개정 질문" }]), "e2.json")]);
+      step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
       const subs = sub_count(c);
       const body = { stage: "plan", round: 2, kind: "review", text: "[AI 점검 답]", answers: {}, spec: id, set_id: review.set_id };
       const r = await raw_post(s, `/${SLUG}/feedback`, JSON.stringify(body));

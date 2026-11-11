@@ -5,7 +5,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { server_url } from "./cli_home.ts";
-import { load_for_read } from "./cli_legacy_read.ts";
+import { db_serves, load_for_read } from "./cli_legacy_read.ts";
+import { py_str } from "./report.ts";
 import {
   LABEL,
   STAGES,
@@ -22,6 +23,7 @@ import {
   py_json_error,
   say,
   stage_arg,
+  unmigrated_notice,
   write_text,
 } from "./cli_support.ts";
 
@@ -46,7 +48,9 @@ export async function project_exists(d: string): Promise<boolean> {
 /** `load(d)`: the project must exist. A 0.15 folder the database does not serve yet is refused with the migration notice. */
 export async function need_project(d: string, what = "쓰기"): Promise<string> {
   const slug = slug_of(d);
-  if ((await db_slugs()).has(slug)) return slug;
+  // the database serves a folder of the PES home only while the project is active; a staging, failed or archived one, a name the database
+  // does not know and a folder outside the PES home are 0.15 folders here (read-only, D14)
+  if (await db_serves(d)) return slug;
   const legacy = join(d, "project.json");
   if (existsSync(legacy)) {
     // a project.json that cannot be read is a broken folder, not a project waiting for its migration: one plain line, the folder untouched (D11)
@@ -58,7 +62,7 @@ export async function need_project(d: string, what = "쓰기"): Promise<string> 
     }
     if (broken !== null) die(`project.json 을 읽지 못했습니다: ${legacy} (${broken}) — 폴더는 그대로 두었습니다`, 1);
     // a project nobody migrated yet is read-only here (D14): the read commands show it, every command that would write refuses, the folder stays as it is
-    die(`${what}: 이 프로젝트는 아직 새 형식으로 옮기지 않았습니다 — 먼저 이전(import → 검증 → 활성화)하세요 (${slug})`, 1);
+    die(unmigrated_notice(what, slug), 1);
   }
   return die(`project.json 없음: ${d}`, 1);
 }
@@ -231,18 +235,34 @@ export async function cmd_qa_brief(args: string[]): Promise<void> {
     lines.push(`\n#${String(raw.id)} ${String(raw.title)} [${String(raw.kind)}/${String(raw.status)}] 신뢰도 ${String(raw.confidence ?? "") || "-"} · 출처 ${String(raw.sources)}`);
     if (typeof raw.summary === "string" && raw.summary !== "") lines.push(`  요약: ${first_line(raw.summary, 300)}`);
   }
-  const basis = [`- 주제: ${String(info.topic)}`, ...((info.notes as string[] | undefined) ?? []).map((n) => `- 인계 메모: ${first_line(n, 300)}`)];
+  const basis = [`- 주제: ${String(info.topic)}`];
+  // v0.15 quoted what the user answered (project-level settings of the plan, the stage's own start answers; the report formats are no standard)
+  const answers = (settings: unknown, skip: string[] = []): string =>
+    Object.entries(is_record(settings) ? settings : {})
+      .filter(([key]) => !skip.includes(key))
+      .map(([key, value]) => `${key}=${py_str(value)}`)
+      .join(", ");
+  // 0.15 cut the answers (not the label) after 1500 characters
+  const clip = (line: string): string => Array.from(line).slice(0, 1500).join("");
+  if (is_record(info.settings) && Object.keys(info.settings).length > 0) basis.push(`- 기획 답(사용자): ${clip(answers(info.settings, ["stage_reports"]))}`);
+  if (is_record(info.stage_settings) && Object.keys(info.stage_settings).length > 0) basis.push(`- ${LABEL[s]} 시작 답(사용자): ${clip(answers(info.stage_settings))}`);
+  basis.push(...((info.notes as string[] | undefined) ?? []).map((n) => `- 인계 메모: ${first_line(n, 300)}`));
+  const changes = ((info.changes as unknown[] | undefined) ?? []).map((c) => `- ${py_str(c)}`);
   const text = `[검토 대상] ${String(info.topic)} — ${LABEL[s]} 단계 R${rnd} 결과 (프로젝트 ${slug})
 [단계 목적] ${STAGE_GOAL[s] ?? ""}
 [읽을 것]
 ${lines.join("\n")}
 [기준 — 사용자가 정한 것]
 ${basis.join("\n")}
+[이번 라운드 변경점(메인)]
+${changes.join("\n")}
 [결과 파일] ${join(rd, "qa.json")}
 pes:reviewer 형식대로 QC·QA·표본 대조(3~5개)를 하고 결과 파일에 쓴 뒤 한 줄만 돌려준다. 프로젝트 상태 파일은 고치지 않는다.
 `;
   await bridge("qa-brief", slug, { stage: s, text, dir: d });
   mkdirSync(rd, { recursive: true });
+  // the main's own check (what `set review` wrote) goes to the reviewer as it stands
+  write_text(join(rd, "self-review.json"), JSON.stringify(is_record(info.review) && Object.keys(info.review).length > 0 ? info.review : {}, null, 1));
   const file = join(rd, "qa-brief.md");
   write_text(file, text);
   say(file);

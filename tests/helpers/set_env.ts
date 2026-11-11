@@ -1,14 +1,16 @@
 // SEL-50 `pes set` 시험 공용 준비물. 전부 합성 자료이고 HOME·USERPROFILE·PES_HOME 은 임시 폴더다.
 //
-// `pes set <dir> <stage> <field> <file|->` · `pes set <dir> project <field> <file|->` 를 v0.15 경로(플래그 없음)로 돌린다.
-// Windows 점검표: python -I -X utf8 (cli_read_env.run_py), 출력·파일은 CRLF→LF 정규화, 셸·which 에 기대지 않는다.
+// `pes set <dir> <stage> <field> <file|->` · `pes set <dir> project <field> <file|->` 를 `node scripts/pes.ts` 로 돌린다 (SEL-74: 0.15 Python 은 없다).
+// 프로젝트는 `init` 이 DB 에 만든다 — project.json 은 없고, 상태(`state()`)는 DB 읽기 모델(0.15 project.json 모양)에서 읽는다.
+// Windows 점검표: 가드 아래 node(cli_read_env.run_cli), 출력·파일은 CRLF→LF 정규화, 셸·which 에 기대지 않는다.
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
-import { run_py, type HomeLike, type RunOptions } from "./cli_read_env.ts";
+import { run_cli, type HomeLike, type RunOptions } from "./cli_read_env.ts";
+import { ts_view, ts_age_lease } from "./compat_ts.ts";
 import type { CliResult } from "./cli_write_env.ts";
 
 export const STAGE_NAMES = ["plan", "research", "analyze", "write", "verify", "publish"] as const;
@@ -24,10 +26,15 @@ export interface SetEnv extends HomeLike {
   json_path: string;
   /** 임시 폴더에 값 파일을 쓰고 경로를 돌려준다. */
   value_file(name: string, text: string): string;
-  /** v0.15(플래그 없음)로 pes.py 를 돌린다. PES_OWNER/PES_TOKEN 은 extra 로만 준다. */
-  py(args: string[], opts?: Omit<RunOptions, "flag">): CliResult;
-  state(): any;
+  /** pes.ts 를 돌린다. PES_OWNER/PES_TOKEN 은 extra 로만 준다. */
+  py(args: string[], opts?: RunOptions): CliResult;
+  /** 상태(옛 project.json 모양). `of` 를 주면 그 슬러그의 프로젝트(기본: 이 환경의 프로젝트). */
+  state(of?: string): any;
   raw(): string;
+  /** 살아 있는 잠금(lease)을 쥔 세션 표시(PES_OWNER), 없으면 undefined — 0.15 의 .pes-lock 의 owner 에 해당한다(D04). */
+  lock_owner(): string | undefined;
+  /** 잠금을 `seconds` 만큼 과거로 돌린다(0.15 의 .pes-lock 시각 고치기). */
+  age_lock(seconds: number): void;
   /** 프로젝트 폴더의 파일 이름(하위 폴더는 `폴더/` 로 한 단계만). */
   listing(): string[];
   cleanup(): void;
@@ -48,17 +55,26 @@ export function make_set_env(slug = "set-synth"): SetEnv {
       return file;
     },
     py(args, opts = {}) {
-      return run_py(self, args, { ...opts, flag: undefined });
+      return run_cli(self, args, opts);
     },
-    state() {
-      // v0.15 load() 는 init 이 아직 안 쓴 notes·processed 를 첫 쓰기 때 채운다 — 그 차이는 set 의 몫이 아니므로 기본값을 미리 채워 비교한다.
-      const p = JSON.parse(self.raw());
+    state(of = slug) {
+      // DB 읽기 모델(옛 project.json 모양). 기본값(notes·processed)은 미리 채워 비교한다.
+      const view = ts_view({ env: home.env, pes_home: home.env.PES_HOME as string, home_dir: home.env.HOME as string }, of);
+      assert.ok(view !== undefined, `DB 에 프로젝트 ${of} 가 있다`);
+      const p = JSON.parse(JSON.stringify(view.project));
       p.notes ??= [];
       p.processed ??= [];
       return p;
     },
+    lock_owner() {
+      return ts_view({ env: home.env, pes_home: home.env.PES_HOME as string, home_dir: home.env.HOME as string }, slug)?.lock?.owner;
+    },
+    age_lock(seconds) {
+      ts_age_lease({ env: home.env, pes_home: home.env.PES_HOME as string, home_dir: home.env.HOME as string }, slug, seconds);
+    },
     raw() {
-      return readFileSync(self.json_path, "utf8").replace(/\r\n/g, "\n");
+      // project.json 은 없다 — 상태 전체를 JSON 글자로 (같은 상태면 같은 글자)
+      return JSON.stringify(self.state());
     },
     listing() {
       return listing_of(folder);

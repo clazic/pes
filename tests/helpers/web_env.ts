@@ -1,9 +1,8 @@
 // Harness for the local-screen DB/API conversion tests (stage 2 PR18, SEL-51). Everything is synthetic.
 //
 // What it gives the tests:
-//   - start_server(): `python3 -I -X utf8 scripts/serve.py <PES_HOME> <port>` in an isolated HOME / USERPROFILE / PES_HOME
-//     (the same isolation as run_py), optional PES_DB_CORE flag, a known PES_LOCAL_SESSION_SECRET, and a stop() that kills it.
-//     `-X utf8` because `python -I` ignores PYTHONIOENCODING (Windows pipes default to cp1252).
+//   - start_server(): `node scripts/serve.ts <PES_HOME> <port>` behind the TS child guard (SEL-72's TsServeProcess) in an isolated HOME / USERPROFILE /
+//     PES_HOME, a known PES_LOCAL_SESSION_SECRET, and a stop() that kills it. (SEL-74: the 0.15 serve.py is gone.)
 //   - http(): fetch with explicit Origin (undici allows it; a browser would not) and no redirect following.
 //   - page_data(): the JSON a template embeds (`<script id="data" type="application/json">`).
 //   - normalize_data() / subset_diffs(): a semantic comparison of two such blobs. "Same screen" means every fact the
@@ -13,18 +12,14 @@
 //   - CRLF: every file read back goes through read_lf (Windows text mode).
 
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 
-import { make_cli_env, PES_PY, SLUG, type CliEnv } from "./cli_write_env.ts";
-import { PY, plain_legacy, root_forms, run_py, seed, write_json, write_legacy, type HomeLike } from "./cli_read_env.ts";
-import { hub_blocked_argv } from "./hub_block.ts";
+import { make_cli_env, SLUG, type CliEnv } from "./cli_write_env.ts";
+import { plain_legacy, root_forms, run_cli, seed, write_json, write_legacy, type HomeLike } from "./cli_read_env.ts";
+import { TsServeProcess, type TsSrvCtx } from "./compat_ts_srv.ts";
 
-export const SERVE_PY = join(PES_PY, "..", "serve.py");
-/** The last main commit whose screens (render / ask / hub / serve) are pure v0.15. */
-export const WEB_BASELINE_REF = "36bc6a2";
 export const SESSION_SECRET = "synthetic-owner-session-secret-sel51";
 
 export function free_port(): Promise<number> {
@@ -47,68 +42,22 @@ export interface Server {
 }
 
 export interface ServerOptions {
-  /** PES_DB_CORE value; "1" by default. undefined runs the server as v0.15. */
-  flag?: string | undefined;
-  /** Another serve.py (a baseline checkout). */
-  script?: string;
   extra?: Record<string, string | undefined>;
 }
 
-/** Start serve.py for the isolated home of `c` and wait until /ping answers. Always stop() it (finally). */
+/** Start scripts/serve.ts for the isolated home of `c` (guarded, injected free port) and wait until it answers. Always stop() it (finally). */
 export async function start_server(c: HomeLike, opts: ServerOptions = {}): Promise<Server> {
-  const port = await free_port();
-  const env: Record<string, string | undefined> = {
-    ...c.env.home.env,
-    PES_OWNER: undefined,
-    PES_TOKEN: undefined,
-    PES_DB_CORE: "flag" in opts ? opts.flag : "1",
-    PES_LOCAL_SESSION_SECRET: SESSION_SECRET,
-    ...opts.extra,
-  };
-  for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
+  const env: Record<string, string | undefined> = { ...c.env.home.env, PES_OWNER: undefined, PES_TOKEN: undefined };
   assert.equal(env.HOME, c.env.home.env.HOME, "the server runs in the isolated HOME");
   assert.equal(env.USERPROFILE, c.env.home.env.HOME);
   assert.ok(env.PES_HOME !== undefined && env.PES_HOME.length > 0, "PES_HOME is set (isolated)");
-  const child: ChildProcess = spawn(PY, hub_blocked_argv(["-I", "-X", "utf8", opts.script ?? SERVE_PY, env.PES_HOME as string, String(port)]), {
-    env: env as NodeJS.ProcessEnv,
-    cwd: c.env.home.root,
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let stderr = "";
-  child.stderr?.on("data", (chunk) => {
-    stderr += String(chunk);
-  });
-  let exited = false;
-  child.once("exit", () => {
-    exited = true;
-  });
-  const url = `http://127.0.0.1:${port}`;
-  const server: Server = {
-    port,
-    origin: url,
-    url,
-    async stop() {
-      if (exited) return;
-      await new Promise<void>((resolve) => {
-        child.once("exit", () => resolve());
-        child.kill();
-        setTimeout(resolve, 3000).unref();
-      });
-    },
-  };
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (exited) throw new Error(`serve.py exited early: ${stderr}`);
-    try {
-      const res = await fetch(`${url}/ping`);
-      if (res.ok) return server;
-    } catch {
-      // not listening yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  await server.stop();
-  throw new Error(`serve.py did not start in 30 s: ${stderr}`);
+  const narrow_bin = join(c.env.home.root, "bin");
+  mkdirSync(narrow_bin, { recursive: true });
+  const ctx: TsSrvCtx = { home: { root: c.env.home.root }, env, narrow_bin, pes_home: env.PES_HOME as string, home_dir: env.HOME as string };
+  const proc = new TsServeProcess(ctx, env.PES_HOME as string, { extra_env: { PES_LOCAL_SESSION_SECRET: SESSION_SECRET, ...opts.extra }, ready_timeout_ms: 30_000 });
+  await proc.start();
+  const url = proc.origin();
+  return { port: proc.port, origin: url, url, stop: () => proc.stop() };
 }
 
 export async function with_server<T>(c: HomeLike, opts: ServerOptions, fn: (s: Server) => Promise<T>): Promise<T> {
@@ -290,9 +239,9 @@ export function read_text_lf(path: string): string {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 }
 
-/** Run a pes.py step in the DB (flag "1") or v0.15 (undefined) mode and require success. */
-export function step(c: CliEnv, flag: string | undefined, args: string[], script?: string): string {
-  const res = run_py(c, args, { flag, ...(script !== undefined ? { script } : {}) });
+/** Run a pes.ts step in the isolated home of `c` and require success. */
+export function step(c: CliEnv, args: string[]): string {
+  const res = run_cli(c, args);
   assert.equal(res.status, 0, `${args.join(" ")}: exit ${res.status}\n${res.stderr}${res.stdout}`);
   return res.stdout;
 }
@@ -312,53 +261,58 @@ export function rm_default_json(c: CliEnv): void {
 }
 
 /** 기획 R1 을 봉인한 뒤 R2: 항목 둘을 보강하고 다시 봉인한다 — 타임라인·항목×라운드(스냅샷 2개 이상)가 보이게. */
-export function second_round(c: CliEnv, flag: string | undefined): void {
-  step(c, flag, ["round-start", SLUG, "plan"]);
-  step(c, flag, ["merge", SLUG, "plan", write_json(c, "r2.json", [{ id: 2, kind: "topic", title: "합성 기획 항목 둘", summary: "합성 요약 둘 (보강)", status: "done" }])]);
-  step(c, flag, ["render", SLUG, "plan"]);
+export function second_round(c: CliEnv): void {
+  step(c, ["round-start", SLUG, "plan"]);
+  step(c, ["merge", SLUG, "plan", write_json(c, "r2.json", [{ id: 2, kind: "topic", title: "합성 기획 항목 둘", summary: "합성 요약 둘 (보강)", status: "done" }])]);
+  step(c, ["render", SLUG, "plan"]);
 }
 
-/** v0.15: 시작 질문 폼 → 기획 라운드 1 → 항목 합치기 → 노트 → 단계 봉인·화면. 모두 project.json 으로. */
-export async function build_old(): Promise<CliEnv> {
-  const c = await make_cli_env();
-  write_legacy(c.folder, plain_legacy(SLUG));
-  step(c, undefined, ["ask", SLUG, write_spec(c)]);
-  seed(c, undefined);
-  writeFileSync(join(c.folder, "..", ".pes-hub"), "1", "utf8"); // render 가 홈 허브도 다시 짓는다 (v0.15)
-  step(c, undefined, ["render", SLUG, "plan"]);
-  second_round(c, undefined);
-  return c;
-}
-
-/** 같은 일을 DB 로(PES_DB_CORE=1). 폴더의 project.json 은 다른 주제의 옛 파일로 남아 있다 — 화면이 그것을 읽으면 틀린다. */
+/** 시작 질문 폼 → 기획 라운드 1 → 항목 합치기 → 노트 → 단계 봉인 → 라운드 2 를 DB 로. 폴더의 project.json 은 다른 주제의 옛 파일로 남아 있다 — 화면이 그것을 읽으면 틀린다. (0.15 로 같은 일을 한 화면의 데이터는 고정 기록 tests/fixtures/golden/web-v015-pages.json) */
 export async function build_db(): Promise<CliEnv> {
   const c = await make_cli_env();
-  step(c, "1", ["ask", SLUG, write_spec(c)]);
-  seed(c, "1");
+  step(c, ["ask", SLUG, write_spec(c)]);
+  seed(c);
   writeFileSync(join(c.folder, "..", ".pes-hub"), "1", "utf8");
-  step(c, "1", ["render", SLUG, "plan"]); // DB 에서는 단계 봉인(스냅샷)이다. 같은 라운드에 두 번째 render 는 이미 봉인돼 거절될 수 있다.
-  second_round(c, "1");
+  step(c, ["render", SLUG, "plan"]); // DB 에서는 단계 봉인(스냅샷)이다. 같은 라운드에 두 번째 render 는 이미 봉인돼 거절될 수 있다.
+  second_round(c);
   return c;
+}
+
+/**
+ * The home page (hub) pes.ts builds: `hub` on an injected single port (never 8760~8775), GET /, then `stop`. Needs the isolated home of `c`.
+ * Returns the data the page embeds.
+ */
+export async function hub_page_data(c: CliEnv): Promise<any> {
+  const port = await free_port();
+  const extra = { PES_HUB_PORTS: `${port}-${port}` };
+  const started = run_cli(c, ["hub"], { extra, allow_child: true, allow_hub_ports: [port] });
+  assert.equal(started.status, 0, `hub: ${started.stderr}${started.stdout}`);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(res.status, 200, "GET / of the hub");
+    return page_data(await res.text());
+  } finally {
+    run_cli(c, ["stop"], { extra, allow_child: true, allow_hub_ports: [port] });
+  }
 }
 
 export interface Pages {
   dash: any;
   ask: any;
-  hub: any;
 }
 
 /**
  * 사용자가 보는 화면 = 서버가 내주는 페이지. 파일로 미리 지어 두든 요청 때 DB 에서 짓든 구현의 선택이다 —
  * 시험은 같은 URL 로 받은 페이지가 품은 데이터만 본다. (v0.15 는 render·ask·hub 가 지은 파일을 정적으로 서빙한다.)
  */
-export async function pages(c: CliEnv, flag: string | undefined): Promise<Pages> {
-  return with_server(c, { flag }, async (s) => {
+export async function pages(c: CliEnv): Promise<Pages> {
+  return with_server(c, {}, async (s) => {
     const get = async (path: string) => {
       const r = await http(s, path);
       assert.equal(r.status, 200, `${path}: ${r.status}`);
       return page_data(r.text);
     };
-    return { dash: await get(`/${SLUG}/`), ask: await get(`/${SLUG}/ask-plan-start.html`), hub: await get("/") };
+    return { dash: await get(`/${SLUG}/`), ask: await get(`/${SLUG}/ask-plan-start.html`) };
   });
 }
 
@@ -366,18 +320,18 @@ export async function pages(c: CliEnv, flag: string | undefined): Promise<Pages>
 export async function db_with_form(): Promise<CliEnv> {
   const c = await make_cli_env();
   rm_default_json(c);
-  step(c, "1", ["ask", SLUG, write_spec(c)]);
-  seed(c, "1");
+  step(c, ["ask", SLUG, write_spec(c)]);
+  seed(c);
   writeFileSync(join(c.folder, "..", ".pes-hub"), "1", "utf8");
-  step(c, "1", ["render", SLUG, "plan"]);
-  second_round(c, "1");
+  step(c, ["render", SLUG, "plan"]);
+  second_round(c);
   return c;
 }
 
 export const sub_count = (c: CliEnv): number => Number(c.env.db.get<{ n: number | bigint }>("SELECT count(*) AS n FROM submissions")!.n);
 export const commit_count = (c: CliEnv): number => c.commits().length;
 export const pending_names = (c: CliEnv): string[] =>
-  step(c, "1", ["pending", SLUG]).split("\n").map((x) => x.trim()).filter(Boolean).map((x) => x.split(/[\\/]/).pop()!);
+  step(c, ["pending", SLUG]).split("\n").map((x) => x.trim()).filter(Boolean).map((x) => x.split(/[\\/]/).pop()!);
 
 export { SLUG };
 

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
-import { code_segments, mentioned_commands, PES_PY, pes_cmds, read_text, REPO, repo_doc, target_docs } from "./helpers/skill_docs.ts";
+import { code_segments, mentioned_commands, PES_USAGE, pes_cmds, read_text, REPO, repo_doc, target_docs } from "./helpers/skill_docs.ts";
 
 const CMDS = pes_cmds();
 const STAGE_WORD = /^(?:plan|research|analyze|write|verify|publish|resume|<[^>]*(?:stage|단계)[^>]*>|"?\$\{?(?:S|STAGE|STG|stage|st)\}?"?)$/;
@@ -27,10 +27,9 @@ interface Spec {
   line: string;
 }
 
-/** pes.py 맨 위 설명의 `  명령 인자들   설명` 줄을 읽는다. 같은 명령이 여러 줄이면 모두 후보다. */
+/** pes.ts 사용법(scripts/pes_core/cli_usage.ts)의 `  명령 인자들   설명` 줄을 읽는다. 같은 명령이 여러 줄이면 모두 후보다. */
 export function usage_specs(): Spec[] {
-  const src = read_text(PES_PY);
-  const doc = src.slice(src.indexOf('"""') + 3, src.indexOf('"""', src.indexOf('"""') + 3));
+  const doc = PES_USAGE;
   const specs: Spec[] = [];
   for (const raw of doc.split("\n")) {
     const m = /^ {2}([a-z][a-z-]*)\s+(\S.*?)(?:\s{3,}\S.*)?$/.exec(raw);

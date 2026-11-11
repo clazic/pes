@@ -9,6 +9,7 @@
  */
 
 import assert from "node:assert/strict";
+import { tree_digest } from "./helpers/legacy_env.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -74,24 +75,21 @@ test("F1b Referer 변형도 같다: 쿼리·해시·대소문자·슬래시 없�
   }
 });
 
-test("F1c 플래그 없음·legacy: /feedback(Referer) 은 v0.15 그대로 feedback/ 에 파일을 쓰고 DB 에는 쓰지 않는다", async () => {
-  const c = await make_cli_env(); // 폴더에 옛 project.json
+test("F1c 옛(미전환) 폴더: /feedback(Referer) 은 받지 않는다 — 404, 폴더에 feedback/ 파일도 DB 영수증도 만들지 않는다 (D14: TS 는 project.json·feedback/ 에 쓰지 않는다)", async () => {
+  // (PR18 은 옛 폴더의 답을 0.15 처럼 feedback/ 에 json 으로 썼다 — scripts/serve.ts 머리말: 'A folder that is not in the database takes no answer (404)')
+  const c = await make_cli_env();
   try {
-    for (const flag of [undefined, "1"] as const) {
-      const other = flag === undefined ? SLUG : "synthetic-legacy-compat";
-      const dir = flag === undefined ? c.folder : join(c.folder, "..", other);
-      if (flag !== undefined) write_legacy(dir, { ...plain_legacy(other), topic: "합성 옛 전용" });
-      await with_server(c, { flag }, async (s) => {
-        const before = existsSync(join(dir, "feedback")) ? readdirSync(join(dir, "feedback")).filter((x) => x.endsWith(".json")).length : 0;
-        const commits = commit_count(c);
-        const r = await raw_post(s, "/feedback", JSON.stringify(COMPAT), { headers: { Referer: `${s.origin}/${other}/index.html` } });
-        assert.equal(r.status, 200, `flag=${String(flag)}: ${r.text}`);
-        const after = readdirSync(join(dir, "feedback")).filter((x) => x.endsWith(".json"));
-        assert.equal(after.length - before, 1, `flag=${String(flag)}: v0.15 처럼 feedback/ 에 json 한 개`);
-        assert.ok(after.includes(r.json.file));
-        assert.equal(commit_count(c), commits, `flag=${String(flag)}: DB 에 쓰지 않는다`);
-      });
-    }
+    const other = "synthetic-legacy-compat";
+    const dir = join(c.folder, "..", other);
+    write_legacy(dir, { ...plain_legacy(other), topic: "합성 옛 전용" });
+    const tree = tree_digest(dir);
+    await with_server(c, {}, async (s) => {
+      const commits = commit_count(c);
+      const r = await raw_post(s, "/feedback", JSON.stringify(COMPAT), { headers: { Referer: `${s.origin}/${other}/index.html` } });
+      assert.equal(r.status, 404, r.text);
+      assert.equal(commit_count(c), commits, "DB 에 쓰지 않는다");
+      assert.equal(tree_digest(dir), tree, "옛 폴더에도 쓰지 않는다");
+    });
   } finally {
     c.close();
   }
@@ -111,12 +109,14 @@ const REVIEW = (label: string, extra: unknown[] = []) => ({
 test("F2 AI 점검 폼 개정 뒤 옛 대시보드 send() 와 같은 본문: 409 이거나 당시 판에 연결 — set_id null 로 저장되지 않는다", async () => {
   const c = await db_with_form();
   try {
-    step(c, "1", ["ask", SLUG, write_spec(c, REVIEW("이전 질문"), "review-old.json")]);
+    step(c, ["ask", SLUG, write_spec(c, REVIEW("이전 질문"), "review-old.json")]);
+    step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
     await with_server(c, {}, async (s) => {
       const dash = page_data((await http(s, `/${SLUG}/`)).text);
       const review = dash.project.stages.plan.review;
       assert.ok(review && review.questions.length >= 1, "대시보드에 점검 질문이 있다");
-      step(c, "1", ["ask", SLUG, write_spec(c, REVIEW("개정 질문"), "review-new.json")]); // 같은 form_key 개정
+      step(c, ["ask", SLUG, write_spec(c, REVIEW("개정 질문"), "review-new.json")]); // 같은 form_key 개정
+      step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
       const subs = sub_count(c);
       // v0.15 대시보드의 send() 가 만드는 본문 그대로 (새 화면이 더 싣는 필드는 review 데이터에서 그대로 따라 싣는다)
       const body: Record<string, unknown> = { stage: "plan", round: review.round, kind: "review", text: "[AI 점검 답]\n이전 질문: 답", answers: { [review.questions[0].id]: "답" } };
@@ -145,7 +145,8 @@ test("F3 AI 점검 질문: show_if.id 가 같은 화면(대시보드 데이터) 
       { id: "scope", type: "single", label: "범위는?", required: true, options: [{ value: "narrow", label: "좁게" }, { value: "wide", label: "넓게", recommended: true }] } as any,
       { id: "why", type: "text", label: "넓게 하는 이유는?", required: true, show_if: { id: "scope", in: ["wide"] } } as any,
     ];
-    step(c, "1", ["ask", SLUG, write_spec(c, spec, "review-sw.json")]);
+    step(c, ["ask", SLUG, write_spec(c, spec, "review-sw.json")]);
+    step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
     await with_server(c, {}, async (s) => {
       const review = page_data((await http(s, `/${SLUG}/`)).text).project.stages.plan.review;
       assert.ok(review, "점검 질문이 대시보드에 있다");

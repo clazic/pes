@@ -30,7 +30,8 @@ test("R3a 없는 질문·자기 자신을 가리키는 show_if 는 대시보드 
       { id: "self-dep", type: "text", label: "자기 자신에 기대는 질문", required: true, show_if: { id: "self-dep", in: ["x"] } },
       { id: "good-dep", type: "text", label: "정상 조건 질문", required: false, show_if: { id: "scope", in: ["wide"] } },
     ];
-    step(c, "1", ["ask", SLUG, write_spec(c, spec_with("plan-check-r2", qs), "r3a.json")]);
+    step(c, ["ask", SLUG, write_spec(c, spec_with("plan-check-r2", qs), "r3a.json")]);
+    step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
     await with_server(c, {}, async (s) => {
       const review = page_data((await http(s, `/${SLUG}/`)).text).project.stages.plan.review;
       assert.ok(review, "점검 질문이 대시보드에 있다");
@@ -108,7 +109,8 @@ test("R3c position 없는 기존 DB 세트(이번 수정 이전 pes ask 로 올�
       { id: "scope", type: "single", label: "범위는?", required: true, options: [{ value: "narrow", label: "좁게" }, { value: "wide", label: "넓게" }] },
       { id: "why", type: "text", label: "넓게 하는 이유는?", required: true, show_if: { id: "scope", in: ["wide"] } },
     ];
-    step(c, "1", ["ask", SLUG, write_spec(c, spec_with("plan-check-old", qs), "r3c.json")]);
+    step(c, ["ask", SLUG, write_spec(c, spec_with("plan-check-old", qs), "r3c.json")]);
+    step(c, ["render", SLUG]); // pes.ts: 대시보드 파일은 render 가 다시 짓는다
     // 이전 판 모양으로 되돌린다: show_if 에 position 이 없고 질문엔 bank_key 도 없다(spec id 만 남은 show_if)
     const changed = c.env.db.run(
       `UPDATE question_versions SET show_if = json_remove(show_if, '$.position') WHERE show_if IS NOT NULL AND show_if LIKE '%"position"%'`,

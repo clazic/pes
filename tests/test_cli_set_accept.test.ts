@@ -144,16 +144,14 @@ test("set 은 다른 명령이 쌓은 상태를 건드리지 않는다 — 라�
 // ---------------------------------------------------------------------------
 // 잠금: v0.15 쓰기 규칙 그대로 (check_lock)
 
-function lock_owner(e: SetEnv): string | undefined {
-  const f = join(e.folder, ".pes-lock");
-  return existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as { owner?: string }).owner : undefined;
-}
+const lock_owner = (e: SetEnv): string | undefined => e.lock_owner(); // DB 의 살아 있는 lease 의 세션 표시 (0.15 는 .pes-lock 파일)
 
 test("set 은 다른 세션의 살아 있는 잠금이면 거부한다 — 파일·잠금 그대로 (v0.15 쓰기 규칙)", () =>
   with_set((e) => {
     ok_run(e.py(["lock", e.slug], { extra: { PES_OWNER: "session-aaaa1111" } }), "lock");
     const before = e.raw();
-    const lock_before = readFileSync(join(e.folder, ".pes-lock"), "utf8");
+    const lock_before = lock_owner(e);
+    assert.equal(lock_before, "session-aaaa1111");
     const file = e.value_file("lk.txt", "잠금 시험 요약");
 
     const other = e.py(["set", e.slug, "plan", "summary", file], { extra: { PES_OWNER: "session-bbbb2222" } });
@@ -162,7 +160,7 @@ test("set 은 다른 세션의 살아 있는 잠금이면 거부한다 — 파�
     const anonymous = e.py(["set", e.slug, "plan", "summary", file]);
     expect_refused(anonymous, "세션 표시 없음");
     assert.equal(e.raw(), before, "거부된 쓰기는 project.json 을 바꾸지 않는다");
-    assert.equal(readFileSync(join(e.folder, ".pes-lock"), "utf8"), lock_before, "남의 잠금은 그대로");
+    assert.equal(lock_owner(e), lock_before, "남의 잠금은 그대로");
     assert.ok(!existsSync(join(e.folder, "project.json.tmp")), "tmp 가 남지 않는다");
 
     ok_run(e.py(["set", e.slug, "plan", "summary", file], { extra: { PES_OWNER: "session-aaaa1111" } }), "잠금 주인");
@@ -181,11 +179,8 @@ test("set 은 잠금이 없을 때 PES_OWNER 가 있으면 v0.15 처럼 그 세�
 test("set 은 오래된(2시간 넘은) 남의 잠금은 넘어서 쓴다 — v0.15 와 같다", () =>
   with_set((e) => {
     ok_run(e.py(["lock", e.slug], { extra: { PES_OWNER: "session-dddd4444" } }), "lock");
-    // 잠금 시각을 3시간 전으로 돌린다 (잠금 파일 형식: {"owner","at"(epoch 초),"since"})
-    const lock_file = join(e.folder, ".pes-lock");
-    const info = JSON.parse(readFileSync(lock_file, "utf8")) as { owner: string; at: number; since?: string };
-    info.at = Date.now() / 1000 - 3 * 3600;
-    writeFileSync(lock_file, JSON.stringify(info), "utf8");
+    // 잠금 시각을 3시간 전으로 돌린다 (0.15 는 .pes-lock 의 at, TS 는 DB lease 의 시각 — ts_age_lease)
+    e.age_lock(3 * 3600);
     ok_run(e.py(["set", e.slug, "plan", "summary", e.value_file("old.txt", "오래된 잠금 뒤 요약")], { extra: { PES_OWNER: "session-eeee5555" } }), "stale lock");
     assert.equal(e.state().stages.plan.summary.trimEnd(), "오래된 잠금 뒤 요약");
   }));

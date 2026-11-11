@@ -1,13 +1,13 @@
-// 설계 전용 SQLite 검사 (stage 2 PR26d) — docs/plan/schemas/check_ddl.py 의 TS 이전.
+// 설계 전용 SQLite 검사 (stage 2 PR26d) — 옛 Python 검사기(check_ddl.py)의 TS 이전. Python 검사기는 SEL-74 에서 지웠다.
 //
 // 사용: node scripts/check_ddl.ts [--ddl <sql 파일>]      (npm run check:ddl)
 //   --ddl 이 없으면 docs/plan/schemas/stage-1-ddl-draft.sql 을 읽는다.
-//   통과: 표준출력에 check_ddl.py 와 같은 줄(첫 줄의 SQLite 버전만 다를 수 있음), 종료 코드 0.
-//   실패: 실패 메시지(check_ddl.py 의 AssertionError/SQLite 오류와 같은 문장)를 표준오류에, 종료 코드 1.
+//   통과: 표준출력에 옛 검사기와 같은 줄(첫 줄의 SQLite 버전만 다를 수 있음), 종료 코드 0.
+//   실패: 실패 메시지(옛 검사기의 AssertionError/SQLite 오류와 같은 문장)를 표준오류에, 종료 코드 1.
 //
 // 이 검사는 `:memory:` 데이터베이스만 쓴다. PES 코어·실제 프로젝트/설정·파일 DB·네트워크·자식 프로세스를 쓰지 않는다.
 // DDL 파일은 읽기만 한다. 아래 CAS/가드 예는 설계 실험이지 운영 서비스가 아니다.
-// check_ddl.py 는 PR26 이 끝날 때까지 기준으로 남는다(동등성 시험이 둘을 견준다).
+// 옛 검사기가 낸 줄은 tests/helpers/ddl_check_env.ts 의 PY_REFERENCE_LINES 에 고정돼 있다.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";

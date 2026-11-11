@@ -1,0 +1,772 @@
+{
+ "dash": {
+  "project": {
+   "pes": 1,
+   "topic": "합성 파일 주제",
+   "slug": "synthetic-files",
+   "current": "plan",
+   "processed": [],
+   "notes": [
+    {
+     "stage": "plan",
+     "text": "합성 인계 메모 하나"
+    },
+    {
+     "stage": "plan",
+     "text": "합성 인계 메모 둘"
+    }
+   ],
+   "stages": {
+    "plan": {
+     "status": "active",
+     "round": 2,
+     "settings": {},
+     "items": [
+      {
+       "id": 1,
+       "title": "합성 기획 항목 하나",
+       "kind": "topic",
+       "question": "",
+       "status": "done",
+       "request": "",
+       "depth": 1,
+       "updated_round": 1,
+       "summary": "합성 요약 하나",
+       "details": "",
+       "sources": [
+        {
+         "title": "합성 출처 A",
+         "url": "https://example.invalid/a",
+         "method": "law",
+         "date": "2026-01-02"
+        },
+        {
+         "title": "합성 출처 B",
+         "url": "https://example.invalid/b",
+         "method": "search"
+        }
+       ],
+       "stats": [],
+       "shots": [],
+       "confidence": "high",
+       "conflicts": [],
+       "verify": null,
+       "links": {},
+       "user_links": []
+      },
+      {
+       "id": 2,
+       "title": "합성 기획 항목 둘",
+       "kind": "topic",
+       "question": "",
+       "status": "done",
+       "request": "",
+       "depth": 2,
+       "updated_round": 2,
+       "summary": "합성 요약 둘 (보강)",
+       "details": "",
+       "sources": [],
+       "stats": [],
+       "shots": [],
+       "confidence": "",
+       "conflicts": [],
+       "verify": null,
+       "links": {},
+       "user_links": []
+      }
+     ],
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "history": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": []
+    },
+    "research": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "items": [],
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "history": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": []
+    },
+    "analyze": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "items": [],
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "history": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": []
+    },
+    "write": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "items": [
+      {
+       "id": 1,
+       "title": "1장",
+       "kind": "section",
+       "question": "",
+       "status": "done",
+       "request": "",
+       "depth": 1,
+       "updated_round": 0,
+       "summary": "",
+       "details": "첫 장 본문입니다 [^1] 그리고 [^2] 끝.",
+       "sources": [
+        {
+         "title": "합성 출처 A",
+         "url": "https://example.invalid/a",
+         "method": "law",
+         "date": "2026-01-02"
+        },
+        {
+         "title": "합성 출처 C",
+         "url": "https://example.invalid/c",
+         "method": "search"
+        }
+       ],
+       "stats": [],
+       "shots": [],
+       "confidence": "",
+       "conflicts": [],
+       "verify": null,
+       "links": {},
+       "user_links": [],
+       "order": 1
+      }
+     ],
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "history": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": []
+    },
+    "verify": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "items": [],
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "history": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": []
+    },
+    "publish": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "items": [],
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "history": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": []
+    }
+   }
+  },
+  "stages": [
+   {
+    "key": "plan",
+    "label": "기획"
+   },
+   {
+    "key": "research",
+    "label": "조사"
+   },
+   {
+    "key": "analyze",
+    "label": "분석·종합"
+   },
+   {
+    "key": "write",
+    "label": "집필"
+   },
+   {
+    "key": "verify",
+    "label": "검증"
+   },
+   {
+    "key": "publish",
+    "label": "산출·공유"
+   }
+  ],
+  "snapshots": [
+   {
+    "stage": "plan",
+    "round": 1,
+    "state": {
+     "round": 1,
+     "status": "active",
+     "changes": [],
+     "items": [
+      {
+       "id": 1,
+       "title": "합성 기획 항목 하나",
+       "kind": "topic",
+       "status": "done",
+       "request": "",
+       "depth": 1,
+       "updated_round": 1,
+       "summary": "합성 요약 하나",
+       "confidence": "high",
+       "conflicts": [],
+       "verdict": null,
+       "n_sources": 2,
+       "n_stats": 0,
+       "details_len": 0
+      },
+      {
+       "id": 2,
+       "title": "합성 기획 항목 둘",
+       "kind": "topic",
+       "status": "deepen",
+       "request": "",
+       "depth": 1,
+       "updated_round": 1,
+       "summary": "합성 요약 둘",
+       "confidence": "",
+       "conflicts": [],
+       "verdict": null,
+       "n_sources": 0,
+       "n_stats": 0,
+       "details_len": 0
+      }
+     ],
+     "n_suggestions": 0,
+     "review": null
+    }
+   },
+   {
+    "stage": "plan",
+    "round": 2,
+    "state": {
+     "round": 2,
+     "status": "active",
+     "changes": [],
+     "items": [
+      {
+       "id": 1,
+       "title": "합성 기획 항목 하나",
+       "kind": "topic",
+       "status": "done",
+       "request": "",
+       "depth": 1,
+       "updated_round": 1,
+       "summary": "합성 요약 하나",
+       "confidence": "high",
+       "conflicts": [],
+       "verdict": null,
+       "n_sources": 2,
+       "n_stats": 0,
+       "details_len": 0
+      },
+      {
+       "id": 2,
+       "title": "합성 기획 항목 둘",
+       "kind": "topic",
+       "status": "done",
+       "request": "",
+       "depth": 2,
+       "updated_round": 2,
+       "summary": "합성 요약 둘 (보강)",
+       "confidence": "",
+       "conflicts": [],
+       "verdict": null,
+       "n_sources": 0,
+       "n_stats": 0,
+       "details_len": 0
+      }
+     ],
+     "n_suggestions": 0,
+     "review": null
+    }
+   }
+  ],
+  "feedback": [],
+  "asks": [
+   "ask-plan-start.html"
+  ],
+  "outputs": [],
+  "qlabels": {
+   "plan": {
+    "client_city": "발주처 도시",
+    "client_city=ulsan": "울산",
+    "seoul_station": "서울 역세권형 집계",
+    "seoul_station=split": "유형 분리",
+    "seoul_station=merge": "합산",
+    "asof": "기준일",
+    "official": "집계 근거",
+    "official=self": "고시 원문 전수 대조",
+    "official=foia": "정보공개청구 병행",
+    "outside": "특·광역시 밖 사례",
+    "outside=compare": "제언 장에서 인용만",
+    "outside=full": "현황까지 포함",
+    "policy": "정책 제안까지 가나요?",
+    "library": "기존 조사 결과",
+    "deadline": "마감일",
+    "stage_reports": "단계마다 승인하면 만들 보고서 형식",
+    "team": "연구진 구성",
+    "research_type": "과제 유형",
+    "period": "시간 범위",
+    "space": "공간 범위",
+    "length": "분량",
+    "format": "최종 결과물 형식",
+    "audience": "누가 읽나요?",
+    "purpose": "결과물 용도",
+    "topic": "주제",
+    "policy=yes": "제언까지",
+    "policy=no": "현황·문제 분석까지",
+    "library=reuse": "참고자료로 활용 — 겹치는 조사 항목은 이어받아 보완",
+    "library=ignore": "참고만 하고 새로 조사",
+    "stage_reports=html": "웹 보고서 (목차·표·출처, 인쇄 가능)",
+    "stage_reports=eli5": "그림 설명 eli5 — 큰 그림, 적은 글",
+    "stage_reports=md": "마크다운 (원본)",
+    "stage_reports=hwpx": "HWPX (울산연구원 양식)",
+    "stage_reports=docx": "Word",
+    "stage_reports=pdf": "PDF",
+    "research_type=basic": "기본과제",
+    "research_type=adhoc": "수시과제",
+    "research_type=contract": "수탁과제",
+    "research_type=none": "해당 없음",
+    "period=since-start": "제도 도입 이후 전체",
+    "period=5y": "최근 5년",
+    "space=national": "전국",
+    "space=metro": "특·광역시",
+    "space=ulsan": "울산 중심",
+    "length=brief": "요약 (5쪽 이내)",
+    "length=normal": "보통 (20~40쪽)",
+    "length=full": "본보고서 (80쪽 이상)",
+    "format=hwpx": "울산연구원 기본정책과제 HWPX",
+    "format=docx": "Word",
+    "format=web": "웹 페이지",
+    "format=slides": "발표자료",
+    "audience=internal": "내부 연구진",
+    "audience=client": "시청·발주처",
+    "audience=council": "의회·위원회",
+    "audience=public": "시민",
+    "purpose=report": "보고서 작성",
+    "purpose=decision": "의사결정 자료",
+    "purpose=learn": "학습·현황 파악",
+    "purpose=present": "발표"
+   },
+   "research": {
+    "client_city": "발주처 도시",
+    "client_city=ulsan": "울산",
+    "seoul_station": "서울 역세권형 집계",
+    "seoul_station=split": "유형 분리",
+    "seoul_station=merge": "합산",
+    "asof": "기준일",
+    "official": "집계 근거",
+    "official=self": "고시 원문 전수 대조",
+    "official=foia": "정보공개청구 병행",
+    "outside": "특·광역시 밖 사례",
+    "outside=compare": "제언 장에서 인용만",
+    "outside=full": "현황까지 포함",
+    "vworld_install": "이 컴퓨터에 vworld(국가공간정보 CLI)가 없습니다. 설치할까요?",
+    "overseas_countries": "해외 사례 국가",
+    "press_range": "기사 범위",
+    "law_range": "법령 확인 범위",
+    "stats": "통계를 어떻게 가져올까요?",
+    "user_links": "꼭 조사할 링크·자료 (있으면)",
+    "scope": "자료 범위 (여러 개 선택)",
+    "model": "조사 모델",
+    "parallel": "병렬 처리",
+    "depth": "조사 깊이",
+    "tools": "조사 도구",
+    "vworld_install=install": "설치",
+    "vworld_install=skip": "이번엔 건너뛰기",
+    "press_range=3y-fact": "최근 3년 · 사실 보도 위주",
+    "press_range=3y-all": "최근 3년 · 여론·갈등 포함",
+    "press_range=all": "전체 기간",
+    "law_range=statute": "법률·시행령·시행규칙",
+    "law_range=ordinance": "+ 조례",
+    "law_range=cases": "+ 조례 + 판례·해석례",
+    "stats=kosis+browser": "KOSIS + 브라우저 확인",
+    "stats=kosis": "KOSIS만",
+    "stats=browser": "kosis.kr 직접",
+    "stats=websearch": "인용 수치",
+    "scope=gov": "국내 정부·공공기관",
+    "scope=law": "법령·조례",
+    "scope=stats": "통계",
+    "scope=academic": "학술·연구보고서",
+    "scope=press": "언론 기사",
+    "scope=overseas": "해외 사례",
+    "scope=spatial": "공간정보",
+    "model=mixed": "혼합",
+    "model=opus": "모두 Opus",
+    "model=sonnet": "모두 Sonnet",
+    "parallel=auto": "자동",
+    "parallel=sequential": "순차",
+    "parallel=max": "최대",
+    "depth=standard": "표준",
+    "depth=quick": "빠른 개요",
+    "depth=deep": "심층",
+    "tools=mixed": "혼용",
+    "tools=browser": "ego-browser만",
+    "tools=websearch": "WebSearch만"
+   },
+   "analyze": {
+    "client_city": "발주처 도시",
+    "client_city=ulsan": "울산",
+    "seoul_station": "서울 역세권형 집계",
+    "seoul_station=split": "유형 분리",
+    "seoul_station=merge": "합산",
+    "asof": "기준일",
+    "official": "집계 근거",
+    "official=self": "고시 원문 전수 대조",
+    "official=foia": "정보공개청구 병행",
+    "outside": "특·광역시 밖 사례",
+    "outside=compare": "제언 장에서 인용만",
+    "outside=full": "현황까지 포함",
+    "charts": "차트",
+    "feasibility": "정책 제언의 실현 가능성 평가",
+    "derived": "통계 가공",
+    "conflicts": "남은 충돌(⚠)은 어떻게 할까요?",
+    "conclusion": "결론 성격",
+    "baseline": "기준 지역",
+    "lens": "분석 관점",
+    "axes": "비교 축 (여러 개 선택)",
+    "charts=yes": "주요 비교에 차트 초안 만들기",
+    "charts=no": "표만",
+    "feasibility=yes": "한다",
+    "feasibility=no": "하지 않는다",
+    "derived=derive": "증감률·인구 대비 비율 등 가공 지표 사용 (가공 표시)",
+    "derived=raw": "원자료만",
+    "conflicts=pick": "출처별 근거를 보여 주고 점검 질문에서 하나씩 정하기",
+    "conflicts=both": "모두 병기",
+    "conclusion=neutral": "중립적 정리",
+    "conclusion=implication": "시사점 제시",
+    "conclusion=policy": "정책 제언까지",
+    "baseline=ulsan": "울산",
+    "baseline=national": "전국 평균",
+    "baseline=none": "없음",
+    "lens=diagnose": "현황 진단",
+    "lens=problem": "문제점과 원인",
+    "lens=evaluate": "성과 평가",
+    "lens=alternative": "정책 대안 도출",
+    "axes=region": "지역별",
+    "axes=year": "연도별",
+    "axes=type": "유형별 (사업 방식·규모)",
+    "axes=actor": "주체별 (LH·지방공사·민간)"
+   },
+   "write": {
+    "client_city": "발주처 도시",
+    "client_city=ulsan": "울산",
+    "seoul_station": "서울 역세권형 집계",
+    "seoul_station=split": "유형 분리",
+    "seoul_station=merge": "합산",
+    "asof": "기준일",
+    "official": "집계 근거",
+    "official=self": "고시 원문 전수 대조",
+    "official=foia": "정보공개청구 병행",
+    "outside": "특·광역시 밖 사례",
+    "outside=compare": "제언 장에서 인용만",
+    "outside=full": "현황까지 포함",
+    "human": "사람이 직접 쓰는 장",
+    "pages": "장별 쪽수 배분",
+    "chart_style": "차트 스타일",
+    "footnote": "출처 표기",
+    "order": "쓰는 순서",
+    "summary": "요약",
+    "style": "문체",
+    "template": "양식",
+    "chart_style=mono": "흑백 인쇄용",
+    "chart_style=color": "컬러",
+    "footnote=footnote": "각주",
+    "footnote=inline": "본문 괄호",
+    "order=chapter": "장별로 차례대로 (장마다 라운드)",
+    "order=draft": "전체 초안 먼저",
+    "summary=one": "요약 1쪽 + 본문",
+    "summary=none": "요약 없음",
+    "summary=brief": "정책 브리프 별도",
+    "style=bullet": "개조식 (□ ○ -)",
+    "style=prose": "서술식",
+    "style=mixed": "혼합",
+    "template=uri": "울산연구원 기본정책과제 양식",
+    "template=general": "일반 보고서",
+    "template=free": "자유"
+   },
+   "verify": {
+    "client_city": "발주처 도시",
+    "client_city=ulsan": "울산",
+    "seoul_station": "서울 역세권형 집계",
+    "seoul_station=split": "유형 분리",
+    "seoul_station=merge": "합산",
+    "asof": "기준일",
+    "official": "집계 근거",
+    "official=self": "고시 원문 전수 대조",
+    "official=foia": "정보공개청구 병행",
+    "outside": "특·광역시 밖 사례",
+    "outside=compare": "제언 장에서 인용만",
+    "outside=full": "현황까지 포함",
+    "unsupported": "근거 없음(unsupported)이 나오면",
+    "law_cite": "법령 인용",
+    "method": "판정 방식",
+    "range": "검증 범위",
+    "unsupported=ask": "점검 질문으로 하나씩 묻기",
+    "unsupported=soften": "표현 완화로 일괄 처리",
+    "unsupported=research": "다시 조사",
+    "law_cite=current": "현행 조문으로 고치기",
+    "law_cite=keep": "당시 조문 유지하고 기준일 표기",
+    "asof=today": "오늘 기준 최신",
+    "asof=research": "조사 시점 기준",
+    "method=source": "원문 대조 (브라우저·KOSIS·법령 재조회)",
+    "method=list": "출처 목록 확인만",
+    "range=numbers": "수치·법령 조문 전부",
+    "range=key": "핵심 주장만",
+    "range=all": "모든 문장"
+   },
+   "publish": {
+    "client_city": "발주처 도시",
+    "client_city=ulsan": "울산",
+    "seoul_station": "서울 역세권형 집계",
+    "seoul_station=split": "유형 분리",
+    "seoul_station=merge": "합산",
+    "asof": "기준일",
+    "official": "집계 근거",
+    "official=self": "고시 원문 전수 대조",
+    "official=foia": "정보공개청구 병행",
+    "outside": "특·광역시 밖 사례",
+    "outside=compare": "제언 장에서 인용만",
+    "outside=full": "현황까지 포함",
+    "slides_n": "발표 장표 수·시간",
+    "strip": "외부 공유 시 내부 메모·AI 추천 기록 빼기",
+    "appendix": "부록 (여러 개 선택)",
+    "audience": "공유 대상",
+    "formats": "최종 형식 (여러 개 선택)",
+    "strip=strip": "뺀다",
+    "strip=keep": "그대로",
+    "appendix=sources": "출처 목록",
+    "appendix=stats": "통계 원표",
+    "appendix=log": "조사 과정 기록 (라운드 이력)",
+    "audience=me": "나만",
+    "audience=team": "팀",
+    "audience=client": "발주처",
+    "formats=hwpx": "HWPX (울산연구원 양식)",
+    "formats=docx": "Word",
+    "formats=pdf": "PDF",
+    "formats=web": "웹 공유 페이지",
+    "formats=slides": "발표자료"
+   }
+  }
+ },
+ "ask": {
+  "spec": {
+   "id": "plan-start",
+   "stage": "plan",
+   "stage_label": "기획",
+   "kind": "stage_start",
+   "title": "기획 시작 질문",
+   "intro": "합성 안내문",
+   "questions": [
+    {
+     "id": "scope",
+     "type": "single",
+     "label": "범위는?",
+     "required": true,
+     "other": true,
+     "options": [
+      {
+       "value": "narrow",
+       "label": "좁게",
+       "recommended": true
+      },
+      {
+       "value": "wide",
+       "label": "넓게"
+      }
+     ]
+    },
+    {
+     "id": "channels",
+     "type": "multi",
+     "label": "채널은?",
+     "options": [
+      {
+       "value": "web",
+       "label": "웹",
+       "recommended": true
+      },
+      {
+       "value": "print",
+       "label": "인쇄"
+      }
+     ]
+    },
+    {
+     "id": "why-wide",
+     "type": "text",
+     "label": "넓게 하는 이유는?",
+     "show_if": {
+      "id": "scope",
+      "in": [
+       "wide"
+      ]
+     }
+    },
+    {
+     "id": "memo",
+     "type": "textarea",
+     "label": "덧붙일 조건",
+     "required": true
+    }
+   ]
+  },
+  "topic": "합성 파일 주제",
+  "stages": [
+   {
+    "key": "plan",
+    "label": "기획",
+    "status": "asking"
+   },
+   {
+    "key": "research",
+    "label": "조사",
+    "status": "pending"
+   },
+   {
+    "key": "analyze",
+    "label": "분석·종합",
+    "status": "pending"
+   },
+   {
+    "key": "write",
+    "label": "집필",
+    "status": "pending"
+   },
+   {
+    "key": "verify",
+    "label": "검증",
+    "status": "pending"
+   },
+   {
+    "key": "publish",
+    "label": "산출·공유",
+    "status": "pending"
+   }
+  ]
+ },
+ "hub": {
+  "projects": [
+   {
+    "slug": "synthetic-files",
+    "topic": "합성 파일 주제",
+    "created": "",
+    "current": "plan",
+    "stages": [
+     {
+      "key": "plan",
+      "label": "기획",
+      "status": "active",
+      "round": 2,
+      "stale": false,
+      "reports": []
+     },
+     {
+      "key": "research",
+      "label": "조사",
+      "status": "pending",
+      "round": 0,
+      "stale": false,
+      "reports": []
+     },
+     {
+      "key": "analyze",
+      "label": "분석·종합",
+      "status": "pending",
+      "round": 0,
+      "stale": false,
+      "reports": []
+     },
+     {
+      "key": "write",
+      "label": "집필",
+      "status": "pending",
+      "round": 0,
+      "stale": false,
+      "reports": []
+     },
+     {
+      "key": "verify",
+      "label": "검증",
+      "status": "pending",
+      "round": 0,
+      "stale": false,
+      "reports": []
+     },
+     {
+      "key": "publish",
+      "label": "산출·공유",
+      "status": "pending",
+      "round": 0,
+      "stale": false,
+      "reports": []
+     }
+    ],
+    "complete": false,
+    "who": "ai",
+    "todo": "기획 R2 작업 중",
+    "pending": 0,
+    "lock": null
+   }
+  ],
+  "stages": [
+   {
+    "key": "plan",
+    "label": "기획"
+   },
+   {
+    "key": "research",
+    "label": "조사"
+   },
+   {
+    "key": "analyze",
+    "label": "분석·종합"
+   },
+   {
+    "key": "write",
+    "label": "집필"
+   },
+   {
+    "key": "verify",
+    "label": "검증"
+   },
+   {
+    "key": "publish",
+    "label": "산출·공유"
+   }
+  ]
+ }
+}

@@ -1,11 +1,11 @@
 /**
- * SEL-48 PR15 — CLI 쓰기 전환 보강 시험 (tester, 보강 모드). 구현(scripts/pes.py, scripts/pes_core/cli_bridge.ts)을
- * 읽고 빈틈을 채운다. 모든 자료는 합성이고 HOME·USERPROFILE·PES_HOME은 임시 폴더다.
+ * SEL-48 PR15 — CLI 쓰기 전환 보강 시험 (tester, 보강 모드). 구현(scripts/pes_core/cli_*.ts, cli_bridge.ts)을
+ * 읽고 빈틈을 채운다. (SEL-74: pes.ts 로 돈다. 0.15 와의 나란히 비교 A·플래그·node 브리지 고장 C1~C3 은 지웠다 — tests/README.md 처리표.) 모든 자료는 합성이고 HOME·USERPROFILE·PES_HOME은 임시 폴더다.
  *
  * 묶음:
- *   A. 플래그 없음: v0.15 동작 불변 (SEL-46 머지 시점의 옛 pes.py와 출력·종료 코드·project.json을 나란히 비교)
- *   B. 플래그 켜짐: 모든 쓰기 명령에서 project.json·.pes-lock·library.json 쓰기 0
- *   C. 브리지 실패(node 없음·쓰레기 출력·빈 출력): 부분 쓰기 0과 분명한 오류
+ *   (A. 플래그 없음 v0.15 비교 — 삭제: 0.15 동작은 baseline E01~E15·X01~X11 이 고정한다)
+ *   B. 모든 쓰기 명령에서 project.json·.pes-lock·library.json 쓰기 0
+ *   (C1~C3. node 브리지 고장 — 삭제: pes.ts 는 코어를 같은 프로세스에서 돌린다. C4 는 남는다)
  *   D. 인증: 만료·회수·다른 프로젝트·범위 부족·공백 토큰
  *   E. lock/unlock ↔ lease
  *   F. 새 5개 명령의 guard 위반·재생
@@ -16,7 +16,6 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,16 +23,9 @@ import { test } from "node:test";
 
 import { revoke_agent_token } from "../scripts/pes_core/actors.ts";
 import { new_artifact } from "./helpers/blob_env.ts";
-import { baseline_dir as shared_baseline_dir } from "./helpers/cli_read_env.ts";
-import { expect_rejected, json_out, make_cli_env, PES_PY, REPO, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
+import { expect_rejected, json_out, make_cli_env, REPO, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
 import { make_content, seal, start } from "./helpers/editions_env.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
-import { hub_blocked_argv } from "./helpers/hub_block.ts";
-
-// `which python3`는 Windows Git Bash에서 /c/... 경로를 주어 Node spawnSync가 ENOENT를 낸다.
-// python3가 스스로 밝히는 실행 파일 경로(sys.executable)는 그 OS의 원래 경로라 PATH를 비운 시험에서도 쓸 수 있다.
-const PY = spawnSync("python3", ["-I", "-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).stdout.trim() || "python3";
-const OFF = { PES_DB_CORE: undefined } as const;
 
 // ---------------------------------------------------------------------------
 // 공통 도구
@@ -58,25 +50,9 @@ function no_crash(res: CliResult, what: string): void {
   assert.doesNotMatch(res.stderr + res.stdout, /Traceback|SyntaxError|ModuleNotFoundError/, `${what}: 스택 추적이 아니라 분명한 오류여야 한다\n${res.stderr}`);
 }
 
-/** 어떤 PATH·플래그로도 실행하는 러너 (하니스의 run()은 PATH를 못 바꾼다: python3도 PATH로 찾기 때문). */
-function run_with(c: CliEnv, args: string[], extra: Record<string, string | undefined> = {}, script = PES_PY, python = PY, py_flags: string[] = []): CliResult {
-  const child: Record<string, string | undefined> = {
-    ...c.env.home.env,
-    PYTHONIOENCODING: "utf-8",
-    PES_OWNER: undefined,
-    PES_TOKEN: undefined,
-    PES_DB_CORE: "1",
-    ...extra,
-  };
-  for (const key of Object.keys(child)) if (child[key] === undefined) delete child[key];
-  const r = spawnSync(python, hub_blocked_argv(["-I", ...py_flags, script, ...args]), {
-    env: child as NodeJS.ProcessEnv,
-    cwd: c.env.home.root,
-    encoding: "utf8",
-    timeout: 60_000,
-  });
-  if (r.error !== undefined) throw r.error;
-  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+/** pes.ts 실행기 (하니스의 run()): PES_OWNER·PES_TOKEN 은 extra 로만 준다. */
+function run_with(c: CliEnv, args: string[], extra: Record<string, string | undefined> = {}): CliResult {
+  return c.run(args, extra);
 }
 
 function write_json(c: CliEnv, name: string, value: unknown): string {
@@ -118,139 +94,6 @@ function claim_as(c: CliEnv, token: string): Guard {
 async function open_plan_round(c: CliEnv, tag: string) {
   return start(c.env, c.stages.plan, tag);
 }
-
-// ---------------------------------------------------------------------------
-// A. 플래그 없음: v0.15 와 나란히 비교
-
-const BASELINE_REF = "1e0a25e"; // SEL-46 머지 시점: scripts/pes.py 가 아직 DB 경로를 모르는 마지막 main
-
-function baseline_dir(): string | null {
-  return shared_baseline_dir(BASELINE_REF); // 셸·tar 없이 git ls-tree + git show 로 꺼낸다 (Windows CI 에서도 같음)
-}
-
-/** 한 루트의 모든 표기: 그대로, Windows 긴 이름(8.3 RUNNER~1 → runneradmin), 파이썬 repr 의 겹친 역슬래시. */
-function root_forms(root: string): string[] {
-  const forms = new Set([root]);
-  try {
-    forms.add(realpathSync.native(root));
-  } catch {
-    // 없는 경로(예: macOS 의 /private 변형)는 그대로만 쓴다.
-  }
-  for (const form of [...forms]) if (form.includes("\\")) forms.add(form.split("\\").join("\\\\"));
-  return [...forms];
-}
-
-function normalize(text: string, roots: string[]): string {
-  let out = text;
-  const all = roots.flatMap(root_forms);
-  for (const root of all.sort((x, y) => y.length - x.length)) out = out.split(root).join("<ROOT>");
-  return out
-    .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?/g, "<TS>")
-    .replace(/\d{8}-\d{6}/g, "<STAMP>") // chat 이 만드는 feedback/plan-R1-YYYYMMDD-HHMMSS.json 의 초 단위 시각
-    .replace(/\b1[0-9]{9}(\.[0-9]+)?\b/g, "<EPOCH>")
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<UUID>");
-}
-
-test("A1 플래그 없음: 쓰기 명령의 출력·종료 코드·project.json이 v0.15와 같다", async () => {
-  const base = baseline_dir();
-  // 기준 커밋이 없으면 조용히 통과하지 않는다 — v0.15 보존의 핵심 증거가 빠지는 것이므로 실패다 (CI 는 fetch-depth: 0).
-  assert.notEqual(base, null, `기준 커밋 ${BASELINE_REF} 가 이 저장소에 없다 (얕은 복제? actions/checkout 에 fetch-depth: 0 필요)`);
-  if (base === null) return;
-  const now = await make_cli_env();
-  const old = await make_cli_env();
-  try {
-    const old_py = join(base, "scripts", "pes.py");
-    const spec = "/dev/null";
-    const steps: Array<[string[], Record<string, string | undefined>]> = [
-      [["round-start", SLUG, "plan"], {}],
-      [["round-start", SLUG, "nope"], {}],
-      [["note", SLUG, "합성 메모", "둘째"], {}],
-      [["note", SLUG, ""], {}],
-      [["mark", SLUG, "feedback/plan-R1-a.json"], {}],
-      [["mark", SLUG], {}],
-      [["chat", SLUG, "plan", "합성 채팅"], {}],
-      [["ask-prep", SLUG, "plan"], {}],
-      [["ask-prep", SLUG, "no-such-bank"], {}],
-      [["qa-brief", SLUG, "plan"], {}],
-      [["qa", SLUG, "plan"], {}],
-      [["render", SLUG, "plan"], {}],
-      [["approve", SLUG, "plan"], {}],
-      [["approve", SLUG, "research"], {}],
-      [["reopen", SLUG, "plan"], {}],
-      [["reopen", SLUG, "write"], {}],
-      [["lock", SLUG], {}],
-      [["lock", SLUG], { PES_OWNER: "sess-aaaa1111" }],
-      [["lock", SLUG], { PES_OWNER: "sess-bbbb2222" }],
-      [["note", SLUG, "남의 메모"], { PES_OWNER: "sess-bbbb2222" }],
-      [["unlock", SLUG], { PES_OWNER: "sess-aaaa1111" }],
-      [["lock", SLUG, "--force"], { PES_OWNER: "sess-bbbb2222" }],
-      [["remote", "add", "https://m5.example.ts.net"], {}],
-      [["remote", "add", "not-a-url"], {}],
-      [["stop", "--", "nowhere-xyz"], {}],
-      [["init", "synthetic-off", "--topic", "합성 옛 방식"], {}],
-      [["init", "synthetic-off", "--topic", "또"], {}],
-      [["init", "BAD NAME", "--topic", "x"], {}],
-      [["merge", SLUG, "plan", spec], {}],
-    ];
-    const roots_now = [now.env.home.root, `/private${now.env.home.root}`, REPO];
-    const roots_old = [old.env.home.root, `/private${old.env.home.root}`, base, `/private${base}`];
-    const seen = [] as string[];
-    for (const [args, extra] of steps) {
-      const label = `${args.join(" ")} ${JSON.stringify(extra)}`;
-      // v0.15 기준본은 stdout 을 UTF-8 로 바꾸지 않아 Windows(cp1252)에서 한글 print 가 죽는다.
-      // 의미 비교를 위해 양쪽 모두 -X utf8 로 띄운다(인코딩 자체는 test_cli_write_stdout_encoding 이 지킨다).
-      const a = run_with(now, args, { ...OFF, ...extra }, PES_PY, PY, ["-X", "utf8"]);
-      const b = run_with(old, args, { ...OFF, ...extra }, old_py, PY, ["-X", "utf8"]);
-      assert.equal(a.status, b.status, `${label}: 종료 코드`);
-      assert.equal(normalize(a.stdout, roots_now), normalize(b.stdout, roots_old), `${label}: stdout`);
-      // 오류 문구는 경로·임시 이름만 다를 수 있다 (스택 추적 줄 번호는 제외)
-      // 옛 CLI 가 스스로 스택 추적을 내는 경우(예: 없는 feedback/ 폴더)도 있다 — 줄 번호가 달라지므로 마지막 줄만 비교한다
-      const last = (s: string, r: string[]) => normalize(s, r).trim().split("\n").pop() ?? "";
-      assert.equal(last(a.stderr, roots_now), last(b.stderr, roots_old), `${label}: stderr 마지막 줄`);
-      const ja = existsSync(now.project_json) ? normalize(readFileSync(now.project_json, "utf8"), roots_now) : "";
-      const jb = existsSync(old.project_json) ? normalize(readFileSync(old.project_json, "utf8"), roots_old) : "";
-      assert.equal(ja, jb, `${label}: project.json`);
-      assert.equal(existsSync(join(now.folder, ".pes-lock")), existsSync(join(old.folder, ".pes-lock")), `${label}: .pes-lock 유무`);
-      seen.push(label);
-    }
-    assert.equal(seen.length, steps.length);
-    // 옛 방식은 DB를 한 번도 건드리지 않는다
-    assert.equal(table_counts(now.env.db).mutation_commits, table_counts(old.env.db).mutation_commits);
-    const own = now.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM mutation_commits WHERE action NOT IN ('project.created')");
-    assert.equal(own?.n, 0n, "플래그 없음 — 쓰기 영수증 0");
-    const own_projects = now.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects");
-    assert.equal(own_projects?.n, 1n, "플래그 없음 — init 이 프로젝트 행을 만들지 않는다");
-  } finally {
-    now.close();
-    old.close();
-    rmSync(base, { recursive: true, force: true });
-  }
-});
-
-test("A2 플래그 값이 1이 아니면(0·빈 문자열·true·yes) 옛 방식이다", () =>
-  with_cli(async (c) => {
-    const signature = state_signature(c.env.db);
-    for (const value of ["0", "", "true", "yes", "01", " 1"]) {
-      const res = run_with(c, ["note", SLUG, `값 ${value}`], { PES_DB_CORE: value });
-      assert.equal(res.status, 0, `PES_DB_CORE=${JSON.stringify(value)}: ${res.stderr}`);
-    }
-    assert.equal(JSON.parse(readFileSync(c.project_json, "utf8")).notes.length, 6, "모두 project.json 에 썼다");
-    assert.equal(state_signature(c.env.db), signature, "DB 불변");
-    for (const name of ["claim", "submit", "wait", "complete", "context"]) {
-      expect_rejected(run_with(c, [name, SLUG], { PES_DB_CORE: "0" }), `${name} (PES_DB_CORE=0)`);
-    }
-    assert.equal(state_signature(c.env.db), signature);
-  }));
-
-test("A3 플래그 없음: 토큰이 있어도 PES_TOKEN 은 무시되고 옛 CLI 그대로 쓴다 (DB 불변)", () =>
-  with_cli(async (c) => {
-    const agent = await c.agent("legacy-token");
-    const signature = state_signature(c.env.db);
-    const res = c.run(["note", SLUG, "토큰 있는 옛 방식"], { ...OFF, PES_TOKEN: agent.token });
-    assert.equal(res.status, 0, res.stderr);
-    assert.equal(state_signature(c.env.db), signature);
-    assert.equal(JSON.parse(readFileSync(c.project_json, "utf8")).notes.length, 1);
-  }));
 
 // ---------------------------------------------------------------------------
 // B. 플래그 켜짐: project.json·.pes-lock·library.json 쓰기 0
@@ -307,6 +150,8 @@ test("B3 [결함 후보] 병합한 항목이 있는 라운드에서 qa-brief·qa
 test("B2 거부된 쓰기(종료 코드 비0)는 어떤 파일도·DB도 바꾸지 않는다: 잠긴 프로젝트에 다른 세션", () =>
   with_cli(async (c) => {
     assert.equal(c.run(["lock", SLUG], { PES_OWNER: "sess-owner001" }).status, 0);
+    // 라운드가 열려 있어야 render 가 봉인(쓰기)을 한다 — 열린 라운드가 없으면 0.15 처럼 render 는 아무것도 하지 않는다(종료 0)
+    assert.equal(c.run(["round-start", SLUG, "plan"], { PES_OWNER: "sess-owner001" }).status, 0);
     const before = snap(c);
     const merge_file = write_json(c, "b2-merge.json", [{ id: 1, title: "x" }]);
     for (const args of [
@@ -330,97 +175,7 @@ test("B2 거부된 쓰기(종료 코드 비0)는 어떤 파일도·DB도 바꾸�
   }));
 
 // ---------------------------------------------------------------------------
-// C. 브리지 실패: 부분 쓰기 0, 분명한 오류
-
-function fake_node(script: string): { dir: string; cleanup(): void } {
-  const dir = mkdtempSync(join(tmpdir(), "pes-sel48-fakenode-"));
-  const file = join(dir, "node");
-  writeFileSync(file, `#!/bin/sh\n${script}\n`, "utf8");
-  chmodSync(file, 0o755);
-  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-}
-
-const BRIDGE_FAILURES: Array<[string, string, RegExp | null]> = [  // 이름 앞의 [결함 후보]: 지금은 파이썬이 스택 추적으로 죽는다
-  ["쓰레기 출력", `cat >/dev/null; echo 'this is not json'`, null],
-  ["빈 출력, 종료 1", `cat >/dev/null; exit 1`, null],
-  ["[결함 후보] JSON 이 아닌 값 null", `cat >/dev/null; echo 'null'`, null],
-  ["[결함 후보] JSON 배열", `cat >/dev/null; echo '[]'`, null],
-  ["[결함 후보] JSON 숫자", `cat >/dev/null; echo '7'`, null],
-  ["[결함 후보] ok 만 있고 data 없음", `cat >/dev/null; echo '{"ok":true}'`, null],
-  ["stderr 에 스택, 종료 1", `cat >/dev/null; echo 'boom' >&2; exit 1`, null],
-  ["시그널로 죽음", `cat >/dev/null; kill -9 $$`, null],
-];
-
-for (const [label, script] of BRIDGE_FAILURES) {
-  test(`C1 브리지가 ${label}: 쓰기 명령은 비0 종료·스택 추적 없음·DB와 파일 불변`, () =>
-    with_cli(async (c) => {
-      const fake = fake_node(script);
-      try {
-        const before = snap(c);
-        const merge_file = write_json(c, "c1-merge.json", [{ id: 1, title: "x" }]);
-        for (const args of [
-          ["note", SLUG, "x"],
-          ["round-start", SLUG, "plan"],
-          ["approve", SLUG, "plan"],
-          ["lock", SLUG],
-          ["merge", SLUG, "plan", merge_file],
-          ["unlock", SLUG],
-          ["mark", SLUG, "a.json"],
-        ]) {
-          const res = run_with(c, args, { PATH: `${fake.dir}:/usr/bin:/bin`, PES_OWNER: "sess-c1111111" });
-          assert.notEqual(res.status, 0, `${args[0]}: 브리지가 망가졌는데 성공으로 끝나면 안 된다`);
-          no_crash(res, `${args[0]} / ${label}`);
-          assert.ok(res.stderr.trim().length > 0, `${args[0]}: 오류 문구가 있어야 한다`);
-          assert_untouched(c, before, `${args[0]} / ${label}`);
-        }
-      } finally {
-        fake.cleanup();
-      }
-    }));
-}
-
-test("C2 node 가 PATH 에 없으면 모든 쓰기가 분명한 오류로 끝나고 아무것도 쓰지 않는다 (옛 project.json 으로 되돌아가지 않는다)", () =>
-  with_cli(async (c) => {
-    const empty = mkdtempSync(join(tmpdir(), "pes-sel48-nonode-"));
-    try {
-      const before = snap(c);
-      for (const args of [
-        ["note", SLUG, "x"],
-        ["round-start", SLUG, "plan"],
-        ["lock", SLUG],
-        ["approve", SLUG, "plan"],
-        ["chat", SLUG, "plan", "x"],
-        ["init", "synthetic-nonode", "--topic", "t"],
-      ]) {
-        const res = run_with(c, args, { PATH: empty, PES_OWNER: "sess-c2222222" });
-        assert.notEqual(res.status, 0, `${args[0]}: node 없음`);
-        no_crash(res, `${args[0]} (node 없음)`);
-        assert.match(res.stderr, /node/i, `${args[0]}: node 가 없다고 말해야 한다`);
-        assert_untouched(c, before, `${args[0]} (node 없음)`);
-      }
-      assert.ok(!existsSync(join(c.env.home.env.PES_HOME as string, "synthetic-nonode")), "init 이 폴더를 만들지 않았다");
-    } finally {
-      rmSync(empty, { recursive: true, force: true });
-    }
-  }));
-
-test("C3 새 5개 명령도 브리지가 죽으면 JSON 을 내지 않고 비0 종료", () =>
-  with_cli(async (c) => {
-    const agent = await c.agent("c3");
-    const fake = fake_node(`cat >/dev/null; echo garbage`);
-    try {
-      const before = snap(c);
-      for (const args of [["context", SLUG], ["claim", SLUG], ["wait", SLUG, "--run", "r", "--lease", "l", "--fence", "1"], ["complete", SLUG, "--run", "r", "--lease", "l", "--fence", "1"]]) {
-        const res = run_with(c, args, { PATH: `${fake.dir}:/usr/bin:/bin`, PES_TOKEN: agent.token });
-        assert.notEqual(res.status, 0, args[0]);
-        assert.equal(res.stdout.trim(), "", `${args[0]}: 성공처럼 보이는 stdout 이 없다`);
-        no_crash(res, args[0]!);
-      }
-      assert_untouched(c, before, "새 5개 + 죽은 브리지");
-    } finally {
-      fake.cleanup();
-    }
-  }));
+// C. (C1~C3 node 브리지 고장 시험은 지웠다 — pes.ts 에 별도 브리지 프로세스가 없다)
 
 test("C4 [결함 후보] init --import 가 DB 에서 거부돼도 참고자료 폴더(library/shots)를 이미 복사해 둔다 — 부분 쓰기", () =>
   with_cli(async (c) => {

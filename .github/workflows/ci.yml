@@ -14,42 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - windows-latest
-          - macos-latest
-        python-version:
-          - "3.9"
-          - "3.13"
-
-    env:
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: "utf-8"
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install development dependencies
-        run: python -m pip install -r requirements-dev.txt
-
-      - name: Run tests
-        timeout-minutes: 8
-        run: python -m pytest -q -p no:cacheprovider
-
   typescript:
     name: ${{ matrix.os }} / Node 26 (${{ matrix.shard }}/8)
     runs-on: ${{ matrix.os }}
@@ -60,7 +24,7 @@ jobs:
         os:
           - windows-latest
           - macos-latest
-        # CLI 시험은 명령마다 Python·Node 브리지를 띄워 Windows 에서 느리다. 시험 파일을 8조각으로 나눠 병렬로 돌린다
+        # CLI 시험은 명령마다 Node 자식을 띄워 Windows 에서 느리다. 시험 파일을 8조각으로 나눠 병렬로 돌린다
         # (시험·상한은 그대로, 조각 합 = 전체 — node --test --test-shard).
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -84,7 +48,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # 설계 검사(DDL 초안 → :memory: SQLite). Python 없이 TS 로 돈다(결정 0016, PR26d). 결과가 shard 마다 같아 OS 마다 1번만 돈다.
+      # 설계 검사(DDL 초안 → :memory: SQLite, 결정 0016, PR26d). 결과가 shard 마다 같아 OS 마다 1번만 돈다.
       - name: Design check (DDL)
         if: matrix.shard == 1
         run: npm run check:ddl
@@ -103,20 +67,11 @@ jobs:
           - windows-latest
           - macos-latest
 
-    env:
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: "utf-8"
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
 
       - name: Set up Node 26
         uses: actions/setup-node@v4
@@ -132,6 +87,184 @@ jobs:
 
       - name: Run browser smoke
         run: npx playwright test
+
+  # 설치·업그레이드 (SEL-74): 한 줄 설치 스크립트를 임시 HOME 에서 실제로 돌린다 — 네트워크 없이(PES_INSTALL_MIRROR = 이 체크아웃의 사본,
+  # PES_SKIP_KEYS=1, PES_SKIP_TOOLS=1), 바깥 설치기(claude·curl)는 가짜 명령으로 바꾼다.
+  # 순서: 새 설치 → 결과 확인 → 0.15 설치 흔적을 깔고 그 위에 다시 설치(업그레이드) → 결과 확인.
+  install-macos:
+    name: macos-latest / 설치·업그레이드
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Make fake external commands (shim) and the repository copy
+        run: |
+          mkdir -p "$RUNNER_TEMP/fakebin" "$RUNNER_TEMP/mirror"
+          cat > "$RUNNER_TEMP/fakebin/claude" <<'FAKE'
+          #!/bin/sh
+          case "$1" in --version) echo "2.0.0 (Claude Code)";; esac
+          [ "$1 $2" = "plugin list" ] && echo "pes@pes-local 0.15.6"
+          exit 0
+          FAKE
+          printf '#!/bin/sh\nexit 22\n' > "$RUNNER_TEMP/fakebin/curl"
+          chmod +x "$RUNNER_TEMP/fakebin/"*
+          cp -R scripts templates questions skills commands agents .claude-plugin package.json README.md "$RUNNER_TEMP/mirror/"
+          dirname "$(command -v node)" > "$RUNNER_TEMP/node-dir.txt"
+
+      - name: 설치 (clean install in a temporary HOME)
+        env:
+          HOME: ${{ runner.temp }}/pes-home
+          PES_HOME: ${{ runner.temp }}/pes-home/pes-projects
+          PES_INSTALL_MIRROR: ${{ runner.temp }}/mirror
+          PES_INSTALL_PATH_ONLY: "1"
+          PES_SKIP_KEYS: "1"
+          PES_SKIP_TOOLS: "1"
+        run: |
+          mkdir -p "$HOME"
+          export PATH="$RUNNER_TEMP/fakebin:$(cat "$RUNNER_TEMP/node-dir.txt"):/usr/bin:/bin:/usr/sbin:/sbin"
+          sh scripts/install.sh
+
+      - name: 설치 결과 확인
+        env:
+          HOME: ${{ runner.temp }}/pes-home
+        run: |
+          test -f "$HOME/.pes/src/scripts/setup.ts"
+          test -f "$HOME/.pes/src/scripts/pes.ts"
+          test -f "$HOME/.pes/setup.json"
+          node "$HOME/.pes/src/scripts/setup.ts" needed
+
+      - name: 0.15 설치 흔적 깔기 (old 0.15 tools, old completion mark)
+        env:
+          HOME: ${{ runner.temp }}/pes-home
+        run: |
+          for f in setup pes serve; do echo "# PES 0.15 (old)" > "$HOME/.pes/src/scripts/$f.py"; done
+          echo '{"version": "0.15.6", "at": "2026-01-01 00:00"}' > "$HOME/.pes/setup.json"
+
+      - name: 업그레이드 (install again over the 0.15 install)
+        env:
+          HOME: ${{ runner.temp }}/pes-home
+          PES_HOME: ${{ runner.temp }}/pes-home/pes-projects
+          PES_INSTALL_MIRROR: ${{ runner.temp }}/mirror
+          PES_INSTALL_PATH_ONLY: "1"
+          PES_SKIP_KEYS: "1"
+          PES_SKIP_TOOLS: "1"
+        run: |
+          export PATH="$RUNNER_TEMP/fakebin:$(cat "$RUNNER_TEMP/node-dir.txt"):/usr/bin:/bin:/usr/sbin:/sbin"
+          sh scripts/install.sh
+
+      - name: 업그레이드 결과 확인
+        env:
+          HOME: ${{ runner.temp }}/pes-home
+        run: |
+          test -f "$HOME/.pes/src/scripts/setup.ts"
+          test -f "$HOME/.pes/src/scripts/pes.ts"
+          node "$HOME/.pes/src/scripts/setup.ts" needed
+          grep -q '"version"' "$HOME/.pes/setup.json"
+          ! grep -q '2026-01-01' "$HOME/.pes/setup.json"
+
+  install-windows:
+    name: windows-latest / 설치·업그레이드
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Make fake external commands (shim) and the repository copy
+        shell: pwsh
+        run: |
+          $fake = Join-Path $env:RUNNER_TEMP "fakebin"
+          $mirror = Join-Path $env:RUNNER_TEMP "mirror"
+          New-Item -ItemType Directory -Force -Path $fake, $mirror | Out-Null
+          Set-Content -Path (Join-Path $fake "claude.cmd") -Encoding ascii -Value @(
+            '@echo off',
+            'if "%1"=="--version" echo 2.0.0 Claude Code',
+            'if "%1 %2"=="plugin list" echo pes@pes-local 0.15.6',
+            'exit /b 0')
+          Set-Content -Path (Join-Path $fake "curl.cmd") -Encoding ascii -Value @('@echo off', 'exit /b 22')
+          foreach ($item in "scripts", "templates", "questions", "skills", "commands", "agents", ".claude-plugin", "package.json", "README.md") {
+            Copy-Item -Path $item -Destination $mirror -Recurse -Force
+          }
+          $dirs = @((Split-Path (Get-Command node).Source), (Split-Path (Get-Command git).Source), "$env:SystemRoot\System32", "$env:SystemRoot\System32\WindowsPowerShell\v1.0")
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP "path-dirs.txt") -Value ($dirs -join ";") -Encoding ascii
+
+      - name: 설치 (clean install in a temporary USERPROFILE)
+        shell: pwsh
+        env:
+          HOME: ${{ runner.temp }}\pes-home
+          USERPROFILE: ${{ runner.temp }}\pes-home
+          PES_HOME: ${{ runner.temp }}\pes-home\pes-projects
+          PES_INSTALL_MIRROR: ${{ runner.temp }}\mirror
+          PES_INSTALL_PATH_ONLY: "1"
+          PES_SKIP_KEYS: "1"
+          PES_SKIP_TOOLS: "1"
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:USERPROFILE | Out-Null
+          $env:Path = (Join-Path $env:RUNNER_TEMP "fakebin") + ";" + (Get-Content (Join-Path $env:RUNNER_TEMP "path-dirs.txt") -Raw).Trim()
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 설치 결과 확인
+        shell: pwsh
+        env:
+          USERPROFILE: ${{ runner.temp }}\pes-home
+        run: |
+          foreach ($f in "scripts\setup.ts", "scripts\pes.ts") { if (-not (Test-Path (Join-Path $env:USERPROFILE ".pes\src\$f"))) { throw "missing $f" } }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE ".pes\setup.json"))) { throw "missing completion mark" }
+          node (Join-Path $env:USERPROFILE ".pes\src\scripts\setup.ts") needed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 0.15 설치 흔적 깔기 (old 0.15 tools, old completion mark)
+        shell: pwsh
+        env:
+          USERPROFILE: ${{ runner.temp }}\pes-home
+        run: |
+          foreach ($f in "setup.py", "pes.py", "serve.py") { Set-Content -Path (Join-Path $env:USERPROFILE ".pes\src\scripts\$f") -Value "# PES 0.15 (old)" }
+          Set-Content -Path (Join-Path $env:USERPROFILE ".pes\setup.json") -Value '{"version": "0.15.6", "at": "2026-01-01 00:00"}'
+
+      - name: 업그레이드 (install again over the 0.15 install)
+        shell: pwsh
+        env:
+          HOME: ${{ runner.temp }}\pes-home
+          USERPROFILE: ${{ runner.temp }}\pes-home
+          PES_HOME: ${{ runner.temp }}\pes-home\pes-projects
+          PES_INSTALL_MIRROR: ${{ runner.temp }}\mirror
+          PES_INSTALL_PATH_ONLY: "1"
+          PES_SKIP_KEYS: "1"
+          PES_SKIP_TOOLS: "1"
+        run: |
+          $env:Path = (Join-Path $env:RUNNER_TEMP "fakebin") + ";" + (Get-Content (Join-Path $env:RUNNER_TEMP "path-dirs.txt") -Raw).Trim()
+          # the README way (irm … | iex): the downloaded text with its UTF-8 BOM kept as a character, run by Invoke-Expression in Windows PowerShell 5.1
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '& { $s = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Resolve-Path scripts/install.ps1))); Invoke-Expression $s }'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 업그레이드 결과 확인
+        shell: pwsh
+        env:
+          USERPROFILE: ${{ runner.temp }}\pes-home
+        run: |
+          foreach ($f in "scripts\setup.ts", "scripts\pes.ts") { if (-not (Test-Path (Join-Path $env:USERPROFILE ".pes\src\$f"))) { throw "missing $f" } }
+          node (Join-Path $env:USERPROFILE ".pes\src\scripts\setup.ts") needed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content (Join-Path $env:USERPROFILE ".pes\setup.json") -Raw) -match "2026-01-01") { throw "the completion mark was not rewritten" }
 
   # 3단계 웹 앱(app/, SEL-81 U1a) — 루트와 따로 설치·검사한다. 브라우저를 못 받으면 건너뛰지 않고 잡을 실패시킨다.
   app:

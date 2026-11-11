@@ -18,7 +18,8 @@
 //   session   -> PES_OWNER, only a lock label; it is never a credential.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 import { resolve_actor, verify_agent_token } from "./actors.ts";
 import { ApiApp } from "./api.ts";
@@ -45,8 +46,9 @@ import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
 import { FORM_REVISED } from "./commands/records.ts";
 import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex, write_storage_bytes } from "./files.ts";
-import { serving_path } from "./migration.ts";
-import { IMPLICIT_MANIFEST, REAPPROVE_REASON, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
+import { import_project } from "./legacy.ts";
+import { activate_import, assert_backup_location, serving_path, validate_import } from "./migration.ts";
+import { IMPLICIT_MANIFEST, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -529,7 +531,7 @@ function topic_particle(name: string): string {
 }
 
 const round_start: Handler = async (s, req) => {
-  const { project, auth } = await write_auth(s, req);
+  const { project, auth, guard } = await write_auth(s, req);
   const stage = s.stage(project, req.args?.stage);
   if (req.args?.any_order === true) {
     // D13 (intended difference from 0.15, which let a round start on an approved stage): the database keeps an approved stage closed
@@ -537,6 +539,13 @@ const round_start: Handler = async (s, req) => {
     if (now_row.status === "approved" && now_row.stale === null) {
       const label = STAGE_LABEL[stage.key] ?? stage.key;
       throw new Refusal("conflict", `round-start: ${label}${topic_particle(label)} 이미 승인됐습니다 — 먼저 reopen 하세요`, 1);
+    }
+    // 0.15 opened rounds back to back; the database wants an open round sealed first. A round with nothing in it (so `render` had nothing
+    // to seal) is closed here with the invisible marker an `approve` uses; one with content still has to be sealed by `render` (conflict).
+    const open = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
+    if (open !== undefined && manifest_parts(s, project, stage).all.length === 0) {
+      const marker = await approval_marker(s, project, auth, stage);
+      await seal_with_manifest(s, project, auth, guard, open.id, [marker], "manifest.json", {});
     }
   }
   const out = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id, ...(req.args?.any_order === true ? { any_order: true } : {}) });
@@ -935,7 +944,7 @@ const compat_render: Handler = async (s, req) => {
  * v0.15 `approve`, on the database's order rule (intended difference D13): a stage whose earlier stage is not approved is refused
  * with one Korean line — v0.15 approved it, the database's guarantee that an approval rests on approved work is not loosened.
  * The database approves a stage on a sealed round of its own and only once, so:
- *  - an approved stage that is approved again is reopened quietly first (the reopen leaves no history line);
+ *  - an approved stage (not invalidated) that is approved again stays as it is: one approval per approved state, nothing is written;
  *  - the open round is sealed; with none (or one sealed before the stage was last invalidated) a round is opened and sealed by the
  *    CLI itself — marked implicit (in the round's receipt, set by the server) so the read model does not count it as a round of the work.
  */
@@ -956,8 +965,31 @@ const compat_approve: Handler = async (s, req) => {
   return s.unit(async () => {
     let now_row = stage_now(s, project, stage);
     if (now_row.status === "approved" && now_row.stale === null) {
-      await reopen_stage(s.service, s.ctx(project, auth), { stage_id: stage.id, reason: REAPPROVE_REASON, quiet: true });
-      now_row = stage_now(s, project, stage);
+      // 0.15 took a second `approve` of the same stage and wrote another history line; the database keeps ONE approval per approved
+      // state, so the stage stays as it is (nothing new is handed over, the person gets the same answer as for the first one). The only
+      // trace is an invisible review artifact the read model turns into that history line.
+      const made = await create_object(s.service, s.ctx(project, auth), { kind: "artifact", edition_id: stage.edition_id });
+      await add_artifact(s.service, s.ctx(project, auth), {
+        object_id: String(result_of(made).object_id),
+        artifact_kind: "review",
+        stage_id: stage.id,
+        title: "(승인 다시 받음)",
+        status: "done",
+        metadata: { role: "reapproval", stage: stage.key },
+      });
+      const after = s.db.get<{ key: string; status: string }>(
+        "SELECT key, status FROM stages WHERE project_id = ? AND edition_id = ? AND ordinal = ?",
+        project.id,
+        stage.edition_id,
+        stage.ordinal + 1,
+      );
+      const edition = s.db.get<{ status: string }>("SELECT status FROM editions WHERE project_id = ? AND id = ?", project.id, stage.edition_id);
+      return {
+        next: after === undefined ? null : { ...after },
+        complete: edition?.status === "completed",
+        handed_over: stage.key === "plan" ? 0 : null,
+        reused: stage.key === "plan" ? 0 : null,
+      };
     }
     const open = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
     let snapshot_id: string | null = null;
@@ -1617,8 +1649,16 @@ const qa_data: Handler = async (s, req) => {
       sources: Number(row.sources),
     })),
     notes: notes.map((row) => row.body_md ?? "").reverse(),
+    ...qa_state(s, project, stage),
   };
 };
+
+/** What the review brief quotes from the state v0.15 kept in project.json: the user's answers, this round's changes and the self-check. */
+function qa_state(s: Session, project: ProjectInfo, stage: StageInfo): Record<string, unknown> {
+  const view = build_project_view(s.db, project.id, s.objects).project as { settings?: unknown; stages?: Record<string, Record<string, unknown>> };
+  const st = view.stages?.[stage.key] ?? {};
+  return { settings: view.settings ?? {}, stage_settings: st.settings ?? {}, review: st.review ?? null, changes: st.changes ?? [] };
+}
 
 const qa_brief: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
@@ -1819,13 +1859,15 @@ const route: Handler = async (s, req) => {
   if (typeof req.slug !== "string" || req.slug.length === 0) {
     throw new Refusal("invalid_payload", "프로젝트 이름이 필요합니다", 2);
   }
-  const row = s.db.get<{ id: string }>("SELECT id FROM projects WHERE slug = ?", req.slug);
+  // the hidden owner project (OWNER_STUB_SLUG) is no project of the user: no command serves it
+  const row = req.slug === OWNER_STUB_SLUG ? undefined : s.db.get<{ id: string; topic: string }>("SELECT id, topic FROM projects WHERE slug = ?", req.slug);
   if (row === undefined) return { serving: "none" };
-  return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy" };
+  return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy", topic: row.topic };
 };
 
+/** The projects the database serves — without the hidden owner project (OWNER_STUB_SLUG): doctor, doctor --fix, list and hub all read this one list. */
 const active_slugs: Handler = async (s) => {
-  const rows = s.db.all<{ slug: string }>("SELECT slug FROM projects WHERE status = 'active' ORDER BY slug");
+  const rows = s.db.all<{ slug: string }>("SELECT slug FROM projects WHERE status = 'active' AND slug <> ? ORDER BY slug", OWNER_STUB_SLUG);
   return { slugs: rows.map((row) => row.slug) };
 };
 
@@ -2224,6 +2266,24 @@ const screen: Handler = async (s, req) => {
   };
 };
 
+/**
+ * The newest question set (form version) of a published form: what the form page of that form key shows now. The local screen sends its
+ * id with the answer; a form revised since is refused. args: form_key, stage (optional).
+ */
+const form_set: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const key = text_arg(req.args ?? {}, "form_key");
+  const requested = typeof req.args?.stage === "string" && STAGE_KEYS.includes(req.args.stage) ? req.args.stage : undefined;
+  const stage = s.stage(project, requested);
+  const row = s.db.get<{ id: string }>(
+    "SELECT id FROM question_sets WHERE project_id = ? AND stage_id = ? AND form_key = ? ORDER BY version_no DESC LIMIT 1",
+    project.id,
+    stage.id,
+    key,
+  );
+  return { set_id: row === undefined ? null : row.id };
+};
+
 const version: Handler = async (s, req) => {
   if (req.slug === undefined) {
     // the home list: any project's change
@@ -2467,11 +2527,110 @@ function in_unit(handler: Handler): Handler {
 }
 
 /** Operations that only read: they use a read-only connection and change nothing on disk. */
-const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
+// migrate (SEL-74 C) -----------------------------------------------------------
+
+/**
+ * What to do after a failed `pes migrate`, one Korean clause per cause (the check of validate, the category of import). It never asks the
+ * user to undo their own edits: a hand-edited report is kept under another name, not thrown away.
+ */
+function migrate_hint(cause: string, path: string | undefined, slug: string): string {
+  const where = path ?? "그 파일";
+  switch (cause) {
+    case "reports_regeneration":
+      return `할 일: 손으로 고친 보고서(${where})를 폴더 밖에 다른 이름으로 보관하고 폴더에서 뺀 뒤 다시 이전하세요 — 이전한 뒤 'pes report ${slug} <단계>' 로 보고서를 새로 만들고, 보관한 내용은 메모로 옮기면 됩니다`;
+    case "source_changed":
+      return "할 일: 이전하는 동안 폴더가 바뀌었습니다 — 이 프로젝트를 쓰는 다른 PES·편집기를 닫고 다시 이전하세요";
+    case "parse_error":
+      return `할 일: ${where} 를 읽지 못했습니다 — 백업 사본으로 바꾸거나 고친 뒤 다시 이전하세요`;
+    case "missing_file":
+    case "files":
+      return `할 일: ${where} 가 없거나 바뀌었습니다 — 그 파일을 제자리에 두고 다시 이전하세요`;
+    default:
+      return "할 일: 폴더는 그대로이니 지우거나 고치지 말고, 이 줄과 'pes doctor' 결과를 개발자에게 알려 주세요";
+  }
+}
+
+/** A refused backup place (assert_backup_location) in one Korean line: why, and how to get out of it. */
+function backup_place_refusal(message: string, backups: string, pes_home: string): Refusal {
+  const why = /OneDrive/i.test(message)
+    ? `백업 폴더(${backups})가 OneDrive 안에 있습니다`
+    : /object store/.test(message)
+      ? `백업 폴더(${backups})가 PES 파일 저장소와 겹칩니다`
+      : `백업 폴더(${backups})와 PES 홈(${pes_home})이 겹칩니다 — 백업은 PES 홈 밖에 있어야 합니다`;
+  return new Refusal("conflict", `이전하지 못했습니다: ${why}. 할 일: PES 홈을 ~/.pes 와 겹치지 않는 폴더(예: ~/pes-projects)로 옮긴 뒤('pes home <새 폴더>') 다시 이전하세요 — 아무것도 바꾸지 않았습니다`);
+}
+
+/** The slug of the project that only holds the local human owner when a fresh database has none (the importer needs a human owner actor). */
+export const OWNER_STUB_SLUG = "pes-local-owner";
+
+/**
+ * Moves one 0.15 project folder into the database: import (PR11) → validate (PR12) → activate with a backup bundle (PR12).
+ * The folder is only read. A failure activates nothing. A project that is already active answers `already`.
+ * args: dir (the folder), pes_home (absolute), slug (the folder's name).
+ */
+const migrate_op: Handler = async (s, req) => {
+  const args = req.args ?? {};
+  const dir = text_arg(args, "dir");
+  const pes_home = text_arg(args, "pes_home");
+  const slug = text_arg(args, "slug");
+  const existing = s.db.get<{ status: string; owner_user_id: string }>("SELECT status, owner_user_id FROM projects WHERE slug = ?", slug);
+  if (existing !== undefined && existing.status === "active") return { state: "already", slug };
+  // the backup goes below ~/.pes/backups: a PES home that holds (or sits inside) that folder cannot be migrated — said before anything is imported
+  const backups = join(pes_dir(s.env), "backups");
+  try {
+    assert_backup_location(backups, pes_home, null);
+  } catch (error) {
+    if (error instanceof ApiError) throw backup_place_refusal(error.message, backups, pes_home);
+    throw error;
+  }
+  // the owner: the one who started this project's earlier try (a retry must stay with the same owner), else the oldest human of this database
+  const human_of = (user_id: string | null): string | undefined =>
+    s.db.get<{ id: string }>(
+      `SELECT a.id AS id FROM actors a JOIN users u ON u.id = a.user_id
+        WHERE a.kind = 'human' AND a.disabled_at IS NULL AND u.disabled_at IS NULL AND (? IS NULL OR a.user_id = ?)
+        ORDER BY a.rowid LIMIT 1`,
+      user_id,
+      user_id,
+    )?.id;
+  let owner_actor_id = human_of(existing === undefined ? null : existing.owner_user_id) ?? human_of(null);
+  if (owner_actor_id === undefined) {
+    await s.unit(async () => {
+      await s.service.execute(s.ctx(null, null), "project.bootstrap", { slug: OWNER_STUB_SLUG, topic: "PES 로컬 소유자 (이전 도구가 만든 자리 — 지우지 마세요)", owner_display_name: "로컬 소유자" });
+    });
+    owner_actor_id = human_of(null);
+  }
+  if (owner_actor_id === undefined) throw new Refusal("unauthenticated", "이 컴퓨터의 사람 소유자를 만들지 못했습니다");
+  const owner = owner_actor_id;
+  try {
+    const imported = await s.unit(() => import_project(s.service, dir, { owner_actor_id: owner }));
+    if (imported.state === "failed") {
+      const first = imported.report.entries[0];
+      throw new Refusal("invalid_payload", `이전하지 못했습니다: 폴더를 옮길 수 없는 내용이 있습니다${first === undefined ? "" : ` (${first.category} ${first.path})`} — 폴더는 그대로 두었습니다. ${migrate_hint(first?.category ?? "", first?.path, slug)}`);
+    }
+    const checked = await s.unit(() => validate_import(s.service, imported.batch_id, { owner_actor_id: owner, source_dir: dir }));
+    if (!checked.ok) {
+      const first = checked.report.problems[0];
+      throw new Refusal("conflict", `이전 검증에 실패했습니다: ${first === undefined ? "차이가 있습니다" : first.check + (first.path === undefined ? "" : " " + first.path)} — 아무것도 켜지 않았고 폴더는 그대로입니다. ${migrate_hint(first?.check ?? "", first?.path, slug)}`);
+    }
+    const backup_dir = join(pes_dir(s.env), "backups", `migrate-${slug}-${imported.batch_id}`);
+    await s.unit(() => activate_import(s.service, imported.batch_id, { owner_actor_id: owner, backup_dir, pes_home }));
+    return { state: "migrated", slug, project_id: imported.project_id, backup_dir };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (/backup folder must/.test(error.message)) throw backup_place_refusal(error.message, backups, pes_home);
+      throw new Refusal("conflict", `이전하지 못했습니다: ${error.code} — 아무것도 켜지 않았고 폴더는 그대로입니다. ${migrate_hint(error.code, undefined, slug)}`);
+    }
+    throw error;
+  }
+};
+
+const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "form_set", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
 
 const HANDLERS: Record<string, Handler> = {
   slugs,
   active_slugs,
+  form_set,
+  migrate: migrate_op,
   route,
   read_project,
   screen,
@@ -2525,6 +2684,23 @@ function schema_is_current(db: Db): boolean {
   }
 }
 
+function empty_file(file: string): boolean {
+  try {
+    return statSync(file).size === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the database has at least one project row (false when there is no projects table). */
+function holds_projects(db: Db): boolean {
+  try {
+    return db.get<{ one: bigint }>("SELECT 1 AS one FROM projects LIMIT 1") !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 function reply(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
@@ -2561,8 +2737,9 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
     return { ok: false, code: "unknown_command", message: `알 수 없는 작업: ${String(request.op)}`, exit: 1 };
   }
   const file = db_path(env);
-  const creating = request.op === "init";
-  if (!creating && !existsSync(file)) {
+  const creating = request.op === "init" || request.op === "migrate";
+  /** What a database that serves nothing answers: a missing file, an empty (0 byte) one, or one without any project (no projects table, an old schema with no project) reads like 0.15 (D14). */
+  const serves_nothing = (): BridgeReply => {
     if (request.op === "slugs" || request.op === "live_locks" || request.op === "active_slugs") {
       return { ok: true, data: { slugs: [], locks: {} } };
     }
@@ -2575,15 +2752,29 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
       message: "PES 데이터베이스가 없습니다 — 옛 project.json 프로젝트는 이전하기 전에는 쓸 수 없습니다",
       exit: 1,
     };
-  }
+  };
+  if (!creating && (!existsSync(file) || empty_file(file))) return serves_nothing();
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
+  if (creating && existsSync(file) && !empty_file(file)) {
+    // a SQLite file of something else (tables, no db_meta): migrate would refuse it with an internal error — say it in one line, change nothing
+    const foreign = probe_database(file).foreign === true;
+    if (foreign) return { ok: false, code: "conflict", message: `PES 데이터베이스가 아닌 파일입니다: ${file} — 다른 이름으로 옮겨 둔 뒤 다시 하세요(옛 0.15 폴더는 그대로 읽힙니다)`, exit: 1 };
+  }
   const read_only = READ_ONLY_OPS.has(request.op);
-  const db = read_only ? connect_read_only(file) : connect(file);
+  let db: Db;
+  try {
+    db = read_only ? connect_read_only(file) : connect(file);
+  } catch (error) {
+    // a file that is not a database (or a locked / unreadable one) is a refusal with one plain line, not an internal error
+    return { ok: false, code: "database_unreadable", message: `PES 데이터베이스를 열 수 없습니다 — ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`, exit: 1 };
+  }
   let session: Session | undefined;
   try {
     if (creating) migrate(db);
     else if (!schema_is_current(db)) {
-      return { ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 };
+      // an old schema that holds no project (or no projects table at all) serves nothing: 0.15 folders stay readable; init / migrate bring it up to date
+      if (!holds_projects(db)) return serves_nothing();
+      return { ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다 — pes migrate <프로젝트> 한 번으로 올라갑니다", exit: 1 };
     }
     session = new Session(env, db, !read_only);
     if (typeof request.args?.dir === "string") session.dir_label = request.args.dir;

@@ -8,12 +8,14 @@
 //     like 0.15 wrote them — UTF-8, LF line ends and "/" in stored paths on every OS (D10);
 //   * where 0.15 died with a Python traceback the exit code stays and the message is one plain Korean line (D11).
 
+import { cmd_claim, cmd_complete, cmd_context, cmd_submit, cmd_wait } from "./cli_agent.ts";
 import { cmd_ask, cmd_ask_prep } from "./cli_ask.ts";
 import { cmd_doctor } from "./cli_doctor.ts";
 import { cmd_home, cmd_remote, cmd_stop } from "./cli_home.ts";
 import { cmd_assemble, cmd_digest, cmd_pending, cmd_report, cmd_show, cmd_web } from "./cli_read.ts";
 import { cmd_approve, cmd_render, cmd_reopen, cmd_round_start } from "./cli_rounds.ts";
 import { cmd_chat, cmd_init, cmd_lock, cmd_mark, cmd_merge, cmd_note, cmd_qa, cmd_qa_brief, cmd_status, cmd_unlock } from "./cli_records.ts";
+import { cmd_migrate } from "./cli_migrate.ts";
 import { cmd_hub, cmd_list, cmd_open, cmd_serve, cmd_watch, cmd_which } from "./cli_server.ts";
 import { cmd_set } from "./cli_set.ts";
 import { Die, die, output } from "./cli_support.ts";
@@ -62,11 +64,21 @@ const READ_COMMANDS: Record<string, Command> = {
   doctor: cmd_doctor,
 };
 
-/** Same table as scripts/pes.py CMDS (minus the five DB-only commands), in the same order. */
+/** SEL-74: the five commands an agent uses with PES_TOKEN (they had no home in 0.15 outside PES_DB_CORE=1) and the 0.15 → database move. */
+const AGENT_COMMANDS: Record<string, Command> = {
+  context: cmd_context,
+  claim: cmd_claim,
+  submit: cmd_submit,
+  wait: cmd_wait,
+  complete: cmd_complete,
+  migrate: cmd_migrate,
+};
+
+/** Same table as scripts/pes.py CMDS, in the same order, then the SEL-74 commands (the five agent commands and migrate). */
 export const CMDS: readonly string[] = [
   "init", "ask-prep", "ask", "round-start", "merge", "render", "approve", "reopen", "status", "pending", "mark", "chat", "assemble", "report",
   "digest", "show", "note", "set", "web", "remote", "qa-brief", "qa", "serve", "stop", "watch", "list", "hub", "home", "open", "doctor", "which",
-  "lock", "unlock",
+  "lock", "unlock", "context", "claim", "submit", "wait", "complete", "migrate",
 ];
 
 /** A name pes.py has that this file has no command for: a plain Korean line (never reached while the two tables above cover CMDS). */
@@ -76,7 +88,7 @@ function not_yet(name: string): Command {
 
 function table(): Record<string, Command> {
   const out: Record<string, Command> = {};
-  for (const name of CMDS) out[name] = WRITE_COMMANDS[name] ?? READ_COMMANDS[name] ?? not_yet(name);
+  for (const name of CMDS) out[name] = WRITE_COMMANDS[name] ?? READ_COMMANDS[name] ?? AGENT_COMMANDS[name] ?? not_yet(name);
   return out;
 }
 

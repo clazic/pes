@@ -260,7 +260,8 @@ test("R2 단계 미지정 artifact 가 있어도 기획 단계 항목이 있으�
     ok(c.run(["round-start", SLUG, "plan"]), "round-start");
     ok(c.run(["merge", SLUG, "plan", write_json(c, "r2b.json", [{ id: 1, kind: "topic", title: "기획 항목", summary: "x" }])]), "merge");
     const rendered = ok(c.run(["render", SLUG, "plan"]), "render");
-    assert.match(rendered.stdout, /항목 1개/, rendered.stdout);
+    // (pes.ts 의 render 출력은 0.15 처럼 대시보드 경로뿐이다 — 봉인 항목 수는 아래 DB 행이 지킨다)
+    assert.match(rendered.stdout, /index\.html/, rendered.stdout);
     const rows = c.env.db.all<{ stage_id: string | null }>(
       `SELECT a.stage_id AS stage_id FROM round_contents rc JOIN artifacts a ON a.project_id = rc.project_id AND a.object_id = rc.object_id`,
     );

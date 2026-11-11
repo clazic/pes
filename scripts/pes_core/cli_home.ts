@@ -89,7 +89,7 @@ export function signalable_pid(pid: unknown): pid is number {
   return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 1;
 }
 
-function kill_pid(pid: unknown): boolean {
+export function kill_pid(pid: unknown): boolean {
   if (!signalable_pid(pid)) return false;
   try {
     process.kill(pid, "SIGTERM");
@@ -104,12 +104,16 @@ function kill_pid(pid: unknown): boolean {
  * its pid may belong to any other program now. The pid is signalled only when the port the record names (else `fallback_port`, the
  * old `.pes-port`) answers `/whoami` on 127.0.0.1 with exactly `owner` — this home (or this project for an old server). Nothing
  * answering, or another root answering, means the record is stale: nothing is signalled, the caller just forgets the record
- * (final review 1 필수 1; the same rule on Windows, where pids are reused often).
+ * (final review 1 필수 1; the same rule on Windows, where pids are reused often). SEL-74 G1: the answer must also name the recorded pid
+ * (`pid` in /whoami, an integer) — the right root with another pid (or none: an older server) cannot confirm the record, nothing is signalled.
  */
-async function kill_recorded(record: Record<string, unknown> | undefined, owner: string, fallback_port?: unknown): Promise<boolean> {
+async function kill_recorded(record: Record<string, unknown> | undefined, owner: string, fallback_port?: unknown, need_pid = true): Promise<boolean> {
   if (record === undefined || !signalable_pid(record.pid)) return false;
   const port = valid_port(record.port) ?? valid_port(fallback_port);
-  if (port === null || (await whoami(port)) !== owner) return false;
+  if (port === null) return false;
+  const info = await whoami_info(port);
+  // `need_pid` false: the old per-project servers (0.15 `.pes-server`) never told their pid — only the root can confirm their record
+  if (info === null || info.root !== owner || (need_pid && info.pid !== record.pid)) return false;
   return kill_pid(record.pid);
 }
 
@@ -153,7 +157,7 @@ export function inside_pes_home(d: string): boolean {
 
 /** The old per-project server (8765~): stop it by its record, forget the record. */
 export async function stop_legacy(d: string): Promise<void> {
-  await kill_recorded(read_json_quiet(join(d, ".pes-server")), d, read_text_quiet(join(d, ".pes-port")));
+  await kill_recorded(read_json_quiet(join(d, ".pes-server")), d, read_text_quiet(join(d, ".pes-port")), false);
   for (const name of [".pes-server", ".pes-port"]) unlink_quiet(join(d, name));
   for (const port of legacy_ports()) {
     if ((await whoami(port)) === d) {
@@ -209,7 +213,24 @@ export async function cmd_stop(args: string[]): Promise<void> {
     root = dirname(d);
     await stop_legacy(d);
   }
-  await stop_server(root, true);
+  if (!(await stop_server(root, true))) {
+    // an older server (no pid in /whoami) cannot be confirmed, so it is not signalled; without pkill (Windows) it stays — say so, and how to end it
+    let port: number | null = null;
+    for (const p of hub_ports()) {
+      if ((await whoami(p)) === root) {
+        port = p;
+        break;
+      }
+    }
+    const at = port === null ? "" : ` (포트 ${port})`;
+    const how =
+      process.platform === "win32"
+        ? `PowerShell 에서 'Stop-Process -Id (Get-NetTCPConnection -LocalPort ${port ?? "<포트>"} -State Listen).OwningProcess' 를 실행하거나 작업 관리자에서 그 python·node 프로세스를 끝내세요(또는 컴퓨터를 다시 시작)`
+        : `'kill $(lsof -ti tcp:${port ?? "<포트>"} -sTCP:LISTEN)' 로 그 프로세스를 끝내세요`;
+    // exit stays 0 (0.15 `stop` always ended with 0 — scripts read it); the line says what really happened instead of 서버 종료
+    say(`서버를 끄지 못했습니다${at} — 옛 버전 서버라 PES 가 스스로 끄지 못합니다(${root}). ${how}`);
+    return;
+  }
   say(`서버 종료 (${root} — 이 홈의 모든 프로젝트 화면이 함께 꺼집니다)`);
 }
 

@@ -20,9 +20,9 @@ description: PES(Project Execution System) 공통 규칙 — 프로젝트 폴더
 ## CLI
 
 ```bash
-PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3가 없으면 py -3 -I
+PES="node ${CLAUDE_PLUGIN_ROOT}/scripts/pes.ts"   # Node.js 26 이상 (macOS·Windows 공통)
 ```
-`${CLAUDE_PLUGIN_ROOT}`가 비어 있으면 이 스킬의 Base directory 기준 `../../scripts/pes.py`를 쓴다. 명령 목록은 `$PES` (인자 없이) 실행.
+`${CLAUDE_PLUGIN_ROOT}`가 비어 있으면 이 스킬의 Base directory 기준 `../../scripts/pes.ts`를 쓴다. 명령 목록은 `$PES` (인자 없이) 실행.
 
 | 명령 | 하는 일 |
 |---|---|
@@ -34,7 +34,7 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `approve <dir> <stage>` | 승인 → 다음 단계 asking. 기획 승인 시 조사 항목 자동 생성 |
 | `list [projects]` · `hub [projects]` | 프로젝트 목록 (채팅용 · 화면 127.0.0.1:8760/) |
 | `which <도구>` | 도구 경로 (PATH + 사용자별 설치 위치, Windows 포함) |
-| `setup.py check · install missing · keys · mark · needed` | 설치 도우미 (`/pes:setup`) — 도구 설치, API 키 화면(127.0.0.1:8759), 완료 표시 |
+| 설치 도우미 | `setup.ts check · install missing · upgrade all · keys · mark · needed` — `node ${CLAUDE_PLUGIN_ROOT}/scripts/setup.ts <명령>` (`/pes:setup`): 도구 설치, API 키 화면(127.0.0.1:8759), 완료 표시 |
 | `doctor [dir] [--fix] [--json]` | 진단 (환경·도구·키·포트·프로젝트 상태·잠금·답·보고서·연결). 명령이 이상하게 실패하면 먼저 실행 |
 | `lock <dir> [--force]` · `unlock <dir>` | 세션 표시 (PES_OWNER) — 잠금 파일을 직접 만들거나 지우지 않는다 |
 | `digest <dir> <stage> [--round N]` · `show <dir> <stage> [id…] [--fields a,b]` | 점검용 압축 요약 · 필요한 부분만 보기. `show <dir> <stage> --fields changes`(id 없이, changes·carry_over·settings·review)는 단계 값을 보여 준다 |
@@ -46,10 +46,17 @@ PES="python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/pes.py"   # Windows에서 python3�
 | `chat <dir> <stage> "텍스트" [kind]` | 채팅으로 받은 지시도 기록 (타임라인이 끊기지 않게) |
 | `assemble <dir>` | 집필 원고 → `out/report.md` (각주 번호 정리) |
 | `qa-brief <dir> <stage>` · `qa <dir> <stage>` | 독립 검토(QC/QA) 지시문 만들기 · 결과 기록 (reviewer 역할) |
-| `context <dir>` | **DB 경로에서 쓰는 명령** — 작업 토큰을 받은 작업자가 읽는 현재 맥락 (단계·라운드·할 일·인계 메모). 기본 경로에서는 `status`·`digest`·`show`로 읽는다 |
-| `claim <dir> [--mode …]` → `submit <dir> --run <run> --lease <lease> --fence <fence> --file <결과.json>` → `complete <dir> --run … --lease … --fence …` | **DB 경로에서 쓰는 명령** — 작업 맡기(run·lease·fence를 받음) → 이미 있는 항목에 새 판 더하기 → 끝내기. 사람에게 물을 때는 `wait <dir> --run … --lease … --fence … [--reason …]`. `submit`의 결과 파일은 DB 결과 형식 전용이다: `{"results": [{"op": "append_version", "object_id": …, "based_on_version_id": …, 코어 필드(`body_md`·`summary`·`metadata` 등)}]}` (1~20개, 새 항목은 만들지 않는다). 스킬의 제안 파일(`id`·`details`·`sources` …)은 이 형식이 아니므로 `submit`으로 내지 않고 `merge`로 넘긴다. 기본 경로에서는 다섯 명령 모두 거부된다 |
+| `context <dir>` | **작업 토큰(PES_TOKEN)을 받은 작업자의 명령** — 현재 맥락 (단계·라운드·할 일·인계 메모). 토큰 없이 읽을 때는 `status`·`digest`·`show` |
+| `claim <dir> [--mode …]` → `submit <dir> --run <run> --lease <lease> --fence <fence> --file <결과.json>` → `complete <dir> --run … --lease … --fence …` | **작업 토큰(PES_TOKEN)을 받은 작업자가 DB 프로젝트에 쓰는 명령** — 작업 맡기(run·lease·fence를 받음) → 이미 있는 항목에 새 판 더하기 → 끝내기. 사람에게 물을 때는 `wait <dir> --run … --lease … --fence … [--reason …]`. `submit`의 결과 파일은 DB 결과 형식 전용이다: `{"results": [{"op": "append_version", "object_id": …, "based_on_version_id": …, 코어 필드(`body_md`·`summary`·`metadata` 등)}]}` (1~20개, 새 항목은 만들지 않는다). 스킬의 제안 파일(`id`·`details`·`sources` …)은 이 형식이 아니므로 `submit`으로 내지 않고 `merge`로 넘긴다. |
 | `web <dir> [--assemble]` | 최종 웹 보고서 `out/report.html` (`templates/final-report.html`; 표지 정보 `out/cover.json`, 출처 확인 여부 `out/sources.json` — assemble 이 만든다) |
 | `serve` / `stop` / `watch` | 로컬 서버 — 홈마다 포트 하나(127.0.0.1:8760, 프로젝트는 `/<slug>/`) / 종료(홈 전체) / 답 대기 명령 |
+
+## 옛 형식(0.15) 프로젝트 — 이전
+
+- `project.json`만 있는 예전 프로젝트 폴더는 새 형식(DB)으로 옮기기 전에는 **읽기 전용**이다: `status`·`digest`·`show`·`pending`·`list`는 그대로 되고, 쓰는 명령은 거절된다. 거절 문구는 `먼저 이전하세요 — pes migrate <이름>` 꼴의 한 줄이다.
+- 이 거절을 받으면 **스스로 이전하지 말고 사용자에게 먼저 묻는다**: "이 프로젝트는 예전 형식이라 새 형식으로 옮겨야 이어서 진행할 수 있습니다. 옮기기 전에 백업이 만들어지고 원본 폴더는 그대로 남습니다. 옮길까요?" — 사용자가 동의(확인)한 뒤에만 `$PES migrate <이름>`을 실행한다. 폴더가 여럿이고 모두 옮겨도 좋다고 하면 `$PES migrate --all`.
+- 이전은 백업 → 검증 → 켜기 순서이고, 실패하면 아무것도 켜지 않고 원상으로 둔다. 이미 옮긴 것은 `이미 이전됨`이라고 답하고 아무것도 바꾸지 않는다. 이전이 끝나면 하던 명령을 다시 한다. `doctor`는 안 옮긴 폴더에 `이전 필요` 줄을 보여 줄 뿐 대신 옮기지 않는다.
+- **이전이 실패하면** 거절 줄(`이전하지 못했습니다…`·`이전 검증에 실패했습니다…`)을 사용자에게 그대로 보여 주고, 줄 끝의 `할 일:` 을 안내한다. 사용자가 고친 내용을 되돌리거나 지우지 않는다 — 예: 손으로 고친 보고서(`reports_regeneration`)는 사용자가 폴더 밖에 다른 이름으로 보관하고 폴더에서 뺀 뒤 다시 이전하고, 이전 뒤 `$PES report <이름> <단계>` 로 새로 만든다. PES 홈 밖 폴더는 사용자가 홈 안으로 옮긴 뒤 이전한다. 원인을 모르겠으면 `$PES doctor` 결과와 함께 사용자에게 알리고 멈춘다.
 
 ## 프로젝트 폴더
 
@@ -68,7 +75,7 @@ snapshots/<stage>-R<n>.json          라운드 스냅샷                  shots/
 
 | 하려는 일 | 쓰는 명령 |
 |---|---|
-| 현재 상태·맥락 읽기 | `status` · `digest` · `show` (파일을 통째로 읽지 않는다), 받은 답은 `pending`이 알려 준 답 파일, 참고자료(library)는 대시보드 기획 탭 또는 가져온 원래 조사 폴더(기획 스킬; DB 경로(`PES_DB_CORE=1`)에서는 칸이 개수만 보이므로 `--import`에 준 원래 폴더의 `state.json`을 읽는다). DB 경로의 작업자는 `context <dir>` |
+| 현재 상태·맥락 읽기 | `status` · `digest` · `show` (파일을 통째로 읽지 않는다), 받은 답은 `pending`이 알려 준 답 파일, 참고자료(library)는 대시보드 기획 탭 또는 가져온 원래 조사 폴더(기획 스킬; 칸이 개수만 보이므로 `--import`에 준 원래 폴더의 `state.json`을 읽는다). 토큰을 받은 작업자는 `context <dir>` |
 | 항목 만들기·고치기 (기획 항목, 조사 결과, 쟁점, 원고, 주장 판정, 산출물) | 결과를 **제안 파일**(JSON)로 쓰고 `merge <dir> <단계> <파일…>` (서브에이전트는 파일을 메인에 돌려주고 메인이 `merge`) |
 | 항목 상태 바꾸기 (심화·수정·삭제·원문 확인) | 항목의 `status`·`request`를 제안 파일에 담아 `merge` |
 | 사람에게 묻기 (시작 질문) | 질문 명세 파일을 만들고 `ask <dir> <명세>` |
@@ -123,13 +130,13 @@ $PES set "$DIR" project conclusion -                                  # 최종 �
 
 ## Windows
 
-- Python: `python3`가 없으면 `py -3`. 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다(pkill 불필요).
+- 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다(pkill 불필요).
 - 브라우저 열기는 `open`/`start` 대신 `$PES open`.
 - 답 대기 명령(`tail -F … | grep --line-buffered`)은 Git Bash에서 그대로 쓴다.
 
 ## 여러 프로젝트
 
-- **세션 표시(PES_OWNER)**: 세션 처음에 이 세션 ID를 정해(모르면 `uuidgen`으로 한 번 만들고 대화 동안 같은 값) 모든 pes 호출에 `PES_OWNER=<ID>`를 붙인다. 예: `pes(){ PES_OWNER=<ID> python3 -I <플러그인>/scripts/pes.py "$@"; }`
+- **세션 표시(PES_OWNER)**: 세션 처음에 이 세션 ID를 정해(모르면 `uuidgen`으로 한 번 만들고 대화 동안 같은 값) 모든 pes 호출에 `PES_OWNER=<ID>`를 붙인다. 예: `pes(){ PES_OWNER=<ID> node <플러그인>/scripts/pes.ts "$@"; }`
 - 프로젝트를 열면 `lock <dir>`. 쓰기 명령은 다른 세션이 2시간 안에 기록한 프로젝트면 거부된다(종료 코드 3) — 억지로 풀지 말고 사용자에게 알린다. 그 세션을 닫았다고 하면 `lock <dir> --force`.
 - 한 세션에서는 한 프로젝트만 진행한다. 다른 프로젝트는 다른 세션에서 `run` 진입점(`/pes:run <폴더>`)으로 연다.
 - `list` = 채팅용 목록, `hub` = 목록 화면(127.0.0.1:8760/). 서버는 PES 홈마다 **포트 하나**이고, 목록은 `/`, 각 프로젝트 대시보드는 `/<slug>/` 로 열린다 — 프로젝트마다 서버를 따로 띄우지 않는다. 프로젝트 대시보드를 다시 만들 때마다 목록 화면도 갱신된다.

@@ -18,8 +18,8 @@ import { test } from "node:test";
 
 import { disk_path } from "./helpers/blob_env.ts";
 import { make_cli_env, type CliEnv } from "./helpers/cli_write_env.ts";
-import { mentioned_commands, PES_PY, pes_cmds, REPO, repo_doc } from "./helpers/skill_docs.ts";
-import { hub_blocked_argv } from "./helpers/hub_block.ts";
+import { mentioned_commands, pes_cmds, REPO, repo_doc } from "./helpers/skill_docs.ts";
+import { run_cli } from "./helpers/cli_read_env.ts";
 
 const SLUG = "pilot-synth";
 const CMDS = pes_cmds();
@@ -76,26 +76,8 @@ function normalize(text: string): string {
 }
 
 function run_pes(c: CliEnv, args: string[], extra: Record<string, string | undefined>) {
-  const env: Record<string, string | undefined> = {
-    ...c.env.home.env,
-    PES_OWNER: undefined,
-    PES_TOKEN: undefined,
-    PES_DB_CORE: undefined,
-    ...extra,
-  };
-  for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
-  assert.equal(env.HOME, c.env.home.env.HOME, "격리된 HOME");
-  assert.equal(env.USERPROFILE, c.env.home.env.HOME, "격리된 USERPROFILE");
-  assert.equal(realpathSync.native(env.PES_HOME as string), realpathSync.native(c.env.home.env.PES_HOME as string), "격리된 PES_HOME");
-  // -I 는 PYTHON* 환경 변수를 무시하므로 UTF-8 은 -X utf8 로 강제한다.
-  const res = spawnSync("python3", hub_blocked_argv(["-X", "utf8", "-I", PES_PY, ...args]), {
-    env: env as NodeJS.ProcessEnv,
-    cwd: c.env.home.root,
-    encoding: "utf8",
-    timeout: 90_000,
-  });
-  if (res.error !== undefined) throw res.error;
-  return { status: res.status, stdout: normalize(res.stdout ?? ""), stderr: normalize(res.stderr ?? "") };
+  const res = run_cli(c, args, { extra, timeout: 90_000 }); // 가드 아래 node scripts/pes.ts, 격리된 HOME·USERPROFILE·PES_HOME
+  return { status: res.status, stdout: normalize(res.stdout), stderr: normalize(res.stderr) };
 }
 
 function prepare(c: CliEnv): Ctx {
@@ -114,10 +96,10 @@ function prepare(c: CliEnv): Ctx {
 // ---------------------------------------------------------------------------
 // 문서 쪽: 파일럿 명령 열은 core+plan 문서가 실제로 지시하는 것이다
 
-test("파일럿: 명령 열의 모든 명령이 pes.py CMDS 에 있고 core+plan 문서가 지시한다", () => {
+test("파일럿: 명령 열의 모든 명령이 pes.ts 명령표(CMDS)에 있고 core+plan 문서가 지시한다", () => {
   const docs = new Set([...mentioned_commands(repo_doc("skills/core/SKILL.md"), CMDS), ...mentioned_commands(repo_doc("skills/plan/SKILL.md"), CMDS)]);
   const missing_from_cli = PILOT.filter((s) => !CMDS.includes(s.command)).map((s) => s.command);
-  assert.deepEqual(missing_from_cli, [], "pes.py CMDS 에 없는 명령");
+  assert.deepEqual(missing_from_cli, [], "pes.ts 명령표에 없는 명령");
   const missing_from_docs = PILOT.filter((s) => !docs.has(s.command)).map((s) => s.command);
   assert.deepEqual(missing_from_docs, [], `core·plan 문서가 지시하지 않는 명령 (문서가 가진 명령: ${[...docs].sort().join(" ")})`);
 });
@@ -130,77 +112,54 @@ test("파일럿: 기획 항목을 만드는 길은 직접 쓰기가 아니라 me
 });
 
 // ---------------------------------------------------------------------------
-// 실행 쪽: 그 열을 합성 프로젝트에 차례로 돌린다 (플래그 없음 / PES_DB_CORE=1)
+// 실행 쪽: 그 열을 합성 프로젝트에 차례로 돌린다 (SEL-74: 플래그 없음(v0.15) 열과 PES_DB_CORE=1 열은 하나가 됐다 — 늘 DB)
 
-async function drive(flag: "off" | "on"): Promise<void> {
+async function drive(): Promise<void> {
   const c = await make_cli_env();
   try {
     const x = prepare(c);
     // core 문서 「여러 프로젝트」: 세션 처음에 정한 ID 를 모든 pes 호출에 PES_OWNER 로 붙인다.
-    const extra_flag: Record<string, string | undefined> = { PES_OWNER: "sess-pilot0001", ...(flag === "on" ? { PES_DB_CORE: "1" } : { PES_DB_CORE: undefined }) };
-    let set_accepted = false;
+    const extra_flag: Record<string, string | undefined> = { PES_OWNER: "sess-pilot0001" };
     for (const step of PILOT) {
       const args = step.args(x);
       const res = run_pes(c, args, { ...extra_flag, ...(step.env ?? {}) });
-      if (step.command === "set") {
-        if (flag === "on" && res.status !== 0) {
-          // 코어에 대응 명령이 없으면 분명한 한국어 거부 (DB 경로의 직접 쓰기는 없다) — 열은 계속된다
-          assert.doesNotMatch(res.stderr, /Traceback/, "set 거부는 충돌이 아니다");
-          assert.match(res.stderr + res.stdout, /[가-힣]/, "set 거부는 한국어 이유를 말한다");
-          continue;
-        }
-        set_accepted = true;
-      }
-      assert.equal(res.status, 0, `[${flag}] pes ${args.join(" ")} → 종료 ${res.status}\n${res.stderr}${res.stdout}`);
-      assert.doesNotMatch(res.stderr, /Traceback|SyntaxError|ModuleNotFoundError|UnicodeEncodeError/, `[${flag}] ${step.command}: 충돌이 아니라 정상 종료여야 한다`);
+      assert.equal(res.status, 0, `pes ${args.join(" ")} → 종료 ${res.status}\n${res.stderr}${res.stdout}`);
+      assert.doesNotMatch(res.stderr, /Traceback|SyntaxError|ModuleNotFoundError|UnicodeEncodeError/, `${step.command}: 충돌이 아니라 정상 종료여야 한다`);
       if (["status", "digest", "show", "report", "approve"].includes(step.command)) {
-        assert.ok(res.stdout.trim().length > 0, `[${flag}] ${step.command}: 출력이 있다`);
+        assert.ok(res.stdout.trim().length > 0, `${step.command}: 출력이 있다`);
       }
     }
     const folder = join(c.env.home.env.PES_HOME as string, SLUG);
-    const json = join(folder, "project.json");
-    if (flag === "on") {
-      assert.ok(!existsSync(json), "DB 경로에서는 project.json 을 만들지 않는다 (직접 쓰기 0)");
-      const projects = c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects WHERE slug = ?", SLUG);
-      assert.equal(projects?.n, 1n, "프로젝트가 DB 에 생겼다");
-      if (set_accepted) {
-        const row = c.env.db.get<{ storage_key: string }>(
-          `SELECT b.storage_key FROM artifacts a
-             JOIN object_versions ov ON ov.object_id = a.object_id
-             JOIN version_files vf ON vf.version_id = ov.id
-             JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
-            WHERE a.project_id = (SELECT id FROM projects WHERE slug = ?) AND a.kind = 'report' AND b.original_name = 'report.md'
-            ORDER BY ov.version_no DESC`,
-          SLUG,
-        );
-        assert.ok(row, "DB 단계 보고서 report.md");
-        const md = normalize(readFileSync(disk_path(c.env, row), "utf8"));
-        assert.ok(md.includes(`## 1. 요약\n\n${SUMMARY_TEXT}`), "[on] 보고서 '요약' 이 set 한 값으로 채워졌다");
-      }
-      const actions = c.commits().map((m) => m.action);
-      for (const want of ["project.created", "round.started", "round.sealed", "stage.approved"]) {
-        assert.ok(actions.includes(want), `영수증 ${want} 이 남아야 한다 (실제: ${actions.join(",")})`);
-      }
-    } else {
-      assert.ok(existsSync(json), "플래그 없음(v0.15)에서는 project.json 이 상태다");
-      const p = JSON.parse(readFileSync(json, "utf8")) as { stages?: Record<string, { status?: string }> };
-      assert.equal(p.stages?.plan?.status, "approved", "기획이 승인됐다");
-      assert.equal(set_accepted, true, "[off] set 이 성공했다");
-      const report = normalize(readFileSync(join(folder, "reports", "plan", "report.md"), "utf8"));
-      assert.ok(report.includes(`## 1. 요약\n\n${SUMMARY_TEXT}`), "[off] 보고서 '요약' 이 note 가 아니라 set 한 값으로 채워졌다");
-      assert.doesNotMatch(report, /\(요약 없음/, "[off] 빈 요약 안내가 없다");
-      const projects = c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects WHERE slug = ?", SLUG);
-      assert.equal(projects?.n, 0n, "플래그 없이는 DB 를 건드리지 않는다");
+    assert.ok(!existsSync(join(folder, "project.json")), "project.json 을 만들지 않는다 (직접 쓰기 0)");
+    const projects = c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects WHERE slug = ?", SLUG);
+    assert.equal(projects?.n, 1n, "프로젝트가 DB 에 생겼다");
+    const row = c.env.db.get<{ storage_key: string }>(
+      `SELECT b.storage_key FROM artifacts a
+         JOIN object_versions ov ON ov.object_id = a.object_id
+         JOIN version_files vf ON vf.version_id = ov.id
+         JOIN blobs b ON b.project_id = vf.project_id AND b.id = vf.blob_id
+        WHERE a.project_id = (SELECT id FROM projects WHERE slug = ?) AND a.kind = 'report' AND b.original_name = 'report.md'
+        ORDER BY ov.version_no DESC`,
+      SLUG,
+    );
+    assert.ok(row, "DB 단계 보고서 report.md");
+    const md = normalize(readFileSync(disk_path(c.env, row), "utf8"));
+    assert.ok(md.includes(`## 1. 요약\n\n${SUMMARY_TEXT}`), "보고서 '요약' 이 note 가 아니라 set 한 값으로 채워졌다");
+    assert.doesNotMatch(md, /\(요약 없음/, "빈 요약 안내가 없다");
+    // pes.ts 는 0.15 호환으로 폴더에도 같은 보고서를 둔다
+    const report = normalize(readFileSync(join(folder, "reports", "plan", "report.md"), "utf8"));
+    assert.ok(report.includes(`## 1. 요약\n\n${SUMMARY_TEXT}`), "폴더 보고서의 '요약' 도 set 한 값");
+    const actions = c.commits().map((m) => m.action);
+    for (const want of ["project.created", "round.started", "round.sealed", "stage.approved"]) {
+      assert.ok(actions.includes(want), `영수증 ${want} 이 남아야 한다 (실제: ${actions.join(",")})`);
     }
+    const status = run_pes(c, ["status", SLUG], extra_flag);
+    assert.match(status.stdout, /기획 .*approved|승인/, "기획이 승인됐다");
   } finally {
     c.close();
   }
 }
 
-test("파일럿 합성 1회: 문서의 명령 열이 플래그 없이(v0.15) 끝까지 성공한다", async () => {
-  await drive("off");
-});
-
-test("파일럿 합성 1회: 같은 명령 열이 PES_DB_CORE=1 에서도 끝까지 성공한다 (project.json 직접 쓰기 0)", async () => {
-  await drive("on");
+test("파일럿 합성 1회: 문서의 명령 열이 끝까지 성공한다 (project.json 직접 쓰기 0, 영수증이 남는다)", async () => {
+  await drive();
 });

@@ -100,7 +100,10 @@ test("(b) serve: pes.ts starts scripts/serve.ts on the injected port and prints 
     assert.equal(started.stdout.trim(), `http://127.0.0.1:${port}/${SLUG}/`, "serve prints the project's address (0.15: server_url)");
     const whoami = await http_json(port, "/whoami");
     assert.equal(whoami.status, 200);
-    assert.deepEqual(whoami.json, { root: realpathSync.native(ctx.pes_home), single: true });
+    // D16 (SEL-74): 0.15 answered {root, single}; the ts /whoami also names the server process (pes stop checks the record's pid against it)
+    const { pid, ...who } = whoami.json as { pid?: unknown; root: string; single: boolean };
+    assert.ok(Number.isSafeInteger(pid) && (pid as number) > 0, `/whoami pid is a positive integer: ${String(pid)}`);
+    assert.deepEqual(who, { root: realpathSync.native(ctx.pes_home), single: true });
     assert.deepEqual((await http_json(port, "/ping")).json, { ok: true });
     assert.deepEqual((await http_json(port, `/${SLUG}/ping`)).json, { ok: true });
     const version = (await http_json(port, "/version")).json;
@@ -204,6 +207,37 @@ test("(c) watch: the same one line as 0.15 (D05 keeps the tail form during the t
     assert.equal(missing.status, 1);
     assert.match(missing.stderr, /[가-힣]/);
     assert.ok(!looks_like_stack_trace(missing.stderr.split("\n")));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("D17: watch refuses a project that is in neither the database nor a project.json folder — exit 1, empty stdout, one Korean line naming the path, nothing created; 0.15 printed the tail line for it (exit 0)", { timeout: 120_000 }, () => {
+  const ctx = make_ctx("pes-ts-watch-d17-");
+  try {
+    // 0.15 (pes.py cmd_watch, frozen here): `d = pdir(args[0]); print(f"tail -n0 -F {shell_quote(f'{d}/feedback.log')} | grep --line-buffered FEEDBACK")` — no existence check, exit 0.
+    const ZERO_FIFTEEN = /^tail -n0 -F .*feedback\.log'? \| grep --line-buffered FEEDBACK\n$/;
+    for (const target of [join(ctx.tmp, "없는-프로젝트"), "no-such-project-d17", join(ctx.tmp, "missing", "deeper")]) {
+      const before = readdirSync(ctx.tmp).sort();
+      const run = run_ts_cli(ctx, ["watch", target]);
+      assert.equal(run.status, 1, `${target}: ${run.stdout}${run.stderr}`);
+      assert.equal(run.stdout, "", `${target}: nothing on stdout (0.15's tail line would never fire)`);
+      assert.doesNotMatch(run.stdout, ZERO_FIFTEEN);
+      const lines = run.stderr.split("\n").filter((x) => x.trim() !== "");
+      assert.equal(lines.length, 1, `${target}: one line: ${JSON.stringify(run.stderr)}`);
+      assert.match(lines[0]!, /^project\.json 없음: /, "the Korean one-liner of cmd_watch");
+      assert.ok(!looks_like_stack_trace(lines), `${target}: no stack trace`);
+      assert.deepEqual(readdirSync(ctx.tmp).sort(), before, `${target}: the refusal creates nothing (no folder, no feedback.log)`);
+    }
+    // a project that exists still gets the 0.15 line, unchanged: a database project and an un-migrated old folder (read-only, D14)
+    const project = init_project(ctx, "watch-d17-ok");
+    const ok = run_ts_cli(ctx, ["watch", project]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, ZERO_FIFTEEN);
+    const old = synthetic_project(ctx, "legacy");
+    const old_run = run_ts_cli(ctx, ["watch", old]);
+    assert.equal(old_run.status, 0, old_run.stderr);
+    assert.match(old_run.stdout, ZERO_FIFTEEN);
   } finally {
     ctx.cleanup();
   }

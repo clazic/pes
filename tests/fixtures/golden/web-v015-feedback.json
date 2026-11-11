@@ -1,0 +1,18 @@
+[
+ {
+  "stage": "plan",
+  "round": 0,
+  "kind": "stage_start",
+  "text": "[단계 시작 질문 · 기획]\n범위는?: 넓게",
+  "via": "html",
+  "processed": false
+ },
+ {
+  "stage": "plan",
+  "round": 1,
+  "kind": "feedback",
+  "text": "합성 자유 의견",
+  "via": "html",
+  "processed": false
+ }
+]

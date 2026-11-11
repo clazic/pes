@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 
 한 번에 이것까지 한다 (다시 실행해도 된다 — **없는 것은 설치, 이미 있는 것은 최신 버전으로 업그레이드**):
 
-1. Git(Git Bash) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
+1. Git(Git Bash) · Node.js 26 이상 — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
 2. 플러그인을 등록할 Claude 찾기 — PATH의 Claude Code → 없으면 **Claude Desktop 안의 Claude Code** → 둘 다 없으면 Claude Code CLI 설치 (`PES_TARGET=desktop` 이면 CLI를 설치하지 않음, `PES_TARGET=cli` 이면 CLI만)
 3. PES 플러그인 등록·설치 (`clazic/pes` → `pes@pes-local`)
 4. 조사 도구: kosis · vworld · korean-law (ego lite는 내려받기 페이지를 연다 — 설치와 첫 실행 안내는 직접)
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 | 구분 | 내용 | 필수 |
 |---|---|---|
 | Claude Code | CLI 또는 데스크톱 앱 | 필수 |
-| Python | 3.9 이상 (macOS `python3`, Windows `py -3`) | 필수 |
+| Node.js | 26 이상 (PES 도구는 모두 `node`로 돈다) | 필수 |
 | tail·grep | 답 자동 수신용. macOS 기본 / Windows는 **Git Bash** | 필수 |
 | ego-browser | 브라우저 조사 (ego lite) | 조사에 권장 |
 | kosis | 통계청 KOSIS API CLI (`npm install -g @clazic/kosis`) + API 키 | 통계가 필요할 때 |
@@ -90,13 +90,13 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 
 설치 상태는 설치 후 `/pes:doctor`로 한 번에 확인한다.
 
-외부 Python 경계: 위 표의 Python 요구는 PES 0.15 도구(`pes.py`·`serve.py`·`setup.py`)의 것이다. kosis·vworld 같은 외부 도구가 무엇을 요구하든 PES 코어가 대신 처리하지 않는 경계 밖이며, PES TS 코어와 legacy importer 는 Python 을 실행하지 않는다 — 자세한 내용은 [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절.
+외부 Python 경계: PES 는 Python 을 쓰지 않는다(위 표에 Python 은 없다). kosis·vworld 같은 외부 도구가 무엇을 요구하든 PES 코어가 대신 처리하지 않는 경계 밖이며, PES TS 코어와 legacy importer 는 Python 을 실행하지 않는다 — 자세한 내용은 [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절.
 
 ### 한 번에 설치·점검: `/pes:setup` (Windows·macOS)
 
 플러그인을 설치한 뒤 Claude Code(또는 Claude Desktop의 Code 탭)에서 **`/pes:setup`** 한 번. 처음 `/pes:start`·`/pes:run`을 실행할 때도 점검이 안 되어 있으면 자동으로 먼저 실행된다.
 
-1. **기본 도구**: Git(Windows는 Git Bash 포함) · Python 3 · Node.js — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
+1. **기본 도구**: Git(Windows는 Git Bash 포함) · Node.js 26 이상 — 없으면 설치 (Windows `winget`, macOS Homebrew / Command Line Tools)
 2. **조사 도구**: kosis(CLI+스킬) · vworld(CLI+스킬) · korean-law(CLI, Claude CLI가 있으면 MCP도) — 없으면 공식 설치 스크립트·npm으로 설치, **있으면 최신으로 업그레이드** (kosis·vworld는 자체 `update`, korean-law는 npm 최신판, ego lite는 `ego-browser upgrade`)
 3. **ego lite**: 앱 설치와 첫 실행 안내(온보딩)는 직접 해야 한다 — 내려받기 페이지를 열어 준다 (macOS는 설치 스크립트로 설치까지)
 4. **API 키**: 브라우저에 키 입력 화면(http://127.0.0.1:8759)이 열린다. 발급 방법이 함께 있고, 넣은 키는 확인 후 각 도구 설정에 바로 등록된다 — **키는 Claude 대화로 전달되지 않는다.** 필요 없는 기능은 비워 두면 된다
@@ -131,6 +131,8 @@ claude plugin marketplace update pes-local && claude plugin update pes@pes-local
 ```
 
 그다음 `/reload-plugins`. 로컬 폴더 설치라면 `/reload-plugins`만으로 반영된다.
+
+**0.15 에서 올릴 때 — 옛 서버 끄기:** 0.15 의 대시보드 서버(`serve.py`)가 켜져 있으면 업데이트 뒤에도 옛 화면을 낸다. 업데이트 뒤 `node scripts/pes.ts stop`(Claude 에게 "PES 서버 꺼 줘")으로 끈다. Windows 에서 `서버를 끄지 못했습니다` 라고 하면 그 줄에 적힌 방법(PowerShell `Stop-Process …` 또는 작업 관리자에서 그 python 프로세스 끝내기)으로 끈다. PES 는 Node.js 26 이상이 필요하다 — 낮으면 명령이 `PES 는 Node.js 26 이상이 필요합니다` 한 줄로 끝난다.
 지금 버전은 `.claude-plugin/plugin.json`의 version, 바뀐 내용은 아래 「변경 이력」.
 
 ### 배포하는 쪽 (개발 Mac)
@@ -196,7 +198,7 @@ claude plugin install pes@pes-local
 
 | 순서 | 일어나는 일 | 직접 할 일 |
 |---|---|---|
-| 1 | Git·Python·Node.js 확인, 없으면 winget으로 설치 | 관리자 권한 창(UAC)이 뜨면 **예** |
+| 1 | Git·Node.js 26 확인, 없으면 winget으로 설치 | 관리자 권한 창(UAC)이 뜨면 **예** |
 | 2 | Git을 이번에 새로 설치했다면 멈춤 | Claude Desktop **재시작** 후 `/pes:setup` 한 번 더 |
 | 3 | kosis·vworld·korean-law 설치 | 없음 |
 | 4 | ego lite 내려받기 페이지가 열림 | 설치 → 앱 실행 → **첫 실행 안내(온보딩)** 끝내기 → Claude에게 "다 했어". SmartScreen이 막으면 **추가 정보 → 실행** |
@@ -228,7 +230,7 @@ claude plugin install pes@pes-local
 - 데스크톱 앱과 CLI는 같은 설정 폴더(`%USERPROFILE%\.claude`)를 읽는다.
 - 데스크톱 앱은 PowerShell 프로필을 읽지 않으므로 PATH는 **Windows 환경 변수**에 있어야 한다 (`/pes:setup`이 설치하는 도구는 사용자 PATH에 등록된다).
 - API 키 등 환경변수는 `settings.json`의 env도 읽지만, 앱 설정의 **Environment variables**가 가장 확실하다.
-- Claude의 셸은 Git Bash(답 자동 수신에 `tail -F`·`grep` 필요). Python은 `py -3`. 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다. 브라우저 열기는 PES가 직접 처리한다.
+- Claude의 셸은 Git Bash(답 자동 수신에 `tail -F`·`grep` 필요). 서버는 백그라운드로 분리되어 뜨고 `stop`은 pid로 끈다. 브라우저 열기는 PES가 직접 처리한다.
 - 인증서 오류가 나면 `/pes:doctor`의 안내를 따른다 (기관 루트 인증서 → `NODE_EXTRA_CA_CERTS`).
 
 ---
@@ -573,12 +575,14 @@ commands/         /pes:* 명령
 skills/core       공통 규칙 (생명주기·CLI·답 받기·AI 점검·토큰·여러 프로젝트)
 skills/<단계>      plan · research · analyze · write · verify · publish
 agents/           researcher · writer · verifier · reviewer(QC/QA) (결과를 파일로)
-scripts/pes.py    상태 CLI          scripts/serve.py  로컬 서버 (127.0.0.1 전용)
+scripts/pes.ts    상태 CLI          scripts/serve.ts  로컬 서버 (127.0.0.1 전용)
 templates/        dashboard · ask · _questions · hub · stage-report · eli5 · final-report
 questions/        단계별 시작 질문 은행
 ```
 
-CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status <slug>`, `pes.py digest <slug> research`.
+CLI 직접 사용: `node scripts/pes.ts` (도움말), 예: `node scripts/pes.ts status <slug>`, `node scripts/pes.ts digest <slug> research`.
+
+예전(0.15) `project.json` 프로젝트는 새 형식으로 옮기기 전에는 읽기만 된다. 쓰는 명령이 `먼저 이전하세요 — pes migrate <이름>` 이라고 거절하면 `node scripts/pes.ts migrate <이름>`(전부는 `migrate --all`)으로 옮긴다 — 백업을 만든 뒤 검증하고, 원본 폴더는 그대로 둔다. Claude 가 진행 중이면 먼저 묻는다. 이전이 실패하면 거절 줄 끝의 `할 일:` 을 따른다(예: 손으로 고친 보고서는 폴더 밖에 다른 이름으로 보관하고 폴더에서 뺀 뒤 다시 이전, 이전 뒤 `report` 로 새로 만든다). PES 홈 밖의 폴더는 이전하지 않는다 — 홈 안으로 **옮긴(복사가 아니라 이동)** 뒤 이전한다. 주의: 이전한 프로젝트와 같은 이름·같은 주제의 사본 폴더를 홈 밖에 두면, 그 사본을 가리킨 명령도 DB 의 프로젝트를 읽고 쓴다(사본 폴더 자체는 바뀌지 않는다). 사본은 이름을 바꿔 두는 편이 안전하다. 백업은 `~/.pes/backups` 에 생기므로 PES 홈이 `~`(또는 `~/.pes` 를 품는 폴더)이면 이전하지 못한다 — 그때는 `home <새 폴더>` 로 홈을 옮긴 뒤 한다.
 
 ---
 
@@ -592,6 +596,8 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 | "다른 세션이 이 프로젝트를 쓰고 있습니다" | 그 세션을 닫고, Claude에게 "가져와"라고 하면 `--force`로 넘겨받는다 |
 | 법령 조회 인증서 오류 (`SELF_SIGNED_CERT_IN_CHAIN`) | 설정의 `NODE_EXTRA_CA_CERTS`에 기관 루트 인증서 파일 |
 | 마크다운 한글이 깨진다 | 0.2.0 이후 서버가 UTF-8로 보낸다. 서버 재시작: `/pes:status` |
+| `PES 데이터베이스가 최신이 아닙니다` · doctor 의 `빈 데이터베이스 파일 (0 바이트)` | 빈 파일이면 `/pes:doctor fix` 가 치운다(다른 PES 가 쓰지 않을 때만). 옛 형식이면 `node scripts/pes.ts migrate <프로젝트>` 한 번으로 최신이 된다. 그 전에도 옛 0.15 폴더는 읽힌다 |
+| `서버를 끄지 못했습니다` (Windows, 0.15 서버) | 그 줄의 방법으로 끈다 — PowerShell `Stop-Process -Id (Get-NetTCPConnection -LocalPort <포트> -State Listen).OwningProcess` |
 | 포트가 모두 사용 중 (8760~8764) | 다른 프로그램이나 다른 PES 홈의 서버가 쓰는 중 — `/pes:doctor`로 확인 후 끄기 |
 
 ---
@@ -706,14 +712,14 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 - ego-browser 스킬 점검: 스킬은 ego lite 앱 안에 있고 `~/.claude/skills/ego-browser`가 앱을 가리키는 링크다. 설치 점검·`/pes:doctor`·업그레이드 결과에 스킬 연결 여부와 버전(앱 안내 버전과 일치하는지)을 표시. 스킬이 없으면 `ego-browser skill` 출력으로 대신 진행.
 
 ### 0.7.0 — 2026-11-02
-- 설치할 때 이미 있는 도구를 **최신 버전으로 업그레이드**: kosis·vworld(CLI+스킬), korean-law(CLI·MCP), ego lite, Claude Code CLI. `setup.py upgrade`, `/pes:setup`·한 줄 설치에 포함, `PES_NO_UPGRADE=1`로 끌 수 있음. 업그레이드 후 실제 버전을 다시 확인해 결과를 보고.
+- 설치할 때 이미 있는 도구를 **최신 버전으로 업그레이드**: kosis·vworld(CLI+스킬), korean-law(CLI·MCP), ego lite, Claude Code CLI. `setup.ts upgrade`, `/pes:setup`·한 줄 설치에 포함, `PES_NO_UPGRADE=1`로 끌 수 있음. 업그레이드 후 실제 버전을 다시 확인해 결과를 보고.
 
 ### 0.6.1 — 2026-11-02
 - 저장소 공개(커밋 작성자 이메일은 GitHub noreply로 변경). macOS·Linux 한 줄 설치에 `| bash` 형식 추가, 설치 안내에서 비공개 저장소 로그인 단계 제거.
 
 ### 0.6.0 — 2026-11-02
 - **한 줄 설치**: Windows `irm …/install.ps1 | iex`, macOS `curl …/install.sh | sh` — 기본 도구 · Claude Code CLI · 플러그인 · 조사 도구 · API 키 화면 · 진단까지.
-- `setup.py keys --wait`: 키 화면에서 '마치기'를 누를 때까지 기다림.
+- `setup.ts keys --wait`: 키 화면에서 '마치기'를 누를 때까지 기다림.
 
 ### 0.5.2 — 2026-11-02
 - README: OneDrive로 PES 홈 옮기기 상세 안내(경로 확인 · 첫 컴퓨터 옮기기 · 두 번째 컴퓨터 지정 · 컴퓨터 바꿔 쓰기 · 충돌 사본 · 되돌리기).
@@ -723,7 +729,7 @@ CLI 직접 사용: `python3 -I scripts/pes.py` (도움말), 예: `pes.py status 
 - README: Windows용 Claude Desktop 단계별 설치 안내(준비 · Code 탭 · 플러그인 설치 · /pes:setup · 막힐 때).
 
 ### 0.5.0 — 2026-11-02
-- `/pes:setup`: Git·Python·Node.js(bootstrap, Windows winget / macOS), kosis·vworld·korean-law(CLI·스킬·MCP) 자동 설치, ego lite 설치 안내, API 키 입력 화면(키는 대화로 오지 않음, 등록 전 확인), doctor 로 마무리, 완료 표시.
+- `/pes:setup`: Git·Node.js 26(bootstrap, Windows winget / macOS), kosis·vworld·korean-law(CLI·스킬·MCP) 자동 설치, ego lite 설치 안내, API 키 입력 화면(키는 대화로 오지 않음, 등록 전 확인), doctor 로 마무리, 완료 표시.
 - `/pes:start`·`/pes:run`이 설치 점검 여부를 먼저 확인.
 - 도구 찾기에 Windows npm·LOCALAPPDATA·스킬 안 바이너리 위치 추가.
 

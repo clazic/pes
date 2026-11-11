@@ -487,6 +487,9 @@ export function probe_database(file: string): Record<string, unknown> {
     if (verdict !== "ok") return { state: "broken", message: `무결성 검사 실패: ${verdict.slice(0, 120)}` };
     let schema_current = false;
     let projects = 0;
+    // a SQLite file with tables but no db_meta is not a PES database (migrate refuses it)
+    const names = (handle.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>).map((row) => row.name);
+    const foreign = names.length > 0 && !names.includes("db_meta");
     try {
       const migrations = load_migrations();
       const newest = BigInt(migrations[migrations.length - 1]!.version);
@@ -497,7 +500,7 @@ export function probe_database(file: string): Record<string, unknown> {
     } catch {
       schema_current = false;
     }
-    return { state: "ok", schema_current, projects };
+    return { state: "ok", schema_current, projects, foreign };
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     return { state: "broken", message: text.slice(0, 160) };

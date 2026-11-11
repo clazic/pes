@@ -1,7 +1,7 @@
 /**
  * SEL-49 PR16 — CLI 읽기·보고서·doctor — watch·doctor (tester). 원래 tests/test_cli_read.test.ts 하나였고 Windows CI 조각 상한(10분) 때문에 주제별로 나눴다. 해석 번호는 test_cli_read_v015.test.ts 머리말 참고. 구현 전이므로 새 시험은 실패하는 것이 정상이다.
  *
- * 시험 방식은 PR15와 같다: `python3 -I -X utf8 scripts/pes.py ...`를 subprocess로 실행하고 HOME·USERPROFILE·PES_HOME은
+ * 시험 방식은 PR15와 같다: `node scripts/pes.ts ...`를 subprocess로 실행하고 (SEL-74: 0.15 Python 은 없다) HOME·USERPROFILE·PES_HOME은
  * 모두 임시 폴더다(tests/helpers/cli_write_env.ts 의 하니스 + cli_read_env.ts). 자료는 모두 합성이다.
  * 개발 플래그 PES_DB_CORE=1 일 때만 DB 읽기 경로가 켜진다. 플래그가 없으면 v0.15 출력·종료 코드·파일이 그대로다.
  *
@@ -43,7 +43,7 @@ import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult, LEGACY_JSON } from "./helpers/cli_write_env.ts";
-import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike } from "./helpers/cli_read_env.ts";
+import { normalize, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_cli, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { copy_fixture, has_problem, migration, with_migration, owner_of, pes_home_of, backup_dir_of, batch_row } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -56,24 +56,27 @@ test("watch: 한 줄 `tail -n0 -F <경로>/feedback.log | grep --line-buffered F
   with_cli(async (c) => {
     const parent = "pes home (공백)'s";
     const home = join(c.env.home.root, parent);
+    // SEL-74: pes.ts 의 watch 는 없는 프로젝트를 오류로 거절한다(0.15 는 경로만 찍었다) — 그래서 프로젝트를 먼저 만든다 (ts 차이, 시험 보고에 적음)
+    ok(run_cli(c, ["init", "some-project", "--topic", "합성 새 주제"], { extra: { PES_HOME: home } }), "init");
     const signature = state_signature(c.env.db);
-    for (const flag of ["1", undefined]) {
-      const res = ok(run_py(c, ["watch", "some-project"], { flag, extra: { PES_HOME: home } }), `watch (flag ${flag})`);
+    const before_tree = tree_digest(home);
+    {
+      const res = ok(run_cli(c, ["watch", "some-project"], { extra: { PES_HOME: home } }), "watch");
       assert.equal(res.stdout.trim().split("\n").length, 1, "한 줄");
       const words = shell_words(res.stdout.trim());
       const expected = join(realpathSync.native(c.env.home.root), parent, "some-project", "feedback.log");
-      assert.deepEqual(words.slice(0, 3), ["tail", "-n0", "-F"], `flag ${flag}`);
+      assert.deepEqual(words.slice(0, 3), ["tail", "-n0", "-F"]);
       assert.equal(words[3]!.split("\\").join("/"), expected.split("\\").join("/"), `경로가 따옴표로 한 단어: ${res.stdout}`);
       assert.deepEqual(words.slice(4), ["|", "grep", "--line-buffered", "FEEDBACK"]);
     }
-    assert.ok(!existsSync(home), "watch 는 아무것도 만들지 않는다");
+    assert.equal(tree_digest(home), before_tree, "watch 는 아무것도 만들지 않는다");
     assert.equal(state_signature(c.env.db), signature);
   }));
 
 test("watch: DB 에만 있고 project.json 이 없는 프로젝트(init 으로 만든)도 같은 형식으로 출력한다", () =>
   with_cli(async (c) => {
-    ok(run_py(c, ["init", "synthetic-init", "--topic", "합성 새 주제"]), "init");
-    const res = ok(run_py(c, ["watch", "synthetic-init"]), "watch");
+    ok(run_cli(c, ["init", "synthetic-init", "--topic", "합성 새 주제"]), "init");
+    const res = ok(run_cli(c, ["watch", "synthetic-init"]), "watch");
     const words = shell_words(res.stdout.trim());
     assert.deepEqual([words[0], words[1], words[2]], ["tail", "-n0", "-F"]);
     assert.match(words[3]!.split("\\").join("/"), /\/synthetic-init\/feedback\.log$/);
@@ -111,10 +114,10 @@ test("doctor 기본 진단은 아무것도 고치지 않고, --fix 만 고친다
     const sig = c.sig(json);
     const signature = state_signature(c.env.db);
     const roots = [c.env.home.root, `/private${c.env.home.root}`];
-    for (const flag of ["1", undefined]) {
-      const plain = run_py(c, ["doctor", "--json"], { flag, extra: { PES_HOME: fresh } });
-      const rows = doctor_rows(plain, `doctor (flag ${flag})`);
-      assert.ok(!existsSync(fresh), `기본 진단은 PES 홈을 만들지 않는다 (flag ${flag})`);
+    {
+      const plain = run_cli(c, ["doctor", "--json"], { extra: { PES_HOME: fresh } });
+      const rows = doctor_rows(plain, "doctor");
+      assert.ok(!existsSync(fresh), "기본 진단은 PES 홈을 만들지 않는다");
       assert.ok(rows.some((r) => r.fixable === true), "고칠 수 있는 항목은 fixable 로 알린다");
       assert.ok(rows.every((r) => r.fixed !== true), "기본 진단은 고치지 않는다");
       const shown = normalize(plain.stdout + plain.stderr, roots);
@@ -122,38 +125,34 @@ test("doctor 기본 진단은 아무것도 고치지 않고, --fix 만 고친다
         assert.equal(shown.includes(real), false, `실제 ${real} 를 읽거나 보이지 않는다 (임시 HOME·PES_HOME 만)`);
       }
     }
-    const folder_rows = doctor_rows(run_py(c, ["doctor", "doc-legacy", "--json"]), "doctor doc-legacy");
+    const folder_rows = doctor_rows(run_cli(c, ["doctor", "doc-legacy", "--json"]), "doctor doc-legacy");
     assert.ok(folder_rows.some((r) => r.title.includes("임시 파일") && r.fixable === true));
     assert.ok(existsSync(tmp), "기본 진단 뒤에도 임시 파일이 그대로");
     assert.deepEqual(c.sig(json), sig);
     assert.equal(state_signature(c.env.db), signature, "기본 진단은 DB 에 쓰지 않는다");
 
-    // 플래그 켜짐 + 홈 안 legacy(미전환) 프로젝트: --fix 도 쓰지 않는다(legacy 는 읽기만 — r1-1 권장 6 결정, review1 R6).
-    run_py(c, ["doctor", "doc-legacy", "--fix", "--json"]);
-    assert.ok(existsSync(tmp), "플래그 켜짐: legacy 폴더의 임시 파일은 --fix 로도 그대로");
-    assert.deepEqual(c.sig(json), sig);
-    // 플래그 없음(v0.15): --fix 가 임시 파일을 지운다.
-    const fixed = doctor_rows(run_py(c, ["doctor", "doc-legacy", "--fix", "--json"], { flag: undefined }), "doctor --fix (v0.15)");
-    assert.ok(fixed.some((r) => r.title.includes("임시 파일") && r.fixed === true), "--fix 가 고친 항목을 알린다");
-    assert.ok(!existsSync(tmp), "--fix 는 임시 파일을 지운다");
+    // 홈 안 legacy(미전환) 프로젝트: --fix 도 쓰지 않는다(legacy 는 읽기만 — r1-1 권장 6 결정, review1 R6, SEL-74 D14).
+    // (0.15 의 '--fix 가 임시 파일을 지운다' 는 TS 에 없다 — 같은 폴더를 0.15 가 어떻게 고쳤는지는 고정 기록 baseline/E15 가 아니라 이 결정이 대신한다.)
+    run_cli(c, ["doctor", "doc-legacy", "--fix", "--json"]);
+    assert.ok(existsSync(tmp), "legacy 폴더의 임시 파일은 --fix 로도 그대로");
     assert.deepEqual(c.sig(json), sig, "--fix 도 project.json 은 건드리지 않는다");
     assert.equal(state_signature(c.env.db), signature, "--fix 도 DB 업무 행을 건드리지 않는다");
 
-    const home_fix = run_py(c, ["doctor", "--fix", "--json"], { extra: { PES_HOME: fresh } });
+    const home_fix = run_cli(c, ["doctor", "--fix", "--json"], { extra: { PES_HOME: fresh } });
     doctor_rows(home_fix, "doctor --fix (홈 없음)");
     assert.ok(existsSync(fresh), "--fix 는 (임시 홈 안의) PES 홈을 만든다");
   }));
 
 test("doctor: DB 프로젝트(project.json 없음)를 '문제'로 보지 않고 데이터베이스 상태를 알린다", () =>
   with_cli(async (c) => {
-    ok(run_py(c, ["init", "synthetic-init", "--topic", "합성 새 주제"]), "init");
+    ok(run_cli(c, ["init", "synthetic-init", "--topic", "합성 새 주제"]), "init");
     assert.ok(!existsSync(join(folder_of(c, "synthetic-init"), "project.json")));
     const signature = state_signature(c.env.db);
-    const one = run_py(c, ["doctor", "synthetic-init", "--json"]);
+    const one = run_cli(c, ["doctor", "synthetic-init", "--json"]);
     const rows = doctor_rows(one, "doctor synthetic-init");
     assert.ok(!rows.some((r) => r.group === "synthetic-init" && r.level === "bad"), `project.json 없음을 문제로 올리면 안 된다: ${JSON.stringify(rows.filter((r) => r.level === "bad"))}`);
     assert.ok(rows.some((r) => r.group === "synthetic-init" && r.level === "ok"), "DB 프로젝트 정상 행");
-    const all = doctor_rows(run_py(c, ["doctor", "--json"]), "doctor");
+    const all = doctor_rows(run_cli(c, ["doctor", "--json"]), "doctor");
     assert.ok(all.some((r) => r.group === "데이터베이스" && r.level === "ok"), "데이터베이스 그룹의 정상 행");
     assert.ok(all.some((r) => r.group === SLUG), "DB 에 있는 프로젝트가 진단 대상에 든다 (project.json 이 없어도)");
     assert.ok(all.some((r) => r.group === "synthetic-init"));
@@ -169,7 +168,7 @@ test("doctor: 깨진 DB 는 문제로 알리고(스택 추적 없음) --fix 로�
     writeFileSync(db, "이것은 SQLite 파일이 아니다 ".repeat(40), "utf8");
     const before = readFileSync(db);
     for (const args of [["doctor", "--json"], ["doctor", "--fix", "--json"]]) {
-      const res = run_py(like, args);
+      const res = run_cli(like, args);
       const rows = doctor_rows(res, args.join(" "));
       assert.equal(res.status, 1, "문제가 있으면 종료 1");
       assert.ok(rows.some((r) => r.group === "데이터베이스" && r.level === "bad"), `데이터베이스 문제 행: ${res.stdout}`);
@@ -211,7 +210,7 @@ setInterval(()=>{},1000);`,
       t.skip("8760~8764 가 모두 이미 쓰이고 있어 시험용 점유를 만들 수 없다");
       return;
     }
-    const rows = doctor_rows(run_py(c, ["doctor", "--json"], { timeout: 120_000, allow_hub_ports: held }), "doctor");
+    const rows = doctor_rows(run_cli(c, ["doctor", "--json"], { timeout: 120_000, allow_hub_ports: held }), "doctor");
     for (const port of held) {
       const row = rows.find((r) => r.group === "서버" && r.title.includes(`:${port}`));
       assert.ok(row, `포트 ${port} 점유 행: ${JSON.stringify(rows.filter((r) => r.group === "서버"))}`);
@@ -229,12 +228,12 @@ test("doctor: 공백·따옴표·괄호가 든 PES 홈 경로는 명령 quoting 
   with_cli(async (c) => {
     const risky = join(c.env.home.root, "pes home (공백)'s");
     mkdirSync(risky, { recursive: true });
-    const rows = doctor_rows(run_py(c, ["doctor", "--json"], { extra: { PES_HOME: risky } }), "doctor (위험한 경로)");
+    const rows = doctor_rows(run_cli(c, ["doctor", "--json"], { extra: { PES_HOME: risky } }), "doctor (위험한 경로)");
     const hit = rows.find((r) => r.group === "환경" && /경로/.test(r.title) && /공백|따옴표|괄호|특수/.test(r.title));
     assert.ok(hit, `경로 quoting 경고 행: ${JSON.stringify(rows.filter((r) => r.group === "환경").map((r) => r.title))}`);
     assert.equal(hit.level, "warn");
     assert.ok(hit.fixable !== true, "경로는 doctor --fix 가 바꾸지 않는다");
-    const clean = doctor_rows(run_py(c, ["doctor", "--json"]), "doctor (깨끗한 경로)");
+    const clean = doctor_rows(run_cli(c, ["doctor", "--json"]), "doctor (깨끗한 경로)");
     assert.ok(!clean.some((r) => r.group === "환경" && /경로/.test(r.title) && /공백|따옴표|괄호|특수/.test(r.title)), "깨끗한 경로에는 경고가 없다");
   }));
 

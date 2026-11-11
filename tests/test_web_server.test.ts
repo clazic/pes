@@ -9,11 +9,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, SLUG, type CliEnv } from "./helpers/cli_write_env.ts";
-import { baseline_dir, folder_of, normalize, plain_legacy, read_lf, run_py, seed, write_legacy, write_json, ok, OFF } from "./helpers/cli_read_env.ts";
+import { tree_digest } from "./helpers/legacy_env.ts";
+import { folder_of, normalize, plain_legacy, read_lf, run_cli, seed, write_legacy, write_json, ok } from "./helpers/cli_read_env.ts";
 import {
   ASK_SPEC,
   build_db,
-  build_old,
   commit_count,
   db_with_form,
   expect_same_screen,
@@ -34,7 +34,6 @@ import {
   sub_count,
   with_server,
   write_spec,
-  WEB_BASELINE_REF,
 } from "./helpers/web_env.ts";
 
 
@@ -71,7 +70,7 @@ test("W3b approve·reopen·feedback·review kind: 각각 처리 대기 한 건, 
   const c = await db_with_form();
   try {
     await with_server(c, {}, async (s) => {
-      const status_before = step(c, "1", ["status", SLUG]);
+      const status_before = step(c, ["status", SLUG]);
       let expected = 0;
       for (const kind of ["approve", "reopen", "feedback", "resume"]) {
         const text = kind === "approve" ? "기획 단계 승인" : kind === "reopen" ? "기획 단계 다시 열기\n합성 사유" : `합성 ${kind}`;
@@ -83,7 +82,7 @@ test("W3b approve·reopen·feedback·review kind: 각각 처리 대기 한 건, 
         assert.equal(commit_count(c) - before, 1, `${kind}: 제출 한 번`);
         assert.equal(pending_names(c).length, expected, `${kind}: 처리 대기 +1`);
       }
-      const after = step(c, "1", ["status", SLUG]).replace(/받은 답[^\n]*\n?/g, "");
+      const after = step(c, ["status", SLUG]).replace(/받은 답[^\n]*\n?/g, "");
       assert.equal(after.split("\n")[0], status_before.split("\n")[0], "상태 첫 줄(단계)이 그대로");
       assert.deepEqual(feedback_files(c), []);
     });
@@ -135,10 +134,7 @@ test("W3d 원격 Origin·CSRF: 허용 안 된 Origin(없음 포함)은 403 + 힌
       }
       assert.equal(rejected[0]!.json.hint, `pes remote add ${evil}`);
       assert.equal(commit_count(c), before, "거부된 요청은 DB 에 아무것도 남기지 않는다");
-      // 세션 비밀이 있어도 다른 출처의 /api/v1 쓰기는 거부(현행 유지)
-      const api = await http(s, "/api/v1/projects", { method: "POST", origin: evil, headers: { "x-pes-session": SESSION_SECRET, "Content-Type": "application/json" }, body: "{}" });
-      assert.equal(api.status, 403);
-      assert.equal(api.json?.error?.code, "forbidden");
+      // (세션 비밀이 있어도 다른 출처의 /api/v1 쓰기 거부 → 아래 W3d2)
       // 신뢰한 원격 출처(~/.pes/config.json trusted_origins, 예: Tailscale 주소)
       const remote = "https://pes-box.example.ts.net";
       const config = join(c.env.home.env.HOME as string, ".pes", "config.json");
@@ -157,16 +153,45 @@ test("W3d 원격 Origin·CSRF: 허용 안 된 Origin(없음 포함)은 403 + 힌
 test("W3e 소유자 세션 비밀은 어떤 정적 응답에도 실리지 않는다 (해석 10)", async () => {
   const c = await db_with_form();
   try {
-    step(c, "1", ["report", SLUG, "plan"]);
+    step(c, ["report", SLUG, "plan"]);
     await with_server(c, {}, async (s) => {
       for (const path of ["/", `/${SLUG}/`, `/${SLUG}/index.html`, `/${SLUG}/ask-plan-start.html`, `/${SLUG}/version`, "/whoami", "/ping", `/${SLUG}/reports/plan/report.html`]) {
         const r = await http(s, path);
         assert.ok(!r.text.includes(SESSION_SECRET), `${path}: 세션 비밀이 응답에 있다`);
         assert.ok(!JSON.stringify([...r.headers]).includes(SESSION_SECRET), `${path}: 세션 비밀이 헤더에 있다`);
       }
-      // 세션 없이 /api/v1 은 401 봉투(정적 파일이 아니다)
+      // (세션 없이 /api/v1 은 401 봉투 → 아래 W3e2)
+    });
+  } finally {
+    c.close();
+  }
+});
+
+// 되살림 (SEL-74 시험 쪽, leader 결정 2026-11-12): 전환 뒤 사용자의 화면은 scripts/serve.ts 가 띄운다 — PR18 의 로컬 화면 보장은 serve.ts 가 갖춘다.
+// 아래 W3d2·W3e2·W3f·W3g 는 83bc0b3 의 단언 그대로다(서버 갭 S1·S2, tests/README.md).
+
+test("W3d2 세션 비밀이 있어도 다른 출처의 /api/v1 쓰기는 거부: 403 forbidden 봉투 (서버 갭 S1)", async () => {
+  const c = await db_with_form();
+  try {
+    await with_server(c, {}, async (s) => {
+      const evil = "http://evil.example";
+      const before = commit_count(c);
+      const api = await http(s, "/api/v1/projects", { method: "POST", origin: evil, headers: { "x-pes-session": SESSION_SECRET, "Content-Type": "application/json" }, body: "{}" });
+      assert.equal(api.status, 403);
+      assert.equal(api.json?.error?.code, "forbidden");
+      assert.equal(commit_count(c), before, "거부된 요청은 DB 에 아무것도 남기지 않는다");
+    });
+  } finally {
+    c.close();
+  }
+});
+
+test("W3e2 세션 없이 /api/v1 은 401 봉투(정적 파일이 아니다) (서버 갭 S1)", async () => {
+  const c = await db_with_form();
+  try {
+    await with_server(c, {}, async (s) => {
       const api = await http(s, "/api/v1/projects/none/overview");
-      assert.ok([401, 404].includes(api.status));
+      assert.ok([401, 404].includes(api.status), `status ${api.status}`);
       assert.equal(api.json?.format_version, "1.0");
     });
   } finally {
@@ -174,7 +199,7 @@ test("W3e 소유자 세션 비밀은 어떤 정적 응답에도 실리지 않는
   }
 });
 
-test("W3f /api/v1 은 정적 서빙보다 먼저다: 폴더 이름이 api 여도 API 봉투가 온다 (해석 10)", async () => {
+test("W3f /api/v1 은 정적 서빙보다 먼저다: 폴더 이름이 api 여도 API 봉투가 온다 (해석 10, 서버 갭 S1)", async () => {
   const c = await db_with_form();
   try {
     const trap = join(c.env.home.env.PES_HOME as string, "api", "v1");
@@ -193,7 +218,7 @@ test("W3f /api/v1 은 정적 서빙보다 먼저다: 폴더 이름이 api 여도
   }
 });
 
-test("W3g /version: DB 변경 커서 기반 — 변경이 없으면 같고, DB 쓰기가 있으면 커지며, 파일 mtime 과 무관하다 (해석 8)", async () => {
+test("W3g /version: DB 변경 커서 기반 — 변경이 없으면 같고, DB 쓰기가 있으면 커지며, 파일 mtime 과 무관하다 (해석 8, 서버 갭 S2)", async () => {
   const c = await db_with_form();
   try {
     await with_server(c, {}, async (s) => {
@@ -209,7 +234,7 @@ test("W3g /version: DB 변경 커서 기반 — 변경이 없으면 같고, DB �
       const future = new Date(Date.now() + 3_600_000);
       if (existsSync(join(c.folder, "index.html"))) utimesSync(join(c.folder, "index.html"), future, future);
       assert.equal(await read(), v0, "index.html 의 mtime 을 바꿔도 값이 안 변한다 (v0.15 는 변했다)");
-      step(c, "1", ["note", SLUG, "합성 새 메모"]);
+      step(c, ["note", SLUG, "합성 새 메모"]);
       const v1 = await read();
       assert.ok(v1 > v0, `DB 쓰기 뒤 커졌다 (${v0} -> ${v1})`);
       const res = await post_feedback(s, SLUG, feedback_body());
@@ -230,7 +255,7 @@ test("W3h 이전 판 폼에서 온 답: 그 판에 붙거나 409 로 거절한�
     const old_set = old_sets[old_sets.length - 1]!.id;
     // 질문이 바뀐 새 판을 올린다 (같은 폼 키)
     const changed = { ...ASK_SPEC, questions: ASK_SPEC.questions.map((q) => (q.id === "scope" ? { ...q, label: "범위는? (개정)" } : q)) };
-    step(c, "1", ["ask", SLUG, write_spec(c, changed, "ask-v2.json")]);
+    step(c, ["ask", SLUG, write_spec(c, changed, "ask-v2.json")]);
     const now_sets = sets();
     assert.ok(now_sets.length > old_sets.length, "새 판이 올라갔다");
     await with_server(c, {}, async (s) => {
@@ -255,7 +280,7 @@ test("W3h 이전 판 폼에서 온 답: 그 판에 붙거나 409 로 거절한�
 test("W5 pes watch: 알림 줄 형식은 v0.15 와 같고, 화면에서 보낸 답마다 한 줄이 느는 것을 tail 없이 파일로 확인한다 (해석 5)", async () => {
   const c = await db_with_form();
   try {
-    const watch = step(c, "1", ["watch", SLUG]).trim();
+    const watch = step(c, ["watch", SLUG]).trim();
     assert.match(watch, /^tail -n0 -F .*feedback\.log.* \| grep --line-buffered FEEDBACK$/);
     await with_server(c, {}, async (s) => {
       for (let i = 1; i <= 3; i += 1) {
@@ -273,22 +298,23 @@ test("W5 pes watch: 알림 줄 형식은 v0.15 와 같고, 화면에서 보낸 �
 });
 
 
-test("W7 미전환 프로젝트(DB 에 없음): 플래그가 켜져도 옛 project.json 으로 같은 화면을 서빙하고, 답은 v0.15 처럼 feedback/ 에 쓴다", async () => {
+test("W7 미전환 프로젝트(DB 에 없음): 같은 서버가 옛 폴더를 서빙하지만 답은 받지 않는다 — 404, DB·폴더 불변 (D14: TS 는 project.json 을 쓰지 않는다)", async () => {
+  // (0.15·PR18 은 이 답을 옛 폴더의 feedback/ 에 파일로 썼다. serve.ts 는 DB 에 없는 폴더의 답을 404 로 거절한다 — scripts/serve.ts 머리말.)
   const c = await make_cli_env();
   try {
     const other = "synthetic-legacy-only";
     const dir = folder_of(c, other);
     write_legacy(dir, { ...plain_legacy(other), topic: "합성 미전환 주제" });
-    step(c, "1", ["status", other]);
+    step(c, ["status", other]);
+    const tree = tree_digest(dir);
     await with_server(c, {}, async (s) => {
       const page = await http(s, `/${other}/ping`);
       assert.equal(page.json?.ok, true, "옛 프로젝트도 같은 서버가 서빙한다");
       const before = commit_count(c);
       const res = await post_feedback(s, other, { stage: "plan", round: 0, kind: "feedback", text: "합성 답", answers: {} });
-      assert.equal(res.status, 200, res.text);
+      assert.equal(res.status, 404, res.text);
       assert.equal(commit_count(c), before, "DB 에 없는 프로젝트의 답은 DB 에 쓰지 않는다");
-      const files = readdirSync(join(dir, "feedback")).filter((x) => x.endsWith(".json"));
-      assert.equal(files.length, 1, "옛 프로젝트는 v0.15 처럼 feedback/ 에 쓴다");
+      assert.equal(tree_digest(dir), tree, "옛 폴더에도 쓰지 않는다 (feedback/ 도 만들지 않는다)");
     });
   } finally {
     c.close();

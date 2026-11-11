@@ -91,6 +91,7 @@ test("H1a Origin 우회 모음: null·대문자·포트 다름·끝 슬래시·�
   await alive();
 });
 
+// 되살림 (SEL-74 시험 쪽): 83bc0b3 의 H1b 그대로 — scripts/serve.ts 의 서버 갭 S1 (tests/README.md).
 test("H1b /api/v1 의 쓰기도 같은 규칙: 허용 안 된 Origin(null 포함)은 PUT·PATCH·DELETE·POST 모두 403 forbidden 봉투 — 세션 비밀이 있어도", async () => {
   const before_state = writes();
   for (const origin of ["null", "http://evil.example", `${s.origin}/`, `http://127.0.0.1:${s.port + 1}`, s.origin.replace("http", "HTTP")]) {
@@ -108,7 +109,6 @@ test("H1b /api/v1 의 쓰기도 같은 규칙: 허용 안 된 Origin(null 포함
   }
   expect_no_new_writes(before_state, "/api/v1 Origin 우회");
 });
-
 test("H1c 같은 출처(127.0.0.1·localhost)의 정상 POST 는 받는다 — 거부 규칙이 정상 길을 막지 않는다", async () => {
   const before_state = writes();
   const a = await raw_post(s, `/${SLUG}/feedback`, JSON.stringify(feedback_body({ text: "합성 정상 하나", answers: { memo: "정상 하나" } })), { origin: `http://127.0.0.1:${s.port}` });
@@ -331,7 +331,7 @@ test("H6b 경로 이탈 POST: /<slug>/../<다른>/feedback·%2f·%2e%2e 로 다�
 });
 
 test("H6c 심볼릭 링크: 폴더 안 reports/·out/ 링크는 DB 보고서 길이 따라가지 않는다 (DB 가 서빙하는 주소는 폴더 파일이 아니다)", async () => {
-  step(c, "1", ["report", SLUG, "plan"]);
+  step(c, ["report", SLUG, "plan"]);
   const dir = join(c.folder, "reports", "plan");
   mkdirSync(dir, { recursive: true });
   const trap_report = join(dir, "trap.html");
@@ -364,6 +364,7 @@ test("H6c 심볼릭 링크: 폴더 안 reports/·out/ 링크는 DB 보고서 길
 // ---------------------------------------------------------------------------
 // /api/v1 과 정적 폴더 이름 충돌
 
+// 되살림 (SEL-74 시험 쪽): 83bc0b3 의 H7 그대로 — scripts/serve.ts 의 서버 갭 S1.
 test("H7 /api/v1 은 폴더 이름과 무관하게 API 다: .. 로 접은 철자도 정적 파일이 아니라 API 봉투(또는 404 봉투)가 온다", async () => {
   const trap = join(pes_home, "api", "v1");
   mkdirSync(trap, { recursive: true });

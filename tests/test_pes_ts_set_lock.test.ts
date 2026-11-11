@@ -15,7 +15,7 @@
  * Windows checklist: children run guarded, outputs are LF-normalised, no shell / `which`, paths go in as arguments and env JSON only.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -354,6 +354,148 @@ test("four concurrent sets of different values: every child ends (exit 0), no st
     assert.ok(texts.includes(e.state().stages.plan.summary), "the stored value is one of the four");
     assert.ok(!existsSync(lock_path(e)), "no lock left behind");
     assert_clean(e, "concurrent");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SEL-74 (5단계 시험 쪽): the rest of the 0.15 matrix of tests/test_cli_set_lock_windows.test.ts (file deleted with Python — each of its 18
+// tests is now one of the tests above or one of these seven): a real read-only folder, the 30 s deadline and the 60 s stale rule, an EPERM that
+// never goes away, stat / unlink that never succeed on a stale lock, and two concurrent sets with injected EPERM.
+
+test("a real read-only folder (chmod 555): no 30 s wait, exit 2, a message that says 권한, no stack trace, the project unchanged", {
+  skip: process.platform === "win32" ? "Windows cannot make a folder read-only with chmod" : process.getuid?.() === 0 ? "root can write into a chmod 555 folder" : false,
+}, () => {
+  const e = make_set_env();
+  try {
+    const before = JSON.stringify(e.state());
+    chmodSync(e.folder, 0o555);
+    const started = Date.now();
+    const r = run_set(e, set_args(e, "읽기 전용", "ro.txt"), {});
+    const elapsed = Date.now() - started;
+    chmodSync(e.folder, 0o755);
+    assert.ok(elapsed < 15_000, `no 30 s wait (${elapsed} ms)`);
+    assert.doesNotMatch(r.stderr, CRASH, r.stderr);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /권한/);
+    assert.equal(JSON.stringify(e.state()), before);
+  } finally {
+    try {
+      chmodSync(e.folder, 0o755);
+    } catch {
+      // may be gone
+    }
+    e.cleanup();
+  }
+});
+
+test("a fresh lock that never goes away: after the 30 s deadline (synthetic clock) exit 3 with the Korean line, no stack trace; the value and the other's lock are untouched", () => {
+  const e = make_set_env();
+  try {
+    put_lock(e, 0);
+    const before = JSON.stringify(e.state());
+    const started = Date.now();
+    const r = run_set(e, set_args(e, "마감 시험", "late.txt"), { fake_clock: true });
+    assert.ok(Date.now() - started < 20_000, "the 30 s are not really waited");
+    assert.doesNotMatch(r.stderr, CRASH, r.stderr);
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /다른 set/, "Korean text");
+    assert.ok(r.counts.slept >= 100, `it retried until the deadline (${r.counts.slept} sleeps)`);
+    assert.equal(JSON.stringify(e.state()), before, "unchanged");
+    assert.ok(existsSync(lock_path(e)), "the other's lock is not ours to remove");
+    assert_clean(e, "deadline");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("(Windows imitation) open fails with EPERM for ever (a deletion that never ends): after the deadline exit 3, no stack trace, no lock file made", () => {
+  const e = make_set_env();
+  try {
+    const before = JSON.stringify(e.state());
+    const started = Date.now();
+    const r = run_set(e, set_args(e, "영영", "forever.txt"), { open_fail: -1, nt: true, fake_clock: true });
+    assert.ok(Date.now() - started < 20_000, "the 30 s are not really waited");
+    assert.doesNotMatch(r.stderr, CRASH, r.stderr);
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /다른 set/);
+    assert.equal(JSON.stringify(e.state()), before);
+    assert.ok(!existsSync(lock_path(e)), "no lock file made");
+    assert_clean(e, "EPERM for ever");
+  } finally {
+    e.cleanup();
+  }
+});
+
+for (const inject of [{ stat_fail: -1 }, { unlink_fail: -1 }] as const) {
+  test(`a stale lock and ${Object.keys(inject)[0]} that never succeeds: after the deadline exit 3, no stack trace, the project unchanged`, () => {
+    const e = make_set_env();
+    try {
+      put_lock(e, 120);
+      const before = JSON.stringify(e.state());
+      const r = run_set(e, set_args(e, "막힘", "stuck.txt"), { ...inject, fake_clock: true });
+      assert.doesNotMatch(r.stderr, CRASH, `${JSON.stringify(inject)}\n${r.stderr}`);
+      assert.equal(r.status, 3, r.stderr);
+      assert.equal(JSON.stringify(e.state()), before);
+      assert_clean(e, JSON.stringify(inject));
+    } finally {
+      e.cleanup();
+    }
+  });
+}
+
+test("the 60 s rule (no injection): a lock younger than 60 s even at the end of the 30 s wait is refused and kept; a 61 s old lock is cleared and set succeeds", () => {
+  const e = make_set_env();
+  try {
+    // the synthetic clock runs to the deadline (30 s): lock age 25 s + 30 s = 55 s < 60 s, so it stays fresh to the end
+    put_lock(e, 25);
+    const before = JSON.stringify(e.state());
+    const held = run_set(e, set_args(e, "아직", "x.txt"), { fake_clock: true });
+    assert.equal(held.status, 3, held.stderr);
+    assert.doesNotMatch(held.stderr, CRASH);
+    assert.equal(JSON.stringify(e.state()), before);
+    assert.ok(existsSync(lock_path(e)));
+    const t = new Date(Date.now() - 61_000);
+    utimesSync(lock_path(e), t, t);
+    set_ok(e, {}, "61초 묵은 잠금", "61 s");
+    assert.ok(!existsSync(lock_path(e)));
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("the 30 s deadline: a lock that is released just before it lets set succeed — EEXIST for the first 1000 tries (20 synthetic seconds), then the real thing", () => {
+  const e = make_set_env();
+  try {
+    const r = set_ok(e, { exists_fail: 1000, fake_clock: true }, "마감 안에 풀림", "inside the deadline");
+    assert.equal(r.counts.exists, 1000);
+    assert.ok(!existsSync(lock_path(e)));
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("two concurrent sets, each with its own first EPERMs on the lock (10 rounds): both succeed, no update is lost, no lock or temporary file is left", async () => {
+  const e = make_set_env();
+  try {
+    for (let round = 0; round < 10; round++) {
+      const a = e.value_file(`ca${round}.txt`, `에이 ${round}`);
+      const b = e.value_file(`cb${round}.txt`, `비 ${round}`);
+      const [ra, rb] = await Promise.all([
+        run_set_async(e, ["set", SLUG, "plan", "summary", a], { open_fail: 1 + (round % 4), nt: true }),
+        run_set_async(e, ["set", SLUG, "project", "conclusion", b], { open_fail: 1 + ((round + 2) % 4), nt: true }),
+      ]);
+      for (const [name, r] of [["a", ra], ["b", rb]] as const) {
+        assert.doesNotMatch(r.stderr, CRASH, `round ${round} ${name}\n${r.stderr}`);
+        assert.equal(r.status, 0, `round ${round} ${name}: exit ${r.status}\n${r.stderr}`);
+      }
+      const st = e.state();
+      assert.equal(st.stages.plan.summary, `에이 ${round}`, `round ${round}: a lost`);
+      assert.equal(st.conclusion, `비 ${round}`, `round ${round}: b lost`);
+      assert_clean(e, `round ${round}`);
+      assert.ok(!existsSync(lock_path(e)), `round ${round}: a lock is left`);
+    }
   } finally {
     e.cleanup();
   }

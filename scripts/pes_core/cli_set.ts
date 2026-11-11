@@ -33,6 +33,14 @@ function finite_numbers(value: unknown): boolean {
   return true;
 }
 
+/** A lone surrogate (JSON.stringify writes it as an escape, but the stored text could not be read back as UTF-8) in any string or key. */
+function well_formed_text(value: unknown): boolean {
+  if (typeof value === "string") return value.isWellFormed();
+  if (Array.isArray(value)) return value.every(well_formed_text);
+  if (is_record(value)) return Object.entries(value).every(([key, item]) => key.isWellFormed() && well_formed_text(item));
+  return true;
+}
+
 function set_parse_check(kind: string, field: string, raw: string): unknown {
   let value: unknown;
   if (kind === "text") {
@@ -57,7 +65,7 @@ function set_parse_check(kind: string, field: string, raw: string): unknown {
   try {
     // it has to be storable as UTF-8 JSON: a lone surrogate or a structure too deep to write is refused before anything is written
     const text = JSON.stringify(value);
-    if (text === undefined || !text.isWellFormed()) throw new Error("not storable");
+    if (text === undefined || !text.isWellFormed() || !well_formed_text(value)) throw new Error("not storable");
   } catch {
     die(`set: ${field} 값을 UTF-8 JSON 으로 저장할 수 없습니다 (짝 없는 문자·너무 깊은 구조 등)`, 2);
   }

@@ -1,6 +1,6 @@
 // SEL-73 (stage 2 PR26d): 설계 검사 `docs/plan/schemas/check_ddl.py` → TS 검사기 `scripts/check_ddl.ts`.
-// 시험을 먼저 썼다: 지금은 scripts/check_ddl.ts 가 없어서 실패한다(요구 때문에 실패 — import/문법 오류 아님).
-// 인터페이스와 격리 규칙은 tests/helpers/ddl_check_env.ts 머리말. 기준은 check_ddl.py(python -I -X utf8)를 지금 돌린 결과다.
+// SEL-74: 옛 Python 검사기는 저장소에서 사라졌다 — 기준은 그것이 낸 줄·실패 문장을 고정한 것(ddl_check_env.PY_REFERENCE_LINES · MUTATIONS[].expect)이다.
+// 인터페이스와 격리 규칙은 tests/helpers/ddl_check_env.ts 머리말.
 // 합성 자료만(DDL 초안 + 변이 사본), 임시 HOME/PES_HOME, 저장소 DDL 은 읽기만.
 
 import assert from "node:assert/strict";
@@ -8,15 +8,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
-  CHECK_PY,
+  PY_REFERENCE_LINES,
   checker,
   CHECK_TS,
   DDL_SQL,
   MUTATIONS,
   lf,
-  py_failure_message,
   read_lf,
-  run_py_default,
   run_ts_default,
   with_work,
 } from "./helpers/ddl_check_env.ts";
@@ -28,26 +26,7 @@ function stdout_lines(text: string): string[] {
   return lf(text).split("\n").filter((l) => l !== "");
 }
 
-// ---------------------------------------------------------------------------
-// 기준(Python)이 지금도 통과해야 비교가 의미 있다
-
-test("baseline: check_ddl.py still passes on the repository DDL (reference for the TS port)", () => {
-  const home = isolated_home("pes-sel73-base-");
-  try {
-    const py = run_py_default(home);
-    assert.equal(py.status, 0, py.all);
-    const lines = stdout_lines(py.stdout);
-    assert.match(lines[0]!, VERSION_LINE);
-    assert.ok(lines.some((l) => l.startsWith("RESULT PASS; rejected cases=64; representative queries=3")), py.stdout);
-    assert.ok(lines.some((l) => l.includes("all 61 tables populated")), py.stdout);
-  } finally {
-    home.cleanup();
-  }
-});
-
-test("the python reference stays in the repository until PR26 ends (the TS port is compared against it)", () => {
-  assert.ok(existsSync(CHECK_PY), "docs/plan/schemas/check_ddl.py must not be deleted by PR26d");
-});
+// (옛 'baseline: check_ddl.py still passes' 와 'the python reference stays in the repository' 두 시험은 지웠다 — 기준이 고정한 줄은 아래에서 쓴다)
 
 // ---------------------------------------------------------------------------
 // 같은 합성 사례(저장소 DDL 초안)에서 같은 결과
@@ -56,18 +35,15 @@ test("scripts/check_ddl.ts exists and is a TS module", () => {
   assert.ok(existsSync(CHECK_TS), "scripts/check_ddl.ts is the TS design checker");
 });
 
-test("TS checker passes on the repository DDL with the same PASS lines as check_ddl.py", () => {
+test("TS checker passes on the repository DDL with the same PASS lines the 0.15 check_ddl.py printed (frozen)", () => {
   const home = isolated_home("pes-sel73-eq-");
   try {
-    const py = run_py_default(home);
     const ts = run_ts_default(home);
     assert.equal(ts.status, 0, ts.all);
-    const py_lines = stdout_lines(py.stdout);
     const ts_lines = stdout_lines(ts.stdout);
-    // 첫 줄은 SQLite 버전이라 구현마다 다를 수 있다(python 번들 vs node:sqlite 번들). 형식은 같아야 한다.
-    assert.match(py_lines[0]!, VERSION_LINE);
+    // 첫 줄은 SQLite 버전이라 번들마다 다를 수 있다. 형식은 같아야 한다.
     assert.match(ts_lines[0]!, VERSION_LINE);
-    assert.deepEqual(ts_lines.slice(1), py_lines.slice(1));
+    assert.deepEqual(ts_lines.slice(1), [...PY_REFERENCE_LINES]);
   } finally {
     home.cleanup();
   }
@@ -89,7 +65,7 @@ test("TS checker: the default DDL is docs/plan/schemas/stage-1-ddl-draft.sql and
   });
 });
 
-test("run_ddl_checks() returns the numbers the python reference prints (61 tables, 64 rejections, 3 queries)", async () => {
+test("run_ddl_checks() returns the numbers the 0.15 python reference printed (61 tables, 64 rejections, 3 queries)", async () => {
   const mod = await checker();
   assert.equal(typeof mod.run_ddl_checks, "function");
   const result = mod.run_ddl_checks();
@@ -129,26 +105,18 @@ test("TS checker only uses an in-memory database (no filesystem database, no wri
 // 깨진 DDL 변이: 각 규칙이 실제로 실패를 내고, 두 구현이 같은 실패(메시지 의미)를 낸다
 
 for (const mutation of MUTATIONS) {
-  test(`broken DDL '${mutation.name}' (${mutation.rule}) fails in python and in TS with the same message`, () =>
+  test(`broken DDL '${mutation.name}' (${mutation.rule}) fails in TS with the message the 0.15 reference gave`, () =>
     with_work((work) => {
       const base = read_lf(DDL_SQL);
       const mutated = mutation.apply(base);
       assert.notEqual(mutated, base, "the mutation changes the DDL");
       work.write_sql(mutated);
 
-      const py = work.run_py();
-      assert.notEqual(py.status, 0, "the python reference must fail on the broken DDL");
-      const py_message = py_failure_message(py.stderr);
-      assert.ok(
-        py_message.includes(mutation.expect),
-        `python reference message for ${mutation.name}: ${JSON.stringify(py_message)}`,
-      );
-
       const ts = work.run_ts();
       assert.notEqual(ts.status, 0, `TS checker must fail on '${mutation.name}':\n${ts.all}`);
       assert.ok(
         ts.all.includes(mutation.expect),
-        `TS checker must say "${mutation.expect}" (the python message) — got:\n${ts.all}`,
+        `TS checker must say "${mutation.expect}" (the message check_ddl.py gave) — got:\n${ts.all}`,
       );
       // 통과 요약을 내면 안 된다
       assert.ok(!ts.stdout.includes("RESULT PASS"), "no RESULT PASS on a broken DDL");

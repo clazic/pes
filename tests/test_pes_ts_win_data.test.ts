@@ -1,7 +1,8 @@
 // SEL-71, W1·W2 (decision 2026-11-11): the ts CLI stores report paths with `/` and writes generated text with LF on every OS, and it READS
 // old data in both spellings — a 0.15 project.json written on Windows (backslash report paths, CRLF line ends, CRLF report files) gives the
-// same result as the same project written on macOS / Linux. The fixture is made synthetic and OS-independent: a 0.15 project is built by
-// the py CLI, then a Windows-style twin is derived from it by rewriting text only (so this runs the same on every runner).
+// same result as the same project written on macOS / Linux. The fixture is synthetic and OS-independent: the 0.15 project is the frozen `full`
+// legacy fixture (SEL-74: the py CLI that used to build it is gone), a Windows-style twin is derived from it by rewriting text only (so this
+// runs the same on every runner).
 import assert from "node:assert/strict";
 import { cpSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -9,7 +10,9 @@ import { join, relative, sep } from "node:path";
 import { test } from "node:test";
 
 import { d02_canon, norm_out } from "./helpers/compat_cases.ts";
-import { dto_from_project_json, init_project, make_ctx, merge, pes, walk_files, type CompatCtx } from "./helpers/compat_env.ts";
+import { dto_from_project_json, make_ctx, walk_files, type CompatCtx } from "./helpers/compat_env.ts";
+import { golden } from "./helpers/cli_read_env.ts";
+import { legacy_folder } from "./helpers/sel74_env.ts";
 import { PES_TS_FILE, answers_multiset, run_ts_cli, ts_seed_legacy, ts_view } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { sel77_on } from "./helpers/sel_scope.ts";
@@ -22,16 +25,10 @@ function crlf(path: string): void {
   writeFileSync(path, readFileSync(path, "utf8").replace(/\r\n/g, "\n").replace(/\n/g, "\r\n"), "utf8");
 }
 
-/** The py-built project (LF, `/`) and a Windows-style twin: CRLF project.json + CRLF report files + backslash report paths. */
+/** The 0.15 project (LF, `/`: the `full` fixture, named win-data) and a Windows-style twin: CRLF project.json + CRLF report files + backslash report paths. */
 function twins(ctx: CompatCtx): { posix: string; windows: string } {
-  const posix = init_project(ctx, "win-data", "합성 주제");
-  assert.equal(pes(ctx, "round-start", posix, "plan").code, 0);
-  merge(ctx, posix, "plan", [
-    { id: 1, kind: "rq", title: "연구 질문", summary: "요약\n둘째 줄", sources: [{ url: "https://example.test/a", title: "출처 A" }] },
-    { id: 2, kind: "topic", title: "범위", summary: "범위 요약", sources: [{ url: "https://example.test/b", title: "출처 B" }] },
-  ]);
-  assert.equal(pes(ctx, "report", posix, "plan").code, 0);
-  // normalise what this OS's py wrote (on Windows py itself writes `\` and CRLF) into the POSIX form first
+  const posix = legacy_folder(ctx, "win-data", "full");
+  // normalise whatever the checkout of the fixture has (autocrlf on Windows) into the POSIX form first
   const file = join(posix, "project.json");
   const data = JSON.parse(readFileSync(file, "utf8")) as any;
   for (const stage of Object.values<any>(data.stages)) for (const r of stage.reports ?? []) r.path = String(r.path).replace(/\\/g, "/");
@@ -51,7 +48,7 @@ function twins(ctx: CompatCtx): { posix: string; windows: string } {
   crlf(wfile);
   for (const rel of walk_files(windows).filter((x) => /\.(md|html)$/.test(x))) crlf(join(windows, ...rel.split("/")));
   assert.match(readFileSync(wfile, "utf8"), /\r\n/);
-  assert.match(readFileSync(wfile, "utf8"), /reports\\\\plan\\\\report\.html/);
+  assert.match(readFileSync(wfile, "utf8"), /reports\\\\plan\\\\report\.pdf/);
   return { posix, windows: windows };
 }
 
@@ -101,20 +98,22 @@ const READS: string[][] = [["status"], ["digest", "plan"], ["show", "plan"], ["s
 test("old data, read straight from the folder (no import): status / digest / show / pending print the same for the posix and the Windows-style twin, and as 0.15 does (SEL-77: reads)", () => {
   if (!sel77_on()) return; // the read commands are SEL-77's; test_pes_ts_contract pins that they are still off
   assert.ok(existsSync(PES_TS_FILE), "scripts/pes.ts does not exist yet — SEL-71 writes it");
+  const reads_015 = golden<Record<string, { status: number; stdout: string[] }>>("win-data-reads");
   const ctx = make_ctx("pes-win-read-");
   try {
     const { posix, windows } = twins(ctx);
     for (const [command, ...rest] of READS) {
-      const on = (folder: string, who: "ts" | "py") => {
+      const on = (folder: string) => {
         const args = [command as string, folder, ...rest];
-        const run = who === "ts" ? run_ts_cli(ctx, args) : pes(ctx, ...args);
-        const out = who === "ts" ? (run as ReturnType<typeof run_ts_cli>) : { status: (run as ReturnType<typeof pes>).code, stdout: (run as ReturnType<typeof pes>).out, stderr: (run as ReturnType<typeof pes>).err };
-        assert.equal(out.status, 0, `${who} ${command}: ${out.stderr}`);
+        const out = run_ts_cli(ctx, args);
+        assert.equal(out.status, 0, `ts ${command}: ${out.stderr}`);
         return norm_out(out.stdout, { PROJECT: folder, HOME: ctx.home_dir, TMP: ctx.home.root });
       };
-      const want = on(posix, "py");
-      assert.deepEqual(on(posix, "ts"), want, `ts ${command} (posix twin) differs from 0.15`);
-      assert.deepEqual(on(windows, "ts"), want, `ts ${command} (Windows-style twin) differs from the posix twin — old backslash/CRLF data must read the same`);
+      // what 0.15 printed for the same folder: the frozen record tests/fixtures/golden/win-data-reads.json
+      const want = reads_015[[command, ...rest].join(" ")]?.stdout;
+      assert.ok(want !== undefined, `no 0.15 record for ${command}`);
+      assert.deepEqual(on(posix), want, `ts ${command} (posix twin) differs from 0.15`);
+      assert.deepEqual(on(windows), want, `ts ${command} (Windows-style twin) differs from the posix twin — old backslash/CRLF data must read the same`);
     }
   } finally {
     ctx.cleanup();
@@ -132,6 +131,10 @@ test("old data → new writes: after the Windows-style project is MIGRATED, ts `
   try {
     const { windows } = twins(ctx);
     const seeded = await ts_seed_legacy(home_of(ctx), windows); // the migration step D14 demands before any generating command
+    // the `full` fixture brings files of its own (out/appendix.md …) that ts does not generate: only files ts wrote or changed are checked
+    const sha_of = (rel: string): string => createHash("sha256").update(readFileSync(join(windows, ...rel.split("/")))).digest("hex");
+    const before_files = new Map(walk_files(windows).map((rel) => [rel, sha_of(rel)] as const));
+    const generated = (rel: string): boolean => before_files.get(rel) !== sha_of(rel);
     for (const args of [["render", windows], ["report", windows, "plan"], ["assemble", windows], ["web", windows]]) {
       const run = run_ts_cli(ctx, args);
       assert.ok(run.status === 0 || args[0] === "assemble" || args[0] === "web", `${args[0]}: ${run.stderr}`);
@@ -145,13 +148,13 @@ test("old data → new writes: after the Windows-style project is MIGRATED, ts `
     // Reason (D02): after migration TS writes no project.json, so the old CRLF/backslash project.json stays as it was and is NOT a TS output; the LF
     // check covers every file TS generated (assert_posix_storage scans project.json too, so it is applied to a view without it).
     for (const rel of walk_files(windows)) {
-      if (rel === "project.json" || !/\.(md|html|json|log|txt)$/.test(rel) || rel.startsWith("feedback/")) continue;
+      if (rel === "project.json" || !/\.(md|html|json|log|txt)$/.test(rel) || rel.startsWith("feedback/") || !generated(rel)) continue;
       assert.ok(!readFileSync(join(windows, ...rel.split("/")), "utf8").includes("\r"), `${rel}: the ts CLI wrote CR`);
     }
     // R1 권장 7: the backslash-path check (assert_posix_storage's second half) comes back for everything TS generated — only project.json (not a TS output, D02) and feedback/ are left out.
     // A raw `reports\plan` (html / md) and the escaped `reports\\plan` of a .json both contain `reports\`.
     for (const rel of walk_files(windows)) {
-      if (rel === "project.json" || !/\.(md|html|json|log|txt)$/.test(rel) || rel.startsWith("feedback/")) continue;
+      if (rel === "project.json" || !/\.(md|html|json|log|txt)$/.test(rel) || rel.startsWith("feedback/") || !generated(rel)) continue;
       assert.doesNotMatch(readFileSync(join(windows, ...rel.split("/")), "utf8"), /(reports|library|out)\\+[A-Za-z0-9_-]/, `${rel}: a backslash path in a generated file`);
     }
     // migrated: the state lives in the database (D02), so the stored report paths are read from there — never from project.json

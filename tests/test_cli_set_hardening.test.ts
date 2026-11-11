@@ -1,21 +1,19 @@
 /**
- * SEL-50 PR17 — `pes set` 보강 (tester, 보강 모드). 구현(scripts/pes.py cmd_set)을 깨뜨리는 경계를 건다.
- * 계약은 test_cli_set_accept/reject (플래그 없음). 자료는 합성, HOME·USERPROFILE·PES_HOME 은 임시 폴더, python -I -X utf8.
+ * SEL-50 PR17 — `pes set` 보강 (tester, 보강 모드). 구현(scripts/pes_core/cli_set.ts)을 깨뜨리는 경계를 건다.
+ * 계약은 test_cli_set_accept/reject. 자료는 합성, HOME·USERPROFILE·PES_HOME 은 임시 폴더, node scripts/pes.ts (SEL-74).
  *
  * 공통 기대: 거부는 0 아닌 종료 + 한국어 이유 + 스택 추적 없음 + project.json 바이트 불변 + project.json.tmp 없음.
  * Windows 점검표: 줄바꿈 정규화, 경로는 node:path, 셸 없음, 동시 실행은 spawn(비동기) 두 개.
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { PES_PY } from "./helpers/cli_write_env.ts";
-import { PY } from "./helpers/cli_read_env.ts";
+import { run_cli_async } from "./helpers/cli_read_env.ts";
+import { ts_view } from "./helpers/compat_ts.ts";
 import { expect_refused, ok_run, with_set, type SetEnv } from "./helpers/set_env.ts";
-import { hub_blocked_argv } from "./helpers/hub_block.ts";
 
 function bytes_file(e: SetEnv, name: string, data: Buffer | string): string {
   const file = join(e.home.root, name);
@@ -160,7 +158,8 @@ test("set: 폴더 인자 — 절대 경로·공백/한글 경로·상대 경로(
     const odd = join(e.home.root, "다른 폴더 (공백)", "proj 하나");
     ok_run(e.py(["init", odd, "--topic", "공백 경로"]), "init odd");
     ok_run(e.py(["set", odd, "project", "conclusion", f]), "공백·한글 경로");
-    assert.equal(JSON.parse(readFileSync(join(odd, "project.json"), "utf8")).conclusion, "경로 시험 요약");
+    const odd_view = ts_view({ env: e.home.env, pes_home: e.home.env.PES_HOME as string, home_dir: e.home.env.HOME as string }, "proj 하나");
+    assert.equal(odd_view?.project.conclusion, "경로 시험 요약");
     // 상대 경로: cwd 는 홈 루트
     ok_run(e.py(["set", "./다른 폴더 (공백)/proj 하나", "plan", "summary", "값 파일 (한글).txt"]), "상대 경로");
     // 윈도 꼴: macOS/Linux 에서는 그런 폴더가 없으므로 거부, Windows 에서는 다른 임시 경로라 역시 없음
@@ -172,11 +171,8 @@ test("set: 폴더 인자 — 절대 경로·공백/한글 경로·상대 경로(
     }
   }));
 
-test("set: project.json 이 깨져 있으면 충돌이 아니라 분명한 이유로 거부하고 파일을 건드리지 않는다", () =>
-  with_set((e) => {
-    writeFileSync(e.json_path, '{"pes": 1, "topic": ', "utf8");
-    refuse_unchanged(e, ["set", e.slug, "plan", "summary", bytes_file(e, "v.txt", "요약")], "깨진 project.json");
-  }));
+// (0.15 의 'set: project.json 이 깨져 있으면 분명한 이유로 거부하고 파일을 건드리지 않는다' 는 지웠다: pes.ts 의 원본은 DB 라 set 이 project.json 을 읽지 않는다(D02).
+//  깨진 옛 project.json 을 만났을 때의 한 줄 오류는 test_pes_ts_r1_review (d)·(권장6), 이전 거절은 test_sel74_c_migrate C10 이 지킨다.)
 
 // ---------------------------------------------------------------------------
 // 동시 실행·잠금 경합
@@ -188,17 +184,7 @@ interface Done {
 }
 
 function py_async(e: SetEnv, args: string[], extra: Record<string, string> = {}): Promise<Done> {
-  return new Promise((resolve, reject) => {
-    const env: Record<string, string | undefined> = { ...e.home.env, PES_OWNER: undefined, PES_TOKEN: undefined, PES_DB_CORE: undefined, ...extra };
-    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
-    const child = spawn(PY, hub_blocked_argv(["-I", "-X", "utf8", PES_PY, ...args]), { env: env as NodeJS.ProcessEnv, cwd: e.home.root });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));
-    child.stderr.on("data", (b: Buffer) => (err += b.toString("utf8")));
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ status: code, stderr: err, stdout: out }));
-  });
+  return run_cli_async(e, args, { extra });
 }
 
 test("set 동시 실행 둘: 어느 쪽도 충돌하지 않고 project.json 은 항상 유효하며 tmp 가 남지 않는다 (10회)", async () => {
@@ -215,7 +201,7 @@ test("set 동시 실행 둘: 어느 쪽도 충돌하지 않고 project.json 은 
         assert.doesNotMatch(r.stderr, /Traceback|FileNotFoundError|PermissionError/, `라운드 ${round} ${name}: 충돌하면 안 된다\n${r.stderr}`);
         assert.equal(r.status, 0, `라운드 ${round} ${name}: 종료 ${r.status}\n${r.stderr}`);
       }
-      const st = JSON.parse(readFileSync(e.json_path, "utf8")); // 유효한 JSON
+      const st = e.state(); // DB 읽기 모델이 늘 읽힌다
       assert.equal(typeof st.stages.plan.summary, "string");
       assert.ok(!existsSync(join(e.folder, "project.json.tmp")), `라운드 ${round}: tmp 가 남는다`);
     }
@@ -233,7 +219,7 @@ test("set 동시 실행 둘이 같은 세션(PES_OWNER)이면 두 값이 모두 
       const b = bytes_file(e, `b${round}.txt`, `비 ${round}`);
       const owner = { PES_OWNER: "session-same0001" };
       await Promise.all([py_async(e, ["set", e.slug, "plan", "summary", a], owner), py_async(e, ["set", e.slug, "project", "conclusion", b], owner)]);
-      const st = JSON.parse(readFileSync(e.json_path, "utf8"));
+      const st = e.state();
       if (st.stages.plan.summary !== `에이 ${round}` || st.conclusion !== `비 ${round}`) lost += 1;
     }
     assert.equal(lost, 0, `12번 중 ${lost}번 한쪽 갱신이 사라졌다 (읽기-수정-쓰기 사이에 교체됨)`);
@@ -257,10 +243,9 @@ test("set 잠금 경합: 같은 시각에 잠근 세션과 다른 세션이 쓰�
       assert.notEqual(r2.status, 0, "다른 세션은 거부");
       assert.doesNotMatch(r2.stderr, /Traceback/);
       assert.match(r2.stderr, /다른 세션/);
-      assert.equal(JSON.parse(readFileSync(e.json_path, "utf8")).stages.plan.summary, `주인 ${round}`);
+      assert.equal(e.state().stages.plan.summary, `주인 ${round}`);
     }
-    const lock = JSON.parse(readFileSync(join(e.folder, ".pes-lock"), "utf8"));
-    assert.equal(lock.owner, "session-owner01", "남의 시도가 잠금 주인을 바꾸지 못한다");
+    assert.equal(e.lock_owner(), "session-owner01", "남의 시도가 잠금 주인을 바꾸지 못한다");
   } finally {
     e.cleanup();
   }
@@ -271,7 +256,7 @@ test("set: 같은 이름으로 끊긴 tmp 가 남아 있어도(앞선 실패 흔
     writeFileSync(join(e.folder, "project.json.tmp"), "{끊긴 흔적", "utf8");
     ok_run(e.py(["set", e.slug, "plan", "summary", bytes_file(e, "v.txt", "흔적 뒤 요약")]), "set");
     assert.equal(e.state().stages.plan.summary, "흔적 뒤 요약");
-    assert.ok(!existsSync(join(e.folder, "project.json.tmp")));
+    // (pes.ts 는 project.json.tmp 를 쓰지 않으므로 옛 흔적을 지우지도 않는다 — 0.15 는 같은 이름으로 덮어썼다. 흔적이 저장을 막지 않는 것이 보장이다.)
   }));
 
 test("set: 값 파일이 프로젝트 폴더 안(rounds/…)에 있어도 되고, 폴더 안 project.json 자체를 값 파일로 주면 거부하거나 안전하게 문자열로만 취급한다", () =>
@@ -281,8 +266,11 @@ test("set: 값 파일이 프로젝트 폴더 안(rounds/…)에 있어도 되고
     writeFileSync(inside, "폴더 안 값 파일", "utf8");
     ok_run(e.py(["set", e.slug, "plan", "summary", inside]), "폴더 안 값 파일");
     assert.equal(e.state().stages.plan.summary, "폴더 안 값 파일");
-    // project.json 을 summary 값으로 주면: 통째 JSON 문자열이 summary 에 들어가는 것은 허용 필드이므로 막을 이유는 없지만, 파일이 유효해야 한다
-    const res = e.py(["set", e.slug, "plan", "summary", e.json_path]);
-    if (res.status === 0) JSON.parse(e.raw());
-    else expect_refused(res, "project.json 을 값으로");
+    // 폴더 안의 JSON 파일을 summary 값으로 주면: 통째 JSON 문자열이 summary 에 들어가는 것은 허용 필드이므로 막을 이유는 없지만, 상태가 유효해야 한다
+    // (0.15 시험은 project.json 자체를 값으로 줬다. TS 의 원본은 DB 라 project.json 이 없다 — 같은 모양의 JSON 파일을 대신 쓴다.)
+    const as_value = join(e.folder, "value.json");
+    writeFileSync(as_value, JSON.stringify({ pes: 1, topic: "값으로 준 JSON" }), "utf8");
+    const res = e.py(["set", e.slug, "plan", "summary", as_value]);
+    if (res.status === 0) assert.equal(typeof e.state().stages.plan.summary, "string");
+    else expect_refused(res, "JSON 파일을 값으로");
   }));

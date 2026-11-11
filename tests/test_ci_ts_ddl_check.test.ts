@@ -79,10 +79,13 @@ test("the design check step does not need Python (no python in the step itself)"
   assert.doesNotMatch(lines.slice(from, to).join("\n"), /python/i);
 });
 
-test("the Python job no longer carries the design check (Python pytest only)", () => {
+// SEL-74: the Python job is gone entirely (0.15 removed). No job carries the old Python design check;
+// the TS check runs only through `npm run check:ddl`.
+test("no job carries the old Python design check (SEL-74: the Python job is removed)", () => {
   const ci = text(join(WORKFLOWS, "ci.yml"));
-  const block = job_block(ci, "test");
-  assert.doesNotMatch(block, /check_ddl/);
+  assert.doesNotMatch(ci, /check_ddl\.py/);
+  assert.doesNotMatch(ci, /^\s{2}test:\s*$/m, "the old Python test job is gone");
+  assert.match(ci, /run: npm run check:ddl/);
 });
 
 test("developer docs name the TS command: AGENTS.md 검사 and docs/plan/README.md list `npm run check:ddl`", () => {

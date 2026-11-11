@@ -3,6 +3,7 @@
  *   N1 tests/fixtures/legacy/full 사본을 import→validate→activate 한 뒤 DB 모드 서버에서, 대시보드가 광고하는 등록 보고서 URL 이
  *      200 이고 바이트가 DB ready blob·원본과 같다. 없는 경로·다른 프로젝트의 blob 은 여전히 404.
  * 합성 자료, 임시 HOME·USERPROFILE·PES_HOME.
+ * (SEL-74 시험 쪽: 지웠던 시험을 되살렸다 — scripts/serve.ts 의 서버 갭 S4, tests/README.md.)
  */
 
 import assert from "node:assert/strict";

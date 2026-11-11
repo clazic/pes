@@ -1,44 +1,67 @@
 // Harness for the CLI read / report / doctor tests (stage 2 PR16, SEL-49). Everything is synthetic.
 //
 // Builds on cli_write_env.ts (same isolated HOME / USERPROFILE / PES_HOME, same DB bootstrap) and adds:
-//   - run_py(): runs a given pes.py (this repo's or a baseline checkout) with `python3 -I -X utf8`, so Korean
-//     output survives Windows pipes (python -I ignores PYTHONIOENCODING, -X utf8 does not)
-//   - baseline_dir(): a copy (git ls-tree + git show, no shell or tar) of the last v0.15 read implementation, to compare outputs against
+//   - run_cli(): runs `node scripts/pes.ts` (behind the TS child guard) in the isolated HOME — SEL-74: the 0.15 Python CLI is gone
 //   - normalize(): output normalisation (roots in every spelling, timestamps, epoch, uuid)
 //   - RICH_LEGACY: a legacy project.json with items, sources, notes, a write stage and unprocessed answers
 //   - shell_words(): a tiny POSIX-style word splitter, so a printed shell command can be checked without a shell
 //     (works the same on Windows CI, where no `sh` can be assumed)
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 
-import { PES_PY, REPO, SLUG, type CliEnv, type CliResult } from "./cli_write_env.ts";
-import { hub_blocked_argv } from "./hub_block.ts";
+import { SLUG, type CliEnv, type CliResult } from "./cli_write_env.ts";
+import { run_ts_cli, run_ts_cli_async } from "./compat_ts.ts";
+import { FIXTURES } from "./legacy_env.ts";
 
-/** The last main commit whose read commands are pure v0.15 (project.json readers). */
-export const READ_BASELINE_REF = "03fc81b";
+/** Folder of the recorded 0.15 reports (tests/fixtures/legacy_reports/README.md): what `pes.py report` of 0.15 made from the `full` fixture, frozen. */
+export const LEGACY_REPORTS = join(FIXTURES, "..", "legacy_reports");
 
-export const PY: string =
-  spawnSync("python3", ["-I", "-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).stdout.trim() || "python3";
+/**
+ * Lays the 0.15 record `name` over a folder that is a copy of the `full` fixture: the project.json 0.15 saved after its `report` run and
+ * the two report files it made (`작성 …` time line fixed to 2001-01-01 00:00). The 0.15 code that made them is gone (SEL-74); the record is frozen.
+ */
+export function overlay_real_report(dir: string, name: string): void {
+  const rec = join(LEGACY_REPORTS, name);
+  cpSync(join(rec, "project.json"), join(dir, "project.json"));
+  cpSync(join(rec, "reports"), join(dir, "reports"), { recursive: true });
+}
 
-export function baseline_dir(ref: string = READ_BASELINE_REF): string | null {
-  const probe = spawnSync("git", ["cat-file", "-e", `${ref}:scripts/pes.py`], { cwd: REPO });
-  if (probe.status !== 0) return null; // shallow clone: the caller fails loudly (CI uses fetch-depth: 0)
-  // No shell, no tar: list the files with `git ls-tree` and read each one with `git show` (argument arrays only).
-  const listing = spawnSync("git", ["ls-tree", "-r", "-z", "--name-only", ref, "--", "scripts", "templates", "questions"], { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
-  assert.equal(listing.status, 0, "baseline listing");
-  const dir = mkdtempSync(join(tmpdir(), "pes-sel49-base-"));
-  for (const rel of listing.stdout.toString("utf8").split("\0").filter((x) => x.length > 0)) {
-    const blob = spawnSync("git", ["show", `${ref}:${rel}`], { cwd: REPO, maxBuffer: 256 * 1024 * 1024 });
-    assert.equal(blob.status, 0, `baseline show ${rel}`);
-    const target = join(dir, ...rel.split("/"));
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, blob.stdout);
-  }
+/**
+ * `full` fixture copied into the PES home of `c` as `slug`, project.json edited at text level by `edit` (the same edit the record was made
+ * with — asserted against the record's input.project.json, so a changed edit fails loudly instead of testing something else), then the
+ * 0.15 report record laid over it.
+ */
+export function legacy_home_with_real_report(c: { env: { home: { env: Record<string, string | undefined> } } }, slug: string, edit: (text: string) => string): string {
+  const dir = join(c.env.home.env.PES_HOME as string, slug);
+  cpSync(join(FIXTURES, "full"), dir, { recursive: true });
+  const json = join(dir, "project.json");
+  const edited = edit(readFileSync(json, "utf8").replace('"slug": "synthetic-legacy-full"', `"slug": "${slug}"`));
+  const input = readFileSync(join(LEGACY_REPORTS, slug, "input.project.json"), "utf8");
+  assert.deepEqual(JSON.parse(edited), JSON.parse(input), `${slug}: the edit no longer makes the project.json the 0.15 record was made from (tests/fixtures/legacy_reports/README.md)`);
+  overlay_real_report(dir, slug);
   return dir;
+}
+
+/** One recorded 0.15 output (tests/fixtures/golden/README.md): `{ "<label>": value }`. */
+export function golden<T = Record<string, { status: number | null; stdout: string; stderr_last: string }>>(name: string): T {
+  return JSON.parse(readFileSync(join(FIXTURES, "..", "golden", `${name}.json`), "utf8")) as T;
+}
+
+/**
+ * Runs `args` and checks exit code, normalised stdout (LF, roots → <ROOT>) and the last stderr line against the recorded 0.15 output `rec`.
+ * A stack trace is never an answer. `rec` = golden(...)[label].
+ */
+export function expect_same_as_015(c: HomeLike, args: string[], rec: { status: number | null; stdout: string; stderr_last: string } | undefined, label: string, opts: RunOptions = {}): CliResult {
+  assert.ok(rec !== undefined, `${label}: no 0.15 record for ${JSON.stringify(args)}`);
+  const roots = [c.env.home.root];
+  const res = run_cli(c, args, opts);
+  assert.equal(res.status, rec.status, `${label}: exit code`);
+  assert.equal(normalize(res.stdout.replace(/\r\n/g, "\n"), roots), rec.stdout, `${label}: stdout`);
+  const last = normalize(res.stderr, roots).trim().split("\n").pop() ?? "";
+  assert.equal(last, rec.stderr_last, `${label}: last stderr line`);
+  return res;
 }
 
 /** Every spelling of one root: as is, the Windows long name (8.3 RUNNER~1), and the doubled-backslash python repr. */
@@ -57,6 +80,11 @@ export function normalize(text: string, roots: string[]): string {
   let out = text;
   const all = roots.flatMap(root_forms);
   for (const root of all.sort((x, y) => y.length - x.length)) out = out.split(root).join("<ROOT>");
+  // a path under a root is printed with the native separator (Windows: '\\'); the 0.15 records were made on macOS ('/').
+  // Only the part right after <ROOT> is folded — the same path, written two ways (PR #58 windows run 43091570453).
+  out = out.replace(/<ROOT>[^\s"'`,)\]]*/g, (path) => path.replace(/\\\\?/g, "/"));
+  // a shell-quoted path was quoted only because of the Windows '\\' (shlex/shell_quote): once folded to '/', drop those quotes
+  out = out.replace(/'(<ROOT>\/[A-Za-z0-9_@%+=:,.\/-]*)'/g, "$1");
   return out
     .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?/g, "<TS>")
     .replace(/\d{8}-\d{6}/g, "<STAMP>")
@@ -65,10 +93,6 @@ export function normalize(text: string, roots: string[]): string {
 }
 
 export interface RunOptions {
-  /** Another pes.py (a baseline checkout). Default: this repository's. */
-  script?: string;
-  /** PES_DB_CORE value; "1" by default. undefined runs the CLI as v0.15. */
-  flag?: string | undefined;
   extra?: Record<string, string | undefined>;
   cwd?: string;
   timeout?: number;
@@ -78,6 +102,10 @@ export interface RunOptions {
   path?: string;
   /** hub-block exceptions: ports of stand-ins the TEST started itself (everything else in 8760~8775 stays blocked) */
   allow_hub_ports?: number[];
+  /** the command starts a process (hub · serve · open): the permission model must let it */
+  allow_child?: boolean;
+  /** another pes.ts (a copy of the scripts folder below the isolated home, e.g. with CRLF templates) */
+  script?: string;
 }
 
 /** A file named `name` (plus PATHEXT extensions on Windows) in the caller's real PATH; no `which`, no shell. */
@@ -96,7 +124,7 @@ export function find_on_path(name: string): string | undefined {
 let narrow_cache: string | undefined;
 
 /**
- * The PATH the doctor tests run with: the folders of python, node, tail and grep (doctor needs them) and of the
+ * The PATH the doctor tests run with: the folders of node, tail and grep (doctor needs them) and of the
  * owner-lookup tool (lsof on macOS, ss on Linux, netstat on Windows) — and nothing else. External CLIs the doctor probes
  * (ego-browser, kosis, vworld, korean-law) are therefore "not installed", so a doctor run starts no slow tool processes.
  * The rows for those tools keep their form; only their value (missing) is fixed by this PATH.
@@ -104,7 +132,7 @@ let narrow_cache: string | undefined;
 export function doctor_path(): string {
   if (narrow_cache !== undefined) return narrow_cache;
   const tools = [process.platform === "darwin" ? "lsof" : process.platform === "win32" ? "netstat" : "ss", "tail", "grep"];
-  const dirs = new Set<string>([dirname(PY), dirname(process.execPath)]);
+  const dirs = new Set<string>([dirname(process.execPath)]);
   for (const tool of tools) {
     const found = find_on_path(tool);
     if (found !== undefined) dirs.add(dirname(found));
@@ -118,33 +146,48 @@ export interface HomeLike {
   env: { home: { readonly root: string; readonly env: Record<string, string | undefined> } };
 }
 
-/** `python3 -I -X utf8 pes.py ...` in the isolated HOME of `c`. PES_OWNER / PES_TOKEN never leak in from the caller. */
-export function run_py(c: HomeLike, args: string[], opts: RunOptions = {}): CliResult {
-  const child: Record<string, string | undefined> = {
-    ...c.env.home.env,
-    PES_OWNER: undefined,
-    PES_TOKEN: undefined,
-    PES_DB_CORE: "flag" in opts ? opts.flag : "1",
-    ...opts.extra,
-  };
+/** `node scripts/pes.ts ...` (guarded) in the isolated HOME of `c`. PES_OWNER / PES_TOKEN never leak in from the caller; `opts.extra` may name them. */
+export function run_cli(c: HomeLike, args: string[], opts: RunOptions = {}): CliResult {
+  const root = c.env.home.root;
+  const narrow_bin = join(root, "bin");
+  mkdirSync(narrow_bin, { recursive: true });
+  const base: Record<string, string | undefined> = { ...c.env.home.env, PES_OWNER: undefined, PES_TOKEN: undefined };
+  for (const key of ["PES_TOKEN", "PES_DB_CORE", "PES_HUB_PORTS", "PES_LOCAL_SESSION_SECRET"]) delete base[key];
+  assert.equal(base.HOME, c.env.home.env.HOME, "the CLI runs in the isolated HOME");
+  assert.equal(base.USERPROFILE, c.env.home.env.HOME);
+  assert.ok(base.PES_HOME !== undefined && base.PES_HOME.length > 0, "PES_HOME is set (isolated)");
+  const { PES_DB_CORE: _flag, ...extra } = opts.extra ?? {};
   const narrow = opts.path ?? (args[0] === "doctor" ? doctor_path() : undefined);
+  const env: Record<string, string | undefined> = { ...extra };
   if (narrow !== undefined) {
-    for (const key of Object.keys(child)) if (key.toLowerCase() === "path") delete child[key]; // Windows: Path / PATH
-    child.PATH = narrow;
+    for (const key of Object.keys(base)) if (key.toLowerCase() === "path") delete base[key]; // Windows: Path / PATH
+    env.PATH = narrow;
   }
-  for (const key of Object.keys(child)) if (child[key] === undefined) delete child[key];
-  assert.equal(child.HOME, c.env.home.env.HOME, "the CLI runs in the isolated HOME");
-  assert.equal(child.USERPROFILE, c.env.home.env.HOME);
-  assert.ok(child.PES_HOME !== undefined && child.PES_HOME.length > 0, "PES_HOME is set (isolated)");
-  const result = spawnSync(PY, hub_blocked_argv(["-I", "-X", "utf8", opts.script ?? PES_PY, ...args], opts.allow_hub_ports), {
-    env: child as NodeJS.ProcessEnv,
-    cwd: opts.cwd ?? c.env.home.root,
-    encoding: "utf8",
-    timeout: opts.timeout ?? 60_000,
-    ...(opts.input !== undefined ? { input: opts.input } : {}),
+  const run = run_ts_cli({ home: { root }, env: base, narrow_bin }, args, {
+    env,
+    cwd: opts.cwd ?? root,
+    timeout_ms: opts.timeout ?? 120_000,
+    input: opts.input,
+    allow_hub_port: opts.allow_hub_ports,
+    // doctor looks for external tools and for the owner of a held port (child processes) in the narrowed PATH
+    ...(narrow !== undefined ? { extra_read: narrow.split(delimiter).filter((x) => x !== ""), allow_child_process: true } : {}),
+    ...(opts.allow_child === true ? { allow_child_process: true } : {}),
+    // the permission model resolves the main script by its real path (macOS /var → /private/var)
+    ...(opts.script !== undefined ? { script: realpathSync.native(opts.script) } : {}),
   });
-  if (result.error !== undefined) throw result.error;
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  return { status: run.status, stdout: run.stdout, stderr: run.stderr };
+}
+
+/** The async twin of run_cli: genuinely concurrent children (the same guard, the same isolated HOME). */
+export async function run_cli_async(c: HomeLike, args: string[], opts: Pick<RunOptions, "extra" | "timeout"> = {}): Promise<CliResult> {
+  const root = c.env.home.root;
+  const narrow_bin = join(root, "bin");
+  mkdirSync(narrow_bin, { recursive: true });
+  const base: Record<string, string | undefined> = { ...c.env.home.env, PES_OWNER: undefined, PES_TOKEN: undefined };
+  for (const key of ["PES_TOKEN", "PES_DB_CORE", "PES_HUB_PORTS", "PES_LOCAL_SESSION_SECRET"]) delete base[key];
+  const { PES_DB_CORE: _flag, ...extra } = opts.extra ?? {};
+  const run = await run_ts_cli_async({ home: { root }, env: base, narrow_bin }, args, { env: extra, cwd: root, timeout_ms: opts.timeout ?? 120_000 });
+  return { status: run.status, stdout: run.stdout, stderr: run.stderr };
 }
 
 /** The same synthetic legacy project.json for every comparison (topic equals the DB project's topic). */
@@ -282,7 +325,6 @@ export function read_lf(path: string): string {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 }
 
-export const OFF = { flag: undefined } as const;
 
 export function ok(res: CliResult, what: string): CliResult {
   assert.equal(res.status, 0, `${what}: exit ${res.status}\n${res.stderr}${res.stdout}`);
@@ -327,9 +369,9 @@ export const WRITE_ITEMS = [
   },
 ];
 
-/** 같은 쓰기를 한 환경에 한다. flag 가 undefined 이면 v0.15(project.json), "1" 이면 DB. */
-export function seed(c: CliEnv, flag: string | undefined): void {
-  const run = (args: string[]) => ok(run_py(c, args, { flag }), args.join(" "));
+/** 같은 합성 쓰기를 한 환경(DB)에 한다. */
+export function seed(c: CliEnv): void {
+  const run = (args: string[]) => ok(run_cli(c, args), args.join(" "));
   run(["round-start", SLUG, "plan"]);
   run(["merge", SLUG, "plan", write_json(c, "seed-plan.json", PLAN_ITEMS)]);
   run(["merge", SLUG, "write", write_json(c, "seed-write.json", WRITE_ITEMS)]);

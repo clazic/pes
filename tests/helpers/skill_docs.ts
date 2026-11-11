@@ -1,7 +1,7 @@
 // SEL-50 (stage 2 PR17) 시험 공용 준비물: 스킬·에이전트·명령 문서를 읽고, 코드 조각과 pes 명령을 뽑고,
 // lint(scripts/lint_skills.ts)를 자식 프로세스로 돌린다. 전부 합성 입력이며 실제 ~/pes-projects·~/.pes 는 건드리지 않는다.
 //
-// Windows 점검표: 문서는 CRLF → LF 로 정규화해서 읽고, 자식 Node/Python 은 UTF-8 로 띄우고(-X utf8),
+// Windows 점검표: 문서는 CRLF → LF 로 정규화해서 읽고, 자식은 Node(UTF-8)로 띄우고,
 // 경로는 node:path 로만 만들며, `which`·sh·tar 에 기대지 않는다.
 
 import { spawnSync } from "node:child_process";
@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
-export const PES_PY = join(REPO, "scripts", "pes.py");
+/** The usage page of pes.ts (scripts/pes_core/cli_usage.ts) — the table of commands and their arguments. SEL-74: pes.py's docstring is gone. */
+export { USAGE as PES_USAGE } from "../../scripts/pes_core/cli_usage.ts";
 export const LINT_TS = join(REPO, "scripts", "lint_skills.ts");
 
 export const STAGES = ["plan", "research", "analyze", "write", "verify", "publish"] as const;
@@ -84,18 +85,18 @@ export function code_segments(markdown: string): Segment[] {
 // ---------------------------------------------------------------------------
 // pes 명령
 
-/** scripts/pes.py 의 CMDS 사전에 있는 명령 이름 (v0.15 + 새 5개). */
+/** scripts/pes.ts 의 명령표(scripts/pes_core/cli_main.ts 의 CMDS 배열)에 있는 명령 이름. (SEL-74: pes.py 는 퇴역 — 표는 TS 쪽에서 읽는다.) */
 export function pes_cmds(): string[] {
-  const src = read_text(PES_PY);
-  const start = src.indexOf("\nCMDS = {");
-  if (start < 0) throw new Error("scripts/pes.py 에 CMDS 사전이 없다");
-  const end = src.indexOf("}", start);
-  const names = [...src.slice(start, end).matchAll(/"([a-z][a-z-]*)"\s*:/g)].map((m) => m[1]!);
+  const src = read_text(join(REPO, "scripts", "pes_core", "cli_main.ts"));
+  const start = src.indexOf("export const CMDS");
+  if (start < 0) throw new Error("scripts/pes_core/cli_main.ts 에 CMDS 배열이 없다");
+  const end = src.indexOf("];", start);
+  const names = [...src.slice(start, end).matchAll(/"([a-z][a-z-]*)"/g)].map((m) => m[1]!);
   if (names.length < 30) throw new Error(`CMDS 파싱 결과가 너무 적다: ${names.length}`);
   return names;
 }
 
-const PREFIX = /^(?:\$\{?PES\}?|pes(?:\.py)?|(?:python3?|py(?:\s+-3)?)\s+(?:-X\s+utf8\s+)?-I\s+\S*pes\.py|\S*\/pes\.py)\s+([a-z][a-z-]*)\b/;
+const PREFIX = /^(?:\$\{?PES\}?|pes(?:\.py)?|node\s+\S*pes\.ts|(?:python3?|py(?:\s+-3)?)\s+(?:-X\s+utf8\s+)?-I\s+\S*pes\.py|\S*\/pes\.py)\s+([a-z][a-z-]*)\b/;
 
 /** 코드 조각 한 줄에서 `$PES <명령>` 꼴로 부른 명령 이름 (없으면 null). */
 export function explicit_command(line: string): string | null {

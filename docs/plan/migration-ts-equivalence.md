@@ -292,7 +292,7 @@ PES 코어는 TypeScript 하나다(결정 0016). 이 저장소에서 Python 이 
 
 - PES TS 코어는 외부 도구가 무엇을 요구하든 Python 을 **실행하지 않는다**. 호출하지 않고, 불러오지 않고, 필요로 하지 않는다. 코어 코드에 `child_process` 로 `pes.py`·`serve.py` 같은 Python 을 띄우는 경로는 없다.
 - legacy importer 는 옛(0.15) 데이터 **형식만 읽는다** — `project.json`·`library.json`·폴더 파일을 읽을 뿐 Python 을 실행하지 않는다. 시험 `tests/test_legacy_import_no_python.test.ts`가 이를 고정한다.
-- 0.15 진입점(`pes.py`·`serve.py`·`setup.py`)이 남아 있는 동안은 제품을 쓰려면 Python 이 필요하다(README 표). 그 진입점은 PR26 이 끝나면 없어진다.
+- PR26e(SEL-74)부터 제품을 쓰는 데 Python 이 필요 없다: 스킬·명령·에이전트 문서와 설치 스크립트는 `node …/scripts/pes.ts`·`setup.ts` 를 부르고(README 표의 필수는 Node.js 26 뿐), 0.15 진입점(`pes.py`·`serve.py`·`setup.py`)은 같은 PR 의 5단계에서 저장소에서 지운다.
 
 ## 10. 위험·모르는 점
 

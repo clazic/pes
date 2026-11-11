@@ -1,65 +1,38 @@
-// Dual-run harness core (SEL-70, PR26a): the same synthetic input goes to the 0.15 Python CLI ("py") or to the TypeScript
-// target ("ts"); stdout / stderr kind / exit / produced files / state DTO are normalised (N1~N10) and compared.
+// Compat harness core (SEL-70, PR26a; SEL-74: the 0.15 Python side is gone): a synthetic input goes to the TypeScript target ("ts":
+// `node [--permission --import ts_child_guard.ts] scripts/pes.ts | serve.ts | setup.ts`); stdout / stderr kind / exit / produced files / state DTO
+// are normalised (N1~N10) and compared with the FROZEN 0.15 records (tests/fixtures/compat/baseline/*.json — no 0.15 code runs any more).
 //
-// Targets
-//   py  python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(scripts/pes.py | serve.py | setup.py)"   (no PES_DB_CORE: pure v0.15)
-//   ts  node [--permission --import ts_child_guard.ts] scripts/pes.ts | serve.ts | setup.ts   (pes.ts: compat_ts.ts, SEL-71; serve.ts / setup.ts:
-//       compat_ts_srv.ts, SEL-72; a missing file answers "not_yet")
-//
-// A target that cannot run a command says so with { kind: "not_yet" } — a case is never skipped silently. The ratchet is PER CASE
-// (SEL-71): cases.json `ts.status` says whether the ts target must match 0.15 (implemented) or answers not_yet (and is not run at all,
-// scripts/*.ts or not — compat_cases.run_case). All three kinds are wired (cli → pes.ts, http → serve.ts, setup → setup.ts); `ts_gate`
-// only reports the missing file of a kind.
-//
-// Isolation: every child gets HOME, USERPROFILE and PES_HOME inside one temp folder (assert_isolated_env), and the py side runs
-// with a narrowed PATH when the case asks for it. The py child also runs the audit hook of tests/conftest.py (reads included,
-// see home_guard.ts). The Windows list: -X utf8, CRLF → LF, realpath.native, doubled backslashes, no `which` / `sh` / `tar`.
+// Isolation: every child gets HOME, USERPROFILE and PES_HOME inside one temp folder (assert_isolated_env), and runs with a narrowed
+// PATH when the case asks for it. The child runs behind the TS child guard (ts_child_guard.ts: real-home reads + hub ports). The Windows
+// list: CRLF → LF, realpath.native, doubled backslashes, no `which` / `sh` / `tar`.
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { account_home, assert_isolated_env, assert_no_real_path, assert_no_violation } from "./home_guard.ts";
-import { hub_block_code } from "./hub_block.ts";
+import { assert_isolated_env } from "./home_guard.ts";
 import { run_ts_cli, ts_cli_exists, ts_view } from "./compat_ts.ts";
 import { adapt_ts_doctor_stdout, adapt_ts_setup_stdout, run_ts_setup } from "./compat_ts_srv.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
-import { n1_json, n1_time, n2_paths, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
+import { n1_json, n1_time, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
 export const FIXTURES = join(REPO, "tests", "fixtures", "compat");
-export const PES_PY = join(REPO, "scripts", "pes.py");
-export const SERVE_PY = join(REPO, "scripts", "serve.py");
-export const SETUP_PY = join(REPO, "scripts", "setup.py");
 export const PES_TS = join(REPO, "scripts", "pes.ts");
 export const SERVE_TS = join(REPO, "scripts", "serve.ts");
 export const SETUP_TS = join(REPO, "scripts", "setup.ts");
-export const CONFTEST_PY = join(REPO, "tests", "conftest.py");
 
-export type Target = "py" | "ts";
+export type Target = "ts";
 export const STAGES = ["plan", "research", "analyze", "write", "verify", "publish"] as const;
 export type Stage = (typeof STAGES)[number];
 
-/** Absolute interpreter, resolved once with the parent PATH, so a narrowed PATH in the child cannot lose it. */
-export const PYTHON: string = (() => {
-  for (const name of ["python3", "python"]) {
-    const probe = spawnSync(name, ["-I", "-c", "import sys; print(sys.executable)"], { encoding: "utf8" });
-    if (probe.status === 0 && probe.stdout.trim() !== "") return probe.stdout.trim();
-  }
-  throw new Error("python3 not found: the 0.15 compat target needs Python 3.9+");
-})();
-
-/** `-I` (ignore PYTHON* and the user site) + `-X utf8` (UTF-8 stdio even on a Windows pipe; -I ignores PYTHONIOENCODING). */
-export const PY_FLAGS = ["-I", "-X", "utf8"] as const;
-
-export function target_from_env(fallback: Target = "py"): Target {
+export function target_from_env(fallback: Target = "ts"): Target {
   const value = process.env.PES_COMPAT_TARGET;
   if (value === undefined || value === "") return fallback;
-  assert.ok(value === "py" || value === "ts", `PES_COMPAT_TARGET must be py or ts (got ${value})`);
+  assert.ok(value === "ts", `PES_COMPAT_TARGET must be ts — the 0.15 Python target is gone (got ${value})`);
   return value;
 }
 
@@ -83,34 +56,6 @@ export function ts_gate(kind: CaseKind, _exists: (path: string) => boolean = exi
     setup: "scripts/setup.ts 없음 (SEL-72, PR26c)",
   };
   return { kind: "not_yet", reason: reasons[kind] };
-}
-
-// ---------------------------------------------------------------- the guarded Python child (audit hook of tests/conftest.py)
-let guard_source: string | undefined;
-/** The GUARD string of tests/conftest.py (the r'''…''' literal), read once. No second copy of the hook exists. */
-export function py_guard_source(): string {
-  if (guard_source === undefined) {
-    const match = /^GUARD = r'''\n([\s\S]*?)\n'''$/m.exec(readFileSync(CONFTEST_PY, "utf8").replace(/\r\n/g, "\n"));
-    assert.ok(match !== null, "tests/conftest.py: the GUARD literal moved — update py_guard_source");
-    guard_source = match[1] as string;
-  }
-  return guard_source;
-}
-
-/**
- * `python -I -X utf8 -c "<GUARD>; <extra>; runpy.run_path(argv[1], run_name='__main__')" <script> <args…>`: the child behaves as if
- * `python -I -X utf8 <script> <args…>` was run (argv, __file__, __main__, exit code), with the audit hook installed first.
- * `extra` is test-only code that runs after the hook and before the script (the sitecustomize-style injections).
- */
-export function guarded_script_argv(script: string, args: string[], extra = "", allow_hub_port?: number | readonly number[]): string[] {
-  // every guarded child also gets the hub block (no real PES hub is ever contacted); only `allow_hub_port` stays open
-  const code = `${py_guard_source()}\n${hub_block_code(allow_hub_port)}\n${extra}\nimport runpy as _pes_runpy, sys as _pes_sys\n_pes_sys.argv = _pes_sys.argv[1:]\n_pes_runpy.run_path(_pes_sys.argv[0], run_name="__main__")\n`;
-  return [...PY_FLAGS, "-c", code, script, ...args];
-}
-
-/** Variables that switch the hook on and name the home it protects. A case/option env may override them (the guard self-test does). */
-function guard_env(): Record<string, string> {
-  return { PES_TEST_GUARD: "1", PES_TEST_REAL_HOME: account_home() };
 }
 
 export interface RunResult {
@@ -138,7 +83,7 @@ export interface CompatCtx {
 }
 
 /** Variables that would make a child depend on the machine or on a real account. */
-const SCRUBBED = ["PES_OWNER", "PES_TOKEN", "PES_DB_CORE", "PES_API_BUDGET_TEST_OVERRIDE", "PES_LOCAL_SESSION_SECRET", "LAW_OC", "KOSIS_API_KEY", "VWORLD_API_KEY", "VWORLD_KEY", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"];
+const SCRUBBED = ["PES_HUB_PORTS", "PES_OWNER", "PES_TOKEN", "PES_DB_CORE", "PES_API_BUDGET_TEST_OVERRIDE", "PES_LOCAL_SESSION_SECRET", "LAW_OC", "KOSIS_API_KEY", "VWORLD_API_KEY", "VWORLD_KEY"];
 
 export const DEFAULT_PROJECT_NAME = "합성 프로젝트";
 
@@ -152,7 +97,7 @@ export function make_ctx(prefix = "pes-compat-"): CompatCtx {
   mkdirSync(narrow_bin, { recursive: true });
   const env: Record<string, string | undefined> = { ...home.env };
   for (const key of SCRUBBED) delete env[key];
-  // pes.py find_tool also looks below %LOCALAPPDATA% / %APPDATA% (Windows) — point them into the temp home, or an ego-browser
+  // the tool lookup also looks below %LOCALAPPDATA% / %APPDATA% (Windows) — point them into the temp home, or an ego-browser
   // installed on the developer's PC would change E14 / E15.
   if (process.platform === "win32") {
     env.LOCALAPPDATA = join(home_dir, "AppData", "Local");
@@ -172,100 +117,44 @@ export function make_ctx(prefix = "pes-compat-"): CompatCtx {
   };
 }
 
-export { HUB_BLOCK, hub_block_code } from "./hub_block.ts";
 
 export interface RunOptions {
-  /** test-only Python run after the audit hook and before the script (after HUB_BLOCK) */
-  extra?: string;
   /** the ONE hub port (of 8760~8775) that stays open — only for a test that starts its own stand-in hub; the other ports stay blocked */
   allow_hub_port?: number | readonly number[];
   env?: Record<string, string | undefined>;
-  /** replace PATH by the empty folder of the ctx (+ on Windows the system folder, which python needs) */
+  /** replace PATH by the empty folder of the ctx (+ on Windows the system folder) */
   narrow_path?: boolean;
   timeout_ms?: number;
   input?: string;
   cwd?: string;
 }
 
-function child_env(ctx: CompatCtx, options: RunOptions): NodeJS.ProcessEnv {
-  const env: Record<string, string | undefined> = { ...ctx.env, ...guard_env(), ...(options.env ?? {}) };
-  // A case / option env must never switch the audit hook off (only PES_TEST_REAL_HOME may be replaced — the guard self-test does).
-  assert.equal(env.PES_TEST_GUARD, "1", "a case env turned the home guard off (PES_TEST_GUARD)");
-  if (options.narrow_path === true) {
-    const extra = process.platform === "win32" ? [join(process.env.SystemRoot ?? "C:\\Windows", "System32")] : [];
-    env.PATH = [ctx.narrow_bin, ...extra].join(process.platform === "win32" ? ";" : ":");
-    env.Path = env.PATH;
-  }
-  for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
-  // PES_OWNER is the one variable a case may add on purpose (lock tests); everything else must be the isolated set.
-  // A case may leave PES_HOME unset on purpose (to see the default <HOME>/pes-projects); HOME is still checked.
-  assert_isolated_env({ ...env, PES_OWNER: undefined, PES_HOME: env.PES_HOME ?? join(env.HOME ?? "", "pes-projects") });
-  return env as NodeJS.ProcessEnv;
-}
-
-function spawn_python(script: string, args: string[], ctx: CompatCtx, options: RunOptions): RunResult {
-  const env = child_env(ctx, options);
-  const result = spawnSync(PYTHON, guarded_script_argv(script, args, options.extra ?? "", options.allow_hub_port), {
-    env,
-    cwd: options.cwd ?? ctx.home.root,
-    encoding: "utf8",
-    input: options.input,
-    timeout: options.timeout_ms ?? 60_000,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.error !== undefined) throw result.error;
-  // N7: a Windows text-mode pipe turns "\n" into "\r\n"; every comparison sees LF.
-  const out = { status: result.status, stdout: n7_text(result.stdout ?? ""), stderr: n7_text(result.stderr ?? "") };
-  assert_no_violation(out.stderr, `${relative(REPO, script)} ${args.join(" ")}`);
-  assert_no_real_path(out.stdout, "stdout");
-  assert_no_real_path(out.stderr, "stderr");
-  return out;
-}
-
 /** Runs one `pes` CLI command on a target. PES_OWNER may be passed through options.env (the lock tests need it). */
-export function run_pes(target: Target, ctx: CompatCtx, args: (string | number)[], options: RunOptions = {}): TargetRun {
+export function run_pes(_target: Target, ctx: CompatCtx, args: (string | number)[], options: RunOptions = {}): TargetRun {
   const argv = args.map(String);
-  if (target === "ts") {
-    // pes.ts missing → "not_yet" (a counted absence). Whether a CASE may run it is decided per case by cases.json (compat_cases).
-    if (!ts_cli_exists()) return ts_gate("cli", () => false);
-    const { PES_OWNER, ...rest } = options.env ?? {};
-    // doctor looks for external tools (a child process per tool, PATH narrowed by the case): the permission model must let it try —
-    // a denied spawn would hide the "tool missing" answer behind ERR_ACCESS_DENIED
-    const run = run_ts_cli(ctx, argv, { env: PES_OWNER === undefined ? rest : { ...rest, PES_OWNER }, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd, extra_read: options.narrow_path === true ? [ctx.narrow_bin] : [], allow_child_process: argv[0] === "doctor" });
-    return { kind: "ran", ...run, stdout: argv[0] === "doctor" ? adapt_ts_doctor_stdout(argv, run.stdout) : run.stdout };
-  }
-  return { kind: "ran", ...spawn_python(PES_PY, argv, ctx, options) };
+  const { PES_OWNER, ...rest } = options.env ?? {};
+  // doctor looks for external tools (a child process per tool, PATH narrowed by the case): the permission model must let it try —
+  // a denied spawn would hide the "tool missing" answer behind ERR_ACCESS_DENIED
+  const run = run_ts_cli(ctx, argv, { env: PES_OWNER === undefined ? rest : { ...rest, PES_OWNER }, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd, allow_hub_port: options.allow_hub_port, extra_read: options.narrow_path === true ? [ctx.narrow_bin] : [], allow_child_process: argv[0] === "doctor" });
+  return { kind: "ran", ...run, stdout: argv[0] === "doctor" ? adapt_ts_doctor_stdout(argv, run.stdout) : run.stdout };
 }
 
-/** Runs a short inline snippet with the same flags, isolation and audit hook (for the few in-process checks of tests/*.py that have no CLI form). */
-export function run_py_code(ctx: CompatCtx, code: string, args: string[] = [], options: RunOptions = {}): RunResult {
-  const env = child_env(ctx, options);
-  const result = spawnSync(PYTHON, [...PY_FLAGS, "-c", `${py_guard_source()}\n${code}`, ...args], { env, cwd: options.cwd ?? ctx.home.root, encoding: "utf8", timeout: options.timeout_ms ?? 60_000 });
-  if (result.error !== undefined) throw result.error;
-  const out = { status: result.status, stdout: n7_text(result.stdout ?? ""), stderr: n7_text(result.stderr ?? "") };
-  assert_no_violation(out.stderr, "inline python snippet");
-  return out;
+export function run_setup(_target: Target, ctx: CompatCtx, args: string[], options: RunOptions = {}): TargetRun {
+  if (!ts_available("setup")) return ts_gate("setup", () => false);
+  // guarded `node scripts/setup.ts` (permission allow-list without the real home + ts_child_guard.ts); a case env may add variables
+  // (PES_OWNER is not one of them: setup has no owner), the narrowed PATH hides every external tool from the child
+  const run = run_ts_setup(ctx, args, { env: options.env, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd });
+  return { kind: "ran", status: run.status, stdout: adapt_ts_setup_stdout(args, run.stdout), stderr: run.stderr };
 }
 
-export function run_setup(target: Target, ctx: CompatCtx, args: string[], options: RunOptions = {}): TargetRun {
-  if (target === "ts") {
-    if (!ts_available("setup")) return ts_gate("setup", () => false);
-    // guarded `node scripts/setup.ts` (permission allow-list without the real home + ts_child_guard.ts); a case env may add variables
-    // (PES_OWNER is not one of them: setup has no owner), the narrowed PATH hides every external tool from the child
-    const run = run_ts_setup(ctx, args, { env: options.env, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd });
-    return { kind: "ran", status: run.status, stdout: adapt_ts_setup_stdout(args, run.stdout), stderr: run.stderr };
-  }
-  return { kind: "ran", ...spawn_python(SETUP_PY, args, ctx, options) };
-}
-
-/** py-only convenience for the ported pytest files: the 0.15 CLI, exit / stdout / stderr, never "not_yet". */
+/** Convenience for the ported tests: the CLI (scripts/pes.ts), exit / stdout / stderr, never "not_yet". */
 export function pes(ctx: CompatCtx, ...args: (string | number)[]): RunResult & { code: number | null; out: string; err: string } {
-  const run = run_pes("py", ctx, args) as { kind: "ran" } & RunResult;
+  const run = run_pes("ts", ctx, args) as { kind: "ran" } & RunResult;
   return { ...run, code: run.status, out: run.stdout, err: run.stderr };
 }
 
 export function pes_as(ctx: CompatCtx, owner: string, ...args: (string | number)[]): ReturnType<typeof pes> {
-  const run = run_pes("py", ctx, args, { env: { PES_OWNER: owner } }) as { kind: "ran" } & RunResult;
+  const run = run_pes("ts", ctx, args, { env: { PES_OWNER: owner } }) as { kind: "ran" } & RunResult;
   return { ...run, code: run.status, out: run.stdout, err: run.stderr };
 }
 
@@ -282,6 +171,16 @@ export function read_json(path: string): any {
 
 export function project_json(project: string): any {
   return read_json(join(project, "project.json"));
+}
+
+/**
+ * The 0.15-shaped state (what project.json held) of a project the ts CLI created, read from the database of the context. SEL-74: pes.ts writes the
+ * database, not project.json — this is the way a test looks at the state after running commands.
+ */
+export function project_state(ctx: CompatCtx, project: string): any {
+  const view = ts_view({ env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir }, basename(project));
+  assert.ok(view !== undefined, `the database has no project ${basename(project)}`);
+  return view.project;
 }
 
 export function edit_project(project: string, mutate: (data: any) => void): any {
@@ -438,8 +337,8 @@ export function dto_from_project_json(data: any, library?: any): StateDto {
   };
 }
 
-export function read_state_dto(target: Target, ctx: CompatCtx, project: string): ({ kind: "ran"; dto: StateDto } | { kind: "not_yet"; reason: string }) {
-  if (target === "ts") {
+export function read_state_dto(_target: Target, ctx: CompatCtx, project: string): ({ kind: "ran"; dto: StateDto } | { kind: "not_yet"; reason: string }) {
+  {
     if (!ts_cli_exists()) return { kind: "not_yet", reason: "TS 상태 DTO 는 DB 에서 만든다 — 대상 CLI(scripts/pes.ts)가 없다" };
     // D02: the DB is the source (slug = the folder name, the 0.15 `pdir` rule); a folder the DB does not serve is read as the old project.json
     const view = ts_view({ env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir }, basename(project));
@@ -450,12 +349,6 @@ export function read_state_dto(target: Target, ctx: CompatCtx, project: string):
     const library_file = join(project, "library.json");
     return { kind: "ran", dto: dto_from_project_json(legacy, existsSync(library_file) ? read_json(library_file) : undefined) };
   }
-  const data = project_json(project);
-  const library_path = join(project, "library.json");
-  const library = existsSync(library_path) ? read_json(library_path) : undefined;
-  const unmapped = unmapped_keys(data);
-  assert.deepEqual(unmapped, [], "0.15 project.json keys the state DTO neither maps nor excludes — add them to TOP_KEYS / STAGE_KEYS / ITEM_KEYS or EXCLUDED_KEYS");
-  return { kind: "ran", dto: dto_from_project_json(data, library) };
 }
 
 /** DTO → N1/N2 normalised plain object, ready for deepEqual against a stored baseline. */
@@ -478,10 +371,14 @@ export const KNOWN_DIFFS: Record<string, KnownDiff> = {
   D11: { id: "D11", title: "0.15 Python traceback → 분명한 한국어 한 줄 오류 (PR26a 관찰 3건, SEL-71 결정)", reason: "0.15 는 없는 결과 파일(merge·ask)·깨진 project.json·`current` 없는 큰 프로젝트(status)에서 traceback 으로 죽는다. 이것은 결함이지 계약이 아니다: ts 는 같은 종료 코드와 스택 추적 없는 한국어 한 줄 오류를 낸다(stdout 은 비교하지 않는다). 결함을 고쳐 성공해도 되는 단계는 표에 `fixable` 로 적는다", traceback_fix: { fixable: { E12: [["status", "{T}/large"]] } } },
   D13: { id: "D13", title: "순서 없는 approve · 승인된 단계의 round-start 는 거절 (SEL-71 1차 리뷰 필수 1, 선택지 b)", reason: "0.15 는 앞 단계가 승인되지 않아도 approve 를 받고, 승인된 단계에도 round-start 로 라운드를 +1 한다. 스킬은 승인을 순서대로 하고 승인된 단계는 reopen 뒤에 round-start 한다(skills/core/SKILL.md). DB 보장(앞 단계 승인 필요·승인된 단계 잠금)을 CLI 호환 때문에 풀지 않으므로 ts 는 exit 1 과 스택·영어 code 없는 한국어 한 줄로 거절하고 아무것도 바꾸지 않는다. 그 단계의 0.15 결과(exit 0)는 기준값에, ts 의 기대 문구는 ts_steps 에 둘 다 고정하고, 끝 상태는 0.15 를 그 단계 없이 돌린 기록(baseline.ts_end)과 같아야 한다", ts_steps: { X08: [{ step: ["approve", "{P}", "research"], exit: 1, stdout: [], stderr: ["approve: 앞 단계(기획)가 아직 승인되지 않았습니다"] }], X09: [{ step: ["round-start", "{P}", "plan"], exit: 1, stdout: [], stderr: ["round-start: 기획은 이미 승인됐습니다 — 먼저 reopen 하세요"] }] } },
   D12: { id: "D12", title: "setup 의 Python 행·실행 명령 표기 (SEL-72)", reason: "PES TS 는 Python 을 쓰지 않는다(migration-ts-equivalence 9.1): `setup.ts check` 에는 python 행이 없고(node 행이 런타임 점검), 사용법 첫 줄은 `사용: node scripts/setup.ts <명령>` 이다. 그 밖의 행·상태 이름·그룹·종료 코드·문구는 0.15 와 같아야 한다 — 하네스가 두 사실을 먼저 단언한 뒤 0.15 표기로 되돌려 한 번에 견준다 (compat_ts_srv.adapt_ts_setup_stdout)" },
+  D15: { id: "D15", title: "pes.ts 사용법 쪽에 새 줄이 있다 (SEL-74 leader 결정 2026-11-12)", reason: "0.15 의 사용법에는 없던 명령이 TS 에 생겼다: 에이전트용 DB 전용 5명령(context·claim·submit·wait·complete)과 옛 폴더를 옮기는 migrate(<dir>·--all). 사용법 쪽(`pes.ts` 인자 없음·모르는 명령)은 그 7줄만 정확히 빼고 0.15 기준값과 한 글자까지 같아야 한다 — 다른 줄이 하나라도 다르면 여전히 실패한다(compat_cases.strip_d15, 줄 표는 test_pes_ts_contract 의 'D15' 시험이 고정한다)" },
+  D16: { id: "D16", title: "/whoami 에 pid 가 더해졌다 (SEL-74 leader 결정 2026-11-12)", reason: "TS 서버의 /whoami 는 0.15 의 {root, single} 에 서버 프로세스의 pid 를 더한다 — 서버 안전(pes stop 이 기록 파일의 pid 를 이 값과 대조하고, 무응답 자식을 정리한다, SEL-74 1~2단계). 하네스는 pid 가 양의 정수임을 단언한 뒤 지우고 나머지(root·single)를 0.15 기준값과 견준다" },
+  D17: { id: "D17", title: "pes watch 는 없는 프로젝트를 거절한다 (SEL-74 leader 결정 2026-11-12)", reason: "0.15 의 `watch <dir>` 는 폴더가 있는지 보지 않고 `tail -n0 -F <dir>/feedback.log | grep --line-buffered FEEDBACK` 한 줄만 찍고 exit 0 이다 — 없는 이름이나 철자 틀린 경로도 그대로 받는다(Monitor 가 영영 오지 않는 파일을 기다린다). TS 는 DB 에도 폴더의 project.json 에도 없는 프로젝트를 exit 1 과 한국어 한 줄(`project.json 없음: <경로>`)로 거절하고 stdout 을 비우며 아무것도 만들지 않는다. 있는 프로젝트(DB 의 것, 옮기지 않은 옛 폴더)의 출력은 0.15 와 한 글자도 다르지 않다. 0.15 기준값 케이스에는 없는 입력이라(E-사례 표는 있는 프로젝트만 쓴다) 자기 시험으로 고정한다: test_pes_ts_read_serve 'D17'" },
+  D18: { id: "D18", title: "홈 `/` 는 요청 때 짓는 허브다 (SEL-74 leader 결정 2026-11-12)", reason: "0.15 의 `/` 는 `pes hub` 가 써 둔 홈 index.html 파일을 그대로 냈다. TS 서버는 PR18 에 따라 허브(프로젝트 목록)도 요청 때 DB 기준으로 짓는다 — DB 가 비어 있고 옛 폴더뿐이어도 허브를 짓는다. 하네스(hub_paths)는 그 단계의 상태·Content-Type·Cache-Control 이 0.15 기준값과 같고, 본문이 허브(제목 PES 프로젝트·서빙하는 프로젝트 synthetic 나열)임을 단언한 뒤에만 기준 본문을 받아들인다. 사례 E13" },
   D14: { id: "D14", title: "옛 0.15 폴더(DB 로 안 옮긴 것)는 TS 에서 읽기 전용 (SEL-77 leader 결정 2026-11-11)", reason: "TS 는 project.json 을 쓰지 않는다(D02). 그래서 DB 로 옮기지 않은 옛 폴더에서 status·digest·show·pending 같은 읽기 명령은 0.15 와 같게 답하지만, render·report·assemble·web 같은 생성 명령은 exit 1 과 한국어 한 줄('이 프로젝트는 아직 새 형식으로 옮기지 않았습니다 — 먼저 이전하세요')로 거절하고 폴더의 바이트·mtime 을 바꾸지 않는다. 0.15 는 같은 명령으로 project.json 과 보고서를 바로 갱신한다" },
 };
 
-// ---------------------------------------------------------------- HTTP server (serve.py) harness
+// ---------------------------------------------------------------- HTTP helpers
 export function free_port(): Promise<number> {
   return new Promise((resolve_port, reject) => {
     const server = createServer();
@@ -501,151 +398,9 @@ export interface HttpResult {
   json(): any;
 }
 
-export interface ServeOptions {
-  /** executable instead of the python interpreter (a missing one exercises the spawn-error path) */
-  command?: string;
-  /** server script instead of scripts/serve.py (a missing one makes python exit at once) */
-  script?: string;
-  /** whoami root the readiness probe expects (default: the root given to the constructor) */
-  expected_root?: string;
-  ready_timeout_ms?: number;
-  /** test-only Python code run in the child after the audit hook and before serve.py (the old sitecustomize injection; -I stays) */
-  sitecustomize?: string;
-  extra_env?: Record<string, string | undefined>;
-}
+// (ServeProcess — the harness that started the 0.15 serve.py — is gone: scripts/serve.ts is started by TsServeProcess in compat_ts_srv.ts.)
 
-export class ServeProcess {
-  port = 0;
-  proc: ChildProcess | undefined;
-  log = "";
-  /** every child this object ever spawned (start-failure tests check that all of them are gone) */
-  readonly children: ChildProcess[] = [];
-  private spawn_error: Error | undefined;
-  readonly ctx: CompatCtx;
-  readonly root: string;
-  readonly options: ServeOptions;
-  constructor(ctx: CompatCtx, root: string, options: ServeOptions = {}) {
-    this.ctx = ctx;
-    this.root = root;
-    this.options = options;
-  }
-
-  origin(): string {
-    return `http://127.0.0.1:${this.port}`;
-  }
-
-  async start(): Promise<this> {
-    const errors: string[] = [];
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      this.port = await free_port();
-      this.log = "";
-      const env: Record<string, string | undefined> = { ...this.ctx.env, ...guard_env(), ...(this.options.extra_env ?? {}) };
-      assert.equal(env.PES_TEST_GUARD, "1", "a server env turned the home guard off (PES_TEST_GUARD)");
-      env.PYTHONIOENCODING = "utf-8";
-      for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
-      assert_isolated_env({ ...env, PES_HOME: env.PES_HOME ?? join(env.HOME ?? "", "pes-projects") });
-      this.spawn_error = undefined;
-      // -I always stays: the test-only injection (options.sitecustomize) runs inside the -c code, after the audit hook and before
-      // serve.py, so no PYTHONPATH / sitecustomize.py is needed any more.
-      const argv = guarded_script_argv(this.options.script ?? SERVE_PY, [this.root, String(this.port)], this.options.sitecustomize ?? "");
-      const proc = spawn(this.options.command ?? PYTHON, argv, { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"], cwd: this.ctx.home.root });
-      this.proc = proc;
-      this.children.push(proc);
-      proc.once("error", (error) => {
-        this.spawn_error = error;
-      });
-      this.proc.stdout?.on("data", (chunk: Buffer) => (this.log += chunk.toString("utf8")));
-      this.proc.stderr?.on("data", (chunk: Buffer) => (this.log += chunk.toString("utf8")));
-      if (await this.wait_ready()) return this;
-      assert_no_violation(this.log, "serve.py start-up");
-      errors.push(`port ${this.port}: readiness timeout\n${this.log}`);
-      await this.stop();
-    }
-    throw new Error(`serve.py did not start after 3 attempts:\n${errors.join("\n")}`);
-  }
-
-  private async wait_ready(): Promise<boolean> {
-    const deadline = Date.now() + (this.options.ready_timeout_ms ?? 15_000);
-    while (Date.now() < deadline) {
-      if (this.spawn_error !== undefined || this.proc === undefined || this.proc.exitCode !== null || this.proc.signalCode !== null) return false;
-      try {
-        const response = await fetch(`${this.origin()}/whoami`, { signal: AbortSignal.timeout(500) });
-        const info = (await response.json()) as { root?: string; single?: boolean };
-        // A port taken by another PES home's server is not "ready".
-        if (info.single === true && info.root !== undefined && same_path(info.root, this.options.expected_root ?? this.root)) return true;
-      } catch {
-        // not listening yet
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return false;
-  }
-
-  async stop(): Promise<void> {
-    const proc = this.proc;
-    this.proc = undefined;
-    if (proc === undefined || proc.exitCode !== null || proc.signalCode !== null || this.spawn_error !== undefined) {
-      assert_no_violation(this.log, "serve.py");
-      return;
-    }
-    await new Promise<void>((done) => {
-      const timer = setTimeout(() => {
-        proc.kill("SIGKILL");
-      }, 10_000);
-      proc.once("exit", () => {
-        clearTimeout(timer);
-        done();
-      });
-      proc.kill();
-    });
-    assert_no_violation(this.log, "serve.py");
-  }
-
-  async restart(): Promise<this> {
-    await this.stop();
-    return this.start();
-  }
-
-  async request(path: string, init: { method?: string; body?: string | Uint8Array; headers?: Record<string, string>; redirect?: "manual" | "follow" } = {}): Promise<HttpResult> {
-    const response = await fetch(`${this.origin()}${path}`, {
-      method: init.method ?? "GET",
-      body: init.body as any,
-      headers: init.headers,
-      redirect: init.redirect ?? "manual",
-      signal: AbortSignal.timeout(30_000),
-    });
-    const body = Buffer.from(await response.arrayBuffer());
-    const headers: Record<string, string> = {};
-    response.headers.forEach((value, key) => (headers[key.toLowerCase()] = value));
-    return {
-      status: response.status,
-      headers,
-      body,
-      text: () => body.toString("utf8"),
-      json: () => JSON.parse(body.toString("utf8")),
-    };
-  }
-
-  /** POST a JSON object (or raw bytes); `origin` null sends no Origin header. */
-  async post(path: string, payload: unknown, origin: string | null = this.origin()): Promise<HttpResult> {
-    const body = payload instanceof Uint8Array ? payload : Buffer.from(JSON.stringify(payload), "utf8");
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (origin !== null) headers.origin = origin;
-    return this.request(path, { method: "POST", body, headers });
-  }
-}
-
-function same_path(a: string, b: string): boolean {
-  const norm = (value: string): string => value.split("\\").join("/").replace(/\/+$/, "").toLowerCase();
-  if (norm(a) === norm(b)) return true;
-  try {
-    return norm(realpathSync.native(a)) === norm(realpathSync.native(b));
-  } catch {
-    return false;
-  }
-}
-
-/** The home layout of tests/test_serve.py::_make_home, in the isolated PES_HOME. */
+/** The synthetic home layout the server tests serve (one project folder + the home pages), in the isolated PES_HOME. */
 export function make_serve_home(ctx: CompatCtx): string {
   mkdirSync(ctx.pes_home, { recursive: true });
   const root = realpathSync.native(ctx.pes_home);

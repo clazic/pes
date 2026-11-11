@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, type CliResult } from "./helpers/cli_write_env.ts";
-import { expect_staging, ok as ok_read, run_py, write_legacy } from "./helpers/cli_read_env.ts";
+import { expect_staging, ok as ok_read, run_cli, write_legacy } from "./helpers/cli_read_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { legacy } from "./helpers/legacy_env.ts";
 import { item_fields, ok, with_mode, type Mode } from "./helpers/state_modes.ts";
@@ -90,7 +90,7 @@ test("v0.15 가져온 기획 topic 의 reuse: 활성화 뒤 DB 모드 approve pl
     await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, "r1-2-reuse"), pes_home: pes_home_of(c.env) });
 
     const py = (args: string[]): CliResult => {
-      const r = run_py(c, args, { flag: "1", extra: { PES_OWNER: "sess-r12-reuse" } });
+      const r = run_cli(c, args, { extra: { PES_OWNER: "sess-r12-reuse" } });
       return { status: r.status, stdout: lf(r.stdout), stderr: lf(r.stderr) };
     };
     const shown = ok_read(py(["show", slug, "plan", "--fields", "title,kind,reuse"]), "show plan");
@@ -220,23 +220,4 @@ test("user_links 가 null·문자열·객체·숫자이면 스택 없이 한국�
   await with_mode("on", bad_links_scenario);
 });
 
-test("항목에 저장된 user_links 가 null 이어도(손으로 고친 project.json) merge 가 스택으로 죽지 않는다 [플래그 없음]", async () => {
-  await with_mode("off", async (m) => {
-    ok(m.py(["round-start", m.slug, "plan"]), "round-start");
-    ok(m.py(["merge", m.slug, "plan", m.json("seed.json", { id: 1, kind: "topic", title: "널 링크", question: "q" })]), "seed");
-    const { readFileSync, writeFileSync } = await import("node:fs");
-    const path = join(m.folder, "project.json");
-    const p = JSON.parse(readFileSync(path, "utf8"));
-    p.stages.plan.items.find((x: any) => x.id === 1).user_links = null;
-    writeFileSync(path, JSON.stringify(p), "utf8");
-    const res = m.py(["merge", m.slug, "plan", m.json("add.json", { id: 1, user_links: [{ url: "https://u.example.test/n", memo: "m" }] })]);
-    assert.doesNotMatch(res.stderr, /Traceback|TypeError/, `스택 없이\n${res.stderr}`);
-    if (res.status === 0) {
-      const it = item_fields(m, "plan", 1, "user_links");
-      assert.equal(it.user_links.length, 1, "null 이던 칸이 목록이 되고 새 줄이 붙는다");
-      assert.equal(it.user_links[0].url, "https://u.example.test/n");
-    } else {
-      assert.match(res.stderr + res.stdout, HANGUL, "거부라면 한국어");
-    }
-  });
-});
+// (the test "항목에 저장된 user_links 가 null 이어도(손으로 고친 project.json) merge 가 스택으로 죽지 않는다" is gone: a hand-edited project.json that the CLI then writes into does not exist for pes.ts — the state is the database, and a null user_links of an OLD project.json is read by the importer: test_legacy_import_final1·test_legacy_import_r1.)

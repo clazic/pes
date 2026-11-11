@@ -16,7 +16,7 @@ import { join, relative } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, SLUG, type CliEnv } from "./helpers/cli_write_env.ts";
-import { run_py } from "./helpers/cli_read_env.ts";
+import { run_cli } from "./helpers/cli_read_env.ts";
 import { sha256_of } from "./helpers/legacy_env.ts";
 
 function snapshot(root: string): Record<string, string> {
@@ -87,7 +87,7 @@ for (const kind of ["wal", "journal"] as const) {
       assert.ok(before[sidecar] !== undefined && !before[sidecar]!.startsWith("0:"), `시작 상태: 비어 있지 않은 ${sidecar} 가 남아 있다 (${Object.keys(before)})`);
       for (const args of [["doctor", "--json"], ["doctor"], ["doctor", SLUG, "--json"], ["doctor", SLUG]]) {
         const label = args.join(" ");
-        const res = run_py(c, args);
+        const res = run_cli(c, args);
         assert.doesNotMatch(res.stderr, /Traceback/, label);
         assert.deepEqual(snapshot(dot_pes), before, `${label}: pes.db·-wal·-shm·-journal 의 존재·바이트·mtime 이 그대로 (DB 를 열어 복구하지 않았다)`);
         if (args.includes("--json")) {
@@ -118,7 +118,7 @@ test("F1c 0바이트 pes.db-wal 은 남은 흔적이 아니다: doctor 는 DB �
     writeFileSync(join(dot_pes, "pes.db-wal"), "");
     const db_before = sha256_of(readFileSync(join(dot_pes, "pes.db")));
     for (const args of [["doctor", "--json"], ["doctor", SLUG, "--json"]]) {
-      const res = run_py(c, args);
+      const res = run_cli(c, args);
       assert.doesNotMatch(res.stderr, /Traceback/);
       const rows = JSON.parse(res.stdout) as Row[];
       const db_rows = rows.filter((r) => r.group === "데이터베이스");
