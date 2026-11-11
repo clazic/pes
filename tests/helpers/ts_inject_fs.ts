@@ -138,14 +138,19 @@ if (cfg.fake_clock === true) {
   const real_set_timeout = globalThis.setTimeout.bind(globalThis);
   const fake_set_timeout = ((callback: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
     sleeping(ms);
-    return real_set_timeout(callback, 0, ...rest);
+    // setImmediate, not setTimeout(…, 0): on Windows a 0 ms timer still waits for the ~15 ms timer tick, so 1000 synthetic
+    // sleeps cost ~11 s of real time and a 30 s synthetic deadline test ran out (PR #58 windows run 43091570453).
+    void real_set_timeout;
+    return setImmediate(callback, ...rest) as unknown as ReturnType<typeof setTimeout>;
   }) as unknown as typeof setTimeout;
   globalThis.setTimeout = fake_set_timeout;
   (timers as unknown as { setTimeout: typeof setTimeout }).setTimeout = fake_set_timeout;
   const real_promises_timeout = timersp.setTimeout.bind(timersp);
   (timersp as unknown as { setTimeout: typeof timersp.setTimeout }).setTimeout = ((ms?: number, value?: unknown, options?: unknown) => {
     sleeping(ms);
-    return real_promises_timeout(0, value as never, options as never);
+    void real_promises_timeout;
+    void options;
+    return new Promise((done) => setImmediate(() => done(value as never)));
   }) as typeof timersp.setTimeout;
   const real_wait = Atomics.wait.bind(Atomics);
   (Atomics as unknown as { wait: unknown }).wait = (array: Int32Array, index: number, value: number, timeout?: number): string => {

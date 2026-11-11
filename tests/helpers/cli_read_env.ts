@@ -80,6 +80,9 @@ export function normalize(text: string, roots: string[]): string {
   let out = text;
   const all = roots.flatMap(root_forms);
   for (const root of all.sort((x, y) => y.length - x.length)) out = out.split(root).join("<ROOT>");
+  // a path under a root is printed with the native separator (Windows: '\\'); the 0.15 records were made on macOS ('/').
+  // Only the part right after <ROOT> is folded — the same path, written two ways (PR #58 windows run 43091570453).
+  out = out.replace(/<ROOT>[^\s"'`,)\]]*/g, (path) => path.replace(/\\\\?/g, "/"));
   return out
     .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?/g, "<TS>")
     .replace(/\d{8}-\d{6}/g, "<STAMP>")
