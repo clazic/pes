@@ -216,12 +216,14 @@ export function build_project_view(
   // A round the CLI opened only to seal an `approve` that came without one (v0.15 approved any stage) is not a round of the work:
   // it has no number of its own, so the stage shows the rounds a person started (round_display, 0 = none).
   const round_no_of = new Map<string, number>();
+  const implicit_rounds = new Set<string>();
   const rounds_by_stage = new Map<string, Array<{ no: number; start: number | null }>>();
   const seen_visible = new Map<string, number>();
   for (const row of rounds) {
     const visible = seen_visible.get(row.stage_id) ?? 0;
     if (row.implicit !== null) {
       round_no_of.set(row.id, visible);
+      implicit_rounds.add(row.id);
       continue;
     }
     seen_visible.set(row.stage_id, visible + 1);
@@ -232,6 +234,13 @@ export function build_project_view(
   }
   const stage_key_of = new Map<string, string>();
   for (const stage of stages) stage_key_of.set(stage.id, stage.key);
+  // where the newest round a person started began (the commit's rowid): what `set changes` wrote before it was cleared by that round-start
+  const last_round_start = new Map<string, number>();
+  for (const stage of stages) {
+    const list = rounds_by_stage.get(stage.id) ?? [];
+    const last = list[list.length - 1];
+    if (last !== undefined && last.start !== null) last_round_start.set(stage.key, last.start);
+  }
 
   const p: Dict = {
     pes: 1,
@@ -338,7 +347,10 @@ export function build_project_view(
 
   const suggestions = new Map<string, string[]>();
   const notes: Array<{ rowid: number; note: Dict }> = [];
-  const qas = new Map<string, Array<{ rowid: number; qa: Dict }>>();
+  const qas = new Map<string, Array<{ rowid: number; tx: number; qa: Dict }>>();
+  // `set review` values by stage: a reopen after the value cleared it (v0.15 reopen set review to null)
+  const set_reviews = new Map<string, { tx: number; value: unknown }>();
+  const reapprovals: Array<{ key: string; tx: number; at: number }> = [];
   const review_logs = new Map<string, Array<{ rowid: number; log: Dict }>>();
   const report_versions: Array<{ stage_key: string | null; version_id: string; role: string; round: number; meta: Dict; rowid: number }> = [];
   const library_items: Dict[] = [];
@@ -375,11 +387,19 @@ export function build_project_view(
       if (!("legacy_id" in extra) && !("legacy_id" in meta)) continue;
     }
     if (kind === "review") {
+      if (meta.role === "reapproval" && stage_key !== null) {
+        reapprovals.push({ key: stage_key, tx: num(row.tx_rowid), at: num(row.created_at) });
+        continue;
+      }
       // `pes set`: one value per (stage or project, field), kept in the newest version of an invisible review artifact (cli_bridge set_field)
       if ((meta.role === "stage_field" || meta.role === "project_field") && typeof meta.field === "string") {
         // only the seven fields `set` writes are taken: a review artifact naming any other field (current, stages, topic ...) shows nothing
         if (meta.role === "stage_field" && stage_key !== null && SET_STAGE_FIELDS.has(meta.field)) {
+          const tx = num(row.tx_rowid);
+          // v0.15 round-start emptied `changes` (the old lines went to the history, below): a value written before the stage's newest round began is gone
+          if (meta.field === "changes" && tx < (last_round_start.get(stage_key) ?? -1)) continue;
           (p.stages[stage_key] as Dict)[meta.field] = meta.value;
+          if (meta.field === "review") set_reviews.set(stage_key, { tx, value: meta.value });
           if (stage_key === "plan" && meta.field === "settings" && is_dict(meta.value)) p.settings = meta.value;
         } else if (meta.role === "project_field" && SET_PROJECT_FIELDS.has(meta.field)) {
           p[meta.field] = meta.value;
@@ -388,7 +408,7 @@ export function build_project_view(
       }
       if (stage_key !== null && truthy(meta.qa)) {
         const list = qas.get(stage_key) ?? [];
-        list.push({ rowid, qa: record(meta.qa) });
+        list.push({ rowid, tx: num(row.tx_rowid), qa: record(meta.qa) });
         qas.set(stage_key, list);
       } else if (stage_key !== null && truthy(meta.review_log)) {
         const list = review_logs.get(stage_key) ?? [];
@@ -545,14 +565,41 @@ export function build_project_view(
   for (const row of db.all<{ id: string; round_id: string | null }>("SELECT id, round_id FROM snapshots WHERE project_id = ?", project_id)) {
     if (row.round_id !== null && round_no_of.has(row.round_id)) snapshot_round.set(row.id, round_no_of.get(row.round_id) as number);
   }
-  for (const event of db.all<{ type: string; payload: string; at: bigint | null; quiet: bigint | null }>(
+  // every value `set changes` wrote, oldest first: the one a round-start found in place goes to the history line of the round that ended
+  const changes_written = new Map<string, Array<{ tx: number; value: unknown }>>();
+  if ([...rounds_by_stage.values()].some((list) => list.length >= 2)) {
+    for (const row of db.all<{ stage_id: string; metadata_json: string; tx_rowid: bigint }>(
+      `SELECT a.stage_id AS stage_id, v.metadata_json AS metadata_json, mc.rowid AS tx_rowid
+         FROM artifacts a
+         JOIN artifact_versions v ON v.project_id = a.project_id AND v.object_id = a.object_id
+         JOIN object_versions ov ON ov.project_id = v.project_id AND ov.id = v.version_id
+         JOIN mutation_commits mc ON mc.project_id = ov.project_id AND mc.id = ov.tx_id
+        WHERE a.project_id = ? AND a.kind = 'review' AND a.stage_id IS NOT NULL
+          AND json_extract(v.metadata_json, '$.role') = 'stage_field' AND json_extract(v.metadata_json, '$.field') = 'changes'
+        ORDER BY ov.rowid`,
+      project_id,
+    )) {
+      const key = stage_key_of.get(row.stage_id);
+      if (key === undefined) continue;
+      const list = changes_written.get(key) ?? [];
+      list.push({ tx: num(row.tx_rowid), value: record(parse(row.metadata_json, {})).value });
+      changes_written.set(key, list);
+    }
+  }
+  const last_reopen = new Map<string, number>();
+  // history lines in the order the commits happened: the events' own and the re-approvals (an `approve` of a stage that stays approved
+  // writes an invisible review artifact and no approval — the database keeps one approval per approved state — but 0.15 wrote a line each time)
+  const hist: Array<{ key: string; tx: number; line?: string; approved_round?: number; stamp?: string }> = [];
+  for (const entry of reapprovals) hist.push({ key: entry.key, tx: entry.tx, stamp: local_stamp(entry.at) });
+  for (const event of db.all<{ type: string; payload: string; at: bigint | null; tx_rowid: bigint | null; quiet: bigint | null }>(
     `SELECT e.type AS type, e.payload AS payload,
             (SELECT mc.created_at FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id) AS at,
+            (SELECT mc.rowid FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id) AS tx_rowid,
             (SELECT 1 FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id
                 AND mc.action = 'stage.reopened' AND json_extract(mc.result_json, '$.quiet') = 1) AS quiet
        FROM events e
       WHERE e.project_id = ?
-        AND (e.type IN ('legacy.processed', 'input.marked_processed', 'legacy.history', 'stage.reopened')
+        AND (e.type IN ('legacy.processed', 'input.marked_processed', 'legacy.history', 'stage.reopened', 'round.started')
              OR (e.type = 'stage.approved'
                  AND EXISTS (SELECT 1 FROM approvals ap WHERE ap.project_id = e.project_id AND ap.id = json_extract(e.payload, '$.approval_id') AND ap.origin = 'new')))
       ORDER BY e.rowid`,
@@ -565,17 +612,58 @@ export function build_project_view(
       const st = key === undefined ? undefined : (p.stages[key] as Dict | undefined);
       if (st === undefined || (event.type === "stage.reopened" && event.quiet !== null)) continue;
       const stamp = local_stamp(num(event.at));
-      if (event.type === "stage.reopened") st.history.push(`다시 열기 ${stamp}`);
-      else st.history.push(`승인 ${stamp} (R${typeof payload.snapshot_id === "string" ? (snapshot_round.get(payload.snapshot_id) ?? 0) : 0})`);
+      if (event.type === "stage.reopened") {
+        hist.push({ key: key as string, tx: num(event.tx_rowid), line: `다시 열기 ${stamp}` });
+        if (key !== undefined) last_reopen.set(key, num(event.tx_rowid));
+      } else {
+        const approved_round = typeof payload.snapshot_id === "string" ? (snapshot_round.get(payload.snapshot_id) ?? 0) : 0;
+        hist.push({ key: key as string, tx: num(event.tx_rowid), line: `승인 ${stamp} (R${approved_round})`, approved_round, stamp });
+      }
+      continue;
+    }
+    if (event.type === "round.started") {
+      // v0.15 round-start: the lines `set changes` left for the round that just ended become one history line (the body is in snapshots/)
+      const stage_id = typeof payload.stage_id === "string" ? payload.stage_id : "";
+      const key = stage_key_of.get(stage_id);
+      const round_id = typeof payload.round_id === "string" ? payload.round_id : "";
+      const now_no = round_no_of.get(round_id) ?? 0;
+      if (key === undefined || implicit_rounds.has(round_id) || now_no < 2) continue;
+      const ended = (rounds_by_stage.get(stage_id) ?? [])[now_no - 2];
+      const here = num(event.tx_rowid);
+      const written = (changes_written.get(key) ?? []).filter((w) => w.tx < here && w.tx > (ended?.start ?? -1));
+      const value = written[written.length - 1]?.value;
+      if (!Array.isArray(value) || value.length === 0) continue;
+      const labels = value.map((c) => String(c).split(":")[0]?.trim() ?? "");
+      const verdicts = (qas.get(key) ?? []).filter((q) => q.tx < here && (Number(q.qa.round) || 0) === now_no - 1);
+      const verdict = verdicts[verdicts.length - 1];
+      const stamp = local_stamp(num(event.at));
+      hist.push({
+        key,
+        tx: here,
+        line: `R${now_no - 1} (${stamp}): ${labels.join(" · ")}${verdict === undefined ? "" : ` / 독립 검토 ${String(verdict.qa.verdict ?? "None")}`} — 상세 snapshots/${key}-R${now_no - 1}.json`,
+      });
       continue;
     }
     if (event.type === "legacy.processed" && typeof payload.name === "string") processed.add(payload.name);
     else if (event.type === "input.marked_processed" && Array.isArray(payload.names)) {
       for (const name of payload.names) if (typeof name === "string") processed.add(name);
     } else if (event.type === "legacy.history" && typeof payload.stage === "string" && typeof payload.line === "string") {
-      const st = p.stages[payload.stage] as Dict | undefined;
-      if (st !== undefined) st.history.push(payload.line);
+      if (p.stages[payload.stage] !== undefined) hist.push({ key: payload.stage, tx: num(event.tx_rowid), line: payload.line });
     }
+  }
+  // the lines of one stage in the order of the commits (events of one commit keep their order); a re-approval repeats the round of the approval in force
+  const approved_in_force = new Map<string, number>();
+  hist.sort((a, b) => a.tx - b.tx);
+  for (const entry of hist) {
+    const st = p.stages[entry.key] as Dict | undefined;
+    if (st === undefined) continue;
+    if (entry.approved_round !== undefined) approved_in_force.set(entry.key, entry.approved_round);
+    st.history.push(entry.line ?? `승인 ${entry.stamp} (R${approved_in_force.get(entry.key) ?? 0})`);
+  }
+  // v0.15 reopen set the stage's `review` to null: a value written by `set review` before the stage's newest (non-quiet) reopen is gone
+  for (const [key, written] of set_reviews) {
+    const st = p.stages[key] as Dict;
+    if ((last_reopen.get(key) ?? -1) > written.tx && st.review === written.value) st.review = null;
   }
   for (const chat of chat_inputs) processed.add(chat.name);
   p.processed = [...processed];

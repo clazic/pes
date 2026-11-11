@@ -18,8 +18,8 @@ type Dict = Record<string, any>;
 const FMT_TXT: Record<string, string> = { md: "마크다운", html: "웹 보고서", eli5: "그림 설명(eli5)", docx: "Word", hwpx: "HWPX", pdf: "PDF", pptx: "발표자료", json: "데이터" };
 
 /** The project as 0.15's `load` shows it: the database read model, or an unmigrated folder's own project.json. */
-async function read_state(d: string): Promise<{ slug: string; project: Dict; pending: Dict[]; legacy: boolean }> {
-  const state = await load_for_read(d);
+async function read_state(d: string, need_current = true): Promise<{ slug: string; project: Dict; pending: Dict[]; legacy: boolean }> {
+  const state = await load_for_read(d, need_current);
   return { slug: state.slug, project: legacy_project(state.project) as Dict, pending: state.pending as Dict[], legacy: state.legacy };
 }
 
@@ -71,7 +71,7 @@ export async function cmd_pending(args: string[]): Promise<void> {
 export async function cmd_digest(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "digest"));
   const s = stage_arg(args[1] === undefined ? missing_args("digest") : args[1]);
-  const { project } = await read_state(d);
+  const { project } = await read_state(d, false); // the stage is named: no `current` needed
   const st = project.stages[s] as Dict;
   const at = args.indexOf("--round");
   const rnd = at >= 0 ? int_arg(args[at + 1], "--round", "digest") : null;
@@ -113,7 +113,7 @@ const SHOW_STAGE_FIELDS = new Set(["changes", "carry_over", "settings", "review"
 export async function cmd_show(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "show"));
   const s = stage_arg(args[1] === undefined ? missing_args("show") : args[1]);
-  const { project } = await read_state(d);
+  const { project } = await read_state(d, false); // the stage is named: no `current` needed
   let rest = args.slice(2);
   let fields: string[] | null = null;
   const k = rest.indexOf("--fields");

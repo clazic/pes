@@ -30,8 +30,12 @@ function read_text(path: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-/** An old project.json project as 0.15's `load(d)` returns it (the report paths of a Windows-written file read with "/"). */
-export function load_legacy(d: string): ReadState {
+/**
+ * An old project.json project as 0.15's `load(d)` returns it (the report paths of a Windows-written file read with "/").
+ * `need_current`: a command that shows the current stage (status, pending ...) cannot go on without one, so a file without a stage name
+ * in `current` ends in one Korean line (D11). `show` and `digest` name the stage themselves and read such a file as 0.15 did.
+ */
+export function load_legacy(d: string, need_current = true): ReadState {
   const file = join(d, "project.json");
   let text: string;
   try {
@@ -50,7 +54,7 @@ export function load_legacy(d: string): ReadState {
   }
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) die(`project.json 은 JSON 객체여야 합니다: ${file}`, 1);
   const current = (raw as Dict).current;
-  if (typeof current !== "string" || !KEYS.includes(current)) {
+  if (need_current && (typeof current !== "string" || !KEYS.includes(current))) {
     // no stage to show: one line instead of `현재 단계: undefined` (D11, R1 권장 5)
     die(`project.json 의 현재 단계(current)가 단계 이름이 아닙니다: ${file} (${KEYS.join(", ")} 중 하나여야 함) — 폴더는 그대로 두었습니다`, 1);
   }
@@ -107,12 +111,12 @@ export async function db_serves(d: string): Promise<boolean> {
  * project), else the old project.json of that folder — a staging, failed or archived project, a name the database does not know and any
  * folder outside the PES home (even one named like a database project) are read from their own file —, else exit 1.
  */
-export async function load_for_read(d: string): Promise<ReadState> {
+export async function load_for_read(d: string, need_current = true): Promise<ReadState> {
   const slug = basename(d);
   if (await db_serves(d)) {
     const data = await bridge("read_project", slug);
     return { slug, project: data.project as Dict, pending: (data.pending as PendingAnswer[] | undefined) ?? [], legacy: false };
   }
-  if (existsSync(join(d, "project.json"))) return load_legacy(d);
+  if (existsSync(join(d, "project.json"))) return load_legacy(d, need_current);
   return die(`project.json 없음: ${d}`, 1);
 }
