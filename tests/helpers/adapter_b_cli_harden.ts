@@ -175,6 +175,56 @@ export function define_cli_harden(spec: CliSpec): void {
     });
   });
 
+  t("launch_env: a project_id outside the key store's ref alphabet or past 200 characters is field_invalid, with no key store call", async () => {
+    // The real key store (scripts/pes_core/a_runtime/keystore.ts SAFE_REF) takes /^[A-Za-z0-9._:-]{1,200}$/ for the whole ref
+    // "pes-agent-token-<runtime>-<project_id>". A colon is inside that alphabet (so it is accepted here), a space is not.
+    const prefix = `pes-agent-token-${spec.runtime}-`;
+    const make_store = () => {
+      const calls: string[] = [];
+      return { calls, store: { get: (ref: string) => (calls.push(ref), "synthetic-token-not-real-0123456789") } };
+    };
+    const outside = ["a b", " a", "a ", "a/b", "a\\b", "../x", "a\nb", "a\u0000b", "한글", "proj-한", "a@b", "a#b", "a%2fb", "a*b", "a?b", "a=b", "a,b", "a;b", "a\"b", "a'b", "a$b", "a`b", "😀", "é", "ａ", "a\u200bb"];
+    for (const project_id of outside) {
+      const { calls, store } = make_store();
+      await assert.rejects(
+        spec.launch_env({ key_store: store as any, project_id }),
+        (error: any) => {
+          assert.equal(error.code, "field_invalid", JSON.stringify(project_id));
+          assert.ok(error instanceof TypeError);
+          assert.match(String(error.message), /[가-힣]/, "the message is Korean");
+          assert.ok(!String(error.message).includes("synthetic-token"));
+          return true;
+        },
+        JSON.stringify(project_id),
+      );
+      assert.deepEqual(calls, [], `the key store is not called for ${JSON.stringify(project_id)}`);
+    }
+
+    // the length limit is on the whole ref: 200 characters pass, 201 do not
+    const room = 200 - prefix.length;
+    assert.ok(room > 100, "the limit leaves room for a real project id");
+    for (const [length, ok] of [[1, true], [room - 1, true], [room, true], [room + 1, false], [room + 50, false], [5000, false]] as const) {
+      const project_id = "a".repeat(length);
+      const { calls, store } = make_store();
+      if (ok) {
+        assert.equal(`${prefix}${project_id}`.length <= 200, true);
+        assert.deepEqual(await spec.launch_env({ key_store: store as any, project_id }), { PES_AGENT_TOKEN: "synthetic-token-not-real-0123456789" });
+        assert.deepEqual(calls, [`${prefix}${project_id}`], `length ${length}: exactly one get with the exact ref`);
+      } else {
+        await assert.rejects(spec.launch_env({ key_store: store as any, project_id }), (error: any) => error.code === "field_invalid", `length ${length}`);
+        assert.deepEqual(calls, [], `length ${length}: no key store call`);
+      }
+    }
+    assert.equal(`${prefix}${"a".repeat(room)}`.length, 200, "the boundary case is exactly 200");
+
+    // every allowed punctuation character is accepted and reaches the store unchanged
+    for (const project_id of ["synthetic-project-id", "a.b_c-d", "a:b", "A0.9_z:Z-1", "0123456789abcdef-0123456789abcdef", "-", ".", "_", ":"]) {
+      const { calls, store } = make_store();
+      await spec.launch_env({ key_store: store as any, project_id });
+      assert.deepEqual(calls, [`${prefix}${project_id}`]);
+    }
+  });
+
   t("the notes never put a token, a long secret or a person's path in any fenced block or line", () => {
     const text = readFileSync(join(REPO, "docs", "adapters", spec.doc), "utf8").replace(/\r\n/g, "\n");
     for (const m of text.matchAll(/PES_AGENT_TOKEN["']?\s*[:=]\s*["']([^"']*)["']/g)) {
