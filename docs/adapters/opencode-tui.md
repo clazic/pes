@@ -52,7 +52,7 @@ Go 구독(`opencode-go/…` 모델)의 계량·한도는 방식 A만 다룬다. 
 
 프로젝트와 기기는 사람의 로컬 세션이 등록하고(계약 4절), 돌려받은 에이전트 토큰이 이 연결의 유일한 자격이다. OpenCode를 켜는 프로세스의 환경변수 `PES_AGENT_TOKEN`에 그 토큰이 있어야 한다 — 값을 채팅에 다시 쓰지 않는다. `opencode_tui_launch_env({key_store, project_id})`는 그 값을 키 저장소에서 가져오는 함수다: 키 저장소(PR19의 `KeyStore`, `scripts/pes_core/a_runtime/keystore.ts`)에서 `pes-agent-token-opencode_tui-<프로젝트 id>`를 **한 번 읽어(`get(ref)`)** `{PES_AGENT_TOKEN}`을 메모리로 돌려준다. 읽기만 하고 파일에는 쓰지 않으며, 없으면 `token_missing`(한국어 설명)이다.
 
-**한계**: 지금 PES에는 에이전트 토큰을 키 저장소의 `pes-agent-token-…` 항목으로 넣는 명령이 **없다**(PR19의 키 저장소는 AI 연결 키용이다). 토큰을 키 저장소에 두는 길은 후속이다. 지금 쓸 수 있는 절차는 하나다: 등록으로 받은 토큰을 사람이 직접 OpenCode를 켜는 셸의 환경변수 `PES_AGENT_TOKEN`으로 둔다. 토큰을 받는 PES 명령(`pes link` 등)도 아직 없고 계약 4절의 등록 API뿐이다.
+**한계**: 지금 PES에는 에이전트 토큰을 키 저장소의 `pes-agent-token-…` 항목으로 넣는 명령이 **없다**(PR19의 키 저장소는 AI 연결 키용이다). 토큰을 키 저장소에 두는 길은 후속이다. 지금 쓸 수 있는 절차는 하나다: 등록으로 받은 토큰을 사람이 직접 OpenCode를 켜는 셸의 환경변수 `PES_AGENT_TOKEN`으로 둔다. 토큰을 받는 PES 명령도 아직 없다(계약 5절의 pes link는 초안이다). 있는 것은 계약 4절의 등록 API뿐이다.
 
 ## 한 번에 한 흐름
 
