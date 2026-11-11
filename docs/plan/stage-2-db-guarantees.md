@@ -503,7 +503,7 @@ A(내장 실행기, `internal_ai`)와 B(MCP·HTTP, `external_agent` — 직접 �
 
 `node scripts/pes.ts <명령>`은 Node 26이 타입을 지워 바로 돌린다(tsx·ts-node·빌드·로더 없음). 진입 파일은 얇고(`scripts/pes.ts`), 본문은 `scripts/pes_core/cli_main.ts`와 `cli_*.ts` 모듈이다. 쓰기는 모두 코어 한 번 호출(`cli_bridge.handle_request`, Python 이 자식 프로세스로 부르던 그 코드 — 이제 같은 프로세스 안에서)이고, `project.json`·`.pes-lock`·업무 SQL 은 이 파일들에 없다. 이 PR 이 옮긴 명령: init·ask-prep·ask·round-start·merge·render·approve·reopen·status·mark·chat·note·set·qa-brief·qa·lock·unlock·home·remote·stop. 읽기·보고서 명령(pending·digest·show·report·assemble·web·list·hub·open·which·doctor·serve·watch)은 이름만 알고 "아직 없다"는 한국어 한 줄과 종료 1로 답한다(SEL-77).
 
-사용법 글은 `pes.py` 의 `__doc__` 그대로이고 첫 줄의 실행 명령만 `node scripts/pes.ts`다. 인자 오류·종료 코드·stdout/stderr 는 0.15 와 같다. 0.15 가 Python 스택 추적으로 죽던 곳(없는 결과·질문 파일, 깨진 JSON, 모자란 인자, `merge` 결과의 잘못된 `sources`)은 같은 종료 코드와 스택 없는 한국어 한 줄이다(D11). 사용자에게 나가는 CLI 경로의 영어 `code: message` 두 줄(아래 D13)도 한국어 한 줄로 바꿨다. 문서가 만든 파일은 어느 OS 에서나 UTF-8·LF 이고 저장 경로는 `/`다(D10, W1·W2).
+사용법 글은 `pes.py` 의 `__doc__` 그대로이고 첫 줄의 실행 명령만 `node scripts/pes.ts`다. 인자 오류·종료 코드·stdout/stderr 는 0.15 와 같다. 0.15 가 Python 스택 추적으로 죽던 곳(없는 결과·질문 파일, 깨진 JSON, 모자란 인자, `merge` 결과의 잘못된 `sources`)은 같은 종료 코드와 스택 없는 한국어 한 줄이다(D11). 사용자에게 나가는 CLI 경로의 영어 `code: message` 두 줄(아래 D13)도 한국어 한 줄로 바꿨다. 문서가 만든 파일은 어느 OS 에서나 UTF-8·LF 이고 저장 경로는 `/`다(D10, W1·W2) — 생성 파일은 한 쓰기 도우미 `cli_support.write_text` 가 LF 로 맞춰 쓰고, `.gitattributes` 가 `templates/`·`questions/`·`tests/fixtures/` 를 Windows checkout 에서도 LF 로 둔다.
 
 0.15 는 어느 단계든 언제든 쓸 수 있었고 DB 는 단계 순서·라운드·봉인을 지킨다. 그 틈을 CLI 가 메우는 방식(모두 `scripts/pes.ts` 가 켜는 선택 항목이다 — 기본 동작과 `pes.py` 경로, 기존 코어 시험은 바뀌지 않는다):
 

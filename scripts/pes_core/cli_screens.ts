@@ -2,10 +2,10 @@
 // Same templates and same data as 0.15's `build_index` / `cmd_render` / `cmd_ask`; the project they show comes from the database
 // (the 0.15-shaped read model), the snapshots and the folder listings from the folder, exactly as 0.15 read them.
 
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
-import { KEYS, QB, STAGES, TPL, bridge, html_escape, is_record, now } from "./cli_support.ts";
+import { KEYS, QB, STAGES, TPL, bridge, html_escape, is_record, now, write_text } from "./cli_support.ts";
 
 type Dict = Record<string, unknown>;
 
@@ -261,7 +261,7 @@ export async function build_index(d: string, slug: string): Promise<string> {
   };
   mkdirSync(d, { recursive: true });
   const file = join(d, "index.html");
-  writeFileSync(file, fill("dashboard.html", `${String(p.topic ?? "프로젝트")} · PES`, page), "utf8");
+  write_text(file, fill("dashboard.html", `${String(p.topic ?? "프로젝트")} · PES`, page));
   return file;
 }
 

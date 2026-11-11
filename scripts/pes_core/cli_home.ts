@@ -1,10 +1,10 @@
 // pes.ts: the PES home (`home`), the allowed remote origins (`remote`), the screen server probes (`stop`, the status line) — SEL-71.
 // The server itself (serve / hub / open) is not started by this file; it only asks the hub ports "who are you" like pes.py does.
 
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, relative, isAbsolute } from "node:path";
 
-import { Die, bridge, config_path, die, pdir, pes_home, read_config, resolve_path, say, write_config } from "./cli_support.ts";
+import { Die, bridge, config_path, die, pdir, pes_home, read_config, resolve_path, say, write_config, write_text } from "./cli_support.ts";
 
 /** Hub ports of one PES home (HUB_PORTS in pes.py); 8765~8775 were the per-project servers of older versions. */
 export const HUB_PORTS: readonly number[] = [8760, 8761, 8762, 8763, 8764];
@@ -230,7 +230,7 @@ export async function cmd_home(args: string[]): Promise<void> {
     move_folder(d, target);
     moved.push(basename(d));
     const log = join(target, "feedback.log");
-    if (existsSync(log)) writeFileSync(log, readFileSync(log, "utf8").split(d).join(target), "utf8");
+    if (existsSync(log)) write_text(log, readFileSync(log, "utf8").split(d).join(target));
     for (const junk of [".pes-port", ".pes-server"]) unlink_quiet(join(target, junk));
   }
   if (existsSync(old)) {

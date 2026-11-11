@@ -1,12 +1,12 @@
 // pes.ts: ask-prep and ask (SEL-71). The question bank is copied to <project>/ask/<id>.json for the AI to polish; `ask` publishes the
 // polished form to the database (so answers can be stored) and writes the 0.15 page ask-<id>.html — same template, same data.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { fill } from "./cli_screens.ts";
 import { need_project, read_json_file } from "./cli_records.ts";
-import { KEYS, QB, STAGES, arg_at, bridge, die, is_record, missing_args, now, pdir, say } from "./cli_support.ts";
+import { KEYS, QB, STAGES, arg_at, bridge, die, is_record, missing_args, now, pdir, say, write_text } from "./cli_support.ts";
 
 const ASK_PURPOSES = new Set(["stage_start", "review", "resume"]);
 const NEW_QUESTION_TYPES = new Set(["single", "multi", "text", "textarea", "number", "scale", "file"]);
@@ -54,7 +54,7 @@ export async function cmd_ask_prep(args: string[]): Promise<void> {
   await bridge("ask-prep", slug, { stage: KEYS.includes(which) ? which : null, bank_key, dir: d });
   mkdirSync(join(d, "ask"), { recursive: true });
   const out = join(d, "ask", `${String(spec.id ?? which)}.json`);
-  if (!existsSync(out)) writeFileSync(out, JSON.stringify(spec, null, 1), "utf8");
+  if (!existsSync(out)) write_text(out, JSON.stringify(spec, null, 1));
   say(out);
 }
 
@@ -95,7 +95,7 @@ export async function cmd_ask(args: string[]): Promise<void> {
   };
   const out = join(d, `ask-${sid}.html`);
   mkdirSync(d, { recursive: true });
-  writeFileSync(out, fill("ask.html", String(spec.title ?? "질문"), page), "utf8");
+  write_text(out, fill("ask.html", String(spec.title ?? "질문"), page));
   say(out);
 }
 

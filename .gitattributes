@@ -1,0 +1,9 @@
+# Files that PES copies, renders or compares byte for byte keep LF in every checkout, also on Windows with
+# core.autocrlf=true (SEL-71, D10 / W2). Every file in the index is already LF, so this changes no stored bytes;
+# it only stops a Windows checkout from turning these into CRLF. text=auto keeps git's binary detection.
+templates/** text=auto eol=lf
+questions/** text=auto eol=lf
+tests/fixtures/** text=auto eol=lf
+
+*.png binary
+*.pdf binary

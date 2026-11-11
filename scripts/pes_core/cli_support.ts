@@ -107,9 +107,18 @@ export function read_config(): Record<string, unknown> {
   }
 }
 
+/**
+ * The one writer of every text file the ts CLI generates (ask pages, index.html, briefs, logs, config): UTF-8 with LF line
+ * ends on every OS (D10, W2). A Windows checkout (core.autocrlf) can give CRLF templates and question banks; the CR never
+ * reaches a generated file.
+ */
+export function write_text(path: string, text: string): void {
+  writeFileSync(path, text.replace(/\r\n?/g, "\n"), "utf8");
+}
+
 export function write_config(cfg: Record<string, unknown>): void {
   mkdirSync(dirname(config_path()), { recursive: true });
-  writeFileSync(config_path(), JSON.stringify(cfg, null, 1), "utf8");
+  write_text(config_path(), JSON.stringify(cfg, null, 1));
 }
 
 /** PES home: env PES_HOME > ~/.pes/config.json `home` > ~/pes-projects (pes.py `pes_home`). */

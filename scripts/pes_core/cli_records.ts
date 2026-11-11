@@ -1,7 +1,7 @@
 // pes.ts write commands, part 1: init, merge, mark, chat, note, qa-brief, qa, lock, unlock, status (SEL-71).
 // 0.15 text and exit codes; the state lives in the database (core calls only).
 
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { server_url } from "./cli_home.ts";
@@ -20,6 +20,7 @@ import {
   pdir,
   say,
   stage_arg,
+  write_text,
 } from "./cli_support.ts";
 
 // ---------------------------------------------------------------- project lookup (the 0.15 `load(d)` rule)
@@ -140,7 +141,7 @@ export async function cmd_init(args: string[]): Promise<void> {
   if (opt.import !== undefined && opt.import !== "") copy_library_shots(d, pdir(opt.import));
   for (const sub of ["feedback", "ask", "snapshots", "shots", "out"]) mkdirSync(join(d, sub), { recursive: true });
   const log = join(d, "feedback.log");
-  if (!existsSync(log)) writeFileSync(log, "", "utf8");
+  if (!existsSync(log)) write_text(log, "");
   say(join(d, "project.json"));
   if (lib !== null) say(`참고자료로 가져옴: 항목 ${(lib.items as unknown[]).length}개 (R${String(lib.round)}까지, ${String(lib.source)})`);
 }
@@ -231,7 +232,7 @@ pes:reviewer 형식대로 QC·QA·표본 대조(3~5개)를 하고 결과 파일�
   await bridge("qa-brief", slug, { stage: s, text, dir: d });
   mkdirSync(rd, { recursive: true });
   const file = join(rd, "qa-brief.md");
-  writeFileSync(file, text, "utf8");
+  write_text(file, text);
   say(file);
 }
 
