@@ -513,7 +513,10 @@ function proc_holds(file: string): boolean {
  * read only) fails with a sharing violation (EBUSY) while any other handle is open, and changes nothing on disk. Any other answer is "unknown".
  */
 function win_held(file: string): Hold {
-  const exlock = (constants as unknown as Record<string, number | undefined>).UV_FS_O_EXLOCK;
+  // Node does not export libuv's UV_FS_O_EXLOCK in fs.constants (not even on Windows), but passes numeric flags straight to uv_fs_open;
+  // libuv/win.h defines it as 0x10000000 on Windows only. Without it every Windows probe would answer "unknown" (SEL-74 CI run 43090412010).
+  const exported = (constants as unknown as Record<string, number | undefined>).UV_FS_O_EXLOCK;
+  const exlock = typeof exported === "number" ? exported : process.platform === "win32" ? 0x10000000 : undefined;
   if (typeof exlock !== "number") return "unknown";
   let fd: number | undefined;
   try {
