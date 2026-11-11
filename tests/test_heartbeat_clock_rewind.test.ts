@@ -31,7 +31,7 @@ import { heartbeat } from "../scripts/pes_core/runs.ts";
 import { assert_error, assert_ok, call, agent_claims, make_agent, with_api, type ApiEnv, type ApiResponse } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { Driver, type Guard, type Side } from "./helpers/cross_driver.ts";
-import { B_TOOLS, make_cross_env, ready_cross, with_cross_env, type CrossEnv } from "./helpers/cross_env.ts";
+import { B_TOOLS, ready_cross, with_cross_env, type CrossEnv } from "./helpers/cross_env.ts";
 import {
   FINISH,
   context_turn,
@@ -49,6 +49,7 @@ const START_MS = 1_760_000_000_000;
 const DELTAS: Array<[string, number]> = [
   ["1 ms back (acquired_at - 1)", 1],
   ["1 hour back (acquired_at - 3 600 000)", 3_600_000],
+  ["clock at 0 (acquired_at - START_MS)", START_MS],
 ];
 const B: Side = { kind: "B", tool: B_TOOLS[0]! };
 const A: Side = { kind: "A" };
@@ -260,11 +261,10 @@ for (const [name, delta] of DELTAS) {
     await with_cross_env("openai_compatible", async (env) => {
       const clock = movable(env);
       await ready_cross(env);
-      const first = await b_claim(env);
+      await b_claim(env);
       const lease = lease_snap(env);
       assert.equal(lease.acquired_at, START_MS);
       await rewind_then_recover(env, clock, `core-${delta}`, delta, core_beat(env, guard_of(lease), env.agent.actor_id), ttl_of(lease));
-      void first;
     });
   });
 }
@@ -593,5 +593,3 @@ for (const [name, delta] of DELTAS) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// one more look from the outside: the make_cross_env helper is imported so a failed setup names this file
-void make_cross_env;
