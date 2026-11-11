@@ -61,6 +61,7 @@
     - **라이선스**: tweakcn **Apache License 2.0**(jnsahaj/tweakcn — NOTICE 파일 없음) · shadcn/ui(블록·부품) **MIT** · shadcn-admin **MIT**(참고만). 배포물에 원문을 함께 넣는다(`licenses/tweakcn-Apache-2.0-LICENSE.txt` · `licenses/shadcn-ui-MIT-LICENSE.txt` — 빌드가 CSS 주석을 지우므로 고지는 원문 파일이 맡는다). Pretendard OFL 1.1은 9번 그대로.
     - **의존성 추가**: `recharts` 3.8.0(고정, shadcn chart가 씀) — 사용량 화면에서만, 그중에서도 따로 불러오는 묶음(약 372 kB · gzip 108 kB). 사이드바·드롭다운·아바타는 이미 있는 `radix-ui`·`lucide-react`로 충분해 새 패키지가 없다. 첫 묶음 JS는 490 → 568 kB(gzip 151 → 175 kB), CSS 142 → 190 kB(gzip 31 → 38 kB). shadcn CLI는 10번처럼 생성·받기 때만 썼다(PES가 고친 부품은 덮어쓰지 않음).
     - **U1에서 정할 것**: 테마 고르기를 제품 기능으로 둘지(사용자 설정 서버 저장 / 브라우저만 / 기본 하나만), 사이드바 접힘 상태를 쿠키(shadcn 기본)로 둘지 — 논의 기록 N13·N14.
+      **정함(2026-11-12, SEL-81)**: 테마는 사용자 결정으로 4종을 넣고 이 브라우저(`localStorage`)에만 저장, 기본 Modern Minimal, 서버 저장은 N31과 함께 나중. 사이드바 접힘은 leader 결정으로 `localStorage`(쿠키 없음 — 서버가 읽지 않음). 왼쪽 열은 사이드바 하나(라운드는 단계 아래 나무). 설계 12.9 “제품에서 정할 것”.
 
 ## 재검토 조건
 
