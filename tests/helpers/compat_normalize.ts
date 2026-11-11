@@ -113,9 +113,18 @@ export function stderr_kind(stderr: string, roots: Roots): string[] {
   if (body.length === 0) return [];
   if (body.some((line) => line.startsWith("Traceback (most recent call last)"))) {
     const last = [...body].reverse().find((line) => /^[A-Za-z_.]+(Error|Exception|Exit)\b/.test(line)) ?? body[body.length - 1] ?? "";
-    return [`traceback: ${last}`];
+    return [`traceback: ${n13_os_not_found(last)}`];
   }
   return body;
+}
+
+/**
+ * N13: the OS wording of "no such file / folder" in a Python exception line. Windows says `[WinError 2] The system cannot find the
+ * file specified:` / `[WinError 3] The system cannot find the path specified:`; POSIX says `[Errno 2] No such file or directory:`.
+ * Same meaning (FileNotFoundError), so only these two Windows phrases fold to the POSIX one; every other message stays as is.
+ */
+export function n13_os_not_found(line: string): string {
+  return line.replace(/^(FileNotFoundError: )\[WinError [23]\] The system cannot find the (?:file|path) specified:/, "$1[Errno 2] No such file or directory:");
 }
 
 // ---------------------------------------------------------------- N3 JSON

@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { make_ctx } from "./helpers/compat_env.ts";
 import { BARE_COMMAND, PES_TS_FILE, REPO_ROOT, TS_GUARD_MODULE, TS_INJECT_MODULE, run_ts_cli, ts_child_argv, ts_permission_flags } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { is_at_or_below } from "./helpers/path_compare.ts";
 
 use_home_guard();
 
@@ -57,7 +58,7 @@ test("the permission allow-list holds the repo and the case's temp root and noth
     assert.match(flags, /--allow-fs-read=.*SEL-71|--allow-fs-read=/);
     for (const home of [process.env.HOME, process.env.USERPROFILE]) if (home !== undefined && home !== "") assert.ok(!flags.includes(`${home}/.pes`) && !flags.includes(`${home}/pes-projects`));
     const writes = ts_permission_flags(ctx).filter((f) => f.startsWith("--allow-fs-write="));
-    assert.ok(writes.length > 0 && writes.every((f) => f.includes(ctx.home.root) || f.includes(ctx.home.root.replace(/^\/private/, ""))), "writes only below the temp root");
+    assert.ok(writes.length > 0 && writes.every((f) => is_at_or_below(f.slice("--allow-fs-write=".length), ctx.home.root)), "writes only below the temp root");
   } finally {
     ctx.cleanup();
   }
@@ -205,7 +206,10 @@ test("injection: open_fail k throws EPERM on the lock name only, then the real o
     assert.equal(plain.counts.open, 2);
     const nt = inject_run(ctx, ["lock-open", join(ctx.tmp, "d"), "2"], { open_fail: 1, nt: true });
     assert.match(nt.stdout, /open EPERM@win32\nopened\nafter /, "win32 inside the catch of the injected error");
-    assert.doesNotMatch(nt.stdout, /after win32/, "…and the real platform again afterwards");
+    // "the real platform again": on a win32 runner the real platform IS win32, so the line must name process.platform — what must not
+    // happen is that the fake `nt` outlives the catch (on POSIX it would show as "after win32")
+    assert.match(nt.stdout, new RegExp(`after ${process.platform}\\n`), "…and the real platform again afterwards");
+    if (process.platform !== "win32") assert.doesNotMatch(nt.stdout, /after win32/, "…the fake win32 is gone after the catch");
     const forever = inject_run(ctx, ["lock-open", join(ctx.tmp, "d"), "4"], { open_fail: -1, code: "EACCES" });
     assert.equal(forever.counts.open, 4);
     assert.equal(forever.stdout.split("\n").filter((l) => l.startsWith("open EACCES")).length, 4);

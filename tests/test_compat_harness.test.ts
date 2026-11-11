@@ -19,6 +19,7 @@ import {
   n10_override,
   n11_relpaths,
   n12_stdlib_error_page,
+  n13_os_not_found,
   n2_paths,
   n3_json,
   n4_multiset,
@@ -323,6 +324,22 @@ test("N8 console: ANSI removed, time and paths replaced, line order kept; stderr
   assert.deepEqual(stderr_kind(tb, roots), ["traceback: KeyError: 'current'"]);
   assert.deepEqual(stderr_kind("", roots), []);
   assert.deepEqual(stderr_kind("--topic 필요\n", roots), ["--topic 필요"]);
+});
+
+test("N13 OS 'not found' wording: the two Windows phrases fold to the POSIX one in a traceback line; other messages stay", () => {
+  const posix = "FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/없는-프로젝트/ask'";
+  const win3 = "FileNotFoundError: [WinError 3] The system cannot find the path specified: '<TMP>/work/없는-프로젝트/ask'";
+  const win2 = "FileNotFoundError: [WinError 2] The system cannot find the file specified: '<TMP>/work/a.json'";
+  assert.equal(n13_os_not_found(win3), posix);
+  assert.equal(n13_os_not_found(win2), "FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/a.json'");
+  assert.equal(n13_os_not_found(posix), posix, "the POSIX form is unchanged");
+  // not the same meaning → never folded
+  assert.equal(n13_os_not_found("PermissionError: [WinError 5] Access is denied: 'x'"), "PermissionError: [WinError 5] Access is denied: 'x'");
+  assert.equal(n13_os_not_found("FileExistsError: [WinError 183] Cannot create a file when that file already exists: 'x'"), "FileExistsError: [WinError 183] Cannot create a file when that file already exists: 'x'");
+  assert.equal(n13_os_not_found("KeyError: 'The system cannot find the path specified:'"), "KeyError: 'The system cannot find the path specified:'");
+  // through stderr_kind (a Windows traceback)
+  const tb = 'Traceback (most recent call last):\r\n  File "C:\\x\\pes.py", line 9, in main\r\n' + win3 + "\r\n";
+  assert.deepEqual(stderr_kind(tb, {}), ["traceback: " + posix]);
 });
 
 test("N9 file meta: only the normalised content counts (mtime and mode are not inputs at all)", () => {

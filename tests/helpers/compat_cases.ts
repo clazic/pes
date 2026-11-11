@@ -515,7 +515,24 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
   } finally {
     await server.stop();
   }
-  return { kind: "ran", record: { id: def.id, steps, dto: null, files: def.files === "count" ? { count: String(Object.keys(http_files(join(root, "synthetic"), roots)).filter((name) => name.startsWith("feedback/")).length) } : http_files(join(root, "synthetic"), roots) } };
+  return { kind: "ran", record: { id: def.id, steps, dto: null, files: def.files === "count" ? answer_count_record(raw_answer_records(root)) : http_files(join(root, "synthetic"), roots) } };
+}
+
+/** The 0.15 answers of the synthetic project as written: feedback/*.json (raw names). */
+function raw_answer_records(root: string): { name: string; doc: Record<string, any> }[] {
+  const dir = join(root, "synthetic", "feedback");
+  return (existsSync(dir) ? readdirSync(dir).sort() : []).map((name) => ({ name, doc: read_json(join(dir, name)) }));
+}
+
+/**
+ * "count" files record: the number of ANSWERS (records), never the number of normalised keys — two answers whose names differ only by
+ * the second (plan-R1-<T1>, plan-R1-<T1>-2, plan-R1-<T2>) collapse to one key once the time is replaced, so a burst that straddles a
+ * second boundary would count fewer. The raw names must be unique (nothing overwritten); both targets are held to it.
+ */
+export function answer_count_record(answers: { name: string; doc: Record<string, any> }[]): { count: string } {
+  const names = answers.map((a) => a.name);
+  assert.equal(new Set(names).size, names.length, `answers must have unique raw names, got ${JSON.stringify(names)}`);
+  return { count: String(answers.length) };
 }
 
 function http_files(project: string, roots: Roots): Record<string, string> {

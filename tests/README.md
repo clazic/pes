@@ -61,7 +61,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 | 파일 | 하는 일 |
 |---|---|
-| `tests/helpers/compat_normalize.ts` | 정규화 N1~N12(시각·경로·JSON·순서·ID·HTML·인코딩·콘솔·파일 메타·의도된 차이·콘솔 상대경로·stdlib 오류 페이지) |
+| `tests/helpers/compat_normalize.ts` | 정규화 N1~N13(시각·경로·JSON·순서·ID·HTML·인코딩·콘솔·파일 메타·의도된 차이·콘솔 상대경로·stdlib 오류 페이지·OS 파일 없음 문구) |
 | `tests/helpers/compat_env.ts` | 이중 실행 하네스: 대상 `py`(`python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(scripts/pes.py·serve.py·setup.py)"`, `PES_DB_CORE` 없음) / `ts`(`scripts/pes.ts`·`serve.ts`·`setup.ts`, 아직 없음 → `not_yet`), 상태 DTO, 의도된 차이 표(D01~D09), `serve.py` 하네스 |
 | `tests/helpers/compat_cases.ts` + `tests/fixtures/compat/cases.json` | E01~E15 사례 표와 실행기. 0.15 기준값은 `tests/fixtures/compat/baseline/E??.json` |
 | `tests/helpers/home_guard.ts` | 실제 `~/.pes`·`~/pes-projects` 접근 0 — 아래 「home_guard 가 막는 것」 |
@@ -83,6 +83,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | N2 (기존) | 루트 철자(8.3 `RUNNER~1`, 겹역슬래시) → `<ROOT>`, 그 뒤 경로 구분자 `\` → `/` | 루트 아래 경로 표기 | 전 사례 |
 | **N11** | **콘솔 글**에 찍힌 상대 파일 경로의 `\` → `/` (확장자로 끝나는 `a\b\c.ext` 만) | `pes report` 가 `reports\plan\report.html` 로 찍는다 — 같은 값이 저장된 것은 데이터라 건드리지 않는다(W1). 글 속 `\n` 은 확장자가 없어 그대로 | E05·E11 의 `report` 단계 stdout |
 | **N12** | `http.server` 가 직접 쓰는 404 HTML 쪽 → `<python http.server error page>` (상태 ≥ 400 이고 제목·머리글이 `Error response`) | 쪽 글은 PES 가 아니라 **파이썬 버전**의 것이다 — 3.9~3.12 는 460자, 3.13 이상은 더 짧다(OS 차이가 아니라 러너의 파이썬 차이). 상태·content-type·cache-control 은 그대로 비교 | E13 (기준값 E13 의 4칸을 이 표시로 바꿈) |
+| **N13** | 파이썬 **traceback 의 마지막 줄**에서 `FileNotFoundError: [WinError 2] The system cannot find the file specified:` / `[WinError 3] The system cannot find the path specified:` → `FileNotFoundError: [Errno 2] No such file or directory:` (이 두 문구만) | OS 가 같은 "파일/경로 없음"을 다르게 적는다 — 뜻이 같은 것만 접는다. 다른 오류(권한·이미 있음 등)와 다른 예외 종류는 그대로 비교 | X02 (`ask-prep` 가 없는 프로젝트에서 0.15 traceback — D11) |
 
 **Windows 0.15 차이(PR26 에서 다룰 것)** — 정규화하지 않고 `os_overrides.win32` 로 고정한 것. 로컬(macOS)에서 만들 수 없어 값은 CI 로그의 실제 값에서 옮겼다(출처: SEL-70 PR #50 windows-latest 5·6·7/8 실패 로그). 값이 틀리면 CI 에서 `PES_COMPAT_DUMP=1` 로 실제 기록을 받는다(아래).
 
