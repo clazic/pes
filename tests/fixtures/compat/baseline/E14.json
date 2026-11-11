@@ -20,7 +20,7 @@
    ],
    "exit": 0,
    "stdout": [
-    "{\n \"groups\": [\n  \"기본\",\n  \"기본\",\n  \"기본\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"API 키\",\n  \"API 키\",\n  \"API 키\"\n ],\n \"keys_per_row\": [\n  \"detail\",\n  \"group\",\n  \"label\",\n  \"name\",\n  \"state\"\n ],\n \"names\": [\n  \"python\",\n  \"git\",\n  \"node\",\n  \"ego-browser\",\n  \"ego-browser-skill\",\n  \"kosis\",\n  \"vworld\",\n  \"korean-law\",\n  \"korean-law-mcp\",\n  \"key-kosis\",\n  \"key-vworld\",\n  \"key-law\"\n ],\n \"stable\": {\n  \"ego-browser\": \"user\",\n  \"key-kosis\": \"key\",\n  \"key-law\": \"key\",\n  \"key-vworld\": \"key\",\n  \"python\": \"ok\"\n }\n}"
+    "{\n \"groups\": [\n  \"기본\",\n  \"기본\",\n  \"기본\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"도구\",\n  \"API 키\",\n  \"API 키\",\n  \"API 키\"\n ],\n \"keys_per_row\": [\n  \"detail\",\n  \"group\",\n  \"label\",\n  \"name\",\n  \"state\"\n ],\n \"names\": [\n  \"python\",\n  \"git\",\n  \"node\",\n  \"ego-browser\",\n  \"ego-browser-skill\",\n  \"kosis\",\n  \"vworld\",\n  \"korean-law\",\n  \"korean-law-mcp\",\n  \"key-kosis\",\n  \"key-vworld\",\n  \"key-law\"\n ],\n \"stable\": {\n  \"key-kosis\": \"key\",\n  \"key-law\": \"key\",\n  \"key-vworld\": \"key\",\n  \"python\": \"ok\"\n }\n}"
    ],
    "stderr": []
   },
@@ -31,7 +31,7 @@
    ],
    "exit": 0,
    "stdout": [
-    "설치 완료 표시: <HOME>/.pes/setup.json (PES 0.15.6)"
+    "설치 완료 표시: <HOME>/.pes/setup.json (PES <VER>)"
    ],
    "stderr": []
   },

@@ -26,6 +26,7 @@ import {
   read_state_dto,
   run_pes,
   run_setup,
+  ts_gate,
   synthetic_project,
   touch,
   walk_files,
@@ -33,7 +34,7 @@ import {
   type CompatCtx,
   type Target,
 } from "./compat_env.ts";
-import { lines, n1_json, n1_time, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, n10_apply, stderr_kind, type Roots } from "./compat_normalize.ts";
+import { dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type Roots } from "./compat_normalize.ts";
 
 export interface CaseDef {
   id: string;
@@ -50,6 +51,8 @@ export interface CaseDef {
   files?: "count";
   /** parts of the 7.4 row that are deliberately not run automatically, with the reason */
   excluded?: { what: string; why: string }[];
+  /** what still differs between OSes / PCs for this case and how the single baseline copes (normalised, excluded, or moved to the temp HOME) */
+  os_notes?: { what: string; handling: string; why: string }[];
 }
 
 export interface CaseTable {
@@ -97,8 +100,13 @@ function ports(text: string): string {
   return text.replace(/127\.0\.0\.1:\d+/g, "127.0.0.1:<PORT>").replace(/localhost:\d+/g, "localhost:<PORT>");
 }
 
+/** `(PES 0.15.6)` in `setup mark` is the plugin version: it moves with every release, so the comparison must not pin it. */
+function versions(text: string): string {
+  return text.replace(/\(PES \d+\.\d+\.\d+(?:[-+][\w.]+)?\)/g, "(PES <VER>)");
+}
+
 function norm_out(text: string, roots: Roots): string[] {
-  return lines(ports(n8_console(text, roots)));
+  return lines(versions(ports(n8_console(text, roots))));
 }
 
 // A python `repr` doubles backslashes; N2 handles it. Python-only wording that is part of the 0.15 contract stays as is.
@@ -107,7 +115,10 @@ function post_process(post: string | undefined, stdout: string, roots: Roots): s
   if (post === undefined) return norm_out(stdout, roots);
   const data = JSON.parse(stdout) as any[];
   if (post === "setup_stable") {
-    const STABLE = ["python", "ego-browser", "key-kosis", "key-vworld", "key-law"];
+    // Only rows that no machine can change. ego-browser is NOT one of them: find_tool also looks in /opt/homebrew/bin and
+    // /usr/local/bin (macOS) and below %LOCALAPPDATA% (Windows), outside the narrowed PATH. git / node / the CLIs are likewise
+    // per machine. `python` is the interpreter running the child; the three keys come from the isolated, empty ~/.pes.
+    const STABLE = ["python", "key-kosis", "key-vworld", "key-law"];
     const valid = new Set(["ok", "missing", "user", "optional", "key"]);
     assert.ok(data.every((row) => valid.has(row.state)), "setup check: unknown state name");
     return [
@@ -122,9 +133,16 @@ function post_process(post: string | undefined, stdout: string, roots: Roots): s
   if (post === "doctor_schema") {
     const levels = new Set(["ok", "info", "warn", "bad"]);
     assert.ok(data.every((row) => levels.has(row.level)), "doctor: unknown level");
+    // 도구 rows: per PC. 서버 rows (the 서버 group and a project's "… 서버 …" rows): they report the state of ports 8760~8764, which a
+    // developer PC may occupy — only their place in the list and `fixable` are compared (os_notes of E15).
+    const server_row = (row: any): boolean => row.group === "서버" || /서버/.test(String(row.title));
     const stable = data
       .filter((row) => row.group !== "도구")
-      .map((row) => ({ group: row.group, level: row.level, title: n1_time(n2_paths(String(row.title), roots)).replace(/Python \d+\.\d+\.\d+/, "Python <VER>"), fixable: row.fixable }));
+      .map((row) =>
+        server_row(row)
+          ? { group: row.group, level: "<STATE>", title: "<서버 상태>", fixable: row.fixable }
+          : { group: row.group, level: row.level, title: n1_time(n2_paths(String(row.title), roots)).replace(/Python \d+\.\d+\.\d+/, "Python <VER>"), fixable: row.fixable },
+      );
     return [
       n3_json({
         keys_per_row: [...new Set(data.flatMap((row) => Object.keys(row)))].sort(),
@@ -260,7 +278,7 @@ function safe_json(path: string): boolean {
 }
 
 async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<CaseOutcome> {
-  if (target === "ts") return { kind: "not_yet", reason: "scripts/serve.ts 없음 (PR26 4단계)" };
+  if (target === "ts") return ts_gate("http");
   const root = make_serve_home(ctx);
   const server = new ServeProcess(ctx, root);
   const steps: unknown[] = [];
@@ -373,10 +391,43 @@ function roundtrip(record: CaseRecord): CaseRecord {
 }
 
 /**
+ * What "a ts case is implemented" means, in one place (and testable with an injected record): the ts record must equal the pinned
+ * 0.15 baseline in every part the py side compares — steps (stdout / stderr kind / exit), the state DTO and the produced files —
+ * except what the listed intended differences (7.5) remove, and each of those removals has its own assertion:
+ *   D01 ids_distinct, D03 processed_count, D06 override (the fixed value, not "anything"), D07 snapshot contents (names ignored,
+ *   no content lost).
+ *
+ * PR26b hook: when the ts DTO / file builders exist, N5 (`n5_ids`: new UUID / tx / event ids → <ID:n> by first appearance) and N4
+ * (`n4_order` / `n4_multiset` for event / answer tables) are applied to the ts side here, before the comparison. They are not
+ * applied today because both sides are Python (integer ids, file order), and they are only unit-tested in test_compat_harness.
+ */
+export function compare_ts_record(def: CaseDef, got: CaseRecord, base: CaseRecord): void {
+  const id = def.id;
+  const diffs = def.diffs;
+  assert.deepEqual(got.steps, base.steps, `${id}: stdout / stderr kind / exit differ`);
+  assert.deepEqual(
+    n10_apply(got.dto, diffs, KNOWN_DIFFS),
+    n10_apply(n10_override(base.dto, id, diffs, KNOWN_DIFFS), diffs, KNOWN_DIFFS),
+    `${id}: state DTO differs beyond ${diffs.join(",") || "no"} intended differences`,
+  );
+  assert.deepEqual(n10_checks(got.dto, base.dto, diffs, KNOWN_DIFFS), [], `${id}: an intended difference's own check failed`);
+  assert.deepEqual(n10_files(got.files, diffs, KNOWN_DIFFS), n10_files(base.files, diffs, KNOWN_DIFFS), `${id}: produced files differ (names or normalised contents) beyond ${diffs.join(",") || "no"} intended differences`);
+  if (diffs.some((d) => KNOWN_DIFFS[d]?.files_check === "snapshot_contents")) {
+    // D07: where the snapshots live is not compared, but none of their contents may be lost (the first state and every later one).
+    const have = dropped_digests(got.files, diffs, KNOWN_DIFFS);
+    for (const digest of dropped_digests(base.files, diffs, KNOWN_DIFFS)) {
+      const at = have.indexOf(digest);
+      assert.ok(at >= 0, `${id}: a snapshot state of 0.15 (${digest}) is missing — the first state or a later one was lost`);
+      have.splice(at, 1);
+    }
+  }
+}
+
+/**
  * The one call a case test makes.
  *  py: the record must equal the stored 0.15 baseline.
- *  ts: a case marked not_yet in cases.json must answer not_yet (an explicit, counted absence); a case marked implemented must equal
- *      the baseline after its intended differences (N10) are removed from the DTO.
+ *  ts: a case marked not_yet in cases.json must answer not_yet (an explicit, counted absence); a case marked implemented must
+ *      pass `compare_ts_record` against the same baseline.
  */
 export async function assert_case(target: Target, id: string): Promise<void> {
   const def = case_def(id);
@@ -397,10 +448,7 @@ export async function assert_case(target: Target, id: string): Promise<void> {
   }
   assert.equal(outcome.kind, "ran", `${id}: marked implemented but the ts target answered not_yet`);
   if (outcome.kind !== "ran") return;
-  const base = read_baseline(id);
-  const got = roundtrip(outcome.record);
-  assert.deepEqual(got.steps, base.steps, `${id}: stdout / stderr kind / exit differ`);
-  assert.deepEqual(n10_apply(got.dto, def.diffs, KNOWN_DIFFS), n10_apply(base.dto, def.diffs, KNOWN_DIFFS), `${id}: state DTO differs beyond ${def.diffs.join(",") || "no"} intended differences`);
+  compare_ts_record(def, roundtrip(outcome.record), read_baseline(id));
 }
 
 export function not_yet_ids(): string[] {

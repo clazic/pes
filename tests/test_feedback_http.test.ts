@@ -157,7 +157,10 @@ test("version / ping / whoami", async () => {
   assert.equal(who.status, 200);
   const info = who.json();
   assert.equal(info.single, true);
-  assert.equal(String(info.root).split("\\").join("/").toLowerCase(), server.root.split("\\").join("/").toLowerCase());
+  assert.deepEqual(Object.keys(info).sort(), ["root", "single"], "the exact key set, like the pytest dict equality");
+  // only Windows compares without case; a case-sensitive file system must not call two different folders the same
+  const same_root = (a: string, b: string): boolean => (process.platform === "win32" ? a.split("\\").join("/").toLowerCase() === b.split("\\").join("/").toLowerCase() : a === b);
+  assert.ok(same_root(String(info.root), server.root), `${info.root} vs ${server.root}`);
 
   const project_version = await server.request("/synthetic/version");
   assert.deepEqual([project_version.status, project_version.json()], [200, { v: old + 10 }]);

@@ -213,6 +213,49 @@ export interface KnownDiff {
   reason: string;
   /** paths (dotted, `*` matches one key / index) removed from a state DTO before comparison */
   drop?: string[];
+  /**
+   * produced-file names (`/`-separated, `*` = within one folder, `**` = across folders) that are not compared by name.
+   * Whatever such a pattern removes must be covered by a separate, explicit assertion (see `files_check`).
+   */
+  drop_files?: string[];
+  /** the separate assertion that replaces the by-name comparison of `drop_files`; compat_cases.compare_ts_record runs it */
+  files_check?: "snapshot_contents";
+  /**
+   * per case id: DTO paths (dotted, numbers index arrays) whose *expected* value is not the pinned 0.15 one but the fixed behaviour
+   * the new core must show. The pinned baseline is never rewritten; the override is applied to the baseline copy before comparing,
+   * so the ts side must show exactly that value (a dropped path would accept anything).
+   */
+  override?: Record<string, Record<string, unknown>>;
+  /** extra DTO assertions that replace a dropped path (run on the ts DTO against the baseline DTO) */
+  checks?: ("ids_distinct" | "processed_count")[];
+}
+
+function glob_to_regex(pattern: string): RegExp {
+  const body = pattern
+    .split("**")
+    .map((part) => part.split("*").map((piece) => piece.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*"))
+    .join(".*");
+  return new RegExp(`^${body}$`);
+}
+
+/** The produced-file map (name → digest) without the files an intended difference lists by name pattern. Unknown ids throw. */
+export function n10_files(files: Record<string, string>, ids: string[], table: Record<string, KnownDiff>): Record<string, string> {
+  const patterns: RegExp[] = [];
+  for (const id of ids) {
+    const diff = table[id];
+    if (diff === undefined) throw new Error(`unknown intended difference ${id}`);
+    for (const pattern of diff.drop_files ?? []) patterns.push(glob_to_regex(pattern));
+  }
+  return Object.fromEntries(Object.entries(files).filter(([name]) => !patterns.some((re) => re.test(name))));
+}
+
+/** The digests of the files that match `drop_files` of the listed differences, sorted — names are ignored, contents are not. */
+export function dropped_digests(files: Record<string, string>, ids: string[], table: Record<string, KnownDiff>): string[] {
+  const kept = n10_files(files, ids, table);
+  return Object.entries(files)
+    .filter(([name]) => !(name in kept))
+    .map(([, digest]) => digest)
+    .sort();
 }
 
 function drop_path(value: unknown, parts: string[]): void {
@@ -238,4 +281,48 @@ export function n10_apply(dto: unknown, ids: string[], table: Record<string, Kno
     for (const path of diff.drop ?? []) drop_path(copy, path.split("."));
   }
   return copy;
+}
+
+function set_path(value: unknown, parts: string[], replacement: unknown): void {
+  let cursor = value as any;
+  for (const part of parts.slice(0, -1)) {
+    cursor = cursor?.[part];
+    if (cursor === null || typeof cursor !== "object") throw new Error(`override path ${parts.join(".")} does not exist in the baseline DTO`);
+  }
+  const last = parts[parts.length - 1] as string;
+  if (!(last in cursor)) throw new Error(`override path ${parts.join(".")} does not exist in the baseline DTO`);
+  cursor[last] = replacement;
+}
+
+/** The pinned baseline DTO with the fixed behaviour of the listed differences written in (see KnownDiff.override). Missing path throws. */
+export function n10_override(dto: unknown, case_id: string, ids: string[], table: Record<string, KnownDiff>): unknown {
+  const copy = JSON.parse(JSON.stringify(dto)) as unknown;
+  for (const id of ids) {
+    const diff = table[id];
+    if (diff === undefined) throw new Error(`unknown intended difference ${id}`);
+    for (const [path, replacement] of Object.entries(diff.override?.[case_id] ?? {})) set_path(copy, path.split("."), replacement);
+  }
+  return copy;
+}
+
+/** KnownDiff.checks on the ts DTO. D01: items still carry an id and the ids are pairwise distinct. D03: `processed` is a list of the same length. */
+export function n10_checks(got: any, base: any, ids: string[], table: Record<string, KnownDiff>): string[] {
+  const problems: string[] = [];
+  // an http case has no state DTO (dto: null on both sides): there is nothing to check
+  if (base === null || base === undefined) return problems;
+  for (const id of ids) {
+    for (const check of table[id]?.checks ?? []) {
+      if (check === "ids_distinct") {
+        for (const [stage, value] of Object.entries<any>(got?.stages ?? {})) {
+          const found = (value.items ?? []).map((item: any) => item.id);
+          if (found.some((x: unknown) => x === undefined || x === null) || new Set(found).size !== found.length) problems.push(`${id}: stage ${stage} item ids are missing or repeat`);
+        }
+        const stages = Object.keys(base?.stages ?? {}).sort().join(",");
+        if (Object.keys(got?.stages ?? {}).sort().join(",") !== stages) problems.push(`${id}: stage set differs`);
+      } else if (check === "processed_count") {
+        if (!Array.isArray(got?.processed) || got.processed.length !== (base?.processed ?? []).length) problems.push(`${id}: processed is not a list of ${(base?.processed ?? []).length}`);
+      }
+    }
+  }
+  return problems;
 }

@@ -2,16 +2,17 @@
 // target ("ts"); stdout / stderr kind / exit / produced files / state DTO are normalised (N1~N10) and compared.
 //
 // Targets
-//   py  python -I -X utf8 scripts/pes.py | serve.py | setup.py       (no PES_DB_CORE: pure v0.15)
-//   ts  scripts/pes.ts                                               (does not exist yet: every run answers "not_yet")
+//   py  python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(scripts/pes.py | serve.py | setup.py)"   (no PES_DB_CORE: pure v0.15)
+//   ts  scripts/pes.ts | serve.ts | setup.ts                           (none exists yet: every run answers "not_yet")
 //
 // A target that cannot run a command says so with { kind: "not_yet" } — a case is never skipped silently; the list of not-yet
 // cases must equal tests/fixtures/compat/cases.json exactly (tests/test_compat_harness.test.ts), so implementing a command
-// forces the table entry to be removed.
+// forces the table entry to be removed. All three ts files are guarded alike (`ts_gate`): once one exists, running its kind of
+// case throws until the ts target is wired in and the not-yet entries are removed.
 //
 // Isolation: every child gets HOME, USERPROFILE and PES_HOME inside one temp folder (assert_isolated_env), and the py side runs
-// with a narrowed PATH when the case asks for it. The Windows list: -X utf8, CRLF → LF, realpath.native, doubled backslashes,
-// no `which` / `sh` / `tar`.
+// with a narrowed PATH when the case asks for it. The py child also runs the audit hook of tests/conftest.py (reads included,
+// see home_guard.ts). The Windows list: -X utf8, CRLF → LF, realpath.native, doubled backslashes, no `which` / `sh` / `tar`.
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -20,7 +21,7 @@ import { createServer } from "node:net";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assert_isolated_env, assert_no_real_path } from "./home_guard.ts";
+import { account_home, assert_isolated_env, assert_no_real_path, assert_no_violation } from "./home_guard.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
 import { n1_json, n1_time, n2_paths, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
 
@@ -31,6 +32,9 @@ export const PES_PY = join(REPO, "scripts", "pes.py");
 export const SERVE_PY = join(REPO, "scripts", "serve.py");
 export const SETUP_PY = join(REPO, "scripts", "setup.py");
 export const PES_TS = join(REPO, "scripts", "pes.ts");
+export const SERVE_TS = join(REPO, "scripts", "serve.ts");
+export const SETUP_TS = join(REPO, "scripts", "setup.ts");
+export const CONFTEST_PY = join(REPO, "tests", "conftest.py");
 
 export type Target = "py" | "ts";
 export const STAGES = ["plan", "research", "analyze", "write", "verify", "publish"] as const;
@@ -55,8 +59,56 @@ export function target_from_env(fallback: Target = "py"): Target {
   return value;
 }
 
-export function ts_available(): boolean {
-  return existsSync(PES_TS);
+export type CaseKind = "cli" | "http" | "setup";
+export const TS_FILES: Record<CaseKind, string> = { cli: PES_TS, http: SERVE_TS, setup: SETUP_TS };
+
+export function ts_available(kind: CaseKind = "cli", exists: (path: string) => boolean = existsSync): boolean {
+  return exists(TS_FILES[kind]);
+}
+
+/**
+ * The one gate of the ts target. The file of a kind does not exist → `not_yet` (counted absence). It exists → throw: wire the ts
+ * target for that kind into compat_env / compat_cases, mark the cases `implemented` in cases.json and TS_IMPLEMENTED, then drop
+ * this throw for the kind. `exists` is injectable so the gate itself can be tested without creating a file under scripts/.
+ */
+export function ts_gate(kind: CaseKind, exists: (path: string) => boolean = existsSync): { kind: "not_yet"; reason: string } {
+  const file = TS_FILES[kind];
+  if (exists(file)) {
+    throw new Error(`${relative(REPO, file).split("\\").join("/")} exists: wire the ts target for "${kind}" cases in compat_env / compat_cases and remove their not_yet entries (cases.json ts.status + TS_IMPLEMENTED)`);
+  }
+  const reasons: Record<CaseKind, string> = {
+    cli: "scripts/pes.ts 없음 (PR26 3~4단계)",
+    http: "scripts/serve.ts 없음 (PR26 4단계)",
+    setup: "scripts/setup.ts 없음 (PR26 4단계)",
+  };
+  return { kind: "not_yet", reason: reasons[kind] };
+}
+
+// ---------------------------------------------------------------- the guarded Python child (audit hook of tests/conftest.py)
+let guard_source: string | undefined;
+/** The GUARD string of tests/conftest.py (the r'''…''' literal), read once. No second copy of the hook exists. */
+export function py_guard_source(): string {
+  if (guard_source === undefined) {
+    const match = /^GUARD = r'''\n([\s\S]*?)\n'''$/m.exec(readFileSync(CONFTEST_PY, "utf8").replace(/\r\n/g, "\n"));
+    assert.ok(match !== null, "tests/conftest.py: the GUARD literal moved — update py_guard_source");
+    guard_source = match[1] as string;
+  }
+  return guard_source;
+}
+
+/**
+ * `python -I -X utf8 -c "<GUARD>; <extra>; runpy.run_path(argv[1], run_name='__main__')" <script> <args…>`: the child behaves as if
+ * `python -I -X utf8 <script> <args…>` was run (argv, __file__, __main__, exit code), with the audit hook installed first.
+ * `extra` is test-only code that runs after the hook and before the script (the sitecustomize-style injections).
+ */
+export function guarded_script_argv(script: string, args: string[], extra = ""): string[] {
+  const code = `${py_guard_source()}\n${extra}\nimport runpy as _pes_runpy, sys as _pes_sys\n_pes_sys.argv = _pes_sys.argv[1:]\n_pes_runpy.run_path(_pes_sys.argv[0], run_name="__main__")\n`;
+  return [...PY_FLAGS, "-c", code, script, ...args];
+}
+
+/** Variables that switch the hook on and name the home it protects. A case/option env may override them (the guard self-test does). */
+function guard_env(): Record<string, string> {
+  return { PES_TEST_GUARD: "1", PES_TEST_REAL_HOME: account_home() };
 }
 
 export interface RunResult {
@@ -98,6 +150,12 @@ export function make_ctx(prefix = "pes-compat-"): CompatCtx {
   mkdirSync(narrow_bin, { recursive: true });
   const env: Record<string, string | undefined> = { ...home.env };
   for (const key of SCRUBBED) delete env[key];
+  // pes.py find_tool also looks below %LOCALAPPDATA% / %APPDATA% (Windows) — point them into the temp home, or an ego-browser
+  // installed on the developer's PC would change E14 / E15.
+  if (process.platform === "win32") {
+    env.LOCALAPPDATA = join(home_dir, "AppData", "Local");
+    env.APPDATA = join(home_dir, "AppData", "Roaming");
+  }
   assert_isolated_env(env);
   return {
     home,
@@ -122,7 +180,7 @@ export interface RunOptions {
 }
 
 function child_env(ctx: CompatCtx, options: RunOptions): NodeJS.ProcessEnv {
-  const env: Record<string, string | undefined> = { ...ctx.env, ...(options.env ?? {}) };
+  const env: Record<string, string | undefined> = { ...ctx.env, ...guard_env(), ...(options.env ?? {}) };
   if (options.narrow_path === true) {
     const extra = process.platform === "win32" ? [join(process.env.SystemRoot ?? "C:\\Windows", "System32")] : [];
     env.PATH = [ctx.narrow_bin, ...extra].join(process.platform === "win32" ? ";" : ":");
@@ -137,7 +195,7 @@ function child_env(ctx: CompatCtx, options: RunOptions): NodeJS.ProcessEnv {
 
 function spawn_python(script: string, args: string[], ctx: CompatCtx, options: RunOptions): RunResult {
   const env = child_env(ctx, options);
-  const result = spawnSync(PYTHON, [...PY_FLAGS, script, ...args], {
+  const result = spawnSync(PYTHON, guarded_script_argv(script, args), {
     env,
     cwd: options.cwd ?? ctx.home.root,
     encoding: "utf8",
@@ -148,6 +206,7 @@ function spawn_python(script: string, args: string[], ctx: CompatCtx, options: R
   if (result.error !== undefined) throw result.error;
   // N7: a Windows text-mode pipe turns "\n" into "\r\n"; every comparison sees LF.
   const out = { status: result.status, stdout: n7_text(result.stdout ?? ""), stderr: n7_text(result.stderr ?? "") };
+  assert_no_violation(out.stderr, `${relative(REPO, script)} ${args.join(" ")}`);
   assert_no_real_path(out.stdout, "stdout");
   assert_no_real_path(out.stderr, "stderr");
   return out;
@@ -156,23 +215,22 @@ function spawn_python(script: string, args: string[], ctx: CompatCtx, options: R
 /** Runs one `pes` CLI command on a target. PES_OWNER may be passed through options.env (the lock tests need it). */
 export function run_pes(target: Target, ctx: CompatCtx, args: (string | number)[], options: RunOptions = {}): TargetRun {
   const argv = args.map(String);
-  if (target === "ts") {
-    if (!ts_available()) return { kind: "not_yet", reason: "scripts/pes.ts 없음 (PR26 3~4단계)" };
-    throw new Error("scripts/pes.ts exists: wire the ts target in compat_env.run_pes and remove the not_yet entries");
-  }
+  if (target === "ts") return ts_gate("cli");
   return { kind: "ran", ...spawn_python(PES_PY, argv, ctx, options) };
 }
 
-/** Runs a short inline snippet with the same flags and isolation (for the few in-process checks of tests/*.py that have no CLI form). */
+/** Runs a short inline snippet with the same flags, isolation and audit hook (for the few in-process checks of tests/*.py that have no CLI form). */
 export function run_py_code(ctx: CompatCtx, code: string, args: string[] = [], options: RunOptions = {}): RunResult {
   const env = child_env(ctx, options);
-  const result = spawnSync(PYTHON, [...PY_FLAGS, "-c", code, ...args], { env, cwd: options.cwd ?? ctx.home.root, encoding: "utf8", timeout: options.timeout_ms ?? 60_000 });
+  const result = spawnSync(PYTHON, [...PY_FLAGS, "-c", `${py_guard_source()}\n${code}`, ...args], { env, cwd: options.cwd ?? ctx.home.root, encoding: "utf8", timeout: options.timeout_ms ?? 60_000 });
   if (result.error !== undefined) throw result.error;
-  return { status: result.status, stdout: n7_text(result.stdout ?? ""), stderr: n7_text(result.stderr ?? "") };
+  const out = { status: result.status, stdout: n7_text(result.stdout ?? ""), stderr: n7_text(result.stderr ?? "") };
+  assert_no_violation(out.stderr, "inline python snippet");
+  return out;
 }
 
 export function run_setup(target: Target, ctx: CompatCtx, args: string[], options: RunOptions = {}): TargetRun {
-  if (target === "ts") return { kind: "not_yet", reason: "scripts/setup.ts 없음 (PR26 4단계)" };
+  if (target === "ts") return ts_gate("setup");
   return { kind: "ran", ...spawn_python(SETUP_PY, args, ctx, options) };
 }
 
@@ -231,7 +289,11 @@ export function approve(ctx: CompatCtx, project: string, stage: string): string 
   return run.out;
 }
 
-/** The four synthetic project shapes of tests/fixtures/generate.py (a TS port: same bytes). */
+/**
+ * The synthetic project shapes of tests/fixtures/generate.py, ported: the same content (`pes`, topic, one plan item / truncated
+ * JSON / a 2 MB payload). Not the same bytes: Python json.dumps writes ", " and ": " separators, JSON.stringify none — pes.py
+ * reads both as the same JSON.
+ */
 let synthetic_seq = 0;
 export function synthetic_project(ctx: CompatCtx, kind: "legacy" | "broken" | "large"): string {
   // a fresh folder per call (pytest gave every test its own tmp_path)
@@ -340,13 +402,13 @@ export function normalized_dto(dto: StateDto, roots: Roots): unknown {
 
 // ---------------------------------------------------------------- intended differences (7.5) — shown in the case table
 export const KNOWN_DIFFS: Record<string, KnownDiff> = {
-  D01: { id: "D01", title: "새 ID(UUID·tx·event·lease) vs 0.15 정수 item id", reason: "새 코어가 DB·버전·사건을 쓴다 (N5 로 치환, 참조만 비교)", drop: ["stages.*.items.*.id"] },
+  D01: { id: "D01", title: "새 ID(UUID·tx·event·lease) vs 0.15 정수 item id", reason: "새 코어가 DB·버전·사건을 쓴다 (N5 로 치환, 참조만 비교)", drop: ["stages.*.items.*.id"], checks: ["ids_distinct"] },
   D02: { id: "D02", title: "project.json 단일 원본 → SQLite 원본", reason: "상태 DTO 로 비교한다. project.json 은 legacy 읽기 전용" },
-  D03: { id: "D03", title: "feedback/*.json 파일 → submissions/answers", reason: "/feedback 호환 응답·영수증 의미를 비교한다", drop: ["processed"] },
+  D03: { id: "D03", title: "feedback/*.json 파일 → submissions/answers", reason: "/feedback 호환 응답·영수증 의미를 비교한다", drop: ["processed"], checks: ["processed_count"] },
   D04: { id: "D04", title: ".pes-lock·PES_OWNER → project_leases/토큰", reason: "CLI exit·owner 의미만 비교한다" },
   D05: { id: "D05", title: "watch tail 명령 → long-poll/이벤트", reason: "출력 형식 호환 또는 새 대기 방식을 명시한다" },
-  D06: { id: "D06", title: "merge depth 재제출 증가 (0.15 결함 ②, SEL-12)", reason: "0.15 는 같은 병합을 다시 보내면 depth 가 또 오른다 — 새 코어는 고친 동작이 정답이다", drop: ["stages.*.items.*.depth"] },
-  D07: { id: "D07", title: "같은 라운드 snapshot (대응표 7.5 '덮어쓰기' — 0.15 는 이미 첫 상태를 지킨다)", reason: "0.15 현재 동작은 snapshot 의 첫 상태를 기본 파일에 두고 이후 상태는 snapshots/<단계>-R<n>/<k>.json 에 모은다(덮어쓰기 결함은 고쳐졌다). 새 코어는 DB 판(editions)으로 보관하므로 파일 이름·위치는 비교하지 않고 '첫 상태 보존·이후 상태 유실 0'만 비교한다" },
+  D06: { id: "D06", title: "merge depth 재제출 증가 (0.15 결함 ②, SEL-12)", reason: "0.15 는 같은 병합을 다시 보내면 depth 가 또 오른다 — 새 코어는 고친 동작이 정답이다 (E03: 같은 결과를 다시 보낸 항목 7 의 depth 는 0.15 의 3 이 아니라 2)", override: { E03: { "stages.research.items.2.depth": 2 } } },
+  D07: { id: "D07", title: "같은 라운드 snapshot (대응표 7.5 '덮어쓰기' — 0.15 는 이미 첫 상태를 지킨다)", reason: "0.15 현재 동작은 snapshot 의 첫 상태를 기본 파일에 두고 이후 상태는 snapshots/<단계>-R<n>/<k>.json 에 모은다(덮어쓰기 결함은 고쳐졌다). 새 코어는 DB 판(editions)으로 보관하므로 파일 이름·위치는 비교하지 않고 '첫 상태 보존·이후 상태 유실 0'만 비교한다 (ts 기록기는 보관한 판을 snapshots/** 아래에 모으고, 그 내용 해시가 하나도 빠지지 않아야 한다 — compat_cases.compare_ts_record)", drop_files: ["snapshots/**"], files_check: "snapshot_contents" },
   D08: { id: "D08", title: "doctor 의 Python/템플릿 검사", reason: "런타임 변경 — TS 런타임 검사로 바꾸고 섹션·exit 를 유지한다" },
   D09: { id: "D09", title: "hub/serve 정적 HTML 생성 → DB/API 서버", reason: "URL·포트·응답 계약은 같고 내부 구현은 다르다" },
 };
@@ -379,7 +441,7 @@ export interface ServeOptions {
   /** whoami root the readiness probe expects (default: the root given to the constructor) */
   expected_root?: string;
   ready_timeout_ms?: number;
-  /** text appended to a generated sitecustomize.py (test-only injection) — placed on PYTHONPATH, so -I is dropped for the child */
+  /** test-only Python code run in the child after the audit hook and before serve.py (the old sitecustomize injection; -I stays) */
   sitecustomize?: string;
   extra_env?: Record<string, string | undefined>;
 }
@@ -409,20 +471,15 @@ export class ServeProcess {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       this.port = await free_port();
       this.log = "";
-      const startup = join(this.ctx.tmp, `serve-startup-${attempt}`);
-      const env: Record<string, string | undefined> = { ...this.ctx.env, ...(this.options.extra_env ?? {}) };
-      const flags: string[] = ["-X", "utf8"];
-      if (this.options.sitecustomize !== undefined) {
-        mkdirSync(startup, { recursive: true });
-        writeFileSync(join(startup, "sitecustomize.py"), this.options.sitecustomize, "utf8");
-        env.PYTHONPATH = startup;
-      } else {
-        flags.unshift("-I");
-      }
+      const env: Record<string, string | undefined> = { ...this.ctx.env, ...guard_env(), ...(this.options.extra_env ?? {}) };
       env.PYTHONIOENCODING = "utf-8";
       for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
+      assert_isolated_env({ ...env, PES_HOME: env.PES_HOME ?? join(env.HOME ?? "", "pes-projects") });
       this.spawn_error = undefined;
-      const proc = spawn(this.options.command ?? PYTHON, [...flags, this.options.script ?? SERVE_PY, this.root, String(this.port)], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"], cwd: this.ctx.home.root });
+      // -I always stays: the test-only injection (options.sitecustomize) runs inside the -c code, after the audit hook and before
+      // serve.py, so no PYTHONPATH / sitecustomize.py is needed any more.
+      const argv = guarded_script_argv(this.options.script ?? SERVE_PY, [this.root, String(this.port)], this.options.sitecustomize ?? "");
+      const proc = spawn(this.options.command ?? PYTHON, argv, { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"], cwd: this.ctx.home.root });
       this.proc = proc;
       this.children.push(proc);
       proc.once("error", (error) => {
@@ -431,6 +488,7 @@ export class ServeProcess {
       this.proc.stdout?.on("data", (chunk: Buffer) => (this.log += chunk.toString("utf8")));
       this.proc.stderr?.on("data", (chunk: Buffer) => (this.log += chunk.toString("utf8")));
       if (await this.wait_ready()) return this;
+      assert_no_violation(this.log, "serve.py start-up");
       errors.push(`port ${this.port}: readiness timeout\n${this.log}`);
       await this.stop();
     }
@@ -457,7 +515,10 @@ export class ServeProcess {
   async stop(): Promise<void> {
     const proc = this.proc;
     this.proc = undefined;
-    if (proc === undefined || proc.exitCode !== null || proc.signalCode !== null || this.spawn_error !== undefined) return;
+    if (proc === undefined || proc.exitCode !== null || proc.signalCode !== null || this.spawn_error !== undefined) {
+      assert_no_violation(this.log, "serve.py");
+      return;
+    }
     await new Promise<void>((done) => {
       const timer = setTimeout(() => {
         proc.kill("SIGKILL");
@@ -468,6 +529,7 @@ export class ServeProcess {
       });
       proc.kill();
     });
+    assert_no_violation(this.log, "serve.py");
   }
 
   async restart(): Promise<this> {

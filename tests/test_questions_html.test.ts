@@ -2,11 +2,11 @@
 // Question screens: the data JSON of ask-*.html, escaping, the shared question module, file-name sanitising.
 // The HTML is inspected as text and JSON only (no browser). Same synthetic specs as the pytest file.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { REPO, init_project, make_ctx, pes, write_json } from "./helpers/compat_env.ts";
+import { REPO, make_ctx, pes, synthetic_project, write_json } from "./helpers/compat_env.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { html_unescape } from "./helpers/compat_normalize.ts";
 
@@ -44,8 +44,9 @@ function ask(project: string, spec: unknown, name = "spec.json"): string {
   return run.out.trim();
 }
 
-function legacy_project(name: string): string {
-  return init_project(ctx, name);
+/** The hand-written old project.json of tests/fixtures/generate.py ("legacy": no stage status yet) — the input the pytest file used. */
+function legacy_project(): string {
+  return synthetic_project(ctx, "legacy");
 }
 
 test("ask embeds the question data, escapes HTML in the title, and keeps </script> inside the data harmless", () => {
@@ -68,9 +69,9 @@ test("ask embeds the question data, escapes HTML in the title, and keeps </scrip
     ],
     _note: "렌더하지 않는 내부 메모",
   };
-  const project = legacy_project("질문 프로젝트");
+  const project = legacy_project();
   const rendered = ask(project, spec);
-  assert.equal(rendered.split("\\").join("/").replace(/^.*\/질문 프로젝트\//, ""), "ask-sel-13-ask.html");
+  assert.equal(rendered, join(realpathSync.native(project), "ask-sel-13-ask.html"));
   const html = read_lf(rendered);
 
   const { blob, data } = data_of(html);
@@ -79,7 +80,7 @@ test("ask embeds the question data, escapes HTML in the title, and keeps </scrip
   assert.equal(data.spec.questions[4]._when, undefined);
   assert.equal(data.topic, "합성 주제");
   assert.deepEqual(data.stages.map((s: any) => s.key), ["plan", "research", "analyze", "write", "verify", "publish"]);
-  assert.equal(data.stages[0].status, "asking");
+  assert.equal(data.stages[0].status, "asking"); // the legacy input has no status: `ask` is what moves it to asking
 
   // A </script> inside the data is escaped, so the data script cannot be ended early.
   assert.ok(!blob.includes("</script>"));
@@ -103,7 +104,7 @@ test("html_escape port agrees with the unescape helper", () => {
 });
 
 test("ask keeps the definitions of the real plan question bank (questions/plan.json) intact", () => {
-  const project = legacy_project("질문 은행 프로젝트");
+  const project = legacy_project();
   const bank = join(REPO, "questions", "plan.json");
   const source = JSON.parse(read_lf(bank));
   const run = pes(ctx, "ask", project, bank);
@@ -121,7 +122,7 @@ test("ask keeps the definitions of the real plan question bank (questions/plan.j
 });
 
 test("the shared question module is inserted once and keeps the other / required / conditional UI", () => {
-  const project = legacy_project("질문 모듈 프로젝트");
+  const project = legacy_project();
   const run = pes(ctx, "ask", project, join(REPO, "questions", "plan.json"));
   assert.equal(run.code, 0, run.out + run.err);
   const html = read_lf(run.out.trim());
@@ -144,15 +145,15 @@ test("the shared question module is inserted once and keeps the other / required
 });
 
 test("the ask id is sanitised into the output file name (test_question_bank: file-name cleaning)", () => {
-  const project = legacy_project("질문 이름 프로젝트");
+  const project = legacy_project();
   const rendered = ask(project, { id: "My Ask / 1", stage: "plan", kind: "stage_start", title: "합성", questions: [] });
   const normalized = rendered.split("\\").join("/");
   assert.equal(normalized.slice(normalized.lastIndexOf("/") + 1), "ask-my-ask---1.html");
-  assert.ok(normalized.includes("/질문 이름 프로젝트/"), "written next to project.json");
+  assert.equal(normalized.slice(0, normalized.lastIndexOf("/")), realpathSync.native(project).split("\\").join("/"), "written next to project.json");
 });
 
 test("every question bank file renders (questions/*.json) and survives the data round trip", () => {
-  const project = legacy_project("질문 은행 전체");
+  const project = legacy_project();
   for (const stage of ["plan", "research", "analyze", "write", "verify", "publish", "resume"]) {
     const prep = pes(ctx, "ask-prep", project, stage);
     assert.equal(prep.code, 0, `${stage}: ${prep.out}${prep.err}`);

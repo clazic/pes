@@ -10,7 +10,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { PES_PY, STAGES, make_ctx, pes, project_json, read_json, run_pes } from "./helpers/compat_env.ts";
+import { PES_PY, STAGES, make_ctx, pes, project_json, read_json, run_pes, run_py_code } from "./helpers/compat_env.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
@@ -54,10 +54,20 @@ test("cli init creates the six-stage skeleton at a Korean path with spaces; a du
   assert.deepEqual(readFileSync(join(project, "project.json")), before);
 });
 
+/** `pes.__doc__.strip()` of the pytest original: the module docstring of scripts/pes.py, read without importing the script. */
+function pes_doc(): string {
+  const run = run_py_code(ctx, "import ast, sys; print(ast.get_docstring(ast.parse(open(sys.argv[1], encoding='utf-8').read()), clean=False), end='')", [PES_PY]);
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(run.stdout.trim().length > 100, "the docstring must be the whole usage text");
+  return run.stdout.trim();
+}
+
 test("no arguments and unknown commands print the usage text and exit 1", () => {
+  const doc = pes_doc();
   for (const args of [[], ["unknown", "project"]]) {
     const run = pes(ctx, ...args);
     assert.equal(run.code, 1);
+    assert.ok(run.out.includes(doc), "the whole module docstring is the usage text");
     assert.match(run.out, /^PES \(Project Execution System\) — 프로젝트 상태 CLI\./);
     assert.match(run.out, /사용: python3 -I pes\.py <명령> <프로젝트 폴더> \[인자\]/);
   }
@@ -68,6 +78,7 @@ test("a single non-special command prints the usage and exits 1 (init, status, u
     const run = pes(ctx, command);
     assert.equal(run.code, 1, command);
     assert.match(run.out, /^PES \(Project Execution System\)/, command);
+    assert.ok(run.out.includes(pes_doc()), `${command}: the whole usage text`);
   }
 });
 

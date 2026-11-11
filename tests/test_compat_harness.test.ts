@@ -4,14 +4,17 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 
-import { baseline_path, load_table, not_yet_ids, run_case } from "./helpers/compat_cases.ts";
-import { KNOWN_DIFFS, STAGES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available } from "./helpers/compat_env.ts";
+import { baseline_path, compare_ts_record, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
+import { KNOWN_DIFFS, STAGES, TS_FILES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available, ts_gate, type CaseKind } from "./helpers/compat_env.ts";
 import {
   html_unescape,
   lines,
   n1_json,
   n1_time,
   n10_apply,
+  n10_checks,
+  n10_files,
+  n10_override,
   n2_paths,
   n3_json,
   n4_multiset,
@@ -51,6 +54,23 @@ test("what an E-row leaves out on purpose is written in the table with a reason 
   for (const x of e13?.excluded ?? []) assert.ok(x.why.length > 10);
 });
 
+test("the rows that still differ per OS / PC (E13 http, E14 setup, E15 doctor) say how the single baseline copes, with a reason each", () => {
+  const table = load_table();
+  for (const id of ["E13", "E14", "E15"]) {
+    const notes = table.cases.find((c) => c.id === id)?.os_notes ?? [];
+    assert.ok(notes.length >= 3, `${id}: os_notes missing`);
+    for (const note of notes) {
+      assert.ok(note.what.length > 3 && note.why.length > 10, `${id}: ${note.what}`);
+      assert.match(note.handling, /정규화|제외|임시 HOME|하나의 기준값|narrow_path/, `${id}: ${note.what} must be normalised, excluded or moved to the temp HOME`);
+    }
+  }
+  // the machine-dependent rows really are out of the baselines: no tool state, no server state, no version
+  const e14_check = JSON.parse(((read_baseline("E14").steps[1] as any).stdout as string[])[0] as string) as { stable: Record<string, string> };
+  assert.deepEqual(Object.keys(e14_check.stable).sort(), ["key-kosis", "key-law", "key-vworld", "python"], "E14 pins only rows no machine can change");
+  for (const id of ["E14", "E15"]) assert.ok(!/0\.15\.\d|Python 3\.\d/.test(JSON.stringify(read_baseline(id))), `${id}: a version number is pinned`);
+  assert.ok(!JSON.stringify(read_baseline("E15")).includes("꺼짐"), "E15: server state is not pinned");
+});
+
 test("every intended difference (7.5) carries a reason, and each is used by at least one case", () => {
   const used = new Set(load_table().cases.flatMap((c) => c.diffs));
   for (const [id, diff] of Object.entries(KNOWN_DIFFS)) {
@@ -65,21 +85,40 @@ test("every intended difference (7.5) carries a reason, and each is used by at l
   assert.match(KNOWN_DIFFS.D07?.reason ?? "", /snapshot/);
 });
 
-test("target selection: py runs, ts answers not_yet while scripts/pes.ts does not exist", () => {
+const KINDS: CaseKind[] = ["cli", "http", "setup"];
+const kind_of = (id: string): CaseKind => load_table().cases.find((c) => c.id === id)?.kind as CaseKind;
+
+test("target selection: py runs, ts answers not_yet for every kind while its scripts/*.ts file does not exist", () => {
   assert.equal(target_from_env("py"), "py");
   const ctx = make_ctx("pes-harness-");
   try {
     const py = run_pes("py", ctx, ["remote"]);
     assert.equal(py.kind, "ran");
     assert.equal(py.kind === "ran" ? py.status : -1, 0);
-    assert.equal(ts_available(), TS_IMPLEMENTED.length > 0, "scripts/pes.ts appeared: wire the ts target in compat_env.run_pes and update TS_IMPLEMENTED + cases.json");
-    if (!ts_available()) {
+    // one ts file per kind of case: pes.ts (cli) / serve.ts (http) / setup.ts (setup). A file exists exactly when some case of
+    // that kind is listed as implemented — otherwise the ratchet has to be turned by hand (cases.json + TS_IMPLEMENTED + wiring).
+    for (const kind of KINDS) {
+      const implemented = TS_IMPLEMENTED.filter((id) => kind_of(id) === kind).length;
+      assert.equal(ts_available(kind), implemented > 0, `${TS_FILES[kind]} ${ts_available(kind) ? "appeared" : "is missing"}: wire the ts "${kind}" target in compat_env / compat_cases and update TS_IMPLEMENTED + cases.json`);
+    }
+    if (!ts_available("cli")) {
       assert.equal(run_pes("ts", ctx, ["remote"]).kind, "not_yet");
-      assert.equal(run_setup("ts", ctx, ["check", "--json"]).kind, "not_yet");
       assert.equal(read_state_dto("ts", ctx, ctx.project()).kind, "not_yet");
     }
+    if (!ts_available("setup")) assert.equal(run_setup("ts", ctx, ["check", "--json"]).kind, "not_yet");
   } finally {
     ctx.cleanup();
+  }
+});
+
+test("the ts gate throws as soon as the ts file of a kind exists (pes.ts, serve.ts and setup.ts alike) — the file is injected, scripts/ is not touched", () => {
+  for (const kind of KINDS) {
+    const absent = ts_gate(kind, () => false);
+    assert.equal(absent.kind, "not_yet");
+    assert.match(absent.reason, new RegExp(`scripts/${kind === "cli" ? "pes" : kind === "http" ? "serve" : "setup"}\\.ts`));
+    assert.throws(() => ts_gate(kind, (path) => path === TS_FILES[kind]), /exists: wire the ts target/, kind);
+    // only the file of the kind itself counts
+    assert.equal(ts_gate(kind, (path) => path !== TS_FILES[kind]).kind, "not_yet", kind);
   }
 });
 
@@ -87,10 +126,108 @@ test("the not-yet list on the TS target equals the table exactly (an implemented
   const expected = ALL_IDS.filter((id) => !TS_IMPLEMENTED.includes(id));
   assert.deepEqual(not_yet_ids(), expected, "cases.json ts.status and TS_IMPLEMENTED disagree");
   assert.equal(expected.length, 15 - TS_IMPLEMENTED.length);
+  // the three ts files, each against its kind of cases: a file that exists without an implemented case of its kind (E08/E09/E13
+  // http, E14 setup, the rest cli) means the not-yet entries were forgotten.
+  for (const kind of KINDS) {
+    const of_kind = ALL_IDS.filter((id) => kind_of(id) === kind);
+    const missing = of_kind.filter((id) => !TS_IMPLEMENTED.includes(id));
+    if (ts_available(kind)) assert.deepEqual(missing, [], `${TS_FILES[kind]} exists but these ${kind} cases are still not_yet`);
+    else assert.deepEqual(missing, of_kind, `${TS_FILES[kind]} is missing but ${kind} cases are listed as implemented`);
+  }
   for (const id of expected) {
     const outcome = await run_case("ts", id);
     assert.equal(outcome.kind, "not_yet", `${id} ran on the ts target although it is listed as not_yet`);
   }
+});
+
+// ---------------------------------------------------------------- "implemented" means the same comparison as py (injected records)
+// No ts target exists, so a fake `implemented` case is built from the pinned baseline itself: a copy of it stands in for the ts record.
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const def_of = (id: string): CaseDef => load_table().cases.find((c) => c.id === id) as CaseDef;
+const with_diffs = (id: string, diffs: string[]): CaseDef => ({ ...def_of(id), diffs });
+
+test("an implemented ts case with the baseline's own record passes (the comparison is not stricter than the contract)", () => {
+  // E03 is the one case whose pinned 0.15 value is a known defect (D06): it passes with the fixed value, see the D06 test below.
+  for (const id of ALL_IDS.filter((x) => x !== "E03")) compare_ts_record(def_of(id), clone(read_baseline(id)), read_baseline(id));
+});
+
+test("an implemented ts case fails when a produced file differs, is missing, or is extra (files are compared like on py)", () => {
+  const base = read_baseline("E02");
+  const names = Object.keys(base.files);
+  assert.ok(names.length >= 2, "E02 must pin produced files (ask HTML, report…)");
+  const changed = clone(base);
+  changed.files[names[0] as string] = "0000000000000000";
+  assert.throws(() => compare_ts_record(def_of("E02"), changed, base), /produced files differ/);
+  const missing = clone(base);
+  delete missing.files[names[0] as string];
+  assert.throws(() => compare_ts_record(def_of("E02"), missing, base), /produced files differ/);
+  const extra = clone(base);
+  extra.files["out/extra.md"] = "1111111111111111";
+  assert.throws(() => compare_ts_record(def_of("E02"), extra, base), /produced files differ/);
+  const steps = clone(base);
+  (steps.steps[0] as any).exit = 99;
+  assert.throws(() => compare_ts_record(def_of("E02"), steps, base), /stdout \/ stderr kind \/ exit differ/);
+});
+
+test("a name-pattern difference removes only its own files: D07 drops snapshots/** by name and checks their contents instead", () => {
+  const base = read_baseline("E03");
+  const snapshots = Object.keys(base.files).filter((name) => name.startsWith("snapshots/"));
+  assert.ok(snapshots.length >= 2, "E03 pins the first state and a later state of the same round");
+  const kept = n10_files(base.files, ["D07"], KNOWN_DIFFS);
+  assert.deepEqual(Object.keys(kept).filter((name) => name.startsWith("snapshots/")), []);
+  assert.equal(Object.keys(kept).length, Object.keys(base.files).length - snapshots.length, "only snapshots/** is removed, nothing else");
+
+  // the new core keeps its editions under other names (the ts record builder lists them below snapshots/** too): accepted, contents unchanged
+  const moved = clone(base);
+  (moved.dto as any).stages.research.items[2].depth = 2; // D06: the fixed value, unrelated to this test
+  for (const name of snapshots) {
+    moved.files[`snapshots/edition-${name.replace(/^snapshots\//, "").replace(/\W+/g, "-")}`] = moved.files[name] as string;
+    delete moved.files[name];
+  }
+  compare_ts_record(def_of("E03"), moved, base);
+
+  // a lost state (the first one, or a later one) fails even though no remaining file differs by name
+  for (const lost of snapshots) {
+    const less = clone(moved);
+    delete less.files[`snapshots/edition-${lost.replace(/^snapshots\//, "").replace(/\W+/g, "-")}`];
+    assert.throws(() => compare_ts_record(def_of("E03"), less, base), /snapshot state of 0\.15 .* is missing/, lost);
+  }
+  // a changed content fails too
+  const edited = clone(moved);
+  edited.files[Object.keys(edited.files).find((name) => name.startsWith("snapshots/edition-")) as string] = "0000000000000000";
+  assert.throws(() => compare_ts_record(def_of("E03"), edited, base), /snapshot state of 0\.15/);
+  // without D07 the same move is a files difference
+  assert.throws(() => compare_ts_record(with_diffs("E03", []), moved, base), /produced files differ|DTO differs/);
+});
+
+test("D06 is a value, not a hole: E03 item 7 must be depth 2 (0.15 says 3); D01 / D03 keep their own checks", () => {
+  const base = read_baseline("E03");
+  const fixed = clone(base);
+  (fixed.dto as any).stages.research.items[2].depth = 2;
+  compare_ts_record(def_of("E03"), fixed, base);
+  for (const wrong of [1, 3, 99]) {
+    const bad = clone(fixed);
+    (bad.dto as any).stages.research.items[2].depth = wrong;
+    assert.throws(() => compare_ts_record(def_of("E03"), bad, base), /state DTO differs/, `depth ${wrong}`);
+  }
+  const other = clone(fixed);
+  (other.dto as any).stages.research.items[0].depth = 5;
+  assert.throws(() => compare_ts_record(def_of("E03"), other, base), /state DTO differs/, "an unrelated depth is still compared");
+  assert.throws(() => n10_override({ stages: {} }, "E03", ["D06"], KNOWN_DIFFS), /does not exist/);
+
+  // D01: ids may be anything, but present and distinct
+  const uuid = clone(fixed);
+  (uuid.dto as any).stages.research.items.forEach((item: any, index: number) => (item.id = `id-${index}`));
+  compare_ts_record(def_of("E03"), uuid, base);
+  const repeated = clone(uuid);
+  (repeated.dto as any).stages.research.items[1].id = "id-0";
+  assert.throws(() => compare_ts_record(def_of("E03"), repeated, base), /own check failed/);
+  assert.match(n10_checks({ stages: { research: { items: [{ id: 1 }, { id: 1 }] } } }, { stages: { research: {} } }, ["D01"], KNOWN_DIFFS)[0] ?? "", /repeat/);
+
+  // D03: processed stays a list of the same length
+  const e07 = read_baseline("E07");
+  assert.deepEqual(n10_checks(clone(e07.dto), e07.dto, ["D03"], KNOWN_DIFFS), []);
+  assert.match(n10_checks({ ...(e07.dto as object), processed: "x" }, e07.dto, ["D03"], KNOWN_DIFFS)[0] ?? "", /processed/);
 });
 
 // ---------------------------------------------------------------- normalisers
@@ -182,10 +319,13 @@ test("N9 file meta: only the normalised content counts (mtime and mode are not i
 
 test("N10 known differences: listed paths are dropped from a copy; an unknown id throws", () => {
   const dto = { stages: { research: { items: [{ id: 1, depth: 2, title: "t" }, { id: 7, depth: 2, title: "u" }] } }, processed: ["a.json"] };
-  const out = n10_apply(dto, ["D06"], KNOWN_DIFFS) as any;
-  assert.equal(out.stages.research.items[0].depth, undefined);
+  const out = n10_apply(dto, ["D01"], KNOWN_DIFFS) as any;
+  assert.equal(out.stages.research.items[0].id, undefined);
+  assert.equal(out.stages.research.items[0].depth, 2, "D01 drops the id only; depth is D06's and is never dropped");
   assert.equal(out.stages.research.items[1].title, "u");
-  assert.equal(dto.stages.research.items[0]?.depth, 2, "the input is not modified");
+  assert.equal(dto.stages.research.items[0]?.id, 1, "the input is not modified");
+  assert.deepEqual(n10_files({ "snapshots/a.json": "1", "snapshots/x/2.json": "2", "report.md": "3" }, ["D07"], KNOWN_DIFFS), { "report.md": "3" });
+  assert.deepEqual(n10_files({ "snapshots/a.json": "1" }, [], KNOWN_DIFFS), { "snapshots/a.json": "1" }, "no listed difference, nothing removed");
   assert.deepEqual((n10_apply(dto, ["D03"], KNOWN_DIFFS) as any).processed, undefined);
   assert.throws(() => n10_apply(dto, ["D99"], KNOWN_DIFFS), /unknown intended difference/);
 });

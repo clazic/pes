@@ -25,7 +25,7 @@ test("round-start increments the round, clears changes and keeps the history lin
   const first = pes(ctx, "round-start", project, "plan");
   assert.equal(first.code, 0, first.out + first.err);
   assert.ok(first.out.includes("R1 시작"));
-  let data = project_json(project);
+  const data = project_json(project);
   assert.equal(data.stages.plan.round, 1);
   assert.equal(data.stages.plan.status, "active");
   assert.deepEqual(data.stages.plan.changes, []);
@@ -43,7 +43,6 @@ test("round-start increments the round, clears changes and keeps the history lin
   assert.ok(plan.history[0].includes("R1"));
   assert.ok(plan.history[0].includes("조사")); // only the part of `changes` before ':' is kept
   assert.ok(plan.history[0].includes("snapshots/plan-R1.json"));
-  data = project_json(project);
 });
 
 // ---------------------------------------------------------------- merge

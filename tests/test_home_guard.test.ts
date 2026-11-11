@@ -1,13 +1,15 @@
 // home_guard (SEL-70): the TS counterpart of the Python audit hook in tests/conftest.py (test_project_basic.py guard tests).
 // Everything uses a *fake* "real home" under a temp folder, so the guard is tested without touching the real ~/.pes.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 
-import { make_ctx, run_pes } from "./helpers/compat_env.ts";
-import { assert_isolated_env, assert_no_real_path, protected_paths, take_home_snapshot, touches_protected, use_home_guard } from "./helpers/home_guard.ts";
+import { PYTHON, ServeProcess, guarded_script_argv, make_ctx, make_serve_home, run_py_code, run_pes } from "./helpers/compat_env.ts";
+import { account_home, assert_isolated_env, assert_no_real_path, protected_paths, real_homes, take_home_snapshot, touches_protected, use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
 
@@ -166,4 +168,113 @@ test("a real CLI run in the isolated context leaves the real home alone (list / 
     ctx.cleanup();
   }
   before.check();
+});
+
+// ---------------------------------------------------------------- the read guard inside the Python children (conftest GUARD)
+// A *synthetic* "real home" is handed to the child through PES_TEST_REAL_HOME: the child must be stopped when it reads anything
+// below its .pes / pes-projects — a pure read, which the snapshot layer cannot see. The real ~/.pes is never involved.
+const VIOLATION = /PESHomeAccessViolation/;
+
+test("a python snippet that only READS below the (synthetic) real home is stopped by the audit hook; a safe read passes", () => {
+  const fake = fake_real_home();
+  const ctx = make_ctx("pes-guard-");
+  try {
+    const env = { PES_TEST_REAL_HOME: fake.dir };
+    const read = "import sys; print(open(sys.argv[1], encoding='utf-8').read())";
+    const safe = join(ctx.tmp, "safe.txt");
+    writeFileSync(safe, "synthetic", "utf8");
+    assert.equal(run_py_code(ctx, read, [safe], { env }).stdout.trim(), "synthetic");
+    const snapshot = take_home_snapshot(fake.dir);
+    for (const [what, code, target] of [
+      ["open a file in .pes", read, join(fake.dir, ".pes", "config.json")],
+      ["list pes-projects", "import os, sys; print(os.listdir(sys.argv[1]))", join(fake.dir, "pes-projects")],
+      ["stat a project below pes-projects", "import os, sys; print(os.stat(sys.argv[1]))", join(fake.dir, "pes-projects", "p")],
+      ["pathlib exists() on .pes", "import sys; from pathlib import Path; print(Path(sys.argv[1]).exists())", join(fake.dir, ".pes")],
+    ] as const) {
+      assert.throws(() => run_py_code(ctx, code, [target], { env }), VIOLATION, what);
+    }
+    snapshot.check(); // and the blocked reads changed nothing
+    if (process.platform !== "win32") {
+      mkdirSync(join(ctx.tmp, "alias-parent"), { recursive: true });
+      symlinkSync(join(fake.dir, ".pes"), join(ctx.tmp, "alias-parent", "alias"), "dir");
+      assert.throws(() => run_py_code(ctx, read, [join(ctx.tmp, "alias-parent", "alias", "config.json")], { env }), VIOLATION, "read through a symlink alias");
+    }
+  } finally {
+    ctx.cleanup();
+    fake.cleanup();
+  }
+});
+
+test("run_pes('py') runs the hook: a CLI pointed at the synthetic real pes-projects is stopped (end to end, nothing skipped)", () => {
+  const fake = fake_real_home();
+  const ctx = make_ctx("pes-guard-");
+  try {
+    const env = { PES_HOME: join(fake.dir, "pes-projects"), PES_TEST_REAL_HOME: fake.dir };
+    assert.throws(() => run_pes("py", ctx, ["list"], { env }), VIOLATION);
+    // the same command with the isolated PES_HOME and the same synthetic real home is fine
+    const run = run_pes("py", ctx, ["list"], { env: { PES_TEST_REAL_HOME: fake.dir } });
+    assert.equal(run.kind === "ran" ? run.status : -1, 0);
+  } finally {
+    ctx.cleanup();
+    fake.cleanup();
+  }
+});
+
+test("ServeProcess runs the hook too: a server rooted in the synthetic real pes-projects fails to start with the violation", async () => {
+  const fake = fake_real_home();
+  const ctx = make_ctx("pes-guard-");
+  try {
+    make_serve_home(ctx);
+    const server = new ServeProcess(ctx, join(fake.dir, "pes-projects"), { extra_env: { PES_TEST_REAL_HOME: fake.dir }, ready_timeout_ms: 3_000 });
+    await assert.rejects(server.start(), VIOLATION);
+    await server.stop().catch(() => undefined);
+    // control: the isolated root starts and answers
+    const ok = await new ServeProcess(ctx, make_serve_home(ctx), { extra_env: { PES_TEST_REAL_HOME: fake.dir } }).start();
+    try {
+      assert.equal((await ok.request("/ping")).status, 200);
+    } finally {
+      await ok.stop();
+    }
+  } finally {
+    ctx.cleanup();
+    fake.cleanup();
+  }
+});
+
+test("the guarded launcher keeps the script's own view: argv, __file__, __name__ and the exit code", () => {
+  const ctx = make_ctx("pes-guard-");
+  try {
+    const script = join(ctx.tmp, "probe.py");
+    writeFileSync(script, "import sys\nprint(sys.argv[1:], __name__, __file__ == sys.argv[0])\nsys.exit(7)\n", "utf8");
+    const env = { ...ctx.env, PES_TEST_GUARD: "1", PES_TEST_REAL_HOME: account_home() };
+    const probe = spawnSync(PYTHON, guarded_script_argv(script, ["a b", "한글"]), { env: env as NodeJS.ProcessEnv, encoding: "utf8" });
+    assert.equal(probe.status, 7);
+    assert.match(probe.stdout, /\['a b', '한글'\] __main__ True/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("'real home' means both os.homedir() and the account's home; a snapshot and the path checks cover each", () => {
+  const homes = real_homes();
+  assert.ok(homes.length >= 1 && homes.length <= 2);
+  assert.ok(homes.includes(account_home()) || homes.some((h) => h.toLowerCase() === account_home().toLowerCase()));
+  assert.deepEqual(take_home_snapshot().homes, homes);
+  for (const home of homes) assert.ok(touches_protected(join(home, ".pes", "x")), home);
+
+  // with $HOME / %USERPROFILE% pointing at a temp folder (an isolated run), os.homedir() follows it but the account home must still be listed
+  const temp = mkdtempSync(join(tmpdir(), "pes-homes-"));
+  try {
+    const module = pathToFileURL(join(import.meta.dirname, "helpers", "home_guard.ts")).href;
+    const child = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(module)}).then((m) => console.log(JSON.stringify({ homes: m.real_homes(), account: m.account_home() })))`], {
+      env: { ...process.env, HOME: temp, USERPROFILE: temp } as NodeJS.ProcessEnv,
+      encoding: "utf8",
+    });
+    assert.equal(child.status, 0, child.stderr);
+    const seen = JSON.parse(child.stdout) as { homes: string[]; account: string };
+    assert.ok(seen.homes.some((h) => h === temp || h.toLowerCase() === temp.toLowerCase()), "os.homedir() (the temp folder) is listed");
+    assert.ok(seen.homes.includes(seen.account), "the account home is listed too");
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
