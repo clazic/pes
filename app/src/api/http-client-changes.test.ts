@@ -3,9 +3,8 @@
 //
 // 해석 (SEL-83 types.ts ChangesRead 머리말 + GET P/changes 실제 응답 {events,next_cursor,has_more,epoch}; 서버 events 에는 tx_id·stage·round 가 없다 — 구현을 추측하지 않음):
 //   getChanges(slug, edition, cursor): Promise<{ cursor: string; txs: { tx_id: string; touched: string[] }[] }>
-//   (1) cursor=null = '기준만 받음': 서버에 head 질의가 없으므로 처음부터 `GET P/changes` 를 has_more=false 가 될 때까지 쪽마다 따라가
-//       마지막 next_cursor 만 쓴다. txs 는 항상 빈 배열(받은 사건을 화면에 쓰지 않는다). 첫 요청은 cursor 쿼리 없음, 다음 쪽부터 직전 next_cursor.
-//       (서버가 나중에 head 질의를 주면 구현이 바꿔도 시험은 '빈 txs + 마지막 next_cursor' 만 본다 — 쪽수는 고정하지 않는다.)
+//   (1) cursor=null = '기준만 받음' (leader 결정): 요청 하나 `GET P/changes?cursor=head` (서버가 사건을 읽지 않고 지금 머리 커서만 준다: {events:[], next_cursor, has_more:false}).
+//       돌려주는 값 = { cursor: 그 next_cursor, txs: [] }. 쪽을 따라가지 않는다(큰 프로젝트에서 전체 사건을 읽지 않는다).
 //   (2) cursor=문자열: 한 번만 `GET P/changes?cursor=<그대로>` (읽기 GET, x-pes-session, 본문 없음). 돌려주는 cursor = 응답 next_cursor(해석 없이 그대로).
 //       events 는 tx_id 가 없으므로 **사건 하나가 tx 하나**이고 tx_id = event_seq 문자열(서버는 whole-tx 쪽만 주므로 쪽이 tx 를 가르지 않는다).
 //       touched 규칙(type 으로만 정한다 — events 에 stage/round 가 없어 'round:<stage>/<round>' 를 만들 수 없다; 해석: 라운드에 닿는 사건은 모든 라운드를 가리키는 "round:*"):
@@ -51,24 +50,27 @@ function server(handler: (cursor: string | null, n: number) => { status: number;
 const make = async (s: ReturnType<typeof server>) => (await load())({ session: SESSION, projects: { [SLUG]: ID }, fetch: s.impl });
 
 describe("getChanges — 기준만 받기 (cursor=null)", () => {
-  it("모든 쪽을 따라가 마지막 next_cursor 만 돌려주고 txs 는 비어 있다(처음 요청은 cursor 쿼리 없음)", async () => {
-    const s = server((cursor) => (cursor === null ? page([ev(1, "project.created"), ev(2, "round.started")], "c-page1", true) : cursor === "c-page1" ? page([ev(3, "run.created")], "c-page2", true) : page([], "c-head", false)));
+  it("요청 하나 ?cursor=head 로 머리 커서만 받고 txs 는 비어 있다(전체 사건을 읽지 않는다)", async () => {
+    const s = server((cursor) => (cursor === "head" ? page([], "c-head", false) : page([ev(1, "project.created")], "c-wrong", true)));
     const out = await (await make(s)).getChanges(SLUG, 1, null);
     expect(out).toEqual({ cursor: "c-head", txs: [] });
-    expect(s.seen[0]!.url.searchParams.has("cursor")).toBe(false);
+    expect(s.seen).toHaveLength(1);
     expect(s.seen[0]!.url.pathname).toBe(`/api/v1/projects/${ID}/changes`);
-    expect(s.seen.slice(1).map((x) => x.url.searchParams.get("cursor"))).toEqual(["c-page1", "c-page2"]);
-    for (const r of s.seen) {
-      expect(r.method).toBe("GET");
-      expect(r.headers.get("x-pes-session")).toBe(SESSION);
-      expect(r.headers.get("idempotency-key")).toBeNull();
-      expect(r.body).toBeNull();
-    }
+    expect(s.seen[0]!.url.searchParams.get("cursor")).toBe("head");
+    expect(s.seen[0]!.method).toBe("GET");
+    expect(s.seen[0]!.headers.get("x-pes-session")).toBe(SESSION);
+    expect(s.seen[0]!.headers.get("idempotency-key")).toBeNull();
+    expect(s.seen[0]!.body).toBeNull();
   });
-  it("쪽이 하나뿐이어도 txs 는 비고 그 쪽의 next_cursor 가 기준이다", async () => {
-    const s = server(() => page([ev(1, "round.started")], "c-only"));
+  it("서버가 (이상하게) 사건을 실어 보내도 txs 는 비어 있고 커서는 응답 next_cursor 이다", async () => {
+    const s = server(() => page([ev(1, "round.started")], "c-only", true));
     expect(await (await make(s)).getChanges(SLUG, 1, null)).toEqual({ cursor: "c-only", txs: [] });
     expect(s.seen).toHaveLength(1);
+  });
+  it("문자열 커서 'head' 가 아닌 보통 커서는 cursor=head 로 바뀌지 않는다", async () => {
+    const s = server(() => page([], "c2"));
+    await (await make(s)).getChanges(SLUG, 1, "c1");
+    expect(s.seen[0]!.url.searchParams.get("cursor")).toBe("c1");
   });
 });
 
@@ -127,12 +129,6 @@ describe("getChanges — 거절", () => {
     expect(expired).toBeInstanceOf(PesApiError);
     expect(expired.body.error.code).toBe("cursor_expired");
     expect(expired.body.error.details).toMatchObject({ next_cursor: "c-fresh", keep_unsubmitted_answers: true });
-  });
-  it("기준 받기(cursor=null) 중 중간 쪽이 410 이어도 PesApiError 로 던진다(반쯤 읽은 커서를 돌려주지 않는다)", async () => {
-    const client = await make(server((c) => (c === null ? page([ev(1, "round.started")], "c1", true) : { status: 410, body: errBody("cursor_expired") })));
-    const e = await client.getChanges(SLUG, 1, null).catch((x) => x);
-    expect(e).toBeInstanceOf(PesApiError);
-    expect(e.body.error.code).toBe("cursor_expired");
   });
   it("401 은 PesApiError, 네트워크 실패는 그대로 reject, 모르는 slug 는 요청 없이 PesApiError(not_found)", async () => {
     const unauth = await make(server(() => ({ status: 401, body: errBody("unauthenticated") })));

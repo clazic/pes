@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { assert_error, assert_ok, call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
+import { open_round, single_spec } from "./helpers/questions_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -215,5 +216,77 @@ test("R1 권장 2: for every credential (owner, tokens of each scope mix) every 
       }
     }
     assert.deepEqual(mismatches, []);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// leader 결정 (작성 모드 3): GET P/changes?cursor=head — 사건을 읽지 않고 '지금 머리' 커서만 받는다(앱 getChanges(null) 의 기준 받기).
+// 해석: cursor 쿼리 값이 정확히 문자열 `head` → 200 { events: [], next_cursor: <지금 머리 커서>, has_more: false, epoch }. 읽기 0 사건·쓰기 없음.
+//   next_cursor 는 부른 자격(소유자/토큰)에 묶인 보통 커서다 — 전부 읽은 마지막 쪽의 next_cursor 와 같고, 이후 `changes?cursor=<그것>` 은 그 뒤 사건부터 준다.
+//   인증은 보통 changes 와 같다(없으면 401, context:read 없는 토큰 403).
+
+test("changes?cursor=head: no events, the head cursor, has_more false; it equals the last page's cursor of a full read and writes nothing", async () => {
+  await with_api(async (env) => {
+    const before = state_signature(env.db);
+    const head = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: "owner" }));
+    assert.deepEqual(head.events, []);
+    assert.equal(head.has_more, false);
+    assert.equal(typeof head.next_cursor, "string");
+    assert.ok(head.next_cursor.length > 0 && head.next_cursor !== "head");
+    assert.match(head.epoch, /^(0|[1-9][0-9]*)$/);
+    assert.equal(state_signature(env.db), before, "reading the head writes nothing");
+    // the same value a full read ends on
+    let cursor: string | null = null;
+    let last = "";
+    for (let i = 0; i < 100; i += 1) {
+      const page = assert_ok(await call(env, { method: "GET", path: P(env, `/changes?limit=100${cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`}`), auth: "owner" }));
+      last = page.next_cursor;
+      if (!page.has_more) break;
+      cursor = page.next_cursor;
+    }
+    assert.equal(head.next_cursor, last);
+    // and it is stable until something is written
+    assert.equal(assert_ok(await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: "owner" })).next_cursor, head.next_cursor);
+  });
+});
+
+test("changes?cursor=head then a write: the head cursor gives exactly the events written after it (and nothing before)", async () => {
+  await with_api(async (env) => {
+    const head = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: "owner" }));
+    const quiet = assert_ok(await call(env, { method: "GET", path: P(env, `/changes?cursor=${encodeURIComponent(head.next_cursor)}`), auth: "owner" }));
+    assert.deepEqual(quiet.events, [], "nothing happened since the head");
+    assert.equal(quiet.next_cursor, head.next_cursor);
+    // a write: a stage-start question (opens a round and publishes a question set)
+    const { stage_id, round_id } = await open_round(env, "head-w");
+    assert_ok(
+      await call(env, { method: "POST", path: P(env, "/questions"), auth: "owner", body: { stage_id, round_id, purpose: "stage_start", form_key: "main", question: single_spec("합성 질문") } }),
+      201,
+    );
+    const after = assert_ok(await call(env, { method: "GET", path: P(env, `/changes?cursor=${encodeURIComponent(head.next_cursor)}`), auth: "owner" }));
+    assert.ok(after.events.length >= 1, "the write shows after the head");
+    assert.notEqual(after.next_cursor, head.next_cursor);
+    const seqs = after.events.map((e: any) => BigInt(e.event_seq));
+    for (let i = 1; i < seqs.length; i += 1) assert.ok(seqs[i] > seqs[i - 1]);
+    // the full read from the beginning holds those events as its tail and more before them
+    const all = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?limit=100"), auth: "owner" }));
+    const tail = all.events.slice(all.events.length - after.events.length).map((e: any) => e.event_seq);
+    if (!all.has_more) assert.deepEqual(after.events.map((e: any) => e.event_seq), tail);
+    assert.ok(all.events.length > after.events.length || all.has_more, "events before the head are not in the head's page");
+  });
+});
+
+test("changes?cursor=head follows the usual rules: no credential 401, a token without context:read 403, a token gets its own head, and the head cursor of one caller kind is not another's", async () => {
+  await with_api(async (env) => {
+    assert.equal((await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: "none" })).status, 401);
+    const noscope = await make_agent(env, "head-noscope", ["run:claim"]);
+    assert.equal((await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: { token: noscope.token } })).status, 403);
+    const reader = await make_agent(env, "head-reader", ["context:read"]);
+    const own = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: { token: reader.token } }));
+    assert.deepEqual(own.events, []);
+    assert.equal(assert_ok(await call(env, { method: "GET", path: P(env, `/changes?cursor=${encodeURIComponent(own.next_cursor)}`), auth: { token: reader.token } })).events.length, 0);
+    const owner = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?cursor=head"), auth: "owner" }));
+    const crossed = await call(env, { method: "GET", path: P(env, `/changes?cursor=${encodeURIComponent(owner.next_cursor)}`), auth: { token: reader.token } });
+    assert.equal(crossed.status, 400);
+    assert.equal(crossed.json.error.code, "cursor_invalid");
   });
 });
