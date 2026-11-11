@@ -452,3 +452,16 @@ MCP 서버(`scripts/pes_core/mcp_server.ts`)와 어댑터(`scripts/pes_core/adap
 - **연결 항목**: `claude_code_mcp_entry`는 MCP 설정에 넣을 `{command, args, env}`만 만들고 파일을 읽지도 쓰지도 않는다. 토큰은 값이 아니라 참조(`${PES_AGENT_TOKEN}`)다. MCP 서버 프로세스는 `PES_API_BASE_URL`이 루프백 `http`일 때만 시작한다(토큰이 이 컴퓨터를 떠나지 않는다).
 - **시험**: `tests/test_adapter_b_claude_*.test.ts`(가짜 MCP 클라이언트, 합성 프로젝트; 실제 Claude·앱·MCP 설정은 읽지도 쓰지도 않는다).
 - **한계**: 실제 Claude Code·Claude 앱 연결은 시험하지 않았다(문서에 「미확인」). 가져오기는 첨부 파일을 저장하지 않는다. `pes link`·`pes sync` CLI는 만들지 않았고 계약은 초안으로 문서에만 있다. `pes_receipt`의 `applied`는 **같은 실행의 `pes_submit` 키**만 증거로 받는다(다른 도구의 키, 다른 실행의 제출 키는 `not_found`). MCP 서버의 `POST /claims` 키 없는 호출은 PES를 한 번 더 부른다(요청 예산은 입력 오류라 돌려받는다).
+
+### 8.18 방식 B 어댑터 — Codex CLI·OpenCode TUI(PR20b)
+
+20a의 MCP 서버(`scripts/pes_core/mcp_server.ts`)와 계약(`docs/adapters/adapter-contract.md`)을 **그대로** 쓴다. 새 코어 명령·HTTP 경로·표·마이그레이션이 없고, MCP 서버 코드도 바뀌지 않는다. 어댑터(`scripts/pes_core/adapters/{codex_cli,opencode_tui,cli_common}.ts`)는 도구의 MCP 설정에 넣을 연결 항목을 만들 뿐 파일을 읽지도 쓰지도 않고 프로세스도 띄우지 않는다. 도구별 노트는 `docs/adapters/{codex,opencode-tui}.md`이고, 그 문서의 `toml/json pes-config` 예시는 시험이 임시 폴더에 써서 읽고 `pes-example` 흐름은 그대로 실행한다.
+
+- **실행 표시**: `runs.mode = B`, `actors.kind = external_agent`. Codex CLI는 `runtime = codex_cli`, `provider = openai`(도구를 만든 쪽), OpenCode TUI는 `runtime = opencode_tui`, `provider = unknown`(여러 제공자). 모델은 도구가 PES에 알려 주지 않으므로 연결 항목에 사람이 적지 않으면 `unknown`이다. 사용량은 B 실행에 기록하지 않는다(숫자를 지어내지 않는다).
+- **토큰은 값이 아니라 이름/참조**: Codex 항목은 `env_vars = ["PES_AGENT_TOKEN"]`(Codex가 시작한 환경에서 넘긴다), OpenCode 항목은 `"{env:PES_AGENT_TOKEN}"`(OpenCode가 확장한다)이다. 어떤 설정 파일·`env`에도 값이 없다. 값은 도구를 켜는 쪽이 `codex_cli_launch_env`·`opencode_tui_launch_env`로 키 저장소에서 **한 번 읽어(`get(ref)`, `ref = pes-agent-token-<runtime>-<project_id>`)** 메모리로만 받아 프로세스 환경에 넣는다. 키 저장소에는 쓰지도 지우지도 않는다. 없으면 `token_missing`(한국어)이다. 다른 도구의 ref만 있는 경우도 없는 것이다. 어댑터의 키 저장소 타입은 PR19 `KeyStore`와 구조가 같은 최소 형태이고 PR19 코드를 가져오지 않는다(PR19 병합 전).
+- **로컬 주소만**: 연결 항목은 `api_base_url`이 루프백 `http`일 때만 만들어진다(토큰이 컴퓨터를 떠나지 않는다). 필수 필드가 비면 `TypeError`다.
+- **내장 실행기(방식 A)와의 구분**(결정 0019): 방식 A 실행(`pes_builtin`, `opencode-go`)과 B 실행은 프로젝트의 lease 하나를 나눠 쓴다. 한쪽이 잡고 있으면 다른 쪽의 claim은 `conflict`이고 아무것도 쓰지 않는다. B 라운드는 A 쪽 표(디스패치·사용량·Go 계량·연결)를 바꾸지 않고, B 연결은 A 실행을 만들 수 없다.
+- **Go 경로**: OpenCode TUI 연결 항목은 모델이 `opencode-go` 또는 `opencode-go/…`(대소문자 무시)이면 `go_route_blocked`로 거부한다. 한계: 사람이 OpenCode 안에서 Go 모델을 고르는 것은 PES가 보지도 막지도 못하고 Go 계량에 잡히지 않는다 — Go는 방식 A 전용이다. Codex CLI는 Go 경로와 무관하다.
+- **닫힌 도구**: 도구는 20a의 11개 그대로다. 승인·재개방·봉인·정책·등록·토큰·삭제·export 도구는 없고, 에이전트 토큰으로 그 API를 불러도 거부된다.
+- **시험**: `tests/test_adapter_b_codex.test.ts`, `tests/test_adapter_b_opencode_tui.test.ts`(공용 `tests/helpers/adapter_b_cli_suite.ts`; 가짜 MCP 클라이언트·합성 프로젝트·가짜 키 저장소). 실제 `codex`·`opencode`를 실행하지 않고 사용자의 `~/.codex`·OpenCode 설정 폴더를 읽거나 쓰지 않는다.
+- **한계**: 실제 Codex CLI·OpenCode TUI 연결은 시험하지 않았다(두 노트에 「미확인」). 도구 버전별 `env_vars`·`{env:VAR}` 처리, 서버 시작 제한 시간, 긴 대기 중 연결 끊김은 확인하지 않았다. 두 도구의 모델·사용량은 PES가 알 수 없다. 키 저장소 구현과 토큰을 키 저장소에 넣는 명령은 PR19다.
