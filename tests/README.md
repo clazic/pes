@@ -213,6 +213,7 @@ PR26c 는 `scripts/serve.ts`(= `serve.py <PES 홈> [포트]` 직접 실행과 �
 | F 실제 홈 보호 | `test_sel74_f_real_home` | 새 시험 전부 임시 HOME·USERPROFILE·PES_HOME + 가드 + 전후 스냅샷(설치 시험은 `~/.claude` 포함) |
 | G SEL-77 권장 3건 | `test_sel74_g_server_safety`·`test_sel74_g2_hung_server` | `/whoami` 의 pid 와 기록 pid 대조(다르면 kill 0), 20초 무응답 서버 자식 종료, 시험 자식 env 에서 `PES_HUB_PORTS` 비움 |
 | H 버전 불변 | `test_sel74_h_version` | `plugin.json` 0.15.6·`package.json` 0.0.0 그대로 |
+| 최종 리뷰 1 반영 | `test_sel74_final1` | 빈(0 바이트)·옛 스키마·PES 가 만들지 않은 `pes.db` 에서도 0.15 폴더 읽기(status·pending·digest·list·hub)가 되고 doctor 가 할 일을 말함(`--fix` 는 0 바이트 파일만 치움, migrate 는 최신으로 올리거나 남의 파일을 한 줄로 거절), 숨김 소유자 프로젝트가 doctor·`--fix`·status·list·hub 에 0, '다른 PES 사용 중' 탐지가 파일을 바꾸지 않음(Windows 방식 포함 — 쓰기·이름 바꾸기 사건 0), Node 26 미만이면 pes.ts·setup.ts·serve.ts 가 한국어 한 줄 exit 1, 끄지 못한 옛 서버는 `stop` 이 `서버 종료` 대신 `서버를 끄지 못했습니다` 와 끄는 방법(exit 0 은 0.15 그대로), DB 없는 홈에 자격 없는 `/api/v1` 은 401 이고 DB 를 만들지 않음 |
 
 공용 도우미 `helpers/sel74_env.ts`(임시 홈 실행·옛 폴더 만들기·바이트/mtime 지문·백업 묶음 찾기·DB 읽기). `ts_run(c, args, extra)` 는 `make_cli_env()` 의 DB 프로젝트에 대해 `pes.ts` 를 돌린다(`c.run` 이 `pes.py` 를 돌리던 자리 — 플래그 없음). `PES_TOKEN` 은 호출마다 `extra` 로만 넣는다.
 
@@ -277,7 +278,7 @@ Python 파일(`scripts/*.py`·`check_ddl.py`·옛 Python 시험·`tests/conftest
 
 ### 새로 더한 시험 (3번 — migrate 보강)
 
-`test_sel74_c_migrate_staging`: 검증이 실패한 뒤(M1) staging 프로젝트가 DB 에 남아도 정상 프로젝트로 보이지 않는다 — `list` 에는 `이전하세요` 오류 줄뿐, `status` 는 한 줄 거절, 홈 화면에 정상 줄 없음(M2); 또 실패해도 staging 행은 하나(M3); 원인을 고친 뒤 다시 `migrate` 하면 성공하고 그 슬러그 프로젝트는 하나·active, `list` 에 정상 줄, 세 번째는 `이미 이전됨`(M4); 빈 DB 에서 만들어지는 숨김 소유자 프로젝트 `pes-local-owner` 는 `list`·홈 화면에 나오지 않는다(M5; `doctor` 는 설명 줄로 일부러 보인다).
+`test_sel74_c_migrate_staging`: 검증이 실패한 뒤(M1) staging 프로젝트가 DB 에 남아도 정상 프로젝트로 보이지 않는다 — `list` 에는 `이전하세요` 오류 줄뿐, `status` 는 한 줄 거절, 홈 화면에 정상 줄 없음(M2); 또 실패해도 staging 행은 하나(M3); 원인을 고친 뒤 다시 `migrate` 하면 성공하고 그 슬러그 프로젝트는 하나·active, `list` 에 정상 줄, 세 번째는 `이미 이전됨`(M4); 빈 DB 에서 만들어지는 숨김 소유자 프로젝트 `pes-local-owner` 는 `list`·홈 화면에 나오지 않는다(M5). 최종 리뷰 1 뒤로는 `doctor`·`doctor --fix`·`status` 에도 나오지 않는다 — bridge 의 `active_slugs`·`route` 한 곳에서 거른다(`test_sel74_final1` 필수 2).
 
 ### ts 구현 갭 — 이식했지만 지금 실패하는 시험 (worker 가 맞추거나, 포기하면 leader 가 시험을 지우라고 결정)
 

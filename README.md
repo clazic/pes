@@ -131,6 +131,8 @@ claude plugin marketplace update pes-local && claude plugin update pes@pes-local
 ```
 
 그다음 `/reload-plugins`. 로컬 폴더 설치라면 `/reload-plugins`만으로 반영된다.
+
+**0.15 에서 올릴 때 — 옛 서버 끄기:** 0.15 의 대시보드 서버(`serve.py`)가 켜져 있으면 업데이트 뒤에도 옛 화면을 낸다. 업데이트 뒤 `node scripts/pes.ts stop`(Claude 에게 "PES 서버 꺼 줘")으로 끈다. Windows 에서 `서버를 끄지 못했습니다` 라고 하면 그 줄에 적힌 방법(PowerShell `Stop-Process …` 또는 작업 관리자에서 그 python 프로세스 끝내기)으로 끈다. PES 는 Node.js 26 이상이 필요하다 — 낮으면 명령이 `PES 는 Node.js 26 이상이 필요합니다` 한 줄로 끝난다.
 지금 버전은 `.claude-plugin/plugin.json`의 version, 바뀐 내용은 아래 「변경 이력」.
 
 ### 배포하는 쪽 (개발 Mac)
@@ -580,7 +582,7 @@ questions/        단계별 시작 질문 은행
 
 CLI 직접 사용: `node scripts/pes.ts` (도움말), 예: `node scripts/pes.ts status <slug>`, `node scripts/pes.ts digest <slug> research`.
 
-예전(0.15) `project.json` 프로젝트는 새 형식으로 옮기기 전에는 읽기만 된다. 쓰는 명령이 `먼저 이전하세요 — pes migrate <이름>` 이라고 거절하면 `node scripts/pes.ts migrate <이름>`(전부는 `migrate --all`)으로 옮긴다 — 백업을 만든 뒤 검증하고, 원본 폴더는 그대로 둔다. Claude 가 진행 중이면 먼저 묻는다.
+예전(0.15) `project.json` 프로젝트는 새 형식으로 옮기기 전에는 읽기만 된다. 쓰는 명령이 `먼저 이전하세요 — pes migrate <이름>` 이라고 거절하면 `node scripts/pes.ts migrate <이름>`(전부는 `migrate --all`)으로 옮긴다 — 백업을 만든 뒤 검증하고, 원본 폴더는 그대로 둔다. Claude 가 진행 중이면 먼저 묻는다. 이전이 실패하면 거절 줄 끝의 `할 일:` 을 따른다(예: 손으로 고친 보고서는 폴더 밖에 다른 이름으로 보관하고 폴더에서 뺀 뒤 다시 이전, 이전 뒤 `report` 로 새로 만든다). PES 홈 밖의 폴더는 이전하지 않는다 — 홈 안으로 **옮긴(복사가 아니라 이동)** 뒤 이전한다. 주의: 이전한 프로젝트와 같은 이름·같은 주제의 사본 폴더를 홈 밖에 두면, 그 사본을 가리킨 명령도 DB 의 프로젝트를 읽고 쓴다(사본 폴더 자체는 바뀌지 않는다). 사본은 이름을 바꿔 두는 편이 안전하다. 백업은 `~/.pes/backups` 에 생기므로 PES 홈이 `~`(또는 `~/.pes` 를 품는 폴더)이면 이전하지 못한다 — 그때는 `home <새 폴더>` 로 홈을 옮긴 뒤 한다.
 
 ---
 
@@ -594,6 +596,8 @@ CLI 직접 사용: `node scripts/pes.ts` (도움말), 예: `node scripts/pes.ts 
 | "다른 세션이 이 프로젝트를 쓰고 있습니다" | 그 세션을 닫고, Claude에게 "가져와"라고 하면 `--force`로 넘겨받는다 |
 | 법령 조회 인증서 오류 (`SELF_SIGNED_CERT_IN_CHAIN`) | 설정의 `NODE_EXTRA_CA_CERTS`에 기관 루트 인증서 파일 |
 | 마크다운 한글이 깨진다 | 0.2.0 이후 서버가 UTF-8로 보낸다. 서버 재시작: `/pes:status` |
+| `PES 데이터베이스가 최신이 아닙니다` · doctor 의 `빈 데이터베이스 파일 (0 바이트)` | 빈 파일이면 `/pes:doctor fix` 가 치운다(다른 PES 가 쓰지 않을 때만). 옛 형식이면 `node scripts/pes.ts migrate <프로젝트>` 한 번으로 최신이 된다. 그 전에도 옛 0.15 폴더는 읽힌다 |
+| `서버를 끄지 못했습니다` (Windows, 0.15 서버) | 그 줄의 방법으로 끈다 — PowerShell `Stop-Process -Id (Get-NetTCPConnection -LocalPort <포트> -State Listen).OwningProcess` |
 | 포트가 모두 사용 중 (8760~8764) | 다른 프로그램이나 다른 PES 홈의 서버가 쓰는 중 — `/pes:doctor`로 확인 후 끄기 |
 
 ---

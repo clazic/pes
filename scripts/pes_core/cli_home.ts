@@ -213,7 +213,24 @@ export async function cmd_stop(args: string[]): Promise<void> {
     root = dirname(d);
     await stop_legacy(d);
   }
-  await stop_server(root, true);
+  if (!(await stop_server(root, true))) {
+    // an older server (no pid in /whoami) cannot be confirmed, so it is not signalled; without pkill (Windows) it stays — say so, and how to end it
+    let port: number | null = null;
+    for (const p of hub_ports()) {
+      if ((await whoami(p)) === root) {
+        port = p;
+        break;
+      }
+    }
+    const at = port === null ? "" : ` (포트 ${port})`;
+    const how =
+      process.platform === "win32"
+        ? `PowerShell 에서 'Stop-Process -Id (Get-NetTCPConnection -LocalPort ${port ?? "<포트>"} -State Listen).OwningProcess' 를 실행하거나 작업 관리자에서 그 python·node 프로세스를 끝내세요(또는 컴퓨터를 다시 시작)`
+        : `'kill $(lsof -ti tcp:${port ?? "<포트>"} -sTCP:LISTEN)' 로 그 프로세스를 끝내세요`;
+    // exit stays 0 (0.15 `stop` always ended with 0 — scripts read it); the line says what really happened instead of 서버 종료
+    say(`서버를 끄지 못했습니다${at} — 옛 버전 서버라 PES 가 스스로 끄지 못합니다(${root}). ${how}`);
+    return;
+  }
   say(`서버 종료 (${root} — 이 홈의 모든 프로젝트 화면이 함께 꺼집니다)`);
 }
 

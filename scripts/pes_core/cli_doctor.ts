@@ -3,7 +3,7 @@
 // is the TS runtime's). Reading only, unless --fix: the safe repairs (a missing home folder, a stale dashboard, old server records).
 
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, utimesSync, writeSync, accessSync, constants } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, unlinkSync, accessSync, constants } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import { hub_ports, inside_pes_home, legacy_ports, root_port, server_url, stop_legacy, whoami, whoami_info } from "./cli_home.ts";
@@ -461,23 +461,30 @@ function db_journal_residue(): string[] {
       continue;
     }
     // another PES that has the database open right now is a normal running state: nothing to recover, so it is not residue
-    if (suffix === "-wal" ? open_elsewhere(db_file() + "-shm", "shm") : open_elsewhere(side, "journal")) continue;
+    if (held_elsewhere(suffix === "-wal" ? db_file() + "-shm" : side) === "held") continue;
     out.push(basename(side));
   }
   return out;
 }
 
-/** True when another process holds `file` open (a live connection keeps its -shm mapped and a writing one its journal open). Unknown → false. */
-function open_elsewhere(file: string, kind: "shm" | "journal"): boolean {
-  if (!exists(file)) return false;
+/** Whether another process has a file open right now. */
+export type Hold = "held" | "free" | "unknown";
+
+/**
+ * Whether another process holds `file` open (a live connection keeps its -shm mapped and a writing one its journal open). It never changes
+ * the file: no write, no rename — only an open for reading (Windows), lsof (macOS) or /proc (Linux). What cannot be told is "unknown".
+ * `platform` is for the tests only.
+ */
+export function held_elsewhere(file: string, platform: NodeJS.Platform = process.platform): Hold {
+  if (!exists(file)) return "free";
   try {
-    if (process.platform === "win32") return win_held(file, kind);
-    if (process.platform === "linux" && !exists("/proc/self/fd")) return false;
-    if (process.platform === "linux") return proc_holds(file);
+    if (platform === "win32") return win_held(file);
+    if (platform === "linux") return exists("/proc/self/fd") ? (proc_holds(file) ? "held" : "free") : "unknown";
     const [code, out] = run_quiet("lsof", ["-t", "--", file], 10);
-    return code === 0 && /^\d+$/m.test(out.trim());
+    if (code === 0 && /^\d+$/m.test(out.trim())) return "held";
+    return code === 1 && out.trim() === "" ? "free" : "unknown";
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
@@ -502,40 +509,22 @@ function proc_holds(file: string): boolean {
 }
 
 /**
- * Windows: SQLite holds a shared byte lock (the -shm's DMS byte) for a live connection, and keeps its journal open without delete sharing.
- * A write of the byte's own value fails while that lock is held; a rename of the journal fails while it is open (both undone at once, times kept).
+ * Windows: SQLite keeps the database, its journal and its -shm open while a connection lives. An open that shares nothing (UV_FS_O_EXLOCK,
+ * read only) fails with a sharing violation (EBUSY) while any other handle is open, and changes nothing on disk. Any other answer is "unknown".
  */
-function win_held(file: string, kind: "shm" | "journal"): boolean {
-  const before = statSync(file);
-  if (kind === "shm") {
-    let fd: number | undefined;
-    try {
-      fd = openSync(file, "r+");
-      const one = Buffer.alloc(1);
-      if (readSync(fd, one, 0, 1, 128) !== 1) return false;
-      writeSync(fd, one, 0, 1, 128);
-      return false;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      return code === "EBUSY" || code === "EPERM" || code === "EACCES";
-    } finally {
-      if (fd !== undefined) closeSync(fd);
-      try {
-        utimesSync(file, before.atime, before.mtime);
-      } catch {
-        // times stay as written
-      }
-    }
-  }
-  const aside = `${file}.probe`;
+function win_held(file: string): Hold {
+  const exlock = (constants as unknown as Record<string, number | undefined>).UV_FS_O_EXLOCK;
+  if (typeof exlock !== "number") return "unknown";
+  let fd: number | undefined;
   try {
-    renameSync(file, aside);
+    fd = openSync(file, constants.O_RDONLY | exlock);
+    return "free";
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+    return code === "EBUSY" ? "held" : code === "ENOENT" ? "free" : "unknown";
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
-  renameSync(aside, file);
-  return false;
 }
 
 function doctor_db_residue(R: Report, residue: string[]): void {
@@ -558,6 +547,35 @@ function doctor_path_risk(R: Report, h: string): void {
   }
 }
 
+/**
+ * A database that is not up to date. An empty (0 byte) file — e.g. left by a program that opened the path and stopped — serves nothing:
+ * the 0.15 folders read as before, and --fix removes the file, only while it is still 0 bytes and no other process has it (or a sidecar) open.
+ * An old schema is brought up to date by `pes migrate` (any folder, or --all).
+ */
+function doctor_db_old(R: Report, file: string, projects: number): void {
+  let size = -1;
+  try {
+    size = statSync(file).size;
+  } catch {
+    // gone since the probe
+  }
+  if (size === 0) {
+    R.add("데이터베이스", "warn", `빈 데이터베이스 파일 (0 바이트) ${file}`, "아무 프로젝트도 없는 빈 파일입니다 — 옛 0.15 폴더는 그대로 읽습니다. --fix 가 이 빈 파일을 치웁니다(다른 PES 가 쓰지 않을 때만)", () => {
+      if (statSync(file).size !== 0) throw new Error("빈 파일이 아니게 되어 지우지 않았습니다");
+      for (const side of [file, `${file}-wal`, `${file}-journal`, `${file}-shm`]) {
+        if (held_elsewhere(side) !== "free") throw new Error("다른 PES 가 쓰고 있을 수 있어 지우지 않았습니다 — 다른 PES(서버·명령)를 끈 뒤 다시 하세요");
+      }
+      unlinkSync(file);
+    });
+    return;
+  }
+  if (projects === 0) {
+    R.add("데이터베이스", "warn", `데이터베이스 스키마가 최신이 아님 ${file}`, "프로젝트가 없는 옛 형식입니다 — 옛 0.15 폴더는 그대로 읽습니다. `pes migrate <프로젝트>`(또는 `pes migrate --all`)가 DB 를 최신으로 올립니다");
+    return;
+  }
+  R.add("데이터베이스", "warn", `데이터베이스 스키마가 최신이 아님 ${file}`, `프로젝트 ${projects}개 — 최신으로 올리기 전에는 이 DB 의 프로젝트를 읽지 못합니다. \`pes migrate <프로젝트>\` 한 번(이미 이전한 이름도 됨)이 DB 를 최신으로 올립니다`);
+}
+
 /** The database group (0.15 doctor_db): the state of the file — read only, never repaired here — and the path risk. */
 async function doctor_db(R: Report, h: string): Promise<void> {
   const file = db_file();
@@ -568,7 +586,9 @@ async function doctor_db(R: Report, h: string): Promise<void> {
   }
   else if (st.state === "broken") {
     R.add("데이터베이스", "bad", `데이터베이스를 열 수 없음 ${file}`, `${String(st.message ?? "")} — doctor 는 DB 를 고치지 않습니다. 백업에서 복원하거나 파일을 옮겨 두고 다시 시작하세요`);
-  } else if (st.schema_current !== true) R.add("데이터베이스", "warn", `데이터베이스 스키마가 최신이 아님 ${file}`, "새 코어 버전으로 DB 를 올려야 합니다");
+  } else if (st.foreign === true) {
+    R.add("데이터베이스", "warn", `PES 데이터베이스가 아닌 파일 ${file}`, "PES 가 만든 DB 가 아닙니다 — 옛 0.15 폴더는 그대로 읽습니다. 이 파일을 다른 이름으로 옮겨 두면 `pes migrate <프로젝트>` 가 새 DB 를 만듭니다 (doctor 는 이 파일을 지우지 않습니다)");
+  } else if (st.schema_current !== true) doctor_db_old(R, file, Number(st.projects ?? 0));
   else R.add("데이터베이스", "ok", `데이터베이스 ${file}`, `프로젝트 ${String(st.projects ?? 0)}개 · 스키마 최신`);
   doctor_path_risk(R, h);
 }

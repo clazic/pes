@@ -11,6 +11,7 @@
 //   ~/.pes/setup.json (mark)  ·  ~/.pes/setup.log, setup-keys.json, setup-keys.out (key screen)  ·  ~/.claude/settings.json (LAW_OC)
 // The key screen listens on 127.0.0.1:8759, or on the port in PES_KEYS_PORT (an integer 1~65535) when that variable is set.
 // Key values go screen → this program → each tool; the output shows masked values only.
+import "./node_guard.ts"; // first: Node 26 미만이면 한국어 한 줄로 끝낸다 (exit 1)
 import { spawn, spawnSync } from "node:child_process";
 import { accessSync, appendFileSync, closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";

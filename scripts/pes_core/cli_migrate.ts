@@ -14,7 +14,7 @@ type Outcome = { state: "migrated" | "already"; slug: string; backup_dir?: strin
 /** Moves one folder; a refusal ends with a Die (one Korean line, exit 1). */
 async function migrate_one(d: string): Promise<Outcome> {
   const slug = basename(d);
-  if (dirname(d) !== pes_home()) return die(`PES 홈(${pes_home()}) 안의 프로젝트 폴더만 이전할 수 있습니다: ${d}`, 1);
+  if (dirname(d) !== pes_home()) return die(`PES 홈(${pes_home()}) 안의 프로젝트 폴더만 이전할 수 있습니다: ${d} — 이 폴더를 PES 홈 안으로 옮긴 뒤(복사가 아니라 이동 — 같은 이름의 사본이 둘 남지 않게) 다시 이전하세요`, 1);
   if (!existsSync(d) || !statSync(d).isDirectory()) return die(`폴더가 없습니다: ${d}`, 1);
   const file = join(d, "project.json");
   if (!existsSync(file)) return die(`project.json 없음: ${d}`, 1);

@@ -20,7 +20,9 @@
 //
 // Safety: binds 127.0.0.1 only, never asks DNS for a host name (SEL-33: socket.getfqdn() stalled 30 s on some macOS runners), never
 // contacts the hub ports 8760~8775, never starts another program.
+import "./node_guard.ts"; // first: Node 26 미만이면 한국어 한 줄로 끝낸다 (exit 1)
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -42,6 +44,7 @@ const API_ERROR_TEXT: Record<string, [string, string]> = {
   payload_too_large: ["요청 본문이 너무 큽니다.", "fix_request"],
   internal_error: ["서버 안에서 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"],
   schema_not_ready: ["PES 데이터베이스가 아직 준비되지 않았습니다.", "migrate_database"],
+  unauthenticated: ["인증이 필요합니다. 올바른 자격으로 다시 요청해 주세요.", "authenticate"],
 };
 /** A body above MAX_BODY but within this size is read away before the 413 is sent (the sender is not cut off). */
 const DRAIN_LIMIT = 8 * 1024 * 1024;
@@ -592,6 +595,25 @@ async function start(config: Config): Promise<void> {
     return origin === "" || allowed.has(origin) || trusted_origins().has(origin);
   };
 
+  /** True when the database exists (not empty), or when the request carries the owner's local session secret (which may create it). */
+  const may_create_db = async (req: IncomingMessage): Promise<boolean> => {
+    try {
+      const [{ db_path }, { existing_local_session_secret }] = await Promise.all([import("./pes_core/paths.ts"), import("./pes_core/api_secret.ts")]);
+      try {
+        if (statSync(db_path(db.env)).size > 0) return true;
+      } catch {
+        // no database file
+      }
+      const secret = existing_local_session_secret(db.env);
+      const presented = header(req, "x-pes-session");
+      if (secret === null || presented === "") return false;
+      const digest = (text: string): Buffer => createHash("sha256").update(text, "utf8").digest();
+      return digest(presented).equals(digest(secret)) && presented.length === secret.length;
+    } catch {
+      return false;
+    }
+  };
+
   const query_refused = (query: string): boolean => {
     if (query === "") return false;
     if (query.length > MAX_API_QUERY || /[^\x21-\x7e]/.test(query)) return true;
@@ -613,6 +635,9 @@ async function start(config: Config): Promise<void> {
     const body = length > 0 ? await read_body(req, length) : Buffer.alloc(0);
     if (body === null) return;
     if (query_refused(query)) return api_error(req, res, 400, "invalid_payload", { target: "$.query" });
+    // a home without a database (none, or an empty file) gets one only for the owner's session: any other request (an <img> of any page, a
+    // token — which no missing database can hold) is 401 before anything is created, so a GET never turns a 0.15 home into a database home (E15)
+    if ((api === null || api === "failed") && !(await may_create_db(req))) return api_error(req, res, 401, "unauthenticated");
     const ready = await ensure_api();
     if (ready === "failed") return api_error(req, res, 503, "schema_not_ready");
     const headers_in: Record<string, string> = {};

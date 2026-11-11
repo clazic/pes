@@ -18,7 +18,7 @@
 //   session   -> PES_OWNER, only a lock label; it is never a credential.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolve_actor, verify_agent_token } from "./actors.ts";
@@ -47,7 +47,7 @@ import { ApiError } from "./errors.ts";
 import { FORM_REVISED } from "./commands/records.ts";
 import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex, write_storage_bytes } from "./files.ts";
 import { import_project } from "./legacy.ts";
-import { activate_import, serving_path, validate_import } from "./migration.ts";
+import { activate_import, assert_backup_location, serving_path, validate_import } from "./migration.ts";
 import { IMPLICIT_MANIFEST, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
@@ -1859,13 +1859,15 @@ const route: Handler = async (s, req) => {
   if (typeof req.slug !== "string" || req.slug.length === 0) {
     throw new Refusal("invalid_payload", "프로젝트 이름이 필요합니다", 2);
   }
-  const row = s.db.get<{ id: string; topic: string }>("SELECT id, topic FROM projects WHERE slug = ?", req.slug);
+  // the hidden owner project (OWNER_STUB_SLUG) is no project of the user: no command serves it
+  const row = req.slug === OWNER_STUB_SLUG ? undefined : s.db.get<{ id: string; topic: string }>("SELECT id, topic FROM projects WHERE slug = ?", req.slug);
   if (row === undefined) return { serving: "none" };
   return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy", topic: row.topic };
 };
 
+/** The projects the database serves — without the hidden owner project (OWNER_STUB_SLUG): doctor, doctor --fix, list and hub all read this one list. */
 const active_slugs: Handler = async (s) => {
-  const rows = s.db.all<{ slug: string }>("SELECT slug FROM projects WHERE status = 'active' ORDER BY slug");
+  const rows = s.db.all<{ slug: string }>("SELECT slug FROM projects WHERE status = 'active' AND slug <> ? ORDER BY slug", OWNER_STUB_SLUG);
   return { slugs: rows.map((row) => row.slug) };
 };
 
@@ -2527,6 +2529,37 @@ function in_unit(handler: Handler): Handler {
 /** Operations that only read: they use a read-only connection and change nothing on disk. */
 // migrate (SEL-74 C) -----------------------------------------------------------
 
+/**
+ * What to do after a failed `pes migrate`, one Korean clause per cause (the check of validate, the category of import). It never asks the
+ * user to undo their own edits: a hand-edited report is kept under another name, not thrown away.
+ */
+function migrate_hint(cause: string, path: string | undefined, slug: string): string {
+  const where = path ?? "그 파일";
+  switch (cause) {
+    case "reports_regeneration":
+      return `할 일: 손으로 고친 보고서(${where})를 폴더 밖에 다른 이름으로 보관하고 폴더에서 뺀 뒤 다시 이전하세요 — 이전한 뒤 'pes report ${slug} <단계>' 로 보고서를 새로 만들고, 보관한 내용은 메모로 옮기면 됩니다`;
+    case "source_changed":
+      return "할 일: 이전하는 동안 폴더가 바뀌었습니다 — 이 프로젝트를 쓰는 다른 PES·편집기를 닫고 다시 이전하세요";
+    case "parse_error":
+      return `할 일: ${where} 를 읽지 못했습니다 — 백업 사본으로 바꾸거나 고친 뒤 다시 이전하세요`;
+    case "missing_file":
+    case "files":
+      return `할 일: ${where} 가 없거나 바뀌었습니다 — 그 파일을 제자리에 두고 다시 이전하세요`;
+    default:
+      return "할 일: 폴더는 그대로이니 지우거나 고치지 말고, 이 줄과 'pes doctor' 결과를 개발자에게 알려 주세요";
+  }
+}
+
+/** A refused backup place (assert_backup_location) in one Korean line: why, and how to get out of it. */
+function backup_place_refusal(message: string, backups: string, pes_home: string): Refusal {
+  const why = /OneDrive/i.test(message)
+    ? `백업 폴더(${backups})가 OneDrive 안에 있습니다`
+    : /object store/.test(message)
+      ? `백업 폴더(${backups})가 PES 파일 저장소와 겹칩니다`
+      : `백업 폴더(${backups})와 PES 홈(${pes_home})이 겹칩니다 — 백업은 PES 홈 밖에 있어야 합니다`;
+  return new Refusal("conflict", `이전하지 못했습니다: ${why}. 할 일: PES 홈을 ~/.pes 와 겹치지 않는 폴더(예: ~/pes-projects)로 옮긴 뒤('pes home <새 폴더>') 다시 이전하세요 — 아무것도 바꾸지 않았습니다`);
+}
+
 /** The slug of the project that only holds the local human owner when a fresh database has none (the importer needs a human owner actor). */
 export const OWNER_STUB_SLUG = "pes-local-owner";
 
@@ -2542,6 +2575,14 @@ const migrate_op: Handler = async (s, req) => {
   const slug = text_arg(args, "slug");
   const existing = s.db.get<{ status: string; owner_user_id: string }>("SELECT status, owner_user_id FROM projects WHERE slug = ?", slug);
   if (existing !== undefined && existing.status === "active") return { state: "already", slug };
+  // the backup goes below ~/.pes/backups: a PES home that holds (or sits inside) that folder cannot be migrated — said before anything is imported
+  const backups = join(pes_dir(s.env), "backups");
+  try {
+    assert_backup_location(backups, pes_home, null);
+  } catch (error) {
+    if (error instanceof ApiError) throw backup_place_refusal(error.message, backups, pes_home);
+    throw error;
+  }
   // the owner: the one who started this project's earlier try (a retry must stay with the same owner), else the oldest human of this database
   const human_of = (user_id: string | null): string | undefined =>
     s.db.get<{ id: string }>(
@@ -2564,19 +2605,20 @@ const migrate_op: Handler = async (s, req) => {
     const imported = await s.unit(() => import_project(s.service, dir, { owner_actor_id: owner }));
     if (imported.state === "failed") {
       const first = imported.report.entries[0];
-      throw new Refusal("invalid_payload", `이전하지 못했습니다: 폴더를 옮길 수 없는 내용이 있습니다${first === undefined ? "" : ` (${first.category} ${first.path})`} — 폴더는 그대로 두었습니다`);
+      throw new Refusal("invalid_payload", `이전하지 못했습니다: 폴더를 옮길 수 없는 내용이 있습니다${first === undefined ? "" : ` (${first.category} ${first.path})`} — 폴더는 그대로 두었습니다. ${migrate_hint(first?.category ?? "", first?.path, slug)}`);
     }
     const checked = await s.unit(() => validate_import(s.service, imported.batch_id, { owner_actor_id: owner, source_dir: dir }));
     if (!checked.ok) {
       const first = checked.report.problems[0];
-      throw new Refusal("conflict", `이전 검증에 실패했습니다: ${first === undefined ? "차이가 있습니다" : first.check + (first.path === undefined ? "" : " " + first.path)} — 아무것도 켜지 않았고 폴더는 그대로입니다`);
+      throw new Refusal("conflict", `이전 검증에 실패했습니다: ${first === undefined ? "차이가 있습니다" : first.check + (first.path === undefined ? "" : " " + first.path)} — 아무것도 켜지 않았고 폴더는 그대로입니다. ${migrate_hint(first?.check ?? "", first?.path, slug)}`);
     }
     const backup_dir = join(pes_dir(s.env), "backups", `migrate-${slug}-${imported.batch_id}`);
     await s.unit(() => activate_import(s.service, imported.batch_id, { owner_actor_id: owner, backup_dir, pes_home }));
     return { state: "migrated", slug, project_id: imported.project_id, backup_dir };
   } catch (error) {
     if (error instanceof ApiError) {
-      throw new Refusal("conflict", `이전하지 못했습니다: ${error.code} — 아무것도 켜지 않았고 폴더는 그대로입니다`);
+      if (/backup folder must/.test(error.message)) throw backup_place_refusal(error.message, backups, pes_home);
+      throw new Refusal("conflict", `이전하지 못했습니다: ${error.code} — 아무것도 켜지 않았고 폴더는 그대로입니다. ${migrate_hint(error.code, undefined, slug)}`);
     }
     throw error;
   }
@@ -2642,6 +2684,23 @@ function schema_is_current(db: Db): boolean {
   }
 }
 
+function empty_file(file: string): boolean {
+  try {
+    return statSync(file).size === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the database has at least one project row (false when there is no projects table). */
+function holds_projects(db: Db): boolean {
+  try {
+    return db.get<{ one: bigint }>("SELECT 1 AS one FROM projects LIMIT 1") !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 function reply(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
@@ -2679,7 +2738,8 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
   }
   const file = db_path(env);
   const creating = request.op === "init" || request.op === "migrate";
-  if (!creating && !existsSync(file)) {
+  /** What a database that serves nothing answers: a missing file, an empty (0 byte) one, or one without any project (no projects table, an old schema with no project) reads like 0.15 (D14). */
+  const serves_nothing = (): BridgeReply => {
     if (request.op === "slugs" || request.op === "live_locks" || request.op === "active_slugs") {
       return { ok: true, data: { slugs: [], locks: {} } };
     }
@@ -2692,8 +2752,14 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
       message: "PES 데이터베이스가 없습니다 — 옛 project.json 프로젝트는 이전하기 전에는 쓸 수 없습니다",
       exit: 1,
     };
-  }
+  };
+  if (!creating && (!existsSync(file) || empty_file(file))) return serves_nothing();
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
+  if (creating && existsSync(file) && !empty_file(file)) {
+    // a SQLite file of something else (tables, no db_meta): migrate would refuse it with an internal error — say it in one line, change nothing
+    const foreign = probe_database(file).foreign === true;
+    if (foreign) return { ok: false, code: "conflict", message: `PES 데이터베이스가 아닌 파일입니다: ${file} — 다른 이름으로 옮겨 둔 뒤 다시 하세요(옛 0.15 폴더는 그대로 읽힙니다)`, exit: 1 };
+  }
   const read_only = READ_ONLY_OPS.has(request.op);
   let db: Db;
   try {
@@ -2706,7 +2772,9 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
   try {
     if (creating) migrate(db);
     else if (!schema_is_current(db)) {
-      return { ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 };
+      // an old schema that holds no project (or no projects table at all) serves nothing: 0.15 folders stay readable; init / migrate bring it up to date
+      if (!holds_projects(db)) return serves_nothing();
+      return { ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다 — pes migrate <프로젝트> 한 번으로 올라갑니다", exit: 1 };
     }
     session = new Session(env, db, !read_only);
     if (typeof request.args?.dir === "string") session.dir_label = request.args.dir;

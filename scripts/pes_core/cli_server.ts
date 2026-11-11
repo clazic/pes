@@ -9,7 +9,6 @@ import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { OWNER_STUB_SLUG } from "./cli_bridge.ts";
 import { hub_ports, kill_pid, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
 import { need_project, project_exists, slug_of } from "./cli_records.ts";
 import { load_legacy } from "./cli_legacy_read.ts";
@@ -170,8 +169,8 @@ function legacy_brief(root: string, slug: string): Dict {
 export async function all_briefs(root: string): Promise<Dict[]> {
   const out: Dict[] = [];
   const at_home = existsSync(root) && resolve_path(root) === pes_home();
-  // the project that only holds the owner of a fresh database (made by `migrate`) is not a project of the user
-  const served = new Set<string>(at_home ? (((await bridge("active_slugs")).slugs as string[] | undefined) ?? []).filter((x) => x !== OWNER_STUB_SLUG) : []);
+  // active_slugs leaves out the project that only holds the owner of a fresh database (OWNER_STUB_SLUG, made by `migrate`)
+  const served = new Set<string>(at_home ? (((await bridge("active_slugs")).slugs as string[] | undefined) ?? []) : []);
   if (existsSync(root)) {
     for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       if (!entry.isDirectory() || served.has(entry.name) || !existsSync(join(root, entry.name, "project.json"))) continue;
