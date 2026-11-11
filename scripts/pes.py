@@ -871,25 +871,44 @@ def short_write_lock(d: Path):
     """읽기-수정-쓰기를 한 번에 하나만 하게 하는 아주 짧은 잠금 (`set` 전용; 세션 잠금 .pes-lock 과 다르다). 끝나면 지운다."""
     lock = d / ".project.json.lock"
     deadline = time.time() + 30
+    seen_lock = False  # 이 루프에서 잠금 파일을 실제로 봤는지 (묵은 잠금을 우리가 치운 뒤 PermissionError 가 이어져도 권한 문제로 오인하지 않는다)
     while True:
         try:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)
             break
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime > 60:  # 죽은 프로세스가 남긴 흔적
-                    lock.unlink(missing_ok=True)
-                    continue
-            except OSError:
-                pass
-            if time.time() > deadline:
-                die("set: 다른 set 이 아직 저장 중입니다 — 잠시 뒤 다시 하세요", 3)
-            time.sleep(0.02)
+        except FileExistsError:  # 이미 잠금이 있음 — 아직 잡혀 있음으로 본다
+            seen_lock = True
+        except PermissionError:
+            # Windows: 다른 프로세스가 잠금을 지우는 중(삭제 대기)이면 PermissionError 가 난다 — 아직 잡혀 있음으로 본다.
+            # 비 Windows 에서 잠금이 한 번도 없었는데 PermissionError 라면 폴더에 쓸 수 없는 것이다 — 기다려도 풀리지 않으니 바로 알린다.
+            # (os.name 은 판단할 때마다 읽는다 — 시험이 그 순간만 "nt" 로 바꾼다)
+            if os.name == "nt" or seen_lock or lock.exists():
+                seen_lock = True
+            else:
+                die("set: 프로젝트 폴더에 쓸 수 없습니다 (권한)", 2)
+        try:
+            if time.time() - lock.stat().st_mtime > 60:  # 죽은 프로세스가 남긴 흔적
+                seen_lock = True
+                lock.unlink(missing_ok=True)
+                continue
+            seen_lock = True
+        except OSError:
+            pass
+        if time.time() > deadline:
+            die("set: 다른 set 이 아직 저장 중입니다 — 잠시 뒤 다시 하세요", 3)
+        time.sleep(0.02)
     try:
         yield
     finally:
-        lock.unlink(missing_ok=True)
+        for attempt in range(50):  # Windows 삭제 대기: 약 1초 동안 다시 지워 본다
+            try:
+                lock.unlink(missing_ok=True)
+                break
+            except OSError:
+                if attempt == 49:
+                    break  # 조용히 넘긴다 — 남은 잠금은 60초 묵은 잠금 규칙이 치운다
+                time.sleep(0.02)
 
 
 def cmd_set(args):
