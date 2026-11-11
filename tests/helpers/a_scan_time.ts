@@ -1,7 +1,7 @@
 // SEL-76: the N8 time limits judge the KEY SCANNER (reply_key_check), not a whole executor run. A whole run adds a fake
 // server round trip, the database and CI load (Windows runner: 3.0 s against a 3 s limit although the scan took ms).
-// Here only the scan is timed: best of a few runs by hrtime, and growth is judged by a RATIO of a small and a 4x input
-// (linear ~4, quadratic ~16). Synthetic only; no server, no clock other than hrtime, no path.
+// Here only the scan is timed: best of a few runs by CPU time (SEL-78: not wall time), and growth is judged by a RATIO of a small and a 4x input
+// (linear ~4, quadratic ~16). Synthetic only; no server, no clock other than process.cpuUsage, no path.
 
 import assert from "node:assert/strict";
 
@@ -12,14 +12,38 @@ import { SYNTHETIC_KEY } from "./a_builtin_env.ts";
 export const MAX_RATIO = 9;
 /** below this a time is noise, not growth (the ratio divides by at least this) */
 export const FLOOR_MS = 8;
+/** a CPU-time window shorter than this is not trusted (two Windows ticks); the scan is repeated inside the window until it is longer */
+const MIN_READING_MS = 30;
+const MAX_BATCH = 4096;
 
-/** best (smallest) wall time of `runs` calls, in ms, measured by hrtime */
-export function best_ms(go: () => unknown, runs = 3): number {
+/**
+ * best (smallest) CPU time of `runs` calls, in ms: process.cpuUsage() user + system.
+ *
+ * SEL-78: wall time lied under the load of a parallel `npm test`. A 5 ms scan fits in one scheduler slice, a 100 ms scan
+ * is preempted again and again, so its wall time grew by the waiting, not by the work: a linear scanner showed x10..x15
+ * (reproduced with 3 busy loops per core). CPU time counts only the work. Where the OS clock is coarse (Windows, one tick
+ * ~15 ms) a reading is rounded to ticks, which the FLOOR_MS floor and the "lowest of several runs" absorb; a square
+ * (x16) is far above that.
+ */
+export function best_ms(go: () => unknown, runs = 3, tick_ms = 0): number {
   let best = Number.POSITIVE_INFINITY;
   for (let i = 0; i < runs; i += 1) {
-    const t0 = process.hrtime.bigint();
-    go();
-    best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6);
+    // SEL-78: a reading under MIN_READING_MS is only a tick or two on a coarse clock (Windows ~15 ms: a 5 ms scan reads 0).
+    // Run the scan k times inside ONE cpuUsage window, doubling k until the window is long enough, and take the mean.
+    let k = 1;
+    for (;;) {
+      const before = process.cpuUsage();
+      for (let j = 0; j < k; j += 1) go();
+      const used = process.cpuUsage(before);
+      let ms = (used.user + used.system) / 1000;
+      // test hook: model a coarse OS clock that rounds a reading DOWN to whole ticks
+      if (tick_ms > 0) ms = Math.floor(ms / tick_ms) * tick_ms;
+      if (ms >= MIN_READING_MS || k >= MAX_BATCH) {
+        best = Math.min(best, ms / k);
+        break;
+      }
+      k *= 2;
+    }
   }
   return best;
 }
@@ -30,13 +54,36 @@ export interface Growth {
   ratio: number;
 }
 
-/** time `scan` on `build(small)` and `build(large)`; the scan takes the text and does the whole check */
-export function measure_growth(scan: (text: string) => unknown, build: (n: number) => string, small: number, large: number): Growth {
+/**
+ * time `scan` on `build(small)` and `build(large)`; the scan takes the text and does the whole check.
+ *
+ * SEL-78: under the load of a parallel `npm test` one slow run of the LARGE input (a preempted core, a GC pause) made a
+ * linear scanner look like x12.8. Noise only ever makes a time longer, and a square grows on EVERY run, so a ratio at or
+ * above MAX_RATIO is measured again (at most `attempts` times in all) and the LOWEST ratio seen counts, with the
+ * lowest time of each size. A real quadratic scanner stays high on every attempt and still fails; a linear one passes
+ * as soon as one attempt is undisturbed.
+ */
+export function measure_growth(
+  scan: (text: string) => unknown,
+  build: (n: number) => string,
+  small: number,
+  large: number,
+  attempts = 3,
+  tick_ms = 0,
+): Growth {
   const small_text = build(small);
   const large_text = build(large);
-  const small_ms = best_ms(() => scan(small_text));
-  const large_ms = best_ms(() => scan(large_text));
-  return { small_ms, large_ms, ratio: large_ms / Math.max(small_ms, FLOOR_MS) };
+  let best: Growth | null = null;
+  let small_min = Number.POSITIVE_INFINITY;
+  let large_min = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < attempts; i += 1) {
+    small_min = Math.min(small_min, best_ms(() => scan(small_text), 3, tick_ms));
+    large_min = Math.min(large_min, best_ms(() => scan(large_text), 3, tick_ms));
+    const g: Growth = { small_ms: small_min, large_ms: large_min, ratio: large_min / Math.max(small_min, FLOOR_MS) };
+    if (best === null || g.ratio < best.ratio) best = g;
+    if (g.ratio < MAX_RATIO) break;
+  }
+  return best as Growth;
 }
 
 /** fails when the time grew by about a square (ratio) or the large input took longer than `max_large_ms` */
