@@ -20,16 +20,24 @@ import { LATER, SEL71_DONE, SEL77_DONE, sel77_on } from "./helpers/sel_scope.ts"
 
 use_home_guard();
 
-test("SEL-71 completion list (a: pes.ts skeleton + write commands): exactly E01~E04, E10, X01~X05, X08~X11 are implemented on ts; SEL-77's read cases are not_yet until SEL-77 turns them on; server / setup are SEL-72 (implemented), doctor stays not_yet", () => {
-  assert.deepEqual([...implemented_ids()].sort(), [...SEL71_DONE, ...SEL72_DONE].sort(), "cases.json / contract.json ts.status differ from the SEL-71 + SEL-72 completion lists");
-  for (const id of SEL77_DONE) assert.equal(case_def(id).ts.status, "not_yet", `${id} belongs to SEL-77 (reads / reports) — not_yet until that issue turns SEL77_DONE on`);
-  assert.equal(sel77_on(), false, "SEL-77 flips all of SEL77_DONE at once; SEL-71 leaves them off");
-  for (const id of LATER) assert.equal(case_def(id).ts.status, "not_yet", `${id} is not part of SEL-71 / SEL-72`);
+test("completion list (SEL-71 a: pes.ts skeleton + write commands, SEL-72 serve / setup, SEL-77 b+c: read / report / doctor): exactly E01~E15 and X01~X11 are implemented on ts, every case has one owner", () => {
+  assert.deepEqual([...implemented_ids()].sort(), [...SEL71_DONE, ...SEL72_DONE, ...SEL77_DONE].sort(), "cases.json / contract.json ts.status differ from the SEL-71 + SEL-72 + SEL-77 completion lists");
+  assert.deepEqual([...SEL77_DONE], ["E05", "E06", "E07", "E11", "E12", "E15", "X06", "X07"], "SEL-77 owns the read / report cases and doctor (E15, moved over from SEL-72)");
+  for (const id of SEL77_DONE) assert.equal(case_def(id).ts.status, "implemented", `${id} belongs to SEL-77 — implemented with it`);
+  assert.equal(sel77_on(), true, "SEL-77 flips all of SEL77_DONE at once");
+  assert.deepEqual([...LATER], [], "nothing is left to a later issue: every case has a ts target");
   assert.deepEqual(load_table().cases.filter((c) => c.kind !== "cli" && c.ts.status === "implemented").map((c) => c.id), [...SEL72_DONE], "http / setup cases are exactly SEL-72's (serve.ts / setup.ts)");
   assert.equal(all_cases().length, 15 + load_contract_table().cases.length);
   assert.deepEqual([...SEL71_DONE, ...SEL72_DONE, ...SEL77_DONE, ...LATER].sort(), all_cases().map((c) => c.id).sort(), "every case has exactly one owner");
+  assert.equal(all_cases().filter((c) => c.ts.status === "not_yet").length, 0, "no not_yet case remains after SEL-77");
   for (const id of [...SEL71_DONE, ...SEL77_DONE]) assert.ok(existsSync(join(REPO_ROOT, "tests", "fixtures", "compat", "baseline", `${id}.json`)), `${id}: pinned 0.15 baseline`);
 });
+
+for (const id of SEL77_DONE) {
+  test(`${id} on the ts target equals the 0.15 baseline (intended differences ${case_def(id).diffs.join(",")})`, { timeout: 300_000 }, async () => {
+    await assert_case("ts", id);
+  });
+}
 
 test("the run method: scripts/pes.ts exists, runs as plain `node scripts/pes.ts` (Node >= 26 strips the types) and needs no tsx / build / loader", () => {
   assert.ok(existsSync(PES_TS_FILE), "scripts/pes.ts does not exist yet — SEL-71 writes it");

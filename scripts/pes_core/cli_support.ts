@@ -222,3 +222,100 @@ export function arg_at(args: string[], index: number, command: string): string {
   if (value === undefined) return missing_args(command);
   return value;
 }
+
+// ---------------------------------------------------------------- Python's json error text (what 0.15 printed for a broken file)
+
+/**
+ * The message Python's `json.loads` raises for `text`, or null when the text is valid JSON (Python also accepts NaN / Infinity).
+ * Only the file's own bytes are read; doctor shows this text for a broken project.json, so it is the same one 0.15 showed.
+ */
+export function py_json_error(text: string): string | null {
+  const chars = Array.from(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  const n = chars.length;
+  class Fail extends Error {
+    readonly at: number;
+    readonly what: string;
+    constructor(what: string, at: number) {
+      super(what);
+      this.what = what;
+      this.at = at;
+    }
+  }
+  const ws = (i: number): number => {
+    let k = i;
+    while (k < n && " \t\n\r".includes(chars[k] as string)) k += 1;
+    return k;
+  };
+  const literal = (i: number, word: string): boolean => chars.slice(i, i + word.length).join("") === word;
+  const string = (start: number): number => {
+    let i = start + 1;
+    for (;;) {
+      if (i >= n) throw new Fail("Unterminated string starting at", start);
+      const c = chars[i] as string;
+      if (c === '"') return i + 1;
+      if (c === "\\") {
+        const e = chars[i + 1];
+        if (e === undefined) throw new Fail("Unterminated string starting at", start);
+        if (e === "u") {
+          if (!/^[0-9a-fA-F]{4}$/.test(chars.slice(i + 2, i + 6).join(""))) throw new Fail("Invalid \\uXXXX escape", i + 1);
+          i += 6;
+        } else if ('"\\/bfnrt'.includes(e)) {
+          i += 2;
+        } else {
+          throw new Fail(`Invalid \\escape: '${e}'`, i);
+        }
+      } else if (c.charCodeAt(0) < 0x20) {
+        throw new Fail("Invalid control character at", i);
+      } else {
+        i += 1;
+      }
+    }
+  };
+  const value = (i: number): number => {
+    const c = chars[i];
+    if (c === '"') return string(i);
+    if (c === "{") {
+      let k = ws(i + 1);
+      if (chars[k] === "}") return k + 1;
+      for (;;) {
+        if (chars[k] !== '"') throw new Fail("Expecting property name enclosed in double quotes", k);
+        k = ws(string(k));
+        if (chars[k] !== ":") throw new Fail("Expecting ':' delimiter", k);
+        k = ws(value(ws(k + 1)));
+        if (chars[k] === "}") return k + 1;
+        if (chars[k] !== ",") throw new Fail("Expecting ',' delimiter", k);
+        k = ws(k + 1);
+      }
+    }
+    if (c === "[") {
+      let k = ws(i + 1);
+      if (chars[k] === "]") return k + 1;
+      for (;;) {
+        k = ws(value(k));
+        if (chars[k] === "]") return k + 1;
+        if (chars[k] !== ",") throw new Fail("Expecting ',' delimiter", k);
+        k = ws(k + 1);
+      }
+    }
+    if (c === "n" && literal(i, "null")) return i + 4;
+    if (c === "t" && literal(i, "true")) return i + 4;
+    if (c === "f" && literal(i, "false")) return i + 5;
+    if (c === "N" && literal(i, "NaN")) return i + 3;
+    if (c === "I" && literal(i, "Infinity")) return i + 8;
+    if (c === "-" && literal(i, "-Infinity")) return i + 9;
+    const number = chars.slice(i, i + 400).join("").match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?/);
+    if (number !== null) return i + Array.from(number[0]).length;
+    throw new Fail("Expecting value", i);
+  };
+  try {
+    const end = ws(value(ws(0)));
+    if (end !== n) throw new Fail("Extra data", end);
+    return null;
+  } catch (error) {
+    if (!(error instanceof Fail)) throw error;
+    const before = chars.slice(0, error.at);
+    const line = before.filter((c) => c === "\n").length + 1;
+    const col = error.at - (before.lastIndexOf("\n") + 1) + 1;
+    return `${error.what}: line ${line} column ${col} (char ${error.at})`;
+  }
+}

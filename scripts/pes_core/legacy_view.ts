@@ -162,6 +162,9 @@ export interface ViewOptions {
   pin?: ReadonlyMap<string, string>;
 }
 
+/** pes.py FMT_TXT: the label a registered report file has in project.json. */
+const REPORT_FORMAT_LABEL: Record<string, string> = { md: "마크다운", html: "웹 보고서", eli5: "그림 설명(eli5)", docx: "Word", hwpx: "HWPX", pdf: "PDF", pptx: "발표자료", json: "데이터" };
+
 export function build_project_view(
   db: Pick<Db, "get" | "all">,
   project_id: string,
@@ -173,6 +176,15 @@ export function build_project_view(
     project_id,
   );
   if (project === undefined) throw new Error("project not found");
+  // v0.15's `slug` is the name the project was made with; its folder may be moved or renamed later (the database's slug follows the folder name)
+  const made = db.get<{ payload: string }>("SELECT payload FROM events WHERE project_id = ? AND type = 'project.created' ORDER BY event_seq LIMIT 1", project_id);
+  let made_slug: unknown = null;
+  try {
+    made_slug = made === undefined ? null : (JSON.parse(made.payload) as Dict).slug;
+  } catch {
+    made_slug = null;
+  }
+  const original_slug = typeof made_slug === "string" && made_slug !== "" ? made_slug : project.slug;
   const edition_id = project.active_edition_id;
   const edition = edition_id === null
     ? undefined
@@ -224,7 +236,7 @@ export function build_project_view(
   const p: Dict = {
     pes: 1,
     topic: project.topic,
-    slug: project.slug,
+    slug: original_slug,
     created: num(project.created_at) > 0 ? local_stamp(num(project.created_at)).slice(0, 10) : "",
     current: STAGE_KEYS[0],
     complete: edition?.status === "completed",
@@ -521,8 +533,10 @@ export function build_project_view(
       const name = file.name;
       const stem = name.replace(/\.[^.]+$/, "");
       const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-      return { format: stem === "eli5" ? "eli5" : ext, label: name, path: `reports/${entry.stage_key}/${name}`, bytes: num(file.size), round: st.round };
+      const format = stem === "eli5" ? "eli5" : ext;
+      return { format, label: REPORT_FORMAT_LABEL[format] ?? format, path: `reports/${entry.stage_key}/${name}`, bytes: num(file.size), round: st.round };
     });
+    if (typeof entry.meta.built === "string") st.reports_built = entry.meta.built;
   }
 
   // processed names and the history lines the importer kept as events

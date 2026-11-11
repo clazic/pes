@@ -34,7 +34,7 @@ import {
 } from "./helpers/compat_normalize.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { SEL72_DONE } from "./helpers/sel72_scope.ts";
-import { SEL71_DONE } from "./helpers/sel_scope.ts";
+import { SEL71_DONE, SEL77_DONE } from "./helpers/sel_scope.ts";
 
 use_home_guard();
 
@@ -42,8 +42,8 @@ use_home_guard();
 // SEL-71 (PR26b) turned the ratchet from "per kind" into "per case": cases.json `ts.status` says, case by case, whether the ts target
 // must match 0.15 (implemented) or answers not_yet (and is not even run, whether the scripts/*.ts file exists or not). Edit this list and
 // cases.json together. The owners: SEL71_DONE (pes.ts, tests/helpers/sel_scope.ts; tests/test_pes_ts_contract.test.ts pins it) and
-// SEL72_DONE (E08 E09 E13 → serve.ts, E14 → setup.ts; tests/helpers/sel72_scope.ts); E15 (doctor) waits for SEL-77 and later.
-const TS_IMPLEMENTED: string[] = [...SEL71_DONE.filter((id) => id.startsWith("E")), ...SEL72_DONE];
+// SEL72_DONE (E08 E09 E13 → serve.ts, E14 → setup.ts; tests/helpers/sel72_scope.ts); SEL77_DONE (E05 E06 E07 E11 E12 E15, the read / report / doctor commands) since SEL-77 — no not_yet case is left.
+const TS_IMPLEMENTED: string[] = [...SEL71_DONE.filter((id) => id.startsWith("E")), ...SEL72_DONE, ...SEL77_DONE.filter((id) => id.startsWith("E"))];
 const ALL_IDS = Array.from({ length: 15 }, (_x, i) => `E${String(i + 1).padStart(2, "0")}`);
 
 test("the table defines E01~E15 once each, with criteria, intended differences and a pinned 0.15 baseline", () => {
@@ -88,6 +88,8 @@ test("every intended difference (7.5) carries a reason, and each is used by at l
   for (const [id, diff] of Object.entries(KNOWN_DIFFS)) {
     assert.equal(diff.id, id);
     assert.ok(diff.title.length > 0 && diff.reason.length > 10, id);
+    // Reason: D14 (un-migrated old folder is read-only) is not a 0.15-vs-ts baseline case — 0.15 would write — so it is pinned by its own test; every other difference still needs a case.
+    if (id === "D14") continue;
     assert.ok(used.has(id), `${id} is in the 7.5 table but no case lists it`);
   }
   // The two 0.15 defects (xfail in pytest) are pinned as intended differences, with the E03 case that carries them.

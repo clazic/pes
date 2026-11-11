@@ -2,13 +2,14 @@
 //   SEL-71 (a) — pes.ts skeleton + the WRITE commands (+ `status`, which E04 uses): E01~E04, E10, X01~X05, X08~X11, SEL-75 set lock, W1 importer path.
 //   SEL-77 (b) — the READ / report commands: E05, E06, E07 (reads), E11, E12, X06, X07, and the W2 generated-text LF of reports.
 //   SEL-72     — serve.ts / setup.ts: E08, E09, E13, E14 (tests/helpers/sel72_scope.ts, SEL72_DONE).
-//   later      — doctor: E15 (a pes.ts command; SEL-77 and later).
+//   SEL-77 (c) — doctor (E15) and the serve·stop·hub·open·watch wiring of pes.ts to scripts/serve.ts (leader, moved over from SEL-72).
 // E07 mixes both; its write half is the contract case X05 (SEL-71), the whole E07 is SEL-77's.
 import { all_cases } from "./compat_cases.ts";
 
 export const SEL71_DONE = ["E01", "E02", "E03", "E04", "E10", "X01", "X02", "X03", "X04", "X05", "X08", "X09", "X10", "X11"];
-export const SEL77_DONE = ["E05", "E06", "E07", "E11", "E12", "X06", "X07"];
-export const LATER = ["E15"];
+export const SEL77_DONE = ["E05", "E06", "E07", "E11", "E12", "E15", "X06", "X07"];
+/** nothing is left over after SEL-77 (E15 doctor moved in) */
+export const LATER: string[] = [];
 
 /** SEL-77 turns itself on by setting these cases to implemented in cases.json / contract.json (all of them at once). */
 export function sel77_on(): boolean {

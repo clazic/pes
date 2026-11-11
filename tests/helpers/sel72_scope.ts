@@ -3,7 +3,7 @@
 //   E15 (doctor --json) stays not_yet: `doctor` is a scripts/pes.ts command, and it is the pes.ts commands serve / stop / hub / open /
 //   watch / doctor that CALL serve.ts — that wiring is SEL-77 and later. This issue does not touch scripts/pes.ts.
 export const SEL72_DONE = ["E08", "E09", "E13", "E14"] as const;
-export const SEL72_LEFT_TO_LATER = ["E15"] as const;
+export const SEL72_LEFT_TO_LATER = ["E15"] as const; // moved to SEL-77 (SEL77_DONE) by the leader
 
 /** The ts file each done case runs: http cases → serve.ts, the setup case → setup.ts. */
 export const SEL72_KIND: Record<(typeof SEL72_DONE)[number], "http" | "setup"> = { E08: "http", E09: "http", E13: "http", E14: "setup" };

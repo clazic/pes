@@ -1,6 +1,6 @@
 {
   "doc": "docs/plan/migration-ts-equivalence.md 7.4 (E01~E15). 합성 입력만. steps 의 {P}=프로젝트 폴더, {T}=시험 임시 폴더, {R}=PES 홈, {PES}=저장소 루트. 기준값은 baseline/<id>.json (0.15 대상). ts.status 는 사례마다 not_yet/implemented 다(사례 단위 래칫, SEL-71): not_yet 사례는 scripts/pes.ts 가 있어도 실행하지 않고 not_yet 으로 단언하고, implemented 사례는 0.15 기준값과 같아야 한다. SEL-72 (PR26c): E08·E09·E13 은 scripts/serve.ts, E14 는 scripts/setup.ts 로 implemented — ts 대상은 tests/helpers/compat_ts_srv.ts (가드 붙은 자식, 합성 프로젝트). ts_import 단계는 ts 대상에서만 옛 폴더를 DB 로 이전한다(py 는 건너뜀).",
-  "ts_not_yet_reason": "이 사례는 아직 TS 대상이 없다: 읽기·보고서 E05·E06·E07·E11·E12 는 SEL-77(SEL77_DONE), E15(doctor)는 pes.ts 의 doctor — SEL-77 이후. 쓰기 사례(SEL71_DONE)는 pes.ts, E08·E09·E13 은 serve.ts, E14 는 setup.ts 로 SEL-71·SEL-72 에서 implemented. 사례 단위 래칫이라 파일이 있어도 not_yet 사례는 실행하지 않는다.",
+  "ts_not_yet_reason": "이 사례는 아직 TS 대상이 없다(SEL-77 이후 not_yet 인 사례는 없다 — 읽기·보고서·doctor E05·E06·E07·E11·E12·E15 는 SEL-77, 쓰기 사례(SEL71_DONE)는 SEL-71, E08·E09·E13 은 serve.ts, E14 는 setup.ts 로 SEL-72 에서 implemented). 사례 단위 래칫이라 파일이 있어도 not_yet 사례는 실행하지 않는다.",
   "cases": [
     {
       "id": "E01",
@@ -637,7 +637,7 @@
         "D10"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {
@@ -790,7 +790,7 @@
         "D10"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {
@@ -898,7 +898,7 @@
         "D02"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {
@@ -1386,7 +1386,7 @@
         "D10"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {
@@ -1568,7 +1568,7 @@
         "D11"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {
@@ -1878,10 +1878,11 @@
       "kind": "cli",
       "criteria": "스키마 동등(group·level·title·detail·fixable), Python 전용 항목은 의도된 차이(D08)",
       "diffs": [
+        "D02",
         "D08"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {

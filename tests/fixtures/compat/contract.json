@@ -1,6 +1,6 @@
 {
   "doc": "CLI 계약 사례 X01~X11 (SEL-71). 32개 명령(+set)의 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·프로젝트 없는 명령의 이름·인자 오류·exit·stdout/stderr 를 0.15 와 견준다. 기준값은 baseline/X0n.json(0.15 대상). 서버·프로세스를 띄우는 serve·hub·open·watch·doctor 는 인자 수 오류(사용법)만 — 실제 실행은 E13·E15(뒤 PR). X01~X05·X08~X11 = SEL-71(쓰기 골격, X08·X09 는 의도된 차이 D13, X10·X11 은 1차 리뷰 권장 7), X06·X07 = SEL-77(읽기). E04 는 status 를 써서 SEL-71 에 status 가 든다.",
-  "ts_not_yet_reason": "읽기·보고서 사례(X06·X07)는 SEL-77 몫 — SEL77_DONE (tests/test_pes_ts_contract.test.ts)",
+  "ts_not_yet_reason": "읽기·보고서 사례(X06·X07)는 SEL-77 에서 implemented — SEL77_DONE (tests/test_pes_ts_contract.test.ts)",
   "cases": [
     {
       "id": "X01",
@@ -849,7 +849,7 @@
         "D11"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {
@@ -1020,7 +1020,7 @@
         "D02"
       ],
       "ts": {
-        "status": "not_yet"
+        "status": "implemented"
       },
       "steps": [
         {

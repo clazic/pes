@@ -17,7 +17,7 @@ import {
   load_table,
   looks_like_stack_trace,
   read_baseline,
-  run_case,
+  not_yet_ids,
   ts_baseline,
   type CaseRecord,
 } from "./helpers/compat_cases.ts";
@@ -191,10 +191,9 @@ test("D11: a 0.15 traceback step passes with the same exit and a plain Korean on
   assert.throws(() => compare_steps(e12, [{ ...large, exit: 0, stderr: ["    at x (node:internal/y:1:1)"] }], [large]));
 });
 
-test("the case ratchet is per case: a not_yet case is never run on ts (pes.ts present or not), an implemented one is", async () => {
-  const outcome = await run_case("ts", "E15");
-  assert.equal(outcome.kind, "not_yet");
-  assert.match(outcome.kind === "not_yet" ? outcome.reason : "", /실행하지 않는다/);
-  // the http / setup cases (E08 E09 E13 E14) are implemented since SEL-72: they run (tests/test_serve_ts_cases.test.ts)
+test("the case ratchet is per case: after SEL-77 no case is not_yet (every case runs on ts); the reason text of the ratchet still says a not_yet case is never run", () => {
+  assert.deepEqual(not_yet_ids(), [], "SEL-77 (E05~E07, E11, E12, E15 + X06, X07) turned the last not_yet cases on");
+  assert.match(load_table().ts_not_yet_reason, /실행하지 않는다/);
+  assert.match(load_contract_table().ts_not_yet_reason, /SEL-77/);
   assert.equal(basename(join("a", "b")), "b");
 });
