@@ -233,12 +233,15 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
     normal: async (env, agent) => {
       const round = await open_round(env);
       const v = await new_artifact(env, "rc");
-      return { subst: { [PH.stage]: round.stage_id, [PH.round]: round.round_id, [PH.version]: v.version_id, act_01J9Z3K7Q7: agent.actor_id } };
+      // SEL-68: the fixture creates a mode A run, and a mode A run belongs to an internal_ai actor only
+      const ai = await make_agent(env, "contract-ai", undefined, "internal_ai");
+      return { subst: { [PH.stage]: round.stage_id, [PH.round]: round.round_id, [PH.version]: v.version_id, act_01J9Z3K7Q7: ai.actor_id } };
     },
     error: async (env, agent) => {
       const round = await open_round(env);
+      const ai = await make_agent(env, "contract-ai", undefined, "internal_ai");
       await go_off(env);
-      return { subst: { [PH.stage]: round.stage_id, [PH.round]: round.round_id } };
+      return { subst: { [PH.stage]: round.stage_id, [PH.round]: round.round_id, act_01J9Z3K7Q7: ai.actor_id } };
     },
   },
   "runs.claim": {

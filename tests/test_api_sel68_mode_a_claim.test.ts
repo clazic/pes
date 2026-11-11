@@ -77,7 +77,7 @@ const MODE_A_BODIES: Array<[string, Record<string, unknown>]> = [
   ["A pes_builtin / opencode-go", { mode: "A", runtime: "pes_builtin", provider: "opencode-go", model: GO_MODEL }],
   ["A synthetic runtime / opencode-go", { mode: "A", runtime: "synthetic-runtime", provider: "opencode-go", model: GO_MODEL }],
   ["A codex_cli runtime / opencode-go", { mode: "A", runtime: "codex_cli", provider: "opencode-go", model: "opencode-go/synthetic" }],
-  ["A with expected_control_rev", { mode: "A", runtime: "pes_builtin", provider: "opencode-go", model: GO_MODEL, expected_control_rev: "1" }],
+  ["A with expected_control_rev", { mode: "A", runtime: "pes_builtin", provider: "opencode-go", model: GO_MODEL, expected_control_rev: "0" }],
 ];
 
 // 해석 2: mode B written, but the provider / model is the A-only (Go) pair

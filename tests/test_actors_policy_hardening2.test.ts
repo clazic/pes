@@ -127,7 +127,7 @@ function assert_clean(error: unknown, forbidden: string[], label: string): void 
 }
 
 /** A member with its OWN user (so disabling that user does not touch the owner). */
-function add_member(env: Env, id: string, kind: "human" | "external_agent", role: "editor" | "reader"): { actor_id: string; user_id: string } {
+function add_member(env: Env, id: string, kind: "human" | "external_agent" | "internal_ai", role: "editor" | "reader"): { actor_id: string; user_id: string } {
   const user_id = `user-${id}`;
   env.db.run("INSERT INTO users (id, display_name, created_at) VALUES (?, ?, 0)", user_id, `비밀표시이름-${id}`);
   env.db.run(
@@ -193,6 +193,18 @@ async function go_lease_ctx_payload(env: Env, key: string, actor_id: string) {
   });
 }
 
+test("SEL-68 core run.claim mode A by an external_agent or a human is forbidden and changes nothing (Go ON)", async () => {
+  await with_env(async (env) => {
+    const ext = add_member(env, "ag-ext68", "external_agent", "editor");
+    const hum = add_member(env, "hu-68", "human", "editor");
+    const before = state_signature(env.db);
+    for (const actor of [ext.actor_id, hum.actor_id]) {
+      await rejects_with_api_error(go_lease_ctx_payload(env, `sel68-${actor}`, actor), "forbidden");
+      assert.equal(state_signature(env.db), before, `${actor}: no run, lease, receipt or event`);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 1. User disabled between a command and its replay
 
@@ -236,7 +248,7 @@ test("R2 replay of token.issue after the owner's user is disabled is forbidden a
 
 test("R3 policy (Go off) plus a disabled user: the answer is forbidden, so policy state is not disclosed to a dead actor", async () => {
   await with_env(async (env) => {
-    const agent = add_member(env, "ag2", "external_agent", "editor");
+    const agent = add_member(env, "ag2", "internal_ai", "editor") /* SEL-68: mode A is internal_ai only */;
     await set_policy(env.service, env.ctx("r3-off"), { allow_opencode_go: false, reason: "합성" });
     disable_user(env, agent.user_id);
     const err = await rejects_with_api_error(go_lease_ctx_payload(env, "r3-claim", agent.actor_id), "forbidden");
@@ -264,7 +276,7 @@ test("R4 re-enabled user: the earlier receipt replays again with the same result
 
 test("R5 disabling a user mid-lease: run.release / heartbeat by that user's actor are forbidden and the lease row is untouched", async () => {
   await with_env(async (env) => {
-    const agent = add_member(env, "ag3", "external_agent", "editor");
+    const agent = add_member(env, "ag3", "internal_ai", "editor") /* SEL-68: mode A is internal_ai only */;
     const out = await go_lease_ctx_payload(env, "r5-claim", agent.actor_id);
     const lease = out.result as { run_id: string; lease_id: string; fence: number };
     disable_user(env, agent.user_id);
@@ -312,7 +324,7 @@ test("R6 a disabled user's agent token: verify / resolve both forbidden; the sam
 
 test("R7 disabled user: dispatch / run / content / token commands all forbidden by actor id, none writes", async () => {
   await with_env(async (env) => {
-    const agent = add_member(env, "ag5", "external_agent", "editor");
+    const agent = add_member(env, "ag5", "internal_ai", "editor") /* SEL-68: mode A is internal_ai only */;
     const lease = (await go_lease_ctx_payload(env, "r7-claim", agent.actor_id)).result as {
       run_id: string;
       lease_id: string;
