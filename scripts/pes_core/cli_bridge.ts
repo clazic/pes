@@ -2034,6 +2034,33 @@ async function write_report_version(
   });
 }
 
+const ATTACHMENT_TYPES: Record<string, string> = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  hwpx: "application/hwp+zip",
+  pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
+/** The finished files of a stage report (`[{name, bytes_b64}]`): a plain file name with one of the 0.15 suffixes, never one the report renders itself. */
+function report_attachments(value: unknown, rendered: RenderedFile[]): RenderedFile[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Refusal("invalid_payload", "보고서 첨부 파일 목록이 올바르지 않습니다", 2);
+  const out: RenderedFile[] = [];
+  for (const entry of value) {
+    const name = is_record(entry) ? entry.name : undefined;
+    const b64 = is_record(entry) ? entry.bytes_b64 : undefined;
+    const ext = typeof name === "string" ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+    if (
+      typeof name !== "string" || typeof b64 !== "string" || name.startsWith(".") || /[\\/\u0000]/.test(name) || !name.includes(".") ||
+      ATTACHMENT_TYPES[ext] === undefined || rendered.some((f) => f.name === name) || out.some((f) => f.name === name)
+    ) {
+      throw new Refusal("invalid_payload", "보고서 첨부 파일은 .docx·.hwpx·.pdf·.pptx 파일 이름과 내용이어야 합니다", 2);
+    }
+    out.push({ name, media_type: ATTACHMENT_TYPES[ext] as string, bytes: new Uint8Array(Buffer.from(b64, "base64")) });
+  }
+  return out;
+}
+
 const report: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const stage = s.stage(project, req.args?.stage);
@@ -2055,6 +2082,9 @@ const report: Handler = async (s, req) => {
     { name: "report.html", media_type: "text/html", bytes: utf8(made.html) },
   ];
   if (made.eli5_html !== null) files.push({ name: "eli5.html", media_type: "text/html", bytes: utf8(made.eli5_html) });
+  // 0.15 registered the Word / HWPX / PDF / slides files a skill put in reports/<stage>/ as stage reports too (pes.py cmd_report):
+  // scripts/pes.ts hands their bytes over and they are attached to the same report version, so the read model lists them.
+  files.push(...report_attachments(req.args?.attachments, files));
   const out = await write_report_version(s, project, auth, {
     role: "stage_report",
     stage,

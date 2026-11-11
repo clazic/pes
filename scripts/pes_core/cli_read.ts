@@ -170,6 +170,7 @@ function folder_files(dir: string): string[] {
 }
 
 const REPORT_SUFFIXES = new Set([".md", ".html", ".docx", ".hwpx", ".pdf", ".pptx"]);
+const ATTACHMENT_SUFFIXES = new Set([".docx", ".hwpx", ".pdf", ".pptx"]);
 
 export async function cmd_report(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "report"));
@@ -179,9 +180,16 @@ export async function cmd_report(args: string[]): Promise<void> {
   // eli5.json is read only: the person's / the skill's picture description (0.15: rendered into eli5.html when it exists)
   const eli5_file = join(rd, "eli5.json");
   const eli5 = existsSync(eli5_file) ? read_json_file(eli5_file, "eli5.json") : null;
-  const data = await bridge("report", slug, { stage: s, eli5, dir: d, plain: true });
+  // the finished Word / HWPX / PDF / slides files in the folder are registered with the report version, as 0.15 did (stages.<s>.reports)
+  const attachments = folder_files(rd)
+    .filter((name) => !name.startsWith(".") && ATTACHMENT_SUFFIXES.has(name.slice(name.lastIndexOf(".")).toLowerCase()))
+    .map((name) => ({ name, bytes_b64: readFileSync(join(rd, name)).toString("base64") }));
+  const attached = new Set(attachments.map((a) => a.name));
+  const data = await bridge("report", slug, { stage: s, eli5, dir: d, plain: true, attachments });
   mkdirSync(rd, { recursive: true });
-  for (const f of (data.files as Array<{ name: string }>) ?? []) write_text(join(rd, f.name), await stored_text(slug, `reports/${s}/${f.name}`));
+  for (const f of (data.files as Array<{ name: string }>) ?? []) {
+    if (!attached.has(f.name)) write_text(join(rd, f.name), await stored_text(slug, `reports/${s}/${f.name}`));
+  }
   const state = (await bridge("read_project", slug)).project as Dict;
   const formats = report_formats(state);
   const reg: Array<{ format: string; label: string; path: string }> = [];

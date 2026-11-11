@@ -4,7 +4,7 @@
 // Port range: 8760~8764, or PES_HUB_PORTS="<first>-<last>"; PES_NO_BROWSER=1 makes `open` print the address and start nothing.
 
 import { spawn } from "node:child_process";
-import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -74,7 +74,8 @@ export async function ensure_server(root: string): Promise<number> {
   }
   if (free === null) return die(`${ports[0]}~${ports[ports.length - 1]} 포트가 모두 사용 중 — 다른 PES 홈의 서버나 다른 프로그램을 끄세요`, 1);
   const pid = spawn_server(root, free);
-  writeFileSync(join(root, ".pes-hub-server"), JSON.stringify({ pid, port: free }), "utf8");
+  const record = join(root, ".pes-hub-server");
+  writeFileSync(record, JSON.stringify({ pid, port: free }), "utf8");
   // the server needs a moment to start: wait until it answers as this home's server (or has died)
   for (let i = 0; i < 200; i += 1) {
     if ((await whoami(free)) === root) return free;
@@ -85,7 +86,11 @@ export async function ensure_server(root: string): Promise<number> {
     }
     await sleep(100);
   }
-  if ((await whoami(free)) !== root) die(`서버가 시작되지 않았습니다 — ${join(root, ".pes-hub.out")} 를 보세요`, 1);
+  if ((await whoami(free)) !== root) {
+    // the record of a server that never answered would outlive it and point at a pid some other program may get (final review 1 권장 4)
+    rmSync(record, { force: true });
+    die(`서버가 시작되지 않았습니다 — ${join(root, ".pes-hub.out")} 를 보세요`, 1);
+  }
   return free;
 }
 

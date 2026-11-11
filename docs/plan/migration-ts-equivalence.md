@@ -74,7 +74,7 @@
 | 28 | `doctor [dir] [--fix] [--net] [--json]` | 환경·도구·키·서버·프로젝트 진단, `--json` 배열 | 읽기 중심. `--fix`는 tmp·잠금·포트·대시보드·보고서 등록 수정 | 0; 1 `bad`가 있을 때 | PR16; `doctor.ts`†; `pes doctor` |
 | 29 | `watch <dir>` | `tail -n0 -F <feedback.log>`로 `FEEDBACK` 줄을 따라가는 명령 | 없음(출력만) | 0 | PR16(+입력 long-poll); `watch` 호환 출력; `pes watch` |
 | 30 | `assemble <dir>` | `out/report.md` 경로·장/절·각주 수 | `out/report.md`, `out/sources.json`; 각주 범위 밖 경고는 stderr | 0; 1 읽기 오류 | PR9+16; `content.ts`·`files.ts`; `pes assemble` |
-| 31 | `report <dir> <stage>` | 보고서 이름·등록 형식 목록·보완 안내 | `reports/<s>/report.md`, `report.html`, `eli5.html`(json 있을 때), docx/hwpx/pdf/pptx 등록, `stages.<s>.reports`, `reports_built`, index | 0; 1 단계 오류 | PR9+16; `content.ts`·`files.ts`; `pes report` |
+| 31 | `report <dir> <stage>` | 보고서 이름·등록 형식 목록·보완 안내 | `reports/<s>/report.md`, `report.html`, `eli5.html`(json 있을 때), docx/hwpx/pdf/pptx 등록, `stages.<s>.reports`, `reports_built`, index | 0; 1 단계 오류 | PR9+16; `content.ts`·`files.ts`; `pes report` (TS: docx/hwpx/pdf/pptx 는 코어 `report` 의 `attachments` 로 같은 보고서 버전에 붙여 읽기 모델 `reports` 에 `/` 경로로 등록 — SEL-77 최종 리뷰 1) |
 | 32 | `web <dir> [--assemble]` | `out/report.html` 경로·출처 수·확인 수 | `out/report.html`; `report.md` 없으면 assemble | 0; 1 읽기 오류 | PR9+16; `content.ts`·`files.ts`; `pes web` |
 
 **공통 종료 코드**: 인자 없음·알 수 없는 명령은 사용법 출력 + 1. `die()` 기본 1, 잠금 충돌 3, `init` 중복 2, `lock` 소유자 없음 2, `doctor` bad 1(글 출력; `--json` 은 0 — 13절 D08). 인자 없는 단일 명령(`list`·`hub`·`home`·`doctor`·`stop`·`remote`)은 내부에서 `--`를 붙여 처리한다. 새 TS CLI도 같은 값을 유지하는 것을 동등성 계약으로 둔다.

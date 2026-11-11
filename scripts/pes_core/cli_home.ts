@@ -99,6 +99,33 @@ function kill_pid(pid: unknown): boolean {
   }
 }
 
+/**
+ * A server record (`.pes-hub-server` of a home, `.pes-server` of an old per-project server) is only a note: after a crash or a reboot
+ * its pid may belong to any other program now. The pid is signalled only when the port the record names (else `fallback_port`, the
+ * old `.pes-port`) answers `/whoami` on 127.0.0.1 with exactly `owner` — this home (or this project for an old server). Nothing
+ * answering, or another root answering, means the record is stale: nothing is signalled, the caller just forgets the record
+ * (final review 1 필수 1; the same rule on Windows, where pids are reused often).
+ */
+async function kill_recorded(record: Record<string, unknown> | undefined, owner: string, fallback_port?: unknown): Promise<boolean> {
+  if (record === undefined || !signalable_pid(record.pid)) return false;
+  const port = valid_port(record.port) ?? valid_port(fallback_port);
+  if (port === null || (await whoami(port)) !== owner) return false;
+  return kill_pid(record.pid);
+}
+
+function valid_port(value: unknown): number | null {
+  const n = typeof value === "string" && /^\s*\d{1,5}\s*$/.test(value) ? Number(value) : value;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
+}
+
+function read_text_quiet(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 function read_json_quiet(file: string): Record<string, unknown> | undefined {
   try {
     const data: unknown = JSON.parse(readFileSync(file, "utf8"));
@@ -126,8 +153,7 @@ export function inside_pes_home(d: string): boolean {
 
 /** The old per-project server (8765~): stop it by its record, forget the record. */
 export async function stop_legacy(d: string): Promise<void> {
-  const record = read_json_quiet(join(d, ".pes-server"));
-  if (record !== undefined) kill_pid(record.pid);
+  await kill_recorded(read_json_quiet(join(d, ".pes-server")), d, read_text_quiet(join(d, ".pes-port")));
   for (const name of [".pes-server", ".pes-port"]) unlink_quiet(join(d, name));
   for (const port of legacy_ports()) {
     if ((await whoami(port)) === d) {
@@ -160,8 +186,7 @@ export async function stop_server(root: string, old = false): Promise<boolean> {
     return (await root_port(root)) !== null;
   };
   const file = join(root, ".pes-hub-server");
-  const record = read_json_quiet(file);
-  if (record !== undefined) kill_pid(record.pid);
+  await kill_recorded(read_json_quiet(file), root);
   unlink_quiet(file);
   for (let i = 0; i < 20; i += 1) {
     if (!(await alive())) return true;
