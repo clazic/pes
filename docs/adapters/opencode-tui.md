@@ -41,7 +41,7 @@ Go 구독(`opencode-go/…` 모델)의 계량·한도는 방식 A만 다룬다. 
 }
 ```
 
-- **설정 형식**: OpenCode 공식 문서(opencode.ai의 MCP servers·Config 쪽, 2026-11-11 확인)는 서버 이름을 `mcp.servers` 밑에 두라고 하고("V2는 서버 이름을 `mcp` 바로 밑에 두지 않는다"), 켜고 끄는 항목은 `enabled`가 아니라 `disabled`(기본 거짓)다. 그래서 예시에 `enabled`는 없고 서버는 기본으로 켜진다. 옛 형식(`mcp.pes` + `enabled: true`)은 OpenCode의 JSON 스키마에 `deprecated`로 남아 아직 받아들여지지만 이 노트와 어댑터는 현행 형식만 만든다. 구버전 OpenCode가 `mcp.servers`를 모르면 옛 형식으로 옮겨 적어야 하며, 그 경우 어댑터의 출력이 아니라 사람이 옮긴 것이다(미확인: 어느 버전부터 현행 형식인지).
+- **설정 형식**: OpenCode 공식 문서(opencode.ai의 MCP servers·Config 쪽, 2026-11-11 확인)는 서버 이름을 `mcp.servers` 밑에 두라고 하고("V2는 서버 이름을 `mcp` 바로 밑에 두지 않는다"), 켜고 끄는 항목은 `enabled`가 아니라 `disabled`(기본 거짓)다. 그래서 예시에 `enabled`는 없고 서버는 기본으로 켜진다. 옛 형식(`mcp.pes` + `enabled: true`)은 OpenCode의 JSON 스키마에 `deprecated`로 남아 아직 받아들여지지만 이 노트와 어댑터는 현행 형식만 만든다. 구버전 OpenCode가 `mcp.servers`를 모르면 옛 형식 `{"mcp":{"pes":{"type":"local","command":[…],"environment":{…},"enabled":true,"timeout":30000}}}`(안의 값은 위 예시와 같다)로 옮겨 적어야 하며, 그 경우 어댑터의 출력이 아니라 사람이 옮긴 것이다(미확인: 어느 버전부터 현행 형식인지).
 - **호출 제한 시간**: `pes_wait`는 한 번에 최대 25초 기다린다. 현행 형식의 서버별 `timeout`은 객체(`startup`·`catalog`·`execution`, 정수 밀리초)이고 `execution` 기본이 12시간이라 예시에 따로 적지 않았다. **옛 형식의 `timeout`은 정수 밀리초이고 기본 5000(5초)**이라 `pes_wait`가 끊기므로 옛 형식으로 옮길 때는 `timeout`을 30000 이상으로 적는다.
 - **토큰은 참조로만**: OpenCode는 `{env:PES_AGENT_TOKEN}`을 시작한 환경의 변수로 채운다. 값은 `opencode.json`에 적지 않는다.
 - **실행 표시**: `PES_RUNTIME=opencode_tui`. OpenCode는 여러 제공자를 쓰므로 `PES_PROVIDER`는 `unknown`이고, 모델도 PES에 알려 주지 않으므로 `unknown`이다. 사용량은 B 실행에 기록하지 않는다.

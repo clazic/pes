@@ -132,7 +132,7 @@ export async function read_launch_env(runtime: CliRuntime, input: CliLaunchEnvIn
   if (typeof token !== "string" || token.length === 0) {
     throw new AdapterError(
       "token_missing",
-      "이 프로젝트의 에이전트 토큰이 키 저장소에 없습니다. 사람이 PES 화면에서 이 도구를 연결해 토큰을 저장한 뒤 다시 시작하세요.",
+      "이 프로젝트의 에이전트 토큰이 키 저장소에 없습니다. 토큰을 키 저장소에 넣는 PES 명령은 아직 없습니다. 등록으로 받은 토큰을 도구를 켜는 셸의 환경변수 PES_AGENT_TOKEN으로 직접 넘겨 다시 시작하세요.",
     );
   }
   return { PES_AGENT_TOKEN: token };
