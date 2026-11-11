@@ -12,8 +12,8 @@
 
 Go 구독(`opencode-go/…` 모델)의 계량·한도는 방식 A만 다룬다. 그래서:
 
-- **차단**: `opencode_tui_mcp_entry`는 모델이 Go 경로(`opencode-go` 또는 `opencode-go/…`, 대소문자 무시)이면 `go_route_blocked`(한국어 설명)로 연결 항목 만들기를 거부한다. 연결 항목에는 Go 경로 이름이 들어가지 않는다.
-- **한계**: 이 차단은 연결 항목에 *적는* 모델 이름만 검사한다. 사람이 OpenCode 안에서 Go 모델을 골라 쓰는 것을 PES는 보지도 막지도 못하며, 그 사용량은 Go 계량에 잡히지 않는다. B 실행의 provider는 `unknown`, model은 사람이 알려 주지 않으면 `unknown`이다.
+- **차단**: `opencode_tui_mcp_entry`는 모델이 Go 경로(`opencode-go` 또는 `opencode-go/…`)이면 `go_route_blocked`(한국어 설명)로 연결 항목 만들기를 거부한다. 판정 전에 모델 이름을 풀어 읽는다: 대소문자, 전각 문자(유니코드 NFKC), 보이지 않는 서식 문자(너비 0 공백·소프트 하이픈·BOM·방향 바꿈 문자), 하이픈 비슷한 문자·밑줄·공백(`opencode_go/x`, `opencode go/x`)을 같은 구분자로 본다. 공백이나 서식 문자가 든 모델 이름은 Go가 아니어도 거부한다. 연결 항목에는 Go 경로 이름이 들어가지 않는다. 다른 문자 체계의 비슷한 글자(예: 키릴 문자 о)로 흉내 낸 이름은 풀지 못한다 — 아래 한계에 포함된다.
+- **한계**: 이 차단은 연결 항목에 *적는* 모델 이름만 검사하고, 키릴 문자 같은 다른 문자 체계의 비슷한 글자로 흉내 낸 이름은 가려내지 못한다. 사람이 OpenCode 안에서 Go 모델을 골라 쓰는 것을 PES는 보지도 막지도 못하며, 그 사용량은 Go 계량에 잡히지 않는다. B 실행의 provider는 `unknown`, model은 사람이 알려 주지 않으면 `unknown`이다.
 - Go 모델을 PES가 관리하는 한도 안에서 쓰려면 방식 A를 쓴다.
 
 ## 연결 항목
@@ -43,6 +43,7 @@ Go 구독(`opencode-go/…` 모델)의 계량·한도는 방식 A만 다룬다. 
 - **토큰은 참조로만**: OpenCode는 `{env:PES_AGENT_TOKEN}`을 시작한 환경의 변수로 채운다. 값은 `opencode.json`에 적지 않는다.
 - **실행 표시**: `PES_RUNTIME=opencode_tui`. OpenCode는 여러 제공자를 쓰므로 `PES_PROVIDER`는 `unknown`이고, 모델도 PES에 알려 주지 않으므로 `unknown`이다. 사용량은 B 실행에 기록하지 않는다.
 - **주소**: `PES_API_BASE_URL`은 이 컴퓨터의 루프백 `http` 주소만 받는다.
+- **입력 규칙**: `command`·`server_script`·`project_id`·`model`에는 줄바꿈·탭·NUL·DEL·U+2028/2029 같은 제어 문자를 쓸 수 없다(공백·따옴표는 경로의 일부라 그대로 둔다). 네 값에 `{env:…}`·`{file:…}` 같은 설정 치환 표기가 있어도 거부한다. `api_base_url`은 `http://127.0.0.1:8760` 꼴의 루프백 origin(`127.0.0.1`·`localhost`·`[::1]`)만 받고, 사용자 정보·경로·쿼리·조각·역슬래시·앞뒤 공백이 있으면 거부하며, 항목에는 정규화한 origin을 적는다. 거부는 모두 고정 `code`(`field_invalid`·`substitution_blocked`·`api_base_url_invalid`)와 한국어 설명의 `TypeError`이고 값을 되풀이하지 않는다. OpenCode는 설정 전체에서 `{env:…}`·`{file:…}`를 풀기 때문에 이 거부가 특히 중요하다 — 항목에 들어가는 치환은 토큰 참조 하나뿐이다.
 
 ## 토큰 받기
 

@@ -28,7 +28,7 @@ export interface CliLaunchEnvInput {
 
 export type CliRuntime = "codex_cli" | "opencode_tui";
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 export class AdapterError extends Error {
   readonly code: string;
@@ -39,30 +39,70 @@ export class AdapterError extends Error {
   }
 }
 
-/** Checks the four required fields and the loopback base URL; returns the model ("unknown" if not given). */
-export function check_entry_input(input: CliMcpEntryInput): string {
-  for (const field of ["command", "server_script", "project_id", "api_base_url"] as const) {
-    const value = input?.[field];
-    if (typeof value !== "string" || value.length === 0) {
-      throw new TypeError(`${field} must be a non-empty string`);
-    }
+/**
+ * A refused input. It is a TypeError (a wrong argument) with a fixed `code` and a Korean message. The message names
+ * the field but never repeats the value, so a forged value cannot reach a log through the error.
+ */
+export class InputError extends TypeError {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "InputError";
+    this.code = code;
   }
+}
+
+// Control characters (NUL, tab, CR, LF, DEL, C1) and the Unicode line/paragraph separators would break a
+// hand-assembled configuration or smuggle a second variable into it. Spaces and quotes are path data and pass.
+const CONTROL = /[\p{Cc}\u2028\u2029]/u;
+// OpenCode expands {env:NAME} and {file:path} in the whole configuration text. A value carrying one would pull a
+// secret or a file into the entry. Both tools share the rule so the two entries refuse the same input.
+const SUBSTITUTION = /\{\s*(?:env|file)\s*:/i;
+
+function check_text_field(name: string, value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new InputError("field_invalid", `${name} 값은 비어 있지 않은 문자열이어야 합니다.`);
+  }
+  if (CONTROL.test(value)) {
+    throw new InputError("field_invalid", `${name} 값에 줄바꿈·탭·NUL 같은 제어 문자를 쓸 수 없습니다.`);
+  }
+  if (SUBSTITUTION.test(value) || SUBSTITUTION.test(value.normalize("NFKC"))) {
+    throw new InputError("substitution_blocked", `${name} 값에 {env:…}·{file:…} 같은 설정 치환 표기를 쓸 수 없습니다.`);
+  }
+  return value;
+}
+
+/**
+ * The canonical origin of a loopback http address (scheme://host[:port]) and nothing else: no user info, query,
+ * fragment, path, backslash, space or control character. The entry stores the normalised origin, so what the tool
+ * reads is exactly what was checked. (The server's own HttpApi would silently normalise such a string.)
+ */
+function canonical_loopback_origin(value: unknown): string {
+  const bad = () => new InputError("api_base_url_invalid", "api_base_url은 이 컴퓨터의 http 주소(예: http://127.0.0.1:8760)만 쓸 수 있습니다. 토큰이 이 컴퓨터를 떠나면 안 됩니다.");
+  if (typeof value !== "string" || value.length === 0) throw bad();
   let url: URL;
   try {
-    url = new URL(input.api_base_url);
+    url = new URL(value);
   } catch {
-    throw new TypeError("api_base_url must be a URL such as http://127.0.0.1:8760");
+    throw bad();
   }
-  // the agent token is sent to this address, so it must be this computer
-  if (url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname)) {
-    throw new TypeError("api_base_url must be a loopback http address (127.0.0.1): the token must not leave this computer");
-  }
-  const model = input.model;
-  if (model === undefined) return "unknown";
-  if (typeof model !== "string" || model.length === 0) {
-    throw new TypeError("model must be a non-empty string when given");
-  }
-  return model;
+  if (url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname)) throw bad();
+  if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "" || url.pathname !== "/") throw bad();
+  // the text must already be the origin, with at most one trailing slash: this rules out spaces, backslashes,
+  // control characters, upper case, default-port spelling and every other way of writing the same address
+  if (value !== url.origin && value !== `${url.origin}/`) throw bad();
+  return url.origin;
+}
+
+/** Checks the four required fields and the loopback base URL; returns the model ("unknown" if not given) and the origin. */
+export function check_entry_input(input: CliMcpEntryInput): { model: string; api_base_url: string } {
+  if (input === null || typeof input !== "object") throw new InputError("field_invalid", "연결 항목 입력이 객체가 아닙니다.");
+  check_text_field("command", input.command);
+  check_text_field("server_script", input.server_script);
+  check_text_field("project_id", input.project_id);
+  const api_base_url = canonical_loopback_origin(input.api_base_url);
+  const model = input.model === undefined ? "unknown" : check_text_field("model", input.model);
+  return { model, api_base_url };
 }
 
 /** The key-store name of the agent token of one tool in one project. */

@@ -23,6 +23,7 @@ env_vars = ["PES_AGENT_TOKEN"]
 - **토큰은 이름으로만**: `env_vars`는 Codex가 시작된 환경에서 `PES_AGENT_TOKEN`을 서버 프로세스로 넘기라는 뜻이다. 토큰 값은 설정 파일에도 `env`에도 적지 않는다.
 - **실행 표시**: `PES_RUNTIME=codex_cli`, `PES_PROVIDER=openai`(도구를 만든 쪽). 실제 모델은 Codex가 PES에 알려 주지 않으므로 `PES_MODEL`은 `unknown`이다. 사람이 모델을 안다면 그 이름을 적을 수 있지만 PES가 확인하지는 않는다. 사용량은 B 실행에 기록하지 않는다 — 숫자를 지어내지 않는다.
 - **주소**: `PES_API_BASE_URL`은 이 컴퓨터의 루프백 `http` 주소만 받는다(토큰이 컴퓨터 밖으로 나가지 않는다). 다른 주소는 연결 항목 만들기와 서버 시작이 모두 거부한다.
+- **입력 규칙**: `command`·`server_script`·`project_id`·`model`에는 줄바꿈·탭·NUL·DEL·U+2028/2029 같은 제어 문자를 쓸 수 없다(공백·따옴표는 경로의 일부라 그대로 둔다). 네 값에 `{env:…}`·`{file:…}` 같은 설정 치환 표기가 있어도 거부한다. `api_base_url`은 `http://127.0.0.1:8760` 꼴의 루프백 origin(`127.0.0.1`·`localhost`·`[::1]`)만 받고, 사용자 정보·경로·쿼리·조각·역슬래시·앞뒤 공백이 있으면 거부하며, 항목에는 정규화한 origin을 적는다. 거부는 모두 고정 `code`(`field_invalid`·`substitution_blocked`·`api_base_url_invalid`)와 한국어 설명의 `TypeError`이고 값을 되풀이하지 않는다.
 
 ## 토큰 받기
 

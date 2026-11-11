@@ -27,13 +27,13 @@ export interface CodexCliMcpEntry {
 }
 
 export function codex_cli_mcp_entry(input: CliMcpEntryInput): CodexCliMcpEntry {
-  const model = check_entry_input(input);
+  const { model, api_base_url } = check_entry_input(input);
   return {
     command: input.command,
     args: [input.server_script],
     env: {
       PES_PROJECT_ID: input.project_id,
-      PES_API_BASE_URL: input.api_base_url,
+      PES_API_BASE_URL: api_base_url,
       PES_RUNTIME: "codex_cli",
       PES_PROVIDER: "openai",
       PES_MODEL: model,
