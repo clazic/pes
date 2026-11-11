@@ -77,7 +77,28 @@ export function n2_paths(text: string, roots: Roots): string {
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 export function n8_console(text: string, roots: Roots): string {
-  return n1_time(n2_paths(n7_text(text).replace(ANSI, ""), roots));
+  return n11_relpaths(n1_time(n2_paths(n7_text(text).replace(ANSI, ""), roots)));
+}
+
+// ---------------------------------------------------------------- N11 relative paths in console text
+/**
+ * A relative file path printed by a command (`reports\plan\report.html` on Windows, `reports/plan/report.html` elsewhere) → `/`.
+ * Only console TEXT: the same path stored in project.json is data and is NOT touched (see os_overrides in cases.json). A word
+ * qualifies when it has at least one `\` between name parts (letters, digits, Hangul, `.`, `_`, `-`) and ends in a file extension
+ * (so a literal `\n` inside a message is left alone).
+ */
+export function n11_relpaths(text: string): string {
+  return text.replace(/(?<![\w<>.\\-])([\w.가-힣-]+(?:\\[\w.가-힣-]+)*\\[\w가-힣-]+\.\w+)/g, (word: string) => word.split("\\").join("/"));
+}
+
+// ---------------------------------------------------------------- N12 stdlib error page
+/**
+ * The 404 page that `http.server` writes itself. Its HTML is the interpreter's, not PES's: Python 3.9~3.12 send a 460 character
+ * page, 3.13+ a shorter one. A response is this page when it is an HTML error status whose body has the stdlib title and heading.
+ */
+export function n12_stdlib_error_page(status: number, text: string): string | null {
+  if (status < 400) return null;
+  return /<title>Error response<\/title>/.test(text) && /<h1>Error response<\/h1>/.test(text) && /Error code: \d+/.test(text) ? "<python http.server error page>" : null;
 }
 
 export function lines(text: string): string[] {

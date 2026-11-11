@@ -61,7 +61,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 | 파일 | 하는 일 |
 |---|---|
-| `tests/helpers/compat_normalize.ts` | 정규화 N1~N10(시각·경로·JSON·순서·ID·HTML·인코딩·콘솔·파일 메타·의도된 차이) |
+| `tests/helpers/compat_normalize.ts` | 정규화 N1~N12(시각·경로·JSON·순서·ID·HTML·인코딩·콘솔·파일 메타·의도된 차이·콘솔 상대경로·stdlib 오류 페이지) |
 | `tests/helpers/compat_env.ts` | 이중 실행 하네스: 대상 `py`(`python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(scripts/pes.py·serve.py·setup.py)"`, `PES_DB_CORE` 없음) / `ts`(`scripts/pes.ts`·`serve.ts`·`setup.ts`, 아직 없음 → `not_yet`), 상태 DTO, 의도된 차이 표(D01~D09), `serve.py` 하네스 |
 | `tests/helpers/compat_cases.ts` + `tests/fixtures/compat/cases.json` | E01~E15 사례 표와 실행기. 0.15 기준값은 `tests/fixtures/compat/baseline/E??.json` |
 | `tests/helpers/home_guard.ts` | 실제 `~/.pes`·`~/pes-projects` 접근 0 — 아래 「home_guard 가 막는 것」 |
@@ -73,7 +73,24 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 **`implemented` 의 뜻(`compat_cases.compare_ts_record`):** ts 기록이 py 와 같은 단언을 통과해야 한다 — `steps`(stdout·stderr 종류·exit)·상태 DTO·**산출 파일(`files`)** 전부 0.15 기준값과 같아야 한다. 의도된 차이는 각자 자기 단언을 가진다: D01 항목 id 는 값을 버리되 '있고 서로 다르다', D03 `processed` 는 버리되 '같은 길이의 목록', D06 은 구멍이 아니라 **값**(E03 항목 7 의 depth 는 0.15 의 3 이 아니라 2), D07 은 `snapshots/**` 를 이름으로 비교하지 않고 내용 해시가 하나도 빠지지 않았는지 본다(ts 기록기는 보관한 판을 `snapshots/**` 아래에 모은다). `files` 가 다르면 실패한다는 것은 기준값 사본을 가짜 ts 기록으로 주입한 시험(`test_compat_harness`)이 지킨다. PR26b 에서 ts 기록기를 만들 때 정규화 N4(순서)·N5(ID → `<ID:n>`)를 ts DTO·표 비교에 연결한다 — 지금은 두 쪽이 모두 Python 이라 `compat_normalize` 의 `n4_*`·`n5_ids` 가 단위 시험에서만 쓰인다.
 
-**OS·PC 마다 남는 차이(E13~E15):** 기준값은 하나다(OS 별 기준값 파일 없음). 정규화로 지우거나(경로·줄바꿈·인코딩·플러그인 버전 문구), 비교에서 뺀다(외부 도구 상태, 포트 점유에 따른 서버 행), 임시 HOME 으로 돌린다(Windows `LOCALAPPDATA`·`APPDATA`). 무엇을 왜 그렇게 했는지는 `cases.json` 각 사례의 `os_notes` 와 `test_compat_harness` 가 지킨다. Windows 러너에서 처음 돌렸을 때 드러나는 차이는 같은 자리에 더한다.
+**OS·PC 마다 남는 차이(E05·E11·E13~E15):** 기준값은 macOS 에서 만든 하나다. Windows 러너(2026-11-11 SEL-70 PR #50)에서 드러난 차이는 두 종류로 나눈다. **(가) 표현 차이**는 비교 전에 정규화해서 지운다(아래 표). **(나) 0.15 가 Windows 에서 데이터 자체를 다르게 저장하거나 OS 별로 다르게 동작하는 것**은 정규화로 지우지 않는다 — `cases.json` 사례의 `os_overrides.win32` 가 그 OS 에서만 기준값의 해당 칸을 바꾼다(`compat_cases.baseline_for`; 없는 칸을 가리키면 던진다). 그대로 두면 Windows 에서 실행해도 통과하고, 값이 또 달라지면 여전히 실패한다. 외부 도구 상태·포트 점유 행은 비교에서 빼고, Windows `LOCALAPPDATA`·`APPDATA` 는 임시 HOME 으로 돌린다(`os_notes`).
+
+**(가) 정규화 규칙 — 무엇을·왜·어느 사례**
+
+| 규칙 | 무엇을 | 왜 | 사례 |
+|---|---|---|---|
+| N7 (기존) | `\r\n` → `\n`, BOM 제거 | Windows 는 텍스트 파일을 CRLF 로 쓴다 — 내용 해시(`n9_text_hash`)·콘솔 비교 전에 LF 로 | E05·E11 의 `reports/plan/report.{html,md}` 해시가 같은 이유 |
+| N2 (기존) | 루트 철자(8.3 `RUNNER~1`, 겹역슬래시) → `<ROOT>`, 그 뒤 경로 구분자 `\` → `/` | 루트 아래 경로 표기 | 전 사례 |
+| **N11** | **콘솔 글**에 찍힌 상대 파일 경로의 `\` → `/` (확장자로 끝나는 `a\b\c.ext` 만) | `pes report` 가 `reports\plan\report.html` 로 찍는다 — 같은 값이 저장된 것은 데이터라 건드리지 않는다(W1). 글 속 `\n` 은 확장자가 없어 그대로 | E05·E11 의 `report` 단계 stdout |
+| **N12** | `http.server` 가 직접 쓰는 404 HTML 쪽 → `<python http.server error page>` (상태 ≥ 400 이고 제목·머리글이 `Error response`) | 쪽 글은 PES 가 아니라 **파이썬 버전**의 것이다 — 3.9~3.12 는 460자, 3.13 이상은 더 짧다(OS 차이가 아니라 러너의 파이썬 차이). 상태·content-type·cache-control 은 그대로 비교 | E13 (기준값 E13 의 4칸을 이 표시로 바꿈) |
+
+**Windows 0.15 차이(PR26 에서 다룰 것)** — 정규화하지 않고 `os_overrides.win32` 로 고정한 것. 로컬(macOS)에서 만들 수 없어 값은 CI 로그의 실제 값에서 옮겼다(출처: SEL-70 PR #50 windows-latest 5·6·7/8 실패 로그). 값이 틀리면 CI 에서 `PES_COMPAT_DUMP=1` 로 실제 기록을 받는다(아래).
+
+- **W1. project.json 에 보고서 경로를 역슬래시로 저장.** `stages.<단계>.reports[].path` 가 Windows 에서 `reports\plan\report.html` 이다(macOS·Linux 는 `reports/plan/report.html`). 재현: Windows 에서 `pes.py report <프로젝트> plan` 뒤 `project.json`. 사례: E05·E11. 영향: 프로젝트 폴더를 macOS ↔ Windows 로 옮기면 경로가 맞지 않아 보고서 링크·존재 검사가 깨질 수 있다(결함 후보 — 실제로 깨지는지는 PR26 에서 확인). TS 판은 OS 와 무관하게 `/` 로 저장하는 것이 기본 방향.
+- **W2. 보고서 파일이 CRLF 로 써지고, 그 크기가 `bytes` 로 저장.** `reports[].bytes` 가 Windows 에서 더 크다(E05 html 10333→10439, md 761→797; E11 html 10058→10164, md 497→522; 차이 = 줄 수로 추정, 확인은 CI 진단). 그 때문에 `project.json`·`index.html` 의 해시도 다르다(W1 의 경로와 `bytes` 가 거기 들어 있다). 사례: E05·E11. 영향: 같은 내용의 보고서가 OS 마다 다른 바이트라 내용 해시·크기 비교로 변경을 가려내면 어긋난다. 파일 내용 자체는 N7 로 LF 로 맞춰 비교하므로(`reports/plan/report.*` 해시 동일) 표현 차이만 있다 — 저장된 `bytes` 만 데이터 차이다.
+- **W3. `setup check` 가 Windows 에서만 `gitbash` 행(group 기본)을 더한다.** 설계된 OS 별 점검 항목이다(`scripts/setup.py` `gitbash()` — 답 자동 수신 Monitor 가 Git Bash 를 쓴다). 결함이 아니라 OS 별 기준값이다. 사례: E14 (`names`·`groups` 에 한 칸씩).
+
+**CI 진단 모드:** `PES_COMPAT_DUMP=1` 이면 py 대상 사례가 기준값(OS 별 반영 후)과 다를 때 실패하는 대신 `COMPAT_DUMP <id> <platform>` / 실제 기록 JSON 한 줄 / `COMPAT_DUMP_END <id>` 를 출력한다. 값이 맞는지 확인하거나 다른 OS 값을 받을 때만 쓴다 — 기본(변수 없음)은 반드시 비교해 실패한다.
 
 **기준값 다시 만들기(0.15 동작을 일부러 바꾼 경우만):** `PES_COMPAT_UPDATE=1 node --test tests/test_compat_cases_*.test.ts` → `git diff tests/fixtures/compat/baseline` 을 검토한다. 평소 실행은 파일을 쓰지 않는다.
 

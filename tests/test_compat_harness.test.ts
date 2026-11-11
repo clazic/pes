@@ -1,10 +1,10 @@
 // Dual-run harness (SEL-70): normalisers N1~N10, target selection, the E01~E15 table, and the explicit list of cases
 // the TS target cannot run yet. Nothing here is skipped: a missing TS command is an asserted "not_yet".
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { baseline_path, compare_ts_record, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
+import { baseline_for, baseline_path, compare_ts_record, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
 import { KNOWN_DIFFS, STAGES, TS_FILES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available, ts_gate, type CaseKind } from "./helpers/compat_env.ts";
 import {
   html_unescape,
@@ -15,6 +15,8 @@ import {
   n10_checks,
   n10_files,
   n10_override,
+  n11_relpaths,
+  n12_stdlib_error_page,
   n2_paths,
   n3_json,
   n4_multiset,
@@ -342,4 +344,49 @@ test("state DTO: only the fields of 7.1, items in input order, library carried, 
   assert.equal(plan.junk, undefined);
   assert.deepEqual(plan.items, [{ id: 1, title: "a" }]);
   assert.deepEqual(dto.library, { items: [] });
+});
+
+test("N11 relative file paths: a printed `\\` path becomes `/`; roots, literal \\n and stored data are untouched", () => {
+  assert.equal(n11_relpaths("웹 보고서 reports\\plan\\report.html, 마크다운 reports\\plan\\report.md"), "웹 보고서 reports/plan/report.html, 마크다운 reports/plan/report.md");
+  assert.equal(n11_relpaths("reports/plan/report.html"), "reports/plan/report.html");
+  assert.equal(n11_relpaths("줄\\n바꿈 a\\nb"), "줄\\n바꿈 a\\nb", "no file extension → not a path");
+  assert.equal(n8_console("기획보고서: reports\\plan\\report.html\r\n", {}), "기획보고서: reports/plan/report.html\n");
+  // the same path as DATA (project.json) is not passed through n8_console by the runner; n3_json keeps it
+  assert.equal(n3_json({ path: "reports\\plan\\report.html" }), '{\n "path": "reports\\\\plan\\\\report.html"\n}');
+});
+
+test("N12 stdlib error page: only an HTML error from http.server counts, whatever the Python version's wording", () => {
+  const short = '<!DOCTYPE HTML>\n<html lang="en">\n<head><title>Error response</title></head>\n<body><h1>Error response</h1>\n<p>Error code: 404</p></body></html>\n';
+  const long = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">\n<html><head><title>Error response</title></head><body><h1>Error response</h1><p>Error code: 404</p><p>Message: File not found.</p></body></html>';
+  assert.equal(n12_stdlib_error_page(404, short), "<python http.server error page>");
+  assert.equal(n12_stdlib_error_page(404, long), "<python http.server error page>");
+  assert.equal(n12_stdlib_error_page(200, short), null, "a 200 is never the error page");
+  assert.equal(n12_stdlib_error_page(404, "<html>Not found</html>"), null, "PES's own 404 text is compared as is");
+});
+
+test("os_overrides: win32 edits apply on win32 only, a path that is not in the baseline throws, json_set edits a JSON text", () => {
+  const base = read_baseline("E05");
+  assert.deepEqual(baseline_for("E05", "darwin", base), base, "no override on macOS / Linux");
+  const win = baseline_for("E05", "win32", base) as any;
+  assert.equal(win.dto.stages.plan.reports[0].path, "reports\\plan\\report.html");
+  assert.ok(win.dto.stages.plan.reports[0].bytes > (base as any).dto.stages.plan.reports[0].bytes, "CRLF makes the stored size larger");
+  assert.notEqual(win.files["project.json"], base.files["project.json"]);
+  assert.equal(win.files["reports/plan/report.html"], base.files["reports/plan/report.html"], "report contents are compared after CRLF → LF (N7), so they stay equal");
+  const e14 = baseline_for("E14", "win32") as any;
+  const stable = JSON.parse(e14.steps[1].stdout[0]);
+  assert.ok(stable.names.includes("gitbash") && stable.names.length === stable.groups.length, "gitbash row: one name and one group more");
+  assert.equal(JSON.parse((read_baseline("E14") as any).steps[1].stdout[0]).names.includes("gitbash"), false);
+  // a patch whose path is gone fails loudly
+  const broken = { ...base, dto: null } as any;
+  assert.throws(() => baseline_for("E05", "win32", broken), /not in the baseline/);
+});
+
+test("every os_overrides entry names a README item and a reason", () => {
+  for (const c of load_table().cases) {
+    for (const [platform, o] of Object.entries(c.os_overrides ?? {})) {
+      assert.ok(platform === "win32" || platform === "linux" || platform === "darwin", `${c.id}: unknown platform ${platform}`);
+      assert.ok(o.item.length > 0 && o.what.length > 0 && o.why.length > 0 && o.edits.length > 0, `${c.id}: os_overrides[${platform}] needs item/what/why/edits`);
+      for (const item of o.item.split(",")) assert.ok(readFileSync(new URL("./README.md", import.meta.url), "utf8").includes(`**${item}.`), `${c.id}: README has no item ${item}`);
+    }
+  }
 });

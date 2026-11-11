@@ -701,7 +701,74 @@
           ]
         }
       ],
-      "project": "{P}"
+      "project": "{P}",
+      "os_overrides": {
+        "win32": {
+          "item": "W1,W2",
+          "what": "project.json 의 stages.plan.reports[].path 역슬래시·bytes(CRLF), 그 때문에 project.json·index.html 해시가 다름",
+          "why": "0.15 가 Windows 에서 보고서 경로를 역슬래시로 project.json·index.html 에 저장하고, bytes 에 CRLF 로 늘어난 파일 크기를 적는다 (콘솔에 찍는 경로는 N11 로 정규화하지만 저장된 값은 데이터라 그대로 둔다)",
+          "edits": [
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                0,
+                "path"
+              ],
+              "value": "reports\\plan\\report.html"
+            },
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                0,
+                "bytes"
+              ],
+              "value": 10439
+            },
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                1,
+                "path"
+              ],
+              "value": "reports\\plan\\report.md"
+            },
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                1,
+                "bytes"
+              ],
+              "value": 797
+            },
+            {
+              "at": [
+                "files",
+                "index.html"
+              ],
+              "value": "e4ec2da5c8307c37"
+            },
+            {
+              "at": [
+                "files",
+                "project.json"
+              ],
+              "value": "a187703cfad69172"
+            }
+          ]
+        }
+      }
     },
     {
       "id": "E06",
@@ -1403,7 +1470,74 @@
           ]
         }
       ],
-      "project": "{T}/복원 위치/사본 프로젝트"
+      "project": "{T}/복원 위치/사본 프로젝트",
+      "os_overrides": {
+        "win32": {
+          "item": "W1,W2",
+          "what": "E05 와 같음 (복원한 사본 프로젝트의 보고서 재생성)",
+          "why": "0.15 가 Windows 에서 보고서 경로를 역슬래시로 project.json·index.html 에 저장하고, bytes 에 CRLF 로 늘어난 파일 크기를 적는다 (콘솔에 찍는 경로는 N11 로 정규화하지만 저장된 값은 데이터라 그대로 둔다)",
+          "edits": [
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                0,
+                "path"
+              ],
+              "value": "reports\\plan\\report.html"
+            },
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                0,
+                "bytes"
+              ],
+              "value": 10164
+            },
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                1,
+                "path"
+              ],
+              "value": "reports\\plan\\report.md"
+            },
+            {
+              "at": [
+                "dto",
+                "stages",
+                "plan",
+                "reports",
+                1,
+                "bytes"
+              ],
+              "value": 522
+            },
+            {
+              "at": [
+                "files",
+                "index.html"
+              ],
+              "value": "3b9e9a14813fdd95"
+            },
+            {
+              "at": [
+                "files",
+                "project.json"
+              ],
+              "value": "8d199146ad8a5853"
+            }
+          ]
+        }
+      }
     },
     {
       "id": "E12",
@@ -1660,7 +1794,56 @@
           "handling": "정규화 (N2: <HOME>/.pes/setup.json)",
           "why": "Windows 역슬래시를 / 로 통일한다"
         }
-      ]
+      ],
+      "os_overrides": {
+        "win32": {
+          "item": "W3",
+          "what": "setup check 가 Windows 에서만 gitbash 행(group 기본)을 더한다",
+          "why": "scripts/setup.py gitbash() — 답 자동 수신(Monitor)에 Git Bash 가 필요하다. 설계된 OS 별 점검 항목이지 결함이 아니다",
+          "edits": [
+            {
+              "at": [
+                "steps",
+                1,
+                "stdout",
+                0
+              ],
+              "json_set": {
+                "names": [
+                  "python",
+                  "git",
+                  "gitbash",
+                  "node",
+                  "ego-browser",
+                  "ego-browser-skill",
+                  "kosis",
+                  "vworld",
+                  "korean-law",
+                  "korean-law-mcp",
+                  "key-kosis",
+                  "key-vworld",
+                  "key-law"
+                ],
+                "groups": [
+                  "기본",
+                  "기본",
+                  "기본",
+                  "기본",
+                  "도구",
+                  "도구",
+                  "도구",
+                  "도구",
+                  "도구",
+                  "도구",
+                  "API 키",
+                  "API 키",
+                  "API 키"
+                ]
+              }
+            }
+          ]
+        }
+      }
     },
     {
       "id": "E15",

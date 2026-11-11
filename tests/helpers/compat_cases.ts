@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   FIXTURES,
@@ -34,7 +35,7 @@ import {
   type CompatCtx,
   type Target,
 } from "./compat_env.ts";
-import { dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type Roots } from "./compat_normalize.ts";
+import { dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n12_stdlib_error_page, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type Roots } from "./compat_normalize.ts";
 
 export interface CaseDef {
   id: string;
@@ -53,7 +54,23 @@ export interface CaseDef {
   excluded?: { what: string; why: string }[];
   /** what still differs between OSes / PCs for this case and how the single baseline copes (normalised, excluded, or moved to the temp HOME) */
   os_notes?: { what: string; handling: string; why: string }[];
+  /**
+   * Windows (or other OS) values that 0.15 really stores or prints differently — kept, not normalised away (tests/README.md,
+   * "Windows 0.15 차이"). Keyed by `process.platform`; each entry replaces values of the baseline record on that OS only.
+   */
+  os_overrides?: Record<string, OsOverride>;
 }
+
+export interface OsOverride {
+  /** README list item this belongs to */
+  item: string;
+  what: string;
+  why: string;
+  edits: OsEdit[];
+}
+
+/** `at`: path into the record. `value` replaces what is there; `json_set` (the target is a JSON text) sets keys inside it. */
+export type OsEdit = { at: (string | number)[]; value: unknown } | { at: (string | number)[]; json_set: Record<string, unknown> };
 
 export interface CaseTable {
   doc: string;
@@ -304,7 +321,8 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
           body = n1_json(JSON.parse(text), roots);
           if (typeof body === "object" && body !== null) body = JSON.parse(ports(JSON.stringify(body)));
         } catch {
-          body = text.length <= 400 ? n7_text(text) : `<${text.length} bytes sha:${n9_text_hash(text, roots)}>`;
+          // N12: the stdlib's own error page is the interpreter's text (length differs by Python version), not PES's.
+          body = n12_stdlib_error_page(response.status, text) ?? (text.length <= 400 ? n7_text(text) : `<${text.length} bytes sha:${n9_text_hash(text, roots)}>`);
         }
         steps.push({
           step: { method: h.method, path: h.path, origin: h.origin ?? null },
@@ -376,6 +394,28 @@ export function read_baseline(id: string): CaseRecord {
   return JSON.parse(readFileSync(path, "utf8")) as CaseRecord;
 }
 
+/**
+ * The baseline for one OS: the single stored record plus that OS's `os_overrides` edits. A path that does not exist in the record
+ * throws (an override must not silently stop matching when the baseline changes). `platform` is injectable for the unit test.
+ */
+export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id)): CaseRecord {
+  const override = case_def(id).os_overrides?.[platform];
+  const out = JSON.parse(JSON.stringify(base)) as CaseRecord;
+  if (override === undefined) return out;
+  for (const edit of override.edits) {
+    const parent = edit.at.slice(0, -1).reduce<any>((node, key) => node?.[key], out);
+    const last = edit.at[edit.at.length - 1]!;
+    assert.ok(parent !== undefined && parent !== null && last in parent, `${id}: os_overrides[${platform}] path ${JSON.stringify(edit.at)} is not in the baseline`);
+    if ("value" in edit) {
+      parent[last] = edit.value;
+    } else {
+      assert.equal(typeof parent[last], "string", `${id}: os_overrides json_set target is not a JSON text`);
+      parent[last] = n3_json({ ...JSON.parse(parent[last] as string), ...edit.json_set });
+    }
+  }
+  return out;
+}
+
 export function write_baseline(record: CaseRecord): void {
   const path = baseline_path(record.id);
   mkdirSync(dirname(path), { recursive: true });
@@ -435,7 +475,15 @@ export async function assert_case(target: Target, id: string): Promise<void> {
       write_baseline(outcome.record);
       return;
     }
-    assert.deepEqual(roundtrip(outcome.record), read_baseline(id), `${id}: 0.15 behaviour differs from the pinned baseline`);
+    const expected = baseline_for(id);
+    const actual = roundtrip(outcome.record);
+    if (process.env.PES_COMPAT_DUMP === "1" && !isDeepStrictEqual(actual, expected)) {
+      // Diagnostic mode (CI only, to collect the values of another OS): print the record instead of failing. Without the variable
+      // a difference always fails below.
+      console.log(`COMPAT_DUMP ${id} ${process.platform}\n${JSON.stringify(actual)}\nCOMPAT_DUMP_END ${id}`);
+      return;
+    }
+    assert.deepEqual(actual, expected, `${id}: 0.15 behaviour differs from the pinned baseline`);
     return;
   }
   if (def.ts.status === "not_yet") {
@@ -444,7 +492,7 @@ export async function assert_case(target: Target, id: string): Promise<void> {
   }
   assert.equal(outcome.kind, "ran", `${id}: marked implemented but the ts target answered not_yet`);
   if (outcome.kind !== "ran") return;
-  compare_ts_record(def, roundtrip(outcome.record), read_baseline(id));
+  compare_ts_record(def, roundtrip(outcome.record), baseline_for(id));
 }
 
 export function not_yet_ids(): string[] {
