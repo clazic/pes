@@ -1,4 +1,5 @@
-// Shared by the two method-B terminal adapters (stage 2 PR20b, SEL-54): Codex CLI and OpenCode TUI.
+// Shared by the method-B tool adapters (stage 2 PR20b, SEL-54: Codex CLI and OpenCode TUI; PR20c, SEL-55: the Codex
+// app and the OpenCode app, which use the same connection entry and add an explicit hand-off).
 //
 // Neither adapter reads or writes a file, starts a process, or looks at a tool's own configuration folder. They
 // only build the entry a person puts into the tool's MCP configuration, and read the agent token from the key
@@ -27,7 +28,7 @@ export interface CliLaunchEnvInput {
   project_id: string;
 }
 
-export type CliRuntime = "codex_cli" | "opencode_tui";
+export type CliRuntime = "codex_cli" | "opencode_tui" | "codex_app" | "opencode_app";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -130,9 +131,13 @@ export async function read_launch_env(runtime: CliRuntime, input: CliLaunchEnvIn
   }
   const token = await input.key_store.get(ref);
   if (typeof token !== "string" || token.length === 0) {
+    // An app may not reach PES at all (its settings, its environment): its way that always works is the hand-off.
+    const app_hint = runtime.endsWith("_app")
+      ? " 앱이 PES에 직접 연결되지 않아도 명시적 전달(묶음 복사 → 앱과 대화 → 결과 붙여 넣기)은 항상 쓸 수 있습니다."
+      : "";
     throw new AdapterError(
       "token_missing",
-      "이 프로젝트의 에이전트 토큰이 키 저장소에 없습니다. 토큰을 키 저장소에 넣는 PES 명령은 아직 없습니다. 등록으로 받은 토큰을 도구를 켜는 셸의 환경변수 PES_AGENT_TOKEN으로 직접 넘겨 다시 시작하세요.",
+      `이 프로젝트의 에이전트 토큰이 키 저장소에 없습니다. 토큰을 키 저장소에 넣는 PES 명령은 아직 없습니다. 등록으로 받은 토큰을 도구를 켜는 셸의 환경변수 PES_AGENT_TOKEN으로 직접 넘겨 다시 시작하세요.${app_hint}`,
     );
   }
   return { PES_AGENT_TOKEN: token };

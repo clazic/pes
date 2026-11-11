@@ -4,7 +4,8 @@
 // the human copies a bundle out, the app answers in its own window, and the human pastes the answer back.
 // That pasted text is not an agent's write. It is the human owner's, recorded as an import:
 //
-//   - one transaction creates the owner's own hand-off run (runtime claude_app_handoff, model unknown),
+//   - one transaction creates the owner's own hand-off run (runtime claude_app_handoff, codex_app_handoff or
+//     opencode_app_handoff by the import's `app` field, model unknown),
 //     appends the pasted results and ends the run as succeeded;
 //   - the run, the receipt and the versions all belong to the owner (a human actor); the receipt's via is
 //     'import', and the events carry the provenance (claimed tool/model, verified:false);
@@ -29,11 +30,31 @@ import {
   type CommandRuntime,
 } from "./shared.ts";
 
-export const HANDOFF_RUNTIME = "claude_app_handoff";
-export const HANDOFF_PROVIDER = "anthropic";
+/**
+ * The apps a hand-off can come from, and what the owner's hand-off run says about each (stage 2 PR20c, SEL-55).
+ * The import names its app in the closed `app` field; the server derives the run's runtime and provider from this
+ * table, never from the pasted text. Without `app` the import is the Claude app's, as it was before PR20c.
+ * The model is always "unknown": what the pasted text says about its model is only a claim.
+ */
+export const HANDOFF_APPS = {
+  claude_app: { runtime: "claude_app_handoff", provider: "anthropic" },
+  codex_app: { runtime: "codex_app_handoff", provider: "openai" },
+  opencode_app: { runtime: "opencode_app_handoff", provider: "unknown" },
+} as const;
+export type HandoffApp = keyof typeof HANDOFF_APPS;
+export const DEFAULT_HANDOFF_APP: HandoffApp = "claude_app";
 export const HANDOFF_MODEL = "unknown";
 
-const IMPORT_FIELDS = ["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_heads"] as const;
+/** The app a hand-off import comes from. Absent is the Claude app; a value outside the closed list is refused. */
+export function handoff_app_of(value: unknown): HandoffApp {
+  if (value === undefined) return DEFAULT_HANDOFF_APP;
+  if (typeof value !== "string" || !Object.hasOwn(HANDOFF_APPS, value)) {
+    throw new ApiError("invalid_payload", `app must be one of ${Object.keys(HANDOFF_APPS).join(", ")}`);
+  }
+  return value as HandoffApp;
+}
+
+const IMPORT_FIELDS = ["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_heads", "app"] as const;
 const MAX_CLAIM_CHARS = 200;
 /**
  * The most object heads one bundle may pin. One entry is about 105 bytes of JSON, so 1000 are about 105 KB: they leave
@@ -109,6 +130,8 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
   if (runtime.ctx.client_request_id !== `import-${request_id}`) {
     throw new ApiError("invalid_payload", "the import must use the idempotency key import-<request_id>");
   }
+  const app = handoff_app_of(source.app);
+  const handoff = HANDOFF_APPS[app];
   const claimed_tool = optional_claim(source, "claimed_tool");
   const claimed_model = optional_claim(source, "claimed_model");
   const items = parse_result_items(source.results);
@@ -208,8 +231,8 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
     stage_id,
     round_id,
     actor_id,
-    HANDOFF_RUNTIME,
-    HANDOFF_PROVIDER,
+    handoff.runtime,
+    handoff.provider,
     HANDOFF_MODEL,
     project.control_rev,
     runtime.now_ms,
@@ -260,7 +283,7 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
       {
         type: "run.created",
         run_id,
-        payload: { run_id, actor_id, mode: "B", runtime: HANDOFF_RUNTIME, via: "import", request_id },
+        payload: { run_id, actor_id, mode: "B", runtime: handoff.runtime, via: "import", request_id },
       },
       ...plans.map((plan) => ({
         type: "result.submitted",

@@ -35,7 +35,7 @@ export interface OpencodeTuiMcpEntry {
  * `opencode-go` word start here, because a screen the person starts is not metered; the server needs the exact
  * provider or the `opencode-go/` prefix). A look-alike from another script (a Cyrillic "о") is not folded.
  */
-function on_go_route(model: string): boolean {
+export function on_go_route(model: string): boolean {
   return /^opencode-go(?![a-z0-9])/.test(fold_go_label(model));
 }
 

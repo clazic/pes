@@ -234,6 +234,10 @@ components:
             claimed_tool: { type: string, description: "A claim of the pasted text, never verified" }
             claimed_model: { type: string, description: "A claim of the pasted text, never verified" }
             expected_control_rev: { type: string }
+            app:
+              type: string
+              enum: [claude_app, codex_app, opencode_app]
+              description: "The AI app the pasted result comes from (closed list). The server derives the hand-off run's runtime and provider from it: claude_app -> claude_app_handoff/anthropic, codex_app -> codex_app_handoff/openai, opencode_app -> opencode_app_handoff/unknown; the model is always unknown. Absent means claude_app. A value outside the list is 400 invalid_payload ($.body.import.app) and nothing is written."
             expected_heads:
               type: array
               maxItems: 1000

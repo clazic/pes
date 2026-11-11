@@ -66,7 +66,7 @@ export class FakeKeyStore {
 export interface CliSpec {
   /** Test title prefix and actor slug. */
   label: string;
-  runtime: "codex_cli" | "opencode_tui";
+  runtime: "codex_cli" | "opencode_tui" | "codex_app" | "opencode_app";
   provider: string;
   /** the adapter functions under test */
   entry(input: { command: string; server_script: string; project_id: string; api_base_url: string; model?: string }): any;
@@ -144,11 +144,11 @@ function assert_subset(actual: any, expected: any, where: string): void {
   } else assert.deepEqual(actual, expected, where);
 }
 
-function a_run_row(env: CliEnv, run_id: string): string {
+export function a_run_row(env: CliEnv, run_id: string): string {
   return wire(env.db.get("SELECT * FROM runs WHERE id = ?", run_id));
 }
 
-function a_side_counts(env: CliEnv): Record<string, bigint> {
+export function a_side_counts(env: CliEnv): Record<string, bigint> {
   // every table that belongs to the built-in (mode A) runner: dispatches, usage, Go gauges, connections
   const names = env.db
     .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND (name LIKE '%dispatch%' OR name LIKE '%usage%' OR name LIKE 'go_%' OR name LIKE '%connection%') ORDER BY name")
@@ -355,6 +355,17 @@ export function define_cli_suite(spec: CliSpec): void {
       const sneaky = await client.tool("pes_claim", { mode: "A", provider: "opencode-go", model: GO_MODEL, idempotency_key: "go-claim-2" });
       const rows = env.db.all<{ mode: string }>("SELECT mode FROM runs");
       assert.ok(rows.every((r) => r.mode === "B"), `a B connection never creates an A run (${wire(sneaky.data)})`);
+      // SEL-68: the same token asking for a mode A (Go) claim over the API is refused with 403 `forbidden`, nothing written
+      const sig = state_signature(env.db);
+      for (const body of [
+        { mode: "A", runtime: "pes_builtin", provider: "opencode-go", model: GO_MODEL },
+        { mode: "A", runtime: spec.runtime, provider: "opencode-go", model: GO_MODEL },
+      ]) {
+        const res = await call(env, { method: "POST", path: project_path(env, "/claims"), auth: { token: env.cli_agent.token }, body });
+        assert.equal(res.status, 403, `a direct ${spec.runtime} token cannot take a mode A claim: ${wire(res.json)}`);
+        assert.equal(res.json.error.code, "forbidden");
+      }
+      assert.equal(state_signature(env.db), sig, "the refused mode A claims wrote nothing");
     });
   });
 
@@ -437,7 +448,7 @@ export function define_cli_suite(spec: CliSpec): void {
     const store = new FakeKeyStore();
     await store.put(ref, token);
     const other = new FakeKeyStore();
-    await other.put(`pes-agent-token-${spec.runtime === "codex_cli" ? "opencode_tui" : "codex_cli"}-${project_id}`, "other-tool-token");
+    await other.put(`pes-agent-token-${spec.runtime.startsWith("codex") ? "opencode_tui" : "codex_cli"}-${project_id}`, "other-tool-token");
     store.calls.length = 0;
     other.calls.length = 0;
 
