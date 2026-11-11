@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import type { PesClient } from "@/api/types";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router";
 
 /**
@@ -45,13 +46,19 @@ export function setEnv({ width = 1440, coarse = false }: Env = {}) {
   window.scrollTo = () => {};
 }
 
-export async function renderApp(url: string, env: Env = {}) {
+export async function renderApp(url: string, env: Env = {}, options: { client?: PesClient } = {}) {
   setEnv(env);
   // import.meta.glob: 파일이 아직 없어도 파일 전체가 죽지 않고, 시험마다 아래 메시지로 실패한다
-  const found = import.meta.glob<{ routes: RouteObject[] }>("/src/app/routes.{ts,tsx}");
+  const found = import.meta.glob<{ routes: RouteObject[]; createRoutes?: (o?: { client?: PesClient }) => RouteObject[] }>("/src/app/routes.{ts,tsx}");
   const loader = Object.values(found)[0];
   if (!loader) throw new Error("src/app/routes.tsx 가 없다 — 계약: `routes: RouteObject[]` 를 내보낸다(src/test/contract.ts)");
-  const { routes } = await loader();
+  const mod = await loader();
+  let routes = mod.routes;
+  if (options.client) {
+    // U1c 심: createRoutes({ client }) — 계약은 src/test/contract.ts 머리말 "시험 심"
+    if (typeof mod.createRoutes !== "function") throw new Error("@/app/routes 가 createRoutes({ client }) 를 내보내야 한다(U1c 시험 심, src/test/contract.ts)");
+    routes = mod.createRoutes({ client: options.client });
+  }
   const router = createMemoryRouter(routes, { initialEntries: [url] });
   const view = render(<RouterProvider router={router} />);
   return { ...view, router };
