@@ -181,6 +181,8 @@ interface Env {
   agent_id: string;
   blob_id: string;
   ctx(key: string, actor_id?: string): MutationContext;
+  /** the internal_ai actor that holds mode A (Go) leases */
+  ai_ctx(key: string): MutationContext;
   with_db(db: Db): CommandService;
   close(): void;
 }
@@ -197,6 +199,12 @@ async function make_env(): Promise<Env> {
     { slug: "synthetic-policy", topic: "합성 정책 주제", owner_display_name: "합성 소유자" },
   );
   const r = out.result as { project_id: string; owner_actor_id: string; owner_user_id: string };
+  // SEL-68: a mode A run belongs to an internal_ai actor only, so the Go lease flow below runs as this actor
+  // (the human owner keeps the policy commands: set_policy, ...).
+  db.run(
+    "INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-ai', 'internal_ai', ?, '합성 내장 AI')",
+    r.owner_user_id,
+  );
   // A synthetic agent actor acting on behalf of the owner's user (so the service scope check
   // passes); kind external_agent. It must still never count as a human owner.
   db.run(
@@ -230,6 +238,7 @@ async function make_env(): Promise<Env> {
       via: "cli",
       client_request_id: key,
     }),
+    ai_ctx: (key) => ({ project_id: r.project_id, actor_id: "agent-ai", via: "cli", client_request_id: key }),
     with_db: (wrapped) =>
       new CommandService(wrapped, { clock, policy: new DbPolicyChecker(), run_config: TEST_CONFIG }),
     close() {
@@ -298,6 +307,11 @@ function db_contains(db: Db, needle: string): boolean {
   return false;
 }
 
+/** SEL-68: dispatch.* / run.* commands run as the internal_ai actor that holds the Go lease; policy and token commands as the owner. */
+function ctx_for(env: Env, command: string, key: string): MutationContext {
+  return /^(dispatch|run)\./.test(command) && command !== "dispatch.block" ? env.ai_ctx(key) : env.ctx(key);
+}
+
 function guard(l: Lease): { run_id: string; lease_id: string; fence: number } {
   return { run_id: l.run_id, lease_id: l.lease_id, fence: l.fence };
 }
@@ -307,7 +321,7 @@ async function claim_go_lease(env: Env, key: string, run_id?: string): Promise<L
     run_id === undefined
       ? { mode: "A", runtime: "synthetic-runtime", provider: "opencode-go", model: GO_MODEL }
       : { run_id };
-  const out = await claim(env.service, env.ctx(key), input);
+  const out = await claim(env.service, env.ai_ctx(key), input);
   return out.result as Lease;
 }
 
@@ -322,18 +336,18 @@ function prepare_payload(env: Env, l: Lease, request_key: string): Record<string
 }
 
 async function do_prepare(env: Env, key: string, l: Lease, request_key: string): Promise<string> {
-  const out = await prepare_dispatch(env.service, env.ctx(key), prepare_payload(env, l, request_key));
+  const out = await prepare_dispatch(env.service, env.ai_ctx(key), prepare_payload(env, l, request_key));
   const r = out.result as { dispatch_id: string; state: string };
   assert.equal(r.state, "prepared");
   return r.dispatch_id;
 }
 
 async function do_authorize(env: Env, key: string, l: Lease, dispatch_id: string): Promise<void> {
-  await authorize_dispatch(env.service, env.ctx(key), { dispatch_id, ...guard(l) });
+  await authorize_dispatch(env.service, env.ai_ctx(key), { dispatch_id, ...guard(l) });
 }
 
 async function do_mark_sent(env: Env, key: string, l: Lease, dispatch_id: string): Promise<void> {
-  await mark_sent(env.service, env.ctx(key), { dispatch_id, ...guard(l), external_request_id: `ext-${key}` });
+  await mark_sent(env.service, env.ai_ctx(key), { dispatch_id, ...guard(l), external_request_id: `ext-${key}` });
 }
 
 async function go_off(env: Env, key = "go-off", actor_id?: string) {
@@ -1085,10 +1099,10 @@ test("dispatch.prepare validates destination and hash, and rejects a reused requ
       { ...prepare_payload(env, l, "rk-p6"), manifest_blob_id: "" },
     ];
     for (const [i, payload] of bad.entries()) {
-      await rejects_with_api_error(prepare_dispatch(env.service, env.ctx(`v-bad-${i}`), payload), "invalid_payload");
+      await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx(`v-bad-${i}`), payload), "invalid_payload");
     }
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ctx("v-dup"), prepare_payload(env, l, "rk-dup")),
+      prepare_dispatch(env.service, env.ai_ctx("v-dup"), prepare_payload(env, l, "rk-dup")),
       "conflict",
     );
     assert.equal(state_signature(env.db), before);
@@ -1101,13 +1115,13 @@ test("state machine: authorize needs prepared, mark_sent needs authorized, block
     const a = await do_prepare(env, "sm-a", l, "rk-sm-a");
     const before_skip = state_signature(env.db);
     await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("sm-skip"), { dispatch_id: a, ...guard(l) }),
+      mark_sent(env.service, env.ai_ctx("sm-skip"), { dispatch_id: a, ...guard(l) }),
       "conflict",
     );
     assert.equal(state_signature(env.db), before_skip, "prepared -> sent is not allowed");
     await do_authorize(env, "sm-auth", l, a);
     await rejects_with_api_error(
-      authorize_dispatch(env.service, env.ctx("sm-auth-again"), { dispatch_id: a, ...guard(l) }),
+      authorize_dispatch(env.service, env.ai_ctx("sm-auth-again"), { dispatch_id: a, ...guard(l) }),
       "conflict",
     );
     await do_mark_sent(env, "sm-sent", l, a);
@@ -1116,7 +1130,7 @@ test("state machine: authorize needs prepared, mark_sent needs authorized, block
       "conflict",
     );
     await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("sm-sent-again"), { dispatch_id: a, ...guard(l) }),
+      mark_sent(env.service, env.ai_ctx("sm-sent-again"), { dispatch_id: a, ...guard(l) }),
       "conflict",
     );
     assert.equal(dispatch_row(env.db, a).state, "sent");
@@ -1128,7 +1142,7 @@ test("state machine: authorize needs prepared, mark_sent needs authorized, block
     await block_dispatch(env.service, env.ctx("sm-block-b"), { dispatch_id: b, reason: "합성: 수동 차단" });
     assert.equal(dispatch_row(env.db, b).state, "blocked");
     await rejects_with_api_error(
-      authorize_dispatch(env.service, env.ctx("sm-auth-blocked"), { dispatch_id: b, ...guard(l) }),
+      authorize_dispatch(env.service, env.ai_ctx("sm-auth-blocked"), { dispatch_id: b, ...guard(l) }),
       "conflict",
     );
     await rejects_with_api_error(
@@ -1176,16 +1190,16 @@ test("after Go OFF nothing new leaves: prepare / authorize / mark_sent are polic
     const before = state_signature(env.db);
 
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ctx("n-prep"), prepare_payload(env, w.lease, "rk-after-off")),
+      prepare_dispatch(env.service, env.ai_ctx("n-prep"), prepare_payload(env, w.lease, "rk-after-off")),
       "policy_denied",
     );
     await rejects_with_api_error(
-      authorize_dispatch(env.service, env.ctx("n-auth"), { dispatch_id: w.prepared, ...guard(w.lease) }),
+      authorize_dispatch(env.service, env.ai_ctx("n-auth"), { dispatch_id: w.prepared, ...guard(w.lease) }),
       "policy_denied",
     );
     // The gate sits in front of the transport: a denied mark_sent never reaches it.
     try {
-      await mark_sent(env.service, env.ctx("n-sent"), { dispatch_id: w.authorized, ...guard(w.lease) });
+      await mark_sent(env.service, env.ai_ctx("n-sent"), { dispatch_id: w.authorized, ...guard(w.lease) });
       transport.send(w.authorized);
     } catch (error) {
       assert.ok(error instanceof ApiError);
@@ -1217,8 +1231,8 @@ test("dispatch.block and non-Go commands are not gated by Go: they fail or succe
     );
     assert.equal(topic.replayed, false);
     // Final-review F1: OFF revoked the Go run's lease, so the old guard cannot even release it.
-    await rejects_with_api_error(release(env.service, env.ctx("off-release"), guard(l)), "conflict");
-    const b = await claim(env.service, env.ctx("off-claim-b"), {
+    await rejects_with_api_error(release(env.service, env.ai_ctx("off-release"), guard(l)), "conflict");
+    const b = await claim(env.service, env.ai_ctx("off-claim-b"), {
       mode: "B",
       runtime: "synthetic-runtime",
       provider: "synthetic",
@@ -1236,16 +1250,16 @@ test("re-allowing Go never revives a blocked dispatch", async () => {
     assert.equal(dispatch_row(env.db, w.prepared).state, "blocked");
     assert.equal(dispatch_row(env.db, w.authorized).state, "blocked");
     await rejects_with_api_error(
-      authorize_dispatch(env.service, env.ctx("rv-auth"), { dispatch_id: w.prepared, ...guard(w.lease) }),
+      authorize_dispatch(env.service, env.ai_ctx("rv-auth"), { dispatch_id: w.prepared, ...guard(w.lease) }),
       "conflict",
     );
     await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("rv-sent"), { dispatch_id: w.authorized, ...guard(w.lease) }),
+      mark_sent(env.service, env.ai_ctx("rv-sent"), { dispatch_id: w.authorized, ...guard(w.lease) }),
       "conflict",
     );
     // Final-review F1: the old lease died with OFF; a fresh dispatch needs a new claim after the owner re-allows.
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ctx("rv-old-prep"), prepare_payload(env, w.lease, "rk-fresh")),
+      prepare_dispatch(env.service, env.ai_ctx("rv-old-prep"), prepare_payload(env, w.lease, "rk-fresh")),
       "conflict",
     );
     const lease2 = await claim_go_lease(env, "rv-reclaim", w.lease.run_id);
@@ -1259,17 +1273,17 @@ test("an old lease (older fence) cannot prepare, authorize or send; the current 
   await with_env(async (env) => {
     const old = await claim_go_lease(env, "ol-claim");
     const id = await do_prepare(env, "ol-prep", old, "rk-old");
-    await release(env.service, env.ctx("ol-release"), guard(old));
+    await release(env.service, env.ai_ctx("ol-release"), guard(old));
     const fresh = await claim_go_lease(env, "ol-reclaim", old.run_id);
     assert.equal(fresh.fence, old.fence + 1);
 
     const before = state_signature(env.db);
     await rejects_with_api_error(
-      authorize_dispatch(env.service, env.ctx("ol-auth-old"), { dispatch_id: id, ...guard(old) }),
+      authorize_dispatch(env.service, env.ai_ctx("ol-auth-old"), { dispatch_id: id, ...guard(old) }),
       "conflict",
     );
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ctx("ol-prep-old"), prepare_payload(env, old, "rk-old-2")),
+      prepare_dispatch(env.service, env.ai_ctx("ol-prep-old"), prepare_payload(env, old, "rk-old-2")),
       "conflict",
     );
     assert.equal(state_signature(env.db), before, "a stale fence writes nothing");
@@ -1277,7 +1291,7 @@ test("an old lease (older fence) cannot prepare, authorize or send; the current 
     await do_authorize(env, "ol-auth-new", fresh, id);
     // the old guard still cannot send, even though the dispatch is authorized now
     await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("ol-sent-old"), { dispatch_id: id, ...guard(old) }),
+      mark_sent(env.service, env.ai_ctx("ol-sent-old"), { dispatch_id: id, ...guard(old) }),
       "conflict",
     );
     assert.equal(dispatch_row(env.db, id).state, "authorized");
@@ -1290,13 +1304,13 @@ test("an old lease is still refused after Go is switched OFF and ON again", asyn
   await with_env(async (env) => {
     const old = await claim_go_lease(env, "of-claim");
     const id = await do_prepare(env, "of-prep", old, "rk-of");
-    await release(env.service, env.ctx("of-release"), guard(old));
+    await release(env.service, env.ai_ctx("of-release"), guard(old));
     const fresh = await claim_go_lease(env, "of-reclaim", old.run_id);
     await go_off(env, "of-off");
     await go_on(env, "of-on");
     const before = state_signature(env.db);
     const err = await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("of-old"), { dispatch_id: id, ...guard(old) }),
+      mark_sent(env.service, env.ai_ctx("of-old"), { dispatch_id: id, ...guard(old) }),
     );
     assert.ok(["conflict", "policy_denied"].includes(err.code), err.code);
     assert.equal(state_signature(env.db), before);
@@ -1312,7 +1326,7 @@ test("an expired lease cannot send: now >= expires_at is a conflict", async () =
     env.clock.advance(TEST_CONFIG.lease_ttl_ms);
     const before = state_signature(env.db);
     await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("ex-sent"), { dispatch_id: id, ...guard(l) }),
+      mark_sent(env.service, env.ai_ctx("ex-sent"), { dispatch_id: id, ...guard(l) }),
       "conflict",
     );
     assert.equal(state_signature(env.db), before);
@@ -1411,11 +1425,11 @@ for (const c of CORRUPT_CASES) {
 
       const before = state_signature(env.db);
       await rejects_with_api_error(
-        prepare_dispatch(env.service, env.ctx("cc-new"), prepare_payload(env, lease, "rk-cc-2")),
+        prepare_dispatch(env.service, env.ai_ctx("cc-new"), prepare_payload(env, lease, "rk-cc-2")),
         "policy_denied",
       );
       await rejects_with_api_error(
-        authorize_dispatch(env.service, env.ctx("cc-auth"), { dispatch_id: prepared, ...guard(lease) }),
+        authorize_dispatch(env.service, env.ai_ctx("cc-auth"), { dispatch_id: prepared, ...guard(lease) }),
         "policy_denied",
       );
       assert.equal(state_signature(env.db), before, "a denied command writes nothing");
@@ -1448,10 +1462,10 @@ test("a request that succeeded before OFF is not replayed after OFF, even with t
   await with_env(async (env) => {
     const l = await claim_go_lease(env, "rp-claim");
     const prep_input = prepare_payload(env, l, "rk-replay");
-    const first = await prepare_dispatch(env.service, env.ctx("rp-prep"), prep_input);
+    const first = await prepare_dispatch(env.service, env.ai_ctx("rp-prep"), prep_input);
     const id = (first.result as { dispatch_id: string }).dispatch_id;
     const auth_input = { dispatch_id: id, ...guard(l) };
-    await authorize_dispatch(env.service, env.ctx("rp-auth"), auth_input);
+    await authorize_dispatch(env.service, env.ai_ctx("rp-auth"), auth_input);
     const topic = await env.service.execute(
       { ...env.ctx("rp-topic"), base_control_rev: 0 },
       "project.set_topic",
@@ -1462,11 +1476,11 @@ test("a request that succeeded before OFF is not replayed after OFF, even with t
     const before = state_signature(env.db);
 
     // same key + same payload: policy wins over replay
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("rp-prep"), prep_input), "policy_denied");
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("rp-auth"), auth_input), "policy_denied");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("rp-prep"), prep_input), "policy_denied");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("rp-auth"), auth_input), "policy_denied");
     // same key + different payload: still policy_denied, not idempotency_key_reuse
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ctx("rp-prep"), { ...prep_input, request_key: "rk-other" }),
+      prepare_dispatch(env.service, env.ai_ctx("rp-prep"), { ...prep_input, request_key: "rk-other" }),
       "policy_denied",
     );
     assert.equal(state_signature(env.db), before);
@@ -1482,7 +1496,7 @@ test("a request that succeeded before OFF is not replayed after OFF, even with t
 
     // once the owner re-allows, the old receipts replay again (they were never removed)
     await go_on(env, "rp-on");
-    const replay = await prepare_dispatch(env.service, env.ctx("rp-prep"), prep_input);
+    const replay = await prepare_dispatch(env.service, env.ai_ctx("rp-prep"), prep_input);
     assert.equal(replay.replayed, true);
     assert.deepEqual(replay.result, first.result);
   });
@@ -1492,10 +1506,10 @@ test("a damaged policy also beats replay", async () => {
   await with_env(async (env) => {
     const l = await claim_go_lease(env, "rd-claim");
     const input = prepare_payload(env, l, "rk-rd");
-    await prepare_dispatch(env.service, env.ctx("rd-prep"), input);
+    await prepare_dispatch(env.service, env.ai_ctx("rd-prep"), input);
     env.db.exec("PRAGMA ignore_check_constraints = ON");
     env.db.run("UPDATE projects SET current_policy_id = NULL WHERE id = ?", env.project_id);
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("rd-prep"), input), "policy_denied");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("rd-prep"), input), "policy_denied");
   });
 });
 
@@ -1576,12 +1590,12 @@ for (const c of CONTRACT_CASES) {
     await with_env(async (env) => {
       const w = await make_world(env);
       const payload = c.payload(env, w);
-      const first = await env.service.execute(env.ctx("ct-key"), c.command, payload);
+      const first = await env.service.execute(ctx_for(env, c.command, "ct-key"), c.command, payload);
       assert.equal(first.replayed, false);
       const counts = table_counts(env.db);
       const sig = state_signature(env.db);
 
-      const again = await env.service.execute(env.ctx("ct-key"), c.command, payload);
+      const again = await env.service.execute(ctx_for(env, c.command, "ct-key"), c.command, payload);
       assert.equal(again.replayed, true);
       const strip = (r: unknown) => {
         const { token: _t, ...rest } = r as Record<string, unknown>;
@@ -1592,7 +1606,7 @@ for (const c of CONTRACT_CASES) {
       assert.deepEqual(table_counts(env.db), counts);
 
       await rejects_with_api_error(
-        env.service.execute(env.ctx("ct-key"), c.command, c.alt(env, w)),
+        env.service.execute(ctx_for(env, c.command, "ct-key"), c.command, c.alt(env, w)),
         "idempotency_key_reuse",
       );
       assert.equal(state_signature(env.db), sig);
@@ -1602,7 +1616,7 @@ for (const c of CONTRACT_CASES) {
   test(`${c.command}: events and the receipt share one tx, with the registered action`, async () => {
     await with_env(async (env) => {
       const w = await make_world(env);
-      await env.service.execute(env.ctx("ct-tx"), c.command, c.payload(env, w));
+      await env.service.execute(ctx_for(env, c.command, "ct-tx"), c.command, c.payload(env, w));
       const rc = receipt_for(env.db, env.project_id, "ct-tx");
       assert.ok(rc);
       assert.equal(rc.action, NEW_COMMANDS[c.command]);
@@ -1631,9 +1645,9 @@ for (const c of CONTRACT_CASES) {
         }),
       );
       const before = state_signature(env.db);
-      await assert.rejects(failing.execute(env.ctx("ct-rb"), c.command, payload), /synthetic events failure/);
+      await assert.rejects(failing.execute(ctx_for(env, c.command, "ct-rb"), c.command, payload), /synthetic events failure/);
       assert.equal(state_signature(env.db), before, "no row, event or receipt survives");
-      const retry = await env.service.execute(env.ctx("ct-rb"), c.command, payload);
+      const retry = await env.service.execute(ctx_for(env, c.command, "ct-rb"), c.command, payload);
       assert.equal(retry.replayed, false);
     });
   });
@@ -1644,13 +1658,13 @@ test("a rejected new command (policy, owner, lease) leaves no receipt behind and
     const l = await claim_go_lease(env, "ru-claim");
     await go_off(env, "ru-off");
     const before = state_signature(env.db);
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("ru-key"), prepare_payload(env, l, "rk-ru")), "policy_denied");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("ru-key"), prepare_payload(env, l, "rk-ru")), "policy_denied");
     assert.equal(receipt_for(env.db, env.project_id, "ru-key"), undefined);
     assert.equal(state_signature(env.db), before);
     await go_on(env, "ru-on");
     // Final-review F1: OFF revoked the old lease, so the retry runs under a new claim.
     const l2 = await claim_go_lease(env, "ru-reclaim", l.run_id);
-    const ok = await prepare_dispatch(env.service, env.ctx("ru-key"), prepare_payload(env, l2, "rk-ru"));
+    const ok = await prepare_dispatch(env.service, env.ai_ctx("ru-key"), prepare_payload(env, l2, "rk-ru"));
     assert.equal(ok.replayed, false);
   });
 });

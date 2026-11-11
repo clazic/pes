@@ -67,6 +67,8 @@ interface Env {
   agent_id: string;
   blob_id: string;
   ctx(key: string, actor_id?: string): MutationContext;
+  /** the internal_ai actor that holds mode A (Go) leases */
+  ai_ctx(key: string): MutationContext;
   close(): void;
 }
 
@@ -82,6 +84,12 @@ async function make_env(): Promise<Env> {
     { slug: "synthetic-hardening", topic: "합성 보강 주제", owner_display_name: "합성 소유자" },
   );
   const r = out.result as { project_id: string; owner_actor_id: string; owner_user_id: string };
+  // SEL-68: a mode A run belongs to an internal_ai actor only, so the Go lease flow below runs as this actor
+  // (the human owner keeps the policy commands: set_policy, ...).
+  db.run(
+    "INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-ai', 'internal_ai', ?, '합성 내장 AI')",
+    r.owner_user_id,
+  );
   db.run(
     "INSERT INTO actors (id, kind, user_id, display_name) VALUES (?, 'external_agent', ?, ?)",
     "agent-1",
@@ -113,6 +121,7 @@ async function make_env(): Promise<Env> {
       via: "cli",
       client_request_id: key,
     }),
+    ai_ctx: (key) => ({ project_id: r.project_id, actor_id: "agent-ai", via: "cli", client_request_id: key }),
     close() {
       db.close();
       home.cleanup();
@@ -212,6 +221,11 @@ function all_db_text(db: Db): string[] {
   return out;
 }
 
+/** SEL-68: dispatch.* / run.* commands run as the internal_ai actor that holds the Go lease; policy and token commands as the owner. */
+function ctx_for(env: Env, command: string, key: string): MutationContext {
+  return /^(dispatch|run)\./.test(command) && command !== "dispatch.block" ? env.ai_ctx(key) : env.ctx(key);
+}
+
 function guard(l: Lease): { run_id: string; lease_id: string; fence: number } {
   return { run_id: l.run_id, lease_id: l.lease_id, fence: l.fence };
 }
@@ -221,7 +235,7 @@ async function claim_go_lease(env: Env, key: string, run_id?: string): Promise<L
     run_id === undefined
       ? { mode: "A", runtime: "synthetic-runtime", provider: "opencode-go", model: GO_MODEL }
       : { run_id };
-  const out = await claim(env.service, env.ctx(key), input);
+  const out = await claim(env.service, env.ai_ctx(key), input);
   return out.result as Lease;
 }
 
@@ -236,16 +250,16 @@ function prepare_payload(env: Env, l: Lease, request_key: string): Record<string
 }
 
 async function do_prepare(env: Env, key: string, l: Lease, request_key: string): Promise<string> {
-  const out = await prepare_dispatch(env.service, env.ctx(key), prepare_payload(env, l, request_key));
+  const out = await prepare_dispatch(env.service, env.ai_ctx(key), prepare_payload(env, l, request_key));
   return (out.result as { dispatch_id: string }).dispatch_id;
 }
 
 async function do_authorize(env: Env, key: string, l: Lease, dispatch_id: string): Promise<void> {
-  await authorize_dispatch(env.service, env.ctx(key), { dispatch_id, ...guard(l) });
+  await authorize_dispatch(env.service, env.ai_ctx(key), { dispatch_id, ...guard(l) });
 }
 
 async function do_mark_sent(env: Env, key: string, l: Lease, dispatch_id: string): Promise<void> {
-  await mark_sent(env.service, env.ctx(key), { dispatch_id, ...guard(l), external_request_id: `ext-${key}` });
+  await mark_sent(env.service, env.ai_ctx(key), { dispatch_id, ...guard(l), external_request_id: `ext-${key}` });
 }
 
 async function go_off(env: Env, key = "go-off", actor_id?: string) {
@@ -812,28 +826,28 @@ test("H18 OFF right after prepare: authorize and mark_sent are denied, the dispa
     const blocked_row = dispatch_row(env.db, id);
 
     const before = state_signature(env.db);
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("h18-auth"), { dispatch_id: id, ...guard(l) }), "policy_denied");
-    await rejects_with_api_error(mark_sent(env.service, env.ctx("h18-sent"), { dispatch_id: id, ...guard(l) }), "policy_denied");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("h18-auth"), { dispatch_id: id, ...guard(l) }), "policy_denied");
+    await rejects_with_api_error(mark_sent(env.service, env.ai_ctx("h18-sent"), { dispatch_id: id, ...guard(l) }), "policy_denied");
     assert.equal(state_signature(env.db), before);
 
     await go_on(env, "h18-on");
     assert.deepEqual(dispatch_row(env.db, id), blocked_row, "ON does not touch the blocked row");
     for (const attempt of [
-      authorize_dispatch(env.service, env.ctx("h18-auth2"), { dispatch_id: id, ...guard(l) }),
-      mark_sent(env.service, env.ctx("h18-sent2"), { dispatch_id: id, ...guard(l) }),
+      authorize_dispatch(env.service, env.ai_ctx("h18-auth2"), { dispatch_id: id, ...guard(l) }),
+      mark_sent(env.service, env.ai_ctx("h18-sent2"), { dispatch_id: id, ...guard(l) }),
       block_dispatch(env.service, env.ctx("h18-block2"), { dispatch_id: id, reason: "합성" }),
     ]) {
       await rejects_with_api_error(attempt, "conflict");
     }
     assert.deepEqual(dispatch_row(env.db, id), blocked_row);
     // the request_key of the blocked dispatch is still burned; a fresh key works
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-reuse"), prepare_payload(env, l, "rk-18")), "conflict");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("h18-reuse"), prepare_payload(env, l, "rk-18")), "conflict");
     // Final-review F1: OFF revoked the lease, so a fresh dispatch needs a new claim (new fence).
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-old-prep"), prepare_payload(env, l, "rk-18b")), "conflict");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("h18-old-prep"), prepare_payload(env, l, "rk-18b")), "conflict");
     const l2 = await claim_go_lease(env, "h18-reclaim", l.run_id);
     assert.ok(l2.fence > l.fence);
     // with a valid new lease the blocked dispatch's request_key is still burned (conflict from the key itself, not a stale lease)
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h18-reuse2"), prepare_payload(env, l2, "rk-18")), "conflict");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("h18-reuse2"), prepare_payload(env, l2, "rk-18")), "conflict");
     const fresh = await do_prepare(env, "h18-fresh", l2, "rk-18b");
     assert.notEqual(fresh, id);
     assert.equal(dispatch_state(env.db, fresh), "prepared");
@@ -849,11 +863,11 @@ test("H19 OFF right after authorize: mark_sent is denied, the transport never ge
     await do_authorize(env, "h19-auth", l, id);
     await go_off(env, "h19-off");
     assert.equal(dispatch_state(env.db, id), "blocked");
-    await rejects_with_api_error(mark_sent(env.service, env.ctx("h19-sent"), { dispatch_id: id, ...guard(l) }), "policy_denied");
+    await rejects_with_api_error(mark_sent(env.service, env.ai_ctx("h19-sent"), { dispatch_id: id, ...guard(l) }), "policy_denied");
     await go_on(env, "h19-on");
     const row = dispatch_row(env.db, id);
-    await rejects_with_api_error(mark_sent(env.service, env.ctx("h19-sent2"), { dispatch_id: id, ...guard(l) }), "conflict");
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("h19-auth2"), { dispatch_id: id, ...guard(l) }), "conflict");
+    await rejects_with_api_error(mark_sent(env.service, env.ai_ctx("h19-sent2"), { dispatch_id: id, ...guard(l) }), "conflict");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("h19-auth2"), { dispatch_id: id, ...guard(l) }), "conflict");
     assert.deepEqual(dispatch_row(env.db, id), row);
     assert.equal(row.sent_at, null);
     assert.equal(row.external_request_id, null);
@@ -874,7 +888,7 @@ test("H20 OFF right after mark_sent: the sent dispatch is byte-for-byte unchange
     await go_on(env, "h20-on");
     assert.deepEqual(dispatch_row(env.db, id), sent_row);
     // the receipt of mark_sent is still the replay source only while Go is ON
-    const again = await mark_sent(env.service, env.ctx("h20-sent"), { dispatch_id: id, ...guard(l), external_request_id: "ext-h20-sent" });
+    const again = await mark_sent(env.service, env.ai_ctx("h20-sent"), { dispatch_id: id, ...guard(l), external_request_id: "ext-h20-sent" });
     assert.equal(again.replayed, true);
   });
 });
@@ -974,17 +988,17 @@ test("H24 old lease / old fence cannot adopt a dispatch across OFF and ON; the n
     const authorized = await do_prepare(env, "h24-prep", old, "rk-24");
     await do_authorize(env, "h24-auth", old, authorized);
     const surviving = await do_prepare(env, "h24-prep-2", old, "rk-24b");
-    await release(env.service, env.ctx("h24-release"), guard(old));
+    await release(env.service, env.ai_ctx("h24-release"), guard(old));
     const fresh = await claim_go_lease(env, "h24-claim-2", old.run_id);
     assert.ok(fresh.fence > old.fence);
 
     // the old lease is stale for every dispatch command even though Go is ON
-    await rejects_with_api_error(mark_sent(env.service, env.ctx("h24-old-sent"), { dispatch_id: authorized, ...guard(old) }), "conflict");
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("h24-old-auth"), { dispatch_id: surviving, ...guard(old) }), "conflict");
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h24-old-prep"), prepare_payload(env, old, "rk-24c")), "conflict");
+    await rejects_with_api_error(mark_sent(env.service, env.ai_ctx("h24-old-sent"), { dispatch_id: authorized, ...guard(old) }), "conflict");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("h24-old-auth"), { dispatch_id: surviving, ...guard(old) }), "conflict");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("h24-old-prep"), prepare_payload(env, old, "rk-24c")), "conflict");
     // a forged fence on the current lease id is stale too
     await rejects_with_api_error(
-      mark_sent(env.service, env.ctx("h24-forged"), { dispatch_id: authorized, ...guard(fresh), fence: fresh.fence + 1 }),
+      mark_sent(env.service, env.ai_ctx("h24-forged"), { dispatch_id: authorized, ...guard(fresh), fence: fresh.fence + 1 }),
       "conflict",
     );
     assert.equal(dispatch_state(env.db, authorized), "authorized");
@@ -992,8 +1006,8 @@ test("H24 old lease / old fence cannot adopt a dispatch across OFF and ON; the n
     await go_off(env, "h24-off");
     await go_on(env, "h24-on");
     for (const lease of [old, fresh]) {
-      await rejects_with_api_error(mark_sent(env.service, env.ctx(`h24-sent-${lease.fence}`), { dispatch_id: authorized, ...guard(lease) }), "conflict");
-      await rejects_with_api_error(authorize_dispatch(env.service, env.ctx(`h24-auth-${lease.fence}`), { dispatch_id: surviving, ...guard(lease) }), "conflict");
+      await rejects_with_api_error(mark_sent(env.service, env.ai_ctx(`h24-sent-${lease.fence}`), { dispatch_id: authorized, ...guard(lease) }), "conflict");
+      await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx(`h24-auth-${lease.fence}`), { dispatch_id: surviving, ...guard(lease) }), "conflict");
     }
     assert.equal(dispatch_state(env.db, authorized), "blocked");
     assert.equal(dispatch_state(env.db, surviving), "blocked");
@@ -1004,10 +1018,10 @@ test("H25 a dispatch cannot be moved with another run's lease; another project's
   await with_env(async (env) => {
     const a = await claim_go_lease(env, "h25-claim-a");
     const id = await do_prepare(env, "h25-prep", a, "rk-25");
-    await release(env.service, env.ctx("h25-release"), guard(a));
+    await release(env.service, env.ai_ctx("h25-release"), guard(a));
     const b = await claim_go_lease(env, "h25-claim-b");
     assert.notEqual(b.run_id, a.run_id);
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("h25-auth"), { dispatch_id: id, ...guard(b) }), "conflict");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("h25-auth"), { dispatch_id: id, ...guard(b) }), "conflict");
     assert.equal(dispatch_state(env.db, id), "prepared");
 
     const p2 = await second_project(env);
@@ -1030,7 +1044,7 @@ test("H26 lease guard values are strictly typed: string / zero / negative / frac
     const fences: unknown[] = [String(l.fence), 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 2, null, undefined, [l.fence], Number.NaN];
     for (const [i, fence] of fences.entries()) {
       const err = await rejects_with_api_error(
-        authorize_dispatch(env.service, env.ctx(`h26-${i}`), { dispatch_id: id, run_id: l.run_id, lease_id: l.lease_id, fence }),
+        authorize_dispatch(env.service, env.ai_ctx(`h26-${i}`), { dispatch_id: id, run_id: l.run_id, lease_id: l.lease_id, fence }),
       );
       assert.ok(["invalid_payload", "conflict"].includes(err.code), `${i}: ${err.code}`);
     }
@@ -1053,15 +1067,15 @@ test("H27 smuggled fields in dispatch payloads are rejected: state, policy_versi
     ];
     for (const [i, extra] of extras.entries()) {
       await rejects_with_api_error(
-        prepare_dispatch(env.service, env.ctx(`h27-prep-${i}`), { ...prepare_payload(env, l, `rk-27-${i}`), ...extra }),
+        prepare_dispatch(env.service, env.ai_ctx(`h27-prep-${i}`), { ...prepare_payload(env, l, `rk-27-${i}`), ...extra }),
         "invalid_payload",
       );
       await rejects_with_api_error(
-        authorize_dispatch(env.service, env.ctx(`h27-auth-${i}`), { dispatch_id: id, ...guard(l), ...extra }),
+        authorize_dispatch(env.service, env.ai_ctx(`h27-auth-${i}`), { dispatch_id: id, ...guard(l), ...extra }),
         "invalid_payload",
       );
       await rejects_with_api_error(
-        mark_sent(env.service, env.ctx(`h27-sent-${i}`), { dispatch_id: id, ...guard(l), ...extra }),
+        mark_sent(env.service, env.ai_ctx(`h27-sent-${i}`), { dispatch_id: id, ...guard(l), ...extra }),
         "invalid_payload",
       );
       await rejects_with_api_error(
@@ -1087,7 +1101,7 @@ test("H28 prepare refuses another project's manifest blob and a missing one with
     const before = state_signature(env.db);
     for (const blob of ["blob-p2", "no-such-blob"]) {
       const err = await rejects_with_api_error(
-        prepare_dispatch(env.service, env.ctx(`h28-${blob}`), { ...prepare_payload(env, l, `rk-28-${blob}`), manifest_blob_id: blob }),
+        prepare_dispatch(env.service, env.ai_ctx(`h28-${blob}`), { ...prepare_payload(env, l, `rk-28-${blob}`), manifest_blob_id: blob }),
         "invalid_payload",
       );
       assert.equal(/FOREIGN KEY|constraint|SQLITE/i.test(err.message), false);
@@ -1104,12 +1118,12 @@ test("H29 mark_sent external_request_id is validated: blank, non-string, lone su
     const before = state_signature(env.db);
     for (const [i, bad] of ["", "   ", 7, {}, "\ud800"].entries()) {
       await rejects_with_api_error(
-        mark_sent(env.service, env.ctx(`h29-${i}`), { dispatch_id: id, ...guard(l), external_request_id: bad }),
+        mark_sent(env.service, env.ai_ctx(`h29-${i}`), { dispatch_id: id, ...guard(l), external_request_id: bad }),
         "invalid_payload",
       );
     }
     assert.equal(state_signature(env.db), before);
-    await mark_sent(env.service, env.ctx("h29-ok"), { dispatch_id: id, ...guard(l) });
+    await mark_sent(env.service, env.ai_ctx("h29-ok"), { dispatch_id: id, ...guard(l) });
     const row = dispatch_row(env.db, id);
     assert.equal(row.state, "sent");
     assert.equal(row.external_request_id, null);
@@ -1167,8 +1181,8 @@ test("H30 a newer row that the pointer does not name makes the policy damaged (f
     damage(env, "newer_row_not_pointed");
     assert.equal(check_go_allowed(env.db, env.project_id).allowed, false);
     throws_api_error(() => current_policy(env.db, env.project_id), "policy_denied");
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("h30-auth"), { dispatch_id: id, ...guard(l) }), "policy_denied");
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h30-prep2"), prepare_payload(env, l, "rk-30b")), "policy_denied");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("h30-auth"), { dispatch_id: id, ...guard(l) }), "policy_denied");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("h30-prep2"), prepare_payload(env, l, "rk-30b")), "policy_denied");
     assert.equal(dispatch_state(env.db, id), "prepared");
   });
 });
@@ -1202,7 +1216,12 @@ test("H33 damage in one project is local: the other project still prepares, auth
     assert.equal(check_go_allowed(env.db, env.project_id).allowed, false);
     assert.deepEqual(check_go_allowed(env.db, p2.project_id), { allowed: true });
 
-    const claimed = await claim(env.service, ctx_of(p2.project_id, p2.actor_id, "h33-claim"), {
+    // SEL-68: mode A belongs to an internal_ai actor — the other project gets its own
+    env.db.run(
+      "INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-ai-p2', 'internal_ai', (SELECT owner_user_id FROM projects WHERE id = ?), '합성 p2 내장 AI')",
+      p2.project_id,
+    );
+    const claimed = await claim(env.service, ctx_of(p2.project_id, "agent-ai-p2", "h33-claim"), {
       mode: "A",
       runtime: "synthetic-runtime",
       provider: "opencode-go",
@@ -1216,7 +1235,7 @@ test("H33 damage in one project is local: the other project still prepares, auth
       "f".repeat(64),
       p2.actor_id,
     );
-    const c = (key: string) => ctx_of(p2.project_id, p2.actor_id, key);
+    const c = (key: string) => ctx_of(p2.project_id, "agent-ai-p2", key);
     const prep = await prepare_dispatch(env.service, c("h33-prep"), {
       ...guard(l2),
       provider: "opencode-go",
@@ -1261,14 +1280,14 @@ test("H36 a corrupted stored receipt is a closed failure, not a bypass, and stay
   await with_env(async (env) => {
     const l = await claim_go_lease(env, "h36-claim");
     const input = prepare_payload(env, l, "rk-36");
-    await prepare_dispatch(env.service, env.ctx("h36-prep"), input);
+    await prepare_dispatch(env.service, env.ai_ctx("h36-prep"), input);
     env.db.exec("PRAGMA ignore_check_constraints = ON");
     env.db.run(
       "UPDATE mutation_commits SET result_json = '{not json' WHERE project_id = ? AND client_request_id = 'h36-prep'",
       env.project_id,
     );
     const before = state_signature(env.db);
-    const err = await prepare_dispatch(env.service, env.ctx("h36-prep"), input).then(
+    const err = await prepare_dispatch(env.service, env.ai_ctx("h36-prep"), input).then(
       () => assert.fail("a corrupted receipt must not replay"),
       (e: unknown) => e,
     );
@@ -1276,7 +1295,7 @@ test("H36 a corrupted stored receipt is a closed failure, not a bypass, and stay
     assert.equal(state_signature(env.db), before, "nothing is written while failing");
     assert.equal(env.db.all("SELECT 1 FROM outbound_dispatches").length, 1, "no second dispatch was created");
     // a different key still works for new work in the same project
-    const other = await prepare_dispatch(env.service, env.ctx("h36-prep-2"), prepare_payload(env, l, "rk-36b"));
+    const other = await prepare_dispatch(env.service, env.ai_ctx("h36-prep-2"), prepare_payload(env, l, "rk-36b"));
     assert.equal(other.replayed, false);
   });
 });
@@ -1288,28 +1307,28 @@ test("H37 a request that succeeded while Go was ON is denied (not replayed) afte
   await with_env(async (env) => {
     const l = await claim_go_lease(env, "h37-claim");
     const prep = prepare_payload(env, l, "rk-37");
-    const first = await prepare_dispatch(env.service, env.ctx("h37-prep"), prep);
+    const first = await prepare_dispatch(env.service, env.ai_ctx("h37-prep"), prep);
     const id = (first.result as { dispatch_id: string }).dispatch_id;
     const auth = { dispatch_id: id, ...guard(l) };
-    await authorize_dispatch(env.service, env.ctx("h37-auth"), auth);
+    await authorize_dispatch(env.service, env.ai_ctx("h37-auth"), auth);
     const sent = { dispatch_id: id, ...guard(l), external_request_id: "ext-37" };
-    await mark_sent(env.service, env.ctx("h37-sent"), sent);
+    await mark_sent(env.service, env.ai_ctx("h37-sent"), sent);
 
     await go_off(env, "h37-off");
     const before = state_signature(env.db);
-    await rejects_with_api_error(prepare_dispatch(env.service, env.ctx("h37-prep"), prep), "policy_denied");
-    await rejects_with_api_error(authorize_dispatch(env.service, env.ctx("h37-auth"), auth), "policy_denied");
-    await rejects_with_api_error(mark_sent(env.service, env.ctx("h37-sent"), sent), "policy_denied");
+    await rejects_with_api_error(prepare_dispatch(env.service, env.ai_ctx("h37-prep"), prep), "policy_denied");
+    await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx("h37-auth"), auth), "policy_denied");
+    await rejects_with_api_error(mark_sent(env.service, env.ai_ctx("h37-sent"), sent), "policy_denied");
     assert.equal(state_signature(env.db), before);
 
     // ON again: replays work again and still return the original results
     await go_on(env, "h37-on");
-    const replay = await mark_sent(env.service, env.ctx("h37-sent"), sent);
+    const replay = await mark_sent(env.service, env.ai_ctx("h37-sent"), sent);
     assert.equal(replay.replayed, true);
 
     // damaged: denied again
     damage(env, "pointer_null");
-    await rejects_with_api_error(mark_sent(env.service, env.ctx("h37-sent"), sent), "policy_denied");
+    await rejects_with_api_error(mark_sent(env.service, env.ai_ctx("h37-sent"), sent), "policy_denied");
   });
 });
 
@@ -1397,7 +1416,7 @@ for (const step of STEPS) {
       });
       const before = state_signature(env.db);
       const err = await service_over(env, failing)
-        .execute(env.ctx(key), step.command, payload)
+        .execute(ctx_for(env, step.command, key), step.command, payload)
         .then(
           () => assert.fail("expected a rollback"),
           (e: unknown) => e,
@@ -1407,11 +1426,11 @@ for (const step of STEPS) {
       assert.equal(receipt_for(env.db, env.project_id, key), undefined);
 
       // the key is still free: first run is fresh, second is a replay with no new rows
-      const first = await env.service.execute(env.ctx(key), step.command, payload);
+      const first = await env.service.execute(ctx_for(env, step.command, key), step.command, payload);
       assert.equal(first.replayed, false);
       const after_first = state_signature(env.db);
       const counts = table_counts(env.db);
-      const second = await env.service.execute(env.ctx(key), step.command, payload);
+      const second = await env.service.execute(ctx_for(env, step.command, key), step.command, payload);
       assert.equal(second.replayed, true);
       assert.equal(state_signature(env.db), after_first, "a replay writes nothing");
       assert.deepEqual(table_counts(env.db), counts);
@@ -1425,7 +1444,7 @@ for (const step of STEPS) {
       }
       // the same key with a different payload is a key-reuse error and writes nothing
       await rejects_with_api_error(
-        env.service.execute(env.ctx(key), step.command, { ...(payload as Record<string, unknown>), reason: "다른 요청", extra_probe: 1 }),
+        env.service.execute(ctx_for(env, step.command, key), step.command, { ...(payload as Record<string, unknown>), reason: "다른 요청", extra_probe: 1 }),
       );
       assert.equal(state_signature(env.db), after_first);
     });

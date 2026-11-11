@@ -159,9 +159,9 @@ test("F1 (c) membership removed during the wait: the waiting inputs request ends
   });
 });
 
-test("F1 (d) an external_agent holding a mode A run is blocked by Go OFF at once — no wait, no input", async () => {
+test("F1 (d) an internal_ai actor holding a mode A run is blocked by Go OFF at once — no wait, no input", async () => {
   await with_api(async (env) => {
-    const agent = await make_agent(env, "f1d"); // external_agent
+    const agent = await make_agent(env, "f1d", undefined, "internal_ai"); // SEL-68: mode A belongs to internal_ai only
     const lease = await run_for(env, agent, "A");
     const q = await agent_asks(env, agent, lease);
     const answered = await owner_submits(env, q);

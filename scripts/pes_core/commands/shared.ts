@@ -99,6 +99,24 @@ export interface CommandDefinition {
   run(runtime: CommandRuntime): CommandResult;
 }
 
+/**
+ * SEL-68: an optional current-state check before a matching success receipt is replayed, kept in its own table
+ * (command name -> check) beside the registry so a definition keeps its fixed shape. CommandService calls it in the
+ * same transaction only when it is about to return a stored result, never on a first run (run() does its own checks
+ * then). It may throw an ApiError to refuse the replay; returning means "replay as stored". It cannot write: it gets
+ * the read-only handle of with_readonly_db (get/all, one SELECT/WITH, SQLite query_only=ON, dead after the call) and
+ * a copy of the payload. A command without an entry replays exactly as before.
+ */
+export type PreReplayHook = (check: PreReplayCheck) => void;
+
+/** What a pre-replay check sees: a read-only view of the transaction, the resolved scope and a payload copy. */
+export interface PreReplayCheck {
+  readonly db: ReadonlyDbHandle;
+  readonly project_id: string | null;
+  readonly actor_id: string | null;
+  readonly payload: unknown;
+}
+
 export function require_well_formed(value: string, field: string): string {
   if (!value.isWellFormed()) {
     throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
@@ -384,6 +402,78 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
     throw new ApiError("forbidden", "a human project owner is required");
   }
   return actor_id;
+}
+
+/** The provider and model prefix of a Go (OpenCode Go) destination. */
+export const GO_PROVIDER = "opencode-go";
+export const GO_MODEL_PREFIX = "opencode-go/";
+
+/**
+ * Folds a label for the Go test. The one order, in one place (both the server rule below and
+ * adapters/opencode_tui.ts `on_go_route` use it; only the test applied to the folded text differs):
+ *   1. Unicode compatibility folding (NFKC: full-width letters, NBSP and ideographic space become plain ones);
+ *   2. format characters (\p{Cf}: zero-width, soft hyphen, BOM, word joiner, bidi marks) removed;
+ *   3. surrounding whitespace (any Unicode space) trimmed — after 1 and 2, so a space hidden behind a format
+ *      character cannot survive as a separator;
+ *   4. lower case;
+ *   5. every run of hyphen-like characters, underscores and spaces folded to one "-", a separator next to "/"
+ *      dropped (`opencode-go /x` is `opencode-go/x`), and leading separators dropped.
+ * A step can expose work for an earlier one (removing a format character can let NFKC compose), so the steps repeat
+ * until the text stops changing: the result is a fixed point, fold_go_label(fold_go_label(x)) === fold_go_label(x).
+ * A look-alike from another script stays unfolded.
+ */
+export function fold_go_label(value: string): string {
+  let current = value;
+  for (let pass = 0; pass < 8; pass++) {
+    const next = current
+      .normalize("NFKC")
+      .replace(/\p{Cf}/gu, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\p{Pd}\u2212_\s]+/gu, "-")
+      .replace(/-*\/-*/g, "/")
+      .replace(/^-+/, "");
+    if (next === current) return next;
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * Which field of a run carries the Go label: "mode" for mode A, else "provider" (folded `opencode-go`) or "model"
+ * (folded `opencode-go/` prefix), or null. Only this test folds; the mode A shape check stays on the exact spelling.
+ */
+export function go_label_field(run: { mode: unknown; provider: unknown; model: unknown }): "mode" | "provider" | "model" | null {
+  if (run.mode === "A") return "mode";
+  if (typeof run.provider === "string" && fold_go_label(run.provider) === GO_PROVIDER) return "provider";
+  if (typeof run.model === "string" && fold_go_label(run.model).startsWith(GO_MODEL_PREFIX)) return "model";
+  return null;
+}
+
+/** A Go label: provider `opencode-go` or a model starting with `opencode-go/`, compared after folding. */
+export function is_go_label(provider: unknown, model: unknown): boolean {
+  const field = go_label_field({ mode: null, provider, model });
+  return field === "provider" || field === "model";
+}
+
+/**
+ * SEL-68: a mode A run (the PES built-in runner) and any Go-labelled run belong to an internal_ai actor only.
+ * A claim, a run_id claim, or a run created for any other actor kind (external_agent, human) is 403 forbidden
+ * before anything is written. One rule for the HTTP API and the core commands (the CLI calls the commands).
+ * `details` is `{ actor_kind, field }`: the kind that was refused and the run field that carries the label.
+ */
+export function require_internal_ai_for_go_run(
+  actor_kind: string | null | undefined,
+  run: { mode: unknown; provider: unknown; model: unknown },
+  field_override?: string,
+): void {
+  const field = go_label_field(run);
+  if (field !== null && actor_kind !== "internal_ai") {
+    throw new ApiError("forbidden", "a mode A or OpenCode Go run belongs to an internal AI actor only", {
+      actor_kind: actor_kind ?? null,
+      field: field_override ?? field,
+    });
+  }
 }
 
 /** True when the command's actor is the project's human owner (no throw). */

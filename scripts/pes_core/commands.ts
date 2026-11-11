@@ -31,7 +31,7 @@ import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { make_register_command, type BuildHooks, type Created } from "./commands/projects.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RECORD_COMMAND_ENTRIES } from "./commands/records.ts";
-import { RUN_COMMAND_ENTRIES } from "./commands/runs.ts";
+import { RUN_COMMAND_ENTRIES, RUN_PRE_REPLAY_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
   is_record,
@@ -47,6 +47,7 @@ import {
   type CommandRuntime,
   type EventDraft,
   type MutationContext,
+  type PreReplayHook,
   type ProjectRow,
 } from "./commands/shared.ts";
 
@@ -527,6 +528,12 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
 ]);
 
 /**
+ * SEL-68: private table of read-only checks run before a stored result is replayed (see PreReplayHook). Only
+ * run.claim and run.create have one; every other command replays as before. Not exported, like COMMAND_TABLE.
+ */
+const PRE_REPLAY_TABLE: ReadonlyMap<string, PreReplayHook> = new Map<string, PreReplayHook>([...RUN_PRE_REPLAY_ENTRIES]);
+
+/**
  * A frozen read-only view with read methods only. Command names are own
  * enumerable properties (so Object.keys is the registry); the read methods are
  * prototype methods. There is no set/delete/clear, so neither a caller nor
@@ -743,6 +750,14 @@ export class CommandService {
 
     const replay = this.#replayed_result(definition, ctx, actor_id, hash);
     if (replay !== undefined) {
+      // SEL-68: a command may re-check the current state (actor kind, Go policy) before its stored result is
+      // replayed. Read-only by construction: the hook only gets the with_readonly_db handle and a payload copy.
+      const pre_replay = PRE_REPLAY_TABLE.get(command);
+      if (pre_replay !== undefined) {
+        with_readonly_db(this.#db, (read_db) =>
+          pre_replay({ db: read_db, project_id: project?.id ?? null, actor_id, payload: copy_snapshot(payload) }),
+        );
+      }
       return { result: replay.result, replayed: true };
     }
 

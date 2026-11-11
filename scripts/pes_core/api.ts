@@ -13,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 
-import { AGENT_SCOPE_NAMES, resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
+import { AGENT_SCOPE_NAMES, read_credential_actor, resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
 import { register_project } from "./bootstrap.ts";
 import type { Clock } from "./clock.ts";
 import { COMMANDS, CommandService, type CommandOutcome, type MutationContext } from "./commands.ts";
@@ -39,6 +39,7 @@ import {
   type ReceiptRow,
 } from "./commands/api_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
+import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
 import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
@@ -973,6 +974,26 @@ export class ApiApp {
     if (!decision.allowed) throw new Fail("policy_blocked");
   }
 
+  /**
+   * SEL-68: the shared actor rule as an API refusal — 403 forbidden with target `$.body.<field>` (the field that
+   * carries the Go label, or `run_id`) and details.actor_kind (the kind that was refused), before any write.
+   */
+  #require_internal_for_go(
+    kind: string,
+    run: { mode: unknown; provider: unknown; model: unknown },
+    field?: string,
+  ): void {
+    try {
+      require_internal_ai_for_go_run(kind, run, field);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "forbidden") {
+        const detail = error.details as { actor_kind: string; field: string };
+        throw new Fail("forbidden", { target: `$.body.${detail.field}`, details: { actor_kind: detail.actor_kind } });
+      }
+      throw error;
+    }
+  }
+
   #run_mode(project_id: string, run_id: string): string | null {
     return run_info(this.#db, project_id, run_id)?.mode ?? null;
   }
@@ -1615,7 +1636,10 @@ export class ApiApp {
     const runtime = require_text(body, "runtime");
     const provider = require_text(body, "provider");
     const model = require_text(body, "model");
-    if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
+    // SEL-68: a mode A / Go-labelled run is made for an internal_ai actor only — refused before any write.
+    const target = read_credential_actor(this.#db, actor_id);
+    if (target !== undefined) this.#require_internal_for_go(target.kind, { mode, provider, model });
+    if (mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
       invalid_field("provider");
     }
     if (mode === "A") this.#require_go(project.id);
@@ -1667,14 +1691,23 @@ export class ApiApp {
     let payload: Record<string, unknown>;
     if (has_run) {
       const run_id = require_text(body, "run_id");
-      if (this.#run_mode(project.id, run_id) === "A") this.#require_go(project.id);
+      // SEL-68: the caller's kind, not only the run's mode, decides first (the Go policy follows for internal_ai).
+      const held = this.#db.get<{ mode: string | null; provider: string | null; model: string | null }>(
+        "SELECT mode, provider, model FROM runs WHERE project_id = ? AND id = ?",
+        project.id,
+        run_id,
+      );
+      if (held !== undefined) this.#require_internal_for_go(auth.kind, held, "run_id");
+      if (held?.mode === "A") this.#require_go(project.id);
       payload = { run_id };
     } else {
       const mode = require_mode(body);
       const runtime = require_text(body, "runtime");
       const provider = require_text(body, "provider");
       const model = require_text(body, "model");
-      if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
+      // SEL-68: mode A and a Go label belong to an internal_ai caller; any other kind is 403 before a write.
+      this.#require_internal_for_go(auth.kind, { mode, provider, model });
+      if (mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
         invalid_field("provider");
       }
       if (mode === "A") this.#require_go(project.id);

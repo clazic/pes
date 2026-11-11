@@ -10,6 +10,7 @@
 // file and starts no process. OpenCode expands `{env:VAR}` itself, so the token is a reference, never a value.
 // OpenCode is multi-provider, so the provider is "unknown"; the model is "unknown" unless the caller knows it.
 
+import { fold_go_label } from "../commands/shared.ts";
 import { AdapterError, check_entry_input, InputError, read_launch_env, type CliLaunchEnvInput, type CliMcpEntryInput } from "./cli_common.ts";
 
 export type { CliLaunchEnvInput, CliMcpEntryInput, TokenKeyStore } from "./cli_common.ts";
@@ -28,19 +29,14 @@ export interface OpencodeTuiMcpEntry {
 }
 
 /**
- * Folds a model label the way a person (or a config reader) would read it, then asks whether it names the Go
- * provider: Unicode compatibility folding (full-width letters), format characters removed (zero-width, soft hyphen,
- * BOM, bidi overrides), every hyphen-like character, underscore and space read as one separator. A look-alike from
- * another script (a Cyrillic "о") is not folded and stays a documented limit.
+ * Asks whether a model label names the Go provider. The folding is the server's own `fold_go_label`
+ * (commands/shared.ts): Unicode compatibility folding, format characters removed, hyphen-like characters,
+ * underscore and space read as one separator. The test on the folded text is wider than the server's (any
+ * `opencode-go` word start here, because a screen the person starts is not metered; the server needs the exact
+ * provider or the `opencode-go/` prefix). A look-alike from another script (a Cyrillic "о") is not folded.
  */
 function on_go_route(model: string): boolean {
-  const folded = model
-    .normalize("NFKC")
-    .replace(/\p{Cf}/gu, "")
-    .toLowerCase()
-    .replace(/[\p{Pd}\u2212_\s]+/gu, "-")
-    .replace(/^-+/, "");
-  return /^opencode-go(?![a-z0-9])/.test(folded);
+  return /^opencode-go(?![a-z0-9])/.test(fold_go_label(model));
 }
 
 export function opencode_tui_mcp_entry(input: CliMcpEntryInput): OpencodeTuiMcpEntry {

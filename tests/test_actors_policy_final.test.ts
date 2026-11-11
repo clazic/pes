@@ -70,6 +70,8 @@ interface Env {
   owner_user_id: string;
   blob_id: string;
   ctx(key: string, actor_id?: string): MutationContext;
+  /** the internal_ai actor that holds mode A (Go) leases */
+  ai_ctx(key: string): MutationContext;
   close(): void;
 }
 
@@ -89,6 +91,12 @@ async function make_env(policy: PolicyChecker = new DbPolicyChecker()): Promise<
     { slug: `synthetic-final-${project_seq}`, topic: "합성 최종 주제", owner_display_name: "합성 소유자" },
   );
   const r = out.result as { project_id: string; owner_actor_id: string; owner_user_id: string };
+  // SEL-68: a mode A run belongs to an internal_ai actor only, so the Go lease flow below runs as this actor
+  // (the human owner keeps the policy commands: set_policy, ...).
+  db.run(
+    "INSERT INTO actors (id, kind, user_id, display_name) VALUES ('agent-ai', 'internal_ai', ?, '합성 내장 AI')",
+    r.owner_user_id,
+  );
   db.run(
     `INSERT INTO blobs (id, project_id, storage_key, sha256, size, media_type, state, created_by)
      VALUES (?, ?, ?, ?, 10, 'application/json', 'ready', ?)`,
@@ -117,6 +125,7 @@ async function make_env(policy: PolicyChecker = new DbPolicyChecker()): Promise<
       via: "cli",
       client_request_id: key,
     }),
+    ai_ctx: (key) => ({ project_id: r.project_id, actor_id: "agent-ai", via: "cli", client_request_id: key }),
     close() {
       db.close();
       home.cleanup();
@@ -167,7 +176,7 @@ function guard(l: Lease): { run_id: string; lease_id: string; fence: number } {
 }
 
 async function claim_go(env: Env, key: string): Promise<Lease> {
-  const out = await claim(env.service, env.ctx(key), {
+  const out = await claim(env.service, env.ai_ctx(key), {
     mode: "A",
     runtime: "synthetic-runtime",
     provider: "opencode-go",
@@ -177,7 +186,7 @@ async function claim_go(env: Env, key: string): Promise<Lease> {
 }
 
 async function claim_b(env: Env, key: string): Promise<Lease> {
-  const out = await claim(env.service, env.ctx(key), {
+  const out = await claim(env.service, env.ai_ctx(key), {
     mode: "B",
     runtime: "synthetic-runtime",
     provider: "synthetic",
@@ -187,7 +196,7 @@ async function claim_b(env: Env, key: string): Promise<Lease> {
 }
 
 async function reclaim(env: Env, key: string, run_id: string): Promise<Lease> {
-  const out = await claim(env.service, env.ctx(key), { run_id });
+  const out = await claim(env.service, env.ai_ctx(key), { run_id });
   return out.result as Lease;
 }
 
@@ -202,12 +211,12 @@ function prepare_payload(env: Env, l: Lease, request_key: string): Record<string
 }
 
 async function do_prepare(env: Env, key: string, l: Lease, request_key: string): Promise<string> {
-  const out = await prepare_dispatch(env.service, env.ctx(key), prepare_payload(env, l, request_key));
+  const out = await prepare_dispatch(env.service, env.ai_ctx(key), prepare_payload(env, l, request_key));
   return (out.result as { dispatch_id: string }).dispatch_id;
 }
 
 async function do_authorize(env: Env, key: string, l: Lease, dispatch_id: string): Promise<void> {
-  await authorize_dispatch(env.service, env.ctx(key), { dispatch_id, ...guard(l) });
+  await authorize_dispatch(env.service, env.ai_ctx(key), { dispatch_id, ...guard(l) });
 }
 
 async function go_off(env: Env, key = "go-off") {
@@ -301,7 +310,7 @@ function applied_receipt_count(env: Env, run_id: string): number {
 async function assert_old_guard_refused(env: Env, old: Lease, tag: string, input: { version_id: string; tx_id: string }, dispatch_ids: string[]) {
   const before = state_signature(env.db);
   const attempts: Array<[string, () => Promise<unknown>]> = [
-    ["heartbeat", () => heartbeat(env.service, env.ctx(`${tag}-hb`), guard(old))],
+    ["heartbeat", () => heartbeat(env.service, env.ai_ctx(`${tag}-hb`), guard(old))],
     [
       "record_receipt(applied)",
       () =>
@@ -312,12 +321,12 @@ async function assert_old_guard_refused(env: Env, old: Lease, tag: string, input
           applied_tx_id: input.tx_id,
         }),
     ],
-    ["prepare", () => prepare_dispatch(env.service, env.ctx(`${tag}-prep`), prepare_payload(env, old, `rk-${tag}-new`))],
-    ["complete", () => complete(env.service, env.ctx(`${tag}-done`), { ...guard(old), status: "succeeded" })],
+    ["prepare", () => prepare_dispatch(env.service, env.ai_ctx(`${tag}-prep`), prepare_payload(env, old, `rk-${tag}-new`))],
+    ["complete", () => complete(env.service, env.ai_ctx(`${tag}-done`), { ...guard(old), status: "succeeded" })],
   ];
   for (const [i, dispatch_id] of dispatch_ids.entries()) {
-    attempts.push([`authorize#${i}`, () => authorize_dispatch(env.service, env.ctx(`${tag}-auth${i}`), { dispatch_id, ...guard(old) })]);
-    attempts.push([`mark_sent#${i}`, () => mark_sent(env.service, env.ctx(`${tag}-sent${i}`), { dispatch_id, ...guard(old) })]);
+    attempts.push([`authorize#${i}`, () => authorize_dispatch(env.service, env.ai_ctx(`${tag}-auth${i}`), { dispatch_id, ...guard(old) })]);
+    attempts.push([`mark_sent#${i}`, () => mark_sent(env.service, env.ai_ctx(`${tag}-sent${i}`), { dispatch_id, ...guard(old) })]);
   }
   for (const [name, attempt] of attempts) {
     await rejects_with_api_error(attempt(), STALE).catch((e) => {
@@ -337,7 +346,7 @@ test("F1 review reproduction 1-6: OFF revokes the Go lease; the old guard stays 
     const prepared = await do_prepare(env, "f1-prep-2", old, "rk-f1-b");
     const input = make_input(env);
     // sanity: before OFF the guard works
-    await heartbeat(env.service, env.ctx("f1-hb-before"), guard(old));
+    await heartbeat(env.service, env.ai_ctx("f1-hb-before"), guard(old));
     assert.equal(lease_row(env).state, "active");
     assert.equal(run_row(env.db, old.run_id).status, "running");
 
@@ -376,7 +385,7 @@ test("F1 review reproduction 1-6: OFF revokes the Go lease; the old guard stays 
 
     const next = await do_prepare(env, "f1-prep-new", fresh, "rk-f1-c");
     await do_authorize(env, "f1-auth-new", fresh, next);
-    await mark_sent(env.service, env.ctx("f1-sent-new"), { dispatch_id: next, ...guard(fresh), external_request_id: "ext-f1" });
+    await mark_sent(env.service, env.ai_ctx("f1-sent-new"), { dispatch_id: next, ...guard(fresh), external_request_id: "ext-f1" });
     assert.equal(dispatch_row(env.db, next).state, "sent");
     // the blocked history is not revived by the new claim
     assert.equal(dispatch_row(env.db, authorized).state, "blocked");
@@ -427,7 +436,7 @@ test("F1 a failing lease or run write rolls the whole OFF back: policy, dispatch
       assert.equal(dispatch_row(env.db, d).state, "prepared");
     }
     // the lease still works, so the failed OFF did not half-revoke it
-    await heartbeat(env.service, env.ctx("f1r-hb"), guard(l));
+    await heartbeat(env.service, env.ai_ctx("f1r-hb"), guard(l));
   });
 });
 
@@ -442,9 +451,9 @@ test("F1 a mode B run keeps its lease and stays running through OFF and ON", asy
     const events = events_of_tx(env, receipt_id(env, "f1b-off"));
     assert.deepEqual(events.map((e) => e.type), ["policy.changed"], "no run event for a B run");
     // the B run is not a Go send: its lease keeps working during OFF
-    await heartbeat(env.service, env.ctx("f1b-hb"), guard(b));
+    await heartbeat(env.service, env.ai_ctx("f1b-hb"), guard(b));
     await go_on(env, "f1b-on");
-    await heartbeat(env.service, env.ctx("f1b-hb2"), guard(b));
+    await heartbeat(env.service, env.ai_ctx("f1b-hb2"), guard(b));
     assert.equal(run_row(env.db, b.run_id).status, "running");
     assert.equal(lease_row(env).state, "active");
   });
@@ -453,7 +462,7 @@ test("F1 a mode B run keeps its lease and stays running through OFF and ON", asy
 test("F1 finished runs stay as they are: a completed Go run is not interrupted, a later Go run is", async () => {
   await with_env(async (env) => {
     const first = await claim_go(env, "f1d-claim-1");
-    await complete(env.service, env.ctx("f1d-done-1"), { ...guard(first), status: "succeeded" });
+    await complete(env.service, env.ai_ctx("f1d-done-1"), { ...guard(first), status: "succeeded" });
     const finished_run = run_row(env.db, first.run_id);
     assert.equal(finished_run.status, "succeeded");
 
@@ -478,7 +487,7 @@ test("F1 OFF while the Go run sits with a released lease (no active lease) chang
   await with_env(async (env) => {
     const a = await claim_go(env, "f1n-claim");
     const d = await do_prepare(env, "f1n-prep", a, "rk-f1n");
-    await complete(env.service, env.ctx("f1n-done"), { ...guard(a), status: "failed" });
+    await complete(env.service, env.ai_ctx("f1n-done"), { ...guard(a), status: "failed" });
     const run_before = run_row(env.db, a.run_id);
     const lease_before = lease_row(env);
     const out = await go_off(env, "f1n-off");
@@ -508,7 +517,7 @@ test("F1 a rejected OFF (agent actor, invalid payload) does not touch the Go run
     );
     assert.equal(state_signature(env.db), before);
     assert.equal(lease_row(env).state, "active");
-    await heartbeat(env.service, env.ctx("f1x-hb"), guard(l));
+    await heartbeat(env.service, env.ai_ctx("f1x-hb"), guard(l));
   });
 });
 
@@ -766,14 +775,34 @@ test("F2 review reproduction: a checker that UPDATEs projects.topic in check() c
 
 test("F2 the real DbPolicyChecker still reads the policy through the guarded handle (Go gate works, OFF and ON)", async () => {
   await with_env(async (env) => {
+    // Go OFF: the guarded policy read stops a mode A Go claim itself (SEL-68: claim is a Go send), nothing is written.
     await go_off(env, "f2g-off");
-    const l = await claim_go(env, "f2g-claim"); // claim is not a Go send, so OFF does not stop it
+    const before_denied = state_signature(env.db);
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ctx("f2g-prep-off"), prepare_payload(env, l, "rk-f2g-b")),
+      claim(env.service, env.ai_ctx("f2g-claim-off"), {
+        mode: "A",
+        runtime: "synthetic-runtime",
+        provider: "opencode-go",
+        model: GO_MODEL,
+      }),
       "policy_denied",
     );
-    await go_on(env, "f2g-on");
-    const next = await do_prepare(env, "f2g-prep-on", l, "rk-f2g-c");
+    assert.equal(state_signature(env.db), before_denied, "a denied Go claim writes nothing");
+    // Go ON: the gate opens, the claim works.
+    await go_on(env, "f2g-on-1");
+    const l = await claim_go(env, "f2g-claim");
+    // Turning OFF revokes the active mode A lease, so the old guard is refused (stale lease or the OFF policy).
+    await go_off(env, "f2g-off-2");
+    const before_prep = state_signature(env.db);
+    await rejects_with_api_error(
+      prepare_dispatch(env.service, env.ai_ctx("f2g-prep-off"), prepare_payload(env, l, "rk-f2g-b")),
+      STALE,
+    );
+    assert.equal(state_signature(env.db), before_prep, "a refused prepare writes nothing");
+    // Go ON again: a fresh claim and prepare go through.
+    await go_on(env, "f2g-on-2");
+    const l2 = await claim_go(env, "f2g-claim-2");
+    const next = await do_prepare(env, "f2g-prep-on", l2, "rk-f2g-c");
     assert.equal(dispatch_row(env.db, next).state, "prepared");
   });
 });
@@ -961,8 +990,8 @@ test("R3 ON does not revive or change an unknown row, and a new claim cannot sen
     await go_on(env, "r3b-on");
     const fresh = await reclaim(env, "r3b-reclaim", w.l.run_id);
     for (const [i, id] of [w.with_sent_at, w.with_ext, w.with_both].entries()) {
-      await rejects_with_api_error(mark_sent(env.service, env.ctx(`r3b-sent-${i}`), { dispatch_id: id, ...guard(fresh) }), "conflict");
-      await rejects_with_api_error(authorize_dispatch(env.service, env.ctx(`r3b-auth-${i}`), { dispatch_id: id, ...guard(fresh) }), "conflict");
+      await rejects_with_api_error(mark_sent(env.service, env.ai_ctx(`r3b-sent-${i}`), { dispatch_id: id, ...guard(fresh) }), "conflict");
+      await rejects_with_api_error(authorize_dispatch(env.service, env.ai_ctx(`r3b-auth-${i}`), { dispatch_id: id, ...guard(fresh) }), "conflict");
     }
     assert.deepEqual([w.with_sent_at, w.with_ext, w.with_both].map((id) => dispatch_row(env.db, id)), unknown_before);
   });
@@ -1014,7 +1043,7 @@ test("R3 sent, response and failed history stays as it is when OFF runs next to 
     const l = await claim_go(env, "r3d-claim");
     const sent = await do_prepare(env, "r3d-p1", l, "rk-r3d-1");
     await do_authorize(env, "r3d-a1", l, sent);
-    await mark_sent(env.service, env.ctx("r3d-s1"), { dispatch_id: sent, ...guard(l), external_request_id: "ext-r3d" });
+    await mark_sent(env.service, env.ai_ctx("r3d-s1"), { dispatch_id: sent, ...guard(l), external_request_id: "ext-r3d" });
     const evidence = await do_prepare(env, "r3d-p2", l, "rk-r3d-2");
     await do_authorize(env, "r3d-a2", l, evidence);
     env.db.run("UPDATE outbound_dispatches SET external_request_id = 'ext-r3d-2' WHERE id = ?", evidence);

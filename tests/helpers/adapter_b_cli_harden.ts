@@ -267,10 +267,9 @@ export function define_cli_harden(spec: CliSpec): void {
     });
   });
 
-  // FINDING outside the adapter (API, PR10/13/19): an external_agent token is allowed to POST /claims with mode A and
-  // provider opencode-go — it gets a lease and a run labelled as a built-in Go run, and the Go policy check
-  // (`op.go && auth.kind === "internal_ai"`) is skipped for it. Marked todo so the PR20b gate is not blocked by it.
-  test(`${spec.label} harden: an external agent token cannot start a built-in (mode A / Go) run over the API`, { todo: "API gap outside PR20b: external_agent may claim mode A" }, async () => {
+  // SEL-68: an external_agent token must not start a built-in (mode A / Go) run over the API. This was a todo in PR20b
+  // (the Go check ran only for internal_ai); it is now a required test. The wider matrix is in test_api_sel68_mode_a_claim.
+  test(`${spec.label} harden: an external agent token cannot start a built-in (mode A / Go) run over the API`, async () => {
     await with_cli(spec, async (env) => {
       const sig = state_signature(env.db);
       for (const body of [
