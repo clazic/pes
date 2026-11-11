@@ -319,8 +319,19 @@ test("F1 (1) clock rewind: after a takeover a clock that goes back before the OL
     assert.equal(await code_of(claim(env.service, env.ctx("r1-again"), { run_id: a.run_id })), "conflict", "the new lease is live (now < its expiry)");
     assert.equal(await code_of(claim(env.service, env.ctx("r1-fresh"), NEW_RUN)), "conflict");
     assert.equal(state_signature(env.db), before);
-    // (not asserted: a heartbeat of the NEW guard under a rewound clock trips the heartbeat_at >= acquired_at CHECK as a raw
-    //  SQLite error instead of an ApiError; that is older than F1 and outside this change, noted in the report)
+    assert.equal(lease_of(env.db, env.p.project_id).lease_id, b.lease_id);
+    // SEL-69: a heartbeat of the NEW guard under the rewound clock (now < the new lease's acquired_at) is no longer a raw
+    // SQLite CHECK error: it succeeds, heartbeat_at = max(now, acquired_at), and the expiry does not move back.
+    const acquired_b = Number(env.db.get<{ acquired_at: bigint }>("SELECT acquired_at FROM project_leases WHERE project_id = ?", env.p.project_id)!.acquired_at);
+    assert.ok(env.clock.t < acquired_b, "the clock is behind the new lease's acquired_at");
+    const hb = (await heartbeat(env.service, env.ctx("r1-new-hb"), g(b))).result as { expires_at: number };
+    assert.equal(hb.expires_at, b.expires_at, "a rewound clock does not shorten the new lease");
+    const row = env.db.get<{ acquired_at: bigint; heartbeat_at: bigint; expires_at: bigint }>(
+      "SELECT acquired_at, heartbeat_at, expires_at FROM project_leases WHERE project_id = ?",
+      env.p.project_id,
+    )!;
+    assert.equal(Number(row.heartbeat_at), Number(row.acquired_at), "heartbeat_at = max(now, acquired_at)");
+    assert.equal(Number(row.expires_at), b.expires_at);
     assert.equal(lease_of(env.db, env.p.project_id).lease_id, b.lease_id);
   });
 });
