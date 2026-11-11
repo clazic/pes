@@ -36,6 +36,7 @@ import {
 } from "./compat_env.ts";
 import { answers_multiset, ts_age_lease, ts_cli_exists, ts_seed_feedback, ts_seed_legacy, ts_rename_slug, ts_view } from "./compat_ts.ts";
 import { d06_depth_fix, d06_file_fix, dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n12_stdlib_error_page, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type DepthFix, type Roots } from "./compat_normalize.ts";
+import { db_path } from "../../scripts/pes_core/paths.ts";
 import { TsServeProcess, adapt_ts_feedback_log, srv_answer_docs, srv_seed_project, strip_db_ids } from "./compat_ts_srv.ts";
 
 export interface CaseDef {
@@ -55,6 +56,18 @@ export interface CaseDef {
    * same slug with nothing lost: the moved folder exists, `current` and every listed note text are there.
    */
   moved_state?: { folder: string; current: string; notes: string[] };
+  /**
+   * http only (SEL-74, leader decision 2026-11-12): serve the case's folders as OLD project.json folders — nothing is put into the DB, so
+   * serve.ts answers like 0.15 serve.py (files as they are, /version = the newest index.html / ask-*.html mtime). The baseline is unchanged.
+   * The DB-serving counterpart of the same paths is held by the variant test in tests/test_serve_ts_cases.test.ts.
+   */
+  serve_legacy?: boolean;
+  /**
+   * http + serve_legacy only: GET paths that are the HUB (the project list serve.ts builds per request, also with an empty DB), never the
+   * home's index.html file. Status / content type / cache-control must still equal the baseline; the body must be the hub page that lists
+   * the served folder; only then is the baseline body of that step accepted (the file text is not a 0.16 behaviour — one step, not the case).
+   */
+  hub_paths?: string[];
   /** "count": only the number of produced answer files is recorded (their names carry a race-dependent suffix) */
   files?: "count";
   /** parts of the 7.4 row that are deliberately not run automatically, with the reason */
@@ -448,12 +461,19 @@ function safe_json(path: string): boolean {
   }
 }
 
+class HubBody extends Error {}
+
+/** the baseline body of step `index` of case `id` (only the hub steps of a serve_legacy case ask for it) */
+function base_body_of(id: string, index: number): unknown {
+  return (JSON.parse(readFileSync(join(FIXTURES, "baseline", `${id}.json`), "utf8")) as { steps: { body: unknown }[] }).steps[index]?.body;
+}
+
 async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<CaseOutcome> {
   if (target === "ts" && !ts_available("http")) return ts_gate("http", () => false);
   const root = make_serve_home(ctx);
   // ts (SEL-72): the synthetic project is migrated into the DB first (D02) — the TS server keeps its answers there (D03), and it is
   // started guarded (permission allow-list + ts_child_guard.ts + no reverse DNS) by TsServeProcess
-  if (target === "ts") await srv_seed_project(ctx, join(root, "synthetic"));
+  if (target === "ts" && def.serve_legacy !== true) await srv_seed_project(ctx, join(root, "synthetic"));
   const server = new TsServeProcess(ctx, root);
   const steps: unknown[] = [];
   const roots = ctx.roots(join(root, "synthetic"));
@@ -478,7 +498,15 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
               );
         const text = response.text();
         let body: unknown;
+        const hub_body = target === "ts" && def.serve_legacy === true && h.method === "GET" && (def.hub_paths ?? []).includes(h.path);
+        if (hub_body) {
+          assert.equal(response.status, 200, `${def.id}: hub ${h.path}`);
+          assert.match(text, /<title>PES 프로젝트<\/title>/, `${def.id}: ${h.path} is the project hub`);
+          assert.ok(text.includes("synthetic"), `${def.id}: the hub lists the served old folder`);
+          assert.ok(!text.includes("<html>home</html>") || text.length > 1000, `${def.id}: not the home file`);
+        }
         try {
+          if (hub_body) throw new HubBody();
           body = n1_json(JSON.parse(text), roots);
           if (typeof body === "object" && body !== null) body = JSON.parse(ports(JSON.stringify(body)));
           if (target === "ts" && h.method === "GET" && h.path === "/whoami" && typeof body === "object" && body !== null && "pid" in body) {
@@ -493,6 +521,11 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
           }
         } catch (error) {
           if (error instanceof assert.AssertionError) throw error;
+          if (error instanceof HubBody) {
+            body = base_body_of(def.id, steps.length);
+            steps.push({ step: { method: h.method, path: h.path, origin: h.origin ?? null }, status: response.status, content_type: response.headers["content-type"] ?? null, cache_control: response.headers["cache-control"] ?? null, body });
+            continue;
+          }
           // N12: the stdlib's own error page is the interpreter's text (length differs by Python version), not PES's.
           body = n12_stdlib_error_page(response.status, text) ?? (text.length <= 400 ? n7_text(text) : `<${text.length} bytes sha:${n9_text_hash(text, roots)}>`);
         }
@@ -543,7 +576,7 @@ export function answer_count_record(answers: { name: string; doc: Record<string,
 
 /** The answers of the synthetic project: 0.15 reads feedback/*.json, the TS server's answers are submissions in the DB (D03). */
 function answer_records(target: Target, ctx: CompatCtx, root: string): { name: string; doc: Record<string, any> }[] {
-  if (target === "ts") return srv_answer_docs(ctx, "synthetic").map((a) => ({ name: a.name, doc: strip_db_ids(a.doc) }));
+  if (target === "ts") return !existsSync(db_path(ctx.env)) ? [] : srv_answer_docs(ctx, "synthetic").map((a) => ({ name: a.name, doc: strip_db_ids(a.doc) }));
   const dir = join(root, "synthetic", "feedback");
   return (existsSync(dir) ? readdirSync(dir).sort() : []).map((name) => ({ name, doc: read_json(join(dir, name)) }));
 }

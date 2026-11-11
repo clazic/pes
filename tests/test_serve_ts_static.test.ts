@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { createConnection, createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { BARE_SERVE, REPO_ROOT, run_ts_bare } from "./helpers/compat_ts_srv.ts";
@@ -115,8 +115,10 @@ test("banner, loopback-only binding, no reverse DNS (SEL-33), no hub contact", {
   }
 });
 
-test("static files: content types, no-store everywhere, redirects, latest ask form, HEAD, query string ignored", { timeout: 90_000 }, async () => {
+test("static files (old folders, nothing in the DB): content types, no-store everywhere, redirects, latest ask form, HEAD, query string ignored", { timeout: 90_000 }, async () => {
+  // 0.15 static serving = OLD project.json folders (nothing in the DB, SEL-74 leader decision 2026-11-12): files as they are, mtime version
   const fx = await serve_fixture("pes-serve-static-", {
+    no_db: true,
     files: {
       "synthetic/out/note.md": "# 메모\n",
       "synthetic/out/note.txt": "text",
@@ -236,8 +238,8 @@ test("/whoami: root + single, CORS only for the local PES ports (87xx) and only 
   }
 });
 
-test("the version cursor follows the newest index.html / ask-*.html time of the folder (home: the home's own files)", { timeout: 90_000 }, async () => {
-  const fx = await serve_fixture("pes-serve-version-");
+test("the version cursor of an old folder (nothing in the DB) follows the newest index.html / ask-*.html time of the folder (home: the home's own files)", { timeout: 90_000 }, async () => {
+  const fx = await serve_fixture("pes-serve-version-", { no_db: true });
   try {
     const { server, root } = fx;
     touch_at(join(root, "synthetic", "index.html"), 1_600_000_000);
@@ -247,6 +249,77 @@ test("the version cursor follows the newest index.html / ask-*.html time of the 
     assert.deepEqual((await server.request("/version")).json(), { v: 1_600_000_900 });
     touch_at(join(root, "synthetic", "index.html"), 1_600_001_000);
     assert.deepEqual((await server.request("/synthetic/version")).json(), { v: 1_600_001_000 });
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+// DB-serving counterparts (SEL-74, leader decision 2026-11-12): the SAME paths for a project that IS in the DB are the database's — the page is
+// built per request, /version is the DB change cursor, files in the folder neither build the page nor move the cursor (PR18 guarantee).
+test("static files, DB-serving project: /<slug>/ and /<slug>/index.html are built from the DB, not the folder's index.html; no-store; HEAD; redirect; ask form still found", { timeout: 90_000 }, async () => {
+  const fx = await serve_fixture("pes-serve-static-db-");
+  try {
+    const { server, root } = fx;
+    const file_text = "<html>synthetic</html>";
+    for (const path of ["/synthetic/", "/synthetic/index.html", "/synthetic/index.html?x=1"]) {
+      const answer = await server.request(path);
+      assert.equal(answer.status, 200, path);
+      assert.equal(answer.headers["content-type"], "text/html; charset=utf-8", path);
+      assert.equal(answer.headers["cache-control"], "no-store", path);
+      assert.notEqual(answer.text(), file_text, `${path}: the page is built from the DB, the folder's index.html is not served`);
+      assert.match(answer.text(), /<\/html>\s*$/i, path);
+    }
+    // editing the folder's file changes nothing a browser sees
+    const before = (await server.request("/synthetic/")).text();
+    writeFileSync(join(root, "synthetic", "index.html"), "<html>EDITED-IN-FOLDER</html>", "utf8");
+    const after = (await server.request("/synthetic/")).text();
+    assert.doesNotMatch(after, /EDITED-IN-FOLDER/);
+    assert.equal(after, before, "same DB state → same page");
+    const noslash = await server.request("/synthetic");
+    assert.equal(noslash.status, 302);
+    assert.equal(noslash.headers.location, "/synthetic/");
+    const head = await server.request("/synthetic/index.html", { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.body.length, 0);
+    assert.equal(head.headers["content-length"], String(Buffer.byteLength(after)), "HEAD length = the built page's length");
+    assert.equal((await server.request("/synthetic/ping")).json().ok, true);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("the version cursor of a DB-serving project is the DB change cursor: not the file time, same until the DB changes, the home's value moves with it", { timeout: 90_000 }, async () => {
+  const fx = await serve_fixture("pes-serve-version-db-");
+  try {
+    const { server, root } = fx;
+    const cursor = async (path: string): Promise<number> => {
+      const answer = await server.request(path);
+      assert.equal(answer.status, 200, path);
+      assert.equal(answer.headers["cache-control"], "no-store", path);
+      const v = answer.json().v;
+      assert.ok(Number.isInteger(v) && v >= 0, `${path}: ${JSON.stringify(answer.json())}`);
+      return v as number;
+    };
+    touch_at(join(root, "synthetic", "index.html"), 1_600_000_000);
+    touch_at(join(root, "synthetic", "ask-plan.html"), 1_600_000_500);
+    touch_at(join(root, "index.html"), 1_600_000_900);
+    const project = await cursor("/synthetic/version");
+    const home = await cursor("/version");
+    assert.notEqual(project, 1_600_000_500, "not the newest file time of the folder");
+    assert.notEqual(home, 1_600_000_900, "not the home index.html time");
+    // file times do not move it
+    touch_at(join(root, "synthetic", "index.html"), 1_700_000_000);
+    touch_at(join(root, "index.html"), 1_700_000_100);
+    assert.equal(await cursor("/synthetic/version"), project);
+    assert.equal(await cursor("/version"), home);
+    // reads and a refused answer do not move it either; an accepted answer does, and the home's value follows
+    await server.request("/synthetic/");
+    await server.request("/synthetic/ping");
+    assert.equal(await cursor("/synthetic/version"), project, "reads leave the cursor alone");
+    const sent = await server.post("/synthetic/feedback", { stage: "plan", round: 1, kind: "feedback", text: "합성" });
+    assert.equal(sent.status, 200);
+    assert.ok((await cursor("/synthetic/version")) > project, "an answer is a change");
+    assert.ok((await cursor("/version")) > home, "the home's cursor moves with any project's change");
   } finally {
     await fx.cleanup();
   }

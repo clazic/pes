@@ -8,11 +8,14 @@
 //
 // Until scripts/serve.ts and scripts/setup.ts exist these fail (the harness answers "not_yet" for an implemented case).
 import assert from "node:assert/strict";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { answer_count_record, assert_case, case_def, load_table, run_case } from "./helpers/compat_cases.ts";
 import { n1_time } from "./helpers/compat_normalize.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { serve_fixture, touch_at } from "./helpers/serve_ts_env.ts";
 import { SEL72_DONE, SEL72_KIND, SEL72_LEFT_TO_LATER } from "./helpers/sel72_scope.ts";
 
 use_home_guard();
@@ -55,4 +58,46 @@ test("E09 count: a burst split by a second boundary still counts every answer (n
   assert.deepEqual(answer_count_record(mk("20261111-120000", 12)), { count: "12" });
   // a raw name used twice (an overwrite) is still caught
   assert.throws(() => answer_count_record([...mk("20261111-120000", 2), ...mk("20261111-120000", 1)]), /unique raw names/);
+});
+
+// SEL-74 (leader decision 2026-11-12): E13 above compares the 0.15 static serving on OLD folders (cases.json `serve_legacy`, nothing in the DB;
+// the baseline is unchanged). The same paths for a project the DB serves are the database's — held here with E13's own mtimes and paths.
+test("E13 DB variant: the same paths for a project in the DB — whoami / ping / 404s equal the baseline, /version is the DB cursor (not the E13 mtimes), the page is built from the DB", { timeout: 240_000 }, async () => {
+  const fx = await serve_fixture("pes-e13-db-");
+  try {
+    const { server, root } = fx;
+    touch_at(join(root, "synthetic", "index.html"), 1_600_000_000);
+    touch_at(join(root, "synthetic", "ask-plan.html"), 1_600_000_010);
+    touch_at(join(root, "index.html"), 1_600_000_020);
+    const base = (id: string, step: number) => (JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "compat", "baseline", `${id}.json`), "utf8")) as { steps: any[] }).steps[step];
+    // unchanged by where the project lives: same status / content type / cache-control / body as the 0.15 record
+    const same = async (path: string, step: number, body_of: (text: string) => unknown = (text) => text) => {
+      const want = base("E13", step);
+      assert.equal(want.step.path, path);
+      const got = await server.request(path);
+      assert.equal(got.status, want.status, path);
+      assert.equal(got.headers["content-type"], want.content_type, path);
+      assert.equal(got.headers["cache-control"], want.cache_control, path);
+      return { got, want, body: body_of(got.text()) };
+    };
+    assert.deepEqual((await same("/ping", 1, (t) => JSON.parse(t))).body, { ok: true });
+    assert.deepEqual((await same("/synthetic/ping", 2, (t) => JSON.parse(t))).body, { ok: true });
+    for (const [path, step] of [["/synthetic/feedback/", 8], ["/nope/", 9], ["/..%2f..%2fetc/passwd", 10], ["/bad slug!/", 11]] as const) await same(path, step);
+    // /version: an integer DB cursor, not the mtimes E13 sets for the folder (they are 0.15's answers on old folders)
+    for (const [path, step, mtime] of [["/version", 3, 1_600_000_020], ["/synthetic/version", 4, 1_600_000_010]] as const) {
+      const { got, want } = await same(path, step, (t) => JSON.parse(t));
+      assert.equal(want.body.v, mtime, "the baseline is the 0.15 mtime value");
+      assert.ok(Number.isInteger(got.json().v) && got.json().v >= 0, path);
+      assert.notEqual(got.json().v, mtime, `${path}: a DB-serving project's cursor is not the file time`);
+    }
+    // /synthetic/: built from the DB, not the folder's index.html the baseline served
+    const page = await server.request("/synthetic/");
+    assert.equal(page.status, 200);
+    assert.equal(page.headers["content-type"], "text/html; charset=utf-8");
+    assert.notEqual(page.text(), base("E13", 6).body, "not the folder's index.html");
+    // an ask form of the folder is still found at its address
+    assert.equal((await server.request("/synthetic/ask-plan.html")).status, 200);
+  } finally {
+    await fx.cleanup();
+  }
 });
