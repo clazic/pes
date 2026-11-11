@@ -17,10 +17,11 @@
  *  해석 22 The provider of a Codex CLI run is "openai" (the tool's vendor); the model of the run is "unknown"
  *          unless the entry was given one (the tool does not tell PES what it runs). The OpenCode TUI provider
  *          is "unknown" (OpenCode is multi-provider). Usage: a B run stores no figures.
- *  해석 23 The token reaches the server process only at launch: `codex_cli_launch_env({key_store, project_id})`
- *          reads it from the PR19 key-store interface (`get(service, account)`, account = project_id; the
- *          service name is the adapter's choice) and returns {PES_AGENT_TOKEN} in memory. It only reads (no
- *          set/delete). A missing token is an error with code `token_missing` and a Korean message.
+ *  해석 23 (leader-corrected) The token reaches the server process only at launch: `codex_cli_launch_env({key_store,
+ *          project_id})` calls `key_store.get(ref)` with ONE argument, ref = "pes-agent-token-codex_cli-<project_id>"
+ *          (OpenCode: "pes-agent-token-opencode_tui-<project_id>"), and returns {PES_AGENT_TOKEN} in memory. The
+ *          PR19 KeyStore is put(ref, secret)/get(ref)/delete(ref)/where(); the adapter only reads (no put/delete).
+ *          A missing token is an error with code `token_missing` and a Korean message.
  *  해석 24 Interference with the built-in runner (decision 0019): a mode-A claim (runtime `pes_builtin`,
  *          provider `opencode-go`) and a B claim share the one project lease. Whoever holds it, the other's
  *          claim is `conflict` and writes nothing; neither run row, nor the lease, nor any dispatch / usage / Go

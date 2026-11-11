@@ -19,8 +19,9 @@
 //         (the mcp.pes entry of opencode.json; OpenCode expands {env:VAR}; a model on the Go route is refused)
 //     opencode_tui_launch_env({key_store, project_id}) -> Promise<{PES_AGENT_TOKEN}>
 //
-//   key store (the PR19 interface, here a fake): { get(service, account), set(service, account, secret),
-//     delete(service, account) }, each sync or async; get gives string | null. account = project_id.
+//   key store (the PR19 interface, here a fake): { put(ref, secret), get(ref), delete(ref), where() }, each sync or
+//     async; get gives string | null. The adapter calls get(ref) with ONE argument,
+//     ref = "pes-agent-token-<runtime>-<project_id>" (runtime = codex_cli / opencode_tui).
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -40,40 +41,28 @@ export const SERVER_SCRIPT = join(REPO, "scripts", "pes_core", "mcp_server.ts");
 export const API_BASE_URL = "http://127.0.0.1:8760";
 export const GO_MODEL = "opencode-go/deepseek-v4.1-flash";
 
-/** The fake key store behind the PR19 key-store interface. It records every call and never touches an OS keychain. */
+/** The fake key store in the PR19 shape: put(ref, secret) / get(ref) / delete(ref) / where(). It never touches an OS keychain. */
 export class FakeKeyStore {
   readonly secrets = new Map<string, string>();
-  readonly calls: string[] = [];
-  private k(service: string, account: string): string {
-    return `${service}\u0000${account}`;
+  /** every call as "name" plus the exact argument list it got, e.g. ["get", ["ref"]] */
+  readonly calls: Array<[string, unknown[]]> = [];
+  async put(...args: unknown[]): Promise<void> {
+    this.calls.push(["put", args]);
+    this.secrets.set(String(args[0]), String(args[1]));
   }
-  async get(service: string, account: string): Promise<string | null> {
-    this.calls.push("get");
-    return this.secrets.get(this.k(service, account)) ?? null;
+  async get(...args: unknown[]): Promise<string | null> {
+    this.calls.push(["get", args]);
+    return this.secrets.get(String(args[0])) ?? null;
   }
-  async set(service: string, account: string, secret: string): Promise<void> {
-    this.calls.push("set");
-    this.secrets.set(this.k(service, account), secret);
+  async delete(...args: unknown[]): Promise<void> {
+    this.calls.push(["delete", args]);
+    this.secrets.delete(String(args[0]));
   }
-  async delete(service: string, account: string): Promise<void> {
-    this.calls.push("delete");
-    this.secrets.delete(this.k(service, account));
-  }
-}
-
-/** A key store whose get() answers for any service name (the service name is the adapter's choice, not pinned). */
-export class AnyServiceKeyStore extends FakeKeyStore {
-  private readonly token: string | null;
-  constructor(token: string | null) {
-    super();
-    this.token = token;
-  }
-  override async get(_service: string, _account: string): Promise<string | null> {
-    this.calls.push("get");
-    return this.token;
+  where(): string {
+    this.calls.push(["where", []]);
+    return "fake";
   }
 }
-
 export interface CliSpec {
   /** Test title prefix and actor slug. */
   label: string;
@@ -443,23 +432,31 @@ export function define_cli_suite(spec: CliSpec): void {
 
   t("the token comes from the key store only at launch, and is written nowhere", async () => {
     const token = "synthetic-token-not-real-0123456789";
-    const store = new AnyServiceKeyStore(token);
-    const out = await spec.launch_env({ key_store: store, project_id: "synthetic-project-id" });
+    const project_id = "synthetic-project-id";
+    const ref = `pes-agent-token-${spec.runtime}-${project_id}`;
+    const store = new FakeKeyStore();
+    await store.put(ref, token);
+    const other = new FakeKeyStore();
+    await other.put(`pes-agent-token-${spec.runtime === "codex_cli" ? "opencode_tui" : "codex_cli"}-${project_id}`, "other-tool-token");
+    store.calls.length = 0;
+    other.calls.length = 0;
+
+    const out = await spec.launch_env({ key_store: store, project_id });
     assert.equal(out.PES_AGENT_TOKEN, token, "the launch environment carries the token for the process, in memory");
-    assert.deepEqual(store.calls, ["get"], "the key store is only read: no set, no delete");
-    const entry = spec.entry({ command: process.execPath, server_script: SERVER_SCRIPT, project_id: "synthetic-project-id", api_base_url: API_BASE_URL });
+    assert.deepEqual(store.calls, [["get", [ref]]], "one read, get(ref) with the single argument; no put, no delete");
+    const entry = spec.entry({ command: process.execPath, server_script: SERVER_SCRIPT, project_id, api_base_url: API_BASE_URL });
     assert.ok(!wire(entry).includes(token), "the connection entry never holds the token value");
 
-    const missing = new AnyServiceKeyStore(null);
+    // the other tool's token is not this tool's: a missing ref is refused and nothing is written
     try {
-      await spec.launch_env({ key_store: missing, project_id: "synthetic-project-id" });
+      await spec.launch_env({ key_store: other, project_id });
       assert.fail("a missing token must be refused");
     } catch (error: any) {
       assert.equal(error.code, "token_missing");
       assert.match(String(error.message), /[가-힣]/, "the message is Korean");
-      assert.ok(!String(error.message).includes(token));
+      assert.ok(!String(error.message).includes("other-tool-token"));
     }
-    assert.deepEqual(missing.calls, ["get"]);
+    assert.deepEqual(other.calls, [["get", [ref]]]);
   });
 
   t("the adapter source reads and writes no file, starts no process and names no tool config directory", () => {
