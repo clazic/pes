@@ -68,8 +68,6 @@ export interface CliSpec {
   label: string;
   runtime: "codex_cli" | "opencode_tui" | "codex_app" | "opencode_app";
   provider: string;
-  /** SEL-55: the app suites leave the mode-A claim probe to SEL-68 (the refusal of an external_agent mode=A claim). */
-  skip_mode_a_probe?: boolean;
   /** the adapter functions under test */
   entry(input: { command: string; server_script: string; project_id: string; api_base_url: string; model?: string }): any;
   launch_env(input: { key_store: unknown; project_id: string }): Promise<Record<string, string>>;
@@ -344,7 +342,7 @@ export function define_cli_suite(spec: CliSpec): void {
     });
   });
 
-  if (spec.skip_mode_a_probe !== true) t("a B connection never claims on the Go route: the run provider/model are not opencode-go", async () => {
+  t("a B connection never claims on the Go route: the run provider/model are not opencode-go", async () => {
     await with_cli(spec, async (env, open) => {
       const client = open(await env.cli_client());
       const claim = await client.ok("pes_claim", { idempotency_key: "go-claim" });
@@ -357,6 +355,17 @@ export function define_cli_suite(spec: CliSpec): void {
       const sneaky = await client.tool("pes_claim", { mode: "A", provider: "opencode-go", model: GO_MODEL, idempotency_key: "go-claim-2" });
       const rows = env.db.all<{ mode: string }>("SELECT mode FROM runs");
       assert.ok(rows.every((r) => r.mode === "B"), `a B connection never creates an A run (${wire(sneaky.data)})`);
+      // SEL-68: the same token asking for a mode A (Go) claim over the API is refused with 403 `forbidden`, nothing written
+      const sig = state_signature(env.db);
+      for (const body of [
+        { mode: "A", runtime: "pes_builtin", provider: "opencode-go", model: GO_MODEL },
+        { mode: "A", runtime: spec.runtime, provider: "opencode-go", model: GO_MODEL },
+      ]) {
+        const res = await call(env, { method: "POST", path: project_path(env, "/claims"), auth: { token: env.cli_agent.token }, body });
+        assert.equal(res.status, 403, `a direct ${spec.runtime} token cannot take a mode A claim: ${wire(res.json)}`);
+        assert.equal(res.json.error.code, "forbidden");
+      }
+      assert.equal(state_signature(env.db), sig, "the refused mode A claims wrote nothing");
     });
   });
 

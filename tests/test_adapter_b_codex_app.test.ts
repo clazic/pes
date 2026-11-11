@@ -40,7 +40,6 @@ const cli = {
   label: "codex-app",
   runtime: "codex_app",
   provider: "openai",
-  skip_mode_a_probe: true,
   entry: (input: any) => codex_app_mcp_entry(input),
   launch_env: (input: any) => codex_app_launch_env(input),
   env_of: (entry: any) => entry.env,

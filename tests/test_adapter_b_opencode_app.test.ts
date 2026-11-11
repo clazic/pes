@@ -29,7 +29,6 @@ const cli = {
   label: "opencode-app",
   runtime: "opencode_app",
   provider: "unknown",
-  skip_mode_a_probe: true,
   entry: (input: any) => opencode_app_mcp_entry(input),
   launch_env: (input: any) => opencode_app_launch_env(input),
   env_of: (entry: any) => entry.environment,
