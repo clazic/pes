@@ -170,7 +170,42 @@ export function make_ctx(prefix = "pes-compat-"): CompatCtx {
   };
 }
 
+/**
+ * Test-only code that EVERY pes.py / setup.py child gets (runs after the audit hook, before the script): nothing may connect to the PES server ports
+ * 8760~8775 — `urlopen` raises URLError, `connect` / `connect_ex` answer "refused". `doctor` (and any command that looks for a server: init, status, open …) then sees "no server" on every PC, and the
+ * real hub of a developer PC is never contacted (0 connections; test_compat_harness runs a recording stand-in on one of the ports).
+ */
+export const HUB_BLOCK = `
+import socket as _hb_socket, urllib.error as _hb_error, urllib.request as _hb_request
+def _hb_port(address):
+    try:
+        return 8760 <= int(address[1]) <= 8775
+    except Exception:
+        return False
+_hb_connect_ex = _hb_socket.socket.connect_ex
+_hb_connect = _hb_socket.socket.connect
+def _hb_socket_connect_ex(self, address):
+    return 111 if _hb_port(address) else _hb_connect_ex(self, address)
+def _hb_socket_connect(self, address):
+    if _hb_port(address):
+        raise ConnectionRefusedError(111, "blocked by the test harness")
+    return _hb_connect(self, address)
+_hb_socket.socket.connect_ex = _hb_socket_connect_ex
+_hb_socket.socket.connect = _hb_socket_connect
+_hb_urlopen = _hb_request.urlopen
+def _hb_guarded_urlopen(url, *args, **kwargs):
+    target = url.full_url if hasattr(url, "full_url") else str(url)
+    if "127.0.0.1:87" in target or "localhost:87" in target:
+        raise _hb_error.URLError("blocked by the test harness")
+    return _hb_urlopen(url, *args, **kwargs)
+_hb_request.urlopen = _hb_guarded_urlopen
+`;
+
 export interface RunOptions {
+  /** test-only Python run after the audit hook and before the script (after HUB_BLOCK) */
+  extra?: string;
+  /** do not block the hub ports (8760~8775) — only for a test that starts its own hub on purpose */
+  allow_hub?: boolean;
   env?: Record<string, string | undefined>;
   /** replace PATH by the empty folder of the ctx (+ on Windows the system folder, which python needs) */
   narrow_path?: boolean;
@@ -181,6 +216,8 @@ export interface RunOptions {
 
 function child_env(ctx: CompatCtx, options: RunOptions): NodeJS.ProcessEnv {
   const env: Record<string, string | undefined> = { ...ctx.env, ...guard_env(), ...(options.env ?? {}) };
+  // A case / option env must never switch the audit hook off (only PES_TEST_REAL_HOME may be replaced — the guard self-test does).
+  assert.equal(env.PES_TEST_GUARD, "1", "a case env turned the home guard off (PES_TEST_GUARD)");
   if (options.narrow_path === true) {
     const extra = process.platform === "win32" ? [join(process.env.SystemRoot ?? "C:\\Windows", "System32")] : [];
     env.PATH = [ctx.narrow_bin, ...extra].join(process.platform === "win32" ? ";" : ":");
@@ -195,7 +232,7 @@ function child_env(ctx: CompatCtx, options: RunOptions): NodeJS.ProcessEnv {
 
 function spawn_python(script: string, args: string[], ctx: CompatCtx, options: RunOptions): RunResult {
   const env = child_env(ctx, options);
-  const result = spawnSync(PYTHON, guarded_script_argv(script, args), {
+  const result = spawnSync(PYTHON, guarded_script_argv(script, args, options.allow_hub === true ? options.extra : `${HUB_BLOCK}\n${options.extra ?? ""}`), {
     env,
     cwd: options.cwd ?? ctx.home.root,
     encoding: "utf8",
@@ -339,10 +376,36 @@ export function touch(path: string, epoch_s: number): void {
 }
 
 // ---------------------------------------------------------------- state DTO (test-only, not a product contract)
-const ITEM_KEYS = ["id", "title", "kind", "status", "summary", "details", "sources", "stats", "links", "updated_round", "depth", "reuse", "request", "conflicts", "confidence", "order", "question"];
-const STAGE_KEYS = ["status", "round", "settings", "review", "suggestions", "warnings", "changes", "summary", "approved_at", "stale", "reports", "history", "carry_over", "qa", "review_log", "reports_built"];
+// Every top-level / stage / item key of a 0.15 project.json is either mapped into the DTO or listed in an explicit exclusion list.
+// `unmapped_keys` reports the rest, and `read_state_dto` throws on any: a new 0.15 field is a decision, never a silent drop.
+// (pes.py: new_stage() / blank_item() / cmd_init; the rest are keys other commands add: review_log, reports_built, carry_over, qa,
+// reuse, order, recommended …)
+export const TOP_KEYS = ["pes", "topic", "slug", "created", "current", "complete", "settings", "processed", "notes", "executive_summary", "conclusion", "library"] as const;
+export const STAGE_KEYS = ["status", "round", "settings", "review", "suggestions", "warnings", "changes", "summary", "approved_at", "stale", "reports", "history", "carry_over", "qa", "review_log", "reports_built"] as const;
+export const ITEM_KEYS = ["id", "title", "kind", "question", "status", "request", "depth", "updated_round", "summary", "details", "sources", "stats", "shots", "confidence", "conflicts", "verify", "links", "user_links", "reuse", "order", "recommended"] as const;
+/**
+ * Keys deliberately left out of the DTO, with the reason.
+ *   top.synthetic_payload — a 2 MB filler that synthetic_project() (the large-project fixture) adds; it is no 0.15 state (its content hash is
+ *   still compared through the `files` digest of project.json).
+ */
+export const EXCLUDED_KEYS: { top: string[]; stage: string[]; item: string[] } = { top: ["synthetic_payload"], stage: [], item: [] };
+
+/** Keys of a 0.15 project.json that the DTO neither maps nor excludes ("top", "stages.<name>", "stages.<name>.items.<id>" prefix). */
+export function unmapped_keys(data: any): string[] {
+  const out: string[] = [];
+  const known = (keys: readonly string[], excluded: string[], value: any, where: string): void => {
+    for (const key of Object.keys(value ?? {})) if (!keys.includes(key) && !excluded.includes(key)) out.push(`${where}.${key}`);
+  };
+  known([...TOP_KEYS, "stages"], EXCLUDED_KEYS.top, data, "top");
+  for (const [name, stage] of Object.entries<any>(data?.stages ?? {})) {
+    known([...STAGE_KEYS, "items"], EXCLUDED_KEYS.stage, stage, `stages.${name}`);
+    for (const item of stage?.items ?? []) known(ITEM_KEYS, EXCLUDED_KEYS.item, item, `stages.${name}.items.${item?.id}`);
+  }
+  return out;
+}
 
 export interface StateDto {
+  pes: unknown;
   topic: unknown;
   slug: unknown;
   created: unknown;
@@ -372,6 +435,7 @@ export function dto_from_project_json(data: any, library?: any): StateDto {
     stages[name] = stage;
   }
   return {
+    pes: data.pes,
     topic: data.topic,
     slug: data.slug,
     created: data.created,
@@ -392,6 +456,8 @@ export function read_state_dto(target: Target, ctx: CompatCtx, project: string):
   const data = project_json(project);
   const library_path = join(project, "library.json");
   const library = existsSync(library_path) ? read_json(library_path) : undefined;
+  const unmapped = unmapped_keys(data);
+  assert.deepEqual(unmapped, [], "0.15 project.json keys the state DTO neither maps nor excludes — add them to TOP_KEYS / STAGE_KEYS / ITEM_KEYS or EXCLUDED_KEYS");
   return { kind: "ran", dto: dto_from_project_json(data, library) };
 }
 
@@ -472,6 +538,7 @@ export class ServeProcess {
       this.port = await free_port();
       this.log = "";
       const env: Record<string, string | undefined> = { ...this.ctx.env, ...guard_env(), ...(this.options.extra_env ?? {}) };
+      assert.equal(env.PES_TEST_GUARD, "1", "a server env turned the home guard off (PES_TEST_GUARD)");
       env.PYTHONIOENCODING = "utf-8";
       for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
       assert_isolated_env({ ...env, PES_HOME: env.PES_HOME ?? join(env.HOME ?? "", "pes-projects") });

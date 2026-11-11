@@ -66,6 +66,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -112,7 +113,11 @@
       "id": 1,
       "title": "연구 질문",
       "kind": "rq",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "질문 요약",
       "details": "",
       "sources": [
@@ -126,19 +131,22 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      },
      {
       "id": 2,
       "title": "조사 범위",
       "kind": "topic",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "범위 요약",
       "details": "",
       "sources": [
@@ -148,13 +156,12 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },
@@ -237,9 +244,9 @@
  },
  "files": {
   "feedback.log": "e3b0c44298fc1c14",
-  "index.html": "579feb55054989dc",
+  "index.html": "db2a5cb958083d8b",
   "project.json": "315045878fad3063",
-  "reports/plan/report.html": "3c783963a2c10a6b",
+  "reports/plan/report.html": "388b16c28081a72c",
   "reports/plan/report.md": "da0d2230158386f2"
  }
 }

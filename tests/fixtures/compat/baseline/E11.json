@@ -132,6 +132,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -178,7 +179,11 @@
       "id": 1,
       "title": "복원 질문",
       "kind": "rq",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "복원 요약",
       "details": "",
       "sources": [
@@ -188,13 +193,12 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },
@@ -246,7 +250,11 @@
       "id": 1,
       "title": "복원 장",
       "kind": "section",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "",
       "details": "복원 본문.[^1]",
       "sources": [
@@ -256,13 +264,12 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },
@@ -300,12 +307,12 @@
  },
  "files": {
   "feedback.log": "e3b0c44298fc1c14",
-  "index.html": "0b1131d95d89c994",
-  "out/report.html": "f3e62c462f4e6c58",
+  "index.html": "276d80a1053ffa47",
+  "out/report.html": "309407129282207c",
   "out/report.md": "5ffc8670cf139fb4",
   "out/sources.json": "3a90dfd9070e3687",
   "project.json": "6229500728e04608",
-  "reports/plan/report.html": "684a187d5032b5a9",
+  "reports/plan/report.html": "450c9006da471148",
   "reports/plan/report.md": "24aeb69f836135d0",
   "snapshots/write-R1.json": "09559b4bc996385a"
  }

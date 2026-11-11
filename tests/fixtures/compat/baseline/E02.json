@@ -76,6 +76,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -182,8 +183,8 @@
  "files": {
   "ask/plan-start.json": "ac89a26ca1d1003c",
   "ask/resume.json": "ace832769cdc6e49",
-  "ask-plan-start.html": "a08c126363a3cb59",
-  "ask-sel-70-evil.html": "6ef4ddb03cd8a9e8",
+  "ask-plan-start.html": "9085439d39de1b10",
+  "ask-sel-70-evil.html": "0bfaff9492a58371",
   "feedback.log": "e3b0c44298fc1c14",
   "project.json": "c865bbcd39ea157c"
  }

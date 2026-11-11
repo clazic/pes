@@ -61,14 +61,16 @@ test("the rows that still differ per OS / PC (E13 http, E14 setup, E15 doctor) s
     assert.ok(notes.length >= 3, `${id}: os_notes missing`);
     for (const note of notes) {
       assert.ok(note.what.length > 3 && note.why.length > 10, `${id}: ${note.what}`);
-      assert.match(note.handling, /정규화|제외|임시 HOME|하나의 기준값|narrow_path/, `${id}: ${note.what} must be normalised, excluded or moved to the temp HOME`);
+      assert.match(note.handling, /정규화|제외|임시 HOME|하나의 기준값|narrow_path|접속하지 못하게 막는다/, `${id}: ${note.what} must be normalised, excluded or moved to the temp HOME`);
     }
   }
   // the machine-dependent rows really are out of the baselines: no tool state, no server state, no version
   const e14_check = JSON.parse(((read_baseline("E14").steps[1] as any).stdout as string[])[0] as string) as { stable: Record<string, string> };
   assert.deepEqual(Object.keys(e14_check.stable).sort(), ["key-kosis", "key-law", "key-vworld", "python"], "E14 pins only rows no machine can change");
   for (const id of ["E14", "E15"]) assert.ok(!/0\.15\.\d|Python 3\.\d/.test(JSON.stringify(read_baseline(id))), `${id}: a version number is pinned`);
-  assert.ok(!JSON.stringify(read_baseline("E15")).includes("꺼짐"), "E15: server state is not pinned");
+  // …except the server rows: the child cannot reach the hub ports (block_hub), so "꺼짐" is the same on every PC and is pinned whole
+  assert.ok(JSON.stringify(read_baseline("E15")).includes("꺼짐"), "E15: the server rows are pinned (no <STATE> mask)");
+  assert.ok(!JSON.stringify(read_baseline("E15")).includes("<STATE>"), "E15: the server rows are not masked");
 });
 
 test("every intended difference (7.5) carries a reason, and each is used by at least one case", () => {
@@ -335,7 +337,7 @@ test("state DTO: only the fields of 7.1, items in input order, library carried, 
     { pes: 1, topic: "t", slug: "s", created: "2026-11-11", current: "plan", complete: false, settings: {}, processed: [], notes: [], extra: "x", stages: { plan: { status: "asking", round: 0, junk: 1, items: [{ id: 1, title: "a", extra: 1 }] } } },
     { items: [] },
   );
-  assert.deepEqual(Object.keys(dto).sort(), ["complete", "conclusion", "created", "current", "executive_summary", "library", "notes", "processed", "settings", "slug", "stages", "topic"]);
+  assert.deepEqual(Object.keys(dto).sort(), ["complete", "conclusion", "created", "current", "executive_summary", "library", "notes", "pes", "processed", "settings", "slug", "stages", "topic"]);
   const plan = dto.stages.plan as any;
   assert.equal(plan.junk, undefined);
   assert.deepEqual(plan.items, [{ id: 1, title: "a" }]);

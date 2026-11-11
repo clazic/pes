@@ -226,6 +226,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -298,70 +299,82 @@
       "id": 1,
       "title": "재사용 주제",
       "kind": "topic",
+      "question": "재사용 질문",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 0,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 0,
-      "depth": 1,
-      "reuse": 5,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": "재사용 질문"
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": [],
+      "reuse": 5
      },
      {
       "id": 2,
       "title": "새 주제",
       "kind": "topic",
+      "question": "새 질문",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 0,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 0,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": "새 질문"
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      },
      {
       "id": 3,
       "title": "제외 주제",
       "kind": "topic",
+      "question": "",
       "status": "removed",
+      "request": "",
+      "depth": 1,
+      "updated_round": 0,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 0,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      },
      {
       "id": 4,
       "title": "쟁점",
       "kind": "issue",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 0,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 0,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },
@@ -387,7 +400,11 @@
       "id": 1,
       "title": "재사용 주제",
       "kind": "topic",
+      "question": "재사용 질문",
       "status": "deepen",
+      "request": "기존 조사(라이브러리 #5) 재사용 — 기획의 조사 질문에 맞게 보완하고, 원문 미확인 출처와 충돌(⚠)은 다시 확인",
+      "depth": 0,
+      "updated_round": 0,
       "summary": "기존 요약",
       "details": "기존 상세",
       "sources": [
@@ -404,6 +421,14 @@
         "unit": "개"
        }
       ],
+      "shots": [
+       "library/shot.png"
+      ],
+      "confidence": "high",
+      "conflicts": [
+       "기존 충돌"
+      ],
+      "verify": null,
       "links": {
        "plan": [
         1
@@ -412,35 +437,31 @@
         5
        ]
       },
-      "updated_round": 0,
-      "depth": 0,
-      "request": "기존 조사(라이브러리 #5) 재사용 — 기획의 조사 질문에 맞게 보완하고, 원문 미확인 출처와 충돌(⚠)은 다시 확인",
-      "conflicts": [
-       "기존 충돌"
-      ],
-      "confidence": "high",
-      "question": "재사용 질문"
+      "user_links": []
      },
      {
       "id": 2,
       "title": "새 주제",
       "kind": "topic",
+      "question": "새 질문",
       "status": "new",
+      "request": "",
+      "depth": 0,
+      "updated_round": 0,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
       "links": {
        "plan": [
         2
        ]
       },
-      "updated_round": 0,
-      "depth": 0,
-      "request": "",
-      "conflicts": [],
-      "confidence": "",
-      "question": "새 질문"
+      "user_links": []
      }
     ]
    },
@@ -517,7 +538,7 @@
  },
  "files": {
   "feedback.log": "e3b0c44298fc1c14",
-  "index.html": "ddd195bbed249594",
+  "index.html": "56a9df5096dc83d8",
   "library.json": "0220eea7c4917c13",
   "project.json": "0023c246319d3973"
  }

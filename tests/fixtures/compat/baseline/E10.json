@@ -157,6 +157,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "processed": [],
   "notes": [
@@ -186,18 +187,21 @@
       "id": 1,
       "title": "합성 항목",
       "kind": "",
+      "question": "",
       "status": "new",
+      "request": "",
+      "depth": 0,
+      "updated_round": 0,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 0,
-      "depth": 0,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },

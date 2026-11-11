@@ -67,6 +67,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "current": "plan",
   "processed": [],

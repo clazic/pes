@@ -67,8 +67,10 @@ export function n2_paths(text: string, roots: Roots): string {
   // A longer spelling must win over a shorter one that is its prefix, whatever root it belongs to.
   pairs.sort((x, y) => y[0].length - x[0].length);
   for (const [form, label] of pairs) out = out.split(form).join(label);
-  // After the roots are gone, a remaining path separator inside a <ROOT>-relative path is made uniform.
-  return out.replace(/(<(?:PROJECT|HOME|PES|TMP)>)([^\s"'<>,;)\]}]*)/g, (_whole, label: string, rest: string) => label + rest.split("\\\\").join("/").split("\\").join("/"));
+  // After the roots are gone, a remaining path separator inside a <ROOT>-relative path is made uniform. A folder name may hold
+  // spaces ("<TMP>\\work\\합성 프로젝트\\project.json" on Windows): a space belongs to the path when the word after it still holds a
+  // separator; otherwise the path ends there ("<PROJECT>/x.json and more").
+  return out.replace(/(<(?:PROJECT|HOME|PES|TMP)>)((?:[^\s"'<>,;)\]}]| (?=[^\s"'<>,;)\]}]*[\\/]))*)/g, (_whole, label: string, rest: string) => label + rest.split("\\\\").join("/").split("\\").join("/"));
 }
 
 // ---------------------------------------------------------------- N8 console
@@ -166,6 +168,13 @@ export function n5_ids(text: string, seen: Map<string, string> = new Map()): str
 // ---------------------------------------------------------------- N6 html
 export interface HtmlView {
   title: string;
+  /** the text between <title> and </title> exactly as written (not unescaped): a page that forgot to escape differs here */
+  raw_title: string;
+  /**
+   * every <script> / <style> block except the data one, in page order: tag, sorted attributes and a content hash (N7/N1/N2 applied).
+   * A shared module inserted twice, left out, or a script changed shows up as a different list.
+   */
+  blocks: string[];
   /** parsed `<script id="data" type="application/json">…</script>` (undefined when the page has none) */
   data: unknown;
   /** visible text: scripts / styles / comments / tags removed, whitespace collapsed, entities decoded (the few that matter) */
@@ -192,7 +201,13 @@ export function n6_html(html: string, roots: Roots = {}): HtmlView {
     .replace(/<script[\s\S]*?<\/script>/g, " ")
     .replace(/<style[\s\S]*?<\/style>/g, " ")
     .replace(/<[^>]+>/g, " ");
-  return { title: html_unescape(title), data, text: n1_time(n2_paths(html_unescape(text).replace(/\s+/g, " ").trim(), roots)) };
+  const blocks: string[] = [];
+  for (const block of source.matchAll(/<(script|style)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
+    const attrs = (block[2] as string).trim().split(/\s+/).filter((a) => a !== "").sort();
+    if (block[1] === "script" && attrs.includes('id="data"')) continue;
+    blocks.push(`${block[1]} ${attrs.join(" ")} ${n9_text_hash(block[3] as string, roots)}`);
+  }
+  return { title: html_unescape(title), raw_title: title, blocks, data, text: n1_time(n2_paths(html_unescape(text).replace(/\s+/g, " ").trim(), roots)) };
 }
 
 // ---------------------------------------------------------------- N9 file meta

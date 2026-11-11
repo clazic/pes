@@ -1711,8 +1711,8 @@
         },
         {
           "what": "'서버' 그룹과 프로젝트 그룹의 '서버' 행 (포트 8760~8764 점유 상태)",
-          "handling": "제외 — 그룹·행 수·fixable 만 비교, level·title 은 <서버 상태>",
-          "why": "개발 PC 에서 PES 서버가 떠 있거나 다른 프로그램이 포트를 쓰면 달라진다. 소유 프로세스 조회는 OS 별 도구(lsof·ss·netstat)라 문구도 OS 마다 다르다"
+          "handling": "모든 pes.py 자식이 포트 8760~8775 에 접속하지 못하게 막는다(compat_env.HUB_BLOCK) — 서버 행은 어느 PC 에서나 '꺼짐'이고 다른 행처럼 그대로(group·level·title·detail·fixable) 비교한다",
+          "why": "개발 PC 에서 PES 서버가 떠 있으면 doctor 가 실제 허브에 접속해 실제 루트를 읽는다 — 접속 자체를 없앤다. 소유 프로세스 조회는 PES_DB_CORE 경로에서만 일어나 이 사례에는 없다"
         },
         {
           "what": "Python 버전 문구",

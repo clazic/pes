@@ -71,6 +71,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",

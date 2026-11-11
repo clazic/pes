@@ -67,6 +67,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | `tests/helpers/home_guard.ts` | 실제 `~/.pes`·`~/pes-projects` 접근 0 — 아래 「home_guard 가 막는 것」 |
 | `tests/test_compat_harness.test.ts` | 정규화기·대상 선택·**미구현 목록이 표와 정확히 같다** |
 | `tests/test_compat_cases_{a,b,c}.test.ts` | E01~E15를 0.15 대상에서 기준값과 대조 |
+| `tests/test_compat_review.test.ts` | 최종 리뷰 1 반영: N6 요약이 제목 escape·공용 모듈 수를 보는지, N2 공백 경로(Windows 철자), 가짜 허브가 떠 있어도 E15 가 같고 접속 0, 상태 DTO 키 전수, `PES_TEST_GUARD` 를 끌 수 없음 |
 
 **대상 바꾸기:** `PES_COMPAT_TARGET=py`(기본) 또는 `ts`. `ts` 에서 아직 없는 명령은 건너뛰지 않고 `not_yet` 으로 단언한다. 사례 종류마다 ts 파일이 하나씩 있다 — `cli`(E01~E07·E10~E12·E15) = `scripts/pes.ts`, `http`(E08·E09·E13) = `scripts/serve.ts`, `setup`(E14) = `scripts/setup.ts`. 셋 모두 같은 문(`compat_env.ts_gate`)으로 막혀 있어서, 파일이 하나라도 생기면 그 종류의 사례 실행이 throw 하고 `test_compat_harness` 가 실패한다(파일 존재와 `TS_IMPLEMENTED` 의 종류별 개수가 맞아야 한다). 그때 `compat_env`·`compat_cases` 에 ts 대상을 연결하고 `cases.json` 의 `ts.status` 와 시험의 `TS_IMPLEMENTED` 를 함께 고친다.
 
@@ -97,6 +98,14 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 |---|---|---|---|
 | Python(0.15) — `run_pes("py")`·`ServeProcess`·`run_setup("py")`·`run_py_code` | **막는다** — 자식 안에서 `tests/conftest.py` 의 `GUARD`(감사 훅 + `os.stat`/`Path.stat` 가드)를 그대로 실행한다. 새 `.py` 파일 없이 `-c "<GUARD>; runpy.run_path(…)"` 로 띄우고 `PES_TEST_GUARD=1`·`PES_TEST_REAL_HOME`(= `os.userInfo().homedir`)을 준다. 위반은 자식 stderr 의 `PESHomeAccessViolation` 이고 하네스가 `assert.fail` 한다 | 막는다(같은 훅) + 전후 스냅샷 | 검사 |
 | TS(`scripts/*.ts`) | **아직 못 막는다 — PR26b 몫.** Node 자식에는 감사 훅이 없다. ts 대상은 지금 전부 `not_yet` 이라 실행되는 자식이 없다. ts 대상을 연결할 때 읽기 가드(예: `--permission` 의 `--allow-fs-read` 허용 목록)를 함께 넣는다 | 전후 스냅샷으로 감지 | 검사 |
+
+**훅이 보지 못하는 것(그래서 따로 막거나 아직 못 막는다):**
+
+- **HTTP 접속.** 감사 훅은 파일 접근만 본다. `doctor` 등은 포트 8760~8775 의 `/whoami` 로 실제 허브의 루트를 읽을 수 있다. 그래서 모든 `pes.py` 자식은 `compat_env.HUB_BLOCK` 을 받는다(`urlopen`·`socket.connect`/`connect_ex` 가 그 포트에서 실패). 허브를 일부러 쓰는 시험만 `allow_hub: true`. `test_compat_review` 가 기록하는 가짜 허브로 접속 0 을 단언한다.
+- **`sqlite3.connect`.** 감사 이벤트가 있지만(파이썬 3.10+) `GUARD` 에 넣지 않았다. 0.15 는 sqlite 를 쓰지 않는다.
+- **`os.access`·`chmod`·`utime`·`truncate`** 등 일부 호출, **ctypes 로 직접 부르는 `open(2)`** (0.15 코드에 ctypes 는 없다).
+- **손자 프로세스.** 예: `doctor` 의 `find_tool` 이 PATH 밖(`/opt/homebrew/bin` 등)의 vworld·kosis 를 띄운다. 자식 안 훅은 손자에게 이어지지 않는다. HOME 은 임시 폴더로 격리되어 있고, 시험은 `narrow_path`·임시 `LOCALAPPDATA` 로 도구를 좁힌다.
+- **`PES_TEST_GUARD`.** 사례·옵션의 `env` 가 이 값을 바꾸지 못한다(`child_env` 가 합친 뒤 `"1"` 을 단언; 가드 자기 시험은 `PES_TEST_REAL_HOME` 만 바꾼다).
 
 공통 3겹: ① 자식 시작 전 `HOME`·`USERPROFILE`·`PES_HOME` 이 임시 폴더인지 검사(`assert_isolated_env`), ② 파일 전후 이름·크기·mtime 비교(`use_home_guard`, 깊이 3 — 읽기는 흔적이 없고 깊이 4 이하의 내용 수정은 상위 폴더 mtime 이 안 변하면 놓친다), ③ 출력·산출 파일에 보호 경로 문자열이 없는지(`assert_no_real_path` — 경로 **이름**이 아닌 프로젝트 이름만 새는 경우는 못 본다). 가드 자체는 합성 '가짜 실제 홈'(`PES_TEST_REAL_HOME`)으로 시험한다(`test_home_guard`): 자식이 그 아래를 **읽기만** 해도 실패한다.
 

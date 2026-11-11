@@ -133,16 +133,12 @@ function post_process(post: string | undefined, stdout: string, roots: Roots): s
   if (post === "doctor_schema") {
     const levels = new Set(["ok", "info", "warn", "bad"]);
     assert.ok(data.every((row) => levels.has(row.level)), "doctor: unknown level");
-    // 도구 rows: per PC. 서버 rows (the 서버 group and a project's "… 서버 …" rows): they report the state of ports 8760~8764, which a
-    // developer PC may occupy — only their place in the list and `fixable` are compared (os_notes of E15).
-    const server_row = (row: any): boolean => row.group === "서버" || /서버/.test(String(row.title));
+    // 도구 rows: per PC (not compared). Every other row — environment, server, project — is compared whole: group, level, title,
+    // detail, fixable. The server rows are the same on every PC because the child cannot reach ports 8760~8775 (HUB_BLOCK, applied to every pes.py child).
+    const text = (value: unknown): string => n1_time(n2_paths(String(value ?? ""), roots)).replace(/Python \d+\.\d+\.\d+/, "Python <VER>");
     const stable = data
       .filter((row) => row.group !== "도구")
-      .map((row) =>
-        server_row(row)
-          ? { group: row.group, level: "<STATE>", title: "<서버 상태>", fixable: row.fixable }
-          : { group: row.group, level: row.level, title: n1_time(n2_paths(String(row.title), roots)).replace(/Python \d+\.\d+\.\d+/, "Python <VER>"), fixable: row.fixable },
-      );
+      .map((row) => ({ group: row.group, level: row.level, title: text(row.title), detail: text(row.detail), fixable: row.fixable }));
     return [
       n3_json({
         keys_per_row: [...new Set(data.flatMap((row) => Object.keys(row)))].sort(),
@@ -154,7 +150,7 @@ function post_process(post: string | undefined, stdout: string, roots: Roots): s
   throw new Error(`unknown post-processor ${post}`);
 }
 
-function file_digest(rel: string, bytes: Buffer, roots: Roots): string {
+export function file_digest(rel: string, bytes: Buffer, roots: Roots): string {
   const text = bytes.toString("utf8");
   if (rel.endsWith(".json") || rel.endsWith(".pes-lock")) {
     try {
@@ -165,7 +161,7 @@ function file_digest(rel: string, bytes: Buffer, roots: Roots): string {
   }
   if (rel.endsWith(".html")) {
     const view = n6_html(text, roots);
-    return n9_text_hash(n3_json({ title: view.title, data: view.data ?? null, text: view.text }), roots);
+    return n9_text_hash(n3_json({ title: view.title, raw_title: view.raw_title, blocks: view.blocks, data: view.data ?? null, text: view.text }), roots);
   }
   return n9_text_hash(ports(text), roots);
 }

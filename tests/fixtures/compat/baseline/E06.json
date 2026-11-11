@@ -87,6 +87,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -162,7 +163,11 @@
       "id": 10,
       "title": "둘째 장",
       "kind": "section",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "",
       "details": "둘째 본문.[^1] 셋째 출처.[^2]",
       "sources": [
@@ -177,20 +182,23 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "order": 2,
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": [],
+      "order": 2
      },
      {
       "id": 20,
       "title": "첫째 장",
       "kind": "section",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "",
       "details": "첫째 본문.[^1] 둘째 출처.[^2]",
       "sources": [
@@ -205,14 +213,13 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "order": 1,
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": [],
+      "order": 1
      }
     ]
    },
@@ -250,7 +257,7 @@
  },
  "files": {
   "feedback.log": "e3b0c44298fc1c14",
-  "out/report.html": "afe0f5a2e6fe236f",
+  "out/report.html": "4cd6cebb154a6db0",
   "out/report.md": "c94fbb971899bfbf",
   "out/sources.json": "63e3afb94de30a71",
   "project.json": "7bf069c03a979649"

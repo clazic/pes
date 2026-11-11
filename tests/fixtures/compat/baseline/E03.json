@@ -167,6 +167,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -214,7 +215,11 @@
       "id": 1,
       "title": "조사 항목",
       "kind": "",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 2,
+      "updated_round": 1,
       "summary": "둘째 요약",
       "details": "첫 상세",
       "sources": [
@@ -240,6 +245,10 @@
         "name": "합성 지표"
        }
       ],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
       "links": {
        "plan": [
         1,
@@ -250,35 +259,37 @@
         9
        ]
       },
-      "updated_round": 1,
-      "depth": 2,
-      "request": "",
-      "conflicts": [],
-      "confidence": "",
-      "question": ""
+      "user_links": []
      },
      {
       "id": 2,
       "title": "번호 없는 항목",
       "kind": "",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      },
      {
       "id": 7,
       "title": "같은 결과",
       "kind": "",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 3,
+      "updated_round": 1,
       "summary": "바뀐 요약",
       "details": "",
       "sources": [
@@ -288,13 +299,12 @@
        }
       ],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 3,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },
@@ -362,7 +372,7 @@
  },
  "files": {
   "feedback.log": "e3b0c44298fc1c14",
-  "index.html": "ef694c6780a41f52",
+  "index.html": "2c419c20a689044f",
   "project.json": "7c4dd643fec15ced",
   "snapshots/research-R1/2.json": "6fdf0cfc39ccca00",
   "snapshots/research-R1.json": "1b5c226956725e18"

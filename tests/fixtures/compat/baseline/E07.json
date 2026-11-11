@@ -258,6 +258,7 @@
   }
  ],
  "dto": {
+  "pes": 1,
   "topic": "합성 주제",
   "slug": "합성 프로젝트",
   "created": "<DATE>",
@@ -314,7 +315,11 @@
       "id": 1,
       "title": "첫 항목",
       "kind": "",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "첫 요약\n둘째 줄",
       "details": "",
       "sources": [
@@ -332,32 +337,34 @@
         "name": "지표"
        }
       ],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
+      "shots": [],
+      "confidence": "high",
       "conflicts": [
        "충돌 하나"
       ],
-      "confidence": "high",
-      "question": ""
+      "verify": null,
+      "links": {},
+      "user_links": []
      },
      {
       "id": 2,
       "title": "둘째 항목",
       "kind": "",
+      "question": "",
       "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
       "summary": "둘째 요약",
       "details": "",
       "sources": [],
       "stats": [],
-      "links": {},
-      "updated_round": 1,
-      "depth": 1,
-      "request": "",
-      "conflicts": [],
+      "shots": [],
       "confidence": "",
-      "question": ""
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
      }
     ]
    },
