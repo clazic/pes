@@ -1624,11 +1624,12 @@
       "diffs": [
         "D09",
         "D05",
-        "D16"
+        "D16",
+        "D18"
       ],
       "serve_legacy": true,
       "hub_paths": ["/"],
-      "serve_legacy_why": "SEL-74 (leader 2026-11-12): 0.15 정적 서빙 동등성(파일 그대로·index.html mtime 버전)은 DB 에 넣지 않은 옛 폴더로 비교한다. DB 가 서빙하는 프로젝트의 같은 경로(DB 커서·DB 화면)는 tests/test_serve_ts_cases.test.ts 의 E13 DB 변형이 고정한다. 기준값은 그대로. 단 `/` 는 홈 index.html 파일이 아니라 요청 때 짓는 허브(DB 가 비어도 짓는다)라서 hub_paths 로 따로 단언한다.",
+      "serve_legacy_why": "SEL-74 (leader 2026-11-12): 0.15 정적 서빙 동등성(파일 그대로·index.html mtime 버전)은 DB 에 넣지 않은 옛 폴더로 비교한다. DB 가 서빙하는 프로젝트의 같은 경로(DB 커서·DB 화면)는 tests/test_serve_ts_cases.test.ts 의 E13 DB 변형이 고정한다. 기준값은 그대로. 단 `/` 는 홈 index.html 파일이 아니라 요청 때 짓는 허브(DB 가 비어도 짓는다)라서 의도된 차이 D18 — hub_paths 로 따로 단언한다.",
       "ts": {
         "status": "implemented"
       },
