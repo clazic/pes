@@ -20,6 +20,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { isolated_home } from "./helpers/isolated_home.ts";
+import { TOOLS } from "./helpers/adapter_b_env.ts";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER_SCRIPT = join(REPO, "scripts", "pes_core", "mcp_server.ts");
@@ -181,7 +182,7 @@ test("the token goes in the Authorization header to the configured address only;
     assert.ok(ran.replies.every((r) => r.jsonrpc === "2.0"), "stdout is JSON-RPC lines only");
     assert.deepEqual(ran.replies.map((r) => r.id), [1, 2, 3, 4]);
     assert.ok(!ran.stdout.includes(TOKEN), "the token never reaches the client");
-    assert.equal(ran.replies[1].result.tools.length, 10);
+    assert.equal(ran.replies[1].result.tools.length, TOOLS.length); // 11: pes_read 추가(최종 리뷰 1/2 F1)
     assert.equal(ran.replies[2].result.isError, false);
 
     assert.ok(pes.seen.length >= 3);

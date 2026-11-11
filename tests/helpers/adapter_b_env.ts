@@ -42,6 +42,7 @@ export const TOOLS = [
   "pes_release",
   "pes_cancel",
   "pes_receipt",
+  "pes_read", // 최종 리뷰 1/2 F1 — 사람 답·자료 본문 읽기(leader 결정, 도구 11개)
 ] as const;
 
 export type ToolName = (typeof TOOLS)[number];

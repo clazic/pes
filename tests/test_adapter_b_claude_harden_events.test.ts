@@ -18,7 +18,7 @@ import { claude_code_mcp_entry } from "../scripts/pes_core/adapters/claude_code.
 import { PROGRESS_PHASES, McpServer } from "../scripts/pes_core/mcp_server.ts";
 import { SESSION_SECRET, assert_ok, call, make_agent } from "./helpers/api_env.ts";
 import { P, restart_app } from "./helpers/api_flow.ts";
-import { FakeMcpClient, ask_args, owner_answers, type AdapterEnv } from "./helpers/adapter_b_env.ts";
+import { FakeMcpClient, TOOLS, ask_args, owner_answers, type AdapterEnv } from "./helpers/adapter_b_env.ts";
 import { claim_fresh, events_of_type, with_cleanup } from "./helpers/adapter_b_flow.ts";
 import { adapter, export_for, paste, register_second } from "./helpers/adapter_b_harden.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
@@ -316,7 +316,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     if (m === null) continue;
     documented.set(m[1]!, new Set([...(m[2] ?? "").matchAll(/`((?:GET|POST) [^`]+)`/g)].map((r) => r[1]!)));
   }
-  assert.equal(documented.size, 10, "all ten tools are in the table");
+  assert.equal(documented.size, TOOLS.length, "all tools (11, with pes_read) are in the table");
 
   await with_cleanup(async (env, open) => {
     const sent: string[] = [];
@@ -324,7 +324,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     const spy = {
       handle: async (request: { method: string; path: string; headers: Record<string, string>; body: string | Uint8Array | null }) => {
         const rest = request.path.replace(/^\/api\/v1\/projects\/[^/]+/, "").replace(/\?.*$/, "");
-        sent.push(`${request.method} ${rest.replace(/^\/runs\/[^/]+/, "/runs/{r}")}`);
+        sent.push(`${request.method} ${rest.replace(/^\/runs\/[^/]+/, "/runs/{r}").replace(/^\/objects\/[^/]+\/versions\/[^/]+$/, "/objects/{o}/versions/{v}")}`);
         return env.app.handle(request);
       },
     };
@@ -341,6 +341,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     };
     await used("pes_claim", { idempotency_key: "t-claim" });
     await used("pes_context", {});
+    await used("pes_read", { object_id: env.object_id }); // 최종 리뷰 1/2 F1: 본문 읽기 도구도 문서의 경로를 실제로 쓴다
     const asked = await used("pes_ask", ask_args(env, "t"));
     await used("pes_submit", { results: [{ op: "append_version", object_id: env.object_id, title: "표" }], idempotency_key: "t-submit" });
     await used("pes_heartbeat", { idempotency_key: "t-hb" });

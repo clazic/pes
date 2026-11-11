@@ -18,7 +18,7 @@
 | 도구 | 하는 일 | API |
 |---|---|---|
 | `pes_context` | 현재 상태 읽기(`project_id`, `control_rev`, `digest`, 단계, 자료 목록, 현재 lease). 실행을 아는 경우 그 실행에 온 답을 `inputs` 배열로 덧붙인다(한 번에 최대 5쪽, 이어 읽기는 2.5). 읽기만 한다 | `GET /context`, `GET /runs/{r}/inputs` |
-| `pes_read` | 자료 한 버전의 내용 읽기 `{object_id, version_id?}`. 사람의 답 본문·질문·작업 자료 본문(2.5). 읽기만 한다 | `GET /objects/{o}/versions/{v}` |
+| `pes_read` | 자료 한 버전의 내용 읽기 `{object_id, version_id?}`. 사람의 답 본문·질문·작업 자료 본문(2.5). 읽기만 한다. `version_id`를 생략하면 맥락 manifest의 현재 버전을 먼저 찾는다 | `GET /context`(`version_id` 생략 시), `GET /objects/{o}/versions/{v}` |
 | `pes_claim` | 작업 시작(lease). `run_id`를 주면 기다리던 실행을 이어받고(새 fence), 없으면 서버 설정의 `runtime`·`provider`·`model`로 새 방식 B 실행을 만든다 | `POST /claims` |
 | `pes_submit` | 결과(새 버전) 1~20개 제출 | `POST /runs/{r}/results` |
 | `pes_ask` | 사람에게 질문 하나 | `POST /questions` |
