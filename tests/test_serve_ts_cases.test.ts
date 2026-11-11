@@ -10,7 +10,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assert_case, case_def, load_table, run_case } from "./helpers/compat_cases.ts";
+import { answer_count_record, assert_case, case_def, load_table, run_case } from "./helpers/compat_cases.ts";
+import { n1_time } from "./helpers/compat_normalize.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { SEL72_DONE, SEL72_KIND, SEL72_LEFT_TO_LATER } from "./helpers/sel72_scope.ts";
 
@@ -39,4 +40,19 @@ test("E15 on the ts target is an asserted not_yet (doctor is a pes.ts command; t
   const outcome = await run_case("ts", "E15");
   assert.equal(outcome.kind, "not_yet");
   await assert_case("ts", "E15");
+});
+
+// SEL-72 R1-1: E09's "count" is the number of answers, whatever second each one was named in.
+test("E09 count: a burst split by a second boundary still counts every answer (names differ only by time/suffix)", () => {
+  const doc = { text: "x" };
+  // 12 answers: 5 named in second T1 (suffixes -2..-5), 7 in T2; after n1_time every k=1 name would collapse to one key
+  const mk = (stamp: string, n: number) => Array.from({ length: n }, (_x, k) => ({ name: `plan-R1-${stamp}${k === 0 ? "" : `-${k + 1}`}.json`, doc }));
+  const answers = [...mk("20261111-120000", 5), ...mk("20261111-120001", 7)];
+  assert.equal(answers.length, 12);
+  assert.equal(new Set(answers.map((a) => n1_time(a.name))).size < 12, true, "the normalised keys do collapse (the old count would be wrong)");
+  assert.deepEqual(answer_count_record(answers), { count: "12" });
+  // the same 12 inside one second give the same record
+  assert.deepEqual(answer_count_record(mk("20261111-120000", 12)), { count: "12" });
+  // a raw name used twice (an overwrite) is still caught
+  assert.throws(() => answer_count_record([...mk("20261111-120000", 2), ...mk("20261111-120000", 1)]), /unique raw names/);
 });
