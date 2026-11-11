@@ -320,6 +320,10 @@ export class FakeAi {
       json = null;
     }
     const path = (req.url ?? "").split("?")[0] ?? "";
+    // SEL-78: every reply closes its connection. PES never retries a model call, so a reused keep-alive socket that the
+    // server closes at the very moment the client reuses it (a runner that stalls for seconds, Windows CI) would look
+    // like a lost answer and block the run as usage_unknown. A fresh connection per request removes that race.
+    res.setHeader("connection", "close");
     const rec: Recorded = { n: 0, method: req.method ?? "", path, headers, text, json };
     this.all.push(rec);
     const send = (status: number, body: unknown, extra: Record<string, string> = {}): void => {

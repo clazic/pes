@@ -1,6 +1,6 @@
 // SEL-76: the N8 time limits moved from whole executor runs (fake server, database, CI load: flaky on Windows) to the key
 // scanner itself. For every surface the whole-run files cover (answer text, tool argument, model list) and every
-// pathology, the scan alone is timed by hrtime (best of three): the 20k input stays under an absolute limit and x4 input
+// pathology, the scan alone is timed by CPU time (best of three, SEL-78): the 20k input stays under an absolute limit and x4 input
 // does not take about x16 (a square). The huge sizes (200k, 3M) are judged by growth only. A deliberately quadratic
 // scanner must FAIL the same meter (mutation check), so the meter cannot silently go blind.
 

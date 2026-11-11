@@ -183,9 +183,29 @@ test("X4 필수2 공백이 든 올바른 상대 경로는 링크가 그대로 �
   expect(dialogs).toEqual([]);
 });
 
+/**
+ * 화면을 열고, 화면이 처음 묻는 /version 두 번(overlay 의 floor, 탭의 base)이 성공으로 끝날 때까지 조건으로 기다린다.
+ * 이 둘이 끝나기 전에 입력·제출을 하면 기준값이 제출 뒤 값으로 잡혀 판정이 느린 러너(Windows)에서 흔들린다. 고정 대기 없음.
+ */
+async function goto_settled(page: Page, path: string): Promise<void> {
+  let ok = 0;
+  const on_response = (r: { url(): string; status(): number }) => {
+    if (/\/version$/.test(new URL(r.url()).pathname) && r.status() === 200) ok += 1;
+  };
+  page.on("response", on_response);
+  try {
+    await page.goto(url(path));
+    await expect.poll(() => ok, { message: "처음 /version 두 번이 끝나야 한다", timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    // 응답 본문을 화면 스크립트가 읽어 기준값을 잡는 마이크로태스크까지 한 번 비운다(시간이 아니라 이벤트 루프 기준)
+    await page.evaluate("new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)))");
+  } finally {
+    page.off("response", on_response);
+  }
+}
+
 test("X5 권장2 답을 보낸 탭은 자기 제출로 '새 결과' 막대가 뜨지 않는다 (질문 폼·승인)", async ({ page }) => {
   await page.clock.install();
-  await page.goto(url("/ask-plan-start.html"));
+  await goto_settled(page, "/ask-plan-start.html");
   await expect(page.locator("#send")).toBeVisible();
   await page.locator('input[data-q="scope"][value="narrow"]').check();
   await page.locator('textarea[data-q="memo"]').fill("합성 메모 자기 제출");
@@ -195,7 +215,7 @@ test("X5 권장2 답을 보낸 탭은 자기 제출로 '새 결과' 막대가 �
   await polls(page, 3);
   await expect(page.locator("#pes-live"), "질문 폼: 자기 제출로 새 결과 막대가 떴다").toBeHidden();
 
-  await page.goto(url("/#plan"));
+  await goto_settled(page, "/#plan");
   await expect(page.locator("#approve")).toBeVisible();
   await page.locator("#approve").click();
   await page.locator("#mok").click();

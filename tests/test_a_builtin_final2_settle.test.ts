@@ -257,7 +257,7 @@ for (const shape of SHAPES) {
       await env.service.execute(env.ctx(next_key(env)), "dispatch.resolve_unknown", { dispatch_id: rows[0]!.id, outcome: "not_charged", note: "합성" });
       const again = await resume_outcome(env, res.run_id);
       assert.equal(again.error, null);
-      assert.equal(again.result?.status, "succeeded");
+      assert.equal(again.result?.status, "succeeded", `resumed run: ${JSON.stringify(again.result)}; logs: ${env.logs.join(" | ")}`);
     } finally {
       await env.close_all();
     }

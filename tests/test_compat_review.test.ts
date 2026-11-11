@@ -232,6 +232,8 @@ test("hub_blocked_argv: keeps flags + script + args, and the child cannot connec
     assert.equal(hub.connections(), 0, "the blocked child reached the hub");
     const open = run(hub.port);
     assert.match(open.stdout, /\['\d+'\] 0/);
+    // SEL-78: the stand-in hub is another process that logs the connection a moment later; wait for the log (condition, bounded)
+    for (let i = 0; i < 200 && hub.connections() < 1; i += 1) await new Promise((r) => setTimeout(r, 25));
     assert.ok(hub.connections() >= 1);
     assert.throws(() => hub_blocked_argv(["-I"]), /no script/);
   } finally {
