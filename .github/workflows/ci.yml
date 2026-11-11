@@ -84,6 +84,10 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # 설계 검사(DDL 초안 → :memory: SQLite). Python 없이 TS 로 돈다(결정 0016, PR26d).
+      - name: Design check (DDL)
+        run: npm run check:ddl
+
       - name: Run tests (shard ${{ matrix.shard }}/8)
         run: node --test --test-shard=${{ matrix.shard }}/8 "tests/**/*.test.ts"
 

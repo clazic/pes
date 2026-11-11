@@ -90,6 +90,8 @@ curl -fsSL https://raw.githubusercontent.com/clazic/pes/main/scripts/install.sh 
 
 설치 상태는 설치 후 `/pes:doctor`로 한 번에 확인한다.
 
+외부 Python 경계: 위 표의 Python 요구는 0.15 도구와 kosis·vworld 같은 외부 도구에 해당하며 경계로 표시한다. PES TS 코어와 legacy importer 는 Python 을 실행하지 않는다 — 자세한 내용은 [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절.
+
 ### 한 번에 설치·점검: `/pes:setup` (Windows·macOS)
 
 플러그인을 설치한 뒤 Claude Code(또는 Claude Desktop의 Code 탭)에서 **`/pes:setup`** 한 번. 처음 `/pes:start`·`/pes:run`을 실행할 때도 점검이 안 되어 있으면 자동으로 먼저 실행된다.
