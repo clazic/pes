@@ -33,14 +33,17 @@ import {
   stderr_kind,
 } from "./helpers/compat_normalize.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { SEL72_DONE } from "./helpers/sel72_scope.ts";
+import { SEL71_DONE } from "./helpers/sel_scope.ts";
 
 use_home_guard();
 
 // ---------------------------------------------------------------- the list of cases the TS target implements today
 // SEL-71 (PR26b) turned the ratchet from "per kind" into "per case": cases.json `ts.status` says, case by case, whether the ts target
-// must match 0.15 (implemented) or answers not_yet (and is not even run, whether scripts/pes.ts exists or not). Edit this list and
-// cases.json together; tests/test_pes_ts_contract.test.ts pins the SEL-71 completion list for good.
-const TS_IMPLEMENTED: string[] = ["E01", "E02", "E03", "E04", "E10"];
+// must match 0.15 (implemented) or answers not_yet (and is not even run, whether the scripts/*.ts file exists or not). Edit this list and
+// cases.json together. The owners: SEL71_DONE (pes.ts, tests/helpers/sel_scope.ts; tests/test_pes_ts_contract.test.ts pins it) and
+// SEL72_DONE (E08 E09 E13 → serve.ts, E14 → setup.ts; tests/helpers/sel72_scope.ts); E15 (doctor) waits for SEL-77 and later.
+const TS_IMPLEMENTED: string[] = [...SEL71_DONE.filter((id) => id.startsWith("E")), ...SEL72_DONE];
 const ALL_IDS = Array.from({ length: 15 }, (_x, i) => `E${String(i + 1).padStart(2, "0")}`);
 
 test("the table defines E01~E15 once each, with criteria, intended differences and a pinned 0.15 baseline", () => {
@@ -121,14 +124,12 @@ test("target selection: py runs; a ts kind with an implemented case needs its sc
   }
 });
 
-test("the ts gate throws as soon as serve.ts / setup.ts exists (their cases are still not wired); pes.ts is wired since SEL-71 — the file is injected, scripts/ is not touched", () => {
-  // cli: wired per case (compat_cases.run_case); the gate only answers "not_yet" while the file is absent
-  assert.equal(ts_gate("cli", () => false).kind, "not_yet");
-  for (const kind of KINDS.filter((k) => k !== "cli")) {
+test("the ts gate only reports the missing file of a kind (all of pes.ts, serve.ts, setup.ts are wired: SEL-71 / SEL-72) — the file is injected, scripts/ is not touched", () => {
+  for (const kind of KINDS) {
     const absent = ts_gate(kind, () => false);
     assert.equal(absent.kind, "not_yet");
-    assert.match(absent.reason, new RegExp(`scripts/${kind === "http" ? "serve" : "setup"}\\.ts`));
-    assert.throws(() => ts_gate(kind, (path) => path === TS_FILES[kind]), /exists: wire the ts target/, kind);
+    assert.match(absent.reason, new RegExp(`scripts/${kind === "cli" ? "pes" : kind === "http" ? "serve" : "setup"}\\.ts`));
+    assert.equal(ts_gate(kind, (path) => path === TS_FILES[kind]).kind, "not_yet", `${kind}: wired, an existing file is not the gate's business`);
     // only the file of the kind itself counts
     assert.equal(ts_gate(kind, (path) => path !== TS_FILES[kind]).kind, "not_yet", kind);
   }

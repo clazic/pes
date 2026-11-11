@@ -1,0 +1,42 @@
+// SEL-72 (PR26c): the compat cases whose ts side is scripts/serve.ts (E08 E09 E13) or scripts/setup.ts (E14), run on the TS target no
+// matter what PES_COMPAT_TARGET says, against the pinned 0.15 baseline (tests/fixtures/compat/baseline/<id>.json).
+//
+// "Implemented" is the comparison of compat_cases.compare_ts_record: every step (stdout / status / content type / body), the produced
+// answers (D03: read from the DB submissions, spelled like 0.15's feedback/*.json) and feedback.log must equal the baseline. The
+// intended differences used here: D03 (answers are submissions; the answer's `v` cursor is extra), D09, D12 (setup.ts has no python row
+// and names `node scripts/setup.ts`). E15 (doctor --json) is a pes.ts command: it stays not_yet and is SEL-77's.
+//
+// Until scripts/serve.ts and scripts/setup.ts exist these fail (the harness answers "not_yet" for an implemented case).
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { assert_case, case_def, load_table, run_case } from "./helpers/compat_cases.ts";
+import { use_home_guard } from "./helpers/home_guard.ts";
+import { SEL72_DONE, SEL72_KIND, SEL72_LEFT_TO_LATER } from "./helpers/sel72_scope.ts";
+
+use_home_guard();
+
+test("the SEL-72 completion list is exactly E08 E09 E13 E14, all marked implemented in cases.json; E15 stays not_yet", () => {
+  assert.deepEqual([...SEL72_DONE], ["E08", "E09", "E13", "E14"]);
+  for (const id of SEL72_DONE) {
+    const def = case_def(id);
+    assert.equal(def.ts.status, "implemented", `${id} must be implemented in cases.json`);
+    assert.equal(def.kind, SEL72_KIND[id], `${id}: kind`);
+  }
+  for (const id of SEL72_LEFT_TO_LATER) assert.equal(case_def(id).ts.status, "not_yet", `${id} is doctor (pes.ts) — SEL-77 and later`);
+  // nothing outside this issue's list was turned on by it
+  const implemented = load_table().cases.filter((c) => c.ts.status === "implemented").map((c) => c.id);
+  for (const id of SEL72_DONE) assert.ok(implemented.includes(id), id);
+});
+
+for (const id of SEL72_DONE) {
+  test(`${id} on the ts target equals the 0.15 baseline`, { timeout: 240_000 }, async () => {
+    await assert_case("ts", id);
+  });
+}
+
+test("E15 on the ts target is an asserted not_yet (doctor is a pes.ts command; this issue does not touch pes.ts)", async () => {
+  const outcome = await run_case("ts", "E15");
+  assert.equal(outcome.kind, "not_yet");
+  await assert_case("ts", "E15");
+});

@@ -3,12 +3,13 @@
 //
 // Targets
 //   py  python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(scripts/pes.py | serve.py | setup.py)"   (no PES_DB_CORE: pure v0.15)
-//   ts  node [--permission --import ts_child_guard.ts] scripts/pes.ts   (serve.ts / setup.ts do not exist yet: "not_yet")
+//   ts  node [--permission --import ts_child_guard.ts] scripts/pes.ts | serve.ts | setup.ts   (pes.ts: compat_ts.ts, SEL-71; serve.ts / setup.ts:
+//       compat_ts_srv.ts, SEL-72; a missing file answers "not_yet")
 //
 // A target that cannot run a command says so with { kind: "not_yet" } — a case is never skipped silently. The ratchet is PER CASE
 // (SEL-71): cases.json `ts.status` says whether the ts target must match 0.15 (implemented) or answers not_yet (and is not run at all,
-// scripts/pes.ts or not — compat_cases.run_case). The cli kind is wired to scripts/pes.ts (compat_ts.run_ts_cli, guarded); the http and
-// setup kinds still go through `ts_gate`: once serve.ts / setup.ts exists, running their cases throws until they are wired too.
+// scripts/*.ts or not — compat_cases.run_case). All three kinds are wired (cli → pes.ts, http → serve.ts, setup → setup.ts); `ts_gate`
+// only reports the missing file of a kind.
 //
 // Isolation: every child gets HOME, USERPROFILE and PES_HOME inside one temp folder (assert_isolated_env), and the py side runs
 // with a narrowed PATH when the case asks for it. The py child also runs the audit hook of tests/conftest.py (reads included,
@@ -24,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { account_home, assert_isolated_env, assert_no_real_path, assert_no_violation } from "./home_guard.ts";
 import { hub_block_code } from "./hub_block.ts";
 import { run_ts_cli, ts_cli_exists, ts_view } from "./compat_ts.ts";
+import { adapt_ts_setup_stdout, run_ts_setup } from "./compat_ts_srv.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
 import { n1_json, n1_time, n2_paths, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
 
@@ -69,19 +71,16 @@ export function ts_available(kind: CaseKind = "cli", exists: (path: string) => b
 }
 
 /**
- * The one gate of the ts target. The file of a kind does not exist → `not_yet` (counted absence). It exists → throw: wire the ts
- * target for that kind into compat_env / compat_cases, mark the cases `implemented` in cases.json and TS_IMPLEMENTED, then drop
- * this throw for the kind. `exists` is injectable so the gate itself can be tested without creating a file under scripts/.
+ * The one gate of the ts target. The file of a kind does not exist → `not_yet` (counted absence). All three kinds are wired (pes.ts
+ * SEL-71, serve.ts / setup.ts SEL-72), so an existing file is not the gate's business and it never throws. Whether a CASE may run on
+ * ts is decided per case by cases.json `ts.status` (compat_cases.run_case). `exists` is injectable so the gate can be tested without
+ * creating a file under scripts/.
  */
-export function ts_gate(kind: CaseKind, exists: (path: string) => boolean = existsSync): { kind: "not_yet"; reason: string } {
-  const file = TS_FILES[kind];
-  if (exists(file)) {
-    throw new Error(`${relative(REPO, file).split("\\").join("/")} exists: wire the ts target for "${kind}" cases in compat_env / compat_cases and remove their not_yet entries (cases.json ts.status + TS_IMPLEMENTED)`);
-  }
+export function ts_gate(kind: CaseKind, _exists: (path: string) => boolean = existsSync): { kind: "not_yet"; reason: string } {
   const reasons: Record<CaseKind, string> = {
     cli: "scripts/pes.ts 없음 (PR26 3~4단계)",
-    http: "scripts/serve.ts 없음 (PR26 4단계)",
-    setup: "scripts/setup.ts 없음 (PR26 4단계)",
+    http: "scripts/serve.ts 없음 (SEL-72, PR26c)",
+    setup: "scripts/setup.ts 없음 (SEL-72, PR26c)",
   };
   return { kind: "not_yet", reason: reasons[kind] };
 }
@@ -246,7 +245,13 @@ export function run_py_code(ctx: CompatCtx, code: string, args: string[] = [], o
 }
 
 export function run_setup(target: Target, ctx: CompatCtx, args: string[], options: RunOptions = {}): TargetRun {
-  if (target === "ts") return ts_gate("setup");
+  if (target === "ts") {
+    if (!ts_available("setup")) return ts_gate("setup", () => false);
+    // guarded `node scripts/setup.ts` (permission allow-list without the real home + ts_child_guard.ts); a case env may add variables
+    // (PES_OWNER is not one of them: setup has no owner), the narrowed PATH hides every external tool from the child
+    const run = run_ts_setup(ctx, args, { env: options.env, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd });
+    return { kind: "ran", status: run.status, stdout: adapt_ts_setup_stdout(args, run.stdout), stderr: run.stderr };
+  }
   return { kind: "ran", ...spawn_python(SETUP_PY, args, ctx, options) };
 }
 
@@ -469,6 +474,7 @@ export const KNOWN_DIFFS: Record<string, KnownDiff> = {
   D10: { id: "D10", title: "Windows 0.15 차이 W1·W2 (SEL-71 결정 2026-11-11): ts 는 저장 경로 `/`·생성 텍스트 LF", reason: "0.15 는 Windows 에서 보고서 경로를 역슬래시로 저장하고 파일을 CRLF 로 써서 bytes 가 커진다(W1·W2, tests/README.md). ts 는 어느 OS 에서나 `/` 와 LF 로 통일한다 — 그래서 ts 대상은 win32 os_overrides 를 쓰지 않고 macOS/Linux 기준값(`/`·LF 바이트)과 같아야 하며, 폴더의 생성 텍스트에 CR 이 없어야 한다. 옛 데이터(역슬래시·CRLF 가 든 project.json)는 두 철자를 모두 읽는다(test_pes_ts_win_data)", posix_storage: true },
   D11: { id: "D11", title: "0.15 Python traceback → 분명한 한국어 한 줄 오류 (PR26a 관찰 3건, SEL-71 결정)", reason: "0.15 는 없는 결과 파일(merge·ask)·깨진 project.json·`current` 없는 큰 프로젝트(status)에서 traceback 으로 죽는다. 이것은 결함이지 계약이 아니다: ts 는 같은 종료 코드와 스택 추적 없는 한국어 한 줄 오류를 낸다(stdout 은 비교하지 않는다). 결함을 고쳐 성공해도 되는 단계는 표에 `fixable` 로 적는다", traceback_fix: { fixable: { E12: [["status", "{T}/large"]] } } },
   D13: { id: "D13", title: "순서 없는 approve · 승인된 단계의 round-start 는 거절 (SEL-71 1차 리뷰 필수 1, 선택지 b)", reason: "0.15 는 앞 단계가 승인되지 않아도 approve 를 받고, 승인된 단계에도 round-start 로 라운드를 +1 한다. 스킬은 승인을 순서대로 하고 승인된 단계는 reopen 뒤에 round-start 한다(skills/core/SKILL.md). DB 보장(앞 단계 승인 필요·승인된 단계 잠금)을 CLI 호환 때문에 풀지 않으므로 ts 는 exit 1 과 스택·영어 code 없는 한국어 한 줄로 거절하고 아무것도 바꾸지 않는다. 그 단계의 0.15 결과(exit 0)는 기준값에, ts 의 기대 문구는 ts_steps 에 둘 다 고정하고, 끝 상태는 0.15 를 그 단계 없이 돌린 기록(baseline.ts_end)과 같아야 한다", ts_steps: { X08: [{ step: ["approve", "{P}", "research"], exit: 1, stdout: [], stderr: ["approve: 앞 단계(기획)가 아직 승인되지 않았습니다"] }], X09: [{ step: ["round-start", "{P}", "plan"], exit: 1, stdout: [], stderr: ["round-start: 기획은 이미 승인됐습니다 — 먼저 reopen 하세요"] }] } },
+  D12: { id: "D12", title: "setup 의 Python 행·실행 명령 표기 (SEL-72)", reason: "PES TS 는 Python 을 쓰지 않는다(migration-ts-equivalence 9.1): `setup.ts check` 에는 python 행이 없고(node 행이 런타임 점검), 사용법 첫 줄은 `사용: node scripts/setup.ts <명령>` 이다. 그 밖의 행·상태 이름·그룹·종료 코드·문구는 0.15 와 같아야 한다 — 하네스가 두 사실을 먼저 단언한 뒤 0.15 표기로 되돌려 한 번에 견준다 (compat_ts_srv.adapt_ts_setup_stdout)" },
 };
 
 // ---------------------------------------------------------------- HTTP server (serve.py) harness
