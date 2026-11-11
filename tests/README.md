@@ -354,3 +354,7 @@ Python 파일(`scripts/*.py`·`check_ddl.py`·옛 Python 시험·`tests/conftest
 | e2e `workspace_*.spec.ts` (11개) | E1·E5·E6·E10·F2·F3·F4a·F4b·X1·N2·R3a | S3 (확인 필요) |
 
 갭 하나를 풀 때마다 이 표에서 그 줄을 지운다. 어떤 갭을 포기하기로 하면(제품이 그 기능을 원하지 않으면) 그 시험을 지우는 것은 worker 가 아니라 leader 가 결정한다.
+
+### SEL-74 갭 정리 결과 (leader, 합친 뒤)
+
+위 'ts 구현 갭'(G1~G18)과 '서버 갭'(S1~S4)은 SEL-74 안에서 모두 구현으로 메웠다 — 서버 쪽 S1~S4·G13·G14·G15 는 ai/SEL-74(w2), G7·G8·G9·G10·G16·G17·G18 과 Python 제거는 ai/SEL-74-py(w3), G1·G2·G3·G5·G6 은 나누기 전(97d64f0). 합친 커밋에서 해당 시험이 모두 통과한다. `test_ci_ts_ddl_check` 의 옛 'Python 잡' 시험은 Python 잡이 사라져 'Python 설계 검사를 싣는 잡이 없다'로 바꿨다(E8 과 같은 계약).
