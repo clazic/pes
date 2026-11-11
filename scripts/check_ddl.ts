@@ -70,7 +70,11 @@ class Checks {
 
   /** 정수는 BigInt 로 묶어 INTEGER 로 저장한다(JS number 는 실수로 묶인다). */
   private bind(params: Value[]): Array<string | bigint | null> {
-    return params.map((v) => (typeof v === "number" ? (Number.isInteger(v) ? BigInt(v) : (v as unknown as string)) : v));
+    return params.map((v) => {
+      if (typeof v !== "number") return v;
+      if (!Number.isInteger(v)) throw new Error(`non-integer number cannot be bound: ${v}`);
+      return BigInt(v);
+    });
   }
 
   sql(text: string, params: Value[] = []): { changes: number } {
@@ -1671,21 +1675,22 @@ class Checks {
 /** 설계 검사를 돌린다. 규칙 위반은 던지지 않고 ok=false + error 로 돌려준다. */
 export function run_ddl_checks(options: { ddl_path?: string } = {}): DdlCheckResult {
   const ddl_path = options.ddl_path ?? DEFAULT_DDL;
-  const checks = new Checks();
+  let checks: Checks | undefined;
   let error: string | undefined;
   try {
+    checks = new Checks();
     checks.run(ddl_path);
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
-    checks.db.close();
+    checks?.db.close();
   }
   const result: DdlCheckResult = {
     ok: error === undefined,
-    lines: checks.lines,
-    rejected_cases: checks.rejections,
-    representative_queries: checks.positive_checks,
-    table_count: checks.table_count,
+    lines: checks?.lines ?? [],
+    rejected_cases: checks?.rejections ?? 0,
+    representative_queries: checks?.positive_checks ?? 0,
+    table_count: checks?.table_count ?? 0,
   };
   if (error !== undefined) result.error = error;
   return result;
@@ -1710,12 +1715,17 @@ function parse_args(argv: string[]): { ddl_path?: string } {
 }
 
 if (import.meta.main) {
+  main(process.argv.slice(2));
+}
+
+function main(argv: string[]): void {
   let options: { ddl_path?: string };
   try {
-    options = parse_args(process.argv.slice(2));
+    options = parse_args(argv);
   } catch (error) {
     process.stderr.write(`check_ddl: ${(error as Error).message}\nusage: node scripts/check_ddl.ts [--ddl <sql>]\n`);
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
   const result = run_ddl_checks(options);
   for (const line of result.lines) process.stdout.write(`${line}\n`);

@@ -19,7 +19,7 @@
 
 ## 검사
 
-Python 3.9 이상과 Node 26 이상이 필요하다. Python 은 0.15 테스트(PR26 이전)와 외부 도구용이다 — PES TS 코어는 Python 을 실행하지 않는다(외부 Python 경계: [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절).
+Python 3.9 이상과 Node 26 이상이 필요하다. Python 은 PES 0.15 도구(`pes.py`·`serve.py`·`setup.py`)와 0.15 테스트(PR26 이전)용이다 — PES TS 코어는 Python 을 실행하지 않는다(외부 Python 경계: [docs/plan/migration-ts-equivalence.md](docs/plan/migration-ts-equivalence.md) 9.1절).
 
 TypeScript 코어·시험(Node 26, `node:sqlite`). `npm run check:ddl`은 DDL 초안 설계 검사(`scripts/check_ddl.ts`, Python 없이 `:memory:` SQLite)다:
 

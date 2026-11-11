@@ -267,19 +267,19 @@ PR26은 위 0.15 시험을 **같은 fixture로** 옮기고 차이 0을 확인한
 
 ### 9.1 외부 Python 경계
 
-PES 코어는 TypeScript 하나다(결정 0016). 그래도 PES 밖의 외부 도구가 Python 을 요구하는 곳이 남을 수 있다. 그것은 **PES 코어의 일이 아니라 외부 도구의 요구**이므로 경계로 표시하고, PES 가 대신 옮기거나 고치지 않는다.
+PES 코어는 TypeScript 하나다(결정 0016). 이 저장소에서 Python 이 필요한 것은 **PES 0.15 도구(`pes.py`·`serve.py`·`setup.py`)와 0.15 pytest** 뿐이다. 외부 도구는 각자 자기 요구를 정하고, 그 요구는 PES 코어의 일이 아니므로 **경계 밖**으로 두고 PES 가 대신 옮기거나 고치지 않는다.
 
-| 외부 도구 | Python 요구 | 경계 |
+| 외부 도구 | Python 과의 관계 | 경계 |
 |---|---|---|
-| kosis (통계청 KOSIS CLI·스킬) | 공식 설치 스크립트나 스킬이 Python 을 요구할 수 있다. 이 저장소는 그 요구를 보증하지 않는다. | **경계** — kosis 쪽 요구이며 PES 코어는 관여하지 않는다. |
-| vworld (국가공간정보 CLI·스킬) | 설치 스크립트나 스킬이 Python 을 요구할 수 있다. 이 저장소는 그 요구를 보증하지 않는다. | **경계** — vworld 쪽 요구이며 PES 코어는 관여하지 않는다. |
-| 그 밖의 외부 도구 (`setup.py`가 설치하는 korean-law·ego lite 등) | 도구마다 다르다. 설치 분기만 `setup.ts`로 옮기고, 도구 안의 Python 은 건드리지 않는다(위 표 `setup.py` 줄). | **경계** — 도구별 요구. |
+| kosis (통계청 KOSIS CLI·스킬) | npm 패키지(`@clazic/kosis`)로 설치된다. 이 저장소에는 kosis 가 Python 을 요구한다는 근거가 없다. | **경계** 밖 — 무엇을 요구하든 kosis 쪽 일이고 PES 코어는 관여하지 않는다. |
+| vworld (국가공간정보 CLI·스킬) | OS 별 네이티브 바이너리(`scripts/setup.py`의 `vworld-macos` 등)로 다룬다. 이 저장소에는 vworld 가 Python 을 요구한다는 근거가 없다. | **경계** 밖 — 무엇을 요구하든 vworld 쪽 일이고 PES 코어는 관여하지 않는다. |
+| 그 밖의 외부 도구 (`setup.py`가 설치하는 korean-law·ego lite 등) | 도구마다 다르다. 이 저장소는 그 도구들의 Python 요구 여부를 확인하지 않았다. 설치 분기만 `setup.ts`로 옮기고 도구 안은 건드리지 않는다(위 표 `setup.py` 줄). | **경계** 밖 — 도구별 요구. |
 
 경계의 뜻:
 
-- PES TS 코어는 Python 을 **실행하지 않는다**. 호출하지 않고, 불러오지 않고, 필요로 하지 않는다. 코어 코드에 `child_process` 로 Python 을 띄우는 경로는 없다.
-- legacy importer 는 옛(0.15) 데이터 **형식만 읽는다** — `project.json`·`library.json`·폴더 파일을 읽을 뿐 `pes.py`·`serve.py` 같은 Python 을 실행하지 않는다. 시험 `tests/test_legacy_import_no_python.test.ts`가 이를 고정한다.
-- 외부 도구의 Python 요구가 사라지거나 늘어도 PES 코어의 동작·시험은 달라지지 않는다. 사용자 안내(README)에는 이 경계를 한 줄로만 알린다.
+- PES TS 코어는 외부 도구가 무엇을 요구하든 Python 을 **실행하지 않는다**. 호출하지 않고, 불러오지 않고, 필요로 하지 않는다. 코어 코드에 `child_process` 로 `pes.py`·`serve.py` 같은 Python 을 띄우는 경로는 없다.
+- legacy importer 는 옛(0.15) 데이터 **형식만 읽는다** — `project.json`·`library.json`·폴더 파일을 읽을 뿐 Python 을 실행하지 않는다. 시험 `tests/test_legacy_import_no_python.test.ts`가 이를 고정한다.
+- 0.15 진입점(`pes.py`·`serve.py`·`setup.py`)이 남아 있는 동안은 제품을 쓰려면 Python 이 필요하다(README 표). 그 진입점은 PR26 이 끝나면 없어진다.
 
 ## 10. 위험·모르는 점
 

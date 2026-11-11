@@ -48,7 +48,7 @@
 | [migration-map.md](migration-map.md) | legacy `project.json`·파일 → DDL 표·열 대응(2단계 PR11). | 확정 |
 | [ddl-gaps.md](ddl-gaps.md) | 2~6단계가 요구하지만 1단계 DDL에 없는 표·열·상태 값과 마이그레이션 귀속. | 초안 |
 | [skill-neutral-inventory.md](skill-neutral-inventory.md) | 스킬·명령의 Claude 전용 표기·직접 쓰기 인벤토리(2단계 PR17). | 초안 |
-| [migration-ts-equivalence.md](migration-ts-equivalence.md) | 0.15 → TS 동등성 대응표(PR26). 9.1절에 외부 Python 경계(kosis·vworld 등 외부 도구의 Python 요구는 경계, TS 코어는 Python 을 실행하지 않음). | 초안 |
+| [migration-ts-equivalence.md](migration-ts-equivalence.md) | 0.15 → TS 동등성 대응표(PR26). 9.1절에 외부 Python 경계(kosis·vworld 등 외부 도구는 경계 밖, 이 저장소의 Python 요구는 0.15 도구뿐이며 TS 코어는 Python 을 실행하지 않음). | 초안 |
 | [webmcp-tools.md](webmcp-tools.md) | 3단계 WebMCP 실험의 노출 도구 목록·금지 API 초안. | 초안 |
 | [defects.md](defects.md) | 재현한 결함만 적는 운영 결함 기록. | 운영 기록 |
 
