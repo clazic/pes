@@ -1,0 +1,911 @@
+{
+  "doc": "CLI 계약 사례 X01~X04 (SEL-71). 32개 명령(+set)의 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·프로젝트 없는 명령의 이름·인자 오류·exit·stdout/stderr 를 0.15 와 견준다. 기준값은 baseline/X0n.json(0.15 대상). 서버·프로세스를 띄우는 serve·hub·open·watch·doctor 는 인자 수 오류(사용법)만 — 실제 실행은 E13·E15(뒤 PR).",
+  "ts_not_yet_reason": "X 사례는 모두 implemented",
+  "cases": [
+    {
+      "id": "X01",
+      "title": "명령 이름과 인자 수 — 사용법(exit 1) 출력, 아는/모르는 이름, 프로젝트 없는 단일 명령",
+      "section": "CLI 계약 X01",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "사용법 글·exit 1·알 수 없는 명령 처리",
+      "diffs": [],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": []
+        },
+        {
+          "run": [
+            "foo"
+          ]
+        },
+        {
+          "run": [
+            "foo",
+            "bar"
+          ]
+        },
+        {
+          "run": [
+            "init"
+          ]
+        },
+        {
+          "run": [
+            "ask-prep"
+          ]
+        },
+        {
+          "run": [
+            "ask"
+          ]
+        },
+        {
+          "run": [
+            "round-start"
+          ]
+        },
+        {
+          "run": [
+            "merge"
+          ]
+        },
+        {
+          "run": [
+            "render"
+          ]
+        },
+        {
+          "run": [
+            "approve"
+          ]
+        },
+        {
+          "run": [
+            "reopen"
+          ]
+        },
+        {
+          "run": [
+            "status"
+          ]
+        },
+        {
+          "run": [
+            "pending"
+          ]
+        },
+        {
+          "run": [
+            "mark"
+          ]
+        },
+        {
+          "run": [
+            "chat"
+          ]
+        },
+        {
+          "run": [
+            "assemble"
+          ]
+        },
+        {
+          "run": [
+            "report"
+          ]
+        },
+        {
+          "run": [
+            "digest"
+          ]
+        },
+        {
+          "run": [
+            "show"
+          ]
+        },
+        {
+          "run": [
+            "note"
+          ]
+        },
+        {
+          "run": [
+            "set"
+          ]
+        },
+        {
+          "run": [
+            "web"
+          ]
+        },
+        {
+          "run": [
+            "remote"
+          ]
+        },
+        {
+          "run": [
+            "qa-brief"
+          ]
+        },
+        {
+          "run": [
+            "qa"
+          ]
+        },
+        {
+          "run": [
+            "serve"
+          ]
+        },
+        {
+          "run": [
+            "stop"
+          ]
+        },
+        {
+          "run": [
+            "watch"
+          ]
+        },
+        {
+          "run": [
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "home"
+          ]
+        },
+        {
+          "run": [
+            "open"
+          ]
+        },
+        {
+          "run": [
+            "which"
+          ]
+        },
+        {
+          "run": [
+            "lock"
+          ]
+        },
+        {
+          "run": [
+            "unlock"
+          ]
+        },
+        {
+          "run": [
+            "init",
+            "{T}/x"
+          ]
+        },
+        {
+          "run": [
+            "which"
+          ]
+        }
+      ],
+      "project": null
+    },
+    {
+      "id": "X02",
+      "title": "없는 프로젝트 — 프로젝트를 받는 23개 명령",
+      "section": "CLI 계약 X02",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "각 명령의 '프로젝트 없음' 처리(exit·메시지). 0.15 traceback 은 D11",
+      "diffs": [
+        "D11"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "ask-prep",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{T}/없는-프로젝트",
+            "{T}/없는 질문.json"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "merge",
+            "{T}/없는-프로젝트",
+            "plan",
+            "{T}/없는 결과.json"
+          ]
+        },
+        {
+          "run": [
+            "render",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "reopen",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "mark",
+            "{T}/없는-프로젝트",
+            "a.json"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{T}/없는-프로젝트",
+            "plan",
+            "글"
+          ]
+        },
+        {
+          "run": [
+            "assemble",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "note",
+            "{T}/없는-프로젝트",
+            "글"
+          ]
+        },
+        {
+          "run": [
+            "set",
+            "{T}/없는-프로젝트",
+            "plan",
+            "summary",
+            "{T}/없는 값.txt"
+          ]
+        },
+        {
+          "run": [
+            "web",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "qa-brief",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "qa",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "lock",
+            "{T}/없는-프로젝트"
+          ],
+          "env": {
+            "PES_OWNER": "alice-session"
+          }
+        },
+        {
+          "run": [
+            "unlock",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "init",
+            "{T}/없는-프로젝트"
+          ]
+        }
+      ],
+      "project": null
+    },
+    {
+      "id": "X03",
+      "title": "나쁜 인자 — 단계 이름·빠진 인자·없는/깨진 파일·set·qa·digest 옵션",
+      "section": "CLI 계약 X03",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "단계 오류 글·exit·0.15 traceback 은 D11",
+      "diffs": [
+        "D01",
+        "D02",
+        "D11"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "계약 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "reopen",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "render",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "qa-brief",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}",
+            "bogus",
+            "글"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "ask-prep",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "qa",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "reopen",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "qa-brief",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "qa",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "ask-prep",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "merge",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "set",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "set",
+            "{P}",
+            "plan",
+            "bogus",
+            "{T}/값.txt"
+          ]
+        },
+        {
+          "run": [
+            "set",
+            "{P}",
+            "bogus",
+            "summary",
+            "{T}/값.txt"
+          ]
+        },
+        {
+          "run": [
+            "merge",
+            "{P}",
+            "plan",
+            "{T}/없는 결과.json"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{P}",
+            "{T}/없는 질문.json"
+          ]
+        },
+        {
+          "write_json": "{T}/나쁜 json.json",
+          "json": "깨짐",
+          "indent": null
+        },
+        {
+          "synthetic": "broken",
+          "as": "{T}/깨진-폴더"
+        },
+        {
+          "run": [
+            "merge",
+            "{P}",
+            "plan",
+            "{T}/나쁜 json.json"
+          ]
+        },
+        {
+          "run": [
+            "merge",
+            "{P}",
+            "plan",
+            "{T}/깨진-폴더/project.json"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{P}",
+            "{T}/나쁜 json.json"
+          ]
+        },
+        {
+          "run": [
+            "ask",
+            "{P}",
+            "{T}/깨진-폴더/project.json"
+          ]
+        },
+        {
+          "run": [
+            "qa",
+            "{P}",
+            "plan",
+            "--file",
+            "{T}/없는 검토.json"
+          ]
+        },
+        {
+          "run": [
+            "qa",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "plan",
+            "--round",
+            "x"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "plan",
+            "--round",
+            "9"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "plan",
+            "999"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "plan",
+            "--fields"
+          ]
+        },
+        {
+          "run": [
+            "mark",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "note",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{P}",
+            "--show",
+            "없는이름"
+          ]
+        },
+        {
+          "run": [
+            "lock",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "unlock",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{P}"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "X04",
+      "title": "프로젝트 없이 쓰는 명령과 홈 — list·home·remote·stop·which, 홈 안 프로젝트, home 이동",
+      "section": "CLI 계약 X04",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "remote 주소 목록·home 이동·list 형식·which 오류",
+      "diffs": [
+        "D01",
+        "D02"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "home"
+          ]
+        },
+        {
+          "run": [
+            "remote"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "add"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "add",
+            "주소 아님"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "add",
+            "https://m5.example.ts.net"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "add",
+            "https://m5.example.ts.net"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "remove",
+            "https://m5.example.ts.net"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "remove",
+            "https://없음.example.ts.net"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "clear"
+          ]
+        },
+        {
+          "run": [
+            "remote",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "stop"
+          ]
+        },
+        {
+          "run": [
+            "which",
+            "없는-도구-xyz"
+          ]
+        },
+        {
+          "run": [
+            "init",
+            "{R}/계약-프로젝트",
+            "--topic",
+            "홈 안 프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "home"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "계약-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "계약-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "note",
+            "계약-프로젝트",
+            "홈 메모"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "계약-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "계약-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "home",
+            "{T}/옮긴 홈"
+          ]
+        },
+        {
+          "run": [
+            "home"
+          ]
+        },
+        {
+          "run": [
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "home",
+            "{T}/옮긴 홈",
+            "--force"
+          ]
+        }
+      ],
+      "project": "{R}/계약-프로젝트"
+    }
+  ]
+}

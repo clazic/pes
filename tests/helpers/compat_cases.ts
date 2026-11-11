@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -35,6 +35,7 @@ import {
   type CompatCtx,
   type Target,
 } from "./compat_env.ts";
+import { answers_multiset, ts_age_lease, ts_cli_exists, ts_seed_feedback, ts_seed_legacy, ts_rename_slug, ts_view } from "./compat_ts.ts";
 import { dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n12_stdlib_error_page, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type Roots } from "./compat_normalize.ts";
 
 export interface CaseDef {
@@ -78,12 +79,25 @@ export interface CaseTable {
   cases: CaseDef[];
 }
 
+/** The 7.4 table E01~E15. */
 export function load_table(): CaseTable {
   return JSON.parse(readFileSync(join(FIXTURES, "cases.json"), "utf8")) as CaseTable;
 }
 
+/**
+ * The CLI contract table X01~X05 (SEL-71): the 38 command names, argument counts, missing project, bad stage / file / JSON, the
+ * commands that need no project. Same runner, same normalisers, own baselines (baseline/X0n.json, made by the 0.15 target).
+ */
+export function load_contract_table(): CaseTable {
+  return JSON.parse(readFileSync(join(FIXTURES, "contract.json"), "utf8")) as CaseTable;
+}
+
+export function all_cases(): CaseDef[] {
+  return [...load_table().cases, ...load_contract_table().cases];
+}
+
 export function case_def(id: string): CaseDef {
-  const found = load_table().cases.find((c) => c.id === id);
+  const found = all_cases().find((c) => c.id === id);
   assert.ok(found, `unknown case ${id}`);
   return found;
 }
@@ -97,6 +111,8 @@ export interface CaseRecord {
   steps: unknown[];
   dto: unknown;
   files: Record<string, string>;
+  /** D03 cases only: the answers as a sorted multiset of {stage, round, kind, text} */
+  answers?: unknown[];
 }
 
 export type CaseOutcome = { kind: "ran"; record: CaseRecord } | { kind: "not_yet"; reason: string };
@@ -122,8 +138,16 @@ function versions(text: string): string {
   return text.replace(/\(PES \d+\.\d+\.\d+(?:[-+][\w.]+)?\)/g, "(PES <VER>)");
 }
 
-function norm_out(text: string, roots: Roots): string[] {
-  return lines(versions(ports(n8_console(text, roots))));
+/**
+ * The usage text names how the CLI is started (`python3 -I pes.py <명령> …` on 0.15, `node scripts/pes.ts <명령> …` on ts). That one
+ * word is the only intended difference of the usage page — the rest, every command line, must be equal.
+ */
+function runner(text: string): string {
+  return text.replace(/^사용: (?:python3 -I pes\.py|node scripts\/pes\.ts) </gm, "사용: <RUN> <");
+}
+
+export function norm_out(text: string, roots: Roots): string[] {
+  return lines(runner(versions(ports(n8_console(text, roots)))));
 }
 
 // A python `repr` doubles backslashes; N2 handles it. Python-only wording that is part of the 0.15 contract stays as is.
@@ -194,13 +218,64 @@ function collect_files(dir: string, roots: Roots): Record<string, string> {
 }
 
 // ---------------------------------------------------------------- runners
+type Answer = { stage: string; round: number; kind: string; text: string };
+
+/** 0.15 side of D04: who holds `.pes-lock` right now (a lock older than the TTL does not count), or null. */
+function py_lock(project: string): { owner: string } | null {
+  const file = join(project, ".pes-lock");
+  if (!existsSync(file)) return null;
+  try {
+    const info = JSON.parse(readFileSync(file, "utf8")) as { owner?: string; at?: number };
+    return Date.now() / 1000 - Number(info.at ?? 0) < 7200 ? { owner: String(info.owner) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 0.15 side of D03: every `feedback/*.json` as {stage, round, kind, text}. */
+function py_answers(project: string): Answer[] {
+  const dir = join(project, "feedback");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .sort()
+    .map((name) => {
+      const record = read_json(join(dir, name));
+      return { stage: String(record.stage), round: Number(record.round), kind: String(record.kind ?? "feedback"), text: String(record.text ?? "") };
+    });
+}
+
+/** D03: the answer-name lines are DB-assigned on ts, so only what is common is compared (a path's last segment; one line for chat). */
+export function d03_stdout(label: unknown, stdout: string[]): string[] {
+  const head = Array.isArray(label) ? String(label[0] ?? "") : "";
+  if (head === "chat") return stdout.length === 1 ? ["<답 기록됨>"] : stdout;
+  if (head === "pending") return stdout.map((line) => line.split(/[\\/]/).pop() as string);
+  return stdout;
+}
+
 async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promise<CaseOutcome> {
   const steps: unknown[] = [];
   const roots = (): Roots => ctx.roots(def.project === null ? undefined : substitute(def.project, ctx));
+  const ts_home = { env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir };
+  const d03 = def.diffs.includes("D03");
+  const d04 = def.diffs.includes("D04");
   let merge_n = 0;
+  let last_pending: string[] = [];
   for (const raw of def.steps) {
+    if (raw.ts_import !== undefined) {
+      // ts only: a 0.15 folder the case wrote is put into the DB the way the user's migration does it (PR11/PR12); py has no DB
+      if (target === "ts") await ts_seed_legacy(ts_home, substitute(raw.ts_import, ctx));
+      continue;
+    }
     if (raw.write_json !== undefined) {
-      write_json(substitute(raw.write_json, ctx), sub_deep(raw.json, ctx), raw.indent === null ? undefined : 1);
+      const path = substitute(raw.write_json, ctx);
+      write_json(path, sub_deep(raw.json, ctx), raw.indent === null ? undefined : 1);
+      // a pending answer dropped into a served project's feedback/ is, on ts, a web submission (D03): same stage/round/kind/text
+      if (target === "ts" && /[\\/]feedback[\\/][^\\/]+\.json$/.test(path)) {
+        const folder = dirname(dirname(path));
+        const a = read_json(path) as Answer;
+        ts_seed_feedback(ctx, basename(folder), { stage: a.stage, round: a.round, kind: a.kind, text: a.text });
+      }
       continue;
     }
     if (raw.synthetic !== undefined) {
@@ -210,6 +285,16 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
       continue;
     }
     if (raw.patch_project !== undefined) {
+      if (target === "ts") {
+        // the project is in the DB: the only fields a case patches (executive_summary / conclusion) go in through `pes set project …`
+        for (const [field, value] of Object.entries<any>(raw.patch_project)) {
+          const file = join(ctx.tmp, `patch-${field}.txt`);
+          writeFileSync(file, String(value), "utf8");
+          const done = run_pes("ts", ctx, ["set", ctx.project(), "project", field, file]);
+          assert.ok(done.kind === "ran" && done.status === 0, `ts: patch_project via set failed: ${done.kind === "ran" ? done.stderr : done.reason}`);
+        }
+        continue;
+      }
       const file = join(ctx.project(), "project.json");
       const data = read_json(file);
       for (const [path, value] of Object.entries<any>(raw.patch_project)) {
@@ -222,7 +307,12 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
       continue;
     }
     if (raw.age_lock !== undefined) {
-      const lock = join(substitute(raw.project, ctx), ".pes-lock");
+      const folder = substitute(raw.project, ctx);
+      if (target === "ts") {
+        ts_age_lease(ts_home, basename(folder), raw.age_lock);
+        continue;
+      }
+      const lock = join(folder, ".pes-lock");
       const data = read_json(lock);
       data.at = Date.now() / 1000 - raw.age_lock;
       writeFileSync(lock, JSON.stringify(data), "utf8");
@@ -233,7 +323,11 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
       continue;
     }
     if (raw.move_project !== undefined) {
-      move_dir(substitute(raw.move_project.from, ctx), substitute(raw.move_project.to, ctx));
+      const from = substitute(raw.move_project.from, ctx);
+      const to = substitute(raw.move_project.to, ctx);
+      move_dir(from, to);
+      // ts: the project folder moved and its name changed — the DB project follows the folder name (the 0.15 `pdir` rule)
+      if (target === "ts") ts_rename_slug(ts_home, basename(from), basename(to));
       continue;
     }
     if (raw.copy_project !== undefined) {
@@ -250,6 +344,8 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
     } else if (raw.run !== undefined) {
       args = (raw.run as string[]).map((a) => substitute(a, ctx));
       label = raw.run;
+      // D03 on ts: `mark` names the answer by the name the DB gave it (the last `pending` listing), not by the 0.15 file name
+      if (target === "ts" && d03 && args[0] === "mark" && last_pending.length > 0) args = ["mark", args[1] as string, ...last_pending.slice(0, args.length - 2)];
     } else if (raw.setup !== undefined) {
       args = raw.setup as string[];
       label = ["setup.py", ...args];
@@ -259,26 +355,56 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
     const options = { env: raw.env as Record<string, string | undefined> | undefined, narrow_path: raw.narrow_path === true };
     const run = raw.setup !== undefined ? run_setup(target, ctx, args, options) : run_pes(target, ctx, args, options);
     if (run.kind === "not_yet") return { kind: "not_yet", reason: run.reason };
-    steps.push({
+    let stdout = post_process(raw.post, run.stdout, roots());
+    if (target === "ts" && d03 && args[0] === "pending") last_pending = run.stdout.split("\n").filter((x) => x !== "").map((x) => x.split(/[\\/]/).pop() as string);
+    if (d03) stdout = d03_stdout(label, stdout);
+    const entry: Record<string, unknown> = {
       step: label,
       env: raw.env ?? undefined,
       exit: run.status,
-      stdout: post_process(raw.post, run.stdout, roots()),
+      stdout,
       stderr: stderr_kind(run.stderr, roots()),
-    });
+    };
+    if (d04 && def.project !== null) {
+      const folder = substitute(def.project, ctx);
+      entry.lock = target === "ts" ? (ts_view(ts_home, basename(folder))?.lock ?? null) : py_lock(folder);
+    }
+    steps.push(entry);
   }
   const project = def.project === null ? undefined : substitute(def.project, ctx);
-  const dto_run = project !== undefined && existsSync(join(project, "project.json")) && safe_json(join(project, "project.json")) ? read_state_dto(target, ctx, project) : undefined;
+  const dto_run = project !== undefined && has_state(target, ctx, project) ? read_state_dto(target, ctx, project) : undefined;
   if (dto_run?.kind === "not_yet") return { kind: "not_yet", reason: dto_run.reason };
-  return {
-    kind: "ran",
-    record: {
-      id: def.id,
-      steps,
-      dto: dto_run === undefined ? null : normalized_dto(dto_run.dto, roots()),
-      files: project === undefined ? {} : collect_files(project, roots()),
-    },
+  const record: CaseRecord = {
+    id: def.id,
+    steps,
+    dto: dto_run === undefined ? null : normalized_dto(dto_run.dto, roots()),
+    files: project === undefined ? {} : collect_files(project, roots()),
   };
+  if (d03 && project !== undefined) {
+    const found = target === "ts" ? (ts_view(ts_home, basename(project))?.answers ?? []) : py_answers(project);
+    record.answers = answers_multiset(found).map((x) => JSON.parse(x) as unknown);
+  }
+  if (target === "ts" && def.diffs.includes("D10") && project !== undefined) assert_posix_storage(project, def.id);
+  return { kind: "ran", record };
+}
+
+/** Does the project exist in a form a DTO can be read from — project.json (py) / the DB or an old project.json (ts)? */
+function has_state(target: Target, ctx: CompatCtx, project: string): boolean {
+  if (target === "py") return existsSync(join(project, "project.json")) && safe_json(join(project, "project.json"));
+  if (!ts_cli_exists()) return true; // read_state_dto answers not_yet
+  const ts_home = { env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir };
+  if (ts_view(ts_home, basename(project)) !== undefined) return true;
+  return existsSync(join(project, "project.json")) && safe_json(join(project, "project.json"));
+}
+
+/** D10 (W1·W2): nothing the ts CLI generated in the project folder has a CR, and no stored path of a report has a backslash. */
+export function assert_posix_storage(project: string, id: string): void {
+  for (const rel of walk_files(project)) {
+    if (!/\.(md|html|json|log|txt)$/.test(rel)) continue;
+    const text = readFileSync(join(project, ...rel.split("/")), "utf8");
+    assert.ok(!text.includes("\r"), `${id}: ${rel} has CR — the ts CLI writes LF on every OS (D10, W2)`);
+    if (rel === "project.json") assert.ok(!/"path":\s*"[^"]*\\\\/.test(text), `${id}: project.json stores a backslash path — ts stores "/" on every OS (D10, W1)`);
+  }
 }
 
 function safe_json(path: string): boolean {
@@ -380,6 +506,8 @@ function http_files(project: string, roots: Roots): Record<string, string> {
 /** Runs one case on one target. The caller owns neither the ctx nor the servers: both are gone when this returns. */
 export async function run_case(target: Target, id: string): Promise<CaseOutcome> {
   const def = case_def(id);
+  // The ratchet is per case (SEL-71): a case marked not_yet is never run on ts — even when scripts/pes.ts exists — it answers not_yet.
+  if (target === "ts" && def.ts.status === "not_yet") return { kind: "not_yet", reason: load_table().ts_not_yet_reason };
   const ctx = make_ctx(`pes-compat-${id.toLowerCase()}-`);
   try {
     return def.kind === "http" ? await run_http(target, def, ctx) : await run_cli_like(target, def, ctx);
@@ -416,6 +544,15 @@ export function baseline_for(id: string, platform: string = process.platform, ba
   return out;
 }
 
+/**
+ * The pinned 0.15 record the ts target is held to: the single stored baseline WITHOUT any os_overrides, on every OS. The win32
+ * overrides are 0.15's Windows data (W1 backslash paths, W2 CRLF sizes); ts stores `/` and LF everywhere (D10), so on Windows it must
+ * equal the macOS/Linux record — that is stronger than ignoring the difference.
+ */
+export function ts_baseline(id: string): CaseRecord {
+  return JSON.parse(JSON.stringify(read_baseline(id))) as CaseRecord;
+}
+
 export function write_baseline(record: CaseRecord): void {
   const path = baseline_path(record.id);
   mkdirSync(dirname(path), { recursive: true });
@@ -437,17 +574,36 @@ function roundtrip(record: CaseRecord): CaseRecord {
  * (`n4_order` / `n4_multiset` for event / answer tables) are applied to the ts side here, before the comparison. They are not
  * applied today because both sides are Python (integer ids, file order), and they are only unit-tested in test_compat_harness.
  */
+/**
+ * D02 device, the one place the DB shape differs from a 0.15 project.json beyond the intended id/processed differences: the DB read
+ * model always carries `executive_summary` / `conclusion` ("") and each stage's `qa` / `review_log` ([]) while 0.15 adds the key with
+ * the first write. An empty value and an absent key are the same state, so both sides drop the empty ones (a non-empty value stays).
+ */
+export function d02_canon(dto: unknown): unknown {
+  if (dto === null || typeof dto !== "object") return dto;
+  const copy = JSON.parse(JSON.stringify(dto)) as any;
+  for (const key of ["executive_summary", "conclusion"]) if (copy[key] === "") delete copy[key];
+  for (const stage of Object.values<any>(copy.stages ?? {})) for (const key of ["qa", "review_log"]) if (Array.isArray(stage[key]) && stage[key].length === 0) delete stage[key];
+  return copy;
+}
+
 export function compare_ts_record(def: CaseDef, got: CaseRecord, base: CaseRecord): void {
   const id = def.id;
   const diffs = def.diffs;
-  assert.deepEqual(got.steps, base.steps, `${id}: stdout / stderr kind / exit differ`);
+  const canon = diffs.includes("D02") ? d02_canon : (x: unknown) => x;
+  compare_steps(def, got.steps, base.steps);
   assert.deepEqual(
-    n10_apply(got.dto, diffs, KNOWN_DIFFS),
-    n10_apply(n10_override(base.dto, id, diffs, KNOWN_DIFFS), diffs, KNOWN_DIFFS),
+    n10_apply(canon(got.dto), diffs, KNOWN_DIFFS),
+    n10_apply(canon(n10_override(base.dto, id, diffs, KNOWN_DIFFS)), diffs, KNOWN_DIFFS),
     `${id}: state DTO differs beyond ${diffs.join(",") || "no"} intended differences`,
   );
   assert.deepEqual(n10_checks(got.dto, base.dto, diffs, KNOWN_DIFFS), [], `${id}: an intended difference's own check failed`);
   assert.deepEqual(n10_files(got.files, diffs, KNOWN_DIFFS), n10_files(base.files, diffs, KNOWN_DIFFS), `${id}: produced files differ (names or normalised contents) beyond ${diffs.join(",") || "no"} intended differences`);
+  if (diffs.some((d) => KNOWN_DIFFS[d]?.answers_check === true) && base.answers !== undefined) {
+    // D03: the answers are a multiset of {stage, round, kind, text}; file names, times and the number of files are not part of it
+    assert.ok(got.answers !== undefined, `${id}: the ts record carries no answers (D03)`);
+    assert.deepEqual([...got.answers].map((x) => JSON.stringify(x)).sort(), [...base.answers].map((x) => JSON.stringify(x)).sort(), `${id}: answers differ (D03: ${"{stage, round, kind, text}"} multiset)`);
+  }
   if (diffs.some((d) => KNOWN_DIFFS[d]?.files_check === "snapshot_contents")) {
     // D07: where the snapshots live is not compared, but none of their contents may be lost (the first state and every later one).
     const have = dropped_digests(got.files, diffs, KNOWN_DIFFS);
@@ -457,6 +613,39 @@ export function compare_ts_record(def: CaseDef, got: CaseRecord, base: CaseRecor
       have.splice(at, 1);
     }
   }
+}
+
+/** A step ended in a Python traceback on 0.15 (stderr kind "traceback: …"). */
+function is_traceback_step(step: any): boolean {
+  return Array.isArray(step?.stderr) && step.stderr.some((line: string) => line.startsWith("traceback:"));
+}
+
+/** What a ts stderr must not look like: a Python or Node stack trace. */
+export function looks_like_stack_trace(lines_: string[]): boolean {
+  return lines_.some((line) => /^traceback:|Traceback \(most recent|^\s+at .+[(:]|node:internal|ERR_[A-Z_]+|\bat file:\/\//.test(line));
+}
+
+/**
+ * Steps: equal, except the D03 name lines (already reduced by d03_stdout on both sides) and D11 — a 0.15 traceback step passes when ts
+ * gives the same exit and a plain Korean message without a stack trace (or, for a `fixable` step, succeeds with exit 0 and no stack trace).
+ */
+export function compare_steps(def: CaseDef, got: unknown[], base: unknown[]): void {
+  const id = def.id;
+  assert.equal(got.length, base.length, `${id}: the number of recorded steps differs`);
+  const d11 = def.diffs.includes("D11");
+  base.forEach((expected: any, index) => {
+    const actual: any = got[index];
+    if (!(d11 && is_traceback_step(expected))) {
+      assert.deepEqual(actual, expected, `${id}: step ${index} (${JSON.stringify(expected.step)}) — stdout / stderr kind / exit${def.diffs.includes("D04") ? " / lock owner" : ""} differ`);
+      return;
+    }
+    assert.deepEqual(actual.step, expected.step, `${id}: step ${index} is another command`);
+    const fixable = (KNOWN_DIFFS.D11?.traceback_fix?.fixable?.[id] ?? []).some((label) => JSON.stringify(label) === JSON.stringify(expected.step));
+    assert.ok(!looks_like_stack_trace(actual.stderr), `${id}: step ${JSON.stringify(expected.step)} still ends in a stack trace (D11): ${JSON.stringify(actual.stderr)}`);
+    if (fixable && actual.exit === 0) return;
+    assert.equal(actual.exit, expected.exit, `${id}: step ${JSON.stringify(expected.step)} (a 0.15 traceback, D11) must end with the same exit code`);
+    assert.ok(actual.stderr.length >= 1 && actual.stderr.every((line: string) => line.trim() !== "") && /[가-힣]/.test(actual.stderr.join("\n")), `${id}: step ${JSON.stringify(expected.step)} needs a plain Korean error message on stderr (D11), got ${JSON.stringify(actual.stderr)}`);
+  });
 }
 
 /**
@@ -490,14 +679,21 @@ export async function assert_case(target: Target, id: string): Promise<void> {
     assert.equal(outcome.kind, "not_yet", `${id}: marked not_yet in cases.json but the ts target ran — set ts.status to "implemented" and remove it from the not-yet list`);
     return;
   }
-  assert.equal(outcome.kind, "ran", `${id}: marked implemented but the ts target answered not_yet`);
+  assert.equal(outcome.kind, "ran", `${id}: marked implemented but the ts target answered not_yet (${outcome.kind === "not_yet" ? outcome.reason : ""})`);
   if (outcome.kind !== "ran") return;
-  compare_ts_record(def, roundtrip(outcome.record), baseline_for(id));
+  compare_ts_record(def, roundtrip(outcome.record), ts_baseline(id));
 }
 
 export function not_yet_ids(): string[] {
   return load_table()
     .cases.filter((c) => c.ts.status === "not_yet")
+    .map((c) => c.id);
+}
+
+/** Ids of the contract table (X01~X05) and the 7.4 table (E01~E15) the ts target must run today. */
+export function implemented_ids(): string[] {
+  return all_cases()
+    .filter((c) => c.ts.status === "implemented")
     .map((c) => c.id);
 }
 

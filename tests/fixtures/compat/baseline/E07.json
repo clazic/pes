@@ -198,7 +198,7 @@
    ],
    "exit": 0,
    "stdout": [
-    "<PROJECT>/feedback/research-R1-<TIME>.json"
+    "<답 기록됨>"
    ],
    "stderr": []
   },
@@ -209,7 +209,7 @@
    ],
    "exit": 0,
    "stdout": [
-    "<PROJECT>/feedback/plan-R0-<TIME>.json"
+    "plan-R0-<TIME>.json"
    ],
    "stderr": []
   },
@@ -435,5 +435,19 @@
   "feedback/research-R1-<TIME>.json": "054de5084fd407ed",
   "feedback.log": "e3b0c44298fc1c14",
   "project.json": "dedbeba9fa4c1308"
- }
+ },
+ "answers": [
+  [
+   "plan",
+   0,
+   "feedback",
+   "합성 답"
+  ],
+  [
+   "research",
+   1,
+   "feedback",
+   "합성 지시"
+  ]
+ ]
 }

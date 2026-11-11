@@ -1,0 +1,697 @@
+{
+ "id": "X03",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "계약 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "reopen",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "render",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "digest",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "show",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "qa-brief",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "chat",
+    "{P}",
+    "bogus",
+    "글"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "report",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "ask-prep",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "질문 은행 없음: <PES>/questions/bogus.json"
+   ]
+  },
+  {
+   "step": [
+    "qa",
+    "{P}",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+   ]
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "approve",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "reopen",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "digest",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "show",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "report",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "qa-brief",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "qa",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "ask-prep",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "chat",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "ask",
+    "{P}"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "set",
+    "{P}"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "set: 인자가 맞지 않습니다",
+    "사용법: set <dir> <단계> <필드> <파일|->  (필드: summary·changes·carry_over·settings·review)",
+    "        set <dir> project <필드> <파일|->  (필드: executive_summary·conclusion)"
+   ]
+  },
+  {
+   "step": [
+    "set",
+    "{P}",
+    "plan",
+    "bogus",
+    "{T}/값.txt"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "set: plan 에서 쓸 수 있는 필드는 summary, changes, carry_over, settings, review 뿐입니다: 'bogus'"
+   ]
+  },
+  {
+   "step": [
+    "set",
+    "{P}",
+    "bogus",
+    "summary",
+    "{T}/값.txt"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "set: 대상은 단계 이름(plan, research, analyze, write, verify, publish) 또는 project 여야 합니다: 'bogus'",
+    "사용법: set <dir> <단계> <필드> <파일|->  (필드: summary·changes·carry_over·settings·review)",
+    "        set <dir> project <필드> <파일|->  (필드: executive_summary·conclusion)"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "{T}/없는 결과.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/없는 결과.json'"
+   ]
+  },
+  {
+   "step": [
+    "ask",
+    "{P}",
+    "{T}/없는 질문.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/없는 질문.json'"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "{T}/나쁜 json.json"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "merge: 결과 항목은 JSON 객체여야 합니다: <TMP>/work/나쁜 json.json"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "{T}/깨진-폴더/project.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: json.decoder.JSONDecodeError: Expecting value: line 1 column 21 (char 20)"
+   ]
+  },
+  {
+   "step": [
+    "ask",
+    "{P}",
+    "{T}/나쁜 json.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: AttributeError: 'str' object has no attribute 'get'"
+   ]
+  },
+  {
+   "step": [
+    "ask",
+    "{P}",
+    "{T}/깨진-폴더/project.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: json.decoder.JSONDecodeError: Expecting value: line 1 column 21 (char 20)"
+   ]
+  },
+  {
+   "step": [
+    "qa",
+    "{P}",
+    "plan",
+    "--file",
+    "{T}/없는 검토.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "검토 결과 없음: <TMP>/work/없는 검토.json — qa-brief 로 지시문을 만들고 pes:reviewer 를 먼저 돌리세요"
+   ]
+  },
+  {
+   "step": [
+    "qa",
+    "{P}",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "검토 결과 없음: <PROJECT>/rounds/plan-R1/qa.json — qa-brief 로 지시문을 만들고 pes:reviewer 를 먼저 돌리세요"
+   ]
+  },
+  {
+   "step": [
+    "digest",
+    "{P}",
+    "plan",
+    "--round",
+    "x"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: ValueError: invalid literal for int() with base 10: 'x'"
+   ]
+  },
+  {
+   "step": [
+    "digest",
+    "{P}",
+    "plan",
+    "--round",
+    "9"
+   ],
+   "exit": 0,
+   "stdout": [
+    "[기획 R1] 항목 0개 · 상태 active"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "show",
+    "{P}",
+    "plan",
+    "999"
+   ],
+   "exit": 0,
+   "stdout": [
+    "[]"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "show",
+    "{P}",
+    "plan",
+    "--fields"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: IndexError: list index out of range"
+   ]
+  },
+  {
+   "step": [
+    "mark",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "처리 완료 표시 0개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "note",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "인계 메모 1개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "pending",
+    "{P}",
+    "--show",
+    "없는이름"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "받은 답이 없습니다: 없는이름"
+   ]
+  },
+  {
+   "step": [
+    "lock",
+    "{P}"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "PES_OWNER 환경변수(이 세션 ID)가 필요합니다"
+   ]
+  },
+  {
+   "step": [
+    "unlock",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "잠금 해제"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 계약 주제  (<PROJECT>)",
+    "현재 단계: 기획",
+    "  ▶ 기획     active   R1 항목 0 (할 일 0)",
+    "    조사     pending  R0 항목 0 (할 일 0)",
+    "    분석·종합  pending  R0 항목 0 (할 일 0)",
+    "    집필     pending  R0 항목 0 (할 일 0)",
+    "    검증     pending  R0 항목 0 (할 일 0)",
+    "    산출·공유  pending  R0 항목 0 (할 일 0)",
+    "인계 메모 1개 (최근 5):",
+    "  - [<TIME>] ",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve 합성 프로젝트"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "pending",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "계약 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "plan",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [
+   {
+    "time": "<TIME>",
+    "stage": "plan",
+    "text": ""
+   }
+  ],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "project.json": "7b9c02ec30d9bad8"
+ }
+}

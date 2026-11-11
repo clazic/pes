@@ -264,6 +264,20 @@ export interface KnownDiff {
   override?: Record<string, Record<string, unknown>>;
   /** extra DTO assertions that replace a dropped path (run on the ts DTO against the baseline DTO) */
   checks?: ("ids_distinct" | "processed_count")[];
+  /**
+   * D03: the answers (`feedback/*.json` on 0.15, submissions/answers in the DB) are compared as a multiset of {stage, round, kind, text}
+   * (record.answers), and the answer-name lines of `chat` / `pending` are reduced to what is common (compat_cases.d03_stdout).
+   */
+  answers_check?: boolean;
+  /** D04: every step also records who holds the lock afterwards (`.pes-lock` owner on 0.15, the live lease label in the DB); compared whole */
+  lock_check?: boolean;
+  /**
+   * D11: a 0.15 step that ends in a Python traceback is a defect. The ts step must end with the same exit code and a plain Korean one-line
+   * error (no stack trace), stdout is not compared; `fixable` lists steps (by label) that may instead succeed with exit 0.
+   */
+  traceback_fix?: { fixable?: Record<string, unknown[][]> };
+  /** D10: the ts target stores `/` paths and LF text on every OS — the win32 `os_overrides` do NOT apply to it (the posix baseline does) */
+  posix_storage?: boolean;
 }
 
 function glob_to_regex(pattern: string): RegExp {

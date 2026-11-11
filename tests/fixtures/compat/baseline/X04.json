@@ -1,0 +1,308 @@
+{
+ "id": "X04",
+ "steps": [
+  {
+   "step": [
+    "list"
+   ],
+   "exit": 0,
+   "stdout": [
+    "프로젝트 없음: <TMP>/pes-projects"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "home"
+   ],
+   "exit": 0,
+   "stdout": [
+    "PES 홈: <TMP>/pes-projects  (PES_HOME 환경변수) · 프로젝트 0개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: 없음 (이 컴퓨터의 127.0.0.1·localhost 만)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "add"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: 없음"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "add",
+    "주소 아님"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "주소 형식이 아닙니다: 주소 아님 (예: https://m5.example.ts.net)"
+   ]
+  },
+  {
+   "step": [
+    "remote",
+    "add",
+    "https://m5.example.ts.net"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: https://m5.example.ts.net"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "list"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: https://m5.example.ts.net"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "add",
+    "https://m5.example.ts.net"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: https://m5.example.ts.net"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "remove",
+    "https://m5.example.ts.net"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: 없음"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "remove",
+    "https://없음.example.ts.net"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "주소 형식이 아닙니다: https://없음.example.ts.net (예: https://m5.example.ts.net)"
+   ]
+  },
+  {
+   "step": [
+    "remote",
+    "clear"
+   ],
+   "exit": 0,
+   "stdout": [
+    "답을 보낼 수 있는 다른 주소: 없음"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "remote",
+    "bogus"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "사용: remote [list|add <주소>|remove <주소>|clear]"
+   ]
+  },
+  {
+   "step": [
+    "stop"
+   ],
+   "exit": 0,
+   "stdout": [
+    "서버 종료 (<TMP>/pes-projects — 이 홈의 모든 프로젝트 화면이 함께 꺼집니다)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "which",
+    "없는-도구-xyz"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "없는-도구-xyz 를 찾지 못함 — /pes:doctor 로 설치 상태 확인"
+   ]
+  },
+  {
+   "step": [
+    "init",
+    "{R}/계약-프로젝트",
+    "--topic",
+    "홈 안 프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "list"
+   ],
+   "exit": 0,
+   "stdout": [
+    "1. [내 차례] 홈 안 프로젝트  (계약-프로젝트)",
+    "   기획 R0 · 기획 시작 질문에 답하기 · 갱신 <TIME> · 서버 꺼짐"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "home"
+   ],
+   "exit": 0,
+   "stdout": [
+    "PES 홈: <TMP>/pes-projects  (PES_HOME 환경변수) · 프로젝트 1개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "계약-프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 홈 안 프로젝트  (<PROJECT>)",
+    "현재 단계: 기획",
+    "  ▶ 기획     asking   R0 항목 0 (할 일 0)",
+    "    조사     pending  R0 항목 0 (할 일 0)",
+    "    분석·종합  pending  R0 항목 0 (할 일 0)",
+    "    집필     pending  R0 항목 0 (할 일 0)",
+    "    검증     pending  R0 항목 0 (할 일 0)",
+    "    산출·공유  pending  R0 항목 0 (할 일 0)",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve 계약-프로젝트"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "pending",
+    "계약-프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [],
+   "stderr": []
+  },
+  {
+   "step": [
+    "note",
+    "계약-프로젝트",
+    "홈 메모"
+   ],
+   "exit": 0,
+   "stdout": [
+    "인계 메모 1개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "계약-프로젝트",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "digest",
+    "계약-프로젝트",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "[기획 R1] 항목 0개 · 상태 active"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "home",
+    "{T}/옮긴 홈"
+   ],
+   "exit": 0,
+   "stdout": [
+    "PES 홈 변경: <TMP>/pes-projects → <TMP>/work/옮긴 홈  (프로젝트 1개 이동: 계약-프로젝트)",
+    "주의: PES_HOME 환경변수가 설정 파일보다 우선합니다 — 환경변수도 바꾸거나 지우세요",
+    "Monitor 가 옛 경로의 feedback.log 를 보고 있었다면 새 경로로 다시 거세요."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "home"
+   ],
+   "exit": 0,
+   "stdout": [
+    "PES 홈: <TMP>/pes-projects  (PES_HOME 환경변수) · 프로젝트 0개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "list"
+   ],
+   "exit": 0,
+   "stdout": [
+    "프로젝트 없음: <TMP>/pes-projects"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "home",
+    "{T}/옮긴 홈",
+    "--force"
+   ],
+   "exit": 0,
+   "stdout": [
+    "PES 홈 변경: <TMP>/pes-projects → <TMP>/work/옮긴 홈  (프로젝트 0개 이동)",
+    "주의: PES_HOME 환경변수가 설정 파일보다 우선합니다 — 환경변수도 바꾸거나 지우세요",
+    "Monitor 가 옛 경로의 feedback.log 를 보고 있었다면 새 경로로 다시 거세요."
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": null,
+ "files": {}
+}

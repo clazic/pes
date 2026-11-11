@@ -34,8 +34,10 @@ import { use_home_guard } from "./helpers/home_guard.ts";
 use_home_guard();
 
 // ---------------------------------------------------------------- the list of cases the TS target implements today
-// Edit this list (and cases.json `ts.status`) together when a case starts to work on the TS target.
-const TS_IMPLEMENTED: string[] = [];
+// SEL-71 (PR26b) turned the ratchet from "per kind" into "per case": cases.json `ts.status` says, case by case, whether the ts target
+// must match 0.15 (implemented) or answers not_yet (and is not even run, whether scripts/pes.ts exists or not). Edit this list and
+// cases.json together; tests/test_pes_ts_contract.test.ts pins the SEL-71 completion list for good.
+const TS_IMPLEMENTED: string[] = ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E10", "E11", "E12"];
 const ALL_IDS = Array.from({ length: 15 }, (_x, i) => `E${String(i + 1).padStart(2, "0")}`);
 
 test("the table defines E01~E15 once each, with criteria, intended differences and a pinned 0.15 baseline", () => {
@@ -92,18 +94,19 @@ test("every intended difference (7.5) carries a reason, and each is used by at l
 const KINDS: CaseKind[] = ["cli", "http", "setup"];
 const kind_of = (id: string): CaseKind => load_table().cases.find((c) => c.id === id)?.kind as CaseKind;
 
-test("target selection: py runs, ts answers not_yet for every kind while its scripts/*.ts file does not exist", () => {
+test("target selection: py runs; a ts kind with an implemented case needs its scripts/*.ts file, a kind without one has none yet", () => {
   assert.equal(target_from_env("py"), "py");
   const ctx = make_ctx("pes-harness-");
   try {
     const py = run_pes("py", ctx, ["remote"]);
     assert.equal(py.kind, "ran");
     assert.equal(py.kind === "ran" ? py.status : -1, 0);
-    // one ts file per kind of case: pes.ts (cli) / serve.ts (http) / setup.ts (setup). A file exists exactly when some case of
-    // that kind is listed as implemented — otherwise the ratchet has to be turned by hand (cases.json + TS_IMPLEMENTED + wiring).
+    // one ts file per kind of case: pes.ts (cli) / serve.ts (http) / setup.ts (setup). Per-case ratchet (SEL-71): a kind that has an
+    // implemented case needs its file (a missing pes.ts is what fails SEL-71 until the worker writes it); a kind with none keeps no
+    // file yet — serve.ts / setup.ts appearing without turning their cases is a forgotten ratchet.
     for (const kind of KINDS) {
       const implemented = TS_IMPLEMENTED.filter((id) => kind_of(id) === kind).length;
-      assert.equal(ts_available(kind), implemented > 0, `${TS_FILES[kind]} ${ts_available(kind) ? "appeared" : "is missing"}: wire the ts "${kind}" target in compat_env / compat_cases and update TS_IMPLEMENTED + cases.json`);
+      assert.equal(ts_available(kind), implemented > 0, `${TS_FILES[kind]} ${ts_available(kind) ? "appeared with no implemented case of that kind (turn the cases in cases.json + TS_IMPLEMENTED)" : "is missing but cases of that kind are implemented in cases.json"}`);
     }
     if (!ts_available("cli")) {
       assert.equal(run_pes("ts", ctx, ["remote"]).kind, "not_yet");
@@ -115,29 +118,26 @@ test("target selection: py runs, ts answers not_yet for every kind while its scr
   }
 });
 
-test("the ts gate throws as soon as the ts file of a kind exists (pes.ts, serve.ts and setup.ts alike) — the file is injected, scripts/ is not touched", () => {
-  for (const kind of KINDS) {
+test("the ts gate throws as soon as serve.ts / setup.ts exists (their cases are still not wired); pes.ts is wired since SEL-71 — the file is injected, scripts/ is not touched", () => {
+  // cli: wired per case (compat_cases.run_case); the gate only answers "not_yet" while the file is absent
+  assert.equal(ts_gate("cli", () => false).kind, "not_yet");
+  for (const kind of KINDS.filter((k) => k !== "cli")) {
     const absent = ts_gate(kind, () => false);
     assert.equal(absent.kind, "not_yet");
-    assert.match(absent.reason, new RegExp(`scripts/${kind === "cli" ? "pes" : kind === "http" ? "serve" : "setup"}\\.ts`));
+    assert.match(absent.reason, new RegExp(`scripts/${kind === "http" ? "serve" : "setup"}\\.ts`));
     assert.throws(() => ts_gate(kind, (path) => path === TS_FILES[kind]), /exists: wire the ts target/, kind);
     // only the file of the kind itself counts
     assert.equal(ts_gate(kind, (path) => path !== TS_FILES[kind]).kind, "not_yet", kind);
   }
 });
 
-test("the not-yet list on the TS target equals the table exactly (an implemented case must leave the list)", async () => {
+test("the not-yet list on the TS target equals the table exactly (an implemented case must leave the list; a not-yet case is never run)", async () => {
   const expected = ALL_IDS.filter((id) => !TS_IMPLEMENTED.includes(id));
   assert.deepEqual(not_yet_ids(), expected, "cases.json ts.status and TS_IMPLEMENTED disagree");
   assert.equal(expected.length, 15 - TS_IMPLEMENTED.length);
-  // the three ts files, each against its kind of cases: a file that exists without an implemented case of its kind (E08/E09/E13
-  // http, E14 setup, the rest cli) means the not-yet entries were forgotten.
-  for (const kind of KINDS) {
-    const of_kind = ALL_IDS.filter((id) => kind_of(id) === kind);
-    const missing = of_kind.filter((id) => !TS_IMPLEMENTED.includes(id));
-    if (ts_available(kind)) assert.deepEqual(missing, [], `${TS_FILES[kind]} exists but these ${kind} cases are still not_yet`);
-    else assert.deepEqual(missing, of_kind, `${TS_FILES[kind]} is missing but ${kind} cases are listed as implemented`);
-  }
+  // serve.ts / setup.ts cases stay not_yet in SEL-71: no http / setup case may be implemented
+  for (const kind of ["http", "setup"] as CaseKind[]) assert.deepEqual(TS_IMPLEMENTED.filter((id) => kind_of(id) === kind), [], `${kind} cases are not part of SEL-71`);
+  // per-case ratchet: a not-yet case answers not_yet WITHOUT running anything, whether or not scripts/pes.ts exists
   for (const id of expected) {
     const outcome = await run_case("ts", id);
     assert.equal(outcome.kind, "not_yet", `${id} ran on the ts target although it is listed as not_yet`);
@@ -147,28 +147,36 @@ test("the not-yet list on the TS target equals the table exactly (an implemented
 // ---------------------------------------------------------------- "implemented" means the same comparison as py (injected records)
 // No ts target exists, so a fake `implemented` case is built from the pinned baseline itself: a copy of it stands in for the ts record.
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+/** The baseline as a (correct) ts record would show it: every 0.15 traceback step (D11) ends in a plain Korean one-line error instead. */
+function ts_like(record: CaseRecord): CaseRecord {
+  const copy = clone(record);
+  for (const step of copy.steps as any[]) if (Array.isArray(step.stderr) && step.stderr.some((l: string) => l.startsWith("traceback:"))) step.stderr = ["오류: 합성 한국어 메시지 (스택 추적 없음)"];
+  return copy;
+}
 const def_of = (id: string): CaseDef => load_table().cases.find((c) => c.id === id) as CaseDef;
 const with_diffs = (id: string, diffs: string[]): CaseDef => ({ ...def_of(id), diffs });
 
 test("an implemented ts case with the baseline's own record passes (the comparison is not stricter than the contract)", () => {
   // E03 is the one case whose pinned 0.15 value is a known defect (D06): it passes with the fixed value, see the D06 test below.
-  for (const id of ALL_IDS.filter((x) => x !== "E03")) compare_ts_record(def_of(id), clone(read_baseline(id)), read_baseline(id));
+  for (const id of ALL_IDS.filter((x) => x !== "E03")) compare_ts_record(def_of(id), ts_like(read_baseline(id)), read_baseline(id));
 });
 
 test("an implemented ts case fails when a produced file differs, is missing, or is extra (files are compared like on py)", () => {
   const base = read_baseline("E02");
   const names = Object.keys(base.files);
   assert.ok(names.length >= 2, "E02 must pin produced files (ask HTML, report…)");
-  const changed = clone(base);
-  changed.files[names[0] as string] = "0000000000000000";
+  // D02 drops project.json / library.json by name (the DTO covers them): pick a file that is still compared
+  const compared = names.filter((n) => !["project.json", "library.json"].includes(n));
+  const changed = ts_like(base);
+  changed.files[compared[0] as string] = "0000000000000000";
   assert.throws(() => compare_ts_record(def_of("E02"), changed, base), /produced files differ/);
-  const missing = clone(base);
-  delete missing.files[names[0] as string];
+  const missing = ts_like(base);
+  delete missing.files[compared[0] as string];
   assert.throws(() => compare_ts_record(def_of("E02"), missing, base), /produced files differ/);
-  const extra = clone(base);
+  const extra = ts_like(base);
   extra.files["out/extra.md"] = "1111111111111111";
   assert.throws(() => compare_ts_record(def_of("E02"), extra, base), /produced files differ/);
-  const steps = clone(base);
+  const steps = ts_like(base);
   (steps.steps[0] as any).exit = 99;
   assert.throws(() => compare_ts_record(def_of("E02"), steps, base), /stdout \/ stderr kind \/ exit differ/);
 });
@@ -182,7 +190,7 @@ test("a name-pattern difference removes only its own files: D07 drops snapshots/
   assert.equal(Object.keys(kept).length, Object.keys(base.files).length - snapshots.length, "only snapshots/** is removed, nothing else");
 
   // the new core keeps its editions under other names (the ts record builder lists them below snapshots/** too): accepted, contents unchanged
-  const moved = clone(base);
+  const moved = ts_like(base);
   (moved.dto as any).stages.research.items[2].depth = 2; // D06: the fixed value, unrelated to this test
   for (const name of snapshots) {
     moved.files[`snapshots/edition-${name.replace(/^snapshots\//, "").replace(/\W+/g, "-")}`] = moved.files[name] as string;
@@ -201,12 +209,12 @@ test("a name-pattern difference removes only its own files: D07 drops snapshots/
   edited.files[Object.keys(edited.files).find((name) => name.startsWith("snapshots/edition-")) as string] = "0000000000000000";
   assert.throws(() => compare_ts_record(def_of("E03"), edited, base), /snapshot state of 0\.15/);
   // without D07 the same move is a files difference
-  assert.throws(() => compare_ts_record(with_diffs("E03", []), moved, base), /produced files differ|DTO differs/);
+  assert.throws(() => compare_ts_record(with_diffs("E03", ["D11"]), moved, base), /produced files differ|DTO differs/);
 });
 
 test("D06 is a value, not a hole: E03 item 7 must be depth 2 (0.15 says 3); D01 / D03 keep their own checks", () => {
   const base = read_baseline("E03");
-  const fixed = clone(base);
+  const fixed = ts_like(base);
   (fixed.dto as any).stages.research.items[2].depth = 2;
   compare_ts_record(def_of("E03"), fixed, base);
   for (const wrong of [1, 3, 99]) {
