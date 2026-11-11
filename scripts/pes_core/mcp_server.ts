@@ -732,7 +732,7 @@ export class McpServer {
     if (args.reason !== undefined) body.reason = args.reason;
     if (args.wait_ms !== undefined) body.wait_ms = args.wait_ms;
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/wait`, body, key));
-    if (out.ok) this.#lease_ended("pes_wait", key, guard);
+    if (out.ok) this.#lease_ended("pes_wait", key, guard, out.data.replayed === true);
     return out;
   }
 
@@ -745,7 +745,7 @@ export class McpServer {
     const body: Record<string, unknown> = { lease_id: guard.lease_id, fence: guard.fence };
     if (args.status !== undefined) body.status = args.status;
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/complete`, body, key));
-    if (out.ok) this.#lease_ended("pes_complete", key, guard);
+    if (out.ok) this.#lease_ended("pes_complete", key, guard, out.data.replayed === true);
     return out;
   }
 
@@ -778,7 +778,7 @@ export class McpServer {
     if (guard === null) return this.#no_guard("pes_release", args, key);
     const body = { lease_id: guard.lease_id, fence: guard.fence };
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/release`, body, key));
-    if (out.ok) this.#lease_ended("pes_release", key, guard);
+    if (out.ok) this.#lease_ended("pes_release", key, guard, out.data.replayed === true);
     return out;
   }
 
@@ -792,7 +792,7 @@ export class McpServer {
     const body: Record<string, unknown> = { confirm: true };
     if (args.reason !== undefined) body.reason = args.reason;
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(run)}/cancel`, body, key));
-    if (out.ok) this.#lease_ended("pes_cancel", key, { run_id: run, lease_id: "", fence: "" });
+    if (out.ok) this.#lease_ended("pes_cancel", key, { run_id: run, lease_id: "", fence: "" }, out.data.replayed === true);
     return out;
   }
 
@@ -846,10 +846,18 @@ export class McpServer {
     return this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/input-receipts`, body, key));
   }
 
-  /** A lease-ending call succeeded: forget the lease, but remember what this key sent for a repeat. */
-  #lease_ended(name: ToolName, key: string, guard: Guard): void {
+  /**
+   * A lease-ending call succeeded: remember what this key sent for a repeat. The remembered guard is cleared only by
+   * a real success (not a replay) whose run_id, lease_id and fence all equal the remembered one; a replay of an old
+   * call must not forget a lease taken since (same run, newer fence). A cancel names only the run, which cannot be
+   * re-claimed, so for it the run_id decides.
+   */
+  #lease_ended(name: ToolName, key: string, guard: Guard, replayed: boolean): void {
     this.#remember_sent(name, key, guard);
-    if (this.#guard?.run_id === guard.run_id) this.#guard = null;
+    if (replayed) return;
+    const held = this.#guard;
+    if (held === null || held.run_id !== guard.run_id) return;
+    if (guard.lease_id === "" || (held.lease_id === guard.lease_id && held.fence === guard.fence)) this.#guard = null;
   }
 }
 

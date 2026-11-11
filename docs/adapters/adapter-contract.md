@@ -41,7 +41,7 @@
 
 기억한 값도 직접 준 값도 없으면 `claim_required`(`next_action: claim`)다. `pes_wait`·`pes_complete`·`pes_release`·`pes_cancel`은 성공하면 기억한 lease를 잊는다.
 
-lease를 잊는 이 네 도구는 성공한 호출이 보낸 묶음(취소는 `run_id`)을 **도구·키별로** 기억한다(최근 256개). 답을 잃은 클라이언트가 **같은 키·같은 인자**로 다시 보내면 서버는 기억한 묶음으로 PES에 다시 보내고, PES가 자격·정책을 검사한 뒤 처음 답을 재생한다(`replayed: true`, `claim_required`가 아니다). 같은 키에 다른 인자는 `idempotency_key_reuse`다. 이 기억은 같은 키의 재전송에만 쓰인다: 잊은 lease를 되살리지 않으므로 **새 키**의 lease 작업은 계속 `claim_required`다. 서버를 다시 띄운 뒤에는 기억이 없으므로 `run_id`·`lease_id`·`fence`를 직접 주어 다시 보낸다. 그 뒤 `pes_claim`으로 이어받으면 fence가 올라가므로 옛 fence로 쓰는 다른 연결은 `conflict`/`lease_lost`로 거부된다.
+lease를 잊는 이 네 도구는 성공한 호출이 보낸 묶음(취소는 `run_id`)을 **도구·키별로** 기억한다(최근 256개). 답을 잃은 클라이언트가 **같은 키·같은 인자**로 다시 보내면 서버는 기억한 묶음으로 PES에 다시 보내고, PES가 자격·정책을 검사한 뒤 처음 답을 재생한다(`replayed: true`, `claim_required`가 아니다). 같은 키에 다른 인자는 `idempotency_key_reuse`다. 이 기억은 같은 키의 재전송에만 쓰인다: 잊은 lease를 되살리지 않으므로 **새 키**의 lease 작업은 계속 `claim_required`다. 재생(`replayed: true`)은 서버가 기억한 현재 묶음을 바꾸지 않는다: 같은 run을 새 fence로 이어받은 뒤 옛 종료 키를 다시 보내도 새 묶음은 남고, 기억한 묶음은 재생이 아닌 실제 성공이면서 `run_id`·`lease_id`·`fence`가 모두 같을 때만 지워진다(취소는 `run_id`만). 서버를 다시 띄운 뒤에는 기억이 없으므로 `run_id`·`lease_id`·`fence`를 직접 주어 다시 보낸다. 그 뒤 `pes_claim`으로 이어받으면 fence가 올라가므로 옛 fence로 쓰는 다른 연결은 `conflict`/`lease_lost`로 거부된다.
 
 ### 2.3 진행·스케줄 알림 — 하나의 형식
 
