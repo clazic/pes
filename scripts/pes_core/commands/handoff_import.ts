@@ -33,8 +33,45 @@ export const HANDOFF_RUNTIME = "claude_app_handoff";
 export const HANDOFF_PROVIDER = "anthropic";
 export const HANDOFF_MODEL = "unknown";
 
-const IMPORT_FIELDS = ["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model"] as const;
+const IMPORT_FIELDS = ["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_heads"] as const;
 const MAX_CLAIM_CHARS = 200;
+/** The most object heads one bundle may pin. */
+export const MAX_EXPECTED_HEADS = 10000;
+
+/**
+ * The heads the bundle was copied from ({object_id, version_id} for each object it covers). Absent is null.
+ * They are compared with the current heads in the import's own transaction, so a head that moved after the
+ * adapter's last read still stops the import before anything is written.
+ */
+function expected_heads(source: Record<string, unknown>): Array<{ object_id: string; version_id: string }> | null {
+  const value = source.expected_heads;
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length > MAX_EXPECTED_HEADS) {
+    throw new ApiError("invalid_payload", "expected_heads must be an array of at most 10000 {object_id, version_id}");
+  }
+  const seen = new Set<string>();
+  const heads: Array<{ object_id: string; version_id: string }> = [];
+  for (const entry of value) {
+    if (
+      !is_record(entry) ||
+      Object.keys(entry).length !== 2 ||
+      typeof entry.object_id !== "string" ||
+      entry.object_id.length === 0 ||
+      !entry.object_id.isWellFormed() ||
+      typeof entry.version_id !== "string" ||
+      entry.version_id.length === 0 ||
+      !entry.version_id.isWellFormed()
+    ) {
+      throw new ApiError("invalid_payload", "each expected_heads entry must be {object_id, version_id}");
+    }
+    if (seen.has(entry.object_id)) {
+      throw new ApiError("invalid_payload", "expected_heads may name each object only once");
+    }
+    seen.add(entry.object_id);
+    heads.push({ object_id: entry.object_id, version_id: entry.version_id });
+  }
+  return heads;
+}
 
 /** A text the pasted result claims about itself. It is stored as a claim, never trusted. */
 function optional_claim(source: Record<string, unknown>, field: string): string | null {
@@ -83,6 +120,24 @@ export function run_import_handoff(runtime: CommandRuntime): CommandResult {
 
   // A stale copy never reaches a write: the base is checked in this transaction.
   const base = require_base_control_rev(runtime, runtime.ctx.base_control_rev);
+
+  // The object heads the bundle was copied from, checked in the same transaction as the write. Moving a head
+  // (content.set_current) does not change control_rev, so the control_rev check alone cannot see it.
+  const heads = expected_heads(source);
+  if (heads !== null) {
+    for (const head of heads) {
+      const row = runtime.db.get<{ current_version_id: string | null; archived_at: unknown }>(
+        "SELECT current_version_id, archived_at FROM objects WHERE project_id = ? AND id = ?",
+        project.id,
+        head.object_id,
+      );
+      if (row === undefined || row.archived_at !== null || row.current_version_id !== head.version_id) {
+        throw new ApiError("rev_conflict", "an object's current version changed after the bundle was copied", {
+          object_id: head.object_id,
+        });
+      }
+    }
+  }
 
   const edition = runtime.db.get<{ active_edition_id: string | null }>(
     "SELECT active_edition_id FROM projects WHERE id = ?",

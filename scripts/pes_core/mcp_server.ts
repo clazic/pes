@@ -1,22 +1,27 @@
 // The PES MCP server for method-B adapters (stage 2 PR20a, SEL-53).
 //
 // An AI tool that runs on its own (Claude Code, and later Codex CLI / OpenCode TUI) talks to PES through
-// ten MCP tools. The server is a thin, closed bridge over the PES HTTP API:
+// eleven MCP tools. The server is a thin, closed bridge over the PES HTTP API:
 //
-//   pes_context  pes_claim  pes_submit  pes_ask  pes_wait  pes_complete  pes_heartbeat  pes_release
-//   pes_cancel   pes_receipt
+//   pes_context  pes_read  pes_claim  pes_submit  pes_ask  pes_wait  pes_complete  pes_heartbeat
+//   pes_release  pes_cancel  pes_receipt
 //
 // - There is no tool for approving, reopening, sealing, changing policy, registering a project or minting a
 //   token: those are the human's. The tools can only do what the project agent token is allowed to do, and PES
 //   (not this file) decides that.
 // - The server holds the agent token in memory and puts it only in the Authorization header of its own API
 //   calls. It never echoes it, and writes nothing but JSON-RPC lines to its output.
-// - Every tool but pes_context takes an `idempotency_key`, sent as the API Idempotency-Key. The same key with the
+// - pes_context and pes_read only read. pes_read is the existing version read (GET objects/{o}/versions/{v}):
+//   the human's answer (value, comment) and question, or a work item's body, under the API's own rules.
+//   pes_context pages through the run's inputs and hands back the next cursor so nothing past a page is lost.
+// - Every tool but pes_context and pes_read takes an `idempotency_key`, sent as the API Idempotency-Key. The same key with the
 //   same arguments replays the first answer; the same key with other arguments is idempotency_key_reuse.
 // - The server remembers the guard {run_id, lease_id, fence} of its last successful claim so the later tools need
 //   not repeat it. Explicit run_id / lease_id / fence arguments override it: that is how a brand-new connection
 //   continues after a restart (pes_context first, then explicit ids). wait, complete, release and cancel make the
-//   server forget the lease.
+//   server forget the lease, but each remembers the guard it sent under its key: the same call sent again with
+//   the same key goes to PES with that guard, so PES checks it and replays its first answer (never claim_required).
+//   That memory only answers a repeat of a key; it never brings the forgotten lease back for a new key.
 // - A PES refusal is a tool result with isError:true and the API error object, never a protocol error.
 //   When a tool cannot even be built (no key, no guard), PES is still asked first with a request that cannot write,
 //   so a credential or scope refusal comes before the tool's own input complaint.
@@ -25,6 +30,7 @@ import { api_request, project_path, type ApiLike, type ApiRequestLike, type ApiR
 
 export const TOOL_NAMES = [
   "pes_context",
+  "pes_read",
   "pes_claim",
   "pes_submit",
   "pes_ask",
@@ -74,6 +80,10 @@ interface Guard {
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_PROTOCOL = SUPPORTED_PROTOCOLS[0] as string;
 const MAX_KEY_CHARS = 200;
+/** How many input pages one pes_context call reads before it hands back the cursor. */
+const INPUT_PAGES_PER_CALL = 5;
+/** How many keys of lease-ending calls the server remembers for a repeat. */
+const MAX_REMEMBERED_KEYS = 256;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 /** PES refusals about who is asking: they answer before the tool's own input complaints. */
 const CREDENTIAL_CODES = new Set(["unauthenticated", "forbidden", "human_required", "owner_required"]);
@@ -111,7 +121,7 @@ interface ToolSpec {
   description: string;
   properties: Record<string, unknown>;
   required: string[];
-  /** The tool takes idempotency_key (every tool but pes_context). */
+  /** The tool takes idempotency_key (every tool but pes_context and pes_read). */
   keyed: boolean;
 }
 
@@ -128,9 +138,23 @@ const TOOLS: readonly ToolSpec[] = [
   {
     name: "pes_context",
     description:
-      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 함께 준다.",
-    properties: { run_id: { type: "string", description: "답(inputs)을 읽을 실행. 생략하면 마지막으로 아는 실행" } },
+      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다.",
+    properties: {
+      run_id: { type: "string", description: "답(inputs)을 읽을 실행. 생략하면 마지막으로 아는 실행" },
+      inputs_cursor: { type: "string", description: "앞선 pes_context가 준 inputs_next_cursor. 생략하면 처음부터" },
+    },
     required: [],
+    keyed: false,
+  },
+  {
+    name: "pes_read",
+    description:
+      "자료 한 버전의 내용을 읽는다. 읽기만 한다. 사람의 답(inputs의 object_id·input_version_id)이면 content.value·content.comment·content.question_version_id를, 질문(inputs의 question_id와 그 question_version_id)이면 질문 글과 선택지를, 작업 자료면 제목·요약·본문을 준다. version_id를 생략하면 현재 버전을 읽는다.",
+    properties: {
+      object_id: { type: "string", description: "읽을 자료(답이면 inputs의 object_id, 질문이면 question_id)" },
+      version_id: { type: "string", description: "읽을 버전(답이면 input_version_id). 생략하면 현재 버전" },
+    },
+    required: ["object_id"],
     keyed: false,
   },
   {
@@ -265,6 +289,8 @@ export class McpServer {
   readonly #claim_defaults: ClaimDefaults;
   #guard: Guard | null = null;
   #last_run_id: string | null = null;
+  /** The guard each lease-ending call sent, by tool and key, so a repeat of that call can be replayed by PES. */
+  readonly #sent = new Map<string, Guard>();
 
   constructor(options: McpServerOptions) {
     if (options === null || typeof options !== "object") throw new TypeError("McpServer options are required");
@@ -448,9 +474,13 @@ export class McpServer {
     return invalid(`$.arguments.${name}`, "10진수 문자열이어야 합니다.");
   }
 
-  /** The guard for a lease-bound tool: explicit arguments over the remembered guard; null when incomplete. */
-  #guard_of(args: Record<string, unknown>): Guard | null {
-    const remembered = this.#guard;
+  /**
+   * The guard for a lease-bound tool: explicit arguments over the remembered guard; null when incomplete.
+   * `sent` is the guard a lease-ending call already sent under the same key: a repeat uses it, not the
+   * current lease, so PES sees the first request again and replays its answer.
+   */
+  #guard_of(args: Record<string, unknown>, sent: Guard | null = null): Guard | null {
+    const remembered = sent ?? this.#guard;
     const run_id = typeof args.run_id === "string" ? args.run_id : undefined;
     const base = remembered !== null && (run_id === undefined || run_id === remembered.run_id) ? remembered : null;
     const lease_id = typeof args.lease_id === "string" ? args.lease_id : base?.lease_id;
@@ -471,6 +501,7 @@ export class McpServer {
 
   async #run_tool(spec: ToolSpec, args: Record<string, unknown>): Promise<Outcome> {
     if (spec.name === "pes_context") return this.#context(spec, args);
+    if (spec.name === "pes_read") return this.#read(spec, args);
     const key = this.#key_of(args);
     if (key === null) return this.#without_key(spec, args);
     const unknown_arg = this.#unknown_arguments(spec, args);
@@ -554,24 +585,79 @@ export class McpServer {
   async #context(spec: ToolSpec, args: Record<string, unknown>): Promise<Outcome> {
     const unknown_arg = this.#unknown_arguments(spec, args);
     if (unknown_arg !== null) return unknown_arg;
-    const bad = this.#strings(args, ["run_id"]);
+    const bad = this.#strings(args, ["run_id", "inputs_cursor"]);
     if (bad !== null) return bad;
     const context = this.#from_api(await this.#send("GET", "/context", undefined, null));
     if (!context.ok) return context;
     const run = typeof args.run_id === "string" ? args.run_id : (this.#guard?.run_id ?? this.#last_run_id);
-    if (run === null) return context;
+    if (run === null) {
+      if (typeof args.inputs_cursor === "string") return invalid("$.arguments.inputs_cursor", "답을 이어 읽을 실행(run_id)이 없습니다.");
+      return context;
+    }
     const inputs: unknown[] = [];
-    let cursor: string | null = null;
-    for (let page = 0; page < 5; page += 1) {
+    let cursor: string | null = typeof args.inputs_cursor === "string" ? args.inputs_cursor : null;
+    let has_more = false;
+    // A few pages per call; when there are more, the cursor goes back to the caller instead of being dropped.
+    for (let page = 0; page < INPUT_PAGES_PER_CALL; page += 1) {
       const query = cursor === null ? "" : `?cursor=${encodeURIComponent(cursor)}`;
       const read = await this.#send("GET", `/runs/${encodeURIComponent(run)}/inputs${query}`, undefined, null);
       if (!read.ok) return { ok: true, data: { ...context.data, inputs: null, inputs_error: read.error } };
       const data = is_record(read.data) ? read.data : {};
       if (Array.isArray(data.inputs)) inputs.push(...data.inputs);
-      if (data.has_more !== true || typeof data.next_cursor !== "string") break;
-      cursor = data.next_cursor;
+      has_more = data.has_more === true && typeof data.next_cursor === "string";
+      if (!has_more) break;
+      cursor = data.next_cursor as string;
     }
-    return { ok: true, data: { ...context.data, inputs } };
+    return {
+      ok: true,
+      data: { ...context.data, inputs, inputs_has_more: has_more, inputs_next_cursor: has_more ? cursor : null },
+    };
+  }
+
+  /** One version of one object, through the existing version read: the API decides what this token may see. */
+  async #read(spec: ToolSpec, args: Record<string, unknown>): Promise<Outcome> {
+    const unknown_arg = this.#unknown_arguments(spec, args);
+    if (unknown_arg !== null) return unknown_arg;
+    const bad = this.#strings(args, ["object_id", "version_id"]);
+    if (bad !== null) return bad;
+    if (typeof args.object_id !== "string") {
+      // PES answers who is asking first; a read of the context cannot write
+      const probe = await this.#send("GET", "/context", undefined, null);
+      if (!probe.ok && CREDENTIAL_CODES.has(probe.error.code)) return { ok: false, error: { ...probe.error } };
+      return invalid("$.arguments.object_id", "object_id가 필요합니다.");
+    }
+    const object_id = args.object_id;
+    let version_id = typeof args.version_id === "string" ? args.version_id : null;
+    if (version_id === null) {
+      const context = this.#from_api(await this.#send("GET", "/context", undefined, null));
+      if (!context.ok) return context;
+      const manifest = Array.isArray(context.data.manifest) ? context.data.manifest : [];
+      const entry = manifest.find((item) => is_record(item) && item.object_id === object_id);
+      if (!is_record(entry) || typeof entry.version_id !== "string") {
+        return local_error("not_found", "그 자료의 현재 버전을 찾을 수 없습니다. version_id를 주세요.", "$.arguments.object_id", "reread_context");
+      }
+      version_id = entry.version_id;
+    }
+    return this.#from_api(
+      await this.#send("GET", `/objects/${encodeURIComponent(object_id)}/versions/${encodeURIComponent(version_id)}`, undefined, null),
+    );
+  }
+
+  /** The guard a lease-ending tool already sent under this key, if any. */
+  #sent_guard(name: ToolName, key: string): Guard | null {
+    return this.#sent.get(`${name} ${key}`) ?? null;
+  }
+
+  /** Remember the guard a lease-ending tool sent, so a repeat of the same key reaches PES's replay. */
+  #remember_sent(name: ToolName, key: string, guard: Guard): void {
+    const slot = `${name} ${key}`;
+    this.#sent.delete(slot);
+    this.#sent.set(slot, guard);
+    while (this.#sent.size > MAX_REMEMBERED_KEYS) {
+      const oldest = this.#sent.keys().next().value;
+      if (oldest === undefined) break;
+      this.#sent.delete(oldest);
+    }
   }
 
   async #claim(args: Record<string, unknown>, key: string): Promise<Outcome> {
@@ -623,13 +709,13 @@ export class McpServer {
   async #wait(args: Record<string, unknown>, key: string): Promise<Outcome> {
     const bad = this.#strings(args, ["reason"]);
     if (bad !== null) return bad;
-    const guard = this.#guard_of(args);
+    const guard = this.#guard_of(args, this.#sent_guard("pes_wait", key));
     if (guard === null) return this.#no_guard("pes_wait", args, key);
     const body: Record<string, unknown> = { lease_id: guard.lease_id, fence: guard.fence };
     if (args.reason !== undefined) body.reason = args.reason;
     if (args.wait_ms !== undefined) body.wait_ms = args.wait_ms;
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/wait`, body, key));
-    if (out.ok) this.#forget(guard.run_id);
+    if (out.ok) this.#lease_ended("pes_wait", key, guard);
     return out;
   }
 
@@ -637,12 +723,12 @@ export class McpServer {
     if (args.status !== undefined && args.status !== "succeeded" && args.status !== "failed") {
       return invalid("$.arguments.status", 'status는 "succeeded" 또는 "failed"여야 합니다.');
     }
-    const guard = this.#guard_of(args);
+    const guard = this.#guard_of(args, this.#sent_guard("pes_complete", key));
     if (guard === null) return this.#no_guard("pes_complete", args, key);
     const body: Record<string, unknown> = { lease_id: guard.lease_id, fence: guard.fence };
     if (args.status !== undefined) body.status = args.status;
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/complete`, body, key));
-    if (out.ok) this.#forget(guard.run_id);
+    if (out.ok) this.#lease_ended("pes_complete", key, guard);
     return out;
   }
 
@@ -671,11 +757,11 @@ export class McpServer {
   }
 
   async #release(args: Record<string, unknown>, key: string): Promise<Outcome> {
-    const guard = this.#guard_of(args);
+    const guard = this.#guard_of(args, this.#sent_guard("pes_release", key));
     if (guard === null) return this.#no_guard("pes_release", args, key);
     const body = { lease_id: guard.lease_id, fence: guard.fence };
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/release`, body, key));
-    if (out.ok) this.#forget(guard.run_id);
+    if (out.ok) this.#lease_ended("pes_release", key, guard);
     return out;
   }
 
@@ -683,12 +769,13 @@ export class McpServer {
     if (args.confirm !== true) return invalid("$.arguments.confirm", "취소하려면 confirm:true가 필요합니다.");
     const bad = this.#strings(args, ["reason"]);
     if (bad !== null) return bad;
-    const run = typeof args.run_id === "string" ? args.run_id : this.#guard?.run_id;
+    // a repeat of this key cancels the run the first call named, not whatever lease is held now
+    const run = typeof args.run_id === "string" ? args.run_id : (this.#sent_guard("pes_cancel", key)?.run_id ?? this.#guard?.run_id);
     if (run === undefined) return this.#no_guard("pes_cancel", args, key);
     const body: Record<string, unknown> = { confirm: true };
     if (args.reason !== undefined) body.reason = args.reason;
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(run)}/cancel`, body, key));
-    if (out.ok) this.#forget(run);
+    if (out.ok) this.#lease_ended("pes_cancel", key, { run_id: run, lease_id: "", fence: "" });
     return out;
   }
 
@@ -742,8 +829,10 @@ export class McpServer {
     return this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(guard.run_id)}/input-receipts`, body, key));
   }
 
-  #forget(run_id: string): void {
-    if (this.#guard?.run_id === run_id) this.#guard = null;
+  /** A lease-ending call succeeded: forget the lease, but remember what this key sent for a repeat. */
+  #lease_ended(name: ToolName, key: string, guard: Guard): void {
+    this.#remember_sent(name, key, guard);
+    if (this.#guard?.run_id === guard.run_id) this.#guard = null;
   }
 }
 

@@ -367,12 +367,19 @@ export class ClaudeAppAdapter {
       stage_id: bundle.stage_id,
       round_id: bundle.round_id,
       expected_control_rev: bundle.base_control_rev,
+      // The heads read above can move before this request lands; PES compares them again inside the import's
+      // own transaction, so a race ends in rev_conflict (bundle_stale here) with nothing written.
+      expected_heads: bundle.base_versions.map((entry) => ({ object_id: entry.object_id, version_id: entry.version_id })),
     };
     if (pasted.claimed_tool !== null) request.claimed_tool = pasted.claimed_tool;
     if (pasted.claimed_model !== null) request.claimed_model = pasted.claimed_model;
     const done = await this.#owner_call("POST", "/runs", { import: request }, import_key);
     if (!done.ok) {
       if (done.error.code === "rev_conflict") {
+        const details = is_record(done.error.details) ? done.error.details : {};
+        if (typeof details.object_id === "string") {
+          throw new HandoffError("bundle_stale", "묶음을 복사한 뒤 자료의 현재 버전이 바뀌었습니다. 묶음을 다시 복사해 주세요.", "export_again", { object_id: details.object_id });
+        }
         throw new HandoffError("bundle_stale", "묶음을 복사한 뒤 프로젝트가 바뀌었습니다. 묶음을 다시 복사해 주세요.", "export_again");
       }
       if (done.error.code === "idempotency_key_reuse") {

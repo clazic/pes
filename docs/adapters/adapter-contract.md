@@ -1,23 +1,24 @@
 # 어댑터 계약 — 방식 B (AI 도구가 PES에 접속해 일한다)
 
-방식 B는 사람이 직접 켠 AI 도구(Claude Code, 뒤이어 Codex CLI·OpenCode TUI)가 PES의 로컬 API로 일하는 방식이다. 이 문서는 도구마다 달라지지 않는 **공통 계약**이다. 도구별 차이는 [claude-code.md](claude-code.md)·[claude-app.md](claude-app.md)에 적는다. 구현은 `scripts/pes_core/mcp_server.ts`(MCP 도구 10개)와 `scripts/pes_core/adapters/`다.
+방식 B는 사람이 직접 켠 AI 도구(Claude Code, 뒤이어 Codex CLI·OpenCode TUI)가 PES의 로컬 API로 일하는 방식이다. 이 문서는 도구마다 달라지지 않는 **공통 계약**이다. 도구별 차이는 [claude-code.md](claude-code.md)·[claude-app.md](claude-app.md)에 적는다. 구현은 `scripts/pes_core/mcp_server.ts`(MCP 도구 11개)와 `scripts/pes_core/adapters/`다.
 
 이 문서의 JSON 예시는 시험이 그대로 실행한다(「문서만 보고 재현」). 예시를 고치면 같은 PR에서 시험이 맞는지 확인한다.
 
 ## 1. 한눈에
 
-- AI 도구는 **MCP 서버**가 내놓는 **닫힌 도구 10개**로만 PES에 쓴다. 승인·재개방·봉인·정책 바꾸기·프로젝트 등록·토큰 만들기 도구는 **없다** — 그것은 사람의 일이다.
+- AI 도구는 **MCP 서버**가 내놓는 **닫힌 도구 11개**로만 PES를 읽고 쓴다. 승인·재개방·봉인·정책 바꾸기·프로젝트 등록·토큰 만들기 도구는 **없다** — 그것은 사람의 일이다.
 - MCP 서버는 프로젝트 **에이전트 토큰**을 메모리에만 들고, 자기 API 호출의 `Authorization` 헤더에만 쓴다. 클라이언트로 돌려주는 어떤 답에도, 어떤 파일에도 토큰을 쓰지 않는다. 표준 출력에는 JSON-RPC 줄만 나간다.
 - 무엇을 할 수 있는지는 PES API가 정한다(토큰 범위·소유자 세션·정책). 도구가 대신 판단하지 않는다. PES가 거부하면 도구 결과는 `isError: true`이고 내용은 API 오류 그대로다(`code`, 한국어 `message`, `retryable`, `target`, `next_action`).
 - 결과 제출은 **승인이 아니다**. `pes_complete`도 단계를 승인하거나 봉인하지 않는다.
 
-## 2. 도구 10개
+## 2. 도구 11개
 
-모든 도구는 `pes_context`를 뺀 모두 `idempotency_key`(비어 있지 않은 문자열)를 받는다. API의 `Idempotency-Key`로 그대로 간다.
+읽기 도구 `pes_context`·`pes_read`를 뺀 모든 도구가 `idempotency_key`(비어 있지 않은 문자열)를 받는다. API의 `Idempotency-Key`로 그대로 간다.
 
 | 도구 | 하는 일 | API |
 |---|---|---|
-| `pes_context` | 현재 상태 읽기(`project_id`, `control_rev`, `digest`, 단계, 자료 목록, 현재 lease). 실행을 아는 경우 그 실행에 온 답을 `inputs` 배열로 덧붙인다. 읽기만 한다 | `GET /context`, `GET /runs/{r}/inputs` |
+| `pes_context` | 현재 상태 읽기(`project_id`, `control_rev`, `digest`, 단계, 자료 목록, 현재 lease). 실행을 아는 경우 그 실행에 온 답을 `inputs` 배열로 덧붙인다(한 번에 최대 5쪽, 이어 읽기는 2.5). 읽기만 한다 | `GET /context`, `GET /runs/{r}/inputs` |
+| `pes_read` | 자료 한 버전의 내용 읽기 `{object_id, version_id?}`. 사람의 답 본문·질문·작업 자료 본문(2.5). 읽기만 한다 | `GET /objects/{o}/versions/{v}` |
 | `pes_claim` | 작업 시작(lease). `run_id`를 주면 기다리던 실행을 이어받고(새 fence), 없으면 서버 설정의 `runtime`·`provider`·`model`로 새 방식 B 실행을 만든다 | `POST /claims` |
 | `pes_submit` | 결과(새 버전) 1~20개 제출 | `POST /runs/{r}/results` |
 | `pes_ask` | 사람에게 질문 하나 | `POST /questions` |
@@ -38,7 +39,9 @@
 
 서버는 마지막으로 성공한 claim의 `{run_id, lease_id, fence}`를 기억해, `pes_submit`·`pes_ask`·`pes_wait`·`pes_complete`·`pes_heartbeat`·`pes_release`·`pes_receipt`가 다시 받지 않게 한다. `run_id`·`lease_id`·`fence`를 직접 주면 기억한 값보다 우선한다 — **새로 연결한 서버가 이어서 일하는 방법**이다(`pes_context`로 현재 lease를 읽고 그 값을 직접 준다).
 
-기억한 값도 직접 준 값도 없으면 `claim_required`(`next_action: claim`)다. `pes_wait`·`pes_complete`·`pes_release`·`pes_cancel`은 성공하면 기억한 lease를 잊는다. 그 뒤 `pes_claim`으로 이어받으면 fence가 올라가므로 옛 fence로 쓰는 다른 연결은 `conflict`/`lease_lost`로 거부된다.
+기억한 값도 직접 준 값도 없으면 `claim_required`(`next_action: claim`)다. `pes_wait`·`pes_complete`·`pes_release`·`pes_cancel`은 성공하면 기억한 lease를 잊는다.
+
+lease를 잊는 이 네 도구는 성공한 호출이 보낸 묶음(취소는 `run_id`)을 **도구·키별로** 기억한다(최근 256개). 답을 잃은 클라이언트가 **같은 키·같은 인자**로 다시 보내면 서버는 기억한 묶음으로 PES에 다시 보내고, PES가 자격·정책을 검사한 뒤 처음 답을 재생한다(`replayed: true`, `claim_required`가 아니다). 같은 키에 다른 인자는 `idempotency_key_reuse`다. 이 기억은 같은 키의 재전송에만 쓰인다: 잊은 lease를 되살리지 않으므로 **새 키**의 lease 작업은 계속 `claim_required`다. 서버를 다시 띄운 뒤에는 기억이 없으므로 `run_id`·`lease_id`·`fence`를 직접 주어 다시 보낸다. 그 뒤 `pes_claim`으로 이어받으면 fence가 올라가므로 옛 fence로 쓰는 다른 연결은 `conflict`/`lease_lost`로 거부된다.
 
 ### 2.3 진행·스케줄 알림 — 하나의 형식
 
@@ -51,6 +54,18 @@
 ### 2.4 영수증과 `applied_by_key`
 
 `pes_receipt`의 `receipts`는 `[{input_version_id, state, reason?, applied_by_key?}]`다. `state`가 `applied`이면 그 입력을 쓴 `pes_submit`의 `idempotency_key`를 `applied_by_key`로 준다. 어댑터가 그 키의 제출 기록을 읽어 API가 요구하는 `applied_tx_id`를 채운다. **증거는 결과 제출(`pes_submit`)의 키뿐이다**: heartbeat·ask·wait·claim 같은 다른 도구의 키는 `not_found`다. 또 그 제출은 **이 실행의 것**이어야 한다(같은 에이전트의 다른 실행의 제출 키도 `not_found`). 모르는 키도 `not_found`이고 아무것도 쓰지 않는다.
+
+### 2.5 사람의 답과 자료 본문 읽기 — `pes_context`의 커서와 `pes_read`
+
+`inputs`의 각 항목은 `{input_version_id, object_id, question_id, kind, …, state}`처럼 ID·시각·상태만 담는다. 답의 본문은 `pes_read`로 읽는다.
+
+1. `pes_read {object_id: <inputs의 object_id>, version_id: <input_version_id>}` → `content.value`(사람이 고른 값), `content.comment`(함께 쓴 코멘트, 없으면 `null`), `content.question_version_id`.
+2. 필요하면 `pes_read {object_id: <inputs의 question_id>, version_id: <content.question_version_id>}` → 질문 글·형식·선택지.
+3. 작업 자료(artifact·source)는 `pes_read {object_id}`로 현재 버전의 제목·요약·본문을 읽는다(`version_id`를 주면 그 버전).
+
+`pes_read`는 이미 있는 버전 읽기 API를 같은 토큰으로 부를 뿐이다. 범위(`context:read`)·Go 정책·AI 참조 금지 파일 숨김은 API 규칙 그대로이고, 모르는 자료·버전은 `not_found`다.
+
+`inputs`는 그 실행만이 아니라 **같은 에이전트가 이 프로젝트에서 물은 질문의 답 전체**라 쌓이면 길어진다. `pes_context`는 한 번에 최대 5쪽(쪽당 100개)을 읽고, 더 있으면 `inputs_has_more: true`와 `inputs_next_cursor`를 싣는다. 그 값을 `pes_context {inputs_cursor: …}`로 주면 이어서 읽는다. 끝까지 읽으면 `inputs_has_more: false`, `inputs_next_cursor: null`이다. 커서는 버려지지 않으므로 500번째 뒤의 답도 읽을 수 있다.
 
 ## 3. 실행해 보는 예시
 
@@ -154,7 +169,7 @@ pes link와 pes sync는 도우미(helper)가 이 컴퓨터에서 쓰는 **로컬
 - **hash는 인증이 아니다.** `manifest_hash`는 복사한 뒤 일부만 바뀐 묶음 같은 사고를 잡는 무결성 검사일 뿐이고, 아무 권한도 주지 않는다. 누가 보냈는지 증명하지 않는다. 권한은 소유자 세션을 PES가 검사해서 얻는다.
 - 가져오기는 소유자의 한 번의 행위다: 소유자 자신의 전달용 실행(`runtime = claude_app_handoff`, `model = unknown`)을 만들고 결과를 붙이고 끝낸다. 에이전트 claim은 없다(`run.claimed` 사건 없음). 영수증의 행위자와 `adopted_by`는 소유자, `via`는 `import`, 출처 표지는 `provenance.verified = false`다. 붙여 넣은 글이 말하는 도구·모델은 **주장**으로만 남고 믿지 않는다.
 - 같은 묶음(요청 ID)은 한 번만 가져온다: 다시 가져오면 내용이 달라도 `duplicate_import`, 행 0개. 거부된 가져오기는 묶음을 쓰지 않은 것이다 — 붙여 넣은 글을 고친 뒤 같은 묶음으로 다시 할 수 있다.
-- 거부 코드: `bundle_invalid`, `bundle_hash_mismatch`, `bundle_wrong_project`, `bundle_stale`(복사한 뒤 `control_rev`나 기반 버전이 바뀜), `duplicate_import`, `result_out_of_scope`, `attachment_missing`, `attachment_unsupported`. PES가 거부하면 API 코드(`unauthenticated`, `forbidden` 등)를 그대로 쓴다. 특히:
+- 거부 코드: `bundle_invalid`, `bundle_hash_mismatch`, `bundle_wrong_project`, `bundle_stale`(복사한 뒤 `control_rev`나 기반 버전이 바뀜 — 자료 머리 버전은 묶음의 `base_versions` 전체를 `expected_heads`로 보내 서버가 쓰기 트랜잭션 안에서 다시 비교하므로, 어댑터가 확인한 뒤 머리가 바뀌는 경합도 쓰기 0으로 거른다), `duplicate_import`, `result_out_of_scope`, `attachment_missing`, `attachment_unsupported`. PES가 거부하면 API 코드(`unauthenticated`, `forbidden` 등)를 그대로 쓴다. 특히:
   - `conflict` — 승인된 단계, 또는 봉인된 라운드(지정한 라운드, 또는 라운드를 안 줬을 때 단계의 현재 라운드). 승인·봉인은 사람의 결정이라 가져오기가 우회하지 못한다. 승인된 단계는 복사도 `conflict`다. 사람이 단계를 다시 열고(봉인이면 새 라운드) 묶음을 다시 복사한다.
   - `invalid_payload` — 한 가져오기가 같은 자료(object)를 둘 이상 말한다(묶음 하나는 한 자료를 한 번만 고친다). 가져오기 멱등 키가 `import-<request_id>`가 아닌 경우도 같다(`$.headers.idempotency-key`) — 서버가 이 키를 강제해 같은 묶음이 두 번 들어오지 못한다.
   - 거부는 모두 쓰기 0이다.

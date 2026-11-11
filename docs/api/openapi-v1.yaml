@@ -234,6 +234,17 @@ components:
             claimed_tool: { type: string, description: "A claim of the pasted text, never verified" }
             claimed_model: { type: string, description: "A claim of the pasted text, never verified" }
             expected_control_rev: { type: string }
+            expected_heads:
+              type: array
+              maxItems: 10000
+              description: "The object heads the bundle was copied from. Compared with the current heads in the import's own transaction; any difference (or an archived/missing object) is 409 rev_conflict with details.object_id and nothing is written."
+              items:
+                type: object
+                required: [object_id, version_id]
+                additionalProperties: false
+                properties:
+                  object_id: { type: string, minLength: 1 }
+                  version_id: { type: string, minLength: 1 }
     ClaimFresh:
       type: object
       required: [mode, runtime, provider, model]
@@ -913,6 +924,7 @@ paths:
   /api/v1/projects/{id}/requests/{key}:
     get:
       summary: Look up a finished request by its Idempotency-Key
+      description: "data carries the receipt: action, tx_id, the original status and run_id (the run the request belonged to, or null when it had none)."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RequestKey"

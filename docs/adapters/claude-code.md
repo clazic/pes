@@ -23,7 +23,7 @@
 
 ## 방식 B: MCP 도구로 PES에 접속하기 (PR20a)
 
-Claude Code가 사람이 켠 세션으로 PES의 로컬 API에 일하게 하는 길이다. 공통 계약(도구 10개, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 Claude Code만의 부분을 적는다.
+Claude Code가 사람이 켠 세션으로 PES의 로컬 API에 일하게 하는 길이다. 공통 계약(도구 11개 — 읽기 `pes_context`·`pes_read` 포함, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 Claude Code만의 부분을 적는다.
 
 - **연결 항목**: `scripts/pes_core/adapters/claude_code.ts`의 `claude_code_mcp_entry`가 Claude Code의 MCP 설정에 넣을 항목을 만든다. 파일을 읽지도 쓰지도 않으니 설정 파일에 넣는 것은 사용자가 한다. 토큰은 **값이 아니라 참조**(`${PES_AGENT_TOKEN}`)로 적는다 — Claude Code가 시작할 때 환경변수에서 채운다. `command`는 node 실행 파일의 경로를 그대로 준다(`which`로 찾지 않는다).
 
@@ -43,7 +43,7 @@ Claude Code가 사람이 켠 세션으로 PES의 로컬 API에 일하게 하는 
 
 - **토큰 받기**: 프로젝트와 기기는 사람의 로컬 세션이 등록한다(`project-registrations`). 받은 기기 토큰을 환경변수 `PES_AGENT_TOKEN`에 두고 값을 채팅에 다시 쓰지 않는다. Claude Code에는 등록·승인·봉인 도구가 없다.
 - **실행 표시**: 연결 항목이 `PES_RUNTIME=claude_code`, `PES_PROVIDER=anthropic`을 명시한다(서버 자체의 기본값은 `mcp`·`unknown`이라 다른 도구가 같은 서버를 쓰다 변수를 빠뜨려도 `claude_code`로 남지 않는다). 모델은 `PES_MODEL`로 알려 주지 않으면 `unknown`으로 기록된다.
-- **한 번에 한 흐름**: `pes_context` → `pes_claim` → `pes_ask` → `pes_wait`(사람이 답함) → `pes_claim`(`run_id`로 이어받기) → `pes_submit` → `pes_complete`. 아래 예시는 시험이 그대로 실행한다.
+- **한 번에 한 흐름**: `pes_context` → `pes_claim` → `pes_ask` → `pes_wait`(사람이 답함) → `pes_claim`(`run_id`로 이어받기) → `pes_context`(`inputs`) → `pes_read`(답 본문 `content.value`·`content.comment`) → `pes_submit` → `pes_complete`. 답이 많으면 `pes_context`의 `inputs_next_cursor`를 `inputs_cursor`로 주어 이어 읽는다. 아래 예시는 시험이 그대로 실행한다.
 
 ```json pes-example
 {

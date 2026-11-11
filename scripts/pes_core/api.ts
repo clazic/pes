@@ -1579,7 +1579,7 @@ export class ApiApp {
     if (!is_record(source)) invalid_field("import");
     const at = "$.body.import";
     for (const field of Object.keys(source)) {
-      if (!["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_control_rev"].includes(field)) {
+      if (!["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_control_rev", "expected_heads"].includes(field)) {
         invalid(`${at}.${field}`);
       }
     }
