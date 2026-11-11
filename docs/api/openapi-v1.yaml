@@ -236,7 +236,7 @@ components:
             expected_control_rev: { type: string }
             expected_heads:
               type: array
-              maxItems: 10000
+              maxItems: 1000
               description: "The object heads the bundle was copied from. Compared with the current heads in the import's own transaction; any difference (or an archived/missing object) is 409 rev_conflict with details.object_id and nothing is written."
               items:
                 type: object
@@ -945,6 +945,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RunId"
+        - name: limit
+          in: query
+          required: false
+          description: "How many answers one read returns at most (1-100, default 100). The next_cursor follows the last answer returned, so a smaller page is read on from there with no gap. The MCP adapter asks for fewer so its reply stays small."
+          schema: { type: integer, minimum: 1, maximum: 100 }
       security: [{ agentToken: [] }]
       responses:
         "200":

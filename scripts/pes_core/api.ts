@@ -2028,6 +2028,7 @@ export class ApiApp {
   async #inputs(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const run_id = request.params[1] as string;
     const wait_ms = this.#query_limit(request, "wait_ms", 0, MAX_WAIT_MS, 0);
+    const limit = this.#query_limit(request, "limit", 1, LIST_MAX_ITEMS, LIST_MAX_ITEMS);
     const scope = `run:${run_id}:${auth.actor_id}`;
     const given = request.query.has("cursor") ? read_cursor(this.#secret, request.query.get("cursor") as string) : undefined;
     const op = this.#table.find((spec) => spec.operation === "runs.inputs")?.op as Op;
@@ -2064,7 +2065,7 @@ export class ApiApp {
           after = BigInt(given.q);
         }
         const page = read_page
-          ? inputs_page(this.#db, current.id, run_id, run.actor_id, after, LIST_MAX_ITEMS)
+          ? inputs_page(this.#db, current.id, run_id, run.actor_id, after, limit)
           : { items: [], has_more: false };
         return { meta, after, page };
       });

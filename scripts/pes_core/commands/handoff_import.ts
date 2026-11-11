@@ -35,8 +35,11 @@ export const HANDOFF_MODEL = "unknown";
 
 const IMPORT_FIELDS = ["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_heads"] as const;
 const MAX_CLAIM_CHARS = 200;
-/** The most object heads one bundle may pin. */
-export const MAX_EXPECTED_HEADS = 10000;
+/**
+ * The most object heads one bundle may pin. One entry is about 105 bytes of JSON, so 1000 are about 105 KB: they leave
+ * room for the results inside the 256 KiB request body limit. A bigger list would end in payload_too_large anyway.
+ */
+export const MAX_EXPECTED_HEADS = 1000;
 
 /**
  * The heads the bundle was copied from ({object_id, version_id} for each object it covers). Absent is null.
@@ -47,7 +50,7 @@ function expected_heads(source: Record<string, unknown>): Array<{ object_id: str
   const value = source.expected_heads;
   if (value === undefined || value === null) return null;
   if (!Array.isArray(value) || value.length > MAX_EXPECTED_HEADS) {
-    throw new ApiError("invalid_payload", "expected_heads must be an array of at most 10000 {object_id, version_id}");
+    throw new ApiError("invalid_payload", `expected_heads must be an array of at most ${MAX_EXPECTED_HEADS} {object_id, version_id}`);
   }
   const seen = new Set<string>();
   const heads: Array<{ object_id: string; version_id: string }> = [];

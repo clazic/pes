@@ -78,6 +78,8 @@ export class HandoffError extends Error {
 }
 
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
+/** The most base versions a bundle may carry. The same number as MAX_EXPECTED_HEADS in commands/handoff_import.ts (the adapter only talks to the API, so it does not import server code). */
+export const MAX_BUNDLE_BASE_VERSIONS = 1000;
 const HEX64 = /^[0-9a-f]{64}$/;
 const BUNDLE_FIELDS = [
   "format_version",
@@ -183,6 +185,15 @@ export class ClaudeAppAdapter {
         base_versions.push({ object_id: String(entry.object_id), version_id: String(entry.version_id) });
       }
     }
+    // The import sends every base version back as expected_heads, which has a limit: say so now, not at the import.
+    if (base_versions.length > MAX_BUNDLE_BASE_VERSIONS) {
+      throw new HandoffError(
+        "payload_too_large",
+        `이 프로젝트의 보조 자료(artifact·source)가 ${base_versions.length}개라 한 묶음에 담을 수 없습니다(최대 ${MAX_BUNDLE_BASE_VERSIONS}개). 쓰지 않는 자료를 보관(archive)해 개수를 줄인 뒤 다시 복사해 주세요. 이 프로젝트는 지금 전달 묶음으로 보낼 수 없고, 같은 컴퓨터의 MCP 연결(방법 B 도구)은 쓸 수 있습니다.`,
+        "archive_objects",
+        { max_objects: MAX_BUNDLE_BASE_VERSIONS, objects: base_versions.length },
+      );
+    }
     const body: Omit<HandoffBundle, "manifest_hash"> = {
       format_version: "1.0",
       kind: "pes.handoff",
@@ -225,6 +236,8 @@ export class ClaudeAppAdapter {
     if (typeof parsed.manifest_hash !== "string" || !HEX64.test(parsed.manifest_hash)) throw invalid("manifest_hash가 없거나 올바르지 않습니다");
     const versions = parsed.base_versions;
     if (!Array.isArray(versions)) throw invalid("base_versions가 배열이 아닙니다");
+    if (versions.length > MAX_BUNDLE_BASE_VERSIONS) throw invalid(`base_versions가 ${MAX_BUNDLE_BASE_VERSIONS}개를 넘습니다`);
+    const named = new Set<string>();
     for (const entry of versions) {
       if (
         !is_record(entry) ||
@@ -236,6 +249,8 @@ export class ClaudeAppAdapter {
       ) {
         throw invalid("base_versions의 항목이 {object_id, version_id}가 아닙니다");
       }
+      if (named.has(entry.object_id)) throw invalid("base_versions가 같은 자료(object_id)를 두 번 말합니다");
+      named.add(entry.object_id);
     }
     return parsed as unknown as HandoffBundle;
   }

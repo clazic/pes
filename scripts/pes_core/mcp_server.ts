@@ -80,8 +80,13 @@ interface Guard {
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_PROTOCOL = SUPPORTED_PROTOCOLS[0] as string;
 const MAX_KEY_CHARS = 200;
-/** How many input pages one pes_context call reads before it hands back the cursor. */
-const INPUT_PAGES_PER_CALL = 5;
+/**
+ * One pes_context call reads one page of answers (the API's `limit`), so the reply stays far below a client's tool
+ * output limit: a page of 50 is about 10 KB of JSON, and it goes out twice (text and structuredContent).
+ */
+const INPUTS_PER_CALL = 50;
+/** If the page's serialized `inputs` is bigger than this, the same cursor is read again with half the `limit`. */
+const INPUTS_BYTES_PER_CALL = 16 * 1024;
 /** How many keys of lease-ending calls the server remembers for a repeat. */
 const MAX_REMEMBERED_KEYS = 256;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
@@ -138,7 +143,7 @@ const TOOLS: readonly ToolSpec[] = [
   {
     name: "pes_context",
     description:
-      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다.",
+      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 한 번에 한 쪽(최대 50개) 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다.",
     properties: {
       run_id: { type: "string", description: "답(inputs)을 읽을 실행. 생략하면 마지막으로 아는 실행" },
       inputs_cursor: { type: "string", description: "앞선 pes_context가 준 inputs_next_cursor. 생략하면 처음부터" },
@@ -594,24 +599,36 @@ export class McpServer {
       if (typeof args.inputs_cursor === "string") return invalid("$.arguments.inputs_cursor", "답을 이어 읽을 실행(run_id)이 없습니다.");
       return context;
     }
-    const inputs: unknown[] = [];
-    let cursor: string | null = typeof args.inputs_cursor === "string" ? args.inputs_cursor : null;
-    let has_more = false;
-    // A few pages per call; when there are more, the cursor goes back to the caller instead of being dropped.
-    for (let page = 0; page < INPUT_PAGES_PER_CALL; page += 1) {
-      const query = cursor === null ? "" : `?cursor=${encodeURIComponent(cursor)}`;
-      const read = await this.#send("GET", `/runs/${encodeURIComponent(run)}/inputs${query}`, undefined, null);
+    const cursor = typeof args.inputs_cursor === "string" ? args.inputs_cursor : null;
+    let limit = INPUTS_PER_CALL;
+    let previous = Number.POSITIVE_INFINITY;
+    for (;;) {
+      const query = new URLSearchParams();
+      if (cursor !== null) query.set("cursor", cursor);
+      query.set("limit", String(limit));
+      const read = await this.#send("GET", `/runs/${encodeURIComponent(run)}/inputs?${query.toString()}`, undefined, null);
       if (!read.ok) return { ok: true, data: { ...context.data, inputs: null, inputs_error: read.error } };
       const data = is_record(read.data) ? read.data : {};
-      if (Array.isArray(data.inputs)) inputs.push(...data.inputs);
-      has_more = data.has_more === true && typeof data.next_cursor === "string";
-      if (!has_more) break;
-      cursor = data.next_cursor as string;
+      const inputs: unknown[] = Array.isArray(data.inputs) ? data.inputs : [];
+      // Too big for one reply: take fewer from the same cursor (the next cursor follows the last answer given).
+      // A page that did not shrink after the retry (the API ignored `limit`) is taken as it is.
+      if (inputs.length > 1 && inputs.length < previous && Buffer.byteLength(JSON.stringify(inputs)) > INPUTS_BYTES_PER_CALL) {
+        previous = inputs.length;
+        limit = Math.max(1, Math.floor(Math.min(limit, inputs.length) / 2));
+        continue;
+      }
+      const has_more = data.has_more === true && typeof data.next_cursor === "string";
+      // The cursor fields come first, so a reply cut short by a client still shows where to go on.
+      return {
+        ok: true,
+        data: {
+          inputs_has_more: has_more,
+          inputs_next_cursor: has_more ? data.next_cursor : null,
+          ...context.data,
+          inputs,
+        },
+      };
     }
-    return {
-      ok: true,
-      data: { ...context.data, inputs, inputs_has_more: has_more, inputs_next_cursor: has_more ? cursor : null },
-    };
   }
 
   /** One version of one object, through the existing version read: the API decides what this token may see. */

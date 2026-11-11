@@ -17,7 +17,7 @@
 
 | 도구 | 하는 일 | API |
 |---|---|---|
-| `pes_context` | 현재 상태 읽기(`project_id`, `control_rev`, `digest`, 단계, 자료 목록, 현재 lease). 실행을 아는 경우 그 실행에 온 답을 `inputs` 배열로 덧붙인다(한 번에 최대 5쪽, 이어 읽기는 2.5). 읽기만 한다 | `GET /context`, `GET /runs/{r}/inputs` |
+| `pes_context` | 현재 상태 읽기(`project_id`, `control_rev`, `digest`, 단계, 자료 목록, 현재 lease). 실행을 아는 경우 그 실행에 온 답을 `inputs` 배열로 덧붙인다(한 번에 한 쪽·최대 50개, 이어 읽기는 2.5). 읽기만 한다 | `GET /context`, `GET /runs/{r}/inputs` |
 | `pes_read` | 자료 한 버전의 내용 읽기 `{object_id, version_id?}`. 사람의 답 본문·질문·작업 자료 본문(2.5). 읽기만 한다. `version_id`를 생략하면 맥락 manifest의 현재 버전을 먼저 찾는다 | `GET /context`(`version_id` 생략 시), `GET /objects/{o}/versions/{v}` |
 | `pes_claim` | 작업 시작(lease). `run_id`를 주면 기다리던 실행을 이어받고(새 fence), 없으면 서버 설정의 `runtime`·`provider`·`model`로 새 방식 B 실행을 만든다 | `POST /claims` |
 | `pes_submit` | 결과(새 버전) 1~20개 제출 | `POST /runs/{r}/results` |
@@ -65,7 +65,9 @@ lease를 잊는 이 네 도구는 성공한 호출이 보낸 묶음(취소는 `r
 
 `pes_read`는 이미 있는 버전 읽기 API를 같은 토큰으로 부를 뿐이다. 범위(`context:read`)·Go 정책·AI 참조 금지 파일 숨김은 API 규칙 그대로이고, 모르는 자료·버전은 `not_found`다.
 
-`inputs`는 그 실행만이 아니라 **같은 에이전트가 이 프로젝트에서 물은 질문의 답 전체**라 쌓이면 길어진다. `pes_context`는 한 번에 최대 5쪽(쪽당 100개)을 읽고, 더 있으면 `inputs_has_more: true`와 `inputs_next_cursor`를 싣는다. 그 값을 `pes_context {inputs_cursor: …}`로 주면 이어서 읽는다. 끝까지 읽으면 `inputs_has_more: false`, `inputs_next_cursor: null`이다. 커서는 버려지지 않으므로 500번째 뒤의 답도 읽을 수 있다.
+`inputs`는 그 실행만이 아니라 **같은 에이전트가 이 프로젝트에서 물은 질문의 답 전체**라 쌓이면 길어진다. `pes_context`는 한 번에 **한 쪽**(최대 50개)만 읽고, 더 있으면 `inputs_has_more: true`와 `inputs_next_cursor`를 싣는다. 이 두 값은 응답 객체의 맨 앞에 있어 응답이 중간에 잘려도 어디서 이어 읽을지 보인다. 그 값을 `pes_context {inputs_cursor: …}`로 주면 이어서 읽는다. 끝까지 읽으면 `inputs_has_more: false`, `inputs_next_cursor: null`이다. 커서는 버려지지 않으므로 500번째 뒤의 답도 읽을 수 있고, 처음부터 답이 수백 개 쌓인 프로젝트도 첫 호출이 작다.
+
+응답 크기: 도구 결과는 같은 JSON이 `content[0].text`와 `structuredContent`로 두 번 나간다. 그래서 `inputs` 한 쪽을 JSON 16KB 이하로 제한한다(답 하나가 약 200바이트라 보통 50개 ≈ 10KB). 넘으면 같은 커서에서 `limit`을 절반으로 줄여 다시 읽어 덜 담고, 나머지는 `inputs_next_cursor`로 이어 읽는다(빠지거나 겹치는 답은 없다). 자료 목록(`manifest`)은 이 제한 밖이다.
 
 ## 3. 실행해 보는 예시
 
@@ -169,11 +171,11 @@ pes link와 pes sync는 도우미(helper)가 이 컴퓨터에서 쓰는 **로컬
 - **hash는 인증이 아니다.** `manifest_hash`는 복사한 뒤 일부만 바뀐 묶음 같은 사고를 잡는 무결성 검사일 뿐이고, 아무 권한도 주지 않는다. 누가 보냈는지 증명하지 않는다. 권한은 소유자 세션을 PES가 검사해서 얻는다.
 - 가져오기는 소유자의 한 번의 행위다: 소유자 자신의 전달용 실행(`runtime = claude_app_handoff`, `model = unknown`)을 만들고 결과를 붙이고 끝낸다. 에이전트 claim은 없다(`run.claimed` 사건 없음). 영수증의 행위자와 `adopted_by`는 소유자, `via`는 `import`, 출처 표지는 `provenance.verified = false`다. 붙여 넣은 글이 말하는 도구·모델은 **주장**으로만 남고 믿지 않는다.
 - 같은 묶음(요청 ID)은 한 번만 가져온다: 다시 가져오면 내용이 달라도 `duplicate_import`, 행 0개. 거부된 가져오기는 묶음을 쓰지 않은 것이다 — 붙여 넣은 글을 고친 뒤 같은 묶음으로 다시 할 수 있다.
-- 거부 코드: `bundle_invalid`, `bundle_hash_mismatch`, `bundle_wrong_project`, `bundle_stale`(복사한 뒤 `control_rev`나 기반 버전이 바뀜 — 자료 머리 버전은 묶음의 `base_versions` 전체를 `expected_heads`로 보내 서버가 쓰기 트랜잭션 안에서 다시 비교하므로, 어댑터가 확인한 뒤 머리가 바뀌는 경합도 쓰기 0으로 거른다), `duplicate_import`, `result_out_of_scope`, `attachment_missing`, `attachment_unsupported`. PES가 거부하면 API 코드(`unauthenticated`, `forbidden` 등)를 그대로 쓴다. 특히:
+- 거부 코드: `bundle_invalid`, `payload_too_large`(복사 단계 — 보조 자료가 1000개를 넘음), `bundle_hash_mismatch`, `bundle_wrong_project`, `bundle_stale`(복사한 뒤 `control_rev`나 기반 버전이 바뀜 — 자료 머리 버전은 묶음의 `base_versions` 전체를 `expected_heads`로 보내 서버가 쓰기 트랜잭션 안에서 다시 비교하므로, 어댑터가 확인한 뒤 머리가 바뀌는 경합도 쓰기 0으로 거른다), `duplicate_import`, `result_out_of_scope`, `attachment_missing`, `attachment_unsupported`. PES가 거부하면 API 코드(`unauthenticated`, `forbidden` 등)를 그대로 쓴다. 특히:
   - `conflict` — 승인된 단계, 또는 봉인된 라운드(지정한 라운드, 또는 라운드를 안 줬을 때 단계의 현재 라운드). 승인·봉인은 사람의 결정이라 가져오기가 우회하지 못한다. 승인된 단계는 복사도 `conflict`다. 사람이 단계를 다시 열고(봉인이면 새 라운드) 묶음을 다시 복사한다.
   - `invalid_payload` — 한 가져오기가 같은 자료(object)를 둘 이상 말한다(묶음 하나는 한 자료를 한 번만 고친다). 가져오기 멱등 키가 `import-<request_id>`가 아닌 경우도 같다(`$.headers.idempotency-key`) — 서버가 이 키를 강제해 같은 묶음이 두 번 들어오지 못한다.
   - 거부는 모두 쓰기 0이다.
-- 묶음의 `base_versions`는 프로젝트 전체의 보조 자료 머리 버전이다(자료가 단계에 묶여 있지 않아 좁히지 못한다 — 한계). 가져올 때 같은 판·같은 단계인지 어댑터가 다시 본다.
+- 묶음의 `base_versions`는 프로젝트 전체의 보조 자료 머리 버전이다(자료가 단계에 묶여 있지 않아 좁히지 못한다 — 한계). 한 묶음에는 **최대 1000개**까지 담는다(가져오기가 `expected_heads`로 다시 보내는데, 요청 본문 한도 256KB 안에서 결과 본문 자리를 남기는 값이다). 그보다 많으면 어댑터는 **복사 단계에서** `payload_too_large`(`next_action: archive_objects`, `details.max_objects`·`details.objects`)로 거부하고 묶음을 만들지 않는다. 쓰지 않는 보조 자료를 보관(archive)해 개수를 줄인 뒤 다시 복사하거나, 이 프로젝트는 MCP 연결(방법 B 도구)로 처리한다. 붙여 넣은 묶음이 1000개를 넘거나 같은 `object_id`를 두 번 말하면 가져오기 전에 `bundle_invalid`다. 가져올 때 같은 판·같은 단계인지 어댑터가 다시 본다.
 
 ## 7. 미확인과 한계
 
