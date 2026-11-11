@@ -237,12 +237,6 @@ const OWNER_REQUESTS_PER_MINUTE = 600;
 const LIST_MAX_ITEMS = 100;
 /** A request refused for its own malformed input was not served: it does not use up the budget. */
 const REFUNDED_CODES: readonly string[] = ["invalid_payload", "validation_failed", "payload_too_large", "cursor_invalid"];
-/**
- * SEL-68: the 403 of the internal_ai rule is decided by the labels the request itself carries (mode, provider,
- * model, or the run it names), like a malformed body, and is refused before anything runs, so it is refunded too.
- * Only refusals made by #require_internal_for_go are marked; every other forbidden still spends the budget.
- */
-const REFUNDED_REFUSALS = new WeakSet<Fail>();
 const MAX_RESULTS_PER_BATCH = 20;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -726,7 +720,7 @@ export class ApiApp {
       return await op.act(request, project, auth);
     } catch (error) {
       // A request refused for its own malformed input was not served: it does not use up the budget.
-      if (error instanceof Fail && (REFUNDED_CODES.includes(error.code) || REFUNDED_REFUSALS.has(error))) {
+      if (error instanceof Fail && REFUNDED_CODES.includes(error.code)) {
         refund();
       }
       throw error;
@@ -994,9 +988,7 @@ export class ApiApp {
     } catch (error) {
       if (error instanceof ApiError && error.code === "forbidden") {
         const detail = error.details as { actor_kind: string; field: string };
-        const refusal = new Fail("forbidden", { target: `$.body.${detail.field}`, details: { actor_kind: detail.actor_kind } });
-        REFUNDED_REFUSALS.add(refusal);
-        throw refusal;
+        throw new Fail("forbidden", { target: `$.body.${detail.field}`, details: { actor_kind: detail.actor_kind } });
       }
       throw error;
     }
