@@ -1,0 +1,32 @@
+{
+ "out": [
+  "기획보고서: Word reports/plan/report.docx, 웹 보고서 reports/plan/report.html, 마크다운 reports/plan/report.md, PDF reports/plan/report.pdf",
+  "eli5: <PROJECT>/reports/plan/eli5.json 를 써야 합니다 (스키마는 pes:core 「단계 보고서」) — 쓴 뒤 report 를 다시 실행"
+ ],
+ "reports": [
+  {
+   "format": "docx",
+   "label": "Word",
+   "path": "reports/plan/report.docx",
+   "bytes": 19
+  },
+  {
+   "format": "html",
+   "label": "웹 보고서",
+   "path": "reports/plan/report.html",
+   "bytes": 9810
+  },
+  {
+   "format": "md",
+   "label": "마크다운",
+   "path": "reports/plan/report.md",
+   "bytes": 262
+  },
+  {
+   "format": "pdf",
+   "label": "PDF",
+   "path": "reports/plan/report.pdf",
+   "bytes": 18
+  }
+ ]
+}

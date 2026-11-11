@@ -1,4 +1,4 @@
-// home_guard (SEL-70): the TS counterpart of the Python audit hook in tests/conftest.py (test_project_basic.py guard tests).
+// home_guard (SEL-70; SEL-74: the Python audit hook it mirrored is gone — the guard of the ts children is tested in test_pes_ts_guard and test_serve_ts_guard).
 // Everything uses a *fake* "real home" under a temp folder, so the guard is tested without touching the real ~/.pes.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { PYTHON, ServeProcess, guarded_script_argv, make_ctx, make_serve_home, run_py_code, run_pes } from "./helpers/compat_env.ts";
+import { make_ctx, run_pes } from "./helpers/compat_env.ts";
 import { account_home, assert_isolated_env, assert_no_real_path, protected_paths, real_homes, take_home_snapshot, touches_protected, use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
@@ -64,14 +64,14 @@ test("run_pes refuses to start a child when the context points at this process's
   try {
     ctx.env.HOME = homedir();
     ctx.env.USERPROFILE = homedir();
-    assert.throws(() => run_pes("py", ctx, ["home"]), /home guard/);
+    assert.throws(() => run_pes("ts", ctx, ["home"]), /home guard/);
     ctx.env.HOME = ctx.home_dir;
     ctx.env.USERPROFILE = ctx.home_dir;
     ctx.env.PES_HOME = join(homedir(), "pes-projects");
-    assert.throws(() => run_pes("py", ctx, ["list"]), /home guard/);
+    assert.throws(() => run_pes("ts", ctx, ["list"]), /home guard/);
     // the owner is the one variable a case may add on purpose, but only per call through options.env
     ctx.env.PES_HOME = ctx.pes_home;
-    assert.doesNotThrow(() => run_pes("py", ctx, ["home"], { env: { PES_OWNER: "alice-session" } }));
+    assert.doesNotThrow(() => run_pes("ts", ctx, ["home"], { env: { PES_OWNER: "alice-session" } }));
     ctx.env.PES_OWNER = "alice";
     assert.throws(() => assert_isolated_env(ctx.env), /PES_OWNER/);
   } finally {
@@ -161,7 +161,7 @@ test("a real CLI run in the isolated context leaves the real home alone (list / 
   const before = take_home_snapshot();
   try {
     for (const args of [["list"], ["home"], ["remote"], ["doctor", "--json"]]) {
-      const run = run_pes("py", ctx, args, { narrow_path: args[0] === "doctor" });
+      const run = run_pes("ts", ctx, args, { narrow_path: args[0] === "doctor" });
       assert.equal(run.kind, "ran");
     }
   } finally {
@@ -170,91 +170,11 @@ test("a real CLI run in the isolated context leaves the real home alone (list / 
   before.check();
 });
 
-// ---------------------------------------------------------------- the read guard inside the Python children (conftest GUARD)
-// A *synthetic* "real home" is handed to the child through PES_TEST_REAL_HOME: the child must be stopped when it reads anything
-// below its .pes / pes-projects — a pure read, which the snapshot layer cannot see. The real ~/.pes is never involved.
-const VIOLATION = /PESHomeAccessViolation/;
 
-test("a python snippet that only READS below the (synthetic) real home is stopped by the audit hook; a safe read passes", () => {
-  const fake = fake_real_home();
-  const ctx = make_ctx("pes-guard-");
-  try {
-    const env = { PES_TEST_REAL_HOME: fake.dir };
-    const read = "import sys; print(open(sys.argv[1], encoding='utf-8').read())";
-    const safe = join(ctx.tmp, "safe.txt");
-    writeFileSync(safe, "synthetic", "utf8");
-    assert.equal(run_py_code(ctx, read, [safe], { env }).stdout.trim(), "synthetic");
-    const snapshot = take_home_snapshot(fake.dir);
-    for (const [what, code, target] of [
-      ["open a file in .pes", read, join(fake.dir, ".pes", "config.json")],
-      ["list pes-projects", "import os, sys; print(os.listdir(sys.argv[1]))", join(fake.dir, "pes-projects")],
-      ["stat a project below pes-projects", "import os, sys; print(os.stat(sys.argv[1]))", join(fake.dir, "pes-projects", "p")],
-      ["pathlib exists() on .pes", "import sys; from pathlib import Path; print(Path(sys.argv[1]).exists())", join(fake.dir, ".pes")],
-    ] as const) {
-      assert.throws(() => run_py_code(ctx, code, [target], { env }), VIOLATION, what);
-    }
-    snapshot.check(); // and the blocked reads changed nothing
-    if (process.platform !== "win32") {
-      mkdirSync(join(ctx.tmp, "alias-parent"), { recursive: true });
-      symlinkSync(join(fake.dir, ".pes"), join(ctx.tmp, "alias-parent", "alias"), "dir");
-      assert.throws(() => run_py_code(ctx, read, [join(ctx.tmp, "alias-parent", "alias", "config.json")], { env }), VIOLATION, "read through a symlink alias");
-    }
-  } finally {
-    ctx.cleanup();
-    fake.cleanup();
-  }
-});
-
-test("run_pes('py') runs the hook: a CLI pointed at the synthetic real pes-projects is stopped (end to end, nothing skipped)", () => {
-  const fake = fake_real_home();
-  const ctx = make_ctx("pes-guard-");
-  try {
-    const env = { PES_HOME: join(fake.dir, "pes-projects"), PES_TEST_REAL_HOME: fake.dir };
-    assert.throws(() => run_pes("py", ctx, ["list"], { env }), VIOLATION);
-    // the same command with the isolated PES_HOME and the same synthetic real home is fine
-    const run = run_pes("py", ctx, ["list"], { env: { PES_TEST_REAL_HOME: fake.dir } });
-    assert.equal(run.kind === "ran" ? run.status : -1, 0);
-  } finally {
-    ctx.cleanup();
-    fake.cleanup();
-  }
-});
-
-test("ServeProcess runs the hook too: a server rooted in the synthetic real pes-projects fails to start with the violation", async () => {
-  const fake = fake_real_home();
-  const ctx = make_ctx("pes-guard-");
-  try {
-    make_serve_home(ctx);
-    const server = new ServeProcess(ctx, join(fake.dir, "pes-projects"), { extra_env: { PES_TEST_REAL_HOME: fake.dir }, ready_timeout_ms: 3_000 });
-    await assert.rejects(server.start(), VIOLATION);
-    await server.stop().catch(() => undefined);
-    // control: the isolated root starts and answers
-    const ok = await new ServeProcess(ctx, make_serve_home(ctx), { extra_env: { PES_TEST_REAL_HOME: fake.dir } }).start();
-    try {
-      assert.equal((await ok.request("/ping")).status, 200);
-    } finally {
-      await ok.stop();
-    }
-  } finally {
-    ctx.cleanup();
-    fake.cleanup();
-  }
-});
-
-test("the guarded launcher keeps the script's own view: argv, __file__, __name__ and the exit code", () => {
-  const ctx = make_ctx("pes-guard-");
-  try {
-    const script = join(ctx.tmp, "probe.py");
-    writeFileSync(script, "import sys\nprint(sys.argv[1:], __name__, __file__ == sys.argv[0])\nsys.exit(7)\n", "utf8");
-    const env = { ...ctx.env, PES_TEST_GUARD: "1", PES_TEST_REAL_HOME: account_home() };
-    const probe = spawnSync(PYTHON, guarded_script_argv(script, ["a b", "한글"]), { env: env as NodeJS.ProcessEnv, encoding: "utf8" });
-    assert.equal(probe.status, 7);
-    assert.match(probe.stdout, /\['a b', '한글'\] __main__ True/);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
+// (deleted with Python — a python snippet that only READS …: the Python audit hook of tests/conftest.py is gone; the same guarantee for the ts children — a read below the real home is reported AND denied, the two nets are independent, a server is guarded too — is test_pes_ts_guard.test.ts and test_serve_ts_guard.test.ts)
+// (deleted with Python — run_pes('py') runs the hook …: the Python audit hook of tests/conftest.py is gone; the same guarantee for the ts children — a read below the real home is reported AND denied, the two nets are independent, a server is guarded too — is test_pes_ts_guard.test.ts and test_serve_ts_guard.test.ts)
+// (deleted with Python — ServeProcess runs the hook too …: the Python audit hook of tests/conftest.py is gone; the same guarantee for the ts children — a read below the real home is reported AND denied, the two nets are independent, a server is guarded too — is test_pes_ts_guard.test.ts and test_serve_ts_guard.test.ts)
+// (deleted with Python — the guarded launcher keeps the script's own view …: the Python audit hook of tests/conftest.py is gone; the same guarantee for the ts children — a read below the real home is reported AND denied, the two nets are independent, a server is guarded too — is test_pes_ts_guard.test.ts and test_serve_ts_guard.test.ts)
 test("'real home' means both os.homedir() and the account's home; a snapshot and the path checks cover each", () => {
   const homes = real_homes();
   assert.ok(homes.length >= 1 && homes.length <= 2);

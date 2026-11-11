@@ -36,7 +36,8 @@ test("E3: no Python call (`python3 … pes.py|serve.py|setup.py|check_ddl.py`, `
   const text_ext = /\.(?:md|ts|json|yml|yaml|sh|ps1|html|txt|toml|cfg)$/;
   const bad: string[] = [];
   for (const rel of repo_files()) {
-    if (is_history(rel) || SELF.test(rel) || BASELINE_SPELLING.has(rel) || !text_ext.test(rel) || rel === "package-lock.json") continue;
+    // the frozen 0.15 baseline records (E7 forbids touching them) keep the 0.15 usage line as DATA ("사용: python3 -I setup.py <명령>" in E14)
+    if (is_history(rel) || SELF.test(rel) || BASELINE_SPELLING.has(rel) || rel.startsWith("tests/fixtures/compat/baseline/") || !text_ext.test(rel) || rel === "package-lock.json") continue;
     read_rel(rel).split("\n").forEach((line, i) => {
       if (call.test(line)) bad.push(`${rel}:${i + 1}: ${line.trim().slice(0, 90)}`);
     });

@@ -1,10 +1,10 @@
-// tests/test_state.py (stage report, assemble, web) → TS (SEL-70, PR26a; table 8: test_reports_compat).
+// tests/test_state.py (stage report, assemble, web) → TS (SEL-70, PR26a; table 8: test_reports_compat). SEL-74: the TS CLI; state from the database (project_state).
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { edit_project, init_project, make_ctx, merge, pes, project_json, read_json } from "./helpers/compat_env.ts";
+import { init_project, make_ctx, merge, pes, project_state, read_json } from "./helpers/compat_env.ts";
 import { unique_name } from "./helpers/compat_state.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
@@ -52,7 +52,7 @@ test("report writes report.md and report.html, orders sources by first appearanc
   assert.ok(html.includes("합성 주제"));
   assert.ok(html.includes("기획보고서"));
 
-  const data = project_json(project).stages.plan;
+  const data = project_state(ctx, project).stages.plan;
   assert.ok(data.reports_built);
   const formats = Object.fromEntries(data.reports.map((entry: any) => [entry.format, entry]));
   assert.equal(String(formats.md.path).split("\\").join("/"), "reports/plan/report.md");
@@ -86,10 +86,12 @@ test("assemble orders sections by `order`, renumbers footnotes, and writes sourc
       ],
     },
   ]);
-  edit_project(project, (p) => {
-    p.executive_summary = "합성 요약";
-    p.conclusion = "합성 결론";
-  });
+  // 0.15 edited project.json here; the same two values go in through `set project …` (the whitelist command)
+  for (const [field, value] of [["executive_summary", "합성 요약"], ["conclusion", "합성 결론"]] as const) {
+    const file = join(ctx.tmp, `${field}-${unique_name()}.txt`);
+    writeFileSync(file, value, "utf8");
+    assert.equal(pes(ctx, "set", project, "project", field, file).code, 0);
+  }
 
   const run = pes(ctx, "assemble", project);
   assert.equal(run.code, 0, run.out + run.err);

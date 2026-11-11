@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { looks_like_stack_trace, norm_out } from "./helpers/compat_cases.ts";
-import { free_port, make_ctx, pes, type CompatCtx } from "./helpers/compat_env.ts";
+import { free_port, make_ctx, type CompatCtx } from "./helpers/compat_env.ts";
+import { golden } from "./helpers/cli_read_env.ts";
 import { run_ts_cli, run_ts_cli_async, type TsRunOptions } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { HUB_PORT_FIRST, HUB_PORT_LAST } from "./helpers/hub_block.ts";
@@ -145,52 +146,47 @@ test("필수 1 (control): the real server of this home is still stopped by its r
   }
 });
 
-/** E05's start (init, round-start) on one side, a Word and a PDF file in reports/plan/, then `report`; the printed lines and the registered list. */
-function report_with_files(ctx: CompatCtx, side: "py" | "ts"): { out: string[]; reports: unknown } {
+/** E05's start (init, round-start), a Word and a PDF file in reports/plan/, then `report` (ts); the printed lines and the registered list. */
+function report_with_files(ctx: CompatCtx): { out: string[]; reports: unknown } {
   const project = ctx.project();
-  const run = (...args: string[]) => (side === "py" ? pes(ctx, ...args) : run_ts_cli(ctx, args));
+  const run = (...args: string[]) => run_ts_cli(ctx, args);
   for (const step of [["init", project, "--topic", "합성 주제"], ["round-start", project, "plan"]]) {
     const r = run(...step);
-    assert.equal(r.status, 0, `${side} ${step[0]}: ${r.stderr}`);
+    assert.equal(r.status, 0, `ts ${step[0]}: ${r.stderr}`);
   }
   const rd = join(project, "reports", "plan");
   mkdirSync(rd, { recursive: true });
   writeFileSync(join(rd, "report.docx"), Buffer.from("PK\u0003\u0004 synthetic docx", "latin1"));
   writeFileSync(join(rd, "report.pdf"), Buffer.from("%PDF-1.4 synthetic", "latin1"));
   const rep = run("report", project, "plan");
-  assert.equal(rep.status, 0, `${side} report: ${rep.stderr}`);
+  assert.equal(rep.status, 0, `ts report: ${rep.stderr}`);
   const out = norm_out(rep.stdout, ctx.roots(project));
-  let reports: unknown;
-  if (side === "py") reports = JSON.parse(readFileSync(join(project, "project.json"), "utf8")).stages.plan.reports;
-  else {
-    const show = run_ts_cli(ctx, ["show", project, "plan"]);
-    assert.equal(show.status, 0, show.stderr);
-    reports = JSON.parse(show.stdout).reports;
-  }
-  assert.equal(readFileSync(join(rd, "report.docx"), "latin1"), "PK\u0003\u0004 synthetic docx", `${side}: the Word file is left as it was`);
+  const show = run_ts_cli(ctx, ["show", project, "plan"]);
+  assert.equal(show.status, 0, show.stderr);
+  const reports = JSON.parse(show.stdout).reports;
+  assert.equal(readFileSync(join(rd, "report.docx"), "latin1"), "PK\u0003\u0004 synthetic docx", "ts: the Word file is left as it was");
   return { out, reports };
 }
 
-test("필수 2: report registers reports/plan/report.docx and report.pdf like 0.15 — show's reports lists them with '/' paths, same line and list as pes.py", { timeout: 240_000 }, () => {
-  const py_ctx = make_ctx("pes-ts-final1-rep-py-");
+test("필수 2: report registers reports/plan/report.docx and report.pdf like 0.15 — show's reports lists them with '/' paths, same line and list as 0.15 (frozen record)", { timeout: 240_000 }, () => {
+  // what 0.15 printed and registered for the same steps: tests/fixtures/golden/report-with-docx-pdf.json
+  const old = golden<{ out: string[]; reports: Array<{ format: string; label: string; path: string; bytes: number }> }>("report-with-docx-pdf");
   const ts_ctx = make_ctx("pes-ts-final1-rep-ts-");
   try {
-    const py = report_with_files(py_ctx, "py");
-    const ts = report_with_files(ts_ctx, "ts");
-    assert.deepEqual(ts.out, py.out, "the printed lines equal 0.15's (E05 with a Word and a PDF file)");
+    const ts = report_with_files(ts_ctx);
+    assert.deepEqual(ts.out, old.out, "the printed lines equal 0.15's (E05 with a Word and a PDF file)");
     const shape = (list: unknown) =>
       (list as Array<Record<string, unknown>>).map((r) => ({ format: r.format, label: r.label, path: String(r.path).split("\\").join("/") }));
-    assert.deepEqual(shape(ts.reports), shape(py.reports), "the registered formats, labels and paths equal 0.15's");
+    assert.deepEqual(shape(ts.reports), shape(old.reports), "the registered formats, labels and paths equal 0.15's");
     const ts_list = ts.reports as Array<Record<string, unknown>>;
     for (const fmt of ["docx", "pdf"]) {
       const row = ts_list.find((r) => r.format === fmt);
       assert.ok(row !== undefined, `${fmt} is in show's reports`);
       assert.equal(row.path, `reports/plan/report.${fmt}`, "a '/' path on every platform");
-      const want = (py.reports as Array<Record<string, unknown>>).find((r) => r.format === fmt);
+      const want = old.reports.find((r) => r.format === fmt);
       assert.equal(row.bytes, want?.bytes, `${fmt}: the size of the file as it is (no line-end change)`);
     }
   } finally {
-    py_ctx.cleanup();
     ts_ctx.cleanup();
   }
 });

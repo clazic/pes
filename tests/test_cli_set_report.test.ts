@@ -70,6 +70,8 @@ test("단계 보고서: set changes 는 다음 round-start 가 이력으로 옮�
     seed(e);
     put(e, "plan", "changes", JSON.stringify(["연구 질문 보강: 질문 하나를 더했다", "범위 조정: 장 수를 줄였다"]));
     assert.deepEqual(e.state().stages.plan.changes, ["연구 질문 보강: 질문 하나를 더했다", "범위 조정: 장 수를 줄였다"]);
+    // pes.ts: 열린 라운드가 있으면 round-start 는 거절한다(conflict) — 0.15 는 연달아 열었다. 흐름대로 render 로 봉인한 뒤 연다.
+    ok_run(e.py(["render", e.slug, "plan"]), "render");
     ok_run(e.py(["round-start", e.slug, "plan"]), "round-start 2");
     const st = e.state().stages.plan;
     assert.equal(st.round, 2);

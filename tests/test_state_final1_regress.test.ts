@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, type CliResult } from "./helpers/cli_write_env.ts";
-import { expect_staging, ok as ok_read, run_py, write_legacy } from "./helpers/cli_read_env.ts";
+import { expect_staging, ok as ok_read, run_cli, write_legacy } from "./helpers/cli_read_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { legacy } from "./helpers/legacy_env.ts";
 
@@ -79,7 +79,7 @@ test("이전된 library 의 옛 confidence(\"중간\")가 approve plan 재사용
     await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, "final1-conf"), pes_home: pes_home_of(c.env) });
 
     const py = (args: string[]): CliResult => {
-      const r = run_py(c, args, { flag: "1", extra: { PES_OWNER: "sess-final1-conf" } });
+      const r = run_cli(c, args, { extra: { PES_OWNER: "sess-final1-conf" } });
       return { status: r.status, stdout: lf(r.stdout), stderr: lf(r.stderr) };
     };
     const shown = ok_read(py(["show", slug, "plan", "--fields", "title,kind,reuse"]), "show plan");

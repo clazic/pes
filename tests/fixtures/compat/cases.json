@@ -1623,7 +1623,8 @@
       "criteria": "경로·응답(status·Content-Type·Cache-Control·JSON) 동등",
       "diffs": [
         "D09",
-        "D05"
+        "D05",
+        "D16"
       ],
       "ts": {
         "status": "implemented"

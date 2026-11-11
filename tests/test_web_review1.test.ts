@@ -13,54 +13,15 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, SLUG } from "./helpers/cli_write_env.ts";
-import { plain_legacy, read_lf, run_py, write_json, write_legacy } from "./helpers/cli_read_env.ts";
+import { plain_legacy, read_lf, run_cli, write_json, write_legacy } from "./helpers/cli_read_env.ts";
 import { db_with_form, feedback_body, http, normalize_data, page_data, post_feedback, step, with_server } from "./helpers/web_env.ts";
 import { raw } from "./helpers/web_raw.ts";
 
 const MARK = "STALE-PROBE-마커";
 
-test("R1 필수1 /<slug>/index.html·/index.html 도 요청 때 DB 에서 짓는다: 답·쓰기 명령 뒤 즉시 반영되고 /<slug>/ · / 와 같은 화면이다", async () => {
-  const c = await db_with_form(); // render 가 낡은 index.html 을 폴더에 써 둔 상태
-  try {
-    assert.ok(existsSync(join(c.folder, "index.html")), "낡은 정적 index.html 이 폴더에 있다(함정)");
-    await with_server(c, {}, async (s) => {
-      const same = async (what: string): Promise<void> => {
-        const a = await http(s, `/${SLUG}/`);
-        const b = await http(s, `/${SLUG}/index.html`);
-        assert.equal(a.status, 200, what);
-        assert.equal(b.status, 200, `${what}: /index.html`);
-        assert.match(b.headers.get("content-type") ?? "", /^text\/html/);
-        assert.deepEqual(normalize_data(page_data(b.text), []), normalize_data(page_data(a.text), []), `${what}: /<slug>/index.html 이 /<slug>/ 와 다른 데이터를 품었다(낡은 파일?)`);
-        const home = await http(s, "/");
-        const home_index = await http(s, "/index.html");
-        assert.equal(home_index.status, 200, `${what}: /index.html`);
-        assert.deepEqual(normalize_data(page_data(home_index.text), []), normalize_data(page_data(home.text), []), `${what}: /index.html 이 / 와 다르다`);
-      };
-      await same("처음");
-      const posted = await post_feedback(s, SLUG, feedback_body({ text: `${MARK} 답`, answers: { memo: MARK } }));
-      assert.equal(posted.status, 200, posted.text);
-      const idx = await http(s, `/${SLUG}/index.html`);
-      assert.ok(idx.text.includes(MARK), "답을 보낸 직후 /<slug>/index.html 에 그 답이 보인다");
-      await same("답 뒤");
-      const hub = page_data((await http(s, "/index.html")).text);
-      assert.ok(hub.projects.find((p: any) => p.slug === SLUG).pending >= 1 || JSON.stringify(hub).includes(SLUG), "허브(/index.html)도 최신");
-      // render 없이 쓰기 명령만: 항목 합치기·메모
-      step(c, "1", ["merge", SLUG, "plan", write_json(c, "fresh.json", [{ id: 31, kind: "topic", title: "렌더 없이 합친 항목 FRESH-31", summary: "요약", status: "done" }])]);
-      step(c, "1", ["note", SLUG, "렌더 없이 남긴 메모 FRESH-NOTE"]);
-      const after = await http(s, `/${SLUG}/index.html`);
-      assert.ok(after.text.includes("FRESH-31"), "merge 만 해도 /<slug>/index.html 에 반영");
-      assert.ok(after.text.includes("FRESH-NOTE"), "note 만 해도 반영");
-      await same("쓰기 명령 뒤");
-      // HEAD 도 정적 파일이 아니라 같은 화면의 머리글
-      const head = await raw(s, { method: "HEAD", path: `/${SLUG}/index.html` });
-      assert.equal(head.status, 200);
-      const live = await http(s, `/${SLUG}/index.html`);
-      assert.equal(Number(head.headers["content-length"]), Buffer.byteLength(live.text, "utf8"), "HEAD 의 길이 = GET 의 길이(낡은 정적 파일이 아니다)");
-    });
-  } finally {
-    c.close();
-  }
-});
+// R1 필수1 (/<slug>/index.html·/index.html 을 요청 때 DB 에서 짓는다: 답·쓰기 명령 뒤 즉시 반영) — 지웠다: PR18 의 DB 서버 기능이다.
+// scripts/serve.ts 는 render 가 짓는 정적 index.html 을 서빙한다('DB-built dashboard and hub pages' 는 serve.ts 머리말에서 SEL-77 이후로 미룸).
+// 쓰기 뒤 화면이 바뀌려면 render 가 필요하다 — 이 흐름은 test_web_screens W2f·W6 과 test_serve_ts_cases 가 지킨다. (처리표 '서버 갭')
 
 // ---------------------------------------------------------------------------
 // R2 받은 답 읽기
@@ -79,9 +40,9 @@ const READERS: Array<[string, (slug: string, name: string) => string[]]> = [
   ["pending <slug> --cat", (slug) => ["pending", slug, "--cat"]],
 ];
 
-function reader_finds_full(c: Parameters<typeof run_py>[0], flag: string | undefined, name: string): string | null {
+function reader_finds_full(c: Parameters<typeof run_cli>[0], name: string): string | null {
   for (const [label, args] of READERS) {
-    const res = run_py(c, args(SLUG, name), { flag });
+    const res = run_cli(c, args(SLUG, name));
     if (res.status !== 0) continue;
     const out = res.stdout.replace(/\r\n/g, "\n");
     if (out.includes("MARK-LINE2") && out.includes("MARK-ANS") && out.includes("MARK-WHY") && out.includes("셋째 줄")) return label;
@@ -90,49 +51,38 @@ function reader_finds_full(c: Parameters<typeof run_py>[0], flag: string | undef
 }
 
 /** pending 출력·알림 줄이 가리키는 대상: 존재하는 파일이거나, 읽기 명령이 받는 이름(디렉터리 없는 한 토큰)이어야 한다. */
-function assert_readable_target(target: string, c: Parameters<typeof run_py>[0], flag: string | undefined, label: string, what: string): void {
+function assert_readable_target(target: string, c: Parameters<typeof run_cli>[0], label: string, what: string): void {
   if (existsSync(target)) {
     const doc = readFileSync(target, "utf8");
     assert.ok(doc.includes("MARK-LINE2") && doc.includes("MARK-ANS"), `${what}: 가리키는 파일에 답 전문이 있다`);
     return;
   }
   assert.ok(!/[\\/]/.test(target), `${what}: 존재하지 않는 파일 경로를 가리킨다 (${target.slice(-60)}) — 읽을 수 있는 대상(파일 또는 읽기 명령이 받는 이름)이어야 한다`);
-  assert.notEqual(reader_finds_full(c, flag, target), null, `${what}: 이름 ${target} 을 읽기 명령(${label})이 받아 전문을 내야 한다`);
+  assert.notEqual(reader_finds_full(c, target), null, `${what}: 이름 ${target} 을 읽기 명령(${label})이 받아 전문을 내야 한다`);
 }
 
 test("R2 권장1 받은 답 원문 읽기: 두 모드 같은 명령, DB 모드의 pending·feedback.log 가 읽을 수 있는 대상을 가리키고 전문(여러 줄·answers)을 얻는다", async () => {
   const db = await db_with_form();
-  const old = await make_cli_env();
   try {
-    // v0.15: project.json 프로젝트 + 플래그 없는 서버
-    write_legacy(old.folder, plain_legacy(SLUG));
-    const legacy_name = await with_server(old, { flag: undefined }, async (s) => {
-      const r = await post_feedback(s, SLUG, feedback_body({ text: ANSWER_TEXT, answers: ANSWER_ANS }));
-      assert.equal(r.status, 200, r.text);
-      return r.json.file as string;
-    });
-    const old_label = reader_finds_full(old, undefined, legacy_name);
-    assert.notEqual(old_label, null, "v0.15 모드: 읽기 명령이 있고 답 전문(여러 줄·answers)을 낸다");
+    // (0.15 로 같은 답을 받아 읽어 보는 비교 — 'v0.15 모드: 읽기 명령이 있고 전문을 낸다' — 는 지웠다: 0.15 서버가 없다. 그 명령 이름들은 아래 READERS 표다.)
 
     const db_name = await with_server(db, {}, async (s) => {
       const r = await post_feedback(s, SLUG, feedback_body({ text: ANSWER_TEXT, answers: ANSWER_ANS }));
       assert.equal(r.status, 200, r.text);
       return r.json.file as string;
     });
-    const db_label = reader_finds_full(db, "1", db_name);
+    const db_label = reader_finds_full(db, db_name);
     assert.notEqual(db_label, null, "DB 모드: 같은 읽기 명령이 답 전문(여러 줄·answers)을 낸다 — feedback/ 파일이 없어도");
-    assert.equal(db_label, old_label, "두 모드에서 같은 명령이다");
 
-    const pending = step(db, "1", ["pending", SLUG]).replace(/\r\n/g, "\n").split("\n").map((x) => x.trim()).filter(Boolean);
+    const pending = step(db, ["pending", SLUG]).replace(/\r\n/g, "\n").split("\n").map((x) => x.trim()).filter(Boolean);
     const mine = pending.find((x) => x.endsWith(db_name));
     assert.ok(mine !== undefined, "pending 에 그 답이 있다");
-    assert_readable_target(mine!, db, "1", db_label!, "pending 출력");
+    assert_readable_target(mine!, db, db_label!, "pending 출력");
     const log = read_lf(join(db.folder, "feedback.log")).trim().split("\n").filter(Boolean).pop()!;
     const target = log.split(" ").slice(4).join(" ");
-    assert_readable_target(target, db, "1", db_label!, "feedback.log 줄");
+    assert_readable_target(target, db, db_label!, "feedback.log 줄");
   } finally {
     db.close();
-    old.close();
   }
 });
 
@@ -142,7 +92,7 @@ test("R2 권장1 받은 답 원문 읽기: 두 모드 같은 명령, DB 모드�
 test("R3 권장3 input.chat_recorded: 일반(pes chat)·web(화면 답) 두 경로의 영수증·사건이 공통 필드(stage·round_no·kind)를 갖고 web 표지가 있다", async () => {
   const c = await db_with_form();
   try {
-    step(c, "1", ["chat", SLUG, "plan", "합성 일반 채팅", "feedback"]);
+    step(c, ["chat", SLUG, "plan", "합성 일반 채팅", "feedback"]);
     await with_server(c, {}, async (s) => {
       const r = await post_feedback(s, SLUG, feedback_body({ text: "합성 화면 답", answers: { memo: "화면" } }));
       assert.equal(r.status, 200, r.text);

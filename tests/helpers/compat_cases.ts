@@ -1,10 +1,9 @@
-// E01~E15 case runner (SEL-70, PR26a): cases.json (the table) → a normalised record on one target → compared with the stored
-// 0.15 baseline (tests/fixtures/compat/baseline/<id>.json).
+// E01~E15 case runner (SEL-70, PR26a; SEL-74: the 0.15 Python target is gone): cases.json (the table) → a normalised record on the ts target →
+// compared with the FROZEN 0.15 baseline (tests/fixtures/compat/baseline/<id>.json, made by 0.15 and never rewritten).
 //
 //   record = { steps: [...], dto?, files }       everything already through N1~N8, so equal records mean equal behaviour
 //
-// Baseline update is explicit: PES_COMPAT_UPDATE=1 rewrites the baseline files of the cases that ran (and only those). A normal run
-// never writes them. `assert_case(target, id)` is the one call a test makes.
+// `assert_case("ts", id)` is the one call a test makes. Nothing writes the baselines any more.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -15,7 +14,6 @@ import {
   FIXTURES,
   KNOWN_DIFFS,
   REPO,
-  ServeProcess,
   copy_dir,
   dto_from_project_json,
   make_ctx,
@@ -164,8 +162,26 @@ function runner(text: string): string {
   return text.replace(/^사용: (?:python3 -I pes\.py|node scripts\/pes\.ts) </gm, "사용: <RUN> <");
 }
 
+/**
+ * D15: the usage page of pes.ts has seven lines 0.15's page did not (the five DB-only agent commands and `migrate <dir>` / `migrate --all`).
+ * They are removed — exactly those, each at most once — so what is left must equal the frozen 0.15 page letter for letter; any other
+ * difference stays a failure. A page that does not start like the usage page is returned untouched.
+ */
+export const D15_USAGE_PREFIXES = ["  context <dir>", "  claim <dir>", "  submit <dir>", "  wait <dir>", "  complete <dir>", "  migrate <dir>", "  migrate --all"] as const;
+export function strip_d15(text: string): string {
+  if (!text.startsWith("PES (Project Execution System)")) return text;
+  const left: string[] = [...D15_USAGE_PREFIXES];
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    const at = left.findIndex((prefix) => line.startsWith(prefix));
+    if (at >= 0) left.splice(at, 1);
+    else out.push(line);
+  }
+  return out.join("\n");
+}
+
 export function norm_out(text: string, roots: Roots): string[] {
-  return lines(runner(versions(ports(n8_console(text, roots)))));
+  return lines(runner(versions(ports(n8_console(strip_d15(text), roots)))));
 }
 
 // A python `repr` doubles backslashes; N2 handles it. Python-only wording that is part of the 0.15 contract stays as is.
@@ -237,31 +253,6 @@ function collect_files(dir: string, roots: Roots, depth_fix?: DepthFix): Record<
 
 // ---------------------------------------------------------------- runners
 type Answer = { stage: string; round: number; kind: string; text: string };
-
-/** 0.15 side of D04: who holds `.pes-lock` right now (a lock older than the TTL does not count), or null. */
-function py_lock(project: string): { owner: string } | null {
-  const file = join(project, ".pes-lock");
-  if (!existsSync(file)) return null;
-  try {
-    const info = JSON.parse(readFileSync(file, "utf8")) as { owner?: string; at?: number };
-    return Date.now() / 1000 - Number(info.at ?? 0) < 7200 ? { owner: String(info.owner) } : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 0.15 side of D03: every `feedback/*.json` as {stage, round, kind, text}. */
-function py_answers(project: string): Answer[] {
-  const dir = join(project, "feedback");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.endsWith(".json"))
-    .sort()
-    .map((name) => {
-      const record = read_json(join(dir, name));
-      return { stage: String(record.stage), round: Number(record.round), kind: String(record.kind ?? "feedback"), text: String(record.text ?? "") };
-    });
-}
 
 /** D03: the answer-name lines are DB-assigned on ts, so only what is common is compared (a path's last segment; one line for chat). */
 export function d03_stdout(label: unknown, stdout: string[]): string[] {
@@ -393,7 +384,7 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx, skip_d
     };
     if (d04 && def.project !== null) {
       const folder = substitute(def.project, ctx);
-      entry.lock = target === "ts" ? (ts_view(ts_home, basename(folder))?.lock ?? null) : py_lock(folder);
+      entry.lock = ts_view(ts_home, basename(folder))?.lock ?? null;
     }
     steps.push(entry);
   }
@@ -408,7 +399,7 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx, skip_d
     files: project === undefined ? {} : collect_files(project, roots(), file_depth_fix),
   };
   if (d03 && project !== undefined) {
-    const found = target === "ts" ? (ts_view(ts_home, basename(project))?.answers ?? []) : py_answers(project);
+    const found = ts_view(ts_home, basename(project))?.answers ?? [];
     record.answers = answers_multiset(found).map((x) => JSON.parse(x) as unknown);
   }
   if (target === "ts" && def.diffs.includes("D10") && project !== undefined) assert_posix_storage(project, def.id);
@@ -431,7 +422,6 @@ function assert_moved_state(def: CaseDef, ctx: CompatCtx, project: string): void
 
 /** Does the project exist in a form a DTO can be read from — project.json (py) / the DB or an old project.json (ts)? */
 function has_state(target: Target, ctx: CompatCtx, project: string): boolean {
-  if (target === "py") return existsSync(join(project, "project.json")) && safe_json(join(project, "project.json"));
   if (!ts_cli_exists()) return true; // read_state_dto answers not_yet
   if (!existsSync(project)) return false; // 0.15 meaning: the project is AT this folder path (a moved home leaves the DB behind, see CaseDef.moved_state)
   const ts_home = { env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir };
@@ -464,7 +454,7 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
   // ts (SEL-72): the synthetic project is migrated into the DB first (D02) — the TS server keeps its answers there (D03), and it is
   // started guarded (permission allow-list + ts_child_guard.ts + no reverse DNS) by TsServeProcess
   if (target === "ts") await srv_seed_project(ctx, join(root, "synthetic"));
-  const server = target === "ts" ? new TsServeProcess(ctx, root) : new ServeProcess(ctx, root);
+  const server = new TsServeProcess(ctx, root);
   const steps: unknown[] = [];
   const roots = ctx.roots(join(root, "synthetic"));
   try {
@@ -491,6 +481,11 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
         try {
           body = n1_json(JSON.parse(text), roots);
           if (typeof body === "object" && body !== null) body = JSON.parse(ports(JSON.stringify(body)));
+          if (target === "ts" && h.method === "GET" && h.path === "/whoami" && typeof body === "object" && body !== null && "pid" in body) {
+            // D16: the ts /whoami also names the server process; 0.15 answered {root, single}
+            assert.ok(Number.isSafeInteger((body as any).pid) && (body as any).pid > 0, `${def.id}: /whoami pid must be a positive integer`);
+            delete (body as any).pid;
+          }
           if (target === "ts" && response.status === 200 && h.method === "POST" && typeof body === "object" && body !== null && "v" in body) {
             // D03: the DB answer also carries the change cursor `v` (PR18 contract: { ok, file, v }); 0.15 had none
             assert.ok(Number.isSafeInteger((body as any).v) && (body as any).v >= 0, `${def.id}: the feedback answer's v must be a non-negative integer`);
@@ -588,7 +583,7 @@ export async function run_case(target: Target, id: string, options: { skip_d13?:
 
 export function read_baseline(id: string): CaseRecord {
   const path = baseline_path(id);
-  assert.ok(existsSync(path), `no 0.15 baseline for ${id}: run PES_COMPAT_UPDATE=1 node --test on the case file once, review the diff`);
+  assert.ok(existsSync(path), `no frozen 0.15 baseline for ${id} (tests/fixtures/compat/baseline/${id}.json) — the baselines are the 0.15 record and are never made again`);
   return JSON.parse(readFileSync(path, "utf8")) as CaseRecord;
 }
 
@@ -596,7 +591,7 @@ export function read_baseline(id: string): CaseRecord {
  * The baseline for one OS: the single stored record plus that OS's `os_overrides` edits. A path that does not exist in the record
  * throws (an override must not silently stop matching when the baseline changes). `platform` is injectable for the unit test.
  */
-export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id), target: "py" | "ts" = "py"): CaseRecord {
+export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id), target: "baseline" | "ts" = "baseline"): CaseRecord {
   const override = case_def(id).os_overrides?.[platform];
   const out = JSON.parse(JSON.stringify(base)) as CaseRecord;
   if (override === undefined || (target === "ts" && override.applies_to_ts !== true)) return out;
@@ -622,12 +617,6 @@ export function baseline_for(id: string, platform: string = process.platform, ba
  */
 export function ts_baseline(id: string, platform: string = process.platform): CaseRecord {
   return baseline_for(id, platform, read_baseline(id), "ts");
-}
-
-export function write_baseline(record: CaseRecord): void {
-  const path = baseline_path(record.id);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(record, null, 1)}\n`, "utf8");
 }
 
 function roundtrip(record: CaseRecord): CaseRecord {
@@ -684,7 +673,7 @@ export function compare_ts_record(def: CaseDef, got: CaseRecord, base_in: CaseRe
   compare_steps(def, got.steps, base.steps);
   if (diffs.includes("D13")) {
     // the divergent steps are refused on ts: the end state is the 0.15 one WITHOUT them (recorded next to the baseline)
-    assert.ok(base.ts_end !== undefined, `${id}: a D13 baseline carries ts_end (regenerate with PES_COMPAT_UPDATE=1 on the py target)`);
+    assert.ok(base.ts_end !== undefined, `${id}: a D13 baseline carries ts_end (it is part of the frozen 0.15 record)`);
     base = { ...base, dto: base.ts_end.dto, files: base.ts_end.files, ...(base.ts_end.answers === undefined ? {} : { answers: base.ts_end.answers }) };
   }
   const got_dto = diffs.includes("D02") ? d02_drop_defaults(got.dto, base.dto, basename(def.project ?? "")) : got.dto;
@@ -764,31 +753,6 @@ export function compare_steps(def: CaseDef, got: unknown[], base: unknown[]): vo
 export async function assert_case(target: Target, id: string): Promise<void> {
   const def = case_def(id);
   const outcome = await run_case(target, id);
-  if (target === "py") {
-    assert.equal(outcome.kind, "ran", `${id}: the 0.15 target must run`);
-    if (outcome.kind !== "ran") return;
-    if (def.diffs.includes("D13")) {
-      // the 0.15 end state without the divergent steps (what ts must end in)
-      const without = await run_case("py", id, { skip_d13: true });
-      assert.equal(without.kind, "ran");
-      if (without.kind !== "ran") return;
-      outcome.record.ts_end = { dto: without.record.dto, files: without.record.files, ...(without.record.answers === undefined ? {} : { answers: without.record.answers }) };
-    }
-    if (process.env.PES_COMPAT_UPDATE === "1") {
-      write_baseline(outcome.record);
-      return;
-    }
-    const expected = baseline_for(id);
-    const actual = roundtrip(outcome.record);
-    if (process.env.PES_COMPAT_DUMP === "1" && !isDeepStrictEqual(actual, expected)) {
-      // Diagnostic mode (CI only, to collect the values of another OS): print the record instead of failing. Without the variable
-      // a difference always fails below.
-      console.log(`COMPAT_DUMP ${id} ${process.platform}\n${JSON.stringify(actual)}\nCOMPAT_DUMP_END ${id}`);
-      return;
-    }
-    assert.deepEqual(actual, expected, `${id}: 0.15 behaviour differs from the pinned baseline`);
-    return;
-  }
   if (def.ts.status === "not_yet") {
     assert.equal(outcome.kind, "not_yet", `${id}: marked not_yet in cases.json but the ts target ran — set ts.status to "implemented" and remove it from the not-yet list`);
     return;

@@ -1,0 +1,52 @@
+{
+ "status synthetic-legacy-full": {
+  "status": 0,
+  "stdout": "주제: 합성 도서관 운영 연구  (<ROOT>/pes-projects/synthetic-legacy-full)\n현재 단계: 조사\n    기획     approved R1 항목 2 (할 일 1)\n  ▶ 조사     active   R1 항목 1 (할 일 1)\n    분석·종합  active   R2 항목 1 (할 일 1)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n참고자료: 기존 조사 2개 항목 (synthetic-research-loop)\n인계 메모 1개 (최근 5):\n  - [<TS>] 합성 메모 하나\n처리 안 한 답: 2개\n  - <ROOT>/pes-projects/synthetic-legacy-full/feedback/research-R1-<STAMP>.json  [research/feedback/R1] 합성 자유 의견: 표를 더 넣어 주세요\n  - <ROOT>/pes-projects/synthetic-legacy-full/feedback/research-R1-<STAMP>.json  [research/review/R1] \n대시보드: 서버 꺼짐 — serve synthetic-legacy-full\n",
+  "stderr_last": ""
+ },
+ "pending synthetic-legacy-full": {
+  "status": 0,
+  "stdout": "<ROOT>/pes-projects/synthetic-legacy-full/feedback/research-R1-<STAMP>.json\n<ROOT>/pes-projects/synthetic-legacy-full/feedback/research-R1-<STAMP>.json\n",
+  "stderr_last": ""
+ },
+ "digest synthetic-legacy-full research": {
+  "status": 0,
+  "stdout": "[조사 R1] 항목 1개 · 상태 active\n\n#1 합성 조사 항목 [topic/new/R0] 신뢰도 - · 출처 0(원문 0) · \n  요약: 합성 조사 요약\n",
+  "stderr_last": ""
+ },
+ "show synthetic-legacy-full plan": {
+  "status": 0,
+  "stdout": "{\n \"status\": \"approved\",\n \"round\": 1,\n \"approved_at\": \"<TS>\",\n \"stale\": false,\n \"settings\": {},\n \"summary\": \"합성 기획 요약\",\n \"history\": [\n  \"R1 (<TS>): 합성 변경 — 상세 snapshots/plan-R1.json\"\n ],\n \"reports\": [\n  {\n   \"format\": \"pdf\",\n   \"label\": \"합성 기획 보고서\",\n   \"path\": \"reports/plan/report.pdf\",\n   \"bytes\": 24,\n   \"round\": 1\n  }\n ],\n \"mystery_stage_key\": 7,\n \"carry_over\": [\n  {\n   \"item\": 1,\n   \"title\": \"합성 항목 하나\",\n   \"request\": \"다음 단계에서 표를 보강한다\",\n   \"from\": \"research\"\n  },\n  {\n   \"item\": 2,\n   \"title\": \"합성 항목 둘\",\n   \"request\": \"대상을 알 수 없는 남은 일\"\n  }\n ],\n \"review\": null,\n \"suggestions\": [],\n \"warnings\": [],\n \"changes\": [],\n \"items\": [\n  \"#1 합성 항목 하나 [rq/done]\",\n  \"#2 합성 항목 둘 [alien/deepen]\"\n ]\n}\n",
+  "stderr_last": ""
+ },
+ "show synthetic-legacy-full plan 1": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"합성 항목 하나\",\n  \"kind\": \"rq\",\n  \"status\": \"done\",\n  \"summary\": \"합성 요약 1\",\n  \"details\": \"합성 본문 1\",\n  \"confidence\": \"high\",\n  \"shots\": [\n   \"shots/shot-1.png\"\n  ],\n  \"updated_round\": 1,\n  \"sources\": [\n   {\n    \"title\": \"합성 출처 A\",\n    \"url\": \"https://example.invalid/a\",\n    \"method\": \"fetch\",\n    \"date\": \"2025-12-01\",\n    \"note\": \"합성\"\n   },\n   {\n    \"title\": \"합성 출처 A 복제\",\n    \"url\": \"https://example.invalid/a\",\n    \"method\": \"search\"\n   }\n  ],\n  \"weird_item_key\": \"x\",\n  \"question\": \"\",\n  \"request\": \"\",\n  \"depth\": 0,\n  \"stats\": [],\n  \"conflicts\": [],\n  \"verify\": null,\n  \"links\": {},\n  \"user_links\": []\n }\n]\n",
+  "stderr_last": ""
+ },
+ "status synthetic-legacy-two": {
+  "status": 0,
+  "stdout": "주제: 합성 도서관 운영 연구  (<ROOT>/pes-projects/synthetic-legacy-two)\n현재 단계: 조사\n    기획     approved R1 항목 2 (할 일 1)\n  ▶ 조사     active   R1 항목 1 (할 일 1)\n    분석·종합  active   R2 항목 1 (할 일 1)\n    집필     pending  R0 항목 0 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n참고자료: 기존 조사 2개 항목 (synthetic-research-loop)\n인계 메모 1개 (최근 5):\n  - [<TS>] 합성 메모 하나\n처리 안 한 답: 2개\n  - <ROOT>/pes-projects/synthetic-legacy-two/feedback/research-R1-<STAMP>.json  [research/feedback/R1] 합성 자유 의견: 표를 더 넣어 주세요\n  - <ROOT>/pes-projects/synthetic-legacy-two/feedback/research-R1-<STAMP>.json  [research/review/R1] \n대시보드: 서버 꺼짐 — serve synthetic-legacy-two\n",
+  "stderr_last": ""
+ },
+ "pending synthetic-legacy-two": {
+  "status": 0,
+  "stdout": "<ROOT>/pes-projects/synthetic-legacy-two/feedback/research-R1-<STAMP>.json\n<ROOT>/pes-projects/synthetic-legacy-two/feedback/research-R1-<STAMP>.json\n",
+  "stderr_last": ""
+ },
+ "digest synthetic-legacy-two research": {
+  "status": 0,
+  "stdout": "[조사 R1] 항목 1개 · 상태 active\n\n#1 합성 조사 항목 [topic/new/R0] 신뢰도 - · 출처 0(원문 0) · \n  요약: 합성 조사 요약\n",
+  "stderr_last": ""
+ },
+ "show synthetic-legacy-two plan": {
+  "status": 0,
+  "stdout": "{\n \"status\": \"approved\",\n \"round\": 1,\n \"approved_at\": \"<TS>\",\n \"stale\": false,\n \"settings\": {},\n \"summary\": \"합성 기획 요약\",\n \"history\": [\n  \"R1 (<TS>): 합성 변경 — 상세 snapshots/plan-R1.json\"\n ],\n \"reports\": [\n  {\n   \"format\": \"pdf\",\n   \"label\": \"합성 기획 보고서\",\n   \"path\": \"reports/plan/report.pdf\",\n   \"bytes\": 24,\n   \"round\": 1\n  }\n ],\n \"mystery_stage_key\": 7,\n \"carry_over\": [\n  {\n   \"item\": 1,\n   \"title\": \"합성 항목 하나\",\n   \"request\": \"다음 단계에서 표를 보강한다\",\n   \"from\": \"research\"\n  },\n  {\n   \"item\": 2,\n   \"title\": \"합성 항목 둘\",\n   \"request\": \"대상을 알 수 없는 남은 일\"\n  }\n ],\n \"review\": null,\n \"suggestions\": [],\n \"warnings\": [],\n \"changes\": [],\n \"items\": [\n  \"#1 합성 항목 하나 [rq/done]\",\n  \"#2 합성 항목 둘 [alien/deepen]\"\n ]\n}\n",
+  "stderr_last": ""
+ },
+ "show synthetic-legacy-two plan 1": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"합성 항목 하나\",\n  \"kind\": \"rq\",\n  \"status\": \"done\",\n  \"summary\": \"합성 요약 1\",\n  \"details\": \"합성 본문 1\",\n  \"confidence\": \"high\",\n  \"shots\": [\n   \"shots/shot-1.png\"\n  ],\n  \"updated_round\": 1,\n  \"sources\": [\n   {\n    \"title\": \"합성 출처 A\",\n    \"url\": \"https://example.invalid/a\",\n    \"method\": \"fetch\",\n    \"date\": \"2025-12-01\",\n    \"note\": \"합성\"\n   },\n   {\n    \"title\": \"합성 출처 A 복제\",\n    \"url\": \"https://example.invalid/a\",\n    \"method\": \"search\"\n   }\n  ],\n  \"weird_item_key\": \"x\",\n  \"question\": \"\",\n  \"request\": \"\",\n  \"depth\": 0,\n  \"stats\": [],\n  \"conflicts\": [],\n  \"verify\": null,\n  \"links\": {},\n  \"user_links\": []\n }\n]\n",
+  "stderr_last": ""
+ }
+}

@@ -1,7 +1,7 @@
 // SEL-50 (stage 2 PR17) 시험 공용 준비물: 스킬·에이전트·명령 문서를 읽고, 코드 조각과 pes 명령을 뽑고,
 // lint(scripts/lint_skills.ts)를 자식 프로세스로 돌린다. 전부 합성 입력이며 실제 ~/pes-projects·~/.pes 는 건드리지 않는다.
 //
-// Windows 점검표: 문서는 CRLF → LF 로 정규화해서 읽고, 자식 Node/Python 은 UTF-8 로 띄우고(-X utf8),
+// Windows 점검표: 문서는 CRLF → LF 로 정규화해서 읽고, 자식은 Node(UTF-8)로 띄우고,
 // 경로는 node:path 로만 만들며, `which`·sh·tar 에 기대지 않는다.
 
 import { spawnSync } from "node:child_process";
@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
-export const PES_PY = join(REPO, "scripts", "pes.py");
+/** The usage page of pes.ts (scripts/pes_core/cli_usage.ts) — the table of commands and their arguments. SEL-74: pes.py's docstring is gone. */
+export { USAGE as PES_USAGE } from "../../scripts/pes_core/cli_usage.ts";
 export const LINT_TS = join(REPO, "scripts", "lint_skills.ts");
 
 export const STAGES = ["plan", "research", "analyze", "write", "verify", "publish"] as const;

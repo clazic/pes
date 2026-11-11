@@ -5,14 +5,14 @@
 //   2. the run method is pinned: `node scripts/pes.ts` (Node 26 strips types) — also bare, unguarded, with a clean stderr;
 //   3. every implemented case runs on the ts target and equals the pinned 0.15 baseline (E01~E04, E10, X01~X05, X08~X11);
 //   4. the real-home guard covers the real child: nothing of the (fake and the account's) real ~/.pes / ~/pes-projects is touched.
-// The ts target always runs here, whatever PES_COMPAT_TARGET says (test_compat_cases_* keep running the py side).
+// The ts target is the only target (SEL-74: the 0.15 Python side is gone; the baselines are its frozen record).
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { all_cases, assert_case, case_def, implemented_ids, load_contract_table, load_table, norm_out, read_baseline } from "./helpers/compat_cases.ts";
-import { PES_PY, make_ctx, pes } from "./helpers/compat_env.ts";
+import { D15_USAGE_PREFIXES, all_cases, assert_case, case_def, implemented_ids, load_contract_table, load_table, norm_out, read_baseline, strip_d15 } from "./helpers/compat_cases.ts";
+import { make_ctx } from "./helpers/compat_env.ts";
 import { PES_TS_FILE, REPO_ROOT, run_ts_bare, run_ts_cli } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { SEL72_DONE } from "./helpers/sel72_scope.ts";
@@ -65,21 +65,35 @@ test("bare `node scripts/pes.ts` (no guard flags): usage page and exit 1 equal 0
     assert.equal(unknown.status, 1);
     assert.equal(unknown.stderr, "");
     assert.deepEqual(norm_out(unknown.stdout, roots), want[2].stdout);
-    // the 0.15 page (same text, the one word of the runner aside): compare with a live py run too, so the baseline cannot drift unseen
-    const py = pes(ctx);
-    assert.deepEqual(norm_out(py.out, roots), want[0].stdout);
-    assert.ok(PES_PY.endsWith("pes.py"));
+    // (SEL-74: the live 0.15 run next to the baseline is gone — the baseline IS the 0.15 page; the runner word and the new lines are D15 below)
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("D15: the usage page of pes.ts has exactly seven lines 0.15's did not (context · claim · submit · wait · complete · migrate <dir> · migrate --all) — taking out those and only those leaves the frozen 0.15 page letter for letter", () => {
+  const ctx = make_ctx("pes-ts-d15-");
+  try {
+    const raw = run_ts_bare(ctx, []).stdout.replace(/\r\n/g, "\n");
+    const page = raw.split("\n");
+    for (const prefix of D15_USAGE_PREFIXES) assert.equal(page.filter((line) => line.startsWith(prefix)).length, 1, `${JSON.stringify(prefix)} appears exactly once`);
+    const stripped = strip_d15(raw);
+    assert.equal(page.length - stripped.split("\n").length, 7, "exactly seven lines are taken out");
+    const want = (read_baseline("X01").steps as any[])[0].stdout as string[];
+    assert.deepEqual(norm_out(raw, ctx.roots()), want, "the rest equals the 0.15 page");
+    // a page with one other line changed (or one more) is NOT excused
+    const tampered = raw.replace("  doctor ", "  doctor! ");
+    assert.notDeepEqual(norm_out(tampered, ctx.roots()), want);
+    assert.notDeepEqual(norm_out(`${raw.trimEnd()}\n  extra <dir>   one more line\n`, ctx.roots()), want);
   } finally {
     ctx.cleanup();
   }
 });
 
 test("every command name 0.15 knows (the 33 old ones; context·claim·submit·wait·complete are the DB-only five) is a command of pes.ts: with a missing project it answers a project error, never the usage page", () => {
-  const source = readFileSync(PES_PY, "utf8");
-  const table = /^CMDS = \{([\s\S]*?)\}\s*$/m.exec(source);
-  assert.ok(table, "pes.py: CMDS moved");
-  const names = [...(table[1] as string).matchAll(/"([a-z-]+)":/g)].map((m) => m[1] as string);
-  assert.equal(names.length, 38, "pes.py CMDS has 38 names (32 + set + 5 DB-only); update this test with the table");
+  // the 38 command names of 0.15 (pes.py CMDS, recorded when the file still existed — SEL-74): 32 + set + the 5 DB-only ones
+  const names = ["approve", "ask", "ask-prep", "assemble", "chat", "claim", "complete", "context", "digest", "doctor", "home", "hub", "init", "list", "lock", "mark", "merge", "note", "open", "pending", "qa", "qa-brief", "remote", "render", "reopen", "report", "round-start", "serve", "set", "show", "status", "stop", "submit", "unlock", "wait", "watch", "web", "which"];
+  assert.equal(names.length, 38, "0.15 CMDS had 38 names (32 + set + 5 DB-only)");
   const known = names.filter((n) => !["context", "claim", "submit", "wait", "complete"].includes(n));
   assert.equal(known.length, 33);
   assert.ok(existsSync(PES_TS_FILE), "scripts/pes.ts does not exist yet — SEL-71 writes it");

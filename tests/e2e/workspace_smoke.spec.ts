@@ -1,6 +1,6 @@
 // SEL-51 PR18 — Playwright 스모크 (tester, 작성 모드). 구현 전이므로 일부는 실패하는 것이 정상이다.
 //
-// 임시 HOME·USERPROFILE·PES_HOME 의 합성 DB 프로젝트(project.json 없음)를 PES_DB_CORE=1 로 serve.py 가 서빙하고, Chromium 으로 열어
+// 임시 HOME·USERPROFILE·PES_HOME 의 합성 DB 프로젝트(project.json 없음)를 serve.ts 가 서빙하고, Chromium 으로 열어
 // 질문 답 제출·승인·보고서 열기·초안 보존·안전한 Markdown·인쇄 CSS·run 표시를 본다. 픽셀 기준선은 없다.
 // 브라우저가 없으면 건너뛰지 않고 실패한다(첫 시험). 설치: npx playwright install chromium
 //

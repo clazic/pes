@@ -1,0 +1,21 @@
+{
+ "round": 1,
+ "questions": [
+  {
+   "label": "점검 질문 하나",
+   "type": "single",
+   "required": true,
+   "options": [
+    {
+     "value": "ok",
+     "label": "맞음",
+     "recommended": true
+    },
+    {
+     "value": "no",
+     "label": "아님"
+    }
+   ]
+  }
+ ]
+}

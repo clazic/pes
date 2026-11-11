@@ -1,7 +1,7 @@
 /**
  * SEL-71 final review 1, recommendations 1 and 3. Everything is synthetic, isolated (temporary HOME / PES_HOME).
  *
- *   1. `pes.py chat <dir> <stage> ""` on the DB path (PES_DB_CORE=1) is refused as on main: the shared `cli_bridge` chat handler takes a
+ *   1. (deleted with Python — `pes.py chat <dir> <stage> ""` on the DB path was refused; `pes.ts chat` sends `allow_blank` itself.) The shared `cli_bridge` chat handler takes a
  *      blank answer only when the caller asks (`allow_blank`, which only scripts/pes.ts `chat` sends). Nothing is written.
  *   3. the core itself refuses `round.start { any_order }` and `project.bootstrap { plan_asking }` from any transport but the CLI
  *      (`via !== "cli"` → invalid_payload), like `implicit` — a second layer behind the API's fixed payloads. The CLI transport still works.
@@ -18,23 +18,7 @@ const OTHER_VIAS = ["http", "mcp", "webmcp", "web", "import"] as const;
 
 // ---------------------------------------------------------------------------------------------------- 1
 
-test("1. pes.py DB path: chat with an empty or blank answer is refused as on main (no allow_blank) and writes nothing", async () => {
-  await with_cli((c) => {
-    for (const text of ["", "   "]) {
-      const before = c.commits().length;
-      const out = c.run(["chat", SLUG, "plan", text]);
-      assert.notEqual(out.status, 0, `chat ${JSON.stringify(text)}: refused (stdout: ${out.stdout})`);
-      assert.doesNotMatch(out.stdout, /채팅 입력 기록/, "no answer recorded");
-      assert.doesNotMatch(out.stderr, /Traceback/, "a refusal, not a crash");
-      assert.equal(c.commits().length, before, "nothing was committed");
-    }
-    // control: a real answer on the same path is still recorded
-    const ok = c.run(["chat", SLUG, "plan", "합성 채팅"]);
-    assert.equal(ok.status, 0, ok.stderr);
-    assert.match(ok.stdout, /채팅 입력 기록/);
-  });
-});
-
+// (the old test 1 — `pes.py chat <dir> <stage> ""` on the PES_DB_CORE path is refused — is gone with pes.py: scripts/pes.ts `chat` itself sends allow_blank (0.15 took a blank answer), and the handler refusing a blank answer from any other caller is not reachable from the CLI any more.)
 // ---------------------------------------------------------------------------------------------------- 3
 
 test("3. round.start { any_order } from a transport other than the CLI is invalid_payload and changes nothing; via cli it opens the round", async () => {

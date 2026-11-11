@@ -1,9 +1,9 @@
 /**
  * SEL-51 PR18 — 로컬 화면 DB/API 전환 (tester, 작성 모드). 구현 전이므로 새 시험은 실패하는 것이 정상이다.
  *
- * 시험 방식: `python3 -I -X utf8 scripts/pes.py ...` 와 `scripts/serve.py` 를 subprocess 로 띄우고 HTTP 로 본다. HOME·USERPROFILE·PES_HOME 은
+ * 시험 방식: `node scripts/pes.ts ...` 와 `scripts/serve.ts` 를 subprocess 로 띄우고 HTTP 로 본다 (SEL-74: 0.15 Python 은 없다). HOME·USERPROFILE·PES_HOME 은
  * 모두 임시 폴더, 자료는 모두 합성이다(tests/helpers/cli_write_env.ts · cli_read_env.ts · web_env.ts). 픽셀 기준선은 없다 —
- * 같은 합성 자료를 v0.15(플래그 없음, project.json)와 DB(PES_DB_CORE=1)로 각각 렌더해 페이지가 품은 데이터(JSON)를 의미로 비교한다.
+ * 같은 합성 자료를 v0.15 가 렌더한 페이지 데이터(고정 기록 tests/fixtures/golden/web-v015-*.json)와 DB 로 렌더한 데이터를 의미로 비교한다.
  * 브라우저가 필요한 동작(질문 폼의 입력 상호작용·초안 보존·안전한 Markdown·인쇄 CSS·run 표시)은 tests/e2e/workspace_smoke.spec.ts 다.
  *
  * 이 시험이 고정하는 해석(보고서의 '해석 n'과 번호가 같다):
@@ -34,17 +34,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, SLUG, type CliEnv } from "./helpers/cli_write_env.ts";
-import { baseline_dir, folder_of, normalize, plain_legacy, read_lf, run_py, seed, write_legacy, write_json, ok, OFF } from "./helpers/cli_read_env.ts";
+import { golden, normalize } from "./helpers/cli_read_env.ts";
 import {
   ASK_SPEC,
   build_db,
-  build_old,
   commit_count,
   db_with_form,
   expect_same_screen,
   feedback_body,
   feedback_files,
   http,
+  hub_page_data,
   normalize_data,
   page_data,
   pages,
@@ -60,7 +60,6 @@ import {
   with_server,
   write_spec,
   url_fix_diffs,
-  WEB_BASELINE_REF,
 } from "./helpers/web_env.ts";
 
 function norm_html(text: string, roots: string[]): string {
@@ -83,125 +82,16 @@ test("W0 Playwright: devDependency 정확한 버전 고정, config 는 e2e *.spe
   assert.equal(pkg.scripts.test, 'node --test "tests/**/*.test.ts"', "npm test 는 *.test.ts 만 (e2e 는 *.spec.ts)");
 });
 
-test("W1a 플래그 없음: render·ask·hub 가 만든 파일이 36bc6a2(v0.15)와 바이트까지 같다 (해석 1)", async () => {
-  const base = baseline_dir(WEB_BASELINE_REF);
-  assert.notEqual(base, null, `기준 커밋 ${WEB_BASELINE_REF} 가 없다 (얕은 복제? fetch-depth: 0 필요)`);
-  if (base === null) return;
-  const now = await make_cli_env();
-  const old = await make_cli_env();
-  try {
-    const old_py = join(base, "scripts", "pes.py");
-    for (const [c, script] of [[now, undefined], [old, old_py]] as const) {
-      write_legacy(c.folder, plain_legacy(SLUG));
-      writeFileSync(join(folder_of(c, SLUG), "..", ".pes-hub"), "1", "utf8"); // render 가 홈 허브도 다시 짓게 한다
-      const run = (args: string[]) => ok(run_py(c, args, { ...OFF, ...(script !== undefined ? { script } : {}) }), args.join(" "));
-      run(["ask", SLUG, write_spec(c)]);
-      run(["round-start", SLUG, "plan"]);
-      run(["merge", SLUG, "plan", write_json(c, "m.json", [{ id: 1, kind: "topic", title: "합성 항목", summary: "요약", status: "done" }])]);
-      run(["note", SLUG, "합성 메모"]);
-      run(["render", SLUG, "plan"]);
-      run(["report", SLUG, "plan"]);
-      run(["web", SLUG, "--assemble"]);
-    }
-    const files = (c: CliEnv) => [
-      join(c.folder, "index.html"),
-      join(c.folder, "ask-plan-start.html"),
-      join(c.folder, "..", "index.html"),
-      join(c.folder, "reports", "plan", "report.html"),
-      join(c.folder, "reports", "plan", "report.md"),
-      join(c.folder, "out", "report.html"),
-    ];
-    const a = files(now);
-    const b = files(old);
-    for (let i = 0; i < a.length; i += 1) {
-      assert.ok(existsSync(a[i]!), `새 코드가 ${a[i]} 를 만든다`);
-      const mine = norm_html(readFileSync(a[i]!, "utf8"), roots_of(now));
-      const theirs = norm_html(readFileSync(b[i]!, "utf8"), roots_of(old, [base, `/private${base}`]));
-      const label = `플래그 없음: ${a[i]!.split(/[\\/]/).slice(-2).join("/")} 가 v0.15 와 같다`;
-      if (a[i]!.endsWith(join(SLUG, "index.html"))) assert.deepEqual(url_fix_diffs(theirs, mine), [], `${label} (path·shots 링크 safeUrl 수정만 허용)`);
-      else assert.equal(mine, theirs, label);
-    }
-  } finally {
-    now.close();
-    old.close();
-  }
-});
-
-test("W1b 플래그 없음: serve.py 의 정적 서빙·/version·/ping·POST feedback 이 36bc6a2 와 같다 (해석 1)", async () => {
-  const base = baseline_dir(WEB_BASELINE_REF);
-  assert.notEqual(base, null, `기준 커밋 ${WEB_BASELINE_REF} 가 없다`);
-  if (base === null) return;
-  const now = await make_cli_env();
-  const old = await make_cli_env();
-  try {
-    for (const c of [now, old]) {
-      write_legacy(c.folder, plain_legacy(SLUG));
-      step(c, undefined, ["ask", SLUG, write_spec(c)]);
-      step(c, undefined, ["render", SLUG, "plan"]);
-    }
-    const seen: Array<Array<[number, string]>> = [];
-    for (const [c, script] of [[now, undefined], [old, join(base, "scripts", "serve.py")]] as const) {
-      const rows: Array<[number, string]> = [];
-      await with_server(c, { flag: undefined, ...(script !== undefined ? { script } : {}) }, async (s) => {
-        const get = async (p: string) => {
-          const r = await http(s, p);
-          rows.push([r.status, `${p} ${r.headers.get("content-type") ?? ""} ${r.headers.get("location") ?? ""}`]);
-          return r;
-        };
-        await get("/ping");
-        await get(`/${SLUG}/ping`);
-        await get(`/${SLUG}`);
-        await get(`/${SLUG}/`);
-        await get(`/${SLUG}/ask-plan-start.html`);
-        await get(`/${SLUG}/no-such-file.html`);
-        await get(`/no-such-project/`);
-        const ver = await get(`/${SLUG}/version`);
-        rows.push([ver.status, Object.keys(ver.json ?? {}).join(",")]);
-        const who = await get("/whoami");
-        rows.push([who.status, Object.keys(who.json ?? {}).join(",")]);
-        const cases: Array<[string, Record<string, unknown> | string, { origin?: string | null }]> = [
-          ["ok", feedback_body(), {}],
-          ["kind", feedback_body({ kind: "bogus" }), {}],
-          ["empty", feedback_body({ text: "", answers: {} }), {}],
-          ["broken", "{not json", {}],
-          ["no-origin", feedback_body(), { origin: null }],
-          ["evil-origin", feedback_body(), { origin: "http://evil.example" }],
-        ];
-        for (const [name, body, o] of cases) {
-          const r = await post_feedback(s, SLUG, body, o);
-          const shape = r.json === null ? "" : Object.keys(r.json).sort().join(",") + JSON.stringify(r.json.error ?? "");
-          rows.push([r.status, `${name} ${shape}`]);
-        }
-        const big = await post_feedback(s, SLUG, JSON.stringify({ text: "x".repeat(300 * 1024) }));
-        rows.push([big.status, "oversize"]);
-        const none = await post_feedback(s, "no-such-project", feedback_body());
-        rows.push([none.status, "unknown-project"]);
-      });
-      seen.push(rows);
-    }
-    assert.deepEqual(seen[0], seen[1], "플래그 없음: 응답 상태와 모양이 v0.15 와 같다");
-    // 파일 쪽: 같은 한 건이 feedback/ 에 json 으로, feedback.log 에 한 줄로 남는다.
-    assert.equal(feedback_files(now).length, 1, "ok 한 건만 feedback/ 에 json 으로 쓰였다");
-    const log = read_lf(join(now.folder, "feedback.log")).trim().split("\n");
-    assert.equal(log.length, 1);
-    assert.match(log[0]!, /^FEEDBACK plan R0 stage_start .*plan-R0-\d{8}-\d{6}(-\d+)?\.json$/);
-    const rec = JSON.parse(read_lf(join(now.folder, "feedback", feedback_files(now)[0]!)));
-    assert.equal(rec.via, "html");
-    assert.deepEqual(rec.answers, feedback_body().answers);
-  } finally {
-    now.close();
-    old.close();
-  }
-});
-
+// W1a·W1b (플래그 없음: render·ask·hub 파일과 serve.py 의 정적 서빙·/version·/ping·POST feedback 이 36bc6a2 와 같다) — 지웠다:
+// 0.15 서버·0.15 가 짓는 파일은 저장소에서 사라졌다. TS 가 0.15 와 같은 응답·같은 파일을 내는 보장은 baseline 의 http·cli 사례
+// (E04~E11 의 파일 비교, X0n)와 test_serve_ts_cases·test_serve_ts_static·test_serve_ts_feedback 이 지킨다.
 
 test("W2a 대시보드: DB 로 렌더한 데이터가 v0.15 데이터의 모든 사실을 담는다 — 전체·단계 탭·타임라인·항목×라운드 (해석 2·3)", async () => {
-  const old = await build_old();
+  const a = golden<{ dash: any }>("web-v015-pages").dash; // 0.15 가 같은 합성 자료로 렌더한 데이터(고정 기록)
   const db = await build_db();
   try {
     const sig = db.sig(db.project_json);
-    const a = normalize_data((await pages(old, undefined)).dash, roots_of(old)) as any;
-    const b = normalize_data((await pages(db, "1")).dash, roots_of(db)) as any;
+    const b = normalize_data((await pages(db)).dash, roots_of(db)) as any;
     // 주제는 DB 의 것이다(폴더의 옛 project.json 은 다른 주제).
     assert.equal(b.project.topic, a.project.topic, "화면의 주제 = DB 의 주제, 폴더에 남은 옛 project.json 이 아니다");
     for (const key of ["project", "stages", "snapshots", "asks", "outputs", "qlabels"]) expect_same_screen(a[key], b[key], `D.${key}`);
@@ -209,17 +99,15 @@ test("W2a 대시보드: DB 로 렌더한 데이터가 v0.15 데이터의 모든 
     assert.ok(b.snapshots.length >= 1, "단계 봉인(스냅샷)이 타임라인·항목×라운드의 자료로 실린다");
     assert.deepEqual(db.sig(db.project_json), sig, "project.json 은 읽기만 한다 (바이트·mtime 불변)");
   } finally {
-    old.close();
     db.close();
   }
 });
 
 test("W2b 시작 질문 폼: __other·show_if·필수·추천이 같은 spec 으로 유지된다 — ask 페이지 데이터 동등 (해석 2)", async () => {
-  const old = await build_old();
+  const a = golden<{ ask: any }>("web-v015-pages").ask;
   const db = await build_db();
   try {
-    const a = normalize_data((await pages(old, undefined)).ask, roots_of(old)) as any;
-    const b = normalize_data((await pages(db, "1")).ask, roots_of(db)) as any;
+    const b = normalize_data((await pages(db)).ask, roots_of(db)) as any;
     expect_same_screen(a.spec, b.spec, "D.spec (질문 id·옵션·추천·required·show_if·other)");
     expect_same_screen(a.stages, b.stages, "D.stages (파이프라인 표시)");
     assert.equal(b.topic, a.topic);
@@ -227,13 +115,12 @@ test("W2b 시작 질문 폼: __other·show_if·필수·추천이 같은 spec 으
     assert.equal(q.options.find((o: any) => o.recommended).value, "narrow", "추천이 유지된다");
     assert.deepEqual((b.spec.questions as any[]).find((x) => x.id === "why-wide").show_if, { id: "scope", in: ["wide"] });
   } finally {
-    old.close();
     db.close();
   }
 });
 
 test("W2c AI 점검: 라운드 점검 질문이 같은 질문·옵션·필수로 대시보드에 실린다 (질문 id 는 달라도 된다) (해석 2)", async () => {
-  const old = await build_old();
+  const a = golden<{ round: number; questions: any[] }>("web-v015-review"); // 0.15 가 같은 점검 질문을 담아 렌더한 화면의 stages.plan.review (고정 기록)
   const db = await build_db();
   try {
     const review = [
@@ -249,31 +136,26 @@ test("W2c AI 점검: 라운드 점검 질문이 같은 질문·옵션·필수로
       },
     ];
     // v0.15: AI 가 project.json 의 stages.plan.review 에 직접 쓰던 것. DB: 점검 질문 세트를 올린다(ask kind=review).
-    const json = JSON.parse(readFileSync(old.project_json, "utf8"));
-    json.stages.plan.review = { round: 1, questions: review };
-    writeFileSync(old.project_json, JSON.stringify(json), "utf8");
-    step(db, "1", ["ask", SLUG, write_spec(db, { id: "plan-review-r1", stage: "plan", kind: "review", round: 1, title: "점검", questions: review }, "review.json")]);
+    // (pes.ts 는 화면 파일을 render 가 짓는다 — 점검 질문을 올린 뒤 다시 지어야 대시보드에 실린다)
+    step(db, ["ask", SLUG, write_spec(db, { id: "plan-review-r1", stage: "plan", kind: "review", round: 1, title: "점검", questions: review }, "review.json")]);
+    step(db, ["render", SLUG]);
     const shape = (r: { round: number; questions: any[] }) => ({
       round: r.round,
       questions: r.questions.map((q) => ({ label: q.label, type: q.type, required: !!q.required, options: q.options })),
     });
-    step(old, undefined, ["render", SLUG]); // v0.15 화면(index.html)은 render 가 다시 지어야 바뀐 review 가 실린다
-    const a = (await pages(old, undefined)).dash.project.stages.plan.review as { round: number; questions: any[] } | null;
-    const b = (await pages(db, "1")).dash.project.stages.plan.review as { round: number; questions: any[] } | null;
-    assert.ok(a && b, "두 화면 모두 점검 질문이 있다");
-    expect_same_screen(shape(a!), shape(b!), "stages.plan.review");
+    const b = (await pages(db)).dash.project.stages.plan.review as { round: number; questions: any[] } | null;
+    assert.ok(b, "화면에 점검 질문이 있다");
+    expect_same_screen(a, shape(b!), "stages.plan.review");
   } finally {
-    old.close();
     db.close();
   }
 });
 
 test("W2d 홈 목록(허브): 프로젝트 줄이 같다 — 주제·현재 단계·차례·처리 대기 수·단계 상태 (해석 2)", async () => {
-  const old = await build_old();
+  const a = golden<{ hub: any }>("web-v015-pages").hub;
   const db = await build_db();
   try {
-    const a = normalize_data((await pages(old, undefined)).hub, roots_of(old)) as any;
-    const b = normalize_data((await pages(db, "1")).hub, roots_of(db)) as any;
+    const b = normalize_data(await hub_page_data(db), roots_of(db)) as any;
     assert.equal(b.projects.length, 1);
     // v0.15 의 합성 project.json 에는 created 가 없어 '' 이고, DB 프로젝트는 만든 날짜를 가진다 — 그 값만 비교에서 빼고 형식을 따로 본다.
     const drop_created = (ps: any[]) => ps.map(({ created, ...rest }) => rest);
@@ -282,7 +164,6 @@ test("W2d 홈 목록(허브): 프로젝트 줄이 같다 — 주제·현재 단�
     expect_same_screen(a.stages, b.stages, "D.stages");
     assert.equal(b.projects[0].topic, a.projects[0].topic);
   } finally {
-    old.close();
     db.close();
   }
 });

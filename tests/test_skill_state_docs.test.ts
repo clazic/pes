@@ -99,22 +99,7 @@ test("plan·research·core 가 받은 답 읽기를 context 로 시키지 않는
   assert.deepEqual(bad, []);
 });
 
-test("플래그 없이 context 는 한국어로 거부되고 종료 2 — 문서가 DB 경로로 구분해야 하는 이유 (파일럿 열의 context 는 모드별로 고정)", async () => {
-  const m = await open_mode("off");
-  try {
-    const res = m.py(["context", m.slug]);
-    assert.equal(res.status, 2, `플래그 없는 context 는 종료 2 (실제 ${res.status}: ${res.stderr})`);
-    assert.match(res.stderr + res.stdout, /PES_DB_CORE=1/);
-    assert.match(res.stderr + res.stdout, /[가-힣]/);
-    assert.doesNotMatch(res.stderr, /Traceback/);
-    // 기본 경로의 읽기 명령은 같은 프로젝트에서 성공한다 (문서가 대신 지시하는 길)
-    for (const args of [["status", m.slug], ["pending", m.slug], ["show", m.slug, "plan"], ["digest", m.slug, "plan"]]) ok(m.py(args), args.join(" "));
-  } finally {
-    m.close();
-  }
-  void OWNER;
-});
-
+// (the test "플래그 없이 context 는 한국어로 거부되고 종료 2" is gone: there is no flag any more — pes.ts `context` always runs on the database; its arguments and exit codes are test_sel74_b_db_commands.)
 // ---------------------------------------------------------------------------
 // 필수 2 (문서)
 

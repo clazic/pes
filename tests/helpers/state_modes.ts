@@ -1,5 +1,5 @@
-// SEL-50 PR17 r1-1 회귀 시험 공용 준비물: 같은 시나리오를 플래그 없음(v0.15)과 PES_DB_CORE=1(DB 경로) 양쪽에 돌린다.
-// 전부 합성 자료이고 HOME·USERPROFILE·PES_HOME 은 임시 폴더다. Windows 점검표: python -I -X utf8(run_py), 출력 LF 정규화,
+// SEL-50 PR17 r1-1 회귀 시험 공용 준비물: 같은 시나리오를 "off"(상태를 DB 읽기 모델 project.json 모양으로 읽어 0.15 기대값과 견준다)·"on"(CliEnv 하니스) 두 길로 돌린다. SEL-74: 둘 다 node scripts/pes.ts 다 — 0.15 Python 과 PES_DB_CORE 플래그는 없다.
+// 전부 합성 자료이고 HOME·USERPROFILE·PES_HOME 은 임시 폴더다. Windows 점검표: 가드 아래 node(run_cli), 출력 LF 정규화,
 // 경로는 node:path, which·sh 에 기대지 않는다.
 
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { make_cli_env, type CliEnv, type CliResult } from "./cli_write_env.ts";
-import { run_py } from "./cli_read_env.ts";
+import { run_cli } from "./cli_read_env.ts";
 import { make_set_env, type SetEnv } from "./set_env.ts";
 
 export type ModeName = "off" | "on";
@@ -19,14 +19,14 @@ export interface Mode {
   name: ModeName;
   slug: string;
   root: string;
-  /** pes.py 를 이 모드로 돌린다(PES_OWNER 붙임). 출력은 LF 정규화. */
+  /** pes.ts 를 이 모드로 돌린다(PES_OWNER 붙임). 출력은 LF 정규화. */
   py(args: string[]): CliResult;
   /** 임시 폴더에 텍스트 파일을 쓰고 경로를 돌려준다. */
   file(name: string, text: string): string;
   /** 임시 폴더에 JSON 파일을 쓰고 경로를 돌려준다. */
   json(name: string, value: unknown): string;
   /** 플래그 없음 모드에서만: project.json 전체. */
-  state(): any;
+  state(of?: string): any;
   /** 프로젝트 폴더(플래그 없음에서만 의미). */
   folder: string;
   close(): void;
@@ -44,10 +44,10 @@ export async function open_mode(name: ModeName): Promise<Mode> {
       slug: SLUG_STATE,
       root: e.home.root,
       folder: e.folder,
-      py: (args) => lf(run_py(e, args, { flag: undefined, extra: { PES_OWNER: OWNER } })),
+      py: (args) => lf(run_cli(e, args, { extra: { PES_OWNER: OWNER } })),
       file: (n, text) => e.value_file(n, text),
       json: (n, value) => e.value_file(n, JSON.stringify(value)),
-      state: () => e.state(),
+      state: (of) => e.state(of),
       close: () => e.cleanup(),
     };
     return self;
@@ -59,7 +59,7 @@ export async function open_mode(name: ModeName): Promise<Mode> {
     slug: SLUG_STATE,
     root,
     folder: join(c.env.home.env.PES_HOME as string, SLUG_STATE),
-    py: (args) => lf(run_py(c, args, { flag: "1", extra: { PES_OWNER: OWNER } })),
+    py: (args) => lf(run_cli(c, args, { extra: { PES_OWNER: OWNER } })),
     file(n, text) {
       const f = join(root, n);
       writeFileSync(f, text, "utf8");

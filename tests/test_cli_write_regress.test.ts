@@ -29,8 +29,6 @@ import { expect_rejected, json_out, REPO, SLUG, with_cli, type CliEnv, type CliR
 import { start } from "./helpers/editions_env.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
 
-const OFF = { PES_DB_CORE: undefined } as const;
-
 function write_json(c: CliEnv, name: string, value: unknown): string {
   const file = join(c.env.home.root, name);
   writeFileSync(file, JSON.stringify(value), "utf8");
@@ -66,7 +64,8 @@ test("① render: 기획 R1 봉인 manifest 에 조사 단계 항목이 섞이�
     ok(c.run(["merge", SLUG, "plan", write_json(c, "m1-plan.json", [{ id: 1, kind: "topic", title: "기획 항목", summary: "기획" }])]), "merge plan");
     ok(c.run(["merge", SLUG, "research", write_json(c, "m1-research.json", [{ id: 1, kind: "topic", title: "조사 항목", summary: "조사", sources: [{ url: "https://r.example/1", title: "R" }] }])]), "merge research");
     const rendered = ok(c.run(["render", SLUG, "plan"]), "render plan");
-    assert.match(rendered.stdout, /기획 R1 봉인.*항목 1개/, `기획 항목 하나만 봉인한다: ${rendered.stdout}`);
+    // (pes.ts 의 render 출력은 0.15 처럼 대시보드 경로뿐이다 — 봉인 항목은 아래 DB 행으로 본다)
+    assert.match(rendered.stdout, /index\.html/, rendered.stdout);
 
     const sealed = c.env.db.get<{ id: string; sealed_snapshot_id: string }>(
       "SELECT id, sealed_snapshot_id FROM rounds WHERE stage_id = ? AND state = 'sealed'",
@@ -139,42 +138,19 @@ function accum_from_db(c: CliEnv): Accum {
   return { conflicts: JSON.parse(row.conflicts), links: meta.links ?? {}, shots: meta.shots ?? [] };
 }
 
-function accum_from_json(c: CliEnv): Accum {
-  const item = JSON.parse(readFileSync(c.project_json, "utf8")).stages.plan.items[0];
-  return { conflicts: item.conflicts, links: item.links, shots: item.shots };
-}
-
-test("② merge 를 두 번·세 번 하면 conflicts·links·shots 가 합집합(순서 유지)으로 쌓인다 — 플래그 없는 v0.15 결과와 같다", () =>
-  with_cli(async (c) =>
-    // 같은 단계에서 새 DB 쪽과 v0.15 쪽을 나란히 돌린다 (v0.15 는 별도 임시 폴더의 project.json)
-    (async () => {
-      const { make_cli_env } = await import("./helpers/cli_write_env.ts");
-      const old = await make_cli_env();
-      try {
-        for (const env of [c, old]) {
-          const extra = env === old ? OFF : {};
-          ok(env.run(["round-start", SLUG, "plan"], extra), "round-start");
-          for (const [n, payload] of [MERGE_1, MERGE_2].entries()) {
-            ok(env.run(["merge", SLUG, "plan", write_json(env, `acc-${n}.json`, [payload])], extra), `merge ${n + 1}`);
-          }
-        }
-        const expected_two: Accum = { conflicts: [{ a: 1 }, { b: 2 }], links: { plan: [7, 8], other: [1] }, shots: ["s1.png", "s2.png"] };
-        assert.deepEqual(accum_from_json(old), expected_two, "v0.15 기준값 (시험의 기대가 v0.15 와 같은지 확인)");
-        assert.deepEqual(accum_from_db(c), expected_two, "두 번 병합: 앞의 값이 사라지지 않고 합집합이다");
-
-        for (const env of [c, old]) {
-          const extra = env === old ? OFF : {};
-          ok(env.run(["merge", SLUG, "plan", write_json(env, "acc-3.json", [MERGE_3])], extra), "merge 3");
-        }
-        const expected_three: Accum = { conflicts: [{ a: 1 }, { b: 2 }], links: { plan: [7, 8, 9], other: [1] }, shots: ["s1.png", "s2.png"] };
-        assert.deepEqual(accum_from_json(old), expected_three, "v0.15 기준값 (세 번째)");
-        assert.deepEqual(accum_from_db(c), expected_three, "세 번째 병합: 중복 없이 쌓이고, 스칼라 링크도 목록에 더해진다");
-        assert.deepEqual(accum_from_db(c), accum_from_json(old), "DB 쪽과 v0.15 쪽이 같다");
-      } finally {
-        old.close();
-      }
-    })(),
-  ));
+test("② merge 를 두 번·세 번 하면 conflicts·links·shots 가 합집합(순서 유지)으로 쌓인다 — 0.15 가 같은 입력에서 낸 값과 같다", () =>
+  with_cli(async (c) => {
+    // expected_* 는 0.15 가 같은 병합 두 번·세 번 뒤에 project.json 에 남긴 값이다 (이 시험을 처음 쓸 때 0.15 로 확인한 기준값 — SEL-74: 0.15 는 이제 없다)
+    ok(c.run(["round-start", SLUG, "plan"]), "round-start");
+    for (const [n, payload] of [MERGE_1, MERGE_2].entries()) {
+      ok(c.run(["merge", SLUG, "plan", write_json(c, `acc-${n}.json`, [payload])]), `merge ${n + 1}`);
+    }
+    const expected_two: Accum = { conflicts: [{ a: 1 }, { b: 2 }], links: { plan: [7, 8], other: [1] }, shots: ["s1.png", "s2.png"] };
+    assert.deepEqual(accum_from_db(c), expected_two, "두 번 병합: 앞의 값이 사라지지 않고 합집합이다");
+    ok(c.run(["merge", SLUG, "plan", write_json(c, "acc-3.json", [MERGE_3])]), "merge 3");
+    const expected_three: Accum = { conflicts: [{ a: 1 }, { b: 2 }], links: { plan: [7, 8, 9], other: [1] }, shots: ["s1.png", "s2.png"] };
+    assert.deepEqual(accum_from_db(c), expected_three, "세 번째 병합: 중복 없이 쌓이고, 스칼라 링크도 목록에 더해진다");
+  }));
 
 test("② links.plan 이 누적된 뒤 기획을 다시 승인해도 조사 항목이 중복 인계되지 않는다", () =>
   with_cli(async (c) => {
@@ -328,32 +304,20 @@ test("4 PES_OWNER 없는 사람 쓰기는 lease 를 잡지 않는다 (v0.15: 세
 // ---------------------------------------------------------------------------
 // 5 · approve plan 출력
 
-test("5 approve plan 은 '조사 항목 N개 생성 (기존 조사 재사용 M개)' 줄을 출력한다 — v0.15 와 같은 문구", () =>
+test("5 approve plan 은 '조사 항목 N개 생성 (기존 조사 재사용 M개)' 줄을 출력한다 — 0.15 와 같은 문구", () =>
   with_cli(async (c) => {
-    const { make_cli_env } = await import("./helpers/cli_write_env.ts");
-    const old = await make_cli_env();
-    try {
-      const topics = [
-        { id: 1, kind: "topic", title: "질문 하나", question: "무엇인가?" },
-        { id: 2, kind: "topic", title: "질문 둘", question: "왜인가?" },
-        { id: 3, kind: "topic", title: "빼기로 한 질문", question: "?", status: "removed" },
-      ];
-      const lines: string[] = [];
-      for (const env of [c, old]) {
-        const extra = env === old ? OFF : {};
-        ok(env.run(["round-start", SLUG, "plan"], extra), "round-start");
-        ok(env.run(["merge", SLUG, "plan", write_json(env, "ap-topics.json", topics)], extra), "merge");
-        ok(env.run(["render", SLUG, "plan"], extra), "render");
-        const approved = ok(env.run(["approve", SLUG, "plan"], extra), "approve");
-        const line = approved.stdout.split("\n").find((l) => l.includes("조사 항목"));
-        assert.ok(line, `조사 항목 줄이 있다:\n${approved.stdout}`);
-        lines.push(line.trim());
-      }
-      assert.equal(lines[1], "조사 항목 2개 생성 (기존 조사 재사용 0개)", "v0.15 문구");
-      assert.equal(lines[0], lines[1], "새 경로의 줄이 v0.15 와 같다");
-    } finally {
-      old.close();
-    }
+    const topics = [
+      { id: 1, kind: "topic", title: "질문 하나", question: "무엇인가?" },
+      { id: 2, kind: "topic", title: "질문 둘", question: "왜인가?" },
+      { id: 3, kind: "topic", title: "빼기로 한 질문", question: "?", status: "removed" },
+    ];
+    ok(c.run(["round-start", SLUG, "plan"]), "round-start");
+    ok(c.run(["merge", SLUG, "plan", write_json(c, "ap-topics.json", topics)]), "merge");
+    ok(c.run(["render", SLUG, "plan"]), "render");
+    const approved = ok(c.run(["approve", SLUG, "plan"]), "approve");
+    const line = approved.stdout.split("\n").find((l) => l.includes("조사 항목"));
+    assert.ok(line, `조사 항목 줄이 있다:\n${approved.stdout}`);
+    assert.equal(line.trim(), "조사 항목 2개 생성 (기존 조사 재사용 0개)", "0.15 문구");
   }));
 
 test("5 approve plan 에 기획 항목이 없으면 '조사 항목 0개 생성' 으로 알린다", () =>

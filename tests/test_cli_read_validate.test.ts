@@ -1,7 +1,7 @@
 /**
  * SEL-49 PR16 — CLI 읽기·보고서·doctor — validate_import 보고서 재생성 (tester). 원래 tests/test_cli_read.test.ts 하나였고 Windows CI 조각 상한(10분) 때문에 주제별로 나눴다. 해석 번호는 test_cli_read_v015.test.ts 머리말 참고. 구현 전이므로 새 시험은 실패하는 것이 정상이다.
  *
- * 시험 방식은 PR15와 같다: `python3 -I -X utf8 scripts/pes.py ...`를 subprocess로 실행하고 HOME·USERPROFILE·PES_HOME은
+ * 시험 방식은 PR15와 같다: `node scripts/pes.ts ...`를 subprocess로 실행하고 (SEL-74: 0.15 Python 은 없다) HOME·USERPROFILE·PES_HOME은
  * 모두 임시 폴더다(tests/helpers/cli_write_env.ts 의 하니스 + cli_read_env.ts). 자료는 모두 합성이다.
  * 개발 플래그 PES_DB_CORE=1 일 때만 DB 읽기 경로가 켜진다. 플래그가 없으면 v0.15 출력·종료 코드·파일이 그대로다.
  *
@@ -43,7 +43,7 @@ import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult, LEGACY_JSON } from "./helpers/cli_write_env.ts";
-import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
+import { overlay_real_report, normalize, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { copy_fixture, has_problem, migration, with_migration, owner_of, pes_home_of, backup_dir_of, batch_row } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -52,27 +52,11 @@ import { state_signature } from "./helpers/state_signature.ts";
 // ---------------------------------------------------------------------------
 // 8 · PR12 validate_import 의 보고서 재생성: 실제 생성기, 불일치는 문제
 
-/** v0.15 (03fc81b) 의 report 로 만든, 시각 줄만 고정한 원본 보고서가 든 fixture 사본. */
+/** v0.15 (03fc81b) 의 report 가 만든, 시각 줄만 고정한 원본 보고서가 든 fixture 사본 — 고정 기록(tests/fixtures/legacy_reports/validate-full, SEL-74)을 얹는다. */
 function legacy_with_real_reports(env: Parameters<typeof copy_fixture>[0]): string {
-  const base = baseline_dir();
-  assert.notEqual(base, null, "기준 커밋 03fc81b 가 이 저장소에 없다 (CI 는 fetch-depth: 0)");
   const dir = copy_fixture(env, "full");
-  try {
-    const like: HomeLike = { env: { home: env.home } };
-    const res = run_py(like, ["report", dir, "plan"], { flag: undefined, script: join(base!, "scripts", "pes.py") });
-    assert.equal(res.status, 0, res.stderr + res.stdout);
-    const md_path = join(dir, "reports", "plan", "report.md");
-    const html_path = join(dir, "reports", "plan", "report.html");
-    const md = readFileSync(md_path, "utf8");
-    const stamp = md.match(/^- 작성 (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · PES\r?$/m)?.[1];
-    assert.ok(stamp, "v0.15 보고서의 '작성 <시각>' 줄");
-    // 시각을 옛날 값으로 고정: 재생성기가 '작성 …' 시각 줄을 비교에서 무시해야 한다 (해석 10)
-    writeFileSync(md_path, md.split(stamp).join("2001-01-01 00:00"), "utf8");
-    writeFileSync(html_path, readFileSync(html_path, "utf8").split(stamp).join("2001-01-01 00:00"), "utf8");
-    return dir;
-  } finally {
-    rmSync(base!, { recursive: true, force: true });
-  }
+  overlay_real_report(dir, "validate-full");
+  return dir;
 }
 
 test("validate_import: v0.15 가 만든 보고서(시각만 다름)는 실제 생성기로 재생성해도 같고 문제가 없다", async () => {

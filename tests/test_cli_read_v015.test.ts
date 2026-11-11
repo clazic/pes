@@ -1,7 +1,7 @@
 /**
  * SEL-49 PR16 — CLI 읽기·보고서·doctor (tester, 작성 모드). 구현 전이므로 새 시험은 실패하는 것이 정상이다.
  *
- * 시험 방식은 PR15와 같다: `python3 -I -X utf8 scripts/pes.py ...`를 subprocess로 실행하고 HOME·USERPROFILE·PES_HOME은
+ * 시험 방식은 PR15와 같다: `node scripts/pes.ts ...`를 subprocess로 실행하고 (SEL-74: 0.15 Python 은 없다) HOME·USERPROFILE·PES_HOME은
  * 모두 임시 폴더다(tests/helpers/cli_write_env.ts 의 하니스 + cli_read_env.ts). 자료는 모두 합성이다.
  * 개발 플래그 PES_DB_CORE=1 일 때만 DB 읽기 경로가 켜진다. 플래그가 없으면 v0.15 출력·종료 코드·파일이 그대로다.
  *
@@ -43,8 +43,8 @@ import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
 import { disk_path } from "./helpers/blob_env.ts";
 import { expect_rejected, make_cli_env, SLUG, with_cli, type CliEnv, type CliResult, LEGACY_JSON } from "./helpers/cli_write_env.ts";
-import { url_fix_diffs } from "./helpers/web_env.ts";
-import { baseline_dir, normalize, OFF, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_py, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
+import { pes_cmds } from "./helpers/skill_docs.ts";
+import { expect_same_as_015, golden, normalize, ok, plain_legacy, folder_of, PLAN_ITEMS, WRITE_ITEMS, read_lf, rich_legacy, RICH_TOPIC, run_cli, seed, shell_words, write_json, write_legacy, write_pending_answer, type HomeLike, expect_staging } from "./helpers/cli_read_env.ts";
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { copy_fixture, has_problem, migration, with_migration, owner_of, pes_home_of, backup_dir_of, batch_row } from "./helpers/migration_env.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -53,10 +53,8 @@ import { state_signature } from "./helpers/state_signature.ts";
 // ---------------------------------------------------------------------------
 // 0 · 구성
 
-test("읽기 13개는 pes.py CMDS 에 그대로 있고, 새 코어 명령은 더해지지 않는다 (해석 5)", () => {
-  const source = readFileSync(join(import.meta.dirname, "..", "scripts", "pes.py"), "utf8");
-  const block = source.slice(source.indexOf("CMDS = {"), source.indexOf("def main("));
-  const cmds = new Set([...block.matchAll(/"([a-z-]+)":\s*cmd_/g)].map((m) => m[1]!));
+test("읽기 13개는 pes.ts 명령표에 그대로 있고, 새 코어 명령은 더해지지 않는다 (해석 5)", () => {
+  const cmds = new Set(pes_cmds());
   for (const name of ["status", "pending", "digest", "show", "list", "hub", "open", "which", "doctor", "watch", "assemble", "report", "web"]) {
     assert.ok(cmds.has(name), `${name} 는 CMDS 에 남는다`);
   }
@@ -96,80 +94,39 @@ test("A1b watch 비교 허용 규칙: 역슬래시 경로의 작은따옴표만 
   assert.throws(() => expect_same_stdout("status", "a\n", "b\n", "x"), "watch 아닌 명령은 항상 엄격");
 });
 
-test("A1 플래그 없음: 읽기·보고서 명령의 출력·종료 코드·만든 파일이 v0.15(03fc81b)와 같고 DB는 불변", async () => {
-  const base = baseline_dir();
-  assert.notEqual(base, null, "기준 커밋 03fc81b 가 이 저장소에 없다 (얕은 복제? actions/checkout 에 fetch-depth: 0 필요)");
-  if (base === null) return;
-  const now = await make_cli_env();
-  const old = await make_cli_env();
+test("A1 옛 폴더(DB 에 없음)의 읽기 명령은 출력·종료 코드가 0.15 와 같고 폴더·DB 는 불변이다", async () => {
+  // 0.15(같은 입력)가 낸 출력: 고정 기록 tests/fixtures/golden/rich-legacy-reads.json.
+  // (0.15 는 report·assemble·web 도 옛 폴더에 파일을 만들었다. TS 는 D14 로 거절한다 — test_sel74_c_d14_refusal C1 과 아래 'legacy 쓰기' 가 그 보장이다.
+  //  doctor 행은 baseline E15 가 고정한다.)
+  const c = await make_cli_env();
   try {
-    for (const c of [now, old]) {
-      write_legacy(c.folder, rich_legacy(SLUG));
-      write_pending_answer(c.folder, "plan-R1-20260301-100000.json");
-    }
-    const signature = state_signature(now.env.db);
-    const old_py = join(base, "scripts", "pes.py");
-    const roots_now = [now.env.home.root, `/private${now.env.home.root}`, join(import.meta.dirname, "..")];
-    const roots_old = [old.env.home.root, `/private${old.env.home.root}`, base, `/private${base}`];
-    const steps: string[][] = [
-      ["status", SLUG],
-      ["status", "no-such-project"],
-      ["pending", SLUG],
-      ["digest", SLUG, "plan"],
-      ["digest", SLUG, "plan", "--round", "1"],
-      ["digest", SLUG, "nope"],
-      ["show", SLUG, "plan"],
-      ["show", SLUG, "plan", "1", "--fields", "title,status"],
-      ["show", SLUG, "plan", "99"],
-      ["list"],
-      ["which", "no-such-tool-sel49"],
-      ["watch", SLUG],
-      ["report", SLUG, "plan"],
-      ["report", SLUG, "nope"],
-      ["assemble", SLUG],
-      ["web", SLUG],
-      ["web", SLUG, "--assemble"],
-    ];
-    for (const args of steps) {
-      const a = run_py(now, args, { ...OFF });
-      const b = run_py(old, args, { ...OFF, script: old_py });
+    const slug = "legacy-only";
+    const folder = folder_of(c, slug);
+    const json = write_legacy(folder, rich_legacy(slug));
+    write_pending_answer(folder, "plan-R1-20260301-100000.json");
+    const sig = c.sig(json);
+    const tree = tree_digest(folder);
+    const signature = state_signature(c.env.db);
+    const rec = golden("rich-legacy-reads");
+    for (const args of [
+      ["status", slug], ["status", "no-such-project"], ["pending", slug], ["digest", slug, "plan"], ["digest", slug, "plan", "--round", "1"], ["digest", slug, "nope"],
+      ["show", slug, "plan"], ["show", slug, "plan", "1", "--fields", "title,status"], ["show", slug, "plan", "99"], ["which", "no-such-tool-sel49"], ["watch", slug],
+      // (list 는 뺐다: 이 환경에는 DB 프로젝트도 있어 목록이 0.15 기록과 다르다. 옛 폴더만 있는 목록은 아래 list 시험과 test_sel74_c_d14_refusal C4)
+    ]) {
       const label = args.join(" ");
-      assert.equal(a.status, b.status, `${label}: 종료 코드`);
-      expect_same_stdout(args[0]!, normalize(a.stdout, roots_now), normalize(b.stdout, roots_old), label);
-      const last = (s: string, r: string[]) => normalize(s, r).trim().split("\n").pop() ?? "";
-      assert.equal(last(a.stderr, roots_now), last(b.stderr, roots_old), `${label}: stderr 마지막 줄`);
+      const res = expect_same_as_015(c, args, rec[label], label);
+      if (args[0] === "watch") expect_same_stdout("watch", normalize(res.stdout, [c.env.home.root]), rec[label]!.stdout, label);
     }
-    // doctor: 도구·연결 그룹은 이 컴퓨터에 깔린 실제 CLI(ego-browser 등)에 따라 달라지므로 빼고, 환경·프로젝트 그룹만 비교한다.
-    const doctor = (c: CliEnv, script: string | undefined, roots: string[]) => {
-      const res = run_py(c, ["doctor", SLUG, "--json"], { ...OFF, ...(script === undefined ? {} : { script }) });
-      const rows = (JSON.parse(res.stdout) as Array<{ group: string; level: string; title: string; detail: string }>).filter((r) => !["도구", "연결", "서버"].includes(r.group) && !/PES_OWNER|ego-browser|kosis|vworld|korean-law/.test(r.title));
-      return normalize(JSON.stringify(rows, null, 1), roots);
-    };
-    assert.equal(doctor(now, undefined, roots_now), doctor(old, old_py, roots_old), "doctor --json (환경·프로젝트 행)");
-    for (const rel of ["project.json", "reports/plan/report.md", "reports/plan/report.html", "out/report.md", "out/sources.json", "out/report.html", "index.html"]) {
-      const a = existsSync(join(now.folder, rel)) ? normalize(readFileSync(join(now.folder, rel), "utf8"), roots_now) : null;
-      const b = existsSync(join(old.folder, rel)) ? normalize(readFileSync(join(old.folder, rel), "utf8"), roots_old) : null;
-      assert.notEqual(a, null, `${rel} 를 v0.15 처럼 만든다`);
-      if (rel === "index.html") assert.deepEqual(url_fix_diffs(b!, a!), [], `${rel}: 내용 (대시보드 path·shots 링크 안전화 줄 차이만 허용)`);
-      else assert.equal(a, b, `${rel}: 내용`);
-    }
-    assert.equal(state_signature(now.env.db), signature, "플래그 없음 — DB 불변");
+    assert.deepEqual(c.sig(json), sig, "project.json 바이트·mtime 불변");
+    assert.equal(tree_digest(folder), tree, "읽기는 폴더에 아무것도 만들지 않는다");
+    assert.equal(state_signature(c.env.db), signature, "읽기는 DB 에 쓰지 않는다");
   } finally {
-    now.close();
-    old.close();
-    rmSync(base, { recursive: true, force: true });
+    c.close();
   }
 });
 
-test("A2 PES_DB_CORE 가 1이 아니면(0·빈 문자열·true) 읽기는 project.json 을 읽는다", () =>
-  with_cli(async (c) => {
-    // DB 의 주제는 '합성 파일 주제', 폴더의 옛 project.json 의 주제는 '합성 옛 주제'
-    for (const value of ["0", "", "true", "yes", " 1"]) {
-      const res = ok(run_py(c, ["status", SLUG], { flag: value }), `PES_DB_CORE=${JSON.stringify(value)}`);
-      assert.match(res.stdout, /주제: 합성 옛 주제/, `PES_DB_CORE=${JSON.stringify(value)}: 옛 방식`);
-    }
-    assert.match(ok(run_py(c, ["status", SLUG]), "PES_DB_CORE=1").stdout, /주제: 합성 파일 주제/, "플래그 1 은 DB 의 주제");
-  }));
+// A2 (PES_DB_CORE 가 1 이 아니면 읽기는 project.json) — 지움: 플래그가 없어졌다. 환경 변수 PES_DB_CORE 가 아무 영향을 못 주는 것은
+// test_sel74_b_db_commands·test_pes_ts_guard 쪽 시험(ts_run 이 그 변수를 지운다)과 아래 'DB 프로젝트의 status' 가 지킨다.
 
 // ---------------------------------------------------------------------------
 // 2 · 플래그 켜짐 + DB 프로젝트: 읽기는 DB, project.json 은 건드리지 않는다
@@ -179,7 +136,7 @@ test("DB 프로젝트의 status 는 DB 에서 읽고 project.json 은 바이트�
     const sig = c.sig(c.project_json);
     const listing = c.listing(c.folder);
     const signature = state_signature(c.env.db);
-    const res = ok(run_py(c, ["status", SLUG]), "status");
+    const res = ok(run_cli(c, ["status", SLUG]), "status");
     assert.match(res.stdout, /^주제: 합성 파일 주제 {2}\(/m, "DB 의 주제 (옛 JSON 의 '합성 옛 주제' 가 아님)");
     assert.doesNotMatch(res.stdout, /합성 옛 주제/);
     assert.match(res.stdout, /^현재 단계: 기획/m);
@@ -192,14 +149,11 @@ test("DB 프로젝트의 status 는 DB 에서 읽고 project.json 은 바이트�
   }));
 
 test("DB 읽기 출력이 같은 쓰기를 한 v0.15 출력과 같다: status·digest·show·list", async () => {
+  // 0.15 가 같은 합성 쓰기(seed)를 한 뒤 낸 출력: 고정 기록 tests/fixtures/golden/seeded-plain-reads.json
   const now = await make_cli_env();
-  const old = await make_cli_env();
   try {
-    write_legacy(old.folder, plain_legacy(SLUG));
-    seed(now, "1");
-    seed(old, undefined);
-    const roots_now = [now.env.home.root, `/private${now.env.home.root}`];
-    const roots_old = [old.env.home.root, `/private${old.env.home.root}`];
+    seed(now);
+    const rec = golden<Record<string, any>>("seeded-plain-reads");
     for (const args of [
       ["status", SLUG],
       ["digest", SLUG, "plan"],
@@ -210,20 +164,16 @@ test("DB 읽기 출력이 같은 쓰기를 한 v0.15 출력과 같다: status·d
       ["show", SLUG, "write", "1", "--fields", "title,details"],
       ["list"],
     ]) {
-      const a = run_py(now, args);
-      const b = run_py(old, args, { ...OFF });
       const label = args.join(" ");
-      assert.equal(a.status, b.status, `${label}: 종료 코드`);
+      const a = expect_same_as_015(now, args, rec[label], `${label}: DB 쪽 출력 = v0.15 출력`);
       assert.doesNotMatch(a.stderr, /Traceback/, label);
-      assert.equal(normalize(a.stdout, roots_now), normalize(b.stdout, roots_old), `${label}: DB 쪽 출력 = v0.15 출력`);
     }
     // 단계 전체 요약(show <stage>)의 항목 목록·상태 필드
-    const a = JSON.parse(run_py(now, ["show", SLUG, "plan"]).stdout);
-    const b = JSON.parse(run_py(old, ["show", SLUG, "plan"], { ...OFF }).stdout);
+    const a = JSON.parse(run_cli(now, ["show", SLUG, "plan"]).stdout);
+    const b = rec["show plan keys"];
     for (const key of ["items", "round", "status", "approved_at", "stale"]) assert.deepEqual(a[key], b[key], `show plan: ${key}`);
   } finally {
     now.close();
-    old.close();
   }
 });
 
@@ -231,27 +181,27 @@ test("pending 은 DB 의 처리 안 한 답을 옛 파일 이름 모양으로 �
   with_cli(async (c) => {
     const dir = join(c.env.home.env.PES_HOME as string, "synthetic-legacy-full");
     cpSync(join(FIXTURES, "full"), dir, { recursive: true });
+    const origin = run_cli(c, ["pending", "synthetic-legacy-full"]); // 아직 DB 에 없는 옛 폴더: project.json 을 읽는다
     const api = await legacy();
     const mig = await migration();
     const imp = await api.import_project(c.env.service, dir, { owner_actor_id: owner_of(c.env) });
     expect_staging(imp, dir, "test_cli_read_v015.test.ts#1");
     assert.equal(imp.state, "staging");
-    const origin = run_py(c, ["pending", "synthetic-legacy-full"], { ...OFF });
     const origin_names = origin.stdout.trim().split("\n").map((l) => l.trim().split(/[\\/]/).pop());
     assert.deepEqual(origin_names, ["research-R1-20260105-130000.json", "research-R1-20260105-140000.json"], "fixture: 처리 안 한 답 2개");
     // staging 은 아직 legacy 경로 — 출력은 v0.15 와 같다
-    assert.equal(run_py(c, ["pending", "synthetic-legacy-full"]).stdout, origin.stdout, "staging 프로젝트는 project.json 을 읽는다 (해석 1)");
+    assert.equal(run_cli(c, ["pending", "synthetic-legacy-full"]).stdout, origin.stdout, "staging 프로젝트는 project.json 을 읽는다 (해석 1)");
     const val = await mig.validate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), source_dir: dir });
     assert.equal(val.ok, true, JSON.stringify(val.report.problems));
     await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, "read-pending"), pes_home: pes_home_of(c.env) });
     const json_sig = c.sig(join(dir, "project.json"));
-    const db_pending = ok(run_py(c, ["pending", "synthetic-legacy-full"]), "pending (DB)");
+    const db_pending = ok(run_cli(c, ["pending", "synthetic-legacy-full"]), "pending (DB)");
     const names = db_pending.stdout.trim().split("\n").map((l) => l.trim().split(/[\\/]/).pop());
     assert.deepEqual(names, origin_names, "DB 에서 읽은 처리 안 한 답 = 옛 파일 이름");
-    ok(run_py(c, ["mark", "synthetic-legacy-full", origin_names[0]!]), "mark");
-    const after = run_py(c, ["pending", "synthetic-legacy-full"]).stdout.trim().split("\n").map((l) => l.trim().split(/[\\/]/).pop());
+    ok(run_cli(c, ["mark", "synthetic-legacy-full", origin_names[0]!]), "mark");
+    const after = run_cli(c, ["pending", "synthetic-legacy-full"]).stdout.trim().split("\n").map((l) => l.trim().split(/[\\/]/).pop());
     assert.deepEqual(after, [origin_names[1]], "표시한 답은 더는 처리 대기가 아니다");
-    const status = ok(run_py(c, ["status", "synthetic-legacy-full"]), "status");
+    const status = ok(run_cli(c, ["status", "synthetic-legacy-full"]), "status");
     assert.match(status.stdout, /^주제: 합성 도서관 운영 연구/m);
     assert.match(status.stdout, /^현재 단계: 조사/m);
     assert.match(status.stdout, /^처리 안 한 답: 1개/m);
@@ -261,7 +211,7 @@ test("pending 은 DB 의 처리 안 한 답을 옛 파일 이름 모양으로 �
 test("list: DB 프로젝트와 project.json 만 있는 프로젝트가 한 번씩 나온다 (같은 슬러그는 중복되지 않음)", () =>
   with_cli(async (c) => {
     write_legacy(join(c.env.home.env.PES_HOME as string, "legacy-only"), plain_legacy("legacy-only"));
-    const out = ok(run_py(c, ["list"]), "list").stdout;
+    const out = ok(run_cli(c, ["list"]), "list").stdout;
     const count = (slug: string) => out.split("\n").filter((l) => l.includes(`(${slug})`)).length;
     assert.equal(count(SLUG), 1, `DB 프로젝트는 한 번 (폴더에 옛 project.json 이 같이 있어도): ${out}`);
     assert.equal(count("legacy-only"), 1, "옛 프로젝트도 목록에 나온다");
@@ -272,26 +222,7 @@ test("list: DB 프로젝트와 project.json 만 있는 프로젝트가 한 번�
 // ---------------------------------------------------------------------------
 // 3 · legacy (DB에 없는 프로젝트): 읽기는 v0.15 와 같고 쓰기는 이전 안내로 막힌다
 
-test("legacy 읽기: DB 에 없는 프로젝트는 플래그가 켜져 있어도 v0.15 출력이고 바이트·mtime 이 불변이다", () =>
-  with_cli(async (c) => {
-    const folder = folder_of(c, "legacy-only");
-    const json = write_legacy(folder, rich_legacy("legacy-only"));
-    write_pending_answer(folder, "plan-R1-20260301-100000.json");
-    const sig = c.sig(json);
-    const tree = tree_digest(folder);
-    const signature = state_signature(c.env.db);
-    const roots = [c.env.home.root, `/private${c.env.home.root}`];
-    for (const args of [["status", "legacy-only"], ["pending", "legacy-only"], ["digest", "legacy-only", "plan"], ["show", "legacy-only", "plan"], ["show", "legacy-only", "plan", "1"], ["watch", "legacy-only"], ["doctor", "legacy-only", "--json"]]) {
-      const on = run_py(c, args);
-      const off = run_py(c, args, { ...OFF });
-      const label = args.join(" ");
-      assert.equal(on.status, off.status, `${label}: 종료 코드`);
-      assert.equal(normalize(on.stdout, roots), normalize(off.stdout, roots), `${label}: 출력이 플래그 없을 때와 같다`);
-    }
-    assert.deepEqual(c.sig(json), sig, "project.json 바이트·mtime 불변");
-    assert.equal(tree_digest(folder), tree, "읽기는 폴더에 아무것도 만들지 않는다");
-    assert.equal(state_signature(c.env.db), signature, "DB 불변");
-  }));
+// 'legacy 읽기: DB 에 없는 프로젝트의 읽기 출력이 플래그 없을 때(v0.15)와 같다' 는 위 A1(고정 기록 rich-legacy-reads)이 같은 입력으로 지킨다. 옛 폴더 doctor 행은 baseline E15 가 고정한다.
 
 test("legacy 쓰기: 이전 안내 메시지와 0 아닌 종료 코드, 폴더·DB 불변 (report·assemble·web 포함)", () =>
   with_cli(async (c) => {
@@ -318,7 +249,7 @@ test("legacy 쓰기: 이전 안내 메시지와 0 아닌 종료 코드, 폴더·
       [["assemble", S], {}],
       [["web", S], {}],
     ] as Array<[string[], Record<string, string | undefined>]>) {
-      const res = run_py(c, args, { extra });
+      const res = run_cli(c, args, { extra });
       expect_rejected(res, args[0]!);
       assert.match(res.stderr, /이전/, `${args[0]}: '이전' 안내 한국어 메시지: ${res.stderr}`);
       assert.deepEqual(c.sig(json), sig, `${args[0]}: project.json 불변`);

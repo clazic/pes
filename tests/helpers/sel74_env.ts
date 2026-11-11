@@ -133,10 +133,10 @@ export function ensure_dir(path: string): string {
 // Running pes.ts against a make_cli_env() fixture (a DB project + a folder with a 0.15 project.json that must never change)
 
 import { mkdirSync as mk_dir } from "node:fs";
-import type { CliEnv, CliResult } from "./cli_write_env.ts";
+import type { CliResult } from "./cli_write_env.ts";
 
 /** `node … scripts/pes.ts <args>` for a CliEnv: the same shape as `c.run` (which ran pes.py with PES_DB_CORE=1), no flag needed. */
-export function ts_run(c: CliEnv, args: string[], extra: Record<string, string | undefined> = {}): CliResult {
+export function ts_run(c: { env: { home: { root: string; env: Record<string, string | undefined> } } }, args: string[], extra: Record<string, string | undefined> = {}): CliResult {
   const narrow_bin = join(c.env.home.root, "bin");
   mk_dir(narrow_bin, { recursive: true });
   const env: Record<string, string | undefined> = { ...c.env.home.env, PES_OWNER: undefined };

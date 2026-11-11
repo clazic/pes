@@ -102,13 +102,21 @@ test("every intended difference (7.5) carries a reason, and each is used by at l
 const KINDS: CaseKind[] = ["cli", "http", "setup"];
 const kind_of = (id: string): CaseKind => load_table().cases.find((c) => c.id === id)?.kind as CaseKind;
 
-test("target selection: py runs; a ts kind with an implemented case needs its scripts/*.ts file, a kind without one has none yet", () => {
-  assert.equal(target_from_env("py"), "py");
+test("target selection: ts is the only target (a py target is refused); a ts kind with an implemented case needs its scripts/*.ts file, a kind without one has none yet", () => {
+  assert.equal(target_from_env(), "ts");
+  const before = process.env.PES_COMPAT_TARGET;
+  try {
+    process.env.PES_COMPAT_TARGET = "py";
+    assert.throws(() => target_from_env(), /ts/, "the 0.15 Python target is gone");
+  } finally {
+    if (before === undefined) delete process.env.PES_COMPAT_TARGET;
+    else process.env.PES_COMPAT_TARGET = before;
+  }
   const ctx = make_ctx("pes-harness-");
   try {
-    const py = run_pes("py", ctx, ["remote"]);
-    assert.equal(py.kind, "ran");
-    assert.equal(py.kind === "ran" ? py.status : -1, 0);
+    const first = run_pes("ts", ctx, ["remote"]);
+    assert.equal(first.kind, "ran");
+    assert.equal(first.kind === "ran" ? first.status : -1, 0);
     // one ts file per kind of case: pes.ts (cli) / serve.ts (http) / setup.ts (setup). Per-case ratchet (SEL-71): a kind that has an
     // implemented case needs its file (a missing pes.ts is what fails SEL-71 until the worker writes it); a kind with none keeps no
     // file yet — serve.ts / setup.ts appearing without turning their cases is a forgotten ratchet.

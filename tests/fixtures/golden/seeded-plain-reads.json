@@ -1,0 +1,52 @@
+{
+ "status synthetic-files": {
+  "status": 0,
+  "stdout": "주제: 합성 파일 주제  (<ROOT>/pes-projects/synthetic-files)\n현재 단계: 기획\n  ▶ 기획     active   R1 항목 2 (할 일 1)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     pending  R0 항목 1 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n인계 메모 2개 (최근 5):\n  - [<TS>] 합성 인계 메모 하나\n  - [<TS>] 합성 인계 메모 둘\n처리 안 한 답: 0개\n대시보드: 서버 꺼짐 — serve synthetic-files\n",
+  "stderr_last": ""
+ },
+ "digest synthetic-files plan": {
+  "status": 0,
+  "stdout": "[기획 R1] 항목 2개 · 상태 active\n\n#1 합성 기획 항목 하나 [topic/done/R1] 신뢰도 high · 출처 2(원문 1) · \n  요약: 합성 요약 하나\n\n#2 합성 기획 항목 둘 [topic/deepen/R1] 신뢰도 - · 출처 0(원문 0) · \n  요약: 합성 요약 둘\n",
+  "stderr_last": ""
+ },
+ "digest synthetic-files plan --round 1": {
+  "status": 0,
+  "stdout": "[기획 R1] 항목 2개 · 상태 active\n\n#1 합성 기획 항목 하나 [topic/done/R1] 신뢰도 high · 출처 2(원문 1) · \n  요약: 합성 요약 하나\n\n#2 합성 기획 항목 둘 [topic/deepen/R1] 신뢰도 - · 출처 0(원문 0) · \n  요약: 합성 요약 둘\n",
+  "stderr_last": ""
+ },
+ "digest synthetic-files write": {
+  "status": 0,
+  "stdout": "[집필 R0] 항목 1개 · 상태 pending\n\n#1 1장 [section/done/R0] 신뢰도 - · 출처 2(원문 1) · \n",
+  "stderr_last": ""
+ },
+ "show synthetic-files plan 1 --fields title,status,confidence": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"합성 기획 항목 하나\",\n  \"status\": \"done\",\n  \"confidence\": \"high\"\n }\n]\n",
+  "stderr_last": ""
+ },
+ "show synthetic-files plan 1 2": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"합성 기획 항목 하나\",\n  \"kind\": \"topic\",\n  \"question\": \"\",\n  \"status\": \"done\",\n  \"request\": \"\",\n  \"depth\": 1,\n  \"updated_round\": 1,\n  \"summary\": \"합성 요약 하나\",\n  \"details\": \"\",\n  \"sources\": [\n   {\n    \"title\": \"합성 출처 A\",\n    \"url\": \"https://example.invalid/a\",\n    \"method\": \"law\",\n    \"date\": \"2026-01-02\"\n   },\n   {\n    \"title\": \"합성 출처 B\",\n    \"url\": \"https://example.invalid/b\",\n    \"method\": \"search\"\n   }\n  ],\n  \"stats\": [],\n  \"shots\": [],\n  \"confidence\": \"high\",\n  \"conflicts\": [],\n  \"verify\": null,\n  \"links\": {},\n  \"user_links\": []\n },\n {\n  \"id\": 2,\n  \"title\": \"합성 기획 항목 둘\",\n  \"kind\": \"topic\",\n  \"question\": \"\",\n  \"status\": \"deepen\",\n  \"request\": \"\",\n  \"depth\": 1,\n  \"updated_round\": 1,\n  \"summary\": \"합성 요약 둘\",\n  \"details\": \"\",\n  \"sources\": [],\n  \"stats\": [],\n  \"shots\": [],\n  \"confidence\": \"\",\n  \"conflicts\": [],\n  \"verify\": null,\n  \"links\": {},\n  \"user_links\": []\n }\n]\n",
+  "stderr_last": ""
+ },
+ "show synthetic-files write 1 --fields title,details": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"1장\",\n  \"details\": \"첫 장 본문입니다 [^1] 그리고 [^2] 끝.\"\n }\n]\n",
+  "stderr_last": ""
+ },
+ "list": {
+  "status": 0,
+  "stdout": "1. [Claude] 합성 파일 주제  (synthetic-files)\n   기획 R1 · 기획 R1 작업 중 · 갱신 <TS> · 서버 꺼짐\n",
+  "stderr_last": ""
+ },
+ "show plan keys": {
+  "items": [
+   "#1 합성 기획 항목 하나 [topic/done]",
+   "#2 합성 기획 항목 둘 [topic/deepen]"
+  ],
+  "round": 1,
+  "status": "active",
+  "approved_at": null,
+  "stale": false
+ }
+}

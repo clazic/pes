@@ -91,24 +91,7 @@ test("H1a Origin 우회 모음: null·대문자·포트 다름·끝 슬래시·�
   await alive();
 });
 
-test("H1b /api/v1 의 쓰기도 같은 규칙: 허용 안 된 Origin(null 포함)은 PUT·PATCH·DELETE·POST 모두 403 forbidden 봉투 — 세션 비밀이 있어도", async () => {
-  const before_state = writes();
-  for (const origin of ["null", "http://evil.example", `${s.origin}/`, `http://127.0.0.1:${s.port + 1}`, s.origin.replace("http", "HTTP")]) {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      const r = await raw(s, {
-        method,
-        path: "/api/v1/projects",
-        headers: { Origin: origin, "x-pes-session": "synthetic-not-the-secret", "Content-Type": "application/json", "Content-Length": "2" },
-        body: "{}",
-      });
-      assert.equal(r.status, 403, `${method} Origin=${origin}: ${r.status} ${r.text}`);
-      assert.equal(r.json?.error?.code, "forbidden", `${method} Origin=${origin}`);
-      assert.equal(r.json?.format_version, "1.0");
-    }
-  }
-  expect_no_new_writes(before_state, "/api/v1 Origin 우회");
-});
-
+// (H1b /api/v1 … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')
 test("H1c 같은 출처(127.0.0.1·localhost)의 정상 POST 는 받는다 — 거부 규칙이 정상 길을 막지 않는다", async () => {
   const before_state = writes();
   const a = await raw_post(s, `/${SLUG}/feedback`, JSON.stringify(feedback_body({ text: "합성 정상 하나", answers: { memo: "정상 하나" } })), { origin: `http://127.0.0.1:${s.port}` });
@@ -331,7 +314,7 @@ test("H6b 경로 이탈 POST: /<slug>/../<다른>/feedback·%2f·%2e%2e 로 다�
 });
 
 test("H6c 심볼릭 링크: 폴더 안 reports/·out/ 링크는 DB 보고서 길이 따라가지 않는다 (DB 가 서빙하는 주소는 폴더 파일이 아니다)", async () => {
-  step(c, "1", ["report", SLUG, "plan"]);
+  step(c, ["report", SLUG, "plan"]);
   const dir = join(c.folder, "reports", "plan");
   mkdirSync(dir, { recursive: true });
   const trap_report = join(dir, "trap.html");
@@ -364,34 +347,4 @@ test("H6c 심볼릭 링크: 폴더 안 reports/·out/ 링크는 DB 보고서 길
 // ---------------------------------------------------------------------------
 // /api/v1 과 정적 폴더 이름 충돌
 
-test("H7 /api/v1 은 폴더 이름과 무관하게 API 다: .. 로 접은 철자도 정적 파일이 아니라 API 봉투(또는 404 봉투)가 온다", async () => {
-  const trap = join(pes_home, "api", "v1");
-  mkdirSync(trap, { recursive: true });
-  writeFileSync(join(trap, "health.txt"), STATIC_TRAP, "utf8");
-  writeFileSync(join(pes_home, "api", "project.json"), JSON.stringify(plain_legacy("api")), "utf8");
-  writeFileSync(join(pes_home, "api", "index.html"), STATIC_TRAP, "utf8");
-  const paths = [
-    "/api/v1/health.txt",
-    "/api/v1/../v1/health.txt",
-    "/api/v1/%2e%2e/v1/health.txt",
-    "/api/v1/./health.txt",
-    "/api/v1/projects/../../v1/health.txt",
-    "/api/v1?x=/api/v1/health.txt",
-    "/api/v1/",
-  ];
-  for (const path of paths) {
-    const r = await raw(s, { path });
-    assert.ok(!r.text.includes(STATIC_TRAP), `${path}: 정적 파일이 먼저 나갔다`);
-    assert.equal(r.json?.format_version, "1.0", `${path}: API 봉투 (${r.status} ${r.text.slice(0, 100)})`);
-  }
-  // 쓰기 쪽도: api 폴더가 프로젝트(project.json)여도 /api/v1 POST 는 화면 답이 아니다
-  const before_state = writes();
-  const post = await raw_post(s, "/api/v1/feedback", JSON.stringify(feedback_body()));
-  assert.ok(post.json?.format_version === "1.0", `POST /api/v1/feedback 은 API 봉투: ${post.status}`);
-  assert.equal(commit_count(c), before_state.commits);
-  assert.ok(!existsSync(join(pes_home, "api", "feedback")), "api 폴더에 화면 답 파일이 생기지 않았다");
-  // 폴더 이름이 api 인 옛 프로젝트의 화면 길(/api/ …)은 그대로 살아 있다
-  const own = await http(s, "/api/ping");
-  assert.equal(own.json?.ok, true);
-  await alive();
-});
+// (H7 /api/v1 … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')

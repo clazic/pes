@@ -1,0 +1,113 @@
+{
+ "status": {
+  "status": 0,
+  "stdout": [
+   "주제: 합성 도서관 운영 연구  (<PROJECT>)",
+   "현재 단계: 조사",
+   "    기획     approved R1 항목 2 (할 일 1)",
+   "  ▶ 조사     active   R1 항목 1 (할 일 1)",
+   "    분석·종합  active   R2 항목 1 (할 일 1)",
+   "    집필     pending  R0 항목 0 (할 일 0)",
+   "    검증     pending  R0 항목 0 (할 일 0)",
+   "    산출·공유  pending  R0 항목 0 (할 일 0)",
+   "참고자료: 기존 조사 2개 항목 (synthetic-research-loop)",
+   "인계 메모 1개 (최근 5):",
+   "  - [<TIME>] 합성 메모 하나",
+   "처리 안 한 답: 2개",
+   "  - <PROJECT>/feedback/research-R1-<TIME>.json  [research/feedback/R1] 합성 자유 의견: 표를 더 넣어 주세요",
+   "  - <PROJECT>/feedback/research-R1-<TIME>.json  [research/review/R1] ",
+   "대시보드: 서버 꺼짐 — serve win-data"
+  ]
+ },
+ "digest plan": {
+  "status": 0,
+  "stdout": [
+   "[기획 R1] 항목 2개 · 상태 approved",
+   "",
+   "#1 합성 항목 하나 [rq/done/R1] 신뢰도 high · 출처 2(원문 0) · ",
+   "  요약: 합성 요약 1",
+   "",
+   "#2 합성 항목 둘 [alien/deepen/R0] 신뢰도 - · 출처 0(원문 0) · "
+  ]
+ },
+ "show plan": {
+  "status": 0,
+  "stdout": [
+   "{",
+   " \"status\": \"approved\",",
+   " \"round\": 1,",
+   " \"approved_at\": \"<TIME>\",",
+   " \"stale\": false,",
+   " \"settings\": {},",
+   " \"summary\": \"합성 기획 요약\",",
+   " \"history\": [",
+   "  \"R1 (<TIME>): 합성 변경 — 상세 snapshots/plan-R1.json\"",
+   " ],",
+   " \"reports\": [",
+   "  {",
+   "   \"format\": \"pdf\",",
+   "   \"label\": \"합성 기획 보고서\",",
+   "   \"path\": \"reports/plan/report.pdf\",",
+   "   \"bytes\": 24,",
+   "   \"round\": 1",
+   "  }",
+   " ],",
+   " \"mystery_stage_key\": 7,",
+   " \"carry_over\": [",
+   "  {",
+   "   \"item\": 1,",
+   "   \"title\": \"합성 항목 하나\",",
+   "   \"request\": \"다음 단계에서 표를 보강한다\",",
+   "   \"from\": \"research\"",
+   "  },",
+   "  {",
+   "   \"item\": 2,",
+   "   \"title\": \"합성 항목 둘\",",
+   "   \"request\": \"대상을 알 수 없는 남은 일\"",
+   "  }",
+   " ],",
+   " \"review\": null,",
+   " \"suggestions\": [],",
+   " \"warnings\": [],",
+   " \"changes\": [],",
+   " \"items\": [",
+   "  \"#1 합성 항목 하나 [rq/done]\",",
+   "  \"#2 합성 항목 둘 [alien/deepen]\"",
+   " ]",
+   "}"
+  ]
+ },
+ "show plan 1 --fields title,summary,sources": {
+  "status": 0,
+  "stdout": [
+   "[",
+   " {",
+   "  \"id\": 1,",
+   "  \"title\": \"합성 항목 하나\",",
+   "  \"summary\": \"합성 요약 1\",",
+   "  \"sources\": [",
+   "   {",
+   "    \"title\": \"합성 출처 A\",",
+   "    \"url\": \"https://example.invalid/a\",",
+   "    \"method\": \"fetch\",",
+   "    \"date\": \"<DATE>\",",
+   "    \"note\": \"합성\"",
+   "   },",
+   "   {",
+   "    \"title\": \"합성 출처 A 복제\",",
+   "    \"url\": \"https://example.invalid/a\",",
+   "    \"method\": \"search\"",
+   "   }",
+   "  ]",
+   " }",
+   "]"
+  ]
+ },
+ "pending": {
+  "status": 0,
+  "stdout": [
+   "<PROJECT>/feedback/research-R1-<TIME>.json",
+   "<PROJECT>/feedback/research-R1-<TIME>.json"
+  ]
+ }
+}

@@ -1,5 +1,6 @@
 // tests/test_state.py (rounds, merge, approve, reopen, defects, snapshots) → TS (SEL-70, PR26a; table 8: test_state_transitions).
-// The real 0.15 CLI, synthetic projects in an isolated home. Same inputs and assertions as the pytest file.
+// SEL-74: the TS CLI (node scripts/pes.ts), synthetic projects in an isolated home; the state is read from the database (project_state).
+// Same inputs and assertions as the 0.15 file — where it edited project.json by hand to get a precondition, the same state is made through commands.
 //
 // The pytest xfail (strict) for the depth defect (SEL-12, "결함 후보 ②") is NOT a todo here: it is an explicit assertion of
 // what 0.15 does today (D06 in the intended-difference table), so the day the new core fixes it, the table and this test change together.
@@ -8,7 +9,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { KNOWN_DIFFS, STAGES, approve, edit_project, init_project, make_ctx, merge, pes, project_json, read_json } from "./helpers/compat_env.ts";
+import { KNOWN_DIFFS, STAGES, approve, init_project, make_ctx, merge, pes, project_state, read_json, write_json } from "./helpers/compat_env.ts";
 import { make_library, unique_name } from "./helpers/compat_state.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
@@ -25,18 +26,19 @@ test("round-start increments the round, clears changes and keeps the history lin
   const first = pes(ctx, "round-start", project, "plan");
   assert.equal(first.code, 0, first.out + first.err);
   assert.ok(first.out.includes("R1 시작"));
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.stages.plan.round, 1);
   assert.equal(data.stages.plan.status, "active");
   assert.deepEqual(data.stages.plan.changes, []);
   assert.equal(data.current, "plan");
 
-  edit_project(project, (p) => {
-    p.stages.plan.changes = ["조사: 합성 변경"];
-  });
+  merge(ctx, project, "plan", [{ id: 1, title: "항목", summary: "요약" }]); // a round with content is sealed by render
+  const changes_file = write_json(join(ctx.tmp, `changes-${unique_name()}.json`), ["조사: 합성 변경"]);
+  assert.equal(pes(ctx, "set", project, "plan", "changes", changes_file).code, 0);
+  assert.equal(pes(ctx, "render", project, "plan").code, 0); // pes.ts: an open round must be sealed before the next one (0.15 opened them back to back)
   const second = pes(ctx, "round-start", project, "plan");
   assert.equal(second.code, 0, second.out + second.err);
-  const plan = project_json(project).stages.plan;
+  const plan = project_state(ctx, project).stages.plan;
   assert.equal(plan.round, 2);
   assert.deepEqual(plan.changes, []);
   assert.equal(plan.history.length, 1);
@@ -66,7 +68,7 @@ test("merge creates the item, dedupes sources, collects links; a second merge ac
     },
   ]);
 
-  let item = project_json(project).stages.research.items[0];
+  let item = project_state(ctx, project).stages.research.items[0];
   assert.deepEqual(item.sources.map((s: any) => s.url), ["https://example.test/a", "https://example.test/b"]);
   assert.equal(item.sources[0].title, "출처 A");
   assert.deepEqual(item.stats, [{ label: "합성 지표", value: 7, unit: "건", name: "합성 지표" }]);
@@ -74,7 +76,7 @@ test("merge creates the item, dedupes sources, collects links; a second merge ac
   assert.equal(item.status, "done");
   assert.equal(item.depth, 1);
   assert.equal(item.updated_round, 1);
-  assert.ok(project_json(project).stages.research.suggestions.includes("[#1] 추가 확인 필요"));
+  assert.ok(project_state(ctx, project).stages.research.suggestions.includes("[#1] 추가 확인 필요"));
 
   merge(ctx, project, "research", [
     {
@@ -88,7 +90,7 @@ test("merge creates the item, dedupes sources, collects links; a second merge ac
       links: { plan: [2, 3], research: [9] },
     },
   ]);
-  const research = project_json(project).stages.research;
+  const research = project_state(ctx, project).stages.research;
   item = research.items[0];
   assert.equal(research.items.length, 1);
   assert.equal(item.summary, "둘째 요약");
@@ -103,7 +105,7 @@ test("merge assigns the next item id when the result has none", () => {
   pes(ctx, "round-start", project, "research");
   merge(ctx, project, "research", [{ id: 4, title: "먼저 온 항목" }]);
   merge(ctx, project, "research", [{ title: "번호 없는 항목" }]);
-  const items = project_json(project).stages.research.items;
+  const items = project_state(ctx, project).stages.research.items;
   assert.deepEqual(items.map((i: any) => i.id), [4, 5]);
   assert.equal(items[1].title, "번호 없는 항목");
 });
@@ -111,7 +113,7 @@ test("merge assigns the next item id when the result has none", () => {
 test("merge keeps the plan `reuse` field (PR17: skills hand merge the field, approve plan reuses the library with it)", () => {
   const project = fresh();
   merge(ctx, project, "plan", [{ id: 1, title: "주제", kind: "topic", reuse: 5 }]);
-  assert.equal(project_json(project).stages.plan.items[0].reuse, 5);
+  assert.equal(project_state(ctx, project).stages.plan.items[0].reuse, 5);
 });
 
 test("merge of a write section replaces its sources and keeps their order (duplicates allowed in the first merge)", () => {
@@ -130,7 +132,7 @@ test("merge of a write section replaces its sources and keeps their order (dupli
       ],
     },
   ]);
-  let item = project_json(project).stages.write.items[0];
+  let item = project_state(ctx, project).stages.write.items[0];
   assert.deepEqual(item.sources.map((s: any) => s.url), ["https://example.test/b", "https://example.test/a", "https://example.test/b"]);
 
   merge(ctx, project, "write", [
@@ -144,7 +146,7 @@ test("merge of a write section replaces its sources and keeps their order (dupli
       ],
     },
   ]);
-  item = project_json(project).stages.write.items[0];
+  item = project_state(ctx, project).stages.write.items[0];
   assert.deepEqual(item.sources.map((s: any) => s.url), ["https://example.test/c", "https://example.test/a"]);
 });
 
@@ -157,14 +159,11 @@ test("approve plan creates and reuses research items; approving again does not d
     { id: 3, title: "제외 주제", kind: "topic", status: "removed" },
     { id: 4, title: "쟁점", kind: "issue" },
   ]);
-  // The skill writes the library id into topic.reuse; merge carries it (see the reuse test), and an explicit edit changes nothing.
-  edit_project(project, (p) => {
-    p.stages.plan.items[0].reuse = 5;
-  });
+  // The skill writes the library id into topic.reuse; merge carries it (see the reuse test).
 
   const out = approve(ctx, project, "plan");
   assert.ok(out.includes("조사 항목 2개 생성 (기존 조사 재사용 1개)"), out);
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.stages.plan.status, "approved");
   assert.ok(data.stages.plan.approved_at);
   assert.equal(data.stages.plan.stale, false);
@@ -183,14 +182,14 @@ test("approve plan creates and reuses research items; approving again does not d
   assert.ok(reused.request.includes("기존 조사(라이브러리 #5) 재사용"));
 
   approve(ctx, project, "plan");
-  assert.deepEqual(project_json(project).stages.research.items.map((i: any) => i.title), ["재사용 주제", "새 주제"]);
+  assert.deepEqual(project_state(ctx, project).stages.research.items.map((i: any) => i.title), ["재사용 주제", "새 주제"]);
 });
 
 test("approve moves to the next stage in `asking` state", () => {
   const project = fresh();
   approve(ctx, project, "plan");
   approve(ctx, project, "research");
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.current, "analyze");
   assert.equal(data.stages.research.status, "approved");
   assert.equal(data.stages.analyze.status, "asking");
@@ -200,7 +199,7 @@ test("approve moves to the next stage in `asking` state", () => {
 test("approving the last stage marks the project complete", () => {
   const project = fresh();
   for (const stage of STAGES) approve(ctx, project, stage);
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.complete, true);
   assert.equal(data.current, "publish");
   for (const stage of STAGES) assert.equal(data.stages[stage].status, "approved", stage);
@@ -215,18 +214,16 @@ test("reopen marks later stages stale and clears review / approval of the reopen
   approve(ctx, project, "plan");
   approve(ctx, project, "research");
   approve(ctx, project, "analyze");
-  edit_project(project, (p) => {
-    p.stages.research.review = { round: 1, questions: [{ id: "합성-점검" }] };
-    p.stages.research.stale = true;
-  });
-  const before = project_json(project).stages.research;
+  // 0.15 set review and stale by editing project.json; here the review goes in through `set` (stale is made by reopen — see the next test)
+  const review_file = write_json(join(ctx.tmp, `review-${unique_name()}.json`), { round: 1, questions: [{ id: "합성-점검" }] });
+  assert.equal(pes(ctx, "set", project, "research", "review", review_file).code, 0);
+  const before = project_state(ctx, project).stages.research;
   assert.notEqual(before.review, null);
-  assert.equal(before.stale, true);
 
   const run = pes(ctx, "reopen", project, "research");
   assert.equal(run.code, 0, run.out + run.err);
   assert.ok(run.out.includes("조사 다시 열림"));
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.current, "research");
   const research = data.stages.research;
   assert.equal(research.status, "active");
@@ -242,10 +239,10 @@ test("reopen marks later stages stale and clears review / approval of the reopen
 test("reopening a completed project clears `complete`", () => {
   const project = fresh();
   for (const stage of STAGES) approve(ctx, project, stage);
-  assert.equal(project_json(project).complete, true);
+  assert.equal(project_state(ctx, project).complete, true);
   const run = pes(ctx, "reopen", project, "plan");
   assert.equal(run.code, 0, run.out + run.err);
-  const data = project_json(project);
+  const data = project_state(ctx, project);
   assert.equal(data.current, "plan");
   assert.equal(data.stages.plan.status, "active");
   assert.equal(data.stages.research.stale, true);
@@ -253,15 +250,15 @@ test("reopening a completed project clears `complete`", () => {
 });
 
 // ---------------------------------------------------------------- 0.15 defects, pinned (D06 / D07)
-test("0.15 defect ② (D06, SEL-12): sending the same merge twice raises `depth` again — pinned, the new core must not copy it", () => {
+test("0.15 defect ② (D06, SEL-12): sending the same merge twice raised `depth` again in 0.15 — the new core must not copy it (depth stays 1)", () => {
   assert.match(KNOWN_DIFFS.D06?.title ?? "", /depth/);
   const project = fresh();
   pes(ctx, "round-start", project, "research");
   const result = { id: 1, title: "같은 결과", summary: "같은 요약", sources: [{ url: "https://example.test/same", title: "같은 출처" }] };
   merge(ctx, project, "research", [result]);
   merge(ctx, project, "research", [result]);
-  const item = project_json(project).stages.research.items[0];
-  assert.equal(item.depth, 2, "0.15 today: depth 2 (the fixed behaviour would be 1)");
+  const item = project_state(ctx, project).stages.research.items[0];
+  assert.equal(item.depth, 1, "the same merge sent twice does not raise depth (D06: 0.15 raised it to 2 — the new core fixed it)");
   assert.equal(item.sources.length, 1, "the source itself is not duplicated");
 });
 

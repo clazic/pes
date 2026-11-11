@@ -1,11 +1,10 @@
-// SEL-73 (stage 2 PR26d) 시험 공용 준비물: 설계 검사(check_ddl) 두 구현 — 기준 `docs/plan/schemas/check_ddl.py`(Python)와
-// 새 `scripts/check_ddl.ts`(TS) — 를 같은 DDL 로 돌려 결과를 견준다. 전부 합성 입력(DDL 초안 + 아래 변이).
+// SEL-73 (stage 2 PR26d) 시험 공용 준비물: 설계 검사 `scripts/check_ddl.ts`(TS)를 DDL 초안과 아래 변이로 돌려 고정한 0.15 결과(옛 Python
+// `docs/plan/schemas/check_ddl.py` 가 낸 줄·실패 문장 — SEL-74 로 그 파일은 저장소에서 사라졌다)와 견준다. 전부 합성 입력.
 //
-// 격리: 두 검사기 모두 `:memory:` 만 쓰지만(check_ddl.py 머리말), 규칙대로 자식 프로세스에는 임시 HOME·USERPROFILE·PES_HOME 만
+// 격리: 검사기는 `:memory:` 만 쓰지만, 규칙대로 자식 프로세스에는 임시 HOME·USERPROFILE·PES_HOME 만
 // 넘기고 process.env 는 바꾸지 않는다. 변이 DDL 은 임시 폴더에 쓴다(저장소의 DDL 은 절대 고치지 않는다).
 //
-// Windows 점검표: Python 은 `-I -X utf8`(-I 는 PYTHONIOENCODING 을 무시), Node 자식은 UTF-8 stdout, 출력 CRLF→LF,
-// 경로는 node:path 로만, `which` 를 쓰지 않는다. 인터프리터 경로는 compat_env.PYTHON 을 재사용한다.
+// Windows 점검표: Node 자식은 UTF-8 stdout, 출력 CRLF→LF, 경로는 node:path 로만, `which` 를 쓰지 않는다.
 //
 // 인터페이스(요구사항에 이름이 없어 여기서 정한다 — worker 는 이대로 만든다):
 //   scripts/check_ddl.ts
@@ -24,14 +23,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PY_FLAGS, PYTHON } from "./compat_env.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
 export const SCHEMAS = join(REPO, "docs", "plan", "schemas");
 export const DDL_SQL = join(SCHEMAS, "stage-1-ddl-draft.sql");
-export const CHECK_PY = join(SCHEMAS, "check_ddl.py");
 export const CHECK_TS = join(REPO, "scripts", "check_ddl.ts");
 
 export interface DdlCheckResult {
@@ -84,11 +81,10 @@ function pack(result: ReturnType<typeof spawnSync>): RunOut {
 
 export interface DdlWork {
   home: IsolatedHome;
-  /** 임시 폴더: check_ddl.py 복사본 + 변이 DDL(stage-1-ddl-draft.sql) 이 같이 있다(py 는 자기 옆 SQL 을 읽는다). */
+  /** 임시 폴더: 변이 DDL(stage-1-ddl-draft.sql). */
   dir: string;
   /** 이 폴더의 SQL 을 바꿔 쓴다. */
   write_sql(sql: string): string;
-  run_py(): RunOut;
   run_ts(): RunOut;
   /** CLI 인자를 직접 정해서 TS 검사기를 돌린다. */
   run_ts_with(args: string[]): RunOut;
@@ -99,7 +95,6 @@ export function make_work(): DdlWork {
   const home = isolated_home("pes-sel73-ddl-");
   const dir = mkdtempSync(join(tmpdir(), "pes-sel73-ddlwork-"));
   mkdirSync(dir, { recursive: true });
-  copyFileSync(CHECK_PY, join(dir, "check_ddl.py"));
   const sql_path = join(dir, "stage-1-ddl-draft.sql");
   copyFileSync(DDL_SQL, sql_path);
   return {
@@ -108,16 +103,6 @@ export function make_work(): DdlWork {
     write_sql(sql: string): string {
       writeFileSync(sql_path, sql, "utf8");
       return sql_path;
-    },
-    run_py(): RunOut {
-      return pack(
-        spawnSync(PYTHON, [...PY_FLAGS, join(dir, "check_ddl.py")], {
-          env: child_env(home),
-          cwd: dir,
-          encoding: "utf8",
-          timeout: 120_000,
-        }),
-      );
     },
     run_ts(): RunOut {
       return pack(
@@ -162,28 +147,27 @@ export function run_ts_default(home: IsolatedHome): RunOut {
   );
 }
 
-export function run_py_default(home: IsolatedHome): RunOut {
-  return pack(
-    spawnSync(PYTHON, [...PY_FLAGS, CHECK_PY], { env: child_env(home), cwd: REPO, encoding: "utf8", timeout: 120_000 }),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 실패 메시지 뽑기
-
-/** Python 의 마지막 오류 줄에서 "AssertionError: " / "sqlite3.OperationalError: " 같은 앞머리를 뗀 문장. 없으면 "". */
-export function py_failure_message(stderr: string): string {
-  const lines = stderr.split("\n").map((l) => l.trimEnd()).filter((l) => l !== "");
-  const last = lines[lines.length - 1] ?? "";
-  const m = /^(?:[A-Za-z_][\w.]*)(?:Error|Exception)?: (.*)$/.exec(last);
-  return m ? m[1]! : "";
-}
-
 // ---------------------------------------------------------------------------
 // 변이 사례: 깨진 DDL. 각 규칙이 실제로 실패를 내는지 본다.
 //
-// `expect` 는 check_ddl.py 가 이 변이에서 내는 실패 메시지가 품어야 하는 문장이다(시험이 Python 으로 먼저 확인한다 —
-// 아니면 변이가 규칙을 못 건드린 것이다). TS 검사기도 같은 문장을 내야 한다.
+// `expect` 는 옛 check_ddl.py 가 이 변이에서 낸 실패 메시지가 품은 문장이다(0.15 에서 확인해 고정했다). TS 검사기도 같은 문장을 내야 한다.
+
+/** The lines the 0.15 check_ddl.py printed on the repository DDL (after the SQLite version line) — frozen when the Python file still existed. */
+export const PY_REFERENCE_LINES: readonly string[] = [
+  "PASS DDL execution; no triggers or external databases",
+  "PASS synthetic hierarchy: 2 projects, 12 stages, all 61 tables populated",
+  "PASS allowed cases: inactive edition, duplicate URL sources, uncertain legacy approval, Go initialized ON",
+  "PASS constraints: 62 invalid/reference/cross-project/duplicate writes rejected",
+  "PASS partial UNIQUE: second active edition and second open round rejected",
+  "PASS representative queries: hierarchy, historical answer + comment, scoped change cursor (indexed)",
+  "PASS zero-row CAS: explicit failure; version, payload, pointer, event, receipt all rolled back",
+  "PASS late SQL failure: successful CAS and all other writes rolled back",
+  "PASS successful command: new version + pointer + event + idempotency receipt committed; old version retained",
+  "PASS SQL guard examples: stale fence and synthetic Go OFF rejected (SQLite only)",
+  "PASS foreign_key_check and integrity_check",
+  "RESULT PASS; rejected cases=64; representative queries=3",
+  "D1 NOT TESTED: batch/guard, deferred FKs, partial indexes, JSON functions, migrations, runtime limits",
+];
 
 export interface Mutation {
   name: string;

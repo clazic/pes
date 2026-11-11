@@ -1,7 +1,7 @@
 /**
  * SEL-48 PR15 — CLI 쓰기 전환 (tester, 작성 모드). 구현 전이므로 실패하는 것이 정상이다.
  *
- * 시험 방식: CLI는 Python이므로 `python3 -I scripts/pes.py ...`를 subprocess로 실행한다. HOME·USERPROFILE·
+ * 시험 방식: CLI 는 `node scripts/pes.ts ...` 를 subprocess 로 실행한다 (SEL-74: 0.15 Python 은 없다). HOME·USERPROFILE·
  * PES_HOME을 모두 임시 폴더로 바꾸고(tests/helpers/cli_write_env.ts), DB(HOME/.pes/pes.db)는 시험이 명령 서비스로
  * 만들어 둔다. 결과는 DB의 mutation_commits·approvals·project_leases와 파일(project.json 바이트·mtime)로 확인한다.
  * 구현 내부(브리지 모양)는 고정하지 않는다 — CLI 바깥 동작만 본다.
@@ -26,10 +26,11 @@ import { test } from "node:test";
 
 import { COMMANDS } from "../scripts/pes_core/commands.ts";
 import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
-import { expect_rejected, json_out, make_cli_env, PES_PY, REPO, SLUG, with_cli, type CliEnv, type CliResult, type Commit } from "./helpers/cli_write_env.ts";
+import { expect_rejected, json_out, make_cli_env, REPO, SLUG, with_cli, type CliEnv, type CliResult, type Commit } from "./helpers/cli_write_env.ts";
 import { new_artifact } from "./helpers/blob_env.ts";
 import { approvals_of, drive_stage, make_content, round_row, seal, stage_row, start, type SealResult } from "./helpers/editions_env.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
+import { pes_cmds } from "./helpers/skill_docs.ts";
 
 // ---------------------------------------------------------------------------
 // 4.3 배정표 (docs/plan/stage-2.md 245행~)
@@ -73,17 +74,15 @@ function doc_commands(row_label: string): string[] {
   return [...cell.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]!);
 }
 
-test("4.3 배정표: 쓰기 19 + 읽기 13 = 32, pes.py CMDS와 같고 새 5개가 더해진다", () => {
+test("4.3 배정표: 쓰기 19 + 읽기 13 = 32, pes.ts 명령표와 같고 새 5개(+set·migrate)가 더해진다", () => {
   assert.equal(WRITE_19.length, 19);
   assert.equal(READ_13.length, 13);
   assert.deepEqual([...doc_commands("15 쓰기")].sort(), [...WRITE_19].sort(), "문서 4.3의 PR15 칸");
   assert.deepEqual([...doc_commands("16 읽기")].sort(), [...READ_13].sort(), "문서 4.3의 PR16 칸 (읽기는 PR16 몫)");
-  const source = readFileSync(PES_PY, "utf8");
-  const block = source.slice(source.indexOf("CMDS = {"), source.indexOf("def main("));
-  const cmds = [...block.matchAll(/"([a-z-]+)":\s*cmd_/g)].map((m) => m[1]!).sort();
-  // PR17(SEL-50): 스킬의 project.json 직접 편집을 대체하는 화이트리스트 쓰기 명령 set 이 더해진다(4.3 표의 PR15·16 칸 밖).
-  const PR17_ADDED = ["set"];
-  assert.deepEqual(cmds, [...WRITE_19, ...READ_13, ...NEW_5, ...PR17_ADDED].sort(), "CMDS는 32개 + context·claim·submit·wait·complete + PR17 set");
+  const cmds = [...pes_cmds()].sort(); // scripts/pes_core/cli_main.ts 의 CMDS 배열 (SEL-74: pes.py 는 퇴역)
+  // PR17(SEL-50): 스킬의 project.json 직접 편집을 대체하는 화이트리스트 쓰기 명령 set 이 더해진다(4.3 표의 PR15·16 칸 밖). SEL-74: 옛 폴더를 옮기는 migrate.
+  const ADDED = ["set", "migrate"];
+  assert.deepEqual(cmds, [...WRITE_19, ...READ_13, ...NEW_5, ...ADDED].sort(), "명령표는 32개 + context·claim·submit·wait·complete + set·migrate");
   // 읽기 13개는 PR16 몫: 이 PR의 영수증 표에 없다.
   for (const name of READ_13) assert.equal(RECEIPT[name], undefined, `${name}은 PR16 몫`);
 });
@@ -397,22 +396,26 @@ test("lock --force를 에이전트 토큰으로는 할 수 없다 (옛 CLI는 �
 // ---------------------------------------------------------------------------
 // 5 · 승인·권한 우회를 승계하지 않는다
 
-test("봉인 없는 approve는 거부된다 (옛 CLI는 아무 때나 승인)", () =>
+test("봉인 없는 approve 는 먼저 봉인한 뒤 승인한다 — 승인 기록은 정확히 하나, 봉인 없이 승인되지 않는다 (SEL-71: pes.ts 의 approve 는 0.15 처럼 아무 때나 부를 수 있고 봉인을 암묵으로 한다)", () =>
   with_cli(async (c) => {
+    // (PR15 의 DB 모드는 봉인 없는 approve 를 거부했다. pes.ts 는 0.15 호환으로 받되, DB 의 보장 — 승인은 봉인된 라운드에 대해서만 — 은 그대로다.)
     await start(c.env, c.stages.plan, "b-start");
     const n = c.commits().length;
-    expect_rejected(run_write(c, ["approve", SLUG, "plan"]).res, "봉인 없는 approve");
-    assert.equal(approvals_of(c.env.db, c.stages.plan).length, 0);
-    assert.notEqual(stage_row(c.env.db, c.stages.plan).status, "approved");
-    assert.equal(c.commits().length, n);
+    const res = run_write(c, ["approve", SLUG, "plan"]).res;
+    assert.equal(res.status, 0, res.stderr);
+    const approvals = approvals_of(c.env.db, c.stages.plan);
+    assert.equal(approvals.length, 1, "승인 기록 하나");
+    assert.equal(stage_row(c.env.db, c.stages.plan).status, "approved");
+    assert.ok(c.commits().length > n);
   }));
 
-test("같은 단계 두 번째 approve는 거부된다 (승인 기록이 쌓이지 않음)", () =>
+test("같은 단계 두 번째 approve 로 승인 기록이 쌓이지 않는다 (받든 거부하든)", () =>
   with_cli(async (c) => {
     await drive_stage(c.env, c.stages.plan, "twice");
     const n = approvals_of(c.env.db, c.stages.plan).length;
-    expect_rejected(run_write(c, ["approve", SLUG, "plan"]).res, "두 번째 approve");
-    assert.equal(approvals_of(c.env.db, c.stages.plan).length, n);
+    // 0.15 는 두 번째 approve 도 받았다(종료 0) — 받든 거부하든 승인 기록이 쌓이면 안 된다 (이 시험이 지키는 것)
+    run_write(c, ["approve", SLUG, "plan"]);
+    assert.equal(approvals_of(c.env.db, c.stages.plan).length, n, "승인 기록이 쌓이지 않는다");
   }));
 
 test("열어 본 적 없는 단계의 reopen은 거부된다", () =>
@@ -529,49 +532,6 @@ test("사람 CLI와 토큰 CLI의 actor는 서로 바뀌지 않는다: PES_OWNER
     assert.equal(receipt.actor_id, agent.actor_id);
   }));
 
-// ---------------------------------------------------------------------------
-// 플래그: PES_DB_CORE 없이는 v0.15 동작 그대로 (project.json을 쓰고 DB를 건드리지 않는다)
-
-const OFF = { PES_DB_CORE: undefined } as const;
-
-test("플래그 없음: init은 예전처럼 project.json을 만들고 DB는 그대로", () =>
-  with_cli(async (c) => {
-    const signature = state_signature(c.env.db);
-    const res = c.run(["init", "synthetic-off", "--topic", "합성 옛 방식"], OFF);
-    assert.equal(res.status, 0, res.stderr + res.stdout);
-    const json = join(c.env.home.env.PES_HOME as string, "synthetic-off", "project.json");
-    assert.ok(existsSync(json), "project.json 을 직접 쓴다");
-    assert.equal(JSON.parse(readFileSync(json, "utf8")).topic, "합성 옛 방식");
-    assert.equal(state_signature(c.env.db), signature, "DB 불변 — 영수증·프로젝트 행 없음");
-    assert.equal(c.env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM projects WHERE slug = 'synthetic-off'")?.n, 0n);
-  }));
-
-test("플래그 없음: round-start·approve·reopen·note·lock이 project.json을 바꾸고 DB는 그대로", () =>
-  with_cli(async (c) => {
-    const signature = state_signature(c.env.db);
-    const read = () => JSON.parse(readFileSync(c.project_json, "utf8"));
-    for (const [args, extra] of [
-      [["round-start", SLUG, "plan"], {}],
-      [["approve", SLUG, "plan"], {}],
-      [["reopen", SLUG, "plan"], {}],
-      [["note", SLUG, "합성 옛 메모"], {}],
-      [["lock", SLUG], { PES_OWNER: "sess-off00001" }],
-    ] as const) {
-      const before = c.sig(c.project_json).sha;
-      const res = c.run([...args], { ...OFF, ...extra });
-      assert.equal(res.status, 0, `${args[0]}: ${res.stderr}${res.stdout}`);
-      if (args[0] !== "lock") assert.notEqual(c.sig(c.project_json).sha, before, `${args[0]}: project.json 갱신`);
-    }
-    assert.equal(read().notes.length, 1);
-    assert.ok(existsSync(join(c.folder, ".pes-lock")), "옛 잠금 파일");
-    assert.equal(state_signature(c.env.db), signature, "DB 불변");
-  }));
-
-test("플래그 없음: 토큰·새 5개 명령은 쓸 수 없고 아무것도 만들지 않는다", () =>
-  with_cli(async (c) => {
-    const signature = state_signature(c.env.db);
-    for (const name of ["claim", "submit", "wait", "complete"]) {
-      expect_rejected(c.run([name, SLUG], OFF), `${name} (플래그 없음)`);
-    }
-    assert.equal(state_signature(c.env.db), signature);
-  }));
+// (플래그 시험 3개 — '플래그 없음: init·round-start·… 은 project.json 을 쓰고 DB 는 그대로', '토큰·새 5개 명령은 쓸 수 없다' — 은 지웠다: PES_DB_CORE 가 없어졌다.
+//  pes.ts 는 늘 DB 로 쓰고, 그 변수는 자식에게 넘어가지 않는다 — test_pes_ts_guard.ts 의 'PES_TOKEN·PES_DB_CORE are scrubbed from the child' 가 그 보장이다.
+//  새 5개 명령의 인자·종료 코드는 test_sel74_b_db_commands, 옛 폴더 거절은 test_sel74_c_d14_refusal.)

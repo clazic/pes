@@ -56,7 +56,7 @@ async function drive(m: Mode): Promise<void> {
     const cur = ok(m.py(["show", SLUG, "plan", "--fields", "changes"]), "show changes").stdout;
     assert.ok(cur.includes("항목: 3개 만듦") && cur.includes("재사용: 1개 표시"), "지금 changes 를 읽을 수 있다");
     ok(m.py(["set", SLUG, "plan", "changes", m.json("c2.json", ["항목: 3개 만듦", "재사용: 1개 표시", "독립 검토 반영: 없음"])]), "전체 배열 다시 쓰기");
-    const p = JSON.parse(readFileSync(join(dirname(m.folder), SLUG, "project.json"), "utf8"));
+    const p = m.state(SLUG); // DB 읽기 모델(옛 project.json 모양) — pes.ts 는 project.json 을 쓰지 않는다
     assert.deepEqual(p.stages.plan.changes, ["항목: 3개 만듦", "재사용: 1개 표시", "독립 검토 반영: 없음"], "앞 줄을 잃지 않았다");
     assert.deepEqual(p.settings, SETTINGS, "최상위 settings (보고서 형식·qa-brief 의 기획 답)");
   }

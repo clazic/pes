@@ -8,14 +8,14 @@
  */
 
 import assert from "node:assert/strict";
-import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test } from "node:test";
 
 import { put_ready, disk_path } from "./helpers/blob_env.ts";
 import { make_cli_env, SLUG, with_cli, type CliEnv } from "./helpers/cli_write_env.ts";
-import { baseline_dir, ok, read_lf, run_py, WRITE_ITEMS, write_json, expect_staging } from "./helpers/cli_read_env.ts";
-import { FIXTURES, legacy, sha256_of } from "./helpers/legacy_env.ts";
+import { legacy_home_with_real_report, ok, read_lf, run_cli, WRITE_ITEMS, write_json, expect_staging } from "./helpers/cli_read_env.ts";
+import { legacy, sha256_of } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { assemble_manuscript } from "../scripts/pes_core/report.ts";
 import { build_project_view } from "../scripts/pes_core/legacy_view.ts";
@@ -62,7 +62,7 @@ for (const mode of ["wal", "delete"] as const) {
       assert.ok(existsSync(join(dot_pes, "pes.db")));
       assert.deepEqual(Object.keys(before.pes).filter((k) => /-(wal|shm|journal)$/.test(k)), [], "시작 상태: 곁가지 파일 없음");
       for (const args of [["doctor", "--json"], ["doctor"], ["doctor", SLUG, "--json"], ["doctor", SLUG]]) {
-        const res = run_py(c, args);
+        const res = run_cli(c, args);
         assert.doesNotMatch(res.stderr, /Traceback/, args.join(" "));
         assert.ok(res.stdout.length > 0, `${args.join(" ")}: 진단 출력`);
         assert.ok(!existsSync(c.env.objects), `${args.join(" ")}: 객체 폴더를 만들지 않는다`);
@@ -80,7 +80,7 @@ for (const mode of ["wal", "delete"] as const) {
 
 test("F2 조립본·sources.json 과 같은 바이트가 다른 이름으로 먼저 저장돼 있어도 assemble 뒤 web 이 성공하고 그 파일들을 쓴다", () =>
   with_cli(async (c) => {
-    ok(run_py(c, ["merge", SLUG, "write", write_json(c, "f2.json", WRITE_ITEMS)]), "merge write");
+    ok(run_cli(c, ["merge", SLUG, "write", write_json(c, "f2.json", WRITE_ITEMS)]), "merge write");
     // 리뷰의 재현: assemble 이 만들 바이트를 이름만 다르게('합성.bin') 먼저 올린다
     const asm = assemble_manuscript(build_project_view(c.env.db, c.env.p.project_id, c.env.objects).project);
     const md = new TextEncoder().encode(asm.markdown);
@@ -89,9 +89,9 @@ test("F2 조립본·sources.json 과 같은 바이트가 다른 이름으로 먼
     const pre_src = await put_ready(c.env, src, "f2-src");
     assert.equal(c.env.db.get<{ original_name: string }>("SELECT original_name FROM blobs WHERE id = ?", pre_md.blob_id)?.original_name, "합성.bin");
 
-    const assembled = ok(run_py(c, ["assemble", SLUG]), "assemble");
+    const assembled = ok(run_cli(c, ["assemble", SLUG]), "assemble");
     assert.match(assembled.stdout, /\(장·절 1개, 각주 2개\)/);
-    const web = ok(run_py(c, ["web", SLUG]), "web (조립본 재사용)");
+    const web = ok(run_cli(c, ["web", SLUG]), "web (조립본 재사용)");
     assert.match(web.stdout, /\(출처 2개 · 확인됨 1개/, `출처 목록이 비지 않는다: ${web.stdout}`);
 
     const object = c.env.db.get<{ object_id: string }>("SELECT object_id FROM artifacts WHERE kind = 'output'")!.object_id;
@@ -116,27 +116,6 @@ test("F2 조립본·sources.json 과 같은 바이트가 다른 이름으로 먼
 // ---------------------------------------------------------------------------
 // S1
 
-function legacy_home_with_real_report(c: CliEnv, slug: string, edit: (text: string) => string, after: (text: string) => string = (t) => t): string {
-  const base = baseline_dir();
-  assert.notEqual(base, null, "기준 커밋 03fc81b 가 없다 (CI 는 fetch-depth: 0)");
-  const dir = join(c.env.home.env.PES_HOME as string, slug);
-  cpSync(join(FIXTURES, "full"), dir, { recursive: true });
-  const json = join(dir, "project.json");
-  writeFileSync(json, edit(readFileSync(json, "utf8").replace('"slug": "synthetic-legacy-full"', `"slug": "${slug}"`)), "utf8");
-  const res = run_py(c, ["report", slug, "plan"], { flag: undefined, script: join(base!, "scripts", "pes.py") });
-  assert.equal(res.status, 0, res.stderr + res.stdout);
-  const md_path = join(dir, "reports", "plan", "report.md");
-  const html_path = join(dir, "reports", "plan", "report.html");
-  const md = readFileSync(md_path, "utf8");
-  const stamp = md.match(/- 작성 (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · PES/)?.[1];
-  assert.ok(stamp);
-  writeFileSync(md_path, md.split(stamp).join("2001-01-01 00:00"), "utf8");
-  writeFileSync(html_path, readFileSync(html_path, "utf8").split(stamp).join("2001-01-01 00:00"), "utf8");
-  // v0.15 의 report 는 project.json 을 다시 저장(json.dump)해 토큰 표기를 정리한다 — 원문 토큰은 보고서를 만든 뒤에 되돌려 넣는다
-  writeFileSync(json, after(readFileSync(json, "utf8")), "utf8");
-  return dir;
-}
-
 test("S1 64자가 넘는 숫자 토큰(1.2345000…e-20) 뒤의 필드가 사라지지 않는다: v0.15 와 같은 보고서·검증 일치·DB 보고서도 같은 줄", () =>
   with_cli(async (c) => {
     const short = "1.2345e-20";
@@ -154,14 +133,9 @@ test("S1 64자가 넘는 숫자 토큰(1.2345000…e-20) 뒤의 필드가 사라
         p.stages.plan.items[1].stats = [{ value: "__F2__", unit: "명", period: "2028", name: "다음 항목 실수 지표", method: "추정" }];
         return JSON.stringify(p).replace('"__L1__"', short).replace('"__F1__"', "12.0").replace('"__F2__"', "7.0");
       },
-      (text) => {
-        assert.equal(text.split(short).length, 2, "v0.15 가 다시 저장한 project.json 에 짧은 토큰이 한 번 있다");
-        const out = text.replace(short, long_token);
-        JSON.parse(out); // 여전히 올바른 JSON
-        assert.ok(out.includes(long_token) && long_token.length > 64);
-        return out;
-      },
     );
+    // the record holds the project.json 0.15 saved after its report run, with the original long token put back (fixture README)
+    assert.ok(readFileSync(join(dir, "project.json"), "utf8").includes(long_token) && long_token.length > 64, "the stored project.json carries the long token");
     const original = read_lf(join(dir, "reports", "plan", "report.md"));
     const line = (md: string, name: string) => md.split("\n").find((l) => l.startsWith(`| ${name} |`));
     const l1 = line(original, "긴 지수 지표");
@@ -178,7 +152,7 @@ test("S1 64자가 넘는 숫자 토큰(1.2345000…e-20) 뒤의 필드가 사라
     assert.equal(val.report.regenerated_reports.find((r) => r.path === "reports/plan/report.md")?.matches, true);
     assert.equal(val.report.regenerated_reports.find((r) => r.path === "reports/plan/report.html")?.matches, true);
     await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, "s1"), pes_home: pes_home_of(c.env) });
-    ok(run_py(c, ["report", "s1-long-number", "plan"]), "report (DB)");
+    ok(run_cli(c, ["report", "s1-long-number", "plan"]), "report (DB)");
     const md = c.env.db
       .all<{ storage_key: string }>(
         `SELECT b.storage_key AS storage_key FROM version_files vf JOIN blobs b ON b.id = vf.blob_id

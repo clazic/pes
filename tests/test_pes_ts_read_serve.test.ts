@@ -100,7 +100,10 @@ test("(b) serve: pes.ts starts scripts/serve.ts on the injected port and prints 
     assert.equal(started.stdout.trim(), `http://127.0.0.1:${port}/${SLUG}/`, "serve prints the project's address (0.15: server_url)");
     const whoami = await http_json(port, "/whoami");
     assert.equal(whoami.status, 200);
-    assert.deepEqual(whoami.json, { root: realpathSync.native(ctx.pes_home), single: true });
+    // D16 (SEL-74): 0.15 answered {root, single}; the ts /whoami also names the server process (pes stop checks the record's pid against it)
+    const { pid, ...who } = whoami.json as { pid?: unknown; root: string; single: boolean };
+    assert.ok(Number.isSafeInteger(pid) && (pid as number) > 0, `/whoami pid is a positive integer: ${String(pid)}`);
+    assert.deepEqual(who, { root: realpathSync.native(ctx.pes_home), single: true });
     assert.deepEqual((await http_json(port, "/ping")).json, { ok: true });
     assert.deepEqual((await http_json(port, `/${SLUG}/ping`)).json, { ok: true });
     const version = (await http_json(port, "/version")).json;

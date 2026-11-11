@@ -9,17 +9,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, SLUG, type CliEnv } from "./helpers/cli_write_env.ts";
-import { baseline_dir, folder_of, normalize, plain_legacy, read_lf, run_py, seed, write_legacy, write_json, ok, OFF } from "./helpers/cli_read_env.ts";
+import { folder_of, golden, normalize, plain_legacy, read_lf, run_cli, seed, write_legacy, write_json, ok } from "./helpers/cli_read_env.ts";
 import {
   ASK_SPEC,
   build_db,
-  build_old,
   commit_count,
   db_with_form,
   expect_same_screen,
   feedback_body,
   feedback_files,
   http,
+  hub_page_data,
   normalize_data,
   page_data,
   pages,
@@ -34,7 +34,6 @@ import {
   sub_count,
   with_server,
   write_spec,
-  WEB_BASELINE_REF,
 } from "./helpers/web_env.ts";
 
 
@@ -42,17 +41,16 @@ test("W2e project.json 이 없는 DB 프로젝트(pes.py init 이 만든 폴더)
   const c = await make_cli_env();
   try {
     rm_default_json(c);
-    step(c, "1", ["ask", SLUG, write_spec(c)]);
-    seed(c, "1");
+    step(c, ["ask", SLUG, write_spec(c)]);
+    seed(c);
     writeFileSync(join(c.folder, "..", ".pes-hub"), "1", "utf8");
-    step(c, "1", ["render", SLUG, "plan"]);
+    step(c, ["render", SLUG, "plan"]);
     assert.ok(!existsSync(c.project_json), "프로젝트 폴더에 project.json 을 만들지 않는다");
+    // 홈 목록: pes.ts 의 hub 가 짓는다(주입한 단일 포트에서 서빙 — 실제 허브 포트는 안 쓴다)
+    assert.ok((await hub_page_data(c)).projects.some((p: any) => p.slug === SLUG), "홈 목록에 DB 프로젝트가 있다");
     await with_server(c, {}, async (s) => {
-      const home = await http(s, "/");
-      assert.equal(home.status, 200, "홈 목록");
-      assert.ok(page_data(home.text).projects.some((p: any) => p.slug === SLUG), "홈 목록에 DB 프로젝트가 있다");
       const redirect = await http(s, `/${SLUG}`);
-      assert.equal(redirect.status, 302, "슬래시 없는 주소는 /<slug>/ 로 보낸다");
+      assert.equal(redirect.status, 301, "슬래시 없는 주소는 /<slug>/ 로 보낸다 (0.15 의 SimpleHTTPRequestHandler 와 같은 301 — PR18 의 DB 서버는 302 였다)");
       assert.equal(redirect.headers.get("location"), `/${SLUG}/`);
       const page = await http(s, `/${SLUG}/`);
       assert.equal(page.status, 200, "대시보드");
@@ -68,26 +66,23 @@ test("W2e project.json 이 없는 DB 프로젝트(pes.py init 이 만든 폴더)
 });
 
 test("W2f 받은 답: 화면에서 보낸 답이 대시보드의 '받은 답'(처리 대기)으로 보인다 — v0.15(feedback 파일)와 같은 사실 (해석 2·4)", async () => {
-  const old = await build_old();
+  const a = golden<any[]>("web-v015-feedback"); // 0.15 가 같은 두 답을 받은 뒤 렌더한 화면의 feedback (고정 기록)
   const db = await build_db();
   try {
-    const sent = async (c: CliEnv, flag: string | undefined) =>
-      with_server(c, { flag }, async (s) => {
+    const sent = async (c: CliEnv) =>
+      with_server(c, {}, async (s) => {
         for (const body of [feedback_body(), { stage: "plan", round: 1, kind: "feedback", text: "합성 자유 의견", answers: {} }]) {
           const r = await post_feedback(s, SLUG, body);
           assert.equal(r.status, 200, r.text);
         }
-        // v0.15 는 render 가 index.html 을 다시 지어야 받은 답이 보인다(DB 모드는 요청 때 DB 에서 짓는다).
-        if (flag === undefined) step(c, undefined, ["render", SLUG]);
+        step(c, ["render", SLUG]); // pes.ts 는 대시보드 파일을 render 가 짓는다 (0.15 도 같았다)
         return page_data((await http(s, `/${SLUG}/`)).text); // 보낸 직후 새로 받은 화면에 보여야 한다
       });
-    const a = normalize_data(await sent(old, undefined), roots_of(old)) as any;
-    const b = normalize_data(await sent(db, "1"), roots_of(db)) as any;
-    assert.equal(a.feedback.length, 2);
-    expect_same_screen(a.feedback, b.feedback, "D.feedback (stage·round·kind·text·via·processed)");
+    const b = normalize_data(await sent(db), roots_of(db)) as any;
+    assert.equal(a.length, 2);
+    expect_same_screen(a, b.feedback, "D.feedback (stage·round·kind·text·via·processed)");
     assert.ok(b.feedback.every((f: any) => f.processed === false));
   } finally {
-    old.close();
     db.close();
   }
 });
@@ -98,10 +93,12 @@ test("W4 보고서·eli5·최종 보고서: DB 에서 같은 URL 로 서빙하�
     mkdirSync(join(c.folder, "reports", "plan"), { recursive: true });
     const eli5 = { title: "합성 그림 설명", lead: "합성 한 줄", scenes: [{ step: "그림 1", big: "합성 장면", emoji: "🔍", say: "합성 말" }], takeaway: "합성 끝" };
     writeFileSync(join(c.folder, "reports", "plan", "eli5.json"), JSON.stringify(eli5), "utf8");
-    step(c, "1", ["report", SLUG, "plan"]);
-    step(c, "1", ["web", SLUG, "--assemble"]);
-    assert.ok(!existsSync(join(c.folder, "reports", "plan", "report.html")), "DB 모드는 폴더 reports/ 에 보고서를 쓰지 않는다");
-    assert.ok(!existsSync(join(c.folder, "out", "report.html")), "DB 모드는 폴더 out/ 에 쓰지 않는다");
+    step(c, ["report", SLUG, "plan"]);
+    step(c, ["web", SLUG, "--assemble"]);
+    // (SEL-74: PR18 의 DB 서버는 폴더에 쓰지 않고 DB 에서 서빙했다. pes.ts 는 0.15 호환으로 폴더에도 같은 파일을 두고 serve.ts 가 그 파일을 서빙한다 — D02.)
+    assert.ok(existsSync(join(c.folder, "reports", "plan", "report.html")), "폴더 reports/ 에 보고서가 있다");
+    assert.ok(existsSync(join(c.folder, "out", "report.html")), "폴더 out/ 에 최종 보고서가 있다");
+    step(c, ["render", SLUG]); // 대시보드 파일은 render 가 다시 짓는다 — 방금 만든 보고서·산출물이 실린다
     const dash = await with_server(c, {}, async (s) => page_data((await http(s, `/${SLUG}/`)).text));
     const paths = (dash.project.stages.plan.reports as Array<{ format: string; path: string }>).map((r) => r.path).sort();
     for (const want of ["reports/plan/report.html", "reports/plan/report.md", "reports/plan/eli5.html"]) assert.ok(paths.includes(want), `대시보드가 ${want} 를 가리킨다 (${paths.join(", ")})`);
@@ -135,7 +132,8 @@ test("W6 악성 입력을 담은 항목도 DB 렌더가 깨지지 않는다: 데
   const c = await db_with_form();
   try {
     const evil = "</script><script>window.__pwned=1</script> [x](javascript:alert(1)) <img src=x onerror=window.__pwned=1>";
-    step(c, "1", ["merge", SLUG, "plan", write_json(c, "evil.json", [{ id: 9, kind: "topic", title: "악성 항목", summary: evil, details: evil, status: "done" }])]);
+    step(c, ["merge", SLUG, "plan", write_json(c, "evil.json", [{ id: 9, kind: "topic", title: "악성 항목", summary: evil, details: evil, status: "done" }])]);
+    step(c, ["render", SLUG]); // pes.ts 는 대시보드 파일을 render 가 짓는다
     const html = await with_server(c, {}, async (s) => (await http(s, `/${SLUG}/`)).text);
     const data = page_data(html);
     const item = data.project.stages.plan.items.find((i: any) => i.title === "악성 항목");
@@ -143,7 +141,7 @@ test("W6 악성 입력을 담은 항목도 DB 렌더가 깨지지 않는다: 데
     const body = html.slice(html.indexOf('<script id="data"'));
     const embedded = body.slice(0, body.indexOf("</script>"));
     assert.ok(!embedded.includes("</script"), "데이터 블록 안에 </script 가 그대로 있으면 안 된다");
-    step(c, "1", ["report", SLUG, "plan"]);
+    step(c, ["report", SLUG, "plan"]);
     await with_server(c, {}, async (s) => {
       const r = await http(s, `/${SLUG}/reports/plan/report.html`);
       assert.equal(r.status, 200);

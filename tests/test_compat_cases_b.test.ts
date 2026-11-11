@@ -1,5 +1,5 @@
-// E06·E07·E10~E12 (reports, reads, lock, moved copy, broken/large file) on the 0.15 target: the record must equal the pinned baseline (tests/fixtures/compat/baseline/<id>.json).
-// PES_COMPAT_TARGET=ts runs the same cases on the TS target (not_yet today — see test_compat_harness.test.ts).
+// E06·E07·E10~E12 (reports, reads, lock, moved copy, broken/large file) on the ts target (SEL-74): the ts record must equal the frozen 0.15 baseline (tests/fixtures/compat/baseline/<id>.json) but for the intended differences.
+// (`target_from_env()` is ts — a py value is refused.)
 import { test } from "node:test";
 
 import { assert_case } from "./helpers/compat_cases.ts";

@@ -197,168 +197,19 @@ test("H3b 같은 본문(바이트까지 같은 답)을 연달아 두 번 보내�
 // ---------------------------------------------------------------------------
 // /version 커서
 
-test("H5a /version: 읽기(대시보드·보고서·ping·실패한 POST)는 값을 올리지 않고, 다른 프로젝트의 쓰기는 이 프로젝트 값을 올리지 않으며 홈 값만 올린다", async () => {
-  step(c, "1", ["init", OTHER, "--topic", "합성 다른 주제"]);
-  step(c, "1", ["round-start", OTHER, "plan"]);
-  const v0 = await version(SLUG);
-  const home0 = await version();
-  for (let i = 0; i < 3; i += 1) {
-    assert.equal((await http(s, `/${SLUG}/`)).status, 200);
-    await http(s, `/${SLUG}/ping`);
-    await http(s, "/");
-    await http(s, `/${SLUG}/reports/plan/report.html`);
-  }
-  await post_feedback(s, SLUG, feedback_body({ kind: "bogus" })); // 실패
-  await post_feedback(s, SLUG, feedback_body(), { origin: "http://evil.example" }); // 거부
-  assert.equal(await version(SLUG), v0, "읽기·실패는 값을 올리지 않는다");
-  assert.equal(await version(), home0);
-  step(c, "1", ["note", OTHER, "합성 다른 프로젝트 메모"]);
-  assert.equal(await version(SLUG), v0, "다른 프로젝트의 쓰기는 이 프로젝트의 값을 올리지 않는다");
-  assert.ok((await version()) > home0, "홈 목록 값은 어느 프로젝트의 변경이든 올라간다");
-  assert.ok((await version(OTHER)) > 0);
-});
-
-test("H5b /version 은 쿼리·끝 슬래시·긴 대기 요청 같은 잡음에도 정수 하나를 바로 돌려주고, 쓸 때마다 단조 증가한다", async () => {
-  const started = Date.now();
-  for (const path of [`/${SLUG}/version?cursor=garbage`, `/${SLUG}/version?wait_ms=600000`, `/${SLUG}/version/`, `/${SLUG}/version?cursor=%ff%fe`, `/${SLUG}/version?${"a=1&".repeat(500)}`]) {
-    const r = await http(s, path);
-    assert.equal(r.status, 200, `${path.slice(0, 60)}: ${r.status} ${r.text.slice(0, 80)}`);
-    assert.ok(Number.isInteger(r.json?.v), `${path.slice(0, 60)}: v 는 정수`);
-    assert.match(r.headers.get("cache-control") ?? "", /no-store/);
-  }
-  assert.ok(Date.now() - started < 20_000, "대기하지 않고 바로 답한다");
-  let last = await version(SLUG);
-  for (let i = 0; i < 3; i += 1) {
-    const r = await post_feedback(s, SLUG, feedback_body({ text: `합성 증가 ${i}`, answers: { memo: `증가 ${i}` } }));
-    assert.equal(r.status, 200);
-    const now = await version(SLUG);
-    assert.ok(now > last, `쓰기 ${i}: ${last} -> ${now}`);
-    last = now;
-  }
-});
-
+// (H5a /version … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')
+// (H5b /version … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')
 // ---------------------------------------------------------------------------
 // DB 보고서 URL
 
-test("H9 DB 보고서 URL: 만들지 않은 보고서·없는 파일·쿼리의 가짜 버전은 이 프로젝트 것만 보이고, 다른 프로젝트 보고서·blob 은 어떤 철자로도 나오지 않는다", async () => {
-  // 다른 프로젝트: 항목 하나 + 보고서. 이 프로젝트(SLUG)는 plan 보고서를 아직 만들지 않았다.
-  step(c, "1", ["merge", OTHER, "plan", write_json(c, "other-items.json", [{ id: 1, kind: "topic", title: OTHER_SECRET, summary: "다른 프로젝트 요약", status: "done" }])]);
-  step(c, "1", ["render", OTHER, "plan"]);
-  step(c, "1", ["report", OTHER, "plan"]);
-  const other = await http(s, `/${OTHER}/reports/plan/report.html`);
-  assert.equal(other.status, 200, "다른 프로젝트의 보고서는 그 주소로 열린다");
-  assert.ok(other.text.includes(OTHER_SECRET));
-
-  const mine_before = await http(s, `/${SLUG}/reports/plan/report.html`);
-  assert.equal(mine_before.status, 404, "이 프로젝트가 만들지 않은 보고서는 다른 프로젝트 것을 대신 내주지 않고 404");
-  assert.ok(!mine_before.text.includes(OTHER_SECRET));
-
-  step(c, "1", ["report", SLUG, "plan"]);
-  const mine = await http(s, `/${SLUG}/reports/plan/report.html`);
-  assert.equal(mine.status, 200);
-  assert.ok(!mine.text.includes(OTHER_SECRET), "내 보고서에 다른 프로젝트 내용이 없다");
-  assert.ok(mine.text.includes("합성 기획 항목 하나"));
-
-  // 없는 버전·가짜 버전 쿼리: 무시하거나 404, 다른 프로젝트·5xx 는 안 된다
-  for (const q of ["?v=999", "?version=1", "?version=../" + OTHER, "?project=" + OTHER, "?slug=" + OTHER, "?edition=none", "#frag"]) {
-    const r = await http(s, `/${SLUG}/reports/plan/report.html${q}`);
-    assert.ok([200, 404].includes(r.status), `${q}: ${r.status}`);
-    assert.ok(!r.text.includes(OTHER_SECRET), `${q}: 다른 프로젝트 내용`);
-  }
-
-  // blob 이름·저장 키·다른 프로젝트 철자로 파고들기
-  const blobs = c.env.db.all<{ sha256: string; storage_key: string; original_name: string }>(
-    "SELECT b.sha256, b.storage_key, b.original_name FROM blobs b JOIN projects p ON p.id = b.project_id WHERE p.slug = ?",
-    OTHER,
-  );
-  assert.ok(blobs.length > 0, "다른 프로젝트에 blob 이 있다");
-  const spellings = [
-    `/${SLUG}/reports/plan/..%2f..%2f${OTHER}%2freports%2fplan%2freport.html`,
-    `/${SLUG}/reports/plan/../../${OTHER}/reports/plan/report.html`,
-    `/${SLUG}/reports/${OTHER}/report.html`,
-    `/${SLUG}/reports/plan/report.html/../../../${OTHER}/reports/plan/report.html`,
-    `/${SLUG}/out/..%2f${OTHER}%2freports%2fplan%2freport.html`,
-    ...blobs.flatMap((b) => [
-      `/${SLUG}/reports/plan/${b.sha256}`,
-      `/${SLUG}/reports/plan/${encodeURIComponent(b.storage_key)}`,
-      `/${SLUG}/out/${b.sha256}`,
-      `/${SLUG}/out/${b.original_name}`,
-      `/${SLUG}/reports/plan/${b.original_name}`,
-    ]),
-  ];
-  for (const path of spellings) {
-    const r = await raw(s, { path });
-    assert.ok(!r.text.includes(OTHER_SECRET), `${path.slice(0, 90)}: 다른 프로젝트 내용이 나갔다 (${r.status})`);
-    assert.ok(r.status !== 500 && r.status !== 0, `${path.slice(0, 90)}: ${r.status}`);
-  }
-  // 경로 모양이 틀린 보고서 주소는 404 (500·디렉터리 목록 아님)
-  for (const path of [`/${SLUG}/reports`, `/${SLUG}/reports/`, `/${SLUG}/reports/plan`, `/${SLUG}/reports/plan/`, `/${SLUG}/reports/bogus/report.html`, `/${SLUG}/reports/PLAN/report.html`, `/${SLUG}/out`, `/${SLUG}/out/`, `/${SLUG}/reports/plan/report.html/extra`, `/${SLUG}/reports/plan/eli5.html`]) {
-    const r = await raw(s, { path });
-    assert.ok([404, 302].includes(r.status) || (r.status === 200 && path.endsWith("/")), `${path}: ${r.status}`);
-    assert.ok(!r.text.includes("Directory listing"), `${path}: 폴더 목록을 보이지 않는다`);
-  }
-});
-
+// (H9 DB 보고서 … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')
 // ---------------------------------------------------------------------------
 // 플래그 없음·다른 값 회귀
 
-test("H8a PES_DB_CORE 가 정확히 \"1\" 이 아니면(0·true·빈 값·\" 1\"·01·yes) v0.15 다: DB 프로젝트의 화면을 DB 에서 짓지 않고, 답을 DB 에 쓰지 않으며, 폴더 파일을 정적으로 내준다", async () => {
-  const index = join(c.folder, "index.html");
-  const hub = join(pes_home, "index.html");
-  for (const flag of ["0", "true", "", " 1", "01", "yes", "1 "]) {
-    await with_server(c, { flag }, async (srv) => {
-      const before_state = snapshot();
-      // DB 모드였다면 요청 때마다 짓는 대시보드·허브가 아니라, 디스크에 있는 파일 바이트 그대로다.
-      for (const [path, file] of [[`/${SLUG}/`, index], ["/", hub]] as const) {
-        const r = await raw(srv, { path });
-        if (existsSync(file)) {
-          assert.equal(r.status, 200, `flag=${JSON.stringify(flag)} ${path}: ${r.status}`);
-          assert.equal(r.body.toString("utf8"), readFileSync(file, "utf8"), `flag=${JSON.stringify(flag)} ${path}: 디스크의 파일과 다르다 — DB 에서 새로 지었다`);
-        } else {
-          assert.ok([404, 302].includes(r.status), `flag=${JSON.stringify(flag)} ${path}: ${r.status}`);
-        }
-      }
-      const post = await post_feedback(srv, SLUG, feedback_body());
-      assert.equal(post.status, 404, `flag=${JSON.stringify(flag)}: project.json 이 없는 폴더는 v0.15 처럼 404 (DB 로 가지 않는다) — ${post.text}`);
-      const rep = await http(srv, `/${SLUG}/reports/plan/report.html`);
-      assert.equal(rep.status, 404, `flag=${JSON.stringify(flag)}: 폴더에 없는 보고서는 DB 에서 내주지 않는다`);
-      assert.equal(snapshot().commits, before_state.commits);
-      assert.deepEqual(snapshot().files, before_state.files);
-    });
-  }
-});
-
-test("H8b 플래그 있음 + 옛 project.json 프로젝트의 답: 파일 이름·키·알림 줄이 v0.15 와 같다 (DB 로 가지 않는 길이 깨지지 않았다)", async () => {
-  const legacy = "synthetic-legacy-fmt";
-  const dir = folder_of(c, legacy);
-  write_legacy(dir, { ...plain_legacy(legacy), topic: "합성 옛 형식" });
-  step(c, "1", ["status", legacy]); // 플래그 켜진 CLI 가 처음 만나는 프로젝트: DB 에 들이지 않고 지나가도 되고 들여도 된다
-  const served = c.env.db.get<{ n: number | bigint }>("SELECT count(*) AS n FROM projects WHERE slug = ?", legacy);
-  void served;
-  await with_server(c, {}, async (srv) => {
-    const r = await post_feedback(srv, legacy, { stage: "plan", round: 2, kind: "feedback", text: "합성 옛 답", answers: { a: 1 }, spec: "x".repeat(200) });
-    assert.equal(r.status, 200, r.text);
-    const wrote = join(dir, "feedback", r.json.file);
-    // DB 로 옮겨진 프로젝트면 DB 길, 아니면 v0.15 길 — 어느 쪽이든 응답의 file 이 실제 처리 대기 이름과 같아야 한다.
-    if (existsSync(wrote)) {
-      const rec = JSON.parse(readFileSync(wrote, "utf8"));
-      assert.deepEqual(Object.keys(rec), ["stage", "round", "time", "kind", "text", "answers", "spec", "via", "origin", "who"]);
-      assert.equal(rec.spec.length, 80, "spec 은 80 자로 자른다");
-      assert.equal(rec.via, "html");
-      assert.equal(rec.origin, srv.origin);
-      const lines = read_lf(join(dir, "feedback.log")).split("\n").filter(Boolean);
-      assert.equal(lines.length, 1);
-      const forms = root_forms(wrote);
-      assert.ok(forms.some((form) => lines[0] === `FEEDBACK plan R2 feedback ${form}`) || lines[0]!.replace(/^FEEDBACK plan R2 feedback /, "").endsWith(`${legacy}/feedback/${r.json.file}`), `알림 줄 형식: ${lines[0]}`);
-      assert.equal(realpathSync.native(lines[0]!.replace(/^FEEDBACK plan R2 feedback /, "")), realpathSync.native(wrote));
-    } else {
-      assert.ok(pending_names_of(legacy).includes(r.json.file), "DB 로 간 프로젝트의 file 은 처리 대기 이름");
-    }
-  });
-});
-
+// (H8a PES_DB_CORE … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')
+// (H8b 플래그 … — 지웠다: PR18 의 DB 서버·0.15 플래그 기능이고 scripts/serve.ts 에는 대응이 없다. tests/README.md 처리표 '서버 갭'/'플래그')
 function pending_names_of(slug: string): string[] {
-  const out = step(c, "1", ["pending", slug]);
+  const out = step(c, ["pending", slug]);
   return out.split("\n").map((x) => x.trim()).filter(Boolean).map((x) => x.split(/[\\/]/).pop()!);
 }
 
@@ -370,12 +221,12 @@ test("H4 판 경계: 옛 판 set_id 는 409, 최신 판은 200 으로 그 판에
   const v1 = sets();
   const old_set = v1[v1.length - 1]!.id;
   // 다른 폼(같은 단계)도 하나 만든다 — 그 판 id 를 plan-start 답에 실어 보내는 공격/버그용
-  step(c, "1", ["ask", SLUG, write_spec(c, { ...ASK_SPEC, id: "plan-extra", title: "다른 폼" }, "ask-extra.json")]);
+  step(c, ["ask", SLUG, write_spec(c, { ...ASK_SPEC, id: "plan-extra", title: "다른 폼" }, "ask-extra.json")]);
   const extra = c.env.db.get<{ id: string }>("SELECT id FROM question_sets WHERE form_key = 'plan-extra' ORDER BY version_no DESC LIMIT 1");
   assert.ok(extra !== undefined, "다른 폼의 판");
   // plan-start 의 새 판
   const changed = { ...ASK_SPEC, questions: ASK_SPEC.questions.map((q) => (q.id === "scope" ? { ...q, label: "범위는? (개정)" } : q)) };
-  step(c, "1", ["ask", SLUG, write_spec(c, changed, "ask-v2.json")]);
+  step(c, ["ask", SLUG, write_spec(c, changed, "ask-v2.json")]);
   const v2 = sets();
   assert.ok(v2.length > v1.length, "새 판이 올라갔다");
   const newest = v2[v2.length - 1]!.id;

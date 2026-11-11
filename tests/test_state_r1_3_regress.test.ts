@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { make_cli_env, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
-import { expect_staging, ok as ok_read, run_py, write_json, write_legacy } from "./helpers/cli_read_env.ts";
+import { expect_staging, ok as ok_read, run_cli, write_json, write_legacy } from "./helpers/cli_read_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { legacy } from "./helpers/legacy_env.ts";
 
@@ -84,7 +84,7 @@ async function activated(c: CliEnv, slug: string, value: Record<string, unknown>
   assert.equal(val.ok, true, JSON.stringify(val.report.problems));
   await mig.activate_import(c.env.service, imp.batch_id, { owner_actor_id: owner_of(c.env), backup_dir: backup_dir_of(c.env, `r1-3-${tag}`), pes_home: pes_home_of(c.env) });
   return (args) => {
-    const r = run_py(c, args, { flag: "1", extra: { PES_OWNER: `sess-r13-${tag}` } });
+    const r = run_cli(c, args, { extra: { PES_OWNER: `sess-r13-${tag}` } });
     return { status: r.status, stdout: lf(r.stdout), stderr: lf(r.stderr) };
   };
 }

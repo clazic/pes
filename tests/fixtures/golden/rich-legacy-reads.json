@@ -1,0 +1,67 @@
+{
+ "status legacy-only": {
+  "status": 0,
+  "stdout": "주제: 합성 파일 주제  (<ROOT>/pes-projects/legacy-only)\n현재 단계: 기획\n  ▶ 기획     active   R1 항목 2 (할 일 1)\n    조사     pending  R0 항목 0 (할 일 0)\n    분석·종합  pending  R0 항목 0 (할 일 0)\n    집필     active   R1 항목 1 (할 일 0)\n    검증     pending  R0 항목 0 (할 일 0)\n    산출·공유  pending  R0 항목 0 (할 일 0)\n인계 메모 2개 (최근 5):\n  - [<TS>] 합성 인계 메모 하나\n  - [<TS>] 합성 인계 메모 둘\n처리 안 한 답: 1개\n  - <ROOT>/pes-projects/legacy-only/feedback/plan-R1-<STAMP>.json  [plan/feedback/R1] 합성 답 한 줄\n대시보드: 서버 꺼짐 — serve legacy-only\n",
+  "stderr_last": ""
+ },
+ "status no-such-project": {
+  "status": 1,
+  "stdout": "",
+  "stderr_last": "project.json 없음: <ROOT>/pes-projects/no-such-project"
+ },
+ "pending legacy-only": {
+  "status": 0,
+  "stdout": "<ROOT>/pes-projects/legacy-only/feedback/plan-R1-<STAMP>.json\n",
+  "stderr_last": ""
+ },
+ "digest legacy-only plan": {
+  "status": 0,
+  "stdout": "[기획 R1] 항목 2개 · 상태 active\n\n#1 합성 기획 항목 하나 [topic/done/R1] 신뢰도 high · 출처 2(원문 1) · \n  요약: 합성 요약 하나\n\n#2 합성 기획 항목 둘 [topic/deepen/R1] 신뢰도 - · 출처 0(원문 0) · \n  요약: 합성 요약 둘\n",
+  "stderr_last": ""
+ },
+ "digest legacy-only plan --round 1": {
+  "status": 0,
+  "stdout": "[기획 R1] 항목 2개 · 상태 active\n\n#1 합성 기획 항목 하나 [topic/done/R1] 신뢰도 high · 출처 2(원문 1) · \n  요약: 합성 요약 하나\n\n#2 합성 기획 항목 둘 [topic/deepen/R1] 신뢰도 - · 출처 0(원문 0) · \n  요약: 합성 요약 둘\n",
+  "stderr_last": ""
+ },
+ "digest legacy-only nope": {
+  "status": 1,
+  "stdout": "",
+  "stderr_last": "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
+ },
+ "show legacy-only plan": {
+  "status": 0,
+  "stdout": "{\n \"status\": \"active\",\n \"round\": 1,\n \"approved_at\": null,\n \"summary\": \"합성 기획 요약\",\n \"settings\": {},\n \"review\": null,\n \"suggestions\": [],\n \"warnings\": [],\n \"changes\": [],\n \"history\": [],\n \"stale\": false,\n \"reports\": [],\n \"items\": [\n  \"#1 합성 기획 항목 하나 [topic/done]\",\n  \"#2 합성 기획 항목 둘 [topic/deepen]\"\n ]\n}\n",
+  "stderr_last": ""
+ },
+ "show legacy-only plan 1 --fields title,status": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"합성 기획 항목 하나\",\n  \"status\": \"done\"\n }\n]\n",
+  "stderr_last": ""
+ },
+ "show legacy-only plan 99": {
+  "status": 0,
+  "stdout": "[]\n",
+  "stderr_last": ""
+ },
+ "list": {
+  "status": 0,
+  "stdout": "1. [내 차례] 합성 옛 주제  (synthetic-files)\n   기획 R0 · 기획 시작 · 갱신 <TS> · 서버 꺼짐\n2. [Claude] 합성 파일 주제  (legacy-only)\n   기획 R1 · 받은 답 1개 처리 대기 · 갱신 <TS> · 서버 꺼짐\n",
+  "stderr_last": ""
+ },
+ "which no-such-tool-sel49": {
+  "status": 1,
+  "stdout": "",
+  "stderr_last": "no-such-tool-sel49 를 찾지 못함 — /pes:doctor 로 설치 상태 확인"
+ },
+ "watch legacy-only": {
+  "status": 0,
+  "stdout": "tail -n0 -F <ROOT>/pes-projects/legacy-only/feedback.log | grep --line-buffered FEEDBACK\n",
+  "stderr_last": ""
+ },
+ "show legacy-only plan 1": {
+  "status": 0,
+  "stdout": "[\n {\n  \"id\": 1,\n  \"title\": \"합성 기획 항목 하나\",\n  \"kind\": \"topic\",\n  \"status\": \"done\",\n  \"summary\": \"합성 요약 하나\",\n  \"confidence\": \"high\",\n  \"updated_round\": 1,\n  \"sources\": [\n   {\n    \"title\": \"합성 출처 A\",\n    \"url\": \"https://example.invalid/a\",\n    \"method\": \"law\",\n    \"date\": \"2026-01-02\"\n   },\n   {\n    \"title\": \"합성 출처 B\",\n    \"url\": \"https://example.invalid/b\",\n    \"method\": \"search\"\n   }\n  ],\n  \"question\": \"\",\n  \"request\": \"\",\n  \"depth\": 0,\n  \"details\": \"\",\n  \"stats\": [],\n  \"shots\": [],\n  \"conflicts\": [],\n  \"verify\": null,\n  \"links\": {},\n  \"user_links\": []\n }\n]\n",
+  "stderr_last": ""
+ }
+}

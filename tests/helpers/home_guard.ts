@@ -1,13 +1,10 @@
-// TS side of the Python audit hook of tests/conftest.py (SEL-70, PR26a).
+// The guards of the temporary-home tests (SEL-70, PR26a; SEL-74: the Python audit hook of the 0.15 children is gone — what is left guards the ts
+// children and the test process itself).
 //
-// Two kinds of children, two kinds of guard:
-//   * Python (0.15) children — the SAME audit hook as tests/conftest.py runs inside the child: compat_env launches them as
-//     `python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(script)"` with PES_TEST_GUARD=1 and PES_TEST_REAL_HOME = the account's
-//     real home (os.userInfo().homedir). open / stat / listdir / scandir (reads included) of the real ~/.pes or ~/pes-projects
-//     raise PESHomeAccessViolation in the child; `assert_no_violation` turns that into a test failure here.
-//   * TS children — NOT covered yet: a Node child has no audit hook. The read guard for `ts` targets belongs to PR26b (the ts
-//     targets are all `not_yet` today, so nothing runs). Until then the three layers below are all there is for them.
-//
+// Two layers outside the child, one inside it:
+//   * inside the child (TS): `--permission` with an allow-list that holds no real home, plus `ts_child_guard.ts` (`--import`) that reports
+//     `PESHomeAccessViolation` for a read or write of the real `~/.pes` / `~/pes-projects` — see compat_ts.ts and test_pes_ts_guard.
+//   * the three layers below, for every child.
 // The three layers (for every child, Python or not):
 //   1. assert_isolated_env(env)  — a child process may only start with HOME / USERPROFILE / PES_HOME inside one temp folder that
 //                                  is not (and does not contain, and is not inside) the protected folders of either real home.

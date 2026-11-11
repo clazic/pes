@@ -1,6 +1,7 @@
 // SEL-71: the comparison devices PR26a postponed — D02 (project.json → DB state DTO), D03 (feedback files → submissions), D04 (.pes-lock →
 // lease) — and the rules of the ts target in the case ratchet (D10 posix storage, D11 tracebacks). These tests need no scripts/pes.ts:
-// the 0.15 side makes a project, the PR11/PR12 importer puts a COPY of it into a DB (compat_ts.ts_seed_legacy), and the device reads it back.
+// the 0.15 side is a hand-made 0.15 project folder (SEL-74: the py CLI that used to make it is gone — project.json written the way 0.15 saved it),
+// the PR11/PR12 importer puts a COPY of it into a DB (compat_ts.ts_seed_legacy), and the device reads it back.
 import assert from "node:assert/strict";
 import { cpSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -21,7 +22,7 @@ import {
   ts_baseline,
   type CaseRecord,
 } from "./helpers/compat_cases.ts";
-import { KNOWN_DIFFS, approve, dto_from_project_json, init_project, make_ctx, merge, pes, project_json, type CompatCtx } from "./helpers/compat_env.ts";
+import { KNOWN_DIFFS, dto_from_project_json, make_ctx, project_json, type CompatCtx } from "./helpers/compat_env.ts";
 import { REPO_ROOT, answers_multiset, ts_age_lease, ts_seed_feedback, ts_seed_legacy, ts_view, run_ts_cli } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
@@ -30,18 +31,40 @@ use_home_guard();
 const home_of = (ctx: CompatCtx) => ({ env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir });
 const BRIDGE = join(REPO_ROOT, "scripts", "pes_core", "cli_bridge.ts");
 
-/** A 0.15 project made by the py CLI in `a`, copied into `b` and imported into b's database. */
+const STAGE_NAMES = ["plan", "research", "analyze", "write", "verify", "publish"] as const;
+
+/** A 0.15 project folder written the way 0.15 saved it: plan R1 with two merged items, one html answer (pending) and one chat answer (processed). */
+function make_015_project(folder: string, slug: string): void {
+  const item = (id: number, kind: string, title: string, summary: string, sources: Array<{ url: string; title: string }>): Record<string, unknown> => ({
+    id, title, kind, question: "", status: "done", request: "", depth: 1, updated_round: 1, summary, details: "", sources, stats: [], shots: [],
+    confidence: "", conflicts: [], verify: [], links: {}, user_links: [],
+  });
+  const stage = (status: string, round: number, items: unknown[]): Record<string, unknown> => ({ status, round, settings: {}, items, review: null, suggestions: [], warnings: [], changes: [], history: [], summary: "", approved_at: null, stale: false, reports: [] });
+  const stages: Record<string, unknown> = {};
+  for (const name of STAGE_NAMES) {
+    stages[name] = name === "plan"
+      ? stage("active", 1, [
+          item(1, "rq", "연구 질문", "요약", [{ url: "https://example.test/a", title: "출처 A" }, { url: "https://example.test/b", title: "출처 B" }]),
+          item(2, "topic", "범위", "범위 요약", []),
+        ])
+      : stage("pending", 0, []);
+  }
+  mkdirSync(join(folder, "feedback"), { recursive: true });
+  writeFileSync(join(folder, "feedback", "plan-R1-20260101-000000.json"), JSON.stringify({ stage: "plan", round: 1, kind: "feedback", text: "합성 답", via: "html" }), "utf8");
+  writeFileSync(join(folder, "feedback", "plan-R1-20260101-000001.json"), JSON.stringify({ stage: "plan", round: 1, kind: "feedback", text: "채팅 글", via: "chat" }), "utf8");
+  writeFileSync(
+    join(folder, "project.json"),
+    JSON.stringify({ pes: 1, topic: "합성 주제", slug, created: "2026-01-01", current: "plan", complete: false, settings: {}, processed: ["plan-R1-20260101-000001.json"], notes: [], stages }, null, 1),
+    "utf8",
+  );
+}
+
+/** A 0.15 project folder (in `a`), copied into `b` and imported into b's database. */
 async function seeded_pair(name = "device-project"): Promise<{ a: CompatCtx; b: CompatCtx; py_folder: string; db_folder: string }> {
   const a = make_ctx("pes-dev-a-");
   const b = make_ctx("pes-dev-b-");
-  const py_folder = init_project(a, name, "합성 주제");
-  assert.equal(pes(a, "round-start", py_folder, "plan").code, 0);
-  merge(a, py_folder, "plan", [
-    { id: 1, kind: "rq", title: "연구 질문", summary: "요약", sources: [{ url: "https://example.test/a", title: "출처 A" }, { url: "https://example.test/b", title: "출처 B" }] },
-    { id: 2, kind: "topic", title: "범위", summary: "범위 요약" },
-  ]);
-  writeFileSync(join(py_folder, "feedback", "plan-R1-20260101-000000.json"), JSON.stringify({ stage: "plan", round: 1, kind: "feedback", text: "합성 답", via: "html" }), "utf8");
-  assert.equal(pes(a, "chat", py_folder, "plan", "채팅 글").code, 0);
+  const py_folder = join(a.tmp, name);
+  make_015_project(py_folder, name);
   const db_folder = join(b.tmp, name);
   cpSync(py_folder, db_folder, { recursive: true });
   await ts_seed_legacy(home_of(b), db_folder);
