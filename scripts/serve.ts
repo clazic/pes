@@ -3,7 +3,7 @@
 //
 //  - GET /                  → the home's index.html (project list)
 //  - GET /<slug>/           → that project's index.html (newest ask-*.html when there is none yet)
-//  - GET /ping, /<slug>/ping → {"ok": true}            GET /whoami → {"root": "<home>", "single": true}
+//  - GET /ping, /<slug>/ping → {"ok": true}            GET /whoami → {"root": "<home>", "single": true, "pid": <this process>}
 //  - GET /version, /<slug>/version → {"v": <newest index.html / ask-*.html time, epoch seconds>}
 //  - POST /<slug>/feedback  {"stage","round","kind","text","answers",...}
 //      the answer is ONE submission written to the database in THIS process (no child process, no feedback/<name>.json file);
@@ -330,7 +330,7 @@ async function start(config: Config): Promise<void> {
 
   const handle_get = (req: IncomingMessage, res: ServerResponse): void => {
     const path = raw_path(req.url);
-    if (path === "/whoami") return send_json(req, res, 200, { root, single: true }, { cors: true });
+    if (path === "/whoami") return send_json(req, res, 200, { root, single: true, pid: process.pid }, { cors: true });
     if (path === "/version" || path.endsWith("/version")) {
       const { dir } = project_of(path.slice(0, -"version".length) || "/");
       const base = dir ?? root;

@@ -89,7 +89,7 @@ export function signalable_pid(pid: unknown): pid is number {
   return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 1;
 }
 
-function kill_pid(pid: unknown): boolean {
+export function kill_pid(pid: unknown): boolean {
   if (!signalable_pid(pid)) return false;
   try {
     process.kill(pid, "SIGTERM");
@@ -104,12 +104,15 @@ function kill_pid(pid: unknown): boolean {
  * its pid may belong to any other program now. The pid is signalled only when the port the record names (else `fallback_port`, the
  * old `.pes-port`) answers `/whoami` on 127.0.0.1 with exactly `owner` — this home (or this project for an old server). Nothing
  * answering, or another root answering, means the record is stale: nothing is signalled, the caller just forgets the record
- * (final review 1 필수 1; the same rule on Windows, where pids are reused often).
+ * (final review 1 필수 1; the same rule on Windows, where pids are reused often). SEL-74 G1: the answer must also name the recorded pid
+ * (`pid` in /whoami, an integer) — the right root with another pid (or none: an older server) cannot confirm the record, nothing is signalled.
  */
 async function kill_recorded(record: Record<string, unknown> | undefined, owner: string, fallback_port?: unknown): Promise<boolean> {
   if (record === undefined || !signalable_pid(record.pid)) return false;
   const port = valid_port(record.port) ?? valid_port(fallback_port);
-  if (port === null || (await whoami(port)) !== owner) return false;
+  if (port === null) return false;
+  const info = await whoami_info(port);
+  if (info === null || info.root !== owner || info.pid !== record.pid) return false;
   return kill_pid(record.pid);
 }
 

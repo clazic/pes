@@ -46,5 +46,12 @@ export const USAGE: string = `PES (Project Execution System) — 프로젝트 �
   which <도구>                          도구 경로 (PATH + ~/.local/bin, Windows LOCALAPPDATA\\Programs)
   lock <dir> [--force]                 이 세션이 프로젝트를 쓴다고 표시 (환경변수 PES_OWNER 필요)
   unlock <dir>                         표시 해제
+  context <dir>                        (에이전트) 이 프로젝트의 현재 상태·할 일을 한 줄 JSON 으로 읽기 (PES_TOKEN)
+  claim <dir> [--run <id>] [--mode B] [--runtime r] [--provider p] [--model m]   (에이전트) 일을 맡는다 → run_id·lease_id·fence 한 줄 JSON
+  submit <dir> --run <id> --lease <id> --fence <n> --file <결과.json>   (에이전트) 결과를 낸다 (결과 배열 또는 {"results": [...]})
+  wait <dir> --run <id> --lease <id> --fence <n> [--reason r]   (에이전트) 사람을 기다리는 상태로 둔다
+  complete <dir> --run <id> --lease <id> --fence <n> [--status s]   (에이전트) 맡은 일을 끝낸다
+  migrate <dir>                        옛 0.15 프로젝트 폴더 하나를 새 형식(DB)으로 옮긴다 (백업 → 검증 → 켜기, 원본 폴더는 그대로)
+  migrate --all                        PES 홈의 옛 폴더를 모두 옮긴다 (이미 옮긴 것은 건너뜀)
   쓰기 명령은 다른 세션(PES_OWNER 다름)이 최근 2시간 안에 잠근 프로젝트면 거부한다.
 `;

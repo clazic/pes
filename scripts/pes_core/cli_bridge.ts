@@ -19,6 +19,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { resolve_actor, verify_agent_token } from "./actors.ts";
 import { ApiApp } from "./api.ts";
@@ -45,7 +46,8 @@ import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
 import { FORM_REVISED } from "./commands/records.ts";
 import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex, write_storage_bytes } from "./files.ts";
-import { serving_path } from "./migration.ts";
+import { import_project } from "./legacy.ts";
+import { activate_import, serving_path, validate_import } from "./migration.ts";
 import { IMPLICIT_MANIFEST, REAPPROVE_REASON, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
@@ -2467,11 +2469,69 @@ function in_unit(handler: Handler): Handler {
 }
 
 /** Operations that only read: they use a read-only connection and change nothing on disk. */
+// migrate (SEL-74 C) -----------------------------------------------------------
+
+/** The slug of the project that only holds the local human owner when a fresh database has none (the importer needs a human owner actor). */
+export const OWNER_STUB_SLUG = "pes-local-owner";
+
+/**
+ * Moves one 0.15 project folder into the database: import (PR11) → validate (PR12) → activate with a backup bundle (PR12).
+ * The folder is only read. A failure activates nothing. A project that is already active answers `already`.
+ * args: dir (the folder), pes_home (absolute), slug (the folder's name).
+ */
+const migrate_op: Handler = async (s, req) => {
+  const args = req.args ?? {};
+  const dir = text_arg(args, "dir");
+  const pes_home = text_arg(args, "pes_home");
+  const slug = text_arg(args, "slug");
+  const existing = s.db.get<{ status: string; owner_user_id: string }>("SELECT status, owner_user_id FROM projects WHERE slug = ?", slug);
+  if (existing !== undefined && existing.status === "active") return { state: "already", slug };
+  // the owner: the one who started this project's earlier try (a retry must stay with the same owner), else the oldest human of this database
+  const human_of = (user_id: string | null): string | undefined =>
+    s.db.get<{ id: string }>(
+      `SELECT a.id AS id FROM actors a JOIN users u ON u.id = a.user_id
+        WHERE a.kind = 'human' AND a.disabled_at IS NULL AND u.disabled_at IS NULL AND (? IS NULL OR a.user_id = ?)
+        ORDER BY a.rowid LIMIT 1`,
+      user_id,
+      user_id,
+    )?.id;
+  let owner_actor_id = human_of(existing === undefined ? null : existing.owner_user_id) ?? human_of(null);
+  if (owner_actor_id === undefined) {
+    await s.unit(async () => {
+      await s.service.execute(s.ctx(null, null), "project.bootstrap", { slug: OWNER_STUB_SLUG, topic: "PES 로컬 소유자 (이전 도구가 만든 자리 — 지우지 마세요)", owner_display_name: "로컬 소유자" });
+    });
+    owner_actor_id = human_of(null);
+  }
+  if (owner_actor_id === undefined) throw new Refusal("unauthenticated", "이 컴퓨터의 사람 소유자를 만들지 못했습니다");
+  const owner = owner_actor_id;
+  try {
+    const imported = await s.unit(() => import_project(s.service, dir, { owner_actor_id: owner }));
+    if (imported.state === "failed") {
+      const first = imported.report.entries[0];
+      throw new Refusal("invalid_payload", `이전하지 못했습니다: 폴더를 옮길 수 없는 내용이 있습니다${first === undefined ? "" : ` (${first.category} ${first.path})`} — 폴더는 그대로 두었습니다`);
+    }
+    const checked = await s.unit(() => validate_import(s.service, imported.batch_id, { owner_actor_id: owner, source_dir: dir }));
+    if (!checked.ok) {
+      const first = checked.report.problems[0];
+      throw new Refusal("conflict", `이전 검증에 실패했습니다: ${first === undefined ? "차이가 있습니다" : first.check + (first.path === undefined ? "" : " " + first.path)} — 아무것도 켜지 않았고 폴더는 그대로입니다`);
+    }
+    const backup_dir = join(pes_dir(s.env), "backups", `migrate-${slug}-${imported.batch_id}`);
+    await s.unit(() => activate_import(s.service, imported.batch_id, { owner_actor_id: owner, backup_dir, pes_home }));
+    return { state: "migrated", slug, project_id: imported.project_id, backup_dir };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw new Refusal("conflict", `이전하지 못했습니다: ${error.code} — 아무것도 켜지 않았고 폴더는 그대로입니다`);
+    }
+    throw error;
+  }
+};
+
 const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
 
 const HANDLERS: Record<string, Handler> = {
   slugs,
   active_slugs,
+  migrate: migrate_op,
   route,
   read_project,
   screen,
@@ -2561,7 +2621,7 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
     return { ok: false, code: "unknown_command", message: `알 수 없는 작업: ${String(request.op)}`, exit: 1 };
   }
   const file = db_path(env);
-  const creating = request.op === "init";
+  const creating = request.op === "init" || request.op === "migrate";
   if (!creating && !existsSync(file)) {
     if (request.op === "slugs" || request.op === "live_locks" || request.op === "active_slugs") {
       return { ok: true, data: { slugs: [], locks: {} } };

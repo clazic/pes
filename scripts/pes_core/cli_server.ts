@@ -9,7 +9,8 @@ import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { hub_ports, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
+import { OWNER_STUB_SLUG } from "./cli_bridge.ts";
+import { hub_ports, kill_pid, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
 import { need_project, project_exists, slug_of } from "./cli_records.ts";
 import { build_index, fill } from "./cli_screens.ts";
 import { LABEL, ROOT, STAGES, Die, arg_at, bridge, bridge_soft, die, expanduser, home_dir, is_record, missing_args, now, pdir, pes_home, resolve_path, say, write_text } from "./cli_support.ts";
@@ -87,7 +88,9 @@ export async function ensure_server(root: string): Promise<number> {
     await sleep(100);
   }
   if ((await whoami(free)) !== root) {
-    // the record of a server that never answered would outlive it and point at a pid some other program may get (final review 1 권장 4)
+    // the record of a server that never answered would outlive it and point at a pid some other program may get (final review 1 권장 4);
+    // SEL-74 G2: the child itself is ended too — a server that cannot answer must not outlive the failed command
+    kill_pid(pid);
     rmSync(record, { force: true });
     die(`서버가 시작되지 않았습니다 — ${join(root, ".pes-hub.out")} 를 보세요`, 1);
   }
@@ -139,7 +142,8 @@ function brief_of(slug: string, path: string, p: Dict, npend: number, lock: Dict
 export async function all_briefs(root: string): Promise<Dict[]> {
   const out: Dict[] = [];
   const at_home = existsSync(root) && resolve_path(root) === pes_home();
-  const served = new Set<string>(at_home ? (((await bridge_soft("active_slugs"))?.slugs as string[] | undefined) ?? []) : []);
+  // the project that only holds the owner of a fresh database (made by `migrate`) is not a project of the user
+  const served = new Set<string>(at_home ? (((await bridge_soft("active_slugs"))?.slugs as string[] | undefined) ?? []).filter((x) => x !== OWNER_STUB_SLUG) : []);
   if (existsSync(root)) {
     for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       if (!entry.isDirectory() || served.has(entry.name) || !existsSync(join(root, entry.name, "project.json"))) continue;

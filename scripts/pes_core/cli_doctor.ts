@@ -424,6 +424,8 @@ function doctor_project_legacy(R: Report, d: string): void {
   }
   const p = parsed as Dict;
   R.add(tag, "ok", String(p.topic ?? ""), `현재 ${LABEL[p.current] ?? String(p.current)}`);
+  // SEL-74 C: guidance only — never fixable (--fix does not migrate; only the user does)
+  R.add(tag, "warn", "이전 필요 — 새 형식으로 옮기지 않은 0.15 프로젝트", `읽기만 됩니다. 쓰려면 먼저 이전하세요: pes migrate ${tag}`);
   R.ro = true;
   try {
     const stale_tmp = readdirSync(d).filter((n) => /^project\.json\.tmp/.test(n)).sort();
