@@ -121,10 +121,14 @@ function exists(path: string): boolean {
   }
 }
 
-/** shutil.which: first match on PATH (with PATHEXT on Windows), nothing when it cannot be looked at. */
+/** shutil.which: first match on PATH, nothing when it cannot be looked at.
+ * Windows (as shutil.which with mode X_OK): a name that does not already end in a PATHEXT extension is looked up only as `name + ext`,
+ * never as the bare file — npm's cmd-shim puts an extensionless sh script (`npm`, `claude`, `korean-law`) next to each `.cmd`, and
+ * that script cannot be started there. Elsewhere: a file with the execute permission. */
 function which(name: string): string | null {
   const dirs = (process.env.PATH ?? process.env.Path ?? "").split(delimiter).filter((dir) => dir !== "");
-  const exts = WIN ? ["", ...(process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => ext !== "")] : [""];
+  const pathext = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => ext !== "");
+  const exts = !WIN ? [""] : pathext.some((ext) => name.toLowerCase().endsWith(ext.toLowerCase())) ? [""] : pathext;
   for (const dir of dirs) {
     for (const ext of exts) {
       const candidate = join(dir, name + ext);

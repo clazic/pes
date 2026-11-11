@@ -471,6 +471,9 @@ async function start(config: Config): Promise<void> {
       else send_json(req, res, 500, { ok: false });
     };
     try {
+      // 0.15 (BaseHTTPRequestHandler.parse_request, gh-87389): leading slashes fold into one, so `//dir` never redirects to the
+      // protocol-relative `//dir/` (another host) but to `/dir/` on this origin
+      if (req.url?.startsWith("//")) req.url = `/${req.url.replace(/^\/+/, "")}`;
       const method = req.method ?? "GET";
       if (method === "GET" || method === "HEAD") handle_get(req, res);
       else if (method === "POST") handle_post(req, res).catch(fail);
