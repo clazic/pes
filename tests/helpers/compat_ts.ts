@@ -120,13 +120,15 @@ function guarded_homes(homes: readonly string[]): string[] {
 export function ts_child_env(ctx: TsCtxLike, options: TsRunOptions = {}): NodeJS.ProcessEnv {
   const env: Record<string, string | undefined> = {
     ...ctx.env,
+    PES_TOKEN: undefined, // SEL-74: a token comes only per call (options.env.PES_TOKEN — the five agent commands context/claim/submit/wait/complete)
+    PES_HUB_PORTS: undefined, // SEL-74 G3: only an explicit options.env value (below) may set the hub range
     PES_TEST_GUARD: "1",
     PES_TEST_REAL_HOME: guarded_homes(options.real_homes ?? real_homes()).join(delimiter),
     ...(options.env ?? {}),
   };
   assert.equal(env.PES_TEST_GUARD, "1", "a case env turned the home guard off (PES_TEST_GUARD)");
   // like the Python side: no flag, token or owner leaks in, PES_OWNER only per call through options.env
-  for (const key of ["PES_TOKEN", "PES_DB_CORE", "NODE_OPTIONS", "NODE_PATH"]) delete env[key];
+  for (const key of ["PES_DB_CORE", "NODE_OPTIONS", "NODE_PATH"]) delete env[key];
   if (options.allow_hub_port !== undefined) env.PES_TEST_ALLOW_HUB_PORT = (typeof options.allow_hub_port === "number" ? [options.allow_hub_port] : [...options.allow_hub_port]).join(",");
   if (options.narrow_path === true) {
     const extra = process.platform === "win32" ? [join(process.env.SystemRoot ?? "C:\\Windows", "System32")] : [];
@@ -134,7 +136,7 @@ export function ts_child_env(ctx: TsCtxLike, options: TsRunOptions = {}): NodeJS
     env.Path = env.PATH;
   }
   for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
-  assert_isolated_env({ ...env, PES_OWNER: undefined, PES_HOME: env.PES_HOME ?? join(env.HOME ?? "", "pes-projects") }, options.real_homes);
+  assert_isolated_env({ ...env, PES_OWNER: undefined, PES_TOKEN: undefined, PES_HOME: env.PES_HOME ?? join(env.HOME ?? "", "pes-projects") }, options.real_homes);
   return env as NodeJS.ProcessEnv;
 }
 

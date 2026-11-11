@@ -197,3 +197,20 @@ PR26c 는 `scripts/serve.ts`(= `serve.py <PES 홈> [포트]` 직접 실행과 �
 **새 환경 변수 `PES_KEYS_PORT`:** API 키 화면의 포트(기본 8759). 시험이 빈 포트를 주입한다. 유효하지 않으면(정수 1~65535 아님) 종료 코드 2 와 변수 이름이 든 한 줄 메시지.
 
 **구현 선택으로 고정한 것(0.15 와 다르거나 0.15 가 정하지 않은 것):** DB 에 없는 폴더(project.json 만 있음)의 `POST /<slug>/feedback` 은 404 `{"ok":false}`(0.15 는 파일에 썼다 — D02: project.json 은 읽기 전용); `serve.ts` 의 잘못된 포트·인자는 스택 추적 없이 종료 코드 2, 이미 쓰는 포트는 1.
+
+## 전환 시험 (SEL-74, PR26e) — 스킬·설치를 TS 로, Python 제거
+
+**시험이 먼저 써졌다.** 아래 시험은 `scripts/`·`skills/`·`commands/`·`agents/`·CI 가 바뀌기 전에는 실패한다(그게 구현이 맞춰야 할 정답). 병합하면 사용자의 실제 `/pes:*` 가 TS 로 바뀌므로 병합 시점은 사용자에게 다시 확인한다.
+
+| 영역 | 파일 | 고정하는 것 |
+|---|---|---|
+| A 호출 전환 | `test_sel74_a_skill_calls` | `skills/`·`commands/`·`agents/`·`docs/adapters/` 에 Python 호출·`.py` 이름 0, README·AGENTS·CLAUDE 에 Python 호출 줄 0, 실행 명령은 `node …/scripts/pes.ts`·`setup.ts`, `lint_skills` 규칙 `[Python 호출]`, D14 흐름(거절 → 사용자에게 묻기 → `migrate`) 문서 단언 |
+| B DB 전용 5개 | `test_sel74_b_db_commands` | `pes.ts` 의 `context`·`claim`·`submit`·`wait`·`complete`: 0.15 `pes.py`(PES_DB_CORE 경로)와 같은 인자·한 줄 JSON·종료 코드, 플래그 없이 동작 |
+| C 0.15 폴더 열기 | `test_sel74_c_d14_refusal`·`test_sel74_c_migrate`·`test_sel74_c_doctor_hub` | 안 옮긴 폴더에 쓰기 → exit 1 + `먼저 이전하세요 — pes migrate …` 한 줄(바이트·mtime 불변), `pes migrate <폴더>`·`--all`(백업 묶음 → 검증 → 활성화, 원본 불변, 실패 시 활성화 없음, 두 번째는 `이미 이전됨` exit 0), doctor `이전 필요` 행(고칠 수 없음) |
+| D 설치·업그레이드 | `test_sel74_d_install_static`·`test_sel74_d_ci_install`·`test_sel74_d_install_run` | 설치 스크립트 Python 0·Node 26 확인·시험용 이음매(`PES_INSTALL_MIRROR`·`PES_INSTALL_PATH_ONLY`·`PES_SKIP_TOOLS`), CI 설치·업그레이드 잡(Windows·macOS), 임시 HOME 에서 스크립트를 실제로 돌림(sh 는 macOS/Linux, ps1 은 Windows 에서만 — 다른 OS 는 이유를 밝히고 skip) |
+| E Python 제거 | `test_sel74_e_python_removed` | `*.py`·pytest·requirements 삭제, 시험이 Python 을 부르지 않음, 하네스는 고정 기준값(`fixtures/compat/baseline/*.json`, `baseline.sha256.json` 으로 불변 확인)만으로 ts 를 비교, CI 에 Python 0 |
+| F 실제 홈 보호 | `test_sel74_f_real_home` | 새 시험 전부 임시 HOME·USERPROFILE·PES_HOME + 가드 + 전후 스냅샷(설치 시험은 `~/.claude` 포함) |
+| G SEL-77 권장 3건 | `test_sel74_g_server_safety`·`test_sel74_g2_hung_server` | `/whoami` 의 pid 와 기록 pid 대조(다르면 kill 0), 20초 무응답 서버 자식 종료, 시험 자식 env 에서 `PES_HUB_PORTS` 비움 |
+| H 버전 불변 | `test_sel74_h_version` | `plugin.json` 0.15.6·`package.json` 0.0.0 그대로 |
+
+공용 도우미 `helpers/sel74_env.ts`(임시 홈 실행·옛 폴더 만들기·바이트/mtime 지문·백업 묶음 찾기·DB 읽기). `ts_run(c, args, extra)` 는 `make_cli_env()` 의 DB 프로젝트에 대해 `pes.ts` 를 돌린다(`c.run` 이 `pes.py` 를 돌리던 자리 — 플래그 없음). `PES_TOKEN` 은 호출마다 `extra` 로만 넣는다.

@@ -24,6 +24,9 @@ export function isolated_home(prefix = "pes-sel34-"): IsolatedHome {
     USERPROFILE: home,
     PES_HOME: projects,
   };
+  // SEL-74 G3: a hub port range of the developer's shell must never reach a child (it would point the server probes somewhere real).
+  // A test that wants a range passes it explicitly in the options of the run.
+  delete env.PES_HUB_PORTS;
 
   let cleaned = false;
   return {
