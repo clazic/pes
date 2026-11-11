@@ -2638,7 +2638,13 @@ export async function handle_request(env: Environment, input: BridgeRequest): Pr
   }
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
   const read_only = READ_ONLY_OPS.has(request.op);
-  const db = read_only ? connect_read_only(file) : connect(file);
+  let db: Db;
+  try {
+    db = read_only ? connect_read_only(file) : connect(file);
+  } catch (error) {
+    // a file that is not a database (or a locked / unreadable one) is a refusal with one plain line, not an internal error
+    return { ok: false, code: "database_unreadable", message: `PES 데이터베이스를 열 수 없습니다 — ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`, exit: 1 };
+  }
   let session: Session | undefined;
   try {
     if (creating) migrate(db);

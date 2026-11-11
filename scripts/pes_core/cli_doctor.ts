@@ -3,8 +3,8 @@
 // is the TS runtime's). Reading only, unless --fix: the safe repairs (a missing home folder, a stale dashboard, old server records).
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, accessSync, constants } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, utimesSync, writeSync, accessSync, constants } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 import { hub_ports, inside_pes_home, legacy_ports, root_port, server_url, stop_legacy, whoami, whoami_info } from "./cli_home.ts";
 import { build_hub, find_tool, which_in_path } from "./cli_server.ts";
@@ -436,6 +436,141 @@ function doctor_project_legacy(R: Report, d: string): void {
   if (is_record(p.stages)) describe_stage_order(R, tag, p);
 }
 
+// ---------------------------------------------------------------- database (reading only)
+
+const RISKY_PATH = /[\s'"`()$&;|<>*?[\]{}!#^]/;
+
+function db_file(): string {
+  return join(home_dir(), ".pes", "pes.db");
+}
+
+/**
+ * Sidecar files next to the DB that SQLite applies to the DB the moment a connection opens (recovery, checkpoint): the default doctor
+ * does not open the DB then (the original stays unchanged). An empty (0 byte) -wal is normal and not counted. 0.15 also asked the OS
+ * whether another PES holds the DB; Node has no byte-range lock probe, so the row says both cases (another PES running, or an
+ * abnormal end) and what to do.
+ */
+function db_journal_residue(): string[] {
+  const out: string[] = [];
+  for (const suffix of ["-wal", "-journal"]) {
+    const side = db_file() + suffix;
+    try {
+      const st = statSync(side);
+      if (!(st.isFile() && st.size > 0)) continue;
+    } catch {
+      continue;
+    }
+    // another PES that has the database open right now is a normal running state: nothing to recover, so it is not residue
+    if (suffix === "-wal" ? open_elsewhere(db_file() + "-shm", "shm") : open_elsewhere(side, "journal")) continue;
+    out.push(basename(side));
+  }
+  return out;
+}
+
+/** True when another process holds `file` open (a live connection keeps its -shm mapped and a writing one its journal open). Unknown → false. */
+function open_elsewhere(file: string, kind: "shm" | "journal"): boolean {
+  if (!exists(file)) return false;
+  try {
+    if (process.platform === "win32") return win_held(file, kind);
+    if (process.platform === "linux" && !exists("/proc/self/fd")) return false;
+    if (process.platform === "linux") return proc_holds(file);
+    const [code, out] = run_quiet("lsof", ["-t", "--", file], 10);
+    return code === 0 && /^\d+$/m.test(out.trim());
+  } catch {
+    return false;
+  }
+}
+
+function proc_holds(file: string): boolean {
+  const real = realpathSync(file);
+  for (const pid of readdirSync("/proc")) {
+    if (!/^\d+$/.test(pid) || Number(pid) === process.pid) continue;
+    try {
+      if (readdirSync(`/proc/${pid}/fd`).some((fd) => {
+        try {
+          return readlinkSync(`/proc/${pid}/fd/${fd}`) === real;
+        } catch {
+          return false;
+        }
+      })) return true;
+      if (readFileSync(`/proc/${pid}/maps`, "utf8").includes(real)) return true;
+    } catch {
+      // a process that went away or is not ours to look at
+    }
+  }
+  return false;
+}
+
+/**
+ * Windows: SQLite holds a shared byte lock (the -shm's DMS byte) for a live connection, and keeps its journal open without delete sharing.
+ * A write of the byte's own value fails while that lock is held; a rename of the journal fails while it is open (both undone at once, times kept).
+ */
+function win_held(file: string, kind: "shm" | "journal"): boolean {
+  const before = statSync(file);
+  if (kind === "shm") {
+    let fd: number | undefined;
+    try {
+      fd = openSync(file, "r+");
+      const one = Buffer.alloc(1);
+      if (readSync(fd, one, 0, 1, 128) !== 1) return false;
+      writeSync(fd, one, 0, 1, 128);
+      return false;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+      try {
+        utimesSync(file, before.atime, before.mtime);
+      } catch {
+        // times stay as written
+      }
+    }
+  }
+  const aside = `${file}.probe`;
+  try {
+    renameSync(file, aside);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+  }
+  renameSync(aside, file);
+  return false;
+}
+
+function doctor_db_residue(R: Report, residue: string[]): void {
+  R.add(
+    "데이터베이스",
+    "warn",
+    `다른 PES 가 실행 중이거나 비정상 종료 흔적 ${db_file()}`,
+    `${residue.join(", ")} 가 남아 있음 — 진단이 DB 를 열면 SQLite 가 이를 DB 에 반영하므로 기본 진단은 DB 를 열지 않았습니다(프로젝트 진단도 건너뜀). 다른 PES(서버·명령)를 끈 뒤 doctor 를 다시 실행하고, 그래도 남으면 doctor --fix(또는 pes 명령 한 번)로 정상 복구하세요`,
+  );
+}
+
+function doctor_path_risk(R: Report, h: string): void {
+  if (RISKY_PATH.test(h)) {
+    R.add(
+      "환경",
+      "warn",
+      "PES 홈 경로에 공백·따옴표·괄호 같은 특수 문자가 있음 (명령 quoting 위험)",
+      `${h} — watch 는 경로를 스스로 따옴표로 묶지만, 이 경로를 셸 명령에 직접 붙이는 다른 곳(Monitor 명령·스크립트)에는 따옴표가 필요합니다. 공백·따옴표 없는 폴더로 \`home\` 명령으로 옮기는 편이 안전합니다`,
+    );
+  }
+}
+
+/** The database group (0.15 doctor_db): the state of the file — read only, never repaired here — and the path risk. */
+async function doctor_db(R: Report, h: string): Promise<void> {
+  const file = db_file();
+  const st = await bridge_soft("db_status");
+  if (st === undefined) R.add("데이터베이스", "bad", `데이터베이스를 점검하지 못함 ${file}`, "코어를 실행하지 못했습니다 — Node 26 이상이 필요합니다");
+  else if (st.state === "missing") R.add("데이터베이스", "info", `데이터베이스 아직 없음 ${file}`, "첫 init 이나 이전 때 만들어집니다");
+  else if (st.state === "broken") {
+    R.add("데이터베이스", "bad", `데이터베이스를 열 수 없음 ${file}`, `${String(st.message ?? "")} — doctor 는 DB 를 고치지 않습니다. 백업에서 복원하거나 파일을 옮겨 두고 다시 시작하세요`);
+  } else if (st.schema_current !== true) R.add("데이터베이스", "warn", `데이터베이스 스키마가 최신이 아님 ${file}`, "새 코어 버전으로 DB 를 올려야 합니다");
+  else R.add("데이터베이스", "ok", `데이터베이스 ${file}`, `프로젝트 ${String(st.projects ?? 0)}개 · 스키마 최신`);
+  doctor_path_risk(R, h);
+}
+
 // ---------------------------------------------------------------- doctor
 
 export async function cmd_doctor(args: string[]): Promise<void> {
@@ -446,14 +581,17 @@ export async function cmd_doctor(args: string[]): Promise<void> {
   const R = new Report();
   doctor_env(R, net);
   const h = pes_home();
-  const st = await bridge_soft("db_status");
-  if (st === undefined) R.add("데이터베이스", "bad", "데이터베이스를 점검하지 못함", "코어를 실행하지 못했습니다");
-  else if (st.state === "broken") R.add("데이터베이스", "bad", "데이터베이스를 열 수 없음", `${String(st.message ?? "")} — doctor 는 DB 를 고치지 않습니다. 백업에서 복원하거나 파일을 옮겨 두고 다시 시작하세요`);
-  else if (st.state !== "missing" && !st.schema_current) R.add("데이터베이스", "warn", "데이터베이스 스키마가 최신이 아님", "새 코어 버전으로 DB 를 올려야 합니다");
+  // the default diagnosis (not --fix) leaves the original alone: a -wal / -journal next to the DB is applied the moment a connection opens
+  const residue = fix ? [] : db_journal_residue();
+  if (residue.length > 0) {
+    doctor_db_residue(R, residue);
+    if (tgt.length === 0) doctor_path_risk(R, h);
+  } else if (tgt.length === 0) await doctor_db(R, h); // the database state is part of the whole-home diagnosis only
   await doctor_server(R, h);
-  const served = new Set<string>(((await bridge_soft("active_slugs"))?.slugs as string[] | undefined) ?? []);
+  const served = new Set<string>(residue.length > 0 ? [] : (((await bridge_soft("active_slugs"))?.slugs as string[] | undefined) ?? []));
   let dirs: string[];
-  if (tgt.length > 0) dirs = [pdir(tgt[0] as string)];
+  if (residue.length > 0) dirs = []; // which projects the database serves is unknown without opening it
+  else if (tgt.length > 0) dirs = [pdir(tgt[0] as string)];
   else {
     const names = new Set<string>(served);
     if (exists(h)) for (const e of readdirSync(h, { withFileTypes: true })) if (e.isDirectory() && exists(join(h, e.name, "project.json"))) names.add(e.name);
@@ -471,7 +609,7 @@ export async function cmd_doctor(args: string[]): Promise<void> {
     }
     doctor_project_legacy(R, d);
   }
-  if (tgt.length === 0 && exists(h)) {
+  if (tgt.length === 0 && exists(h) && residue.length === 0) {
     const stray = readdirSync(h, { withFileTypes: true })
       .filter((e) => e.isDirectory() && !exists(join(h, e.name, "project.json")) && !e.name.startsWith(".") && !served.has(e.name))
       .map((e) => e.name)
@@ -514,7 +652,8 @@ export async function cmd_doctor(args: string[]): Promise<void> {
         1,
       ),
     );
-    return; // 0.15: --json ends with exit 0 whatever the rows say
+    if (bad) process.exitCode = 1; // the database path of 0.15: a problem row ends --json with exit 1 too
+    return;
   }
   const MARK: Record<Level, string> = { ok: "[정상]", info: "[참고]", warn: "[주의]", bad: "[문제]" };
   let last: string | null = null;
