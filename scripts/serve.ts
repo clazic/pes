@@ -27,12 +27,6 @@ const MAX_BODY = 256 * 1024;
 /** A body above MAX_BODY but within this size is read away before the 413 is sent (the sender is not cut off). */
 const DRAIN_LIMIT = 8 * 1024 * 1024;
 const DRAIN_IO_TIMEOUT_MS = 10_000;
-/**
- * Answers that arrive one close behind the other (less than BURST_GAP_MS apart; at most BURST_MAX_MS from the first) share one time, so
- * a burst written one answer after the other is not split by a second boundary (the file names then differ only by the -k suffix).
- */
-const BURST_GAP_MS = 100;
-const BURST_MAX_MS = 1000;
 const SAFE_INT = 2n ** 53n - 1n;
 const MAX_JSON_DEPTH = 200;
 const KINDS = new Set(["feedback", "review", "stage_start", "approve", "resume", "reopen"]);
@@ -236,21 +230,10 @@ function make_db(root: string): { route: (slug: string) => Promise<"database" | 
 
 async function start(config: Config): Promise<void> {
   const { root, port } = config;
-  // Load the database code BEFORE listening: otherwise the first answers wait for it, and the load (synchronous, long) would split a burst of
-  // answers in the middle. A failure here is not fatal: the first answer meets it again and is refused with 503.
+  // Load the database code BEFORE listening: otherwise the first answer waits for it. A failure here is not fatal: the first answer meets it again and is refused with 503.
   await import("./pes_core/cli_bridge.ts").catch(() => undefined);
   const allowed = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   const db = make_db(root);
-  let burst_first_at = Number.NEGATIVE_INFINITY;
-  let burst_last_at = Number.NEGATIVE_INFINITY;
-  /** The time an answer is recorded with: its arrival, shared by the answers of one burst. */
-  const arrival_ms = (): number => {
-    const now = Date.now();
-    if (now - burst_last_at > BURST_GAP_MS || now - burst_first_at > BURST_MAX_MS) burst_first_at = now;
-    burst_last_at = now;
-    return burst_first_at;
-  };
-
   const project_of = (path: string): { dir: string | null; rest: string[] } => {
     const parts = py_unquote(path).split("/").filter((part) => part !== "");
     if (parts[0] !== undefined && SLUG.test(parts[0]) && existsSync(join(root, parts[0], "project.json"))) return { dir: join(root, parts[0]), rest: parts.slice(1) };
@@ -402,7 +385,6 @@ async function start(config: Config): Promise<void> {
     });
 
   const handle_post = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const arrived = arrival_ms();
     const path = raw_path(req.url);
     // which project takes the answer: '/<slug>/feedback', or (screens before 0.8) the first segment of the Referer's path for '/feedback'
     let slug: string | null = null;
@@ -461,7 +443,6 @@ async function start(config: Config): Promise<void> {
       kind,
       text,
       answers,
-      received_ms: arrived,
       spec: py_str(Object.hasOwn(data, "spec") ? data.spec : "").slice(0, 1024),
       set_id: typeof data.set_id === "string" ? data.set_id : null,
       via: allowed.has(origin) ? "html" : "remote",

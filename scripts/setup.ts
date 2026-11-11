@@ -858,8 +858,12 @@ async function cmd_keys(args: string[]): Promise<void> {
     try {
       // a screen started earlier is still there: end it
       const info = JSON.parse(readFileSync(join(PESDIR, "setup-keys.json"), "utf8")) as { pid?: unknown };
-      process.kill(Number(info.pid));
-      await sleep(500);
+      const pid = info.pid;
+      // only a real process id: 0 / negative would signal a whole process group
+      if (typeof pid === "number" && Number.isInteger(pid) && pid > 1) {
+        process.kill(pid);
+        await sleep(500);
+      }
     } catch {
       // not ours / already gone
     }

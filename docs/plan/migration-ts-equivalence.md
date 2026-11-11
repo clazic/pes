@@ -127,10 +127,10 @@
 | 항목 | 0.15 | TS |
 |---|---|---|
 | 답(`POST /<slug>/feedback`) | 파일 `feedback/<이름>.json` | 같은 프로세스 안에서 DB 제출 한 번(`cli_bridge.ts` 의 `handle_request`, 자식 프로세스 없음). 응답 `{ok, file, v}`, `feedback.log` 줄은 `FEEDBACK <단계> R<라운드> <종류> <이름>`. DB 에 없는 폴더는 404(D02: `project.json` 은 읽기 전용) |
-| 답 시각 | 처리 시각 | 서버가 받은 시각(100ms 안에 이어 도착한 답은 한 시각을 나눈다 — 동시에 온 답이 초 경계에 갈라지지 않게. 이름 충돌은 `-k` 가 푼다) |
 | 기동 | `getfqdn()` 회피(SEL-33) | IP 주소(`127.0.0.1`)로만 bind, 이름 조회·허브 접속 없음 |
 | `setup check` | `python` 행 있음 | **D12**: `python` 행 없음(PES TS 는 Python 을 실행하지 않는다). 사용법 첫 줄은 `사용: node scripts/setup.ts <명령>` |
 | API 키 화면 포트 | 8759 고정 | 기본 8759, 환경 변수 `PES_KEYS_PORT`(정수 1~65535)로 바꾼다. 잘못된 값은 종료 코드 2 |
+| `keys` 의 `reg_law` | `settings.json` 을 Python `json` 으로 다시 씀 | JS `JSON.parse`→`stringify` 로 다시 쓴다(`.bak-pes` 백업을 먼저 만든다): `1.0`→`1`, 정수꼴 키("1")가 앞으로 재정렬, 2^53 넘는 정수는 정밀도 손실 — 설정 의미는 같다 |
 | 외부 도구 설치·업그레이드 | `run()` 이 모든 예외를 -1 로 삼킴 | 같다 — 실행하지 못하는 도구는 '없음'으로 본다 |
 
 ## 5. skills/commands/agents의 Python 호출 위치

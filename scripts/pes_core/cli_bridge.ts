@@ -2371,10 +2371,8 @@ const web_feedback: Handler = async (s, req) => {
     }
   }
 
-  // The time of the answer: when the local server received it (args.received_ms, scripts/serve.ts), else now. Answers that arrive together
-  // then carry one time, so a burst is not split by a second boundary while it is written one after another.
-  const received = typeof args.received_ms === "number" && Number.isFinite(args.received_ms) ? args.received_ms : s.now();
-  const stamp = file_stamp(received);
+  const now = s.now();
+  const stamp = file_stamp(now);
   const doc: Record<string, unknown> = {
     stage: stage.key,
     round,
