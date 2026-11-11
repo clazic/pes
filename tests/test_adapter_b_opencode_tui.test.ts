@@ -6,13 +6,13 @@
  *  해석 26 `scripts/pes_core/adapters/opencode_tui.ts` exports `opencode_tui_mcp_entry({command, server_script,
  *          project_id, api_base_url, model?})` → {type:"local", command:[command, server_script], environment:
  *          {PES_PROJECT_ID, PES_API_BASE_URL, PES_RUNTIME:"opencode_tui", PES_PROVIDER:"unknown", PES_MODEL,
- *          PES_AGENT_TOKEN:"{env:PES_AGENT_TOKEN}"}, enabled:true}: the `mcp.pes` entry of opencode.json.
+ *          PES_AGENT_TOKEN:"{env:PES_AGENT_TOKEN}"}} (no `enabled`; `disabled` absent or false): the `mcp.servers.pes` entry of opencode.json (current OpenCode form, docs opencode.ai/docs/mcp-servers).
  *          OpenCode expands `{env:VAR}`, so the token is a reference, never a value. Reads/writes no file.
  *  해석 27 OpenCode TUI is NOT the built-in runner and not the Go route: the entry refuses a model or provider on
  *          the Go route (`opencode-go/...`, error code `go_route_blocked`, Korean message) — PES cannot see or
  *          cap what a person's TUI spends, and the Go subscription meter belongs to mode A only. The note
  *          docs/adapters/opencode-tui.md says so in a 「Go」 limits section (차단/한계), says OpenCode TUI is not the
- *          A 내장 실행기, and carries ONE ```json pes-config``` block: {"mcp": {"pes": {...}}} with the same
+ *          A 내장 실행기, and carries ONE ```json pes-config``` block: {"mcp": {"servers": {"pes": {...}}}} with the same
  *          placeholders as the Codex note.
  */
 
@@ -39,8 +39,13 @@ define_cli_suite({
   parse_config: (text) => {
     const parsed = JSON.parse(text);
     assert.ok(parsed.mcp && typeof parsed.mcp === "object", "the example has an mcp object");
-    assert.deepEqual(Object.keys(parsed.mcp), ["pes"], "one server, named pes");
-    return parsed.mcp.pes;
+    // current OpenCode form: mcp.servers.<name> (not the old mcp.<name>)
+    assert.deepEqual(Object.keys(parsed.mcp), ["servers"], "server names live under mcp.servers, nothing else under mcp");
+    assert.deepEqual(Object.keys(parsed.mcp.servers), ["pes"], "one server, named pes");
+    const server = parsed.mcp.servers.pes;
+    assert.ok(!("enabled" in server), "the old `enabled` key is not used; OpenCode's switch is `disabled`");
+    assert.ok(server.disabled === undefined || server.disabled === false, "the server is not disabled");
+    return server;
   },
   forbidden_home_dirs: [".config", ".local", ".opencode"],
 });
@@ -54,7 +59,8 @@ test("opencode-tui: the config entry is a local server with the token as a {env:
   });
   assert.equal(entry.type, "local");
   assert.deepEqual(entry.command, [process.execPath, SERVER_SCRIPT], "the node path is given, never looked up with which");
-  assert.equal(entry.enabled, true);
+  assert.ok(!("enabled" in entry), "no `enabled` key: current OpenCode uses `disabled` (default false)");
+  assert.ok(!("disabled" in entry) || entry.disabled === false, "the server is on");
   assert.deepEqual(Object.keys(entry.environment).sort(), ["PES_AGENT_TOKEN", "PES_API_BASE_URL", "PES_MODEL", "PES_PROJECT_ID", "PES_PROVIDER", "PES_RUNTIME"]);
   assert.equal(entry.environment.PES_RUNTIME, "opencode_tui");
   assert.equal(entry.environment.PES_PROVIDER, "unknown");

@@ -15,8 +15,8 @@
 //     opencode_tui_mcp_entry({command, server_script, project_id, api_base_url, model?})
 //         -> {type:"local", command:[command, server_script], environment:{PES_PROJECT_ID, PES_API_BASE_URL,
 //             PES_RUNTIME:"opencode_tui", PES_PROVIDER:"unknown", PES_MODEL: model ?? "unknown",
-//             PES_AGENT_TOKEN:"{env:PES_AGENT_TOKEN}"}, enabled:true}
-//         (the mcp.pes entry of opencode.json; OpenCode expands {env:VAR}; a model on the Go route is refused)
+//             PES_AGENT_TOKEN:"{env:PES_AGENT_TOKEN}"}}
+//         (the mcp.servers.pes entry of opencode.json, no `enabled`; OpenCode expands {env:VAR}; a model on the Go route is refused)
 //     opencode_tui_launch_env({key_store, project_id}) -> Promise<{PES_AGENT_TOKEN}>
 //
 //   key store (the PR19 interface, here a fake): { put(ref, secret), get(ref), delete(ref), where() }, each sync or

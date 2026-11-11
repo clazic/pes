@@ -23,8 +23,14 @@ define_cli_harden({
   config_file: "opencode.json",
   parse_config: (text) => {
     const parsed = JSON.parse(text);
-    assert.deepEqual(Object.keys(parsed.mcp), ["pes"]);
-    return parsed.mcp.pes;
+    assert.ok(parsed.mcp && typeof parsed.mcp === "object", "the example has an mcp object");
+    // current OpenCode form: mcp.servers.<name> (not the old mcp.<name>)
+    assert.deepEqual(Object.keys(parsed.mcp), ["servers"], "server names live under mcp.servers, nothing else under mcp");
+    assert.deepEqual(Object.keys(parsed.mcp.servers), ["pes"], "one server, named pes");
+    const server = parsed.mcp.servers.pes;
+    assert.ok(!("enabled" in server), "the old `enabled` key is not used; OpenCode's switch is `disabled`");
+    assert.ok(server.disabled === undefined || server.disabled === false, "the server is not disabled");
+    return server;
   },
   forbidden_home_dirs: [".config", ".local", ".opencode"],
 });
