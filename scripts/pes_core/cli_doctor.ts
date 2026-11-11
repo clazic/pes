@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { hub_ports, legacy_ports, root_port, server_url, stop_legacy, whoami, whoami_info } from "./cli_home.ts";
+import { hub_ports, inside_pes_home, legacy_ports, root_port, server_url, stop_legacy, whoami, whoami_info } from "./cli_home.ts";
 import { build_hub, find_tool, which_in_path } from "./cli_server.ts";
 import { build_index } from "./cli_screens.ts";
 import {
@@ -319,7 +319,8 @@ async function doctor_server(R: Report, h: string): Promise<void> {
   }
   if (old.length > 0) {
     R.add("서버", "warn", `예전 방식 프로젝트별 서버 ${old.length}개`, `${old.map(([pt]) => `:${pt}`).join(", ")} — 이제 포트 하나로 충분`, async () => {
-      for (const [, r] of old) await stop_legacy(r);
+      // any local program can answer /whoami with any path: only a root inside the PES home is an old PES server to stop (R1 권장 9)
+      for (const [, r] of old) if (inside_pes_home(r)) await stop_legacy(r);
     });
   }
   const free_ports: number[] = [];
@@ -410,7 +411,13 @@ function doctor_project_legacy(R: Report, d: string): void {
     R.add(tag, "bad", "project.json 읽기 실패", (broken ?? "읽을 수 없음").slice(0, 200));
     return;
   }
-  const parsed: unknown = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch {
+    R.add(tag, "bad", "project.json 읽기 실패", "지원하지 않는 값(NaN·Infinity)이 있습니다");
+    return;
+  }
   if (!is_record(parsed)) {
     R.add(tag, "bad", "project.json 읽기 실패", "project.json 은 JSON 객체여야 합니다");
     return;

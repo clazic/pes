@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 
-import { Die, bridge, die, py_json_error } from "./cli_support.ts";
+import { Die, KEYS, bridge, die, py_json_error } from "./cli_support.ts";
 import { normalize_project } from "./report.ts";
 
 type Dict = Record<string, any>;
@@ -50,8 +50,19 @@ function load_legacy(d: string): ReadState {
   }
   const broken = py_json_error(text);
   if (broken !== null) die(`project.json 을 읽지 못했습니다: ${file} (${broken}) — 폴더는 그대로 두었습니다`, 1);
-  const raw: unknown = JSON.parse(text);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    // Python's json accepts NaN / Infinity / -Infinity, JSON.parse does not: one Korean line instead of the parser's English (R1 권장 4)
+    return die(`project.json 에 지원하지 않는 값(NaN·Infinity)이 있습니다: ${file} — 폴더는 그대로 두었습니다`, 1);
+  }
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) die(`project.json 은 JSON 객체여야 합니다: ${file}`, 1);
+  const current = (raw as Dict).current;
+  if (typeof current !== "string" || !KEYS.includes(current)) {
+    // no stage to show: one line instead of `현재 단계: undefined` (D11, R1 권장 5)
+    die(`project.json 의 현재 단계(current)가 단계 이름이 아닙니다: ${file} (${KEYS.join(", ")} 중 하나여야 함) — 폴더는 그대로 두었습니다`, 1);
+  }
   let library: Dict | null = null;
   const lib_file = join(d, "library.json");
   if (existsSync(lib_file)) {

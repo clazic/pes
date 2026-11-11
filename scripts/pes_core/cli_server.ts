@@ -255,7 +255,7 @@ function shell_quote(text: string): string {
 export async function cmd_watch(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "watch"));
   if (!existsSync(join(d, "project.json")) && !(await project_exists(d))) die(`project.json 없음: ${d}`, 1);
-  say(`tail -n0 -F ${shell_quote(`${d}/feedback.log`)} | grep --line-buffered FEEDBACK`);
+  say(`tail -n0 -F ${shell_quote(join(d, "feedback.log"))} | grep --line-buffered FEEDBACK`);
 }
 
 function is_executable(file: string): boolean {

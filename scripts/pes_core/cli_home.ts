@@ -81,9 +81,18 @@ export async function server_url(d: string): Promise<string | null> {
   return `http://127.0.0.1:${port}/${d === root ? "" : `${basename(d)}/`}`;
 }
 
+/**
+ * A pid read from a record file (`.pes-hub-server`, `.pes-server`) is signalled only when it is a safe integer > 1: null / 0 would hit
+ * our own process group, -1 every process of the user, 1 init — a stale or hand-made record must never reach those (R1 필수 1).
+ */
+export function signalable_pid(pid: unknown): pid is number {
+  return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 1;
+}
+
 function kill_pid(pid: unknown): boolean {
+  if (!signalable_pid(pid)) return false;
   try {
-    process.kill(Number(pid), "SIGTERM");
+    process.kill(pid, "SIGTERM");
     return true;
   } catch {
     return false;
@@ -108,6 +117,12 @@ function unlink_quiet(file: string): void {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+/** True when `d` is a folder inside the PES home (not the home itself): only such a root answered by an old server is ours to stop. */
+export function inside_pes_home(d: string): boolean {
+  const rel = relative(resolve_path(pes_home()), resolve_path(d));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
 
 /** The old per-project server (8765~): stop it by its record, forget the record. */
 export async function stop_legacy(d: string): Promise<void> {
