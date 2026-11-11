@@ -153,17 +153,19 @@ function note_count(runtime: CommandRuntime, project_id: string): number {
 
 /**
  * The stage a note belongs to: the one named, else the current one. A project without a current stage (a hand-written v0.15 file that never
- * named one) keeps the note on no stage, as v0.15 did (`stage: null`).
+ * named one) keeps the note on no stage, as v0.15 did (`stage: null`) — only when the CLI asks for it (`stage_optional`).
  */
 function note_stage(
   runtime: CommandRuntime,
   project_id: string,
   key: unknown,
+  stage_optional: boolean,
 ): { id: string | null; key: string | null; edition_id: string } {
   try {
     return resolve_stage_key(runtime, project_id, key);
   } catch (error) {
-    if (!(error instanceof ApiError) || error.code !== "not_found" || (key !== undefined && key !== null)) throw error;
+    // the relaxation is the CLI's option only (`stage_optional`); every other caller still gets `not_found`, as before SEL-71
+    if (!stage_optional || !(error instanceof ApiError) || error.code !== "not_found" || (key !== undefined && key !== null)) throw error;
     const edition = runtime.db.get<{ id: string }>("SELECT active_edition_id AS id FROM projects WHERE id = ?", project_id);
     if (edition === undefined || edition.id === null) throw error;
     return { id: null, key: null, edition_id: edition.id };
@@ -175,12 +177,15 @@ function note_stage(
 
 function run_add_note(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["text", "stage", "allow_blank"]);
+  reject_unknown_fields(payload, ["text", "stage", "allow_blank", "stage_optional"]);
+  if ("stage_optional" in payload && (payload.stage_optional !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "stage_optional is not accepted here");
+  }
   // `allow_blank`: v0.15's `note <dir>` with no text stored an empty note; scripts/pes.ts keeps that (a person-facing CLI rule, not an API one)
   const blank_ok = payload.allow_blank === true && payload.text === "";
   const text = blank_ok ? "" : require_text(payload, "text");
   const scope = scope_of(runtime);
-  const stage = note_stage(runtime, scope.project_id, payload.stage);
+  const stage = note_stage(runtime, scope.project_id, payload.stage, payload.stage_optional === true);
   const ids = new_ids(runtime);
   const result = {
     project_id: scope.project_id,
@@ -220,8 +225,18 @@ function run_add_note(runtime: CommandRuntime): CommandResult {
 
 function run_record_chat(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage", "text", "kind", "web"]);
-  const text = require_text(payload, "text", payload.web === undefined ? MAX_TEXT : MAX_WEB_TEXT);
+  reject_unknown_fields(payload, ["stage", "text", "kind", "web", "allow_blank"]);
+  // `allow_blank` (scripts/pes.ts `chat`): v0.15 recorded an empty or blank answer (exit 0); the CLI keeps that. Not for the API / a screen.
+  if ("allow_blank" in payload && (payload.allow_blank !== true || runtime.ctx.via !== "cli" || payload.web !== undefined)) {
+    throw new ApiError("invalid_payload", "allow_blank is not accepted here");
+  }
+  let text: string;
+  if (payload.allow_blank === true && typeof payload.text === "string") {
+    if (payload.text.length > MAX_TEXT) throw new ApiError("invalid_payload", "text is too long");
+    text = payload.text;
+  } else {
+    text = require_text(payload, "text", payload.web === undefined ? MAX_TEXT : MAX_WEB_TEXT);
+  }
   const kind = payload.kind === undefined ? "feedback" : require_non_empty_string(payload, "kind");
   if (kind.length > 64) throw new ApiError("invalid_payload", "kind is too long");
   if (payload.web !== undefined) return run_web_submission(runtime, payload, kind);
@@ -248,7 +263,7 @@ function run_record_chat(runtime: CommandRuntime): CommandResult {
     scope,
     stage,
     "note",
-    record_fields(first_line(text, 80), text, "done", {
+    record_fields(first_line(text, 80) || "(빈 답)", text, "done", {
       role: "chat_input",
       stage: stage.key,
       round: stage.latest_round_no,

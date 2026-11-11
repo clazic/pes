@@ -1,7 +1,7 @@
 // pes.ts write commands, part 1: init, merge, mark, chat, note, qa-brief, qa, lock, unlock, status (SEL-71).
 // 0.15 text and exit codes; the state lives in the database (core calls only).
 
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { server_url } from "./cli_home.ts";
@@ -123,9 +123,20 @@ export async function cmd_init(args: string[]): Promise<void> {
     die(`--slug(${slug})는 폴더 이름(${slug_of(d)})과 같아야 합니다 — 폴더 이름으로 프로젝트를 찾습니다`, 2);
   }
   const lib = opt.import !== undefined && opt.import !== "" ? library_dict(pdir(opt.import)) : null;
-  // the database's checks (duplicate name, a library it refuses) first; the folder and the library's files only after they pass
-  await bridge("init", null, { slug, topic: opt.topic, library: lib, any_name: true });
-  mkdirSync(d, { recursive: true });
+  // The folder first: when it cannot be made (a file in the way, no permission, a path too long) nothing is left in the database, so the
+  // same name can be initialised again. If the database then refuses (a library it will not take), the folders made here go away again.
+  let made_first: string | undefined;
+  try {
+    made_first = mkdirSync(d, { recursive: true });
+  } catch (error) {
+    die(`프로젝트 폴더를 만들 수 없습니다: ${d} (${(error as NodeJS.ErrnoException).code ?? "오류"})`, 1);
+  }
+  try {
+    await bridge("init", null, { slug, topic: opt.topic, library: lib, any_name: true });
+  } catch (error) {
+    if (made_first !== undefined) rmSync(made_first, { recursive: true, force: true });
+    throw error;
+  }
   if (opt.import !== undefined && opt.import !== "") copy_library_shots(d, pdir(opt.import));
   for (const sub of ["feedback", "ask", "snapshots", "shots", "out"]) mkdirSync(join(d, sub), { recursive: true });
   const log = join(d, "feedback.log");

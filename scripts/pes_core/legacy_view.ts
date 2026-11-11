@@ -113,11 +113,22 @@ function library_item(row: Row, extra: Dict, sources: Dict[]): Dict {
   return item;
 }
 
-/** The manifest name of a round that `approve` opened and sealed by itself (cli_bridge compat_approve); the read model does not count it as a round. */
+/**
+ * The manifest name `approve` gives a round it opened and sealed by itself (cli_bridge compat_approve). Only a label for a person
+ * reading the store: the read model does NOT trust it (a client picks upload names) — the server's mark is the round's receipt
+ * (`mutation_commits.result_json.implicit`, set by `round.start` for the CLI transport only).
+ */
 export const IMPLICIT_MANIFEST = "implicit-approval.json";
 
-/** The `reason` of the reopen `approve` does by itself to approve a stage a second time (v0.15 allowed that); it leaves no history line. */
+/**
+ * The `reason` `approve` gives the reopen it does by itself to approve a stage a second time (v0.15 allowed that). Only a label: a
+ * client picks reopen reasons — the read model reads the reopen receipt's `quiet` (set by `stage.reopen`, CLI transport only).
+ */
 export const REAPPROVE_REASON = "pes-cli:re-approve";
+
+/** The seven fields `set` can write (cli_set.ts): the only ones the read model takes from a `stage_field` / `project_field` artifact. */
+const SET_STAGE_FIELDS: ReadonlySet<string> = new Set(["summary", "changes", "carry_over", "settings", "review"]);
+const SET_PROJECT_FIELDS: ReadonlySet<string> = new Set(["executive_summary", "conclusion"]);
 
 export interface PendingAnswer {
   name: string;
@@ -183,10 +194,10 @@ export function build_project_view(
             (SELECT mc.rowid FROM mutation_commits mc
               WHERE mc.project_id = r.project_id AND mc.action = 'round.started'
                 AND json_extract(mc.result_json, '$.round_id') = r.id) AS start_rowid,
-            (SELECT 1 FROM snapshots sn JOIN blobs b ON b.project_id = sn.project_id AND b.id = sn.manifest_blob_id
-              WHERE sn.project_id = r.project_id AND sn.id = r.sealed_snapshot_id AND b.original_name = ?) AS implicit
+            (SELECT 1 FROM mutation_commits mc
+              WHERE mc.project_id = r.project_id AND mc.action = 'round.started'
+                AND json_extract(mc.result_json, '$.round_id') = r.id AND json_extract(mc.result_json, '$.implicit') = 1) AS implicit
        FROM rounds r WHERE r.project_id = ? AND r.edition_id = ? ORDER BY r.stage_id, r.round_no`,
-    IMPLICIT_MANIFEST,
     project_id,
     edition_id ?? "",
   );
@@ -354,10 +365,11 @@ export function build_project_view(
     if (kind === "review") {
       // `pes set`: one value per (stage or project, field), kept in the newest version of an invisible review artifact (cli_bridge set_field)
       if ((meta.role === "stage_field" || meta.role === "project_field") && typeof meta.field === "string") {
-        if (meta.role === "stage_field" && stage_key !== null) {
+        // only the seven fields `set` writes are taken: a review artifact naming any other field (current, stages, topic ...) shows nothing
+        if (meta.role === "stage_field" && stage_key !== null && SET_STAGE_FIELDS.has(meta.field)) {
           (p.stages[stage_key] as Dict)[meta.field] = meta.value;
           if (stage_key === "plan" && meta.field === "settings" && is_dict(meta.value)) p.settings = meta.value;
-        } else if (meta.role === "project_field") {
+        } else if (meta.role === "project_field" && SET_PROJECT_FIELDS.has(meta.field)) {
           p[meta.field] = meta.value;
         }
         continue;
@@ -519,9 +531,11 @@ export function build_project_view(
   for (const row of db.all<{ id: string; round_id: string | null }>("SELECT id, round_id FROM snapshots WHERE project_id = ?", project_id)) {
     if (row.round_id !== null && round_no_of.has(row.round_id)) snapshot_round.set(row.id, round_no_of.get(row.round_id) as number);
   }
-  for (const event of db.all<{ type: string; payload: string; at: bigint | null }>(
+  for (const event of db.all<{ type: string; payload: string; at: bigint | null; quiet: bigint | null }>(
     `SELECT e.type AS type, e.payload AS payload,
-            (SELECT mc.created_at FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id) AS at
+            (SELECT mc.created_at FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id) AS at,
+            (SELECT 1 FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id
+                AND mc.action = 'stage.reopened' AND json_extract(mc.result_json, '$.quiet') = 1) AS quiet
        FROM events e
       WHERE e.project_id = ?
         AND (e.type IN ('legacy.processed', 'input.marked_processed', 'legacy.history', 'stage.reopened')
@@ -535,7 +549,7 @@ export function build_project_view(
     if (event.type === "stage.approved" || event.type === "stage.reopened") {
       const key = typeof payload.stage_id === "string" ? stage_key_of.get(payload.stage_id) : undefined;
       const st = key === undefined ? undefined : (p.stages[key] as Dict | undefined);
-      if (st === undefined || (event.type === "stage.reopened" && payload.reason === REAPPROVE_REASON)) continue;
+      if (st === undefined || (event.type === "stage.reopened" && event.quiet !== null)) continue;
       const stamp = local_stamp(num(event.at));
       if (event.type === "stage.reopened") st.history.push(`다시 열기 ${stamp}`);
       else st.history.push(`승인 ${stamp} (R${typeof payload.snapshot_id === "string" ? (snapshot_round.get(payload.snapshot_id) ?? 0) : 0})`);

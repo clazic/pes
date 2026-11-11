@@ -85,6 +85,8 @@ const LOCK_HEARTBEAT_MS = 30 * 60 * 1000;
 /** runs.external_session_ref limit enforced by run.claim. */
 const SESSION_MAX = 200;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** The Korean stage names a person reads in a refusal (the same words as scripts/pes_core/cli_support.ts LABEL). */
+const STAGE_LABEL: Readonly<Record<string, string>> = { plan: "기획", research: "조사", analyze: "분석·종합", write: "집필", verify: "검증", publish: "산출·공유" };
 const STAGE_KEYS = ["plan", "research", "analyze", "write", "verify", "publish"];
 const VERIFIED_METHODS = new Set(["browser", "kosis", "law", "vworld"]);
 const SOURCE_METHODS = new Set(["search", "fetch", "browser", "kosis", "law", "vworld", "import", "unknown"]);
@@ -510,20 +512,33 @@ const init: Handler = async (s, req) => {
 function display_round_no(s: Session, project_id: string, stage_id: string, round_no: number): number {
   const hidden = s.db.get<{ n: bigint }>(
     `SELECT count(*) AS n FROM rounds r
-       JOIN snapshots sn ON sn.project_id = r.project_id AND sn.id = r.sealed_snapshot_id
-       JOIN blobs b ON b.project_id = sn.project_id AND b.id = sn.manifest_blob_id
-      WHERE r.project_id = ? AND r.stage_id = ? AND r.round_no < ? AND b.original_name = ?`,
+       JOIN mutation_commits mc ON mc.project_id = r.project_id AND mc.action = 'round.started'
+        AND json_extract(mc.result_json, '$.round_id') = r.id
+      WHERE r.project_id = ? AND r.stage_id = ? AND r.round_no < ? AND json_extract(mc.result_json, '$.implicit') = 1`,
     project_id,
     stage_id,
     round_no,
-    IMPLICIT_MANIFEST,
   );
   return round_no - Number(hidden?.n ?? 0n);
+}
+
+/** Korean particle 은/는 for a stage name (the last syllable has a final consonant or not). */
+function topic_particle(name: string): string {
+  const last = name.charCodeAt(name.length - 1);
+  return last >= 0xac00 && last <= 0xd7a3 && (last - 0xac00) % 28 !== 0 ? "은" : "는";
 }
 
 const round_start: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const stage = s.stage(project, req.args?.stage);
+  if (req.args?.any_order === true) {
+    // D13 (intended difference from 0.15, which let a round start on an approved stage): the database keeps an approved stage closed
+    const now_row = stage_now(s, project, stage);
+    if (now_row.status === "approved" && now_row.stale === null) {
+      const label = STAGE_LABEL[stage.key] ?? stage.key;
+      throw new Refusal("conflict", `round-start: ${label}${topic_particle(label)} 이미 승인됐습니다 — 먼저 reopen 하세요`, 1);
+    }
+  }
   const out = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id, ...(req.args?.any_order === true ? { any_order: true } : {}) });
   return { round_no: display_round_no(s, project.id, stage.id, Number(result_of(out).round_no)), round_id: result_of(out).round_id };
 };
@@ -917,18 +932,31 @@ const compat_render: Handler = async (s, req) => {
 };
 
 /**
- * v0.15 `approve`: any stage, any time. The database approves a stage on a sealed round of its own and only once, so:
+ * v0.15 `approve`, on the database's order rule (intended difference D13): a stage whose earlier stage is not approved is refused
+ * with one Korean line — v0.15 approved it, the database's guarantee that an approval rests on approved work is not loosened.
+ * The database approves a stage on a sealed round of its own and only once, so:
  *  - an approved stage that is approved again is reopened quietly first (the reopen leaves no history line);
  *  - the open round is sealed; with none (or one sealed before the stage was last invalidated) a round is opened and sealed by the
- *    CLI itself — marked implicit (its manifest) so the read model does not count it as a round of the work.
+ *    CLI itself — marked implicit (in the round's receipt, set by the server) so the read model does not count it as a round of the work.
  */
 const compat_approve: Handler = async (s, req) => {
   const { project, auth, guard } = await write_auth(s, req);
   const stage = s.stage(project, req.args?.stage);
+  const earlier = s.db.get<{ key: string }>(
+    `SELECT key FROM stages
+      WHERE project_id = ? AND edition_id = ? AND ordinal < ? AND (status <> 'approved' OR stale_since_event_seq IS NOT NULL)
+      ORDER BY ordinal LIMIT 1`,
+    project.id,
+    stage.edition_id,
+    stage.ordinal,
+  );
+  if (earlier !== undefined) {
+    throw new Refusal("conflict", `approve: 앞 단계(${STAGE_LABEL[earlier.key] ?? earlier.key})가 아직 승인되지 않았습니다`, 1);
+  }
   return s.unit(async () => {
     let now_row = stage_now(s, project, stage);
     if (now_row.status === "approved" && now_row.stale === null) {
-      await reopen_stage(s.service, s.ctx(project, auth), { stage_id: stage.id, reason: REAPPROVE_REASON });
+      await reopen_stage(s.service, s.ctx(project, auth), { stage_id: stage.id, reason: REAPPROVE_REASON, quiet: true });
       now_row = stage_now(s, project, stage);
     }
     const open = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
@@ -957,7 +985,7 @@ const compat_approve: Handler = async (s, req) => {
       if (open !== undefined) {
         round_id = open.id;
       } else {
-        const started = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id });
+        const started = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id, implicit: true });
         round_id = String(result_of(started).round_id);
         implicit = true;
       }
@@ -1019,24 +1047,26 @@ const set_field: Handler = async (s, req) => {
   }
   const stage = whole_project ? null : s.stage(project, target);
   const role = whole_project ? "project_field" : "stage_field";
-  const current = s.db.get<{ object_id: string; version_id: string; metadata_json: string }>(
-    `SELECT o.id AS object_id, v.version_id AS version_id, v.metadata_json AS metadata_json
-       FROM objects o
-       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
-       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
-      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = 'review'
-        AND ((? IS NULL AND a.stage_id IS NULL) OR a.stage_id = ?)
-        AND json_extract(v.metadata_json, '$.role') = ? AND json_extract(v.metadata_json, '$.field') = ?
-      ORDER BY o.display_no LIMIT 1`,
-    project.id,
-    stage === null ? null : stage.id,
-    stage === null ? null : stage.id,
-    role,
-    field,
-  );
   const metadata = { role, field, value: args.value, stage: stage === null ? null : stage.key };
-  if (current !== undefined && same_json(parse_json_field(current.metadata_json, {}), metadata)) return { changed: false };
-  await s.unit(async () => {
+  // The read of the current value and the write are ONE unit (BEGIN IMMEDIATE): two `set` of the same field (even from two folders of
+  // the same name, whose lock files differ) see each other's result, so the field stays one object and no later `set` is lost.
+  return s.unit(async () => {
+    const current = s.db.get<{ object_id: string; version_id: string; metadata_json: string }>(
+      `SELECT o.id AS object_id, v.version_id AS version_id, v.metadata_json AS metadata_json
+         FROM objects o
+         JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+         JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = 'review'
+          AND ((? IS NULL AND a.stage_id IS NULL) OR a.stage_id = ?)
+          AND json_extract(v.metadata_json, '$.role') = ? AND json_extract(v.metadata_json, '$.field') = ?
+        ORDER BY o.display_no LIMIT 1`,
+      project.id,
+      stage === null ? null : stage.id,
+      stage === null ? null : stage.id,
+      role,
+      field,
+    );
+    if (current !== undefined && same_json(parse_json_field(current.metadata_json, {}), metadata)) return { changed: false };
     const title = `(${whole_project ? "프로젝트" : stage?.key} ${field})`;
     if (current === undefined) {
       const created = await create_object(s.service, s.ctx(project, auth), { kind: "artifact", edition_id: project.active_edition_id });
@@ -1059,15 +1089,19 @@ const set_field: Handler = async (s, req) => {
       });
       await set_current(s.service, s.ctx(project, auth), { object_id: current.object_id, version_id: String(result_of(appended).version_id) });
     }
+    return { changed: true };
   });
-  return { changed: true };
 };
 
 const note: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const args = req.args ?? {};
   // scripts/pes.ts: `note <dir>` with no text stored an empty note in v0.15 and still does (allow_blank); the API and pes.py refuse blank text
-  const payload = args.allow_blank === true && args.text === "" ? { text: "", allow_blank: true } : { text: text_arg(args, "text") };
+  const payload = {
+    ...(args.allow_blank === true && args.text === "" ? { text: "", allow_blank: true } : { text: text_arg(args, "text") }),
+    // a project without a current stage (a hand-written v0.15 file) keeps the note on no stage, as 0.15 did — the CLI's option only
+    ...(args.allow_blank === true ? { stage_optional: true } : {}),
+  };
   const out = await add_note(s.service, s.ctx(project, auth), payload);
   return { note_count: result_of(out).note_count };
 };
@@ -1083,9 +1117,12 @@ const chat: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const args = req.args ?? {};
   const stage = s.stage(project, args.stage);
+  // 0.15 recorded an empty or blank answer (exit 0, like `note` with no text): the text may be blank here, not absent
+  if (typeof args.text !== "string") throw new Refusal("invalid_payload", "text 값이 필요합니다", 2);
   const out = await record_chat(s.service, s.ctx(project, auth), {
     stage: stage.key,
-    text: text_arg(args, "text"),
+    text: args.text,
+    allow_blank: true,
     kind: typeof args.kind === "string" && args.kind.length > 0 ? args.kind : "feedback",
   });
   return { object_id: result_of(out).object_id };
@@ -1326,6 +1363,13 @@ const merge: Handler = async (s, req) => {
       if (typeof given_confidence !== "string" || !CONFIDENCES.includes(given_confidence)) {
         throw new Refusal("invalid_payload", `알 수 없는 confidence 값입니다: ${String(given_confidence)}`, 2);
       }
+    }
+    // `sources` must be a list of objects (a missing, null or empty one is fine). 0.15 raised a traceback in the middle of the merge
+    // for a string / number / list of strings (D11); nothing is written here, and the whole batch is refused, with one plain line.
+    const given_sources = raw.sources;
+    const empty_sources = given_sources === undefined || given_sources === null || given_sources === "" || given_sources === 0 || given_sources === false;
+    if (!empty_sources && !(Array.isArray(given_sources) && given_sources.every(is_record)) && !(is_record(given_sources) && Object.keys(given_sources).length === 0)) {
+      throw new Refusal("invalid_payload", `merge: sources 는 출처 객체의 목록이어야 합니다 (#${String(raw.id ?? "")})`, req.args?.v015 === true ? 1 : 2);
     }
     items.push(raw);
   }

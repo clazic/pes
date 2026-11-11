@@ -19,7 +19,8 @@ const SET_USAGE =
 function os_error_text(error: unknown, path: string): string {
   const code = (error as NodeJS.ErrnoException).code;
   if (code === "ENOENT") return `[Errno 2] No such file or directory: '${path}'`;
-  if (code === "EACCES") return `[Errno 13] Permission denied: '${path}'`;
+  // Windows answers a file it may not read with EPERM: the same one line as EACCES
+  if (code === "EACCES" || code === "EPERM") return `[Errno 13] Permission denied: '${path}'`;
   if (code === "EISDIR") return `[Errno 21] Is a directory: '${path}'`;
   if (code === "ENOTDIR") return `[Errno 20] Not a directory: '${path}'`;
   return `${code ?? "읽기 오류"}: '${path}'`;
