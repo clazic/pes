@@ -69,11 +69,11 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | `tests/test_compat_cases_{a,b,c}.test.ts` | E01~E15를 0.15 대상에서 기준값과 대조 |
 | `tests/test_compat_review.test.ts` | 최종 리뷰 1 반영: N6 요약이 제목 escape·공용 모듈 수를 보는지, N2 공백 경로(Windows 철자), 가짜 허브가 떠 있어도 E15 가 같고 접속 0, 상태 DTO 키 전수, `PES_TEST_GUARD` 를 끌 수 없음 |
 
-**대상 바꾸기:** `PES_COMPAT_TARGET=py`(기본) 또는 `ts`. `ts` 에서 아직 없는 명령은 건너뛰지 않고 `not_yet` 으로 단언한다. **래칫은 사례 단위다(SEL-71, PR26b):** `cases.json` 의 사례마다 `ts.status` 가 `implemented`/`not_yet` 이다. `not_yet` 사례는 `scripts/pes.ts` 가 있어도 **실행하지 않고** `not_yet` 으로 단언하고(`compat_cases.run_case`), `implemented` 사례는 0.15 기준값과 같아야 한다(`compare_ts_record`). 사례 종류마다 ts 파일이 하나씩 있다 — `cli` = `scripts/pes.ts`(PR26b 에서 연결됨), `http`(E08·E09·E13) = `scripts/serve.ts`, `setup`(E14) = `scripts/setup.ts`(아직 `ts_gate` 로 막혀 있다: 파일이 생기면 그 종류 사례 실행이 throw). **누가 어느 사례를 켜나**는 `tests/helpers/sel_scope.ts` 에 있다. SEL-71(a: pes.ts 골격 + 쓰기 명령, `status` 포함 — E04 가 쓴다) = `SEL71_DONE`: E01~E04·E10·X01~X05 가 `implemented`. SEL-77(b: 읽기·보고서) = `SEL77_DONE`: E05·E06·E07·E11·E12·X06·X07 은 지금 `not_yet`이고 SEL-77 이 한꺼번에 켠다(`sel77_on()`). E08·E09·E13·E14·E15 는 뒤 PR. E07 은 쓰기·읽기가 섞여서 E07 전체는 SEL-77 이 켜고, 쓰기 절반은 계약 사례 X05 로 SEL-71 이 맡는다. 사례 표는 둘이다: `cases.json`(7.4 의 E01~E15)과 `contract.json`(CLI 계약 X01~X07, 기준값 `baseline/X0n.json`).
+**대상 바꾸기:** `PES_COMPAT_TARGET=py`(기본) 또는 `ts`. `ts` 에서 아직 없는 명령은 건너뛰지 않고 `not_yet` 으로 단언한다. **래칫은 사례 단위다(SEL-71, PR26b):** `cases.json` 의 사례마다 `ts.status` 가 `implemented`/`not_yet` 이다. `not_yet` 사례는 `scripts/pes.ts` 가 있어도 **실행하지 않고** `not_yet` 으로 단언하고(`compat_cases.run_case`), `implemented` 사례는 0.15 기준값과 같아야 한다(`compare_ts_record`). 사례 종류마다 ts 파일이 하나씩 있다 — `cli` = `scripts/pes.ts`(PR26b 에서 연결됨), `http`(E08·E09·E13) = `scripts/serve.ts`, `setup`(E14) = `scripts/setup.ts`(SEL-72 에서 `compat_ts_srv.ts` 로 연결됨; `ts_gate` 는 세 종류 모두 파일이 없을 때 `not_yet` 만 알린다). **누가 어느 사례를 켜나**는 `tests/helpers/sel_scope.ts` 에 있다. SEL-71(a: pes.ts 골격 + 쓰기 명령, `status` 포함 — E04 가 쓴다) = `SEL71_DONE`: E01~E04·E10·X01~X05 가 `implemented`. SEL-77(b: 읽기·보고서) = `SEL77_DONE`: E05·E06·E07·E11·E12·X06·X07 은 지금 `not_yet`이고 SEL-77 이 한꺼번에 켠다(`sel77_on()`). E08·E09·E13·E14 는 SEL-72 `SEL72_DONE`(`tests/helpers/sel72_scope.ts`), E15(doctor)는 SEL-77 이후. E07 은 쓰기·읽기가 섞여서 E07 전체는 SEL-77 이 켜고, 쓰기 절반은 계약 사례 X05 로 SEL-71 이 맡는다. 사례 표는 둘이다: `cases.json`(7.4 의 E01~E15)과 `contract.json`(CLI 계약 X01~X07, 기준값 `baseline/X0n.json`).
 
 **`implemented` 의 뜻(`compat_cases.compare_ts_record`):** ts 기록이 py 와 같은 단언을 통과해야 한다 — `steps`(stdout·stderr 종류·exit)·상태 DTO·**산출 파일(`files`)** 전부 0.15 기준값과 같아야 한다. 의도된 차이는 각자 자기 단언을 가진다: D01 항목 id 는 값을 버리되 '있고 서로 다르다', D03 `processed` 는 버리되 '같은 길이의 목록', D06 은 구멍이 아니라 **값**(E03 항목 7 의 depth 는 0.15 의 3 이 아니라 2), D07 은 `snapshots/**` 를 이름으로 비교하지 않고 내용 해시가 하나도 빠지지 않았는지 본다(ts 기록기는 보관한 판을 `snapshots/**` 아래에 모은다). `files` 가 다르면 실패한다는 것은 기준값 사본을 가짜 ts 기록으로 주입한 시험(`test_compat_harness`)이 지킨다. PR26b 에서 ts 기록기를 만들 때 정규화 N4(순서)·N5(ID → `<ID:n>`)를 ts DTO·표 비교에 연결한다 — 지금은 두 쪽이 모두 Python 이라 `compat_normalize` 의 `n4_*`·`n5_ids` 가 단위 시험에서만 쓰인다.
 
-**OS·PC 마다 남는 차이(E05·E11·E13~E15):** 기준값은 macOS 에서 만든 하나다. Windows 러너(2026-11-11 SEL-70 PR #50)에서 드러난 차이는 두 종류로 나눈다. **(가) 표현 차이**는 비교 전에 정규화해서 지운다(아래 표). **(나) 0.15 가 Windows 에서 데이터 자체를 다르게 저장하거나 OS 별로 다르게 동작하는 것**은 정규화로 지우지 않는다 — `cases.json` 사례의 `os_overrides.win32` 가 그 OS 에서만 기준값의 해당 칸을 바꾼다(`compat_cases.baseline_for`; 없는 칸을 가리키면 던진다). 그대로 두면 Windows 에서 실행해도 통과하고, 값이 또 달라지면 여전히 실패한다. 외부 도구 상태·포트 점유 행은 비교에서 빼고, Windows `LOCALAPPDATA`·`APPDATA` 는 임시 HOME 으로 돌린다(`os_notes`).
+**OS·PC 마다 남는 차이(E05·E11·E13~E15):** 기준값은 macOS 에서 만든 하나다. Windows 러너(2026-11-11 SEL-70 PR #50)에서 드러난 차이는 두 종류로 나눈다. **(가) 표현 차이**는 비교 전에 정규화해서 지운다(아래 표). **(나) 0.15 가 Windows 에서 데이터 자체를 다르게 저장하거나 OS 별로 다르게 동작하는 것**은 정규화로 지우지 않는다 — `cases.json` 사례의 `os_overrides.win32` 가 그 OS 에서만 기준값의 해당 칸을 바꾼다(`compat_cases.baseline_for`; 없는 칸을 가리키면 던진다). `os_overrides` 는 두 종류다: **W1·W2(데이터 저장 차이)** 는 py 대상에만 적용하고 ts 는 적용하지 않는다(D10 — ts 는 어느 OS 에서나 `/`·LF), **W3(OS 별 설계 항목)** 는 `"applies_to_ts": true` 를 달아 py·ts 모두 적용한다(`ts_baseline`). 그대로 두면 Windows 에서 실행해도 통과하고, 값이 또 달라지면 여전히 실패한다. 외부 도구 상태·포트 점유 행은 비교에서 빼고, Windows `LOCALAPPDATA`·`APPDATA` 는 임시 HOME 으로 돌린다(`os_notes`).
 
 **(가) 정규화 규칙 — 무엇을·왜·어느 사례**
 
@@ -124,7 +124,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 - **D03 (feedback 파일 → submissions):** 답은 파일 이름·시각이 아니라 `{단계, 라운드, 종류, 글}` 모음으로 견준다(`record.answers`; 0.15 는 `feedback/*.json`, ts 는 DB 의 답). `chat` 이 찍는 답 식별자 줄과 `pending` 이 찍는 이름은 공통 부분만(`d03_stdout`). 옛 답 파일을 폴더에 떨어뜨리는 단계는 ts 에서 웹 제출(`cli_bridge` 의 `web_feedback` — `serve.py` 가 부르는 그 호출)로 바뀐다.
 - **D04 (.pes-lock → lease):** 각 단계 뒤에 '지금 누가 쥐었나'(`lock.owner`)를 기록해 그대로 견준다 — 0.15 는 `.pes-lock` 의 owner(2시간 안 것만), ts 는 살아 있는 lease 와 그 `external_session_ref`(= `PES_OWNER`). 만료는 하네스가 시계를 돌린다(`age_lock` ↔ `ts_age_lease`).
 
-**의도된 차이 추가:** `D13`(순서 없는 `approve`·승인된 단계의 `round-start` — 스킬은 승인을 순서대로 하고 승인된 단계는 reopen 뒤에 round-start 하므로 DB 보장을 CLI 호환 때문에 풀지 않는다: ts 는 exit 1 + 스택·영어 code 없는 한국어 한 줄. 사례 X08·X09 에 0.15 기준값(exit 0)과 ts 기대 문구(`KNOWN_DIFFS.D13.ts_steps`)를 둘 다 고정하고, 사례의 그 단계에는 `"d13": true` 를 단다. 거절된 단계는 ts 에서 아무것도 바꾸지 않으므로 끝 상태(DTO·파일)는 0.15 를 **그 단계 없이** 돌린 기록 `baseline.ts_end` 와 견준다 — py 대상이 `PES_COMPAT_UPDATE=1` 때 함께 만든다), `D10`(W1·W2 — ts 는 어느 OS 에서나 `/`·LF; 그래서 ts 는 `os_overrides.win32` 를 쓰지 않고 macOS/Linux 기준값과 같아야 하며(`ts_baseline`), 폴더에 CR·역슬래시 경로가 없어야 한다(`assert_posix_storage`)), `D11`(0.15 가 traceback 으로 죽는 단계 — ts 는 같은 exit 와 스택 추적 없는 한국어 한 줄; `fixable` 에 적은 단계만 성공해도 됨; PR26a 가 관찰한 3건: merge·ask 의 없는 파일, 깨진 project.json, `current` 없는 큰 프로젝트). 사용법 첫 줄의 실행 형식(`python3 -I pes.py` ↔ `node scripts/pes.ts`)은 `사용: <RUN> <` 로 정규화한다.
+**의도된 차이 추가:** `D13`(순서 없는 `approve`·승인된 단계의 `round-start` — 스킬은 승인을 순서대로 하고 승인된 단계는 reopen 뒤에 round-start 하므로 DB 보장을 CLI 호환 때문에 풀지 않는다: ts 는 exit 1 + 스택·영어 code 없는 한국어 한 줄. 사례 X08·X09 에 0.15 기준값(exit 0)과 ts 기대 문구(`KNOWN_DIFFS.D13.ts_steps`)를 둘 다 고정하고, 사례의 그 단계에는 `"d13": true` 를 단다. 거절된 단계는 ts 에서 아무것도 바꾸지 않으므로 끝 상태(DTO·파일)는 0.15 를 **그 단계 없이** 돌린 기록 `baseline.ts_end` 와 견준다 — py 대상이 `PES_COMPAT_UPDATE=1` 때 함께 만든다), `D10`(W1·W2 — ts 는 어느 OS 에서나 `/`·LF; 그래서 ts 는 W1·W2 의 `os_overrides.win32` 를 쓰지 않고(W3 는 `applies_to_ts` 라 씀) macOS/Linux 기준값과 같아야 하며(`ts_baseline`), 폴더에 CR·역슬래시 경로가 없어야 한다(`assert_posix_storage`)), `D11`(0.15 가 traceback 으로 죽는 단계 — ts 는 같은 exit 와 스택 추적 없는 한국어 한 줄; `fixable` 에 적은 단계만 성공해도 됨; PR26a 가 관찰한 3건: merge·ask 의 없는 파일, 깨진 project.json, `current` 없는 큰 프로젝트). 사용법 첫 줄의 실행 형식(`python3 -I pes.py` ↔ `node scripts/pes.ts`)은 `사용: <RUN> <` 로 정규화한다.
 
 **SEL-75 행렬(ts):** `test_pes_ts_set_lock` — 0.15 의 `test_cli_set_lock_windows` 와 같은 시나리오 21개를 Node 쪽 주입으로. Windows 흉내(`nt`)는 오류를 다루는 동안만 `process.platform` 이 `win32` 로 읽히게 한다. 해석: ts `set` 도 0.15 의 짧은 쓰기 잠금 `<프로젝트 폴더>/.project.json.lock`(배타 생성, 60초 넘으면 묵은 것, 30초 기다림, 마감 뒤 exit 3 "다른 set", 잠금 없는 PermissionError 는 비 Windows 에서 즉시 exit 2 "권한")을 쓴다.
 
@@ -162,3 +162,34 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 공통 3겹: ① 자식 시작 전 `HOME`·`USERPROFILE`·`PES_HOME` 이 임시 폴더인지 검사(`assert_isolated_env`), ② 파일 전후 이름·크기·mtime 비교(`use_home_guard`, 깊이 3 — 읽기는 흔적이 없고 깊이 4 이하의 내용 수정은 상위 폴더 mtime 이 안 변하면 놓친다), ③ 출력·산출 파일에 보호 경로 문자열이 없는지(`assert_no_real_path` — 경로 **이름**이 아닌 프로젝트 이름만 새는 경우는 못 본다). 가드 자체는 합성 '가짜 실제 홈'(`PES_TEST_REAL_HOME`)으로 시험한다(`test_home_guard`): 자식이 그 아래를 **읽기만** 해도 실패한다.
 
 경로 판정(`touches_protected`)은 보호 폴더처럼 보이는 경로를 철자만으로 결정한다(파일 시스템을 건드리지 않는다). 보호 폴더처럼 안 보이는 경로만 `realpath` 로 풀어 심볼릭 링크·junction 별칭을 본다. 스냅샷은 두 보호 폴더의 이름·크기·mtime 만 `lstat` 으로 읽고 내용은 열지 않는다.
+
+## serve.ts·setup.ts 시험 (SEL-72, PR26c)
+
+PR26c 는 `scripts/serve.ts`(= `serve.py <PES 홈> [포트]` 직접 실행과 같은 계약)와 `scripts/setup.ts`(= `setup.py` 7개 명령)를 독립 진입점으로 옮긴다. `scripts/pes.ts` 는 SEL-71·77 몫이라 건드리지 않는다 — `pes serve`·`stop`·`hub`·`open`·`watch`·`doctor` 가 `serve.ts` 를 부르는 연결과 `/api/v1/*` 통과 길(serve.py 의 DB API)은 SEL-77 이후다.
+
+**완료 목록 `SEL72_DONE`(`helpers/sel72_scope.ts`)** — E08·E09·E13(http → `serve.ts`)·E14(setup → `setup.ts`). E15(`doctor --json`)는 `pes.ts` 명령이라 `not_yet` 로 남는다(`test_serve_ts_cases` 가 단언). `cases.json` 의 `ts.status`·`test_compat_harness` 의 `TS_IMPLEMENTED` 가 이 목록과 같다.
+
+| 파일 | 내용 |
+|---|---|
+| `helpers/compat_ts_srv.ts` | ts 대상: 실행 방법·가드 플래그(`ts_srv_argv`)·`run_ts_setup`·`spawn_ts_setup`·`TsServeProcess`(주입 포트·허브/역DNS 기록)·합성 프로젝트의 DB 이전(`srv_seed_project`)·DB 에서 읽는 답(`srv_answer_docs`)·D12/D03 어댑터 |
+| `helpers/ts_child_guard.ts` | 자식 안에서 `--import` 로 도는 읽기 가드 + 허브 차단(SEL-71 과 같은 파일) |
+| `helpers/ts_no_reverse_dns.ts` | `serve.ts` 전용 `--import`: `dns.reverse`·`lookupService`·IP 가 아닌 이름 조회가 있으면 `PES_TEST_DNS_LOG` 에 한 줄(SEL-33) |
+| `helpers/serve_ts_env.ts` | 서버 시험 공용 준비물(합성 PES 홈 + DB 프로젝트 + 서버)과 원시 소켓 도우미 |
+| `test_serve_ts_cases` | E08·E09·E13·E14 를 ts 대상에서 0.15 기준값과 대조 |
+| `test_serve_ts_static` | 실행법·사용법·포트 오류·배너·loopback 전용·역DNS 없음·허브 접속 0·정적 파일 규칙·traversal·CORS·허용 안 하는 메서드 |
+| `test_serve_ts_feedback` | `POST /<slug>/feedback`: 저장 기록, 검사 순서, Origin·신뢰 목록(요청마다 읽음), 크기(413), round·깊이 한도, Referer 별칭, DB 에 없는 폴더 404, 동시 40개, 재시작 |
+| `test_serve_ts_guard` | 가드 플래그 적용(단위) + 가짜 '실제 홈' 아래를 읽으려는 서버가 `PESHomeAccessViolation` 으로 잡힘 |
+| `test_setup_ts_contract` | `check [--json]`·`needed`·`mark`·사용법·`install`/`upgrade` 의 외부 호출 없는 분기·LAW_OC 행 |
+| `test_setup_ts_keys` | API 키 화면(`keys-serve`·`keys`): **합성 키·임시 HOME 만**, 포트는 `PES_KEYS_PORT` 로 주입 |
+
+**실행 방법(고정):** `node scripts/serve.ts <PES 홈> [포트]`, `node scripts/setup.ts <명령> …` — Node 26 이 타입을 지운다(tsx·ts-node·빌드 없음). 시험에서는 `node --permission --allow-fs-read=<저장소> --allow-fs-read=<임시 루트> --allow-fs-write=<임시 루트> --allow-net --import tests/helpers/ts_child_guard.ts …` 가 앞에 붙는다. **자식 프로세스는 기본 금지**(`--allow-child-process` 없음): `serve.ts` 는 답을 같은 프로세스 안에서 DB 에 쓴다(`cli_bridge` 를 요청마다 띄우지 않는다). `setup.ts` 는 실행하지 못하는 외부 도구를 '없음'으로 본다(setup.py 의 `run()` 이 모든 예외를 -1 로 삼킨 것과 같다). `keys` 만 키 화면 자식을 띄워야 해서 그 시험에서만 `allow_child_process` 를 켠다.
+
+**허용 목록 밖은 보이지 않는다:** `/opt/homebrew`·`/usr/local`·실제 홈이 허용 목록에 없으므로 개발 PC 에 설치된 kosis·vworld·korean-law·ego-browser 가 자식에게 보이지 않는다. 그래서 `setup.ts check` 의 행은 어느 PC 에서나 같고(`test_setup_ts_contract` 가 행 전체를 단언), 키 등록(`reg_*`)은 외부 도구를 부르지 못한다. 0.15(py) 쪽 E14 는 PATH 만 좁히므로 안정 행만 견주는 기존 방식을 그대로 둔다.
+
+**의도된 차이:** D03(답은 DB 제출 — 하네스가 DB 에서 읽어 `feedback/<이름>` 파일 해시와 `feedback.log` 줄을 0.15 철자로 바꿔 견준다; 응답의 `v` 는 정수인지 확인하고 뺀다; DB 가 붙이는 `id`·`set_id` 는 해시 전에 뺀다), D09(정적 서빙은 그대로라 차이 없음), **D12 신설**(setup: `check` 에 `python` 행이 없고 사용법 첫 줄이 `사용: python3 -I setup.py <명령>` 가 아니라 `사용: node scripts/setup.ts <명령>` — `adapt_ts_setup_stdout` 이 두 사실을 먼저 단언한 뒤 0.15 철자로 되돌려 한 번에 견준다).
+
+**시험하지 않는 것(외부 호출·브라우저):** `install kosis|vworld|ego-browser`(curl | sh·앱 내려받기·브라우저 열기), `install missing`/이름 없는 `install`, `upgrade kosis|vworld|ego-browser|all`, `--no-open` 없는 `keys`, 키 화면의 3시간 시간 제한(`SETUP keys timeout`), 기본 포트 8759·허브 포트 8760~8775 에 실제로 묶는 일.
+
+**새 환경 변수 `PES_KEYS_PORT`:** API 키 화면의 포트(기본 8759). 시험이 빈 포트를 주입한다. 유효하지 않으면(정수 1~65535 아님) 종료 코드 2 와 변수 이름이 든 한 줄 메시지.
+
+**구현 선택으로 고정한 것(0.15 와 다르거나 0.15 가 정하지 않은 것):** DB 에 없는 폴더(project.json 만 있음)의 `POST /<slug>/feedback` 은 404 `{"ok":false}`(0.15 는 파일에 썼다 — D02: project.json 은 읽기 전용); `serve.ts` 의 잘못된 포트·인자는 스택 추적 없이 종료 코드 2, 이미 쓰는 포트는 1.

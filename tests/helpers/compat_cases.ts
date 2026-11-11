@@ -27,6 +27,7 @@ import {
   read_state_dto,
   run_pes,
   run_setup,
+  ts_available,
   ts_gate,
   synthetic_project,
   touch,
@@ -37,6 +38,7 @@ import {
 } from "./compat_env.ts";
 import { answers_multiset, ts_age_lease, ts_cli_exists, ts_seed_feedback, ts_seed_legacy, ts_rename_slug, ts_view } from "./compat_ts.ts";
 import { d06_depth_fix, d06_file_fix, dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n12_stdlib_error_page, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type DepthFix, type Roots } from "./compat_normalize.ts";
+import { TsServeProcess, adapt_ts_feedback_log, srv_answer_docs, srv_seed_project, strip_db_ids } from "./compat_ts_srv.ts";
 
 export interface CaseDef {
   id: string;
@@ -73,6 +75,11 @@ export interface OsOverride {
   item: string;
   what: string;
   why: string;
+  /**
+   * true = an OS-specific DESIGN item (W3): the ts target is held to it too. Absent/false = 0.15's Windows DATA difference
+   * (W1·W2): ts stores `/` and LF everywhere (D10), so the ts target never gets it.
+   */
+  applies_to_ts?: boolean;
   edits: OsEdit[];
 }
 
@@ -452,9 +459,12 @@ function safe_json(path: string): boolean {
 }
 
 async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<CaseOutcome> {
-  if (target === "ts") return ts_gate("http");
+  if (target === "ts" && !ts_available("http")) return ts_gate("http", () => false);
   const root = make_serve_home(ctx);
-  const server = new ServeProcess(ctx, root);
+  // ts (SEL-72): the synthetic project is migrated into the DB first (D02) — the TS server keeps its answers there (D03), and it is
+  // started guarded (permission allow-list + ts_child_guard.ts + no reverse DNS) by TsServeProcess
+  if (target === "ts") await srv_seed_project(ctx, join(root, "synthetic"));
+  const server = target === "ts" ? new TsServeProcess(ctx, root) : new ServeProcess(ctx, root);
   const steps: unknown[] = [];
   const roots = ctx.roots(join(root, "synthetic"));
   try {
@@ -481,7 +491,13 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
         try {
           body = n1_json(JSON.parse(text), roots);
           if (typeof body === "object" && body !== null) body = JSON.parse(ports(JSON.stringify(body)));
-        } catch {
+          if (target === "ts" && response.status === 200 && h.method === "POST" && typeof body === "object" && body !== null && "v" in body) {
+            // D03: the DB answer also carries the change cursor `v` (PR18 contract: { ok, file, v }); 0.15 had none
+            assert.ok(Number.isSafeInteger((body as any).v) && (body as any).v >= 0, `${def.id}: the feedback answer's v must be a non-negative integer`);
+            delete (body as any).v;
+          }
+        } catch (error) {
+          if (error instanceof assert.AssertionError) throw error;
           // N12: the stdlib's own error page is the interpreter's text (length differs by Python version), not PES's.
           body = n12_stdlib_error_page(response.status, text) ?? (text.length <= 400 ? n7_text(text) : `<${text.length} bytes sha:${n9_text_hash(text, roots)}>`);
         }
@@ -497,9 +513,9 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
         const answers = await Promise.all(
           Array.from({ length: b.count as number }, (_x, index) => server.post(b.path, { stage: b.stage, round: b.round, kind: "feedback", text: `${b.text_prefix}${index}` })),
         );
-        const dir = join(root, "synthetic", "feedback");
-        const names = existsSync(dir) ? readdirSync(dir).sort() : [];
-        const texts = names.map((name) => read_json(join(dir, name)).text).sort();
+        const answers_now = answer_records(target, ctx, root);
+        const names = answers_now.map((a) => a.name);
+        const texts = answers_now.map((a) => a.doc.text as string).sort();
         steps.push({
           step: { burst: b.count },
           statuses: [...new Set(answers.map((a) => a.status))],
@@ -515,13 +531,8 @@ async function run_http(target: Target, def: CaseDef, ctx: CompatCtx): Promise<C
   } finally {
     await server.stop();
   }
-  return { kind: "ran", record: { id: def.id, steps, dto: null, files: def.files === "count" ? answer_count_record(raw_answer_records(root)) : http_files(join(root, "synthetic"), roots) } };
-}
-
-/** The 0.15 answers of the synthetic project as written: feedback/*.json (raw names). */
-function raw_answer_records(root: string): { name: string; doc: Record<string, any> }[] {
-  const dir = join(root, "synthetic", "feedback");
-  return (existsSync(dir) ? readdirSync(dir).sort() : []).map((name) => ({ name, doc: read_json(join(dir, name)) }));
+  const answers = answer_records(target, ctx, root);
+  return { kind: "ran", record: { id: def.id, steps, dto: null, files: def.files === "count" ? answer_count_record(answers) : http_files(join(root, "synthetic"), roots, answers, target) } };
 }
 
 /**
@@ -535,20 +546,27 @@ export function answer_count_record(answers: { name: string; doc: Record<string,
   return { count: String(answers.length) };
 }
 
-function http_files(project: string, roots: Roots): Record<string, string> {
+/** The answers of the synthetic project: 0.15 reads feedback/*.json, the TS server's answers are submissions in the DB (D03). */
+function answer_records(target: Target, ctx: CompatCtx, root: string): { name: string; doc: Record<string, any> }[] {
+  if (target === "ts") return srv_answer_docs(ctx, "synthetic").map((a) => ({ name: a.name, doc: strip_db_ids(a.doc) }));
+  const dir = join(root, "synthetic", "feedback");
+  return (existsSync(dir) ? readdirSync(dir).sort() : []).map((name) => ({ name, doc: read_json(join(dir, name)) }));
+}
+
+function http_files(project: string, roots: Roots, answers: { name: string; doc: Record<string, any> }[], target: Target): Record<string, string> {
   const out: Record<string, string> = {};
-  const feedback = join(project, "feedback");
-  if (existsSync(feedback)) {
-    for (const name of readdirSync(feedback).sort()) {
-      const record = n1_json(read_json(join(feedback, name)), roots) as Record<string, unknown>;
-      if (typeof record.origin === "string") record.origin = ports(record.origin);
-      out[`feedback/${n1_time(name)}`] = n9_text_hash(n3_json(record), roots);
-    }
+  for (const { name, doc } of answers) {
+    const record = n1_json(doc, roots) as Record<string, unknown>;
+    if (typeof record.origin === "string") record.origin = ports(record.origin);
+    out[`feedback/${n1_time(name)}`] = n9_text_hash(n3_json(record), roots);
   }
   const log = join(project, "feedback.log");
   if (existsSync(log) && statSync(log).size > 0) {
     // one line per answer: the file name carries a time (N1) and the path a root (N2)
-    out["feedback.log"] = n9_text_hash(lines(ports(n8_console(readFileSync(log, "utf8"), roots))).sort().join("\n"), roots);
+    const raw = readFileSync(log, "utf8");
+    // D03: the TS server's log line names the answer; the path 0.15 wrote is put back before the same normalisation
+    const text = target === "ts" ? adapt_ts_feedback_log(raw, project) : raw;
+    out["feedback.log"] = n9_text_hash(lines(ports(n8_console(text, roots))).sort().join("\n"), roots);
   } else {
     out["feedback.log"] = "empty";
   }
@@ -578,10 +596,10 @@ export function read_baseline(id: string): CaseRecord {
  * The baseline for one OS: the single stored record plus that OS's `os_overrides` edits. A path that does not exist in the record
  * throws (an override must not silently stop matching when the baseline changes). `platform` is injectable for the unit test.
  */
-export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id)): CaseRecord {
+export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id), target: "py" | "ts" = "py"): CaseRecord {
   const override = case_def(id).os_overrides?.[platform];
   const out = JSON.parse(JSON.stringify(base)) as CaseRecord;
-  if (override === undefined) return out;
+  if (override === undefined || (target === "ts" && override.applies_to_ts !== true)) return out;
   for (const edit of override.edits) {
     const parent = edit.at.slice(0, -1).reduce<any>((node, key) => node?.[key], out);
     const last = edit.at[edit.at.length - 1]!;
@@ -597,12 +615,13 @@ export function baseline_for(id: string, platform: string = process.platform, ba
 }
 
 /**
- * The pinned 0.15 record the ts target is held to: the single stored baseline WITHOUT any os_overrides, on every OS. The win32
- * overrides are 0.15's Windows data (W1 backslash paths, W2 CRLF sizes); ts stores `/` and LF everywhere (D10), so on Windows it must
- * equal the macOS/Linux record — that is stronger than ignoring the difference.
+ * The pinned 0.15 record the ts target is held to on one OS: the stored baseline plus ONLY the `os_overrides` marked
+ * `applies_to_ts` (W3: designed per-OS items such as the Windows `gitbash` row of `setup check`). The data overrides (W1 backslash
+ * paths, W2 CRLF sizes) are NOT applied — ts stores `/` and LF everywhere (D10), so on Windows it must equal the macOS/Linux
+ * record there; that is stronger than ignoring the difference. `platform` is injectable for the unit test.
  */
-export function ts_baseline(id: string): CaseRecord {
-  return JSON.parse(JSON.stringify(read_baseline(id))) as CaseRecord;
+export function ts_baseline(id: string, platform: string = process.platform): CaseRecord {
+  return baseline_for(id, platform, read_baseline(id), "ts");
 }
 
 export function write_baseline(record: CaseRecord): void {

@@ -2593,6 +2593,7 @@ async function main(): Promise<void> {
   reply(answer);
 }
 
+// Only when run as the program (`node cli_bridge.ts`): scripts/pes.ts and scripts/serve.ts import this file for handle_request() and must not start main().
 if (import.meta.main) {
   main().catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);

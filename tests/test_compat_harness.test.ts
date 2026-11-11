@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_contract_table, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
+import { ts_baseline, baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_contract_table, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
 import { KNOWN_DIFFS, STAGES, TS_FILES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available, ts_gate, type CaseKind } from "./helpers/compat_env.ts";
 import {
   d06_depth_fix,
@@ -33,14 +33,17 @@ import {
   stderr_kind,
 } from "./helpers/compat_normalize.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { SEL72_DONE } from "./helpers/sel72_scope.ts";
+import { SEL71_DONE } from "./helpers/sel_scope.ts";
 
 use_home_guard();
 
 // ---------------------------------------------------------------- the list of cases the TS target implements today
 // SEL-71 (PR26b) turned the ratchet from "per kind" into "per case": cases.json `ts.status` says, case by case, whether the ts target
-// must match 0.15 (implemented) or answers not_yet (and is not even run, whether scripts/pes.ts exists or not). Edit this list and
-// cases.json together; tests/test_pes_ts_contract.test.ts pins the SEL-71 completion list for good.
-const TS_IMPLEMENTED: string[] = ["E01", "E02", "E03", "E04", "E10"];
+// must match 0.15 (implemented) or answers not_yet (and is not even run, whether the scripts/*.ts file exists or not). Edit this list and
+// cases.json together. The owners: SEL71_DONE (pes.ts, tests/helpers/sel_scope.ts; tests/test_pes_ts_contract.test.ts pins it) and
+// SEL72_DONE (E08 E09 E13 → serve.ts, E14 → setup.ts; tests/helpers/sel72_scope.ts); E15 (doctor) waits for SEL-77 and later.
+const TS_IMPLEMENTED: string[] = [...SEL71_DONE.filter((id) => id.startsWith("E")), ...SEL72_DONE];
 const ALL_IDS = Array.from({ length: 15 }, (_x, i) => `E${String(i + 1).padStart(2, "0")}`);
 
 test("the table defines E01~E15 once each, with criteria, intended differences and a pinned 0.15 baseline", () => {
@@ -121,14 +124,12 @@ test("target selection: py runs; a ts kind with an implemented case needs its sc
   }
 });
 
-test("the ts gate throws as soon as serve.ts / setup.ts exists (their cases are still not wired); pes.ts is wired since SEL-71 — the file is injected, scripts/ is not touched", () => {
-  // cli: wired per case (compat_cases.run_case); the gate only answers "not_yet" while the file is absent
-  assert.equal(ts_gate("cli", () => false).kind, "not_yet");
-  for (const kind of KINDS.filter((k) => k !== "cli")) {
+test("the ts gate only reports the missing file of a kind (all of pes.ts, serve.ts, setup.ts are wired: SEL-71 / SEL-72) — the file is injected, scripts/ is not touched", () => {
+  for (const kind of KINDS) {
     const absent = ts_gate(kind, () => false);
     assert.equal(absent.kind, "not_yet");
-    assert.match(absent.reason, new RegExp(`scripts/${kind === "http" ? "serve" : "setup"}\\.ts`));
-    assert.throws(() => ts_gate(kind, (path) => path === TS_FILES[kind]), /exists: wire the ts target/, kind);
+    assert.match(absent.reason, new RegExp(`scripts/${kind === "cli" ? "pes" : kind === "http" ? "serve" : "setup"}\\.ts`));
+    assert.equal(ts_gate(kind, (path) => path === TS_FILES[kind]).kind, "not_yet", `${kind}: wired, an existing file is not the gate's business`);
     // only the file of the kind itself counts
     assert.equal(ts_gate(kind, (path) => path !== TS_FILES[kind]).kind, "not_yet", kind);
   }
@@ -138,8 +139,8 @@ test("the not-yet list on the TS target equals the table exactly (an implemented
   const expected = ALL_IDS.filter((id) => !TS_IMPLEMENTED.includes(id));
   assert.deepEqual(not_yet_ids(), expected, "cases.json ts.status and TS_IMPLEMENTED disagree");
   assert.equal(expected.length, 15 - TS_IMPLEMENTED.length);
-  // serve.ts / setup.ts cases stay not_yet in SEL-71: no http / setup case may be implemented
-  for (const kind of ["http", "setup"] as CaseKind[]) assert.deepEqual(TS_IMPLEMENTED.filter((id) => kind_of(id) === kind), [], `${kind} cases are not part of SEL-71`);
+  // the implemented http / setup cases are exactly SEL-72's (serve.ts / setup.ts)
+  assert.deepEqual(TS_IMPLEMENTED.filter((id) => kind_of(id) !== "cli"), [...SEL72_DONE], "http / setup cases are SEL-72's");
   // per-case ratchet: a not-yet case answers not_yet WITHOUT running anything, whether or not scripts/pes.ts exists
   for (const id of expected) {
     const outcome = await run_case("ts", id);
@@ -406,6 +407,15 @@ test("os_overrides: win32 edits apply on win32 only, a path that is not in the b
   // a patch whose path is gone fails loudly
   const broken = { ...base, dto: null } as any;
   assert.throws(() => baseline_for("E05", "win32", broken), /not in the baseline/);
+});
+
+test("os_overrides split: ts baseline on win32 has W3 (gitbash row) but not W1·W2; py baseline has all", () => {
+  const names = (r: any) => JSON.parse(r.steps[1].stdout[0]).names as string[];
+  assert.ok(names(ts_baseline("E14", "win32")).includes("gitbash"), "W3 applies to ts");
+  assert.ok(names(baseline_for("E14", "win32")).includes("gitbash"));
+  assert.equal(names(ts_baseline("E14", "darwin")).includes("gitbash"), false, "no W3 off Windows");
+  for (const id of ["E05", "E11"]) assert.deepEqual(ts_baseline(id, "win32"), read_baseline(id), `${id}: W1·W2 not applied to ts`);
+  for (const c of load_table().cases) for (const o of Object.values(c.os_overrides ?? {})) assert.equal(o.applies_to_ts === true, o.item === "W3", `${c.id}: only W3 applies to ts`);
 });
 
 test("every os_overrides entry names a README item and a reason", () => {

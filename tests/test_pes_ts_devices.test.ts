@@ -195,6 +195,6 @@ test("the case ratchet is per case: a not_yet case is never run on ts (pes.ts pr
   const outcome = await run_case("ts", "E15");
   assert.equal(outcome.kind, "not_yet");
   assert.match(outcome.kind === "not_yet" ? outcome.reason : "", /실행하지 않는다/);
-  for (const id of ["E08", "E09", "E13", "E14"]) assert.equal((await run_case("ts", id)).kind, "not_yet", id);
+  // the http / setup cases (E08 E09 E13 E14) are implemented since SEL-72: they run (tests/test_serve_ts_cases.test.ts)
   assert.equal(basename(join("a", "b")), "b");
 });
