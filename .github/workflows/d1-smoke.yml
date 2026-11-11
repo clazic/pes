@@ -8,6 +8,8 @@ on:
       - "scripts/pes_core/**"
       - "tests/d1/**"
       - "tests/test_d1_smoke.test.ts"
+      - "tests/test_cross_d1.test.ts"
+      - "tests/fixtures/contracts/cross/**"
       - ".github/workflows/d1-smoke.yml"
       - "package.json"
       - "package-lock.json"

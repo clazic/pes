@@ -114,6 +114,12 @@ function read_lease(runtime: CommandRuntime, project_id: string): LeaseRow | und
   );
 }
 
+/** True while the project's lease is active and unexpired (whoever holds it). */
+function is_project_lease_live(runtime: CommandRuntime, project_id: string): boolean {
+  const lease = read_lease(runtime, project_id);
+  return lease !== undefined && is_live_lease(lease, runtime.now_ms);
+}
+
 function is_live_lease(lease: LeaseRow, now_ms: number): boolean {
   return lease.state === "active" && now_ms < Number(lease.expires_at);
 }
@@ -337,7 +343,10 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     }
     // SEL-68: a mode A / Go-labelled run is taken by an internal_ai actor only (no lease, no receipt otherwise).
     require_run_id_claim_allowed(runtime.db, scope.project_id, scope.actor_id, run);
-    if (!CLAIMABLE_RUN_STATUSES.has(run.status)) {
+    // SEL-56 F1: a `running` run is claimable only when no live lease holds the project (its holder died and the
+    // lease ran out). The live-lease check below still refuses a claim while any lease is alive.
+    const stale_running = run.status === "running" && !is_project_lease_live(runtime, scope.project_id);
+    if (!CLAIMABLE_RUN_STATUSES.has(run.status) && !stale_running) {
       throw new ApiError("conflict", "the run cannot be claimed in its current status");
     }
     if (run.actor_id !== scope.actor_id) {
@@ -408,6 +417,15 @@ function run_claim(runtime: CommandRuntime): CommandResult {
   // running, in the same transaction and with its own event. Finished runs
   // (succeeded/failed/interrupted/...) are left untouched.
   const displaced_events: EventDraft[] = [];
+  // SEL-56 F1: the same actor takes back its own dead `running` run. The stale lease is ended with its own event;
+  // the run itself goes on as `running` under the new lease (below).
+  if (existing !== null && existing.status === "running" && previous !== undefined && previous.state === "active" && previous.run_id === run_id) {
+    displaced_events.push({
+      type: "run.interrupted",
+      run_id,
+      payload: { reason: "lease_expired", lease_id: previous.lease_id, fence: Number(previous.fence) },
+    });
+  }
   if (
     previous !== undefined &&
     previous.state === "active" &&

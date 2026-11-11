@@ -255,8 +255,11 @@ export class BuiltinExecutor {
     }
     // The switch comes first: with it off nothing else about the run matters.
     this.#require_policy(project_id);
-    if (run.status !== "waiting_human" && run.status !== "blocked_usage" && run.status !== "interrupted") {
-      throw new ApiError("conflict", "only a waiting, blocked or interrupted run can be resumed");
+    // SEL-56 F1: a run whose holder died is still `running` once its lease has run out; its own actor may take it
+    // back (run.claim ends the stale lease with its own event). A live lease is never taken.
+    const dead_running = run.status === "running" && !this.#project_lease_live(project_id);
+    if (run.status !== "waiting_human" && run.status !== "blocked_usage" && run.status !== "interrupted" && !dead_running) {
+      throw new ApiError("conflict", "only a waiting, blocked, interrupted or dead running run can be resumed");
     }
     const settings = read_run_settings(this.#db, input.run_id);
     if (settings === undefined) throw new ApiError("conflict", "the run has no AI connection settings");
@@ -287,6 +290,15 @@ export class BuiltinExecutor {
 
   // ---------------------------------------------------------------------
   // pieces of start / resume
+
+  /** True while the project's lease is active and unexpired (whoever holds it). */
+  #project_lease_live(project_id: string): boolean {
+    const lease = this.#db.get<{ state: string; expires_at: bigint }>(
+      "SELECT state, expires_at FROM project_leases WHERE project_id = ?",
+      project_id,
+    );
+    return lease !== undefined && lease.state === "active" && this.#now() < Number(lease.expires_at);
+  }
 
   #require_owner(ctx: MutationContext): void {
     const ok = this.#service.read((db) => {

@@ -481,3 +481,20 @@ MCP 서버(`scripts/pes_core/mcp_server.ts`)와 어댑터(`scripts/pes_core/adap
 - **변하지 않은 것(8.17)**: 전달 묶음의 `base_versions`는 여전히 프로젝트 전체의 보조 자료 머리 버전이고 최대 1000개다. 단계·라운드로 좁히는 일은 이 PR이 하지 않았다(한계로 남는다). 첨부 파일은 저장하지 않는다.
 - **시험**: `tests/test_adapter_b_codex_app.test.ts`, `tests/test_adapter_b_opencode_app.test.ts`(공용 `tests/helpers/adapter_b_app_suite.ts`·`adapter_b_cli_suite.ts`; 가짜 MCP 클라이언트·합성 프로젝트·가짜 키 저장소·임시 HOME). 실제 Codex 앱·OpenCode 앱·`codex`·`opencode`를 실행하지 않고 사용자의 앱 설정을 읽거나 쓰지 않는다.
 - **한계**: 실제 앱의 직접 연결은 시험하지 않았다(두 노트에 「미확인」). 앱 버전별 MCP 설정 형식·`env_vars`/`{env:VAR}` 처리·긴 대기 중 연결 끊김은 확인하지 않았다. 앱의 모델·사용량은 PES가 알 수 없다. 사람이 앱 안에서 Go 모델을 고르는 것은 PES가 보지도 막지도 못한다. 토큰을 키 저장소에 넣는 명령은 후속이다.
+
+### 8.20 A·B 교차 계약(PR21, SEL-56)
+
+A(내장 실행기, `internal_ai`)와 B(MCP·HTTP, `external_agent` — 직접 연결 다섯 길과 앱 세 개의 전달 경로)가 **같은 시작 상태에서 같은 의미·권한·오류**를 내고, 인계·중복·충돌에서 유실이 없음을 가짜 AI 서버·가짜 MCP 클라이언트·합성 자료로 시험한다. 결정은 [0020](decisions/0020-cross-contract.md).
+
+- **오류는 code·효과로 같다(해석 1).** 같은 code·같은 target·쓰기 0. 문장은 같게 하지 않는다 — A는 영어 `code: message`, B는 code마다 고정된 한국어 문장(B의 여섯 도구는 byte 단위로 같다). SQL·표 이름·스택은 둘 다 보이지 않는다.
+- **옛 guard 거부 code(해석 3).** `heartbeat`·`release`·`input-receipts`는 `lease_lost`, `submit`·`wait`·`complete`는 `conflict`로 갈린다. 현재 동작을 계약으로 고정하고(둘 다 거부·쓰기 0), 통일은 후속이다.
+- **인계(해석 9~12).** 인계 = lease를 내려놓음(release·만료·interrupt) 뒤 다른 쪽의 새 claim. B는 A run을 `run_id`로 이어받지 못하고(SEL-68) 새 run·새 lease가 선다. fence는 프로젝트 lease 한 줄에서 claim마다 정확히 +1. 같은 키의 재전송은 lease가 넘어간 뒤에도 처음 답 재생. 경합에서 진 claim은 `conflict`이고 흔적 0(A 쪽은 owner가 먼저 만든 `queued` run 1개가 남을 수 있다).
+- **제출은 승인이 아니다(해석 13).** 채택 전 제출 버전은 DB에 남지만 다음 context에는 보이지 않는다 — 유실이 아니다.
+- **지연·종료·Go OFF·사용량 문턱.** 늦게 온 답은 채택하지 않고 run은 `blocked_usage`·lease 해제. 프로세스 종료는 run이 `running`·lease `active`·호출 `sent`로 남고(해석 14·15), lease TTL 뒤 B의 새 claim이 그 run을 `interrupted`(`lease_expired` 사건)로 끝낸다. Go OFF·비용 상한·구독 문턱은 A만 막고 B는 영향이 없다(해석 5·16).
+- **`unknown` 예약 보존(해석 17·18).** 호출 행은 B 인계·Go OFF/ON·재시작·한 달 시계 뒤에도 한 글자도 안 바뀌고, 사람이 정리하기 전에는 재개가 막히며 예약이 한도에 계속 잡힌다. 정리는 사람만, 행 옆에 한 줄 기록. B는 `unknown`을 만들 수도 정리할 수도 없다.
+- **F1 수정(죽은 run 이어받기).** `running` + 프로젝트에 살아 있는 lease 없음(만료)인 run은 **같은 행위자**가 이어받는다: B `run.claim {run_id}`(`commands/runs.ts`), A `resume`(`a_runtime/loop.ts`). 새 lease는 fence +1, 옛 lease는 `run.interrupted`(`reason: lease_expired`, 옛 `lease_id`·`fence`) 사건을 남기고 교체된다. 활성 lease가 살아 있으면 `conflict`, 다른 행위자 run·SEL-68·`PRE_REPLAY_TABLE`은 그대로다. A는 정산 안 된 dispatch(`prepared`·`authorized`·`sent`·`unknown`)가 있으면 `conflict` — 사람이 정리한 뒤에만 이어받는다. 옛 guard는 계속 거부된다.
+- **B의 외부 비용은 집행했다고 표시하지 않는다.** B run에는 dispatch·사용량·단가·A 설정이 없고 API·MCP 답·사건·영수증에 비용 필드가 없다(프로젝트 `policy` 묶음 제외, 해석 8).
+- **D1(해석 19·20).** SQLite와 로컬 D1(miniflare)이 같은 성공·충돌·부분 실패를 내는지 같은 문장 표로 본다. **001 스키마 한정** — 002의 D1 적용은 검증하지 않았다. 표의 SQL은 서비스 코드가 아니라 같은 모양을 다시 쓴 것이라 `commands/runs.ts`의 claim·release·heartbeat UPDATE 모양이 바뀌면 같이 고친다.
+- **시험**: `tests/test_cross_contract.test.ts`(같은 시작 상태 표), `test_cross_handoff.test.ts`(인계·옛 fence), `test_cross_scenarios.test.ts`(지연·종료·Go OFF·사용량·F1), `test_cross_unknown.test.ts`(예약 보존), `test_cross_d1.test.ts`(SQLite/D1); 도우미 `tests/helpers/cross_{env,driver}.ts`; 표 `tests/fixtures/contracts/cross/{same_outcome,b_tools,d1_scenarios}.json`.
+- **D1 로컬 smoke 조건**: `PES_D1_SMOKE=1` 또는 `tests/d1/node_modules`(miniflare)가 있으면 D1 부분을 돌리고, 꺼져 있으면 사유와 함께 skip한다(`PES_D1_SMOKE=1`인데 도구가 없으면 실패). CI는 `d1-smoke` 워크플로가 돌린다(paths에 `tests/test_cross_d1.test.ts`·`tests/fixtures/contracts/cross/**` 포함).
+- **한계**: 해석 3의 code 통일은 후속. D1 교차는 001뿐. 실제 모델·실제 B 에이전트는 호출하지 않았다.
