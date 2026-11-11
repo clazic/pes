@@ -104,8 +104,10 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | `tests/helpers/ts_child_guard.ts` | 자식 안에서 `--import` 로 도는 시험 전용 가드(읽기 가드 + 허브 차단) |
 | `tests/helpers/ts_inject_fs.ts` | SEL-75 오류 주입(잠금 파일 EPERM·EEXIST, 가짜 시계) |
 | `tests/helpers/ts_guard_probe.ts`·`ts_inject_probe.ts` | 위 둘의 자기 시험용 가짜 자식(pes.ts 없이 돈다) |
-| `tests/fixtures/compat/contract.json` + `baseline/X0n.json` | CLI 계약 사례 X01~X07: 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·홈 명령 (쓰기 X01~X05, 읽기 X06·X07) |
-| `tests/test_pes_ts_contract.test.ts` | SEL-71/77 담당 목록, 실행 방법, (a) 사례 10개를 ts 에서 |
+| `tests/fixtures/compat/contract.json` + `baseline/X0n.json` | CLI 계약 사례 X01~X11: 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·홈 명령 (쓰기 X01~X05, 읽기 X06·X07, 1차 리뷰 X08~X11: 순서 없는 approve·승인된 단계 round-start(D13), chat 빈 답, merge 잘못된 sources) |
+| `tests/test_pes_ts_contract.test.ts` | SEL-71/77 담당 목록, 실행 방법, (a) 사례 14개를 ts 에서 |
+| `tests/test_pes_ts_review1_core.test.ts` | 1차 리뷰(코어): CLI 전용 선택 항목이 API·A 실행기로 새지 않음(`note_stage` 폴백·`any_order`·`plan_asking`·`allow_blank`), 읽기 모델이 `set` 필드 7개만 받음, 읽기 모델이 클라이언트가 고른 이름(`implicit-approval.json`·`pes-cli:re-approve`)을 믿지 않음 |
+| `tests/test_pes_ts_review1_cli.test.ts` | 1차 리뷰(CLI): 같은 이름 다른 폴더 두 `set` 동시(갱신 유실 0·객체 1개), `init` 폴더 생성 실패 뒤 DB 에 프로젝트 없음·다시 init, `EPERM` 도 `[Errno 13] Permission denied` 한 줄 (`helpers/ts_inject_read.ts` 가 읽기 오류 주입) |
 | `tests/test_pes_ts_guard.test.ts` | 가드·주입 장치 자기 시험 (지금도 통과) |
 | `tests/test_pes_ts_devices.test.ts` | D02·D03·D04 비교 장치와 D10·D11 규칙 자기 시험 (지금도 통과) |
 | `tests/test_pes_ts_win_data.test.ts` | W1·W2: 옛 역슬래시·CRLF 데이터 읽기, `/`·LF 쓰기 |
@@ -121,7 +123,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 - **D03 (feedback 파일 → submissions):** 답은 파일 이름·시각이 아니라 `{단계, 라운드, 종류, 글}` 모음으로 견준다(`record.answers`; 0.15 는 `feedback/*.json`, ts 는 DB 의 답). `chat` 이 찍는 답 식별자 줄과 `pending` 이 찍는 이름은 공통 부분만(`d03_stdout`). 옛 답 파일을 폴더에 떨어뜨리는 단계는 ts 에서 웹 제출(`cli_bridge` 의 `web_feedback` — `serve.py` 가 부르는 그 호출)로 바뀐다.
 - **D04 (.pes-lock → lease):** 각 단계 뒤에 '지금 누가 쥐었나'(`lock.owner`)를 기록해 그대로 견준다 — 0.15 는 `.pes-lock` 의 owner(2시간 안 것만), ts 는 살아 있는 lease 와 그 `external_session_ref`(= `PES_OWNER`). 만료는 하네스가 시계를 돌린다(`age_lock` ↔ `ts_age_lease`).
 
-**의도된 차이 추가:** `D10`(W1·W2 — ts 는 어느 OS 에서나 `/`·LF; 그래서 ts 는 `os_overrides.win32` 를 쓰지 않고 macOS/Linux 기준값과 같아야 하며(`ts_baseline`), 폴더에 CR·역슬래시 경로가 없어야 한다(`assert_posix_storage`)), `D11`(0.15 가 traceback 으로 죽는 단계 — ts 는 같은 exit 와 스택 추적 없는 한국어 한 줄; `fixable` 에 적은 단계만 성공해도 됨; PR26a 가 관찰한 3건: merge·ask 의 없는 파일, 깨진 project.json, `current` 없는 큰 프로젝트). 사용법 첫 줄의 실행 형식(`python3 -I pes.py` ↔ `node scripts/pes.ts`)은 `사용: <RUN> <` 로 정규화한다.
+**의도된 차이 추가:** `D13`(순서 없는 `approve`·승인된 단계의 `round-start` — 스킬은 승인을 순서대로 하고 승인된 단계는 reopen 뒤에 round-start 하므로 DB 보장을 CLI 호환 때문에 풀지 않는다: ts 는 exit 1 + 스택·영어 code 없는 한국어 한 줄. 사례 X08·X09 에 0.15 기준값(exit 0)과 ts 기대 문구(`KNOWN_DIFFS.D13.ts_steps`)를 둘 다 고정하고, 사례의 그 단계에는 `"d13": true` 를 단다. 거절된 단계는 ts 에서 아무것도 바꾸지 않으므로 끝 상태(DTO·파일)는 0.15 를 **그 단계 없이** 돌린 기록 `baseline.ts_end` 와 견준다 — py 대상이 `PES_COMPAT_UPDATE=1` 때 함께 만든다), `D10`(W1·W2 — ts 는 어느 OS 에서나 `/`·LF; 그래서 ts 는 `os_overrides.win32` 를 쓰지 않고 macOS/Linux 기준값과 같아야 하며(`ts_baseline`), 폴더에 CR·역슬래시 경로가 없어야 한다(`assert_posix_storage`)), `D11`(0.15 가 traceback 으로 죽는 단계 — ts 는 같은 exit 와 스택 추적 없는 한국어 한 줄; `fixable` 에 적은 단계만 성공해도 됨; PR26a 가 관찰한 3건: merge·ask 의 없는 파일, 깨진 project.json, `current` 없는 큰 프로젝트). 사용법 첫 줄의 실행 형식(`python3 -I pes.py` ↔ `node scripts/pes.ts`)은 `사용: <RUN> <` 로 정규화한다.
 
 **SEL-75 행렬(ts):** `test_pes_ts_set_lock` — 0.15 의 `test_cli_set_lock_windows` 와 같은 시나리오 21개를 Node 쪽 주입으로. Windows 흉내(`nt`)는 오류를 다루는 동안만 `process.platform` 이 `win32` 로 읽히게 한다. 해석: ts `set` 도 0.15 의 짧은 쓰기 잠금 `<프로젝트 폴더>/.project.json.lock`(배타 생성, 60초 넘으면 묵은 것, 30초 기다림, 마감 뒤 exit 3 "다른 set", 잠금 없는 PermissionError 는 비 Windows 에서 즉시 exit 2 "권한")을 쓴다.
 

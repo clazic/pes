@@ -3,7 +3,7 @@
 // This file is the contract of the issue, written before the code (it fails until scripts/pes.ts exists):
 //   1. the SEL-71 completion list is pinned (a: skeleton + write commands; SEL-77 owns the reads);
 //   2. the run method is pinned: `node scripts/pes.ts` (Node 26 strips types) — also bare, unguarded, with a clean stderr;
-//   3. every implemented case runs on the ts target and equals the pinned 0.15 baseline (E01~E04, E10, X01~X05);
+//   3. every implemented case runs on the ts target and equals the pinned 0.15 baseline (E01~E04, E10, X01~X05, X08~X11);
 //   4. the real-home guard covers the real child: nothing of the (fake and the account's) real ~/.pes / ~/pes-projects is touched.
 // The ts target always runs here, whatever PES_COMPAT_TARGET says (test_compat_cases_* keep running the py side).
 import assert from "node:assert/strict";
@@ -19,7 +19,7 @@ import { LATER, SEL71_DONE, SEL77_DONE, sel77_on } from "./helpers/sel_scope.ts"
 
 use_home_guard();
 
-test("SEL-71 completion list (a: pes.ts skeleton + write commands): exactly E01~E04, E10, X01~X05 are implemented on ts; SEL-77's read cases are not_yet until SEL-77 turns them on; server / setup / doctor stay not_yet", () => {
+test("SEL-71 completion list (a: pes.ts skeleton + write commands): exactly E01~E04, E10, X01~X05, X08~X11 are implemented on ts; SEL-77's read cases are not_yet until SEL-77 turns them on; server / setup / doctor stay not_yet", () => {
   assert.deepEqual([...implemented_ids()].sort(), [...SEL71_DONE].sort(), "cases.json / contract.json ts.status differ from the SEL-71 completion list");
   for (const id of SEL77_DONE) assert.equal(case_def(id).ts.status, "not_yet", `${id} belongs to SEL-77 (reads / reports) — not_yet until that issue turns SEL77_DONE on`);
   assert.equal(sel77_on(), false, "SEL-77 flips all of SEL77_DONE at once; SEL-71 leaves them off");

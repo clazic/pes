@@ -1,0 +1,231 @@
+{
+ "id": "X11",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "계약 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: AttributeError: 'str' object has no attribute 'get'"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: TypeError: 'int' object is not iterable"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: AttributeError: 'str' object has no attribute 'get'"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<2 result file(s)>"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: AttributeError: 'str' object has no attribute 'get'"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 1건 병합"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "계약 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "research",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 2,
+      "title": "올바른 항목",
+      "kind": "",
+      "question": "",
+      "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
+      "summary": "요약",
+      "details": "",
+      "sources": [
+       {
+        "url": "https://example.test/a",
+        "title": "출처 A"
+       }
+      ],
+      "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
+     }
+    ]
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "project.json": "c372ca9911d4e02f"
+ }
+}

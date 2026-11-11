@@ -1,0 +1,231 @@
+{
+ "id": "X10",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "계약 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "analyze"
+   ],
+   "exit": 0,
+   "stdout": [
+    "분석·종합 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "chat",
+    "{P}",
+    "plan",
+    ""
+   ],
+   "exit": 0,
+   "stdout": [
+    "<답 기록됨>"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "chat",
+    "{P}",
+    "research",
+    "",
+    "feedback"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<답 기록됨>"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "chat",
+    "{P}",
+    "analyze",
+    "   "
+   ],
+   "exit": 0,
+   "stdout": [
+    "<답 기록됨>"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "계약 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "analyze",
+  "complete": false,
+  "settings": {},
+  "processed": [
+   "plan-R1-<TIME>.json",
+   "research-R1-<TIME>.json",
+   "analyze-R1-<TIME>.json"
+  ],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback/analyze-R1-<TIME>.json": "53153e6cb50f942d",
+  "feedback/plan-R1-<TIME>.json": "fba341729801b12f",
+  "feedback/research-R1-<TIME>.json": "c83fe5748e874990",
+  "feedback.log": "e3b0c44298fc1c14",
+  "project.json": "412e092064c66fc6"
+ },
+ "answers": [
+  [
+   "analyze",
+   1,
+   "feedback",
+   "   "
+  ],
+  [
+   "plan",
+   1,
+   "feedback",
+   ""
+  ],
+  [
+   "research",
+   1,
+   "feedback",
+   ""
+  ]
+ ]
+}

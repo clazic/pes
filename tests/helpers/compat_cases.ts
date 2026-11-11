@@ -119,6 +119,11 @@ export interface CaseRecord {
   files: Record<string, string>;
   /** D03 cases only: the answers as a sorted multiset of {stage, round, kind, text} */
   answers?: unknown[];
+  /**
+   * D13 cases only (baseline side): the end state of the same case run on 0.15 WITHOUT its `d13` steps — what ts must end in, since its
+   * divergent steps are refused and change nothing. { dto, files, answers? } as the record carries them.
+   */
+  ts_end?: { dto: unknown; files: Record<string, string>; answers?: unknown[] };
 }
 
 export type CaseOutcome = { kind: "ran"; record: CaseRecord } | { kind: "not_yet"; reason: string };
@@ -259,7 +264,7 @@ export function d03_stdout(label: unknown, stdout: string[]): string[] {
   return stdout;
 }
 
-async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promise<CaseOutcome> {
+async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx, skip_d13 = false): Promise<CaseOutcome> {
   const steps: unknown[] = [];
   const roots = (): Roots => ctx.roots(def.project === null ? undefined : substitute(def.project, ctx));
   const ts_home = { env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir };
@@ -270,6 +275,8 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
   let merge_n = 0;
   let last_pending: string[] = [];
   for (const raw of def.steps) {
+    // D13: a step ts refuses on purpose. Skipped only to record the 0.15 end state ts must reach (CaseRecord.ts_end).
+    if (skip_d13 && raw.d13 === true) continue;
     if (raw.ts_import !== undefined) {
       // ts only: a 0.15 folder the case wrote is put into the DB the way the user's migration does it (PR11/PR12); py has no DB
       if (target === "ts") await ts_seed_legacy(ts_home, substitute(raw.ts_import, ctx));
@@ -532,13 +539,13 @@ function http_files(project: string, roots: Roots): Record<string, string> {
 }
 
 /** Runs one case on one target. The caller owns neither the ctx nor the servers: both are gone when this returns. */
-export async function run_case(target: Target, id: string): Promise<CaseOutcome> {
+export async function run_case(target: Target, id: string, options: { skip_d13?: boolean } = {}): Promise<CaseOutcome> {
   const def = case_def(id);
   // The ratchet is per case (SEL-71): a case marked not_yet is never run on ts — even when scripts/pes.ts exists — it answers not_yet.
   if (target === "ts" && def.ts.status === "not_yet") return { kind: "not_yet", reason: load_table().ts_not_yet_reason };
   const ctx = make_ctx(`pes-compat-${id.toLowerCase()}-`);
   try {
-    return def.kind === "http" ? await run_http(target, def, ctx) : await run_cli_like(target, def, ctx);
+    return def.kind === "http" ? await run_http(target, def, ctx) : await run_cli_like(target, def, ctx, options.skip_d13 === true);
   } finally {
     ctx.cleanup();
   }
@@ -633,11 +640,17 @@ export function d02_drop_defaults(got: unknown, base: unknown, folder_name: stri
   return copy;
 }
 
-export function compare_ts_record(def: CaseDef, got: CaseRecord, base: CaseRecord): void {
+export function compare_ts_record(def: CaseDef, got: CaseRecord, base_in: CaseRecord): void {
+  let base = base_in;
   const id = def.id;
   const diffs = def.diffs;
   const canon = diffs.includes("D02") ? d02_canon : (x: unknown) => x;
   compare_steps(def, got.steps, base.steps);
+  if (diffs.includes("D13")) {
+    // the divergent steps are refused on ts: the end state is the 0.15 one WITHOUT them (recorded next to the baseline)
+    assert.ok(base.ts_end !== undefined, `${id}: a D13 baseline carries ts_end (regenerate with PES_COMPAT_UPDATE=1 on the py target)`);
+    base = { ...base, dto: base.ts_end.dto, files: base.ts_end.files, ...(base.ts_end.answers === undefined ? {} : { answers: base.ts_end.answers }) };
+  }
   const got_dto = diffs.includes("D02") ? d02_drop_defaults(got.dto, base.dto, basename(def.project ?? "")) : got.dto;
   assert.deepEqual(
     n10_apply(canon(got_dto), diffs, KNOWN_DIFFS),
@@ -682,8 +695,17 @@ export function compare_steps(def: CaseDef, got: unknown[], base: unknown[]): vo
   const id = def.id;
   assert.equal(got.length, base.length, `${id}: the number of recorded steps differs`);
   const d11 = def.diffs.includes("D11");
+  const d13 = def.diffs.includes("D13") ? (KNOWN_DIFFS.D13?.ts_steps?.[id] ?? []) : [];
   base.forEach((expected: any, index) => {
     const actual: any = got[index];
+    const own = d13.find((x) => JSON.stringify(x.step) === JSON.stringify(expected.step));
+    if (own !== undefined) {
+      // D13: not the 0.15 result — exactly the pinned ts one (exit, empty stdout, the Korean line), and never a stack trace
+      assert.deepEqual(actual.step, expected.step, `${id}: step ${index} is another command`);
+      assert.ok(!looks_like_stack_trace(actual.stderr), `${id}: step ${JSON.stringify(expected.step)} ends in a stack trace: ${JSON.stringify(actual.stderr)}`);
+      assert.deepEqual({ exit: actual.exit, stdout: actual.stdout, stderr: actual.stderr }, { exit: own.exit, stdout: own.stdout, stderr: own.stderr }, `${id}: step ${JSON.stringify(expected.step)} (D13) differs from the pinned ts result`);
+      return;
+    }
     if (!(d11 && is_traceback_step(expected))) {
       assert.deepEqual(actual, expected, `${id}: step ${index} (${JSON.stringify(expected.step)}) — stdout / stderr kind / exit${def.diffs.includes("D04") ? " / lock owner" : ""} differ`);
       return;
@@ -709,6 +731,13 @@ export async function assert_case(target: Target, id: string): Promise<void> {
   if (target === "py") {
     assert.equal(outcome.kind, "ran", `${id}: the 0.15 target must run`);
     if (outcome.kind !== "ran") return;
+    if (def.diffs.includes("D13")) {
+      // the 0.15 end state without the divergent steps (what ts must end in)
+      const without = await run_case("py", id, { skip_d13: true });
+      assert.equal(without.kind, "ran");
+      if (without.kind !== "ran") return;
+      outcome.record.ts_end = { dto: without.record.dto, files: without.record.files, ...(without.record.answers === undefined ? {} : { answers: without.record.answers }) };
+    }
     if (process.env.PES_COMPAT_UPDATE === "1") {
       write_baseline(outcome.record);
       return;

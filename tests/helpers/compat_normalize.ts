@@ -282,6 +282,14 @@ export interface KnownDiff {
    * value before hashing (`depth += delta`, only on objects `{id: item_id, depth: <number>}`); every other field is compared as is.
    */
   file_depth?: Record<string, DepthFix>;
+  /**
+   * D13 (SEL-71 review 1, leader decision (b)): steps whose ts behaviour is deliberately NOT the 0.15 one. Per case: the step (by label,
+   * flagged `"d13": true` in the case table) and the exact result ts must give — exit code, stdout and the stderr lines (no stack trace,
+   * no English `code:` text, one Korean line). Every other step is compared with the 0.15 baseline as usual. Because the divergent step
+   * changes nothing on ts, the state DTO / produced files / answers are compared with `ts_end` of the baseline: the 0.15 record of the
+   * same case run WITHOUT its d13 steps (so the end state is pinned by 0.15 itself, not by a hand-written override).
+   */
+  ts_steps?: Record<string, { step: unknown; exit: number; stdout: string[]; stderr: string[] }[]>;
   /** D10: the ts target stores `/` paths and LF text on every OS — the win32 `os_overrides` do NOT apply to it (the posix baseline does) */
   posix_storage?: boolean;
 }

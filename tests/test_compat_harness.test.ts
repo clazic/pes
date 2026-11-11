@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
+import { baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_contract_table, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
 import { KNOWN_DIFFS, STAGES, TS_FILES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available, ts_gate, type CaseKind } from "./helpers/compat_env.ts";
 import {
   d06_depth_fix,
@@ -80,7 +80,7 @@ test("the rows that still differ per OS / PC (E13 http, E14 setup, E15 doctor) s
 });
 
 test("every intended difference (7.5) carries a reason, and each is used by at least one case", () => {
-  const used = new Set(load_table().cases.flatMap((c) => c.diffs));
+  const used = new Set([...load_table().cases, ...load_contract_table().cases].flatMap((c) => c.diffs));
   for (const [id, diff] of Object.entries(KNOWN_DIFFS)) {
     assert.equal(diff.id, id);
     assert.ok(diff.title.length > 0 && diff.reason.length > 10, id);
@@ -435,4 +435,81 @@ test("D02 default keys (E10): only slug / created / settings / complete, only at
   assert.notDeepEqual(d02_drop_defaults({ ...got, extra: 1 }, base, "legacy-project"), base);
   // a key the baseline has is compared as is (the baseline value wins)
   assert.deepEqual(d02_drop_defaults({ ...got, slug: "x" }, { ...base, slug: "legacy-project" }, "legacy-project"), { ...base, slug: "x" });
+});
+
+// ---------------------------------------------------------------- D13 (SEL-71 review 1): refused-on-purpose steps
+const x_def = (id: string): CaseDef => load_contract_table().cases.find((c) => c.id === id) as CaseDef;
+/** What a correct ts run of X08 / X09 records: the 0.15 baseline, the divergent step replaced by the pinned ts result, the end state = ts_end. */
+function d13_ts_like(id: string): CaseRecord {
+  const base = read_baseline(id);
+  const copy = clone(base);
+  const own = KNOWN_DIFFS.D13?.ts_steps?.[id] ?? [];
+  for (const [index, step] of (copy.steps as any[]).entries()) {
+    const mine = own.find((x) => JSON.stringify(x.step) === JSON.stringify(step.step));
+    if (mine !== undefined) copy.steps[index] = { ...step, exit: mine.exit, stdout: mine.stdout, stderr: mine.stderr };
+  }
+  copy.dto = (base.ts_end as NonNullable<CaseRecord["ts_end"]>).dto;
+  copy.files = (base.ts_end as NonNullable<CaseRecord["ts_end"]>).files;
+  delete copy.ts_end;
+  return copy;
+}
+
+test("D13: every ts_steps entry names exactly one `d13` step of its case, every `d13` step has an entry, and the ts text is one Korean line without a code prefix or stack", () => {
+  for (const [id, wanted] of Object.entries(KNOWN_DIFFS.D13?.ts_steps ?? {})) {
+    const def = x_def(id);
+    assert.ok(def.diffs.includes("D13"), `${id} must list D13`);
+    const flagged = def.steps.filter((s) => s.d13 === true).map((s) => s.run);
+    assert.deepEqual(flagged, wanted.map((w) => w.step), `${id}: d13-flagged steps and ts_steps must be the same list`);
+    for (const w of wanted) {
+      assert.equal(w.exit, 1);
+      assert.deepEqual(w.stdout, []);
+      assert.equal(w.stderr.length, 1);
+      assert.match(w.stderr[0] as string, /[가-힣]/);
+      assert.doesNotMatch(w.stderr[0] as string, /^[a-z_]+: [a-z_ ]+$|conflict|ERR_|Error/, "no English `code: message` text");
+    }
+    const base = read_baseline(id);
+    assert.ok(base.ts_end, `${id}: baseline carries ts_end`);
+    assert.notDeepEqual(base.ts_end?.dto, base.dto, `${id}: the end state without the divergent step must differ from the 0.15 one (otherwise the step is not divergent)`);
+  }
+  assert.deepEqual(Object.keys(KNOWN_DIFFS.D13?.ts_steps ?? {}).sort(), ["X08", "X09"]);
+});
+
+test("D13: the pinned wording (the 0.15 result stays in the baseline: exit 0)", () => {
+  assert.deepEqual(KNOWN_DIFFS.D13?.ts_steps?.X08?.[0]?.stderr, ["approve: 앞 단계(기획)가 아직 승인되지 않았습니다"]);
+  assert.deepEqual(KNOWN_DIFFS.D13?.ts_steps?.X09?.[0]?.stderr, ["round-start: 기획은 이미 승인됐습니다 — 먼저 reopen 하세요"]);
+  const steps = (id: string) => read_baseline(id).steps as any[];
+  assert.equal(steps("X08")[1].exit, 0);
+  assert.deepEqual(steps("X08")[1].stdout.slice(0, 1), ["조사 승인"]);
+  assert.equal(steps("X09")[3].exit, 0);
+  assert.deepEqual(steps("X09")[3].stdout, ["기획 R1 시작"]);
+});
+
+test("D13: a record shaped like a correct ts run passes; the 0.15 result, another text, another exit, a stack, stdout or a changed end state fail", () => {
+  for (const id of ["X08", "X09"]) {
+    const def = x_def(id);
+    const good = d13_ts_like(id);
+    compare_ts_record(def, clone(good), read_baseline(id));
+    const at = (good.steps as any[]).findIndex((s) => (KNOWN_DIFFS.D13?.ts_steps?.[id] ?? []).some((x) => JSON.stringify(x.step) === JSON.stringify(s.step)));
+    const mutate = (fn: (step: any) => void): CaseRecord => {
+      const copy = clone(good);
+      fn(copy.steps[at]);
+      return copy;
+    };
+    const base = read_baseline(id);
+    assert.throws(() => compare_ts_record(def, clone(base), base), /ts_end|differs|DTO/, "the 0.15 behaviour itself is not accepted on ts");
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.exit = 0)), base), /D13/);
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.exit = 2)), base), /D13/);
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.stderr = ["conflict: an earlier stage is not approved"])), base), /D13/);
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.stderr = ["오류: 다른 문구"])), base), /D13/);
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.stderr = [s.stderr[0], "다음 줄"])), base), /D13/);
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.stdout = ["x"])), base), /D13/);
+    assert.throws(() => compare_ts_record(def, mutate((s) => (s.stderr = ["    at file:///x.ts:1:1"])), base), /stack trace/);
+    const moved = clone(good);
+    moved.dto = clone(base.dto);
+    assert.throws(() => compare_ts_record(def, moved, base), /DTO differs/, "the refused step must change nothing on ts");
+    const files = clone(good);
+    files.files = clone(base.files);
+    const compared = (f: Record<string, string> | undefined) => JSON.stringify(Object.entries(f ?? {}).filter(([k]) => k !== "project.json" && k !== "library.json"));
+    if (compared(base.files) !== compared(base.ts_end?.files)) assert.throws(() => compare_ts_record(def, files, base), /produced files differ/);
+  }
 });

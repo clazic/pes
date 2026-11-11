@@ -1,0 +1,379 @@
+{
+ "id": "X09",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "계약 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 승인",
+    "조사 항목 1개 생성 (기존 조사 재사용 0개)",
+    "다음 단계: 조사 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> plan  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "계약 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "plan",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": false,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)"
+    ],
+    "items": [
+     {
+      "id": 1,
+      "title": "주제",
+      "kind": "topic",
+      "question": "질문",
+      "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 0,
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
+     }
+    ]
+   },
+   "research": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 1,
+      "title": "주제",
+      "kind": "topic",
+      "question": "질문",
+      "status": "new",
+      "request": "",
+      "depth": 0,
+      "updated_round": 0,
+      "summary": "",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
+      "links": {
+       "plan": [
+        1
+       ]
+      },
+      "user_links": []
+     }
+    ]
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "index.html": "076487f7c2995c29",
+  "project.json": "b18185ace1497b8d"
+ },
+ "ts_end": {
+  "dto": {
+   "pes": 1,
+   "topic": "계약 주제",
+   "slug": "합성 프로젝트",
+   "created": "<DATE>",
+   "current": "research",
+   "complete": false,
+   "settings": {},
+   "processed": [],
+   "notes": [],
+   "executive_summary": "",
+   "conclusion": "",
+   "library": null,
+   "stages": {
+    "plan": {
+     "status": "approved",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": "<TIME>",
+     "stale": false,
+     "reports": [],
+     "history": [
+      "승인 <TIME> (R0)"
+     ],
+     "items": [
+      {
+       "id": 1,
+       "title": "주제",
+       "kind": "topic",
+       "question": "질문",
+       "status": "done",
+       "request": "",
+       "depth": 1,
+       "updated_round": 0,
+       "summary": "",
+       "details": "",
+       "sources": [],
+       "stats": [],
+       "shots": [],
+       "confidence": "",
+       "conflicts": [],
+       "verify": null,
+       "links": {},
+       "user_links": []
+      }
+     ]
+    },
+    "research": {
+     "status": "asking",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": [
+      {
+       "id": 1,
+       "title": "주제",
+       "kind": "topic",
+       "question": "질문",
+       "status": "new",
+       "request": "",
+       "depth": 0,
+       "updated_round": 0,
+       "summary": "",
+       "details": "",
+       "sources": [],
+       "stats": [],
+       "shots": [],
+       "confidence": "",
+       "conflicts": [],
+       "verify": null,
+       "links": {
+        "plan": [
+         1
+        ]
+       },
+       "user_links": []
+      }
+     ]
+    },
+    "analyze": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "write": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "verify": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "publish": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    }
+   }
+  },
+  "files": {
+   "feedback.log": "e3b0c44298fc1c14",
+   "index.html": "076487f7c2995c29",
+   "project.json": "fc7c3ac2c2325d0b"
+  }
+ }
+}

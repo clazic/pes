@@ -1,5 +1,5 @@
 {
-  "doc": "CLI 계약 사례 X01~X07 (SEL-71). 32개 명령(+set)의 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·프로젝트 없는 명령의 이름·인자 오류·exit·stdout/stderr 를 0.15 와 견준다. 기준값은 baseline/X0n.json(0.15 대상). 서버·프로세스를 띄우는 serve·hub·open·watch·doctor 는 인자 수 오류(사용법)만 — 실제 실행은 E13·E15(뒤 PR). X01~X05 = SEL-71(쓰기 골격), X06·X07 = SEL-77(읽기). E04 는 status 를 써서 SEL-71 에 status 가 든다.",
+  "doc": "CLI 계약 사례 X01~X11 (SEL-71). 32개 명령(+set)의 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·프로젝트 없는 명령의 이름·인자 오류·exit·stdout/stderr 를 0.15 와 견준다. 기준값은 baseline/X0n.json(0.15 대상). 서버·프로세스를 띄우는 serve·hub·open·watch·doctor 는 인자 수 오류(사용법)만 — 실제 실행은 E13·E15(뒤 PR). X01~X05·X08~X11 = SEL-71(쓰기 골격, X08·X09 는 의도된 차이 D13, X10·X11 은 1차 리뷰 권장 7), X06·X07 = SEL-77(읽기). E04 는 status 를 써서 SEL-71 에 status 가 든다.",
   "ts_not_yet_reason": "읽기·보고서 사례(X06·X07)는 SEL-77 몫 — SEL77_DONE (tests/test_pes_ts_contract.test.ts)",
   "cases": [
     {
@@ -1085,6 +1085,280 @@
         }
       ],
       "project": "{R}/계약-프로젝트"
+    },
+    {
+      "id": "X08",
+      "title": "approve 앞 단계 미승인 — 0.15 는 순서 없이 승인, ts 는 의도된 차이 D13 (exit 1 + 한국어 한 줄)",
+      "section": "CLI 계약 X08",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "0.15 기준값(exit 0, 조사 승인)과 ts 기대값(D13 문구)을 둘 다 고정",
+      "diffs": [
+        "D01",
+        "D02",
+        "D13"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "계약 주제"
+          ]
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "research"
+          ],
+          "d13": true
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "X09",
+      "title": "승인된 단계의 round-start — 0.15 는 라운드 +1, ts 는 의도된 차이 D13 (먼저 reopen)",
+      "section": "CLI 계약 X09",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "0.15 기준값(exit 0, 기획 R1 시작)과 ts 기대값(D13 문구)을 둘 다 고정",
+      "diffs": [
+        "D01",
+        "D02",
+        "D13"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "계약 주제"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "plan",
+            "results": [
+              {
+                "id": 1,
+                "title": "주제",
+                "kind": "topic",
+                "question": "질문"
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "approve",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "plan"
+          ],
+          "d13": true
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "X10",
+      "title": "chat 빈 답 — 0.15 와 같게 exit 0, 빈 답 기록",
+      "section": "CLI 계약 X10",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "빈 글·공백만 있는 글도 답으로 기록(D03 multiset), 단계마다 한 건씩",
+      "diffs": [
+        "D03",
+        "D01",
+        "D02"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "계약 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "analyze"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}",
+            "plan",
+            ""
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}",
+            "research",
+            "",
+            "feedback"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}",
+            "analyze",
+            "   "
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "X11",
+      "title": "merge 의 잘못된 sources — 0.15 traceback, ts 는 D11 (exit 1 한국어 한 줄, 아무것도 안 씀)",
+      "section": "CLI 계약 X11",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "잘못된 sources(문자열·숫자·문자열 목록, 올바른 항목과 같이 보낸 경우)에서 아무것도 쓰지 않고, 이어지는 올바른 병합은 그대로 된다",
+      "diffs": [
+        "D01",
+        "D02",
+        "D11"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "계약 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "항목",
+                "summary": "요약",
+                "sources": "nope"
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "항목",
+                "summary": "요약",
+                "sources": 5
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "항목",
+                "summary": "요약",
+                "sources": [
+                  "문자열"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 3,
+                "title": "좋은 항목",
+                "summary": "요약"
+              },
+              {
+                "id": 4,
+                "title": "항목",
+                "summary": "요약",
+                "sources": "nope"
+              }
+            ]
+          }
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 2,
+                "title": "올바른 항목",
+                "summary": "요약",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "project": "{P}"
     }
   ]
 }
