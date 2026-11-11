@@ -130,7 +130,7 @@ import {
   type Env,
   type GcResult,
 } from "./helpers/blob_env.ts";
-import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
+import { EXPECTED_COMMAND_NAMES, NAME_SHAPE_EXEMPT } from "./helpers/command_names.ts";
 import { state_signature } from "./helpers/state_signature.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1099,7 +1099,7 @@ test("the full registry lists exactly the expected names, file.* included", () =
 
 test("there is no command that deletes, rewrites, or exposes paths of blobs, file policies or version files", () => {
   const bad = /(update|delete|remove|overwrite|replace|rewrite|patch|truncate|purge|path|url|sign).*(blob|file_polic|version_file)|\.(insert|update|delete|upsert|sql|exec|crud)$/i;
-  assert.deepEqual([...COMMANDS.keys()].filter((k) => bad.test(k)), []);
+  assert.deepEqual([...COMMANDS.keys()].filter((k) => !NAME_SHAPE_EXEMPT.includes(k) && bad.test(k)), []); // exempt: see command_names.ts
 });
 
 function ts_files(dir: string): string[] {

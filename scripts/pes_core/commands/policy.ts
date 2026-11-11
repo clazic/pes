@@ -17,6 +17,8 @@
 
 import { ApiError } from "../errors.ts";
 import { current_policy } from "../policy.ts";
+import { AI_PROVIDER } from "../a_runtime/spec.ts";
+import { gate_builtin_dispatch } from "./ai.ts";
 import {
   insert_receipt,
   optional_rev,
@@ -48,6 +50,7 @@ const DISPATCH_PREPARE_FIELDS = [
   "manifest_blob_id",
   "payload_hash",
   "request_key",
+  "reservation",
 ] as const;
 const DISPATCH_AUTHORIZE_FIELDS = ["dispatch_id", "run_id", "lease_id", "fence"] as const;
 const DISPATCH_MARK_SENT_FIELDS = [
@@ -409,8 +412,8 @@ function run_dispatch_prepare(runtime: CommandRuntime): CommandResult {
   reject_unknown_fields(payload, DISPATCH_PREPARE_FIELDS);
   const guard = require_guard(payload);
   const provider = require_non_empty_string(payload, "provider");
-  if (provider !== GO_PROVIDER) {
-    return invalid_payload('provider must be "opencode-go"');
+  if (provider !== GO_PROVIDER && provider !== AI_PROVIDER) {
+    return invalid_payload('provider must be "opencode-go" or "ai_connection"');
   }
   const manifest_blob_id = require_non_empty_string(payload, "manifest_blob_id");
   const payload_hash = payload.payload_hash;
@@ -422,6 +425,14 @@ function run_dispatch_prepare(runtime: CommandRuntime): CommandResult {
   const scope = require_scope(runtime);
   require_current_lease(runtime, scope, guard);
   const policy = current_policy(runtime.db, scope.project_id);
+  let allowance_json: string | null = null;
+  if (provider === AI_PROVIDER) {
+    // The usage / cost gate is judged here, in the same transaction that records the reservation, so two runs of
+    // one connection cannot both pass the line and then both send.
+    allowance_json = gate_builtin_dispatch(runtime, scope.project_id, guard.run_id, payload.reservation);
+  } else if (payload.reservation !== undefined) {
+    return invalid_payload("reservation belongs to ai_connection dispatches");
+  }
 
   const blob = runtime.db.get<{ ok: bigint }>(
     "SELECT 1 AS ok FROM blobs WHERE project_id = ? AND id = ?",
@@ -445,16 +456,17 @@ function run_dispatch_prepare(runtime: CommandRuntime): CommandResult {
   runtime.db.run(
     `INSERT INTO outbound_dispatches
        (id, project_id, run_id, provider, policy_version_id, manifest_blob_id,
-        payload_hash, state, request_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?)`,
+        payload_hash, state, request_key, allowance_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?)`,
     dispatch_id,
     scope.project_id,
     guard.run_id,
-    GO_PROVIDER,
+    provider,
     policy.policy_id,
     manifest_blob_id,
     payload_hash,
     request_key,
+    allowance_json,
   );
 
   const result = {
@@ -482,7 +494,7 @@ function run_dispatch_prepare(runtime: CommandRuntime): CommandResult {
         run_id: guard.run_id,
         payload: {
           dispatch_id,
-          provider: GO_PROVIDER,
+          provider,
           policy_version_id: policy.policy_id,
         },
       },

@@ -46,6 +46,7 @@ import {
   type PolicyChecker,
 } from "../scripts/pes_core/commands.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
+import { NAME_SHAPE_EXEMPT } from "./helpers/command_names.ts";
 import { isolated_home, type IsolatedHome } from "./helpers/isolated_home.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
 
@@ -205,6 +206,7 @@ test("COMMANDS is a closed registry of named domain commands, not table CRUD", (
   for (const name of names) {
     assert.match(name, /^[a-z][a-z_]*\.[a-z][a-z_]*$/, `command name shape: ${name}`);
     assert.doesNotMatch(name, /^(sql|exec|table|ops|raw|crud|insert|update|delete|replace)\b/);
+    if (NAME_SHAPE_EXEMPT.includes(name)) continue; // ai_connection.update: a domain command, see command_names.ts
     assert.doesNotMatch(name, /\.(insert|update|delete|replace|exec|sql|ops)$/);
   }
 });

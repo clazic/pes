@@ -26,6 +26,8 @@ import {
 } from "./shared.ts";
 import { ApiError } from "../errors.ts";
 import { run_import_handoff } from "./handoff_import.ts";
+import { BUILTIN_RUNTIME } from "../a_runtime/spec.ts";
+import { builtin_run_settings, write_builtin_run_settings } from "./ai.ts";
 
 const CLAIMABLE_RUN_STATUSES = new Set(["queued", "waiting_human", "blocked_usage", "interrupted"]);
 const COMPLETE_RUN_STATUSES = new Set(["succeeded", "failed"]);
@@ -470,7 +472,7 @@ function run_claim(runtime: CommandRuntime): CommandResult {
   };
 }
 
-const CREATE_RUN_FIELDS = ["actor_id", "mode", "runtime", "provider", "model"] as const;
+const CREATE_RUN_FIELDS = ["actor_id", "mode", "runtime", "provider", "model", "ai_connection_id", "stage_id", "round_id"] as const;
 
 /**
  * A human owner queues a run for an agent actor. No lease is taken and no
@@ -494,9 +496,19 @@ function run_create(runtime: CommandRuntime): CommandResult {
   const runtime_name = require_non_empty_string(payload, "runtime");
   const provider = require_non_empty_string(payload, "provider");
   const model = require_non_empty_string(payload, "model");
-  if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
+  // A built-in run (PR19) names a registered AI connection; every other mode A run is the legacy Go pair.
+  const ai_connection_id = optional_string(payload, "ai_connection_id");
+  if (ai_connection_id !== null) {
+    if (mode !== "A" || runtime_name !== BUILTIN_RUNTIME) {
+      throw new ApiError("invalid_payload", "ai_connection_id belongs to a mode A pes_builtin run");
+    }
+  } else if (mode === "A" && (provider !== "opencode-go" || !model.startsWith("opencode-go/"))) {
     throw new ApiError("invalid_payload", "mode A requires the opencode-go provider and model prefix");
+  } else if (runtime_name === BUILTIN_RUNTIME) {
+    throw new ApiError("invalid_payload", "a pes_builtin run needs ai_connection_id");
   }
+  const builtin =
+    ai_connection_id === null ? null : builtin_run_settings(runtime, scope.project_id, ai_connection_id, provider, model);
 
   const target = read_credential_actor(runtime.db, actor_id);
   if (target === undefined) {
@@ -519,15 +531,42 @@ function run_create(runtime: CommandRuntime): CommandResult {
     throw new ApiError("conflict", "the project has no active edition");
   }
 
+  // An optional place in the work: a stage of the active edition and, within it, a round.
+  const stage_id = optional_string(payload, "stage_id");
+  const round_id = optional_string(payload, "round_id");
+  if (round_id !== null && stage_id === null) {
+    throw new ApiError("invalid_payload", "round_id needs stage_id");
+  }
+  if (stage_id !== null) {
+    const stage = runtime.db.get<{ ok: bigint }>(
+      "SELECT 1 AS ok FROM stages WHERE project_id = ? AND edition_id = ? AND id = ?",
+      scope.project_id,
+      edition.active_edition_id,
+      stage_id,
+    );
+    if (stage === undefined) throw new ApiError("not_found", "stage not found in the active edition");
+  }
+  if (round_id !== null) {
+    const round = runtime.db.get<{ ok: bigint }>(
+      "SELECT 1 AS ok FROM rounds WHERE project_id = ? AND stage_id = ? AND id = ?",
+      scope.project_id,
+      stage_id,
+      round_id,
+    );
+    if (round === undefined) throw new ApiError("not_found", "round not found in the stage");
+  }
+
   const run_id = runtime.new_id();
   const written = runtime.db.run(
     `INSERT INTO runs
-       (id, project_id, edition_id, actor_id, mode, runtime, provider, model, role,
+       (id, project_id, edition_id, stage_id, round_id, actor_id, mode, runtime, provider, model, role,
         status, parent_run_id, base_control_rev, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'worker', 'queued', NULL, ?, NULL, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'worker', 'queued', NULL, ?, NULL, NULL)`,
     run_id,
     scope.project_id,
     edition.active_edition_id,
+    stage_id,
+    round_id,
     actor_id,
     mode,
     runtime_name,
@@ -538,6 +577,7 @@ function run_create(runtime: CommandRuntime): CommandResult {
   if (written.changes !== 1n) {
     throw new Error("the queued run was not created");
   }
+  if (builtin !== null) write_builtin_run_settings(runtime, scope.project_id, run_id, model, builtin);
 
   const result = {
     project_id: scope.project_id,
