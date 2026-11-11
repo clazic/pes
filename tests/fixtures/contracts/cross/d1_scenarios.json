@@ -1,0 +1,1347 @@
+{
+ "contract": "cross/d1_scenarios",
+ "version": 1,
+ "description": "SQLite(node:sqlite)와 로컬 D1(miniflare)이 같은 lease/fence 시나리오에서 같은 성공·충돌·부분 실패를 내는지 보는 표. 문장은 commands/runs.ts 의 실제 claim/release/heartbeat SQL 과 같은 모양이다(CAS 는 require_change 로 0행 → 실패). expect: ok(모든 문장 성공, changes 를 주면 문장별 변경 수가 같다) | zero_rows(ZeroRowsError, 앞 문장 되돌림) | error(그 밖의 SQL 오류: 제약 위반 등, 앞 문장 되돌림). then: 그 step 직후 표 상태. 값은 전부 합성.",
+ "seed": [
+  {
+   "sql": "INSERT INTO users (id, display_name) VALUES (?, ?)",
+   "params": [
+    "u1",
+    "합성 소유자"
+   ]
+  },
+  {
+   "sql": "INSERT INTO projects (id, slug, topic, owner_user_id) VALUES (?, ?, ?, ?)",
+   "params": [
+    "p1",
+    "cross-d1",
+    "합성 주제",
+    "u1"
+   ]
+  },
+  {
+   "sql": "INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)",
+   "params": [
+    "p1",
+    "u1",
+    "owner"
+   ]
+  },
+  {
+   "sql": "INSERT INTO actors (id, kind, user_id, display_name) VALUES (?, ?, ?, ?)",
+   "params": [
+    "act_human",
+    "human",
+    "u1",
+    "합성 사람"
+   ]
+  },
+  {
+   "sql": "INSERT INTO actors (id, kind, user_id, display_name) VALUES (?, ?, ?, ?)",
+   "params": [
+    "act_ai",
+    "internal_ai",
+    "u1",
+    "합성 내장 AI"
+   ]
+  },
+  {
+   "sql": "INSERT INTO actors (id, kind, user_id, display_name) VALUES (?, ?, ?, ?)",
+   "params": [
+    "act_b",
+    "external_agent",
+    "u1",
+    "합성 외부 에이전트"
+   ]
+  },
+  {
+   "sql": "INSERT INTO editions (id, project_id, edition_no, status) VALUES (?, ?, ?, ?)",
+   "params": [
+    "e1",
+    "p1",
+    1,
+    "active"
+   ]
+  }
+ ],
+ "scenarios": [
+  {
+   "name": "first_claim_a",
+   "why": "A 의 첫 claim: run 과 lease(fence 1)가 한 batch 로 선다",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ],
+     "then": [
+      {
+       "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "lease_id": "lease_a1",
+         "run_id": "run_a1",
+         "owner_actor_id": "act_ai",
+         "fence": 1,
+         "state": "active"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "claim_while_live_is_refused",
+   "why": "A 가 live lease 를 쥔 동안 B 의 claim(CAS)은 0행 → batch 전체 실패, B 의 run 도 남지 않는다 (SQLite 의 'the project already has an active lease' 와 같은 결과)",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ]
+    },
+    {
+     "label": "B claims against a live lease",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        2,
+        5000,
+        5000,
+        125000,
+        "p1",
+        1,
+        5000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "zero_rows",
+     "then": [
+      {
+       "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "lease_id": "lease_a1",
+         "run_id": "run_a1",
+         "owner_actor_id": "act_ai",
+         "fence": 1,
+         "state": "active"
+        }
+       ]
+      },
+      {
+       "sql": "SELECT id, status FROM runs WHERE project_id = ? ORDER BY id",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "id": "run_a1",
+         "status": "running"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a_to_b_after_release",
+   "why": "A 가 lease 를 내려놓으면 B 의 claim 이 fence 2 로 선다. run 은 각자 따로, A 의 run 은 queued 로 남는다",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ]
+    },
+    {
+     "label": "A releases (run→queued, lease→released)",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "queued",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        "p1",
+        "lease_a1",
+        1,
+        6000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ]
+    },
+    {
+     "label": "B claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        2,
+        7000,
+        7000,
+        127000,
+        "p1",
+        1,
+        7000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ],
+     "then": [
+      {
+       "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "lease_id": "lease_b1",
+         "run_id": "run_b1",
+         "owner_actor_id": "act_b",
+         "fence": 2,
+         "state": "active"
+        }
+       ]
+      },
+      {
+       "sql": "SELECT id, status FROM runs WHERE project_id = ? ORDER BY id",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "id": "run_a1",
+         "status": "queued"
+        },
+        {
+         "id": "run_b1",
+         "status": "running"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "b_to_a_after_expiry",
+   "why": "B 가 사라져 lease 가 만료되면(expires_at 지남) A 의 claim 이 fence 2 로 선다 — 만료는 해제와 같은 길이다",
+   "steps": [
+    {
+     "label": "B claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ]
+    },
+    {
+     "label": "A claims before expiry is refused",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        2,
+        50000,
+        50000,
+        170000,
+        "p1",
+        1,
+        50000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "zero_rows"
+    },
+    {
+     "label": "A claims after expiry",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        2,
+        130000,
+        130000,
+        250000,
+        "p1",
+        1,
+        130000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ],
+     "then": [
+      {
+       "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "lease_id": "lease_a1",
+         "run_id": "run_a1",
+         "owner_actor_id": "act_ai",
+         "fence": 2,
+         "state": "active"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "stale_guard_rolls_back_the_whole_write",
+   "why": "B 가 fence 2 를 쥔 뒤 A 의 옛 guard(fence 1)로 wait(run 상태 변경 + lease 해제)를 하면 해제가 0행 → 앞선 run 상태 변경까지 되돌아간다 (부분 실패 없음)",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1,
+      1
+     ]
+    },
+    {
+     "label": "A releases",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "queued",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        "p1",
+        "lease_a1",
+        1,
+        6000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "B claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        2,
+        7000,
+        7000,
+        127000,
+        "p1",
+        1,
+        7000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "A wakes up and waits with the OLD guard",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "waiting_human",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        "p1",
+        "lease_a1",
+        1,
+        8000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "zero_rows",
+     "then": [
+      {
+       "sql": "SELECT id, status FROM runs WHERE project_id = ? ORDER BY id",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "id": "run_a1",
+         "status": "queued"
+        },
+        {
+         "id": "run_b1",
+         "status": "running"
+        }
+       ]
+      },
+      {
+       "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "lease_id": "lease_b1",
+         "run_id": "run_b1",
+         "owner_actor_id": "act_b",
+         "fence": 2,
+         "state": "active"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "stale_heartbeat_changes_nothing",
+   "why": "옛 lease_id·fence 로 heartbeat 를 보내도 0행(require_change 로 실패) — 현재 lease 의 시각이 안 바뀐다",
+   "steps": [
+    {
+     "label": "B claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "heartbeat with fence 2 (wrong)",
+     "batch": [
+      {
+       "sql": "UPDATE project_leases SET heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        3000,
+        123000,
+        "p1",
+        "lease_b1",
+        2,
+        3000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "zero_rows",
+     "then": [
+      {
+       "sql": "SELECT heartbeat_at, expires_at FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "heartbeat_at": 1000,
+         "expires_at": 121000
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "label": "heartbeat with the right guard",
+     "batch": [
+      {
+       "sql": "UPDATE project_leases SET heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        3000,
+        123000,
+        "p1",
+        "lease_b1",
+        1,
+        3000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1
+     ],
+     "then": [
+      {
+       "sql": "SELECT heartbeat_at, expires_at FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "heartbeat_at": 3000,
+         "expires_at": 123000
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "two_claims_one_winner",
+   "why": "같은 이전 fence(1)를 본 두 claim 이 연달아 오면 하나만 성공 — 두 번째는 CAS 0행(분실 갱신 없음)",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "A releases",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "queued",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        "p1",
+        "lease_a1",
+        1,
+        6000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "B claims (sees fence 1)",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        2,
+        7000,
+        7000,
+        127000,
+        "p1",
+        1,
+        7000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "A claims again (also saw fence 1)",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a2",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_a2",
+        "run_a2",
+        "act_ai",
+        2,
+        7000,
+        7000,
+        127000,
+        "p1",
+        1,
+        7000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "zero_rows",
+     "then": [
+      {
+       "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "lease_id": "lease_b1",
+         "run_id": "run_b1",
+         "owner_actor_id": "act_b",
+         "fence": 2,
+         "state": "active"
+        }
+       ]
+      },
+      {
+       "sql": "SELECT id, status FROM runs WHERE project_id = ? ORDER BY id",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "id": "run_a1",
+         "status": "queued"
+        },
+        {
+         "id": "run_b1",
+         "status": "running"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "guarded_receipt_fails_the_batch",
+   "why": "영수증 INSERT 의 guard_ok 가 현재 lease 와 안 맞으면 0 → CHECK(guard_ok = 1) 가 batch 전체를 실패시킨다(require_change 없이도). 앞서 성공한 run 상태 변경이 되돌아간다",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "receipt with the right guard",
+     "batch": [
+      {
+       "sql": "INSERT INTO mutation_commits (id, project_id, run_id, actor_id, via, client_request_id, request_hash, action, lease_id, fence, guard_ok, result_json, created_at) SELECT ?, ?, ?, ?, 'http', ?, ?, 'result.submitted', ?, ?, CASE WHEN EXISTS (SELECT 1 FROM project_leases WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?) THEN 1 ELSE 0 END, '{}', ?",
+       "params": [
+        "m1",
+        "p1",
+        "run_a1",
+        "act_ai",
+        "k1",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "lease_a1",
+        1,
+        "p1",
+        "lease_a1",
+        1,
+        5000,
+        5000
+       ]
+      }
+     ],
+     "expect": "ok",
+     "changes": [
+      1
+     ]
+    },
+    {
+     "label": "A releases, B claims",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "queued",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "UPDATE project_leases SET state = 'released' WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+       "params": [
+        "p1",
+        "lease_a1",
+        1,
+        6000
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_b1",
+        "p1",
+        "e1",
+        "act_b",
+        "B",
+        "claude_code",
+        "anthropic",
+        "unknown",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+       "params": [
+        "lease_b1",
+        "run_b1",
+        "act_b",
+        2,
+        7000,
+        7000,
+        127000,
+        "p1",
+        1,
+        7000
+       ],
+       "require_change": true
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "A's late receipt with the old guard (after a state change in the same batch)",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "running",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "INSERT INTO mutation_commits (id, project_id, run_id, actor_id, via, client_request_id, request_hash, action, lease_id, fence, guard_ok, result_json, created_at) SELECT ?, ?, ?, ?, 'http', ?, ?, 'result.submitted', ?, ?, CASE WHEN EXISTS (SELECT 1 FROM project_leases WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?) THEN 1 ELSE 0 END, '{}', ?",
+       "params": [
+        "m2",
+        "p1",
+        "run_a1",
+        "act_ai",
+        "k2",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "lease_a1",
+        1,
+        "p1",
+        "lease_a1",
+        1,
+        8000,
+        8000
+       ]
+      }
+     ],
+     "expect": "error",
+     "then": [
+      {
+       "sql": "SELECT id, status FROM runs WHERE project_id = ? ORDER BY id",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "id": "run_a1",
+         "status": "queued"
+        },
+        {
+         "id": "run_b1",
+         "status": "running"
+        }
+       ]
+      },
+      {
+       "sql": "SELECT count(*) AS n FROM mutation_commits WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "n": 1
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "duplicate_request_key_is_a_conflict",
+   "why": "같은 (project, actor, client_request_id) 영수증 INSERT 는 UNIQUE 로 실패하고 같은 batch 의 앞 문장을 되돌린다 — 중복 쓰기 0",
+   "steps": [
+    {
+     "label": "A claims",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_a1",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin_go",
+        "opencode-go",
+        "opencode-go/synthetic",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_a1",
+        "run_a1",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "first receipt",
+     "batch": [
+      {
+       "sql": "INSERT INTO mutation_commits (id, project_id, run_id, actor_id, via, client_request_id, request_hash, action, lease_id, fence, guard_ok, result_json, created_at) SELECT ?, ?, ?, ?, 'http', ?, ?, 'result.submitted', ?, ?, CASE WHEN EXISTS (SELECT 1 FROM project_leases WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?) THEN 1 ELSE 0 END, '{}', ?",
+       "params": [
+        "m1",
+        "p1",
+        "run_a1",
+        "act_ai",
+        "k1",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "lease_a1",
+        1,
+        "p1",
+        "lease_a1",
+        1,
+        5000,
+        5000
+       ]
+      }
+     ],
+     "expect": "ok"
+    },
+    {
+     "label": "the same key again with another change in front",
+     "batch": [
+      {
+       "sql": "UPDATE runs SET status = ?, ended_at = ? WHERE project_id = ? AND id = ?",
+       "params": [
+        "waiting_human",
+        null,
+        "p1",
+        "run_a1"
+       ],
+       "require_change": true
+      },
+      {
+       "sql": "INSERT INTO mutation_commits (id, project_id, run_id, actor_id, via, client_request_id, request_hash, action, lease_id, fence, guard_ok, result_json, created_at) SELECT ?, ?, ?, ?, 'http', ?, ?, 'result.submitted', ?, ?, CASE WHEN EXISTS (SELECT 1 FROM project_leases WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?) THEN 1 ELSE 0 END, '{}', ?",
+       "params": [
+        "m2",
+        "p1",
+        "run_a1",
+        "act_ai",
+        "k1",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "lease_a1",
+        1,
+        "p1",
+        "lease_a1",
+        1,
+        5000,
+        5001
+       ]
+      }
+     ],
+     "expect": "error",
+     "then": [
+      {
+       "sql": "SELECT id, status FROM runs WHERE project_id = ? ORDER BY id",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "id": "run_a1",
+         "status": "running"
+        }
+       ]
+      },
+      {
+       "sql": "SELECT count(*) AS n FROM mutation_commits WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "n": 1
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mode_a_label_rule_in_sql",
+   "why": "001 의 SQL 규칙: mode A run 은 Go 라벨 쌍만 통과. 어긋난 A run 은 어느 엔진에서도 INSERT 에서 실패하고 같은 batch 의 lease 도 안 남는다 (002 가 pes_builtin 을 허용하는 것은 SQLite 에서만 검증됨 — 문서 8.16)",
+   "steps": [
+    {
+     "label": "A run with a non-Go provider",
+     "batch": [
+      {
+       "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+       "params": [
+        "run_x",
+        "p1",
+        "e1",
+        "act_ai",
+        "A",
+        "pes_builtin",
+        "openai_compatible",
+        "synthetic-model",
+        "running",
+        1000
+       ]
+      },
+      {
+       "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+       "params": [
+        "p1",
+        "lease_x",
+        "run_x",
+        "act_ai",
+        1,
+        1000,
+        1000,
+        121000
+       ]
+      }
+     ],
+     "expect": "error",
+     "then": [
+      {
+       "sql": "SELECT count(*) AS n FROM runs WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "n": 0
+        }
+       ]
+      },
+      {
+       "sql": "SELECT count(*) AS n FROM project_leases WHERE project_id = ?",
+       "params": [
+        "p1"
+       ],
+       "rows": [
+        {
+         "n": 0
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

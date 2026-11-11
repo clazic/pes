@@ -1,0 +1,537 @@
+{
+  "contract": "cross/same_outcome",
+  "version": 1,
+  "description": "같은 시작 상태(합성 프로젝트, plan 단계 열린 판, 자료 1개)에서 같은 단계 열을 A(internal_ai, 내장 실행기의 도구 경로)와 B(external_agent, MCP 도구 5개 직접 연결)로 돌려 사건·영수증 action·오류 code·lease·run 상태·추가된 버전 수를 비교한다. actor·runtime·mode·id·시계·메시지 언어(A 영어 core 문구, B 한국어 API 문구)는 비교하지 않는다. 오류 code 는 core 철자로 맞춘다(policy_blocked→policy_denied, human_required/owner_required→forbidden, lease_lost→conflict). `same` 은 A·B 모두 같은 기대, `A`/`B` 는 side 별 기대(같은 키는 side 값이 이긴다). `b_raw_code` 는 B 가 쓰는 원래 철자다.",
+  "scenarios": [
+    {
+      "name": "submit_ok",
+      "why": "정상 제출: 같은 사건 1개·영수증 1개·버전 1개",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true,
+              "lease": "active",
+              "run_status": "running",
+              "versions_added": 0
+            },
+            "A": {
+              "events": [
+                "run.created",
+                "run.claimed"
+              ],
+              "receipts": [
+                "run.created",
+                "run.claimed"
+              ]
+            },
+            "B": {
+              "events": [
+                "run.claimed"
+              ],
+              "receipts": [
+                "run.claimed"
+              ]
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "result.submitted"
+              ],
+              "receipts": [
+                "result.submitted"
+              ],
+              "lease": "active",
+              "run_status": "running",
+              "versions_added": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_missing_object",
+      "why": "없는 자료에 제출: not_found, 아무것도 안 남는다(사건·영수증·버전 0)",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "object": "missing",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "not_found",
+              "events": [],
+              "receipts": [],
+              "lease": "active",
+              "run_status": "running",
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_empty_results",
+      "why": "빈 results: invalid_payload, 아무것도 안 남는다",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "results": "empty",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "invalid_payload",
+              "events": [],
+              "receipts": [],
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_results_not_array",
+      "why": "results 가 배열이 아님: invalid_payload (A 도구는 code 없는 문장으로 거절한다 — 해석)",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "results": "not_array",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "invalid_payload",
+              "events": [],
+              "receipts": [],
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "stale_guard_after_release",
+      "why": "lease 를 내려놓은 뒤 옛 guard 로 제출: conflict, 쓰기 0, run 은 queued 로 남는다",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "release",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "run.released"
+              ],
+              "receipts": [
+                "run.released"
+              ],
+              "lease": "released",
+              "run_status": "queued"
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "guard": "previous",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "conflict",
+              "events": [],
+              "receipts": [],
+              "lease": "released",
+              "run_status": "queued",
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_partial_failure_is_all_or_nothing",
+      "why": "한 번에 2개를 내는데 둘째가 없는 자료: 호출 전체가 not_found 이고 첫째 버전도 남지 않는다 — 부분 성공 없음(양쪽 공통)",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "results": "partial",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "not_found",
+              "events": [],
+              "receipts": [],
+              "lease": "active",
+              "run_status": "running",
+              "versions_added": 0
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "result.submitted"
+              ],
+              "receipts": [
+                "result.submitted"
+              ],
+              "versions_added": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "wrong_fence",
+      "why": "fence 가 하나 큰 guard: 거부, 쓰기 0, lease 는 그대로 active",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "guard": "fence_plus_one",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "conflict",
+              "events": [],
+              "receipts": [],
+              "lease": "active",
+              "run_status": "running",
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ask_wait_then_stale",
+      "why": "질문 게시 → 대기(lease 반납, waiting_human) → 대기 전 guard 로 제출은 거부",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "ask",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "question.set_published"
+              ],
+              "receipts": [
+                "question.set_published"
+              ],
+              "lease": "active",
+              "run_status": "running"
+            }
+          }
+        },
+        {
+          "op": "wait",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "run.waiting_human"
+              ],
+              "receipts": [
+                "run.waiting_human"
+              ],
+              "lease": "released",
+              "run_status": "waiting_human"
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "guard": "previous",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "conflict",
+              "events": [],
+              "receipts": [],
+              "lease": "released",
+              "run_status": "waiting_human",
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "complete_then_stale",
+      "why": "제출 → 완료(succeeded, lease 반납) → 완료 전 guard 로 제출은 거부",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "expect": {
+            "same": {
+              "ok": true,
+              "versions_added": 1
+            }
+          }
+        },
+        {
+          "op": "complete",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "run.completed"
+              ],
+              "receipts": [
+                "run.completed"
+              ],
+              "lease": "released",
+              "run_status": "succeeded"
+            }
+          }
+        },
+        {
+          "op": "submit",
+          "guard": "previous",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "conflict",
+              "events": [],
+              "receipts": [],
+              "lease": "released",
+              "run_status": "succeeded",
+              "versions_added": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "complete_failed",
+      "why": "failed 로 완료: 같은 사건, run 은 failed",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "complete",
+          "status": "failed",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "run.completed"
+              ],
+              "receipts": [
+                "run.completed"
+              ],
+              "lease": "released",
+              "run_status": "failed"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "heartbeat_then_stale_heartbeat",
+      "why": "heartbeat 는 사건 1개, lease 반납 뒤 옛 guard 의 heartbeat 는 거부 (B 의 HTTP 철자는 lease_lost)",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "heartbeat",
+          "expect": {
+            "same": {
+              "ok": true,
+              "events": [
+                "run.heartbeat"
+              ],
+              "receipts": [
+                "run.heartbeat"
+              ],
+              "lease": "active",
+              "run_status": "running"
+            }
+          }
+        },
+        {
+          "op": "release",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "heartbeat",
+          "guard": "previous",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "conflict",
+              "events": [],
+              "receipts": [],
+              "lease": "released",
+              "run_status": "queued"
+            },
+            "B": {
+              "b_raw_code": "lease_lost"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "human_only_actions",
+      "why": "승인·정책 변경은 사람만: 둘 다 forbidden(B 철자 human_required / owner_required), 쓰기 0",
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "same": {
+              "ok": true
+            }
+          }
+        },
+        {
+          "op": "human_only_approve",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "forbidden",
+              "events": [],
+              "receipts": [],
+              "lease": "active"
+            },
+            "B": {
+              "b_raw_code": "human_required"
+            }
+          }
+        },
+        {
+          "op": "human_only_policy",
+          "expect": {
+            "same": {
+              "ok": false,
+              "code": "forbidden",
+              "events": [],
+              "receipts": [],
+              "lease": "active"
+            },
+            "B": {
+              "b_raw_code": "owner_required"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "go_off_blocks_only_a",
+      "why": "Go 를 끄면 A(mode A, Go 라벨) 시작은 policy_denied, B(외부 에이전트)는 영향 없이 claim·제출 가능 — 권한이 같은 게 아니라 '의도대로 다른' 항목",
+      "setup": [
+        "go_off"
+      ],
+      "steps": [
+        {
+          "op": "claim",
+          "expect": {
+            "A": {
+              "ok": false,
+              "code": "policy_denied",
+              "events": [],
+              "receipts": [],
+              "lease": null
+            },
+            "B": {
+              "ok": true,
+              "events": [
+                "run.claimed"
+              ],
+              "receipts": [
+                "run.claimed"
+              ],
+              "lease": "active",
+              "run_status": "running"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
