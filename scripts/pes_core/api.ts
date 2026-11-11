@@ -25,6 +25,7 @@ import {
   inputs_page,
   latest_approval_id,
   lease_info,
+  current_place,
   max_event_seq,
   operation_receipt,
   owner_user_id,
@@ -200,6 +201,22 @@ interface LeaseRow {
  */
 type Who = "any" | "agent" | "human" | "owner" | "session";
 type Bucket = "general" | "control";
+
+/** Why an operation refuses a caller; null = it does not. One rule for the real check (#bind) and the screen's `enabled` (#action_refusal). */
+type Denial =
+  | { by: "session_is_not_agent" }
+  | { by: "human_required" | "owner_required" | "session_only" }
+  | { by: "scope"; scope: string };
+
+/** The permission rule of an operation (who may call it): pure, no database, no side effect. */
+function permission_denial(op: { who: Who; scope?: string }, caller: { session: boolean; scopes: readonly string[] | null }): Denial | null {
+  if (caller.session) return op.who === "agent" ? { by: "session_is_not_agent" } : null;
+  if (op.who === "human") return { by: "human_required" };
+  if (op.who === "owner") return { by: "owner_required" };
+  if (op.who === "session") return { by: "session_only" };
+  if (op.scope !== undefined && !(caller.scopes ?? []).includes(op.scope)) return { by: "scope", scope: op.scope };
+  return null;
+}
 
 interface Op {
   who: Who;
@@ -943,13 +960,29 @@ export class ApiApp {
   }
 
   #bind(project: ProjectRow, credential: Credential, op: Op): AuthInfo {
-    if (credential.session) {
-      if (op.who === "agent") {
-        throw new Fail("forbidden", {
-          target: "$.headers.x-pes-session",
-          next_action: "use_agent_token",
-        });
+    const denial = permission_denial(op, { session: credential.session, scopes: credential.scopes });
+    if (denial !== null) {
+      const actor_kind = credential.kind as string;
+      switch (denial.by) {
+        case "session_is_not_agent":
+          throw new Fail("forbidden", { target: "$.headers.x-pes-session", next_action: "use_agent_token" });
+        case "human_required":
+        case "owner_required":
+          throw new Fail(denial.by, {
+            target: "$.headers.Authorization",
+            details: { actor_kind, required: denial.by === "human_required" ? "human_owner" : "owner_human" },
+          });
+        case "session_only":
+          throw new Fail("forbidden", { target: "$.headers.Authorization", details: { actor_kind } });
+        case "scope":
+          throw new Fail("forbidden", {
+            target: "$.headers.Authorization",
+            details: { required_scope: denial.scope },
+            next_action: "request_scope",
+          });
       }
+    }
+    if (credential.session) {
       return {
         actor_id: this.#owner_actor(project.id),
         kind: "human",
@@ -958,29 +991,9 @@ export class ApiApp {
         token_id: null,
       };
     }
-    const actor_kind = credential.kind as string;
-    if (op.who === "human" || op.who === "owner") {
-      throw new Fail(op.who === "human" ? "human_required" : "owner_required", {
-        target: "$.headers.Authorization",
-        details: {
-          actor_kind,
-          required: op.who === "human" ? "human_owner" : "owner_human",
-        },
-      });
-    }
-    if (op.who === "session") {
-      throw new Fail("forbidden", { target: "$.headers.Authorization", details: { actor_kind } });
-    }
-    if (op.scope !== undefined && !(credential.scopes ?? []).includes(op.scope)) {
-      throw new Fail("forbidden", {
-        target: "$.headers.Authorization",
-        details: { required_scope: op.scope },
-        next_action: "request_scope",
-      });
-    }
     return {
       actor_id: credential.actor_id as string,
-      kind: actor_kind,
+      kind: credential.kind as string,
       session: false,
       scopes: credential.scopes,
       token_id: credential.token_id,
@@ -1537,14 +1550,20 @@ export class ApiApp {
     return { status: 200, data };
   }
 
-  /** Can this caller run the operation? null = yes; otherwise the reason, in Korean (the same rule #bind enforces; display only). */
+  /** Can this caller run the operation? null = yes; otherwise the reason, in Korean (the rule #bind enforces — permission_denial; display only). */
   #action_refusal(operation: string, auth: AuthInfo): string | null {
     const op = this.#table.find((spec) => spec.operation === operation)?.op;
     if (op === undefined) return "이 서버가 지원하지 않는 동작입니다.";
-    if (auth.session) return op.who === "agent" ? "에이전트 토큰으로만 할 수 있는 동작입니다." : null;
-    if (op.who === "human" || op.who === "owner" || op.who === "session") return "소유자 본인(사람)만 할 수 있는 동작입니다.";
-    if (op.scope !== undefined && !(auth.scopes ?? []).includes(op.scope)) return `이 토큰에는 ${op.scope} 권한이 없습니다.`;
-    return null;
+    const denial = permission_denial(op, { session: auth.session, scopes: auth.scopes });
+    if (denial === null) return null;
+    switch (denial.by) {
+      case "session_is_not_agent":
+        return "에이전트 토큰으로만 할 수 있는 동작입니다.";
+      case "scope":
+        return `이 토큰에는 ${denial.scope} 권한이 없습니다.`;
+      default:
+        return "소유자 본인(사람)만 할 수 있는 동작입니다.";
+    }
   }
 
   #workspace_data(project: ProjectRow, auth: AuthInfo): unknown {
@@ -1590,11 +1609,9 @@ export class ApiApp {
     const count_of = (kind: string): number => Number(counts.find((row) => row.kind === kind)?.n ?? 0n);
 
     const run_of = new Map(run_rows.map((row) => [row.stage_id, row.status]));
-    const current_stage =
-      stage_rows.find((stage) => stage.id === edition.current_stage_id) ??
-      stage_rows.find((stage) => stage.status !== "approved") ??
-      stage_rows[stage_rows.length - 1];
-    if (current_stage === undefined) throw new ApiError("conflict", "the project has no stages");
+    const place = current_place(edition.current_stage_id, stage_rows, round_rows);
+    if (place === undefined) throw new ApiError("conflict", "the project has no stages");
+    const current_stage = place.stage;
 
     const view_of = (stage: StageRow): string => {
       if (stage.status === "approved") return stage.stale_since_event_seq === null ? "approved" : "stale";
@@ -1618,14 +1635,8 @@ export class ApiApp {
       return { key: stage.key, view: view_of(stage), rounds };
     });
 
-    const open_round = round_rows.find((round) => round.stage_id === current_stage.id && round.state === "open");
-    const last_round = [...round_rows].reverse().find((round) => round.stage_id === current_stage.id);
-    const current_round_id =
-      open_round !== undefined
-        ? Number(open_round.round_no)
-        : current_stage.status === "asking" || last_round === undefined
-          ? null
-          : Number(last_round.round_no);
+    const open_round = place.open_round;
+    const current_round_id = place.round_id;
 
     const everything_approved = stage_rows.every((stage) => stage.status === "approved" && stage.stale_since_event_seq === null);
     const current_view = stages.find((stage) => stage.key === current_stage.key)?.view ?? "pending";
@@ -1685,6 +1696,25 @@ export class ApiApp {
     const limit = this.#query_limit(request, "limit", 1, LIST_MAX_ITEMS, LIST_MAX_ITEMS);
     const scope = auth.session ? "owner" : "agent";
     let given: ReturnType<typeof read_cursor> = null;
+    if (request.query.get("cursor") === "head") {
+      // SEL-82: "just the head" — no event is read; the cursor a full read would end on (every event of the project is scanned, hidden ones too)
+      const data = read_tx(this.#db, () => {
+        const meta = db_meta(this.#db);
+        return {
+          events: [],
+          next_cursor: make_cursor(this.#secret, {
+            p: project.id,
+            s: scope,
+            d: meta.database_instance_id,
+            e: meta.cursor_epoch,
+            q: max_event_seq(this.#db, project.id).toString(),
+          }),
+          has_more: false,
+          epoch: meta.cursor_epoch,
+        };
+      });
+      return { status: 200, data };
+    }
     if (request.query.has("cursor")) {
       given = read_cursor(this.#secret, request.query.get("cursor") as string);
       if (given === null || given.p !== project.id || given.s !== scope) {

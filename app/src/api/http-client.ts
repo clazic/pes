@@ -43,7 +43,32 @@ async function toApiError(res: Response): Promise<PesApiError> {
 
 const isNotFound = (e: unknown): boolean => e instanceof PesApiError && e.body.error.code === "not_found";
 
-export function createHttpClient(options: HttpClientOptions): PesClient {
+/**
+ * 변경 읽기(SEL-83 U1c 의 PesClient.getChanges 약속). SEL-83 이 아직 병합 전이라 types.ts 에는 없다 — 여기서 좁게 선언해 두고, 병합 뒤 types.ts 의 것으로 바꾼다.
+ * 서버 events 에는 tx_id·stage·round 가 없다: 사건 하나 = tx 하나(tx_id = event_seq), touched 는 사건 type 만으로 정한다.
+ */
+export interface ChangesTx {
+  tx_id: string;
+  touched: string[];
+}
+export interface ChangesRead {
+  cursor: string;
+  txs: ChangesTx[];
+}
+export type HttpClient = PesClient & {
+  /** cursor null = 기준만 받음(`?cursor=head` 한 번, txs 비어 있음), 문자열 = 그 커서 다음 한 쪽 */
+  getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>;
+};
+
+/** 사건 type → 화면이 다시 읽을 자리. 모든 사건은 workspace, project·edition·policy 는 + projects, 라운드에 닿는 사건은 + 'round:*'(어느 라운드인지 events 에 없다) */
+function touchedBy(type: string): string[] {
+  const touched = ["workspace"];
+  if (/^(project\.|edition\.|policy\.changed$)/.test(type)) touched.push("projects");
+  if (/^(round|question|answer|result|stage|run|input)\./.test(type)) touched.push("round:*");
+  return touched;
+}
+
+export function createHttpClient(options: HttpClientOptions): HttpClient {
   const base = options.baseUrl ?? "";
   const send = (url: string, init: RequestInit): Promise<Response> => (options.fetch ?? ((u, i) => globalThis.fetch(u, i)))(url, init);
   const headers = (extra: Record<string, string> = {}): Record<string, string> => ({ "x-pes-session": options.session, ...extra });
@@ -71,6 +96,22 @@ export function createHttpClient(options: HttpClientOptions): PesClient {
   }
 
   return {
+    /** GET P/changes — 한 번만 부른다(has_more 여도 한 쪽). 400 cursor_invalid · 410 cursor_expired 는 PesApiError 로 나온다 */
+    async getChanges(slug, _edition, cursor): Promise<ChangesRead> {
+      const id = idOf(slug);
+      if (id === undefined) throw new PesApiError(fallbackBody(404));
+      const res = await send(projectUrl(id, `/changes?cursor=${encodeURIComponent(cursor ?? "head")}`), { method: "GET", headers: headers(), credentials: "omit" });
+      if (!res.ok) throw await toApiError(res);
+      const body: unknown = await res.json();
+      const data = isRecord(body) ? body.data : undefined;
+      if (!isRecord(data) || !Array.isArray(data.events) || typeof data.next_cursor !== "string") throw new PesApiError(fallbackBody(500));
+      if (cursor === null) return { cursor: data.next_cursor, txs: [] };
+      const txs = data.events.flatMap((event): ChangesTx[] =>
+        isRecord(event) && typeof event.event_seq === "string" && typeof event.type === "string" ? [{ tx_id: event.event_seq, touched: touchedBy(event.type) }] : [],
+      );
+      return { cursor: data.next_cursor, txs };
+    },
+
     async listProjects(): Promise<ProjectRef[]> {
       const found = await Promise.all(Object.keys(options.projects).map((slug) => readWorkspace(slug)));
       return found.flatMap((w) => (w ? [{ slug: w.slug, edition: w.edition, current: w.current }] : []));

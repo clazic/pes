@@ -892,6 +892,7 @@ paths:
   /api/v1/projects/{id}/changes:
     get:
       summary: Change feed after an opaque cursor (whole transactions, ascending event_seq)
+      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security: [{ agentToken: [] }, { localSession: [] }]

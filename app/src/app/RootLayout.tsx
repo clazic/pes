@@ -6,12 +6,13 @@ import { selectClient } from "@/api/select-client";
 import { readSidebarOpen, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ArrivalContext, useArrivalRoot } from "./arrival";
+import { OpenGuidance } from "./OpenGuidance";
 import { AppSidebar } from "./AppSidebar";
 import { SiteHeader } from "./SiteHeader";
 
 /**
  * 서버 자료는 TanStack Query 가 맡는다(설계 12.5) — 폴링 없음 · 창 초점 재조회 없음 · 시간으로 다시 받지 않음.
- * 클라이언트는 selectClient 가 고른다 — 기본은 앱 안 가짜 클라이언트(합성 자료), window.__PES_APP__ 설정이 있으면 서버 HTTP 클라이언트(U1b). 루트마다 새로 만들어 상태가 새지 않는다.
+ * 클라이언트는 selectClient 가 고른다 — window.__PES_APP__ 설정이 있으면 서버 HTTP 클라이언트(U1b), 없으면 비 production 빌드만 앱 안 가짜 클라이언트(합성 자료), production 은 `pes open` 안내. 루트마다 새로 만들어 상태가 새지 않는다.
  */
 function makeQueryClient() {
   return new QueryClient({
@@ -37,6 +38,8 @@ export function RootLayout() {
   const [client] = React.useState(() => selectClient(window));
   const arrival = useArrivalRoot();
   const [sidebarOpen] = React.useState(initialSidebarOpen);
+  // production 빌드에서 열어 준 쪽이 넘긴 설정이 없으면 가짜 자료 대신 안내만 그린다(요청 0)
+  if (client === null) return <OpenGuidance />;
   return (
     <QueryClientProvider client={queryClient}>
       <ClientContext.Provider value={client}>
