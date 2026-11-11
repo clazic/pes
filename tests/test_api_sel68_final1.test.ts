@@ -28,10 +28,28 @@ import { state_signature } from "./helpers/state_signature.ts";
 const GO_MODEL = "opencode-go/deepseek-v4.1-flash";
 const A_BODY = { mode: "A", runtime: "synthetic-runtime", provider: "opencode-go", model: GO_MODEL };
 
-const claim = (env: ApiEnv, auth: Auth, body: unknown): Promise<ApiResponse> =>
-  call(env, { method: "POST", path: P(env, "/claims"), auth, body });
-const create_run = (env: ApiEnv, body: unknown): Promise<ApiResponse> =>
-  call(env, { method: "POST", path: P(env, "/runs"), auth: "owner", body });
+/**
+ * The request budget (60/min per agent token, 600/min per owner session, fixed 60 s window) is product behaviour and a
+ * 403 spends it. The big variant tables send hundreds of requests on a fixed synthetic clock, so after every PACE
+ * calls the clock moves past the window: no call ever sees a 429, and no assertion is weakened.
+ */
+const PACE = 25;
+const WINDOW_PAST_MS = 60_001;
+const sent = new WeakMap<object, number>();
+function pace(env: ApiEnv): void {
+  const n = (sent.get(env) ?? 0) + 1;
+  sent.set(env, n);
+  if (n % PACE === 0) env.clock.advance(WINDOW_PAST_MS);
+}
+
+const claim = (env: ApiEnv, auth: Auth, body: unknown): Promise<ApiResponse> => {
+  pace(env);
+  return call(env, { method: "POST", path: P(env, "/claims"), auth, body });
+};
+const create_run = (env: ApiEnv, body: unknown): Promise<ApiResponse> => {
+  pace(env);
+  return call(env, { method: "POST", path: P(env, "/runs"), auth: "owner", body });
+};
 
 /** Core command (no HTTP): the same thing the CLI calls. Returns {result, replayed}. */
 function core(env: ApiEnv, actor_id: string, command: "run.claim" | "run.create", input: Record<string, unknown>, key: string) {
