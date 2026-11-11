@@ -13,8 +13,8 @@
 //
 // This file reads and writes no file and starts no process; the app's own settings are not looked at.
 
-import { ClaudeAppAdapter, type ClaudeAppAdapterOptions } from "./claude_app.ts";
-import { api_naming_app, check_entry_input, read_launch_env, type CliLaunchEnvInput, type CliMcpEntryInput } from "./cli_common.ts";
+import { ClaudeAppAdapter, type ClaudeAppAdapterOptions, type HandoffApp } from "./claude_app.ts";
+import { check_entry_input, read_launch_env, type CliLaunchEnvInput, type CliMcpEntryInput } from "./cli_common.ts";
 
 export type { CliLaunchEnvInput, CliMcpEntryInput, TokenKeyStore } from "./cli_common.ts";
 export type { BundleBaseVersion, HandoffBundle, ImportInput, ImportOutcome } from "./claude_app.ts";
@@ -62,11 +62,7 @@ export type CodexAppAdapterOptions = ClaudeAppAdapterOptions;
  * `app = codex_app`, so PES records the owner's run as `codex_app_handoff` (provider openai, model unknown).
  */
 export class CodexAppAdapter extends ClaudeAppAdapter {
-  constructor(options: CodexAppAdapterOptions) {
-    super(
-      options !== null && typeof options === "object"
-        ? { ...options, api: api_naming_app(options.api, options.project_id, "codex_app") }
-        : options,
-    );
+  protected override handoff_app(): HandoffApp {
+    return "codex_app";
   }
 }

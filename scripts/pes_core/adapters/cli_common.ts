@@ -8,7 +8,6 @@
 // else, so a change of that signature fails to compile here.
 
 import type { KeyStore } from "../a_runtime/keystore.ts";
-import { project_path, type ApiLike } from "./api_client.ts";
 
 export type TokenKeyStore = Pick<KeyStore, "get">;
 
@@ -142,35 +141,4 @@ export async function read_launch_env(runtime: CliRuntime, input: CliLaunchEnvIn
     );
   }
   return { PES_AGENT_TOKEN: token };
-}
-
-/** The apps an explicit hand-off can come from: the closed `app` list of the server's import (PR20c). */
-export type HandoffApp = "claude_app" | "codex_app" | "opencode_app";
-
-/**
- * Wraps an API so that the one request that records a hand-off import (POST /runs with an `import` body) also names
- * the app it comes from. The server derives the run's runtime and provider from that closed field, never from the
- * pasted text. Every other request, and an import that already names an app, goes through as it was.
- */
-export function api_naming_app(api: ApiLike, project_id: string, app: HandoffApp): ApiLike {
-  return {
-    handle: (request) => {
-      if (request.method === "POST" && request.path === project_path(project_id, "/runs") && typeof request.body === "string") {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(request.body);
-        } catch {
-          return api.handle(request);
-        }
-        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const body = parsed as Record<string, unknown>;
-          const source = body.import;
-          if (source !== null && typeof source === "object" && !Array.isArray(source) && !("app" in source)) {
-            return api.handle({ ...request, body: JSON.stringify({ ...body, import: { ...source, app } }) });
-          }
-        }
-      }
-      return api.handle(request);
-    },
-  };
 }

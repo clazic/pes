@@ -27,6 +27,9 @@ export interface ClaudeAppAdapterOptions {
   owner_session: string;
 }
 
+/** The apps an explicit hand-off can come from: the closed `app` list of the server's import (PR20c). */
+export type HandoffApp = "claude_app" | "codex_app" | "opencode_app";
+
 export interface BundleBaseVersion {
   object_id: string;
   version_id: string;
@@ -146,6 +149,15 @@ export class ClaudeAppAdapter {
     }
     if (key !== null) headers["idempotency-key"] = key;
     return api_request(this.#api, { method, path: project_path(this.#project_id, rest), headers, body: payload });
+  }
+
+  /**
+   * The app this adapter hands off for. A subclass for another app overrides it; the import request then names it
+   * in the closed `app` field and the server derives the run's runtime and provider from that (PR20c). The Claude
+   * app sends no `app`, which is the same request as before PR20c.
+   */
+  protected handoff_app(): HandoffApp {
+    return "claude_app";
   }
 
   #refusal(result: ApiResult & { ok: false }): HandoffError {
@@ -386,6 +398,8 @@ export class ClaudeAppAdapter {
       // own transaction, so a race ends in rev_conflict (bundle_stale here) with nothing written.
       expected_heads: bundle.base_versions.map((entry) => ({ object_id: entry.object_id, version_id: entry.version_id })),
     };
+    const app = this.handoff_app();
+    if (app !== "claude_app") request.app = app;
     if (pasted.claimed_tool !== null) request.claimed_tool = pasted.claimed_tool;
     if (pasted.claimed_model !== null) request.claimed_model = pasted.claimed_model;
     const done = await this.#owner_call("POST", "/runs", { import: request }, import_key);

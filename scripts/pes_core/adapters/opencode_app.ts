@@ -16,9 +16,9 @@
 //
 // This file reads and writes no file and starts no process; the app's own settings are not looked at.
 
-import { ClaudeAppAdapter, type ClaudeAppAdapterOptions } from "./claude_app.ts";
+import { ClaudeAppAdapter, type ClaudeAppAdapterOptions, type HandoffApp } from "./claude_app.ts";
 import { on_go_route } from "./opencode_tui.ts";
-import { AdapterError, api_naming_app, check_entry_input, InputError, read_launch_env, type CliLaunchEnvInput, type CliMcpEntryInput } from "./cli_common.ts";
+import { AdapterError, check_entry_input, InputError, read_launch_env, type CliLaunchEnvInput, type CliMcpEntryInput } from "./cli_common.ts";
 
 export type { CliLaunchEnvInput, CliMcpEntryInput, TokenKeyStore } from "./cli_common.ts";
 export type { BundleBaseVersion, HandoffBundle, ImportInput, ImportOutcome } from "./claude_app.ts";
@@ -75,11 +75,7 @@ export type OpencodeAppAdapterOptions = ClaudeAppAdapterOptions;
  * `app = opencode_app`, so PES records the owner's run as `opencode_app_handoff` (provider unknown, model unknown).
  */
 export class OpencodeAppAdapter extends ClaudeAppAdapter {
-  constructor(options: OpencodeAppAdapterOptions) {
-    super(
-      options !== null && typeof options === "object"
-        ? { ...options, api: api_naming_app(options.api, options.project_id, "opencode_app") }
-        : options,
-    );
+  protected override handoff_app(): HandoffApp {
+    return "opencode_app";
   }
 }
