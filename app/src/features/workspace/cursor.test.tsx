@@ -224,3 +224,137 @@ describe("오류·시간 초과·커서 무효", () => {
     expect(router.state.location.pathname + router.state.location.search).toBe(hrefBefore);
   });
 });
+
+describe("첫 호출은 마운트 즉시 — 기준 커서 (R1 권장 3)", () => {
+  it("화면이 붙자마자(3초를 기다리지 않고) cursor=null 로 한 번 부른다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const s = createScriptedClient();
+    const t0 = Date.now();
+    await renderApp(CURRENT, { width: WIDTHS.wide1440 }, { client: s.client });
+    await ready();
+    await advance(500);
+    const first = s.changesCalls()[0];
+    expect(first, "마운트 뒤 0.5초 안에 첫 호출이 있어야 한다").toBeDefined();
+    expect(first!.args).toEqual(["sample-study", 1, null]);
+    expect(first!.at - t0, "첫 읽기와 기준 사이에 3초 틈을 두지 않는다").toBeLessThan(U1C.active.minGap);
+  });
+
+  it("기준을 받은 뒤 다음 호출은 그 커서로 — 첫 호출만 null", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const s = createScriptedClient();
+    s.queueChanges({ cursor: "base-0", txs: [] });
+    await renderApp(CURRENT, { width: WIDTHS.wide1440 }, { client: s.client });
+    await ready();
+    await advance(8_000);
+    const args = s.changesCalls().map((c) => c.args[2]);
+    expect(args[0]).toBeNull();
+    expect(args[1]).toBe("base-0");
+    expect(args.slice(1).includes(null), "이후 호출은 null 이 아니다").toBe(false);
+  });
+
+  it("기준 호출이 실패하면 늦춰 다시 시도하되 계속 null 로 기준부터 받는다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const s = createScriptedClient();
+    s.queueChanges(new Error("끊김"));
+    await renderApp(CURRENT, { width: WIDTHS.wide1440 }, { client: s.client });
+    await ready();
+    await advance(70_000);
+    const calls = s.changesCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    expect(calls[0]!.args[2]).toBeNull();
+    expect(calls[1]!.args[2], "기준을 못 받았으니 또 null").toBeNull();
+    expect(calls[1]!.at - calls[0]!.at).toBeGreaterThanOrEqual(U1C.backoff.notBeforeMs);
+  });
+
+  it.each(["cursor_expired", "cursor_invalid"])("%s 재동기화 뒤에도 3초를 기다리지 않고 곧바로 cursor=null 로 기준을 다시 잡는다", async (code) => {
+    const { s } = await boot();
+    await advance(500); // 마운트 즉시 기준 호출이 끝난 뒤
+    s.reset();
+    s.queueChanges(apiError(code));
+    await advance(U1C.active.every + 1_000); // 활성 박자의 다음 호출 = 오류
+    const calls = s.changesCalls();
+    expect(calls.length, "오류 호출 뒤 곧바로 다음 호출까지 와 있어야 한다").toBeGreaterThanOrEqual(2);
+    const errIdx = 0;
+    expect(calls[errIdx + 1]!.args[2], "재동기화 뒤 첫 호출은 기준(null)").toBeNull();
+    expect(calls[errIdx + 1]!.at - calls[errIdx]!.at, "3초 틈 없음").toBeLessThan(U1C.active.minGap);
+  });
+});
+
+describe("시간 초과 가드 15초 → 늦춤 → 재개 (R1 권장 8)", () => {
+  it("응답이 안 오는 호출은 15초 뒤 시간 초과로 끝나고, 그 뒤 늦춰서(3.5초 이상) 다시 부르고, 성공하면 3초 박자로 돌아온다", async () => {
+    const { s } = await boot();
+    await advance(500);
+    s.reset();
+    s.queueChanges("hang");
+    await advance(U1C.active.every + 500); // 멈춘 호출이 나간다
+    const hangAt = s.changesCalls()[0]!.at;
+    await advance(14_000 - 500); // 아직 15초 전
+    expect(s.changesCalls().length, "15초 전에는 겹쳐 보내지 않는다").toBe(1);
+    await advance(70_000);
+    const calls = s.changesCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    const retryGap = calls[1]!.at - hangAt;
+    expect(retryGap, "시간 초과(15초) + 늦춤").toBeGreaterThanOrEqual(15_000 + U1C.backoff.notBeforeMs);
+    expect(retryGap).toBeLessThanOrEqual(15_000 + U1C.backoff.retryWithinMs);
+    expect(calls[2]!.at - calls[1]!.at, "성공 뒤 활성 박자").toBeLessThanOrEqual(U1C.active.maxGap);
+    expect(screen.getByRole("main"), "화면 자료는 그대로").toBeInTheDocument();
+  });
+
+  it("멈춘 호출이 시간 초과로 끝난 뒤 늦게 도착하는 거절이 처리되지 않은 거부(unhandledrejection)를 만들지 않는다", async () => {
+    const { s } = await boot();
+    await advance(500);
+    const seen: unknown[] = [];
+    const onRej = (e: PromiseRejectionEvent | Event) => seen.push(e);
+    window.addEventListener("unhandledrejection", onRej);
+    process.on("unhandledRejection", onRej as never);
+    try {
+      s.queueChanges("hang");
+      await advance(40_000);
+      expect(seen).toEqual([]);
+    } finally {
+      window.removeEventListener("unhandledrejection", onRej);
+      process.off("unhandledRejection", onRej as never);
+    }
+  });
+});
+
+describe("오류 뒤 숨김 → 다시 보임 (R1 권장 8: failures>0 분기)", () => {
+  it("오류가 난 뒤 숨겼다가 다시 보이면 곧바로(1초 안) 부르지 않고 늦춤 박자로 재개한 뒤 성공하면 3초 박자", async () => {
+    const { s } = await boot();
+    await advance(500);
+    s.reset();
+    s.queueChanges(new Error("끊김"));
+    await advance(U1C.active.every + 500); // 오류 호출이 나가고 실패 처리됨
+    expect(s.changesCalls().length).toBe(1);
+    setVisible(false);
+    await advance(U1C.inactiveQuietMs);
+    expect(s.changesCalls().length, "숨은 동안 0").toBe(1);
+    s.reset();
+    setVisible(true);
+    await advance(1_000);
+    expect(s.changesCalls().length, "오류 뒤에는 보이자마자 곧바로 부르지 않는다").toBe(0);
+    await advance(U1C.backoff.retryWithinMs);
+    const calls = s.changesCalls();
+    expect(calls.length, "늦춤 박자로 재개").toBeGreaterThanOrEqual(2);
+    expect(calls[1]!.at - calls[0]!.at, "성공 뒤 활성 박자").toBeLessThanOrEqual(U1C.active.maxGap);
+  });
+
+  it("호출이 떠 있는 채 숨겨졌다가 숨은 동안 시간 초과로 끝나면, 다시 보일 때 늦춤 박자로 재개한다(숨은 동안 호출 0)", async () => {
+    const { s } = await boot();
+    await advance(500);
+    s.reset();
+    s.queueChanges("hang");
+    await advance(U1C.active.every + 500);
+    expect(s.changesCalls().length).toBe(1);
+    setVisible(false);
+    await advance(20_000); // 15초 가드가 숨은 동안 끝난다
+    expect(s.changesCalls().length, "숨은 동안 새 호출 없음").toBe(1);
+    s.reset();
+    setVisible(true);
+    await advance(1_000);
+    expect(s.changesCalls().length, "실패 뒤 다시 보임은 늦춤").toBe(0);
+    await advance(U1C.backoff.retryWithinMs);
+    expect(s.changesCalls().length).toBeGreaterThanOrEqual(2);
+  });
+});
+

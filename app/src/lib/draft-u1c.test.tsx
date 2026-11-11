@@ -146,3 +146,65 @@ describe("저장소를 아예 못 쓰는 환경(sessionStorage 접근이 예외)
     }
   });
 });
+
+describe("저장소는 살아 있는데 쓰기만 실패(용량 초과) — 메모리에 든 글을 다시 읽는다 (R1 권장 2)", () => {
+  const proto = Storage.prototype;
+  const realSet = proto.setItem;
+  afterEach(() => {
+    proto.setItem = realSet;
+  });
+  const quotaFull = () => {
+    proto.setItem = () => {
+      throw new DOMException("용량 초과", "QuotaExceededError");
+    };
+  };
+
+  it("훅을 지웠다 다시 만들어도(화면 이동) 메모리에 든 초안이 읽힌다", () => {
+    quotaFull();
+    const key = keyOf({ ...BASE, project: "quota-full" });
+    const a = renderHook(() => useDraft(key));
+    act(() => a.result.current[1]("용량이 가득 찬 뒤에 쓴 글"));
+    expect(stored(), "저장소에는 못 썼다").toEqual({});
+    a.unmount();
+    const b = renderHook(() => useDraft(key));
+    expect(b.result.current[0]).toBe("용량이 가득 찬 뒤에 쓴 글");
+  });
+
+  it("다른 키 글과 섞이지 않고, 저장소 값이 있는 키는 저장소 값이 이긴다", () => {
+    const real = keyOf({ ...BASE, project: "quota-real" });
+    const other = keyOf({ ...BASE, project: "quota-other" });
+    const mem = keyOf({ ...BASE, project: "quota-mem" });
+    window.sessionStorage.setItem(`pes-draft:${real}`, "저장소 글");
+    quotaFull();
+    const m = renderHook(() => useDraft(mem));
+    act(() => m.result.current[1]("메모리 글"));
+    m.unmount();
+    expect(renderHook(() => useDraft(real)).result.current[0]).toBe("저장소 글");
+    expect(renderHook(() => useDraft(other)).result.current[0]).toBe("");
+    expect(renderHook(() => useDraft(mem)).result.current[0]).toBe("메모리 글");
+  });
+
+  it("clearDraft 는 이 메모리 값도 지운다", () => {
+    quotaFull();
+    const key = keyOf({ ...BASE, project: "quota-clear" });
+    const a = renderHook(() => useDraft(key));
+    act(() => a.result.current[1]("지울 글"));
+    a.unmount();
+    clear(key);
+    expect(renderHook(() => useDraft(key)).result.current[0]).toBe("");
+  });
+
+  it("저장소 쓰기가 다시 되면 그 값이 이기고 메모리 값은 남지 않는다", () => {
+    const key = keyOf({ ...BASE, project: "quota-recover" });
+    quotaFull();
+    const a = renderHook(() => useDraft(key));
+    act(() => a.result.current[1]("메모리"));
+    proto.setItem = realSet;
+    act(() => a.result.current[1]("저장소로"));
+    a.unmount();
+    expect(window.sessionStorage.getItem(`pes-draft:${key}`)).toBe("저장소로");
+    expect(renderHook(() => useDraft(key)).result.current[0]).toBe("저장소로");
+    window.sessionStorage.removeItem(`pes-draft:${key}`);
+    expect(renderHook(() => useDraft(key)).result.current[0], "옛 메모리 값이 되살아나지 않는다").toBe("");
+  });
+});

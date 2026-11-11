@@ -76,6 +76,8 @@ test("ime: 한글 조합 중에는 Ctrl/Cmd+K 도 Tab 보조도 동작하지 않
   await expect(menu(page)).toBeVisible();
 });
 
+// 한계(R1): 앱의 가짜 클라이언트는 변경을 내지 않아 실제 재그림이 일어나지 않는다 — 이 시험은 "갱신 박자가 지나는 동안 조합 중 글·초점이 안 깨진다"만 본다.
+// 재그림 중 보존(같은 DOM 노드 · 선택 범위 · 조합 값)은 vitest(live-update.test.tsx)가 변경분을 실제로 내서 고정한다.
 test("ime: 조합 중에 갱신 주기(3초 이상)가 지나도 조합 중 글·초점이 그대로", async ({ page, context }) => {
   await open(page, CURRENT);
   const box = page.locator("#q-21");
@@ -121,6 +123,8 @@ test("deep_link: 순서 넘김이 지난 라운드에서도 주소만 바꾼다"
   expect(new URL(page.url()).pathname).toContain("/s/plan/r/1");
 });
 
+// 한계(R1): 가짜 클라이언트는 변경을 내지 않아 재그림이 없다 — 박자가 지나는 동안 글·초점이 유지되고 화면 밖 요청이 없다는 것만 본다(재그림 중 보존은 live-update.test.tsx).
+// 네트워크 0 은 명령 메뉴를 열고 거르고 AI 모드로 바꿔 글을 써 보는 길까지 포함한다(새 글리프·글꼴 요청이 같은 출처 밖으로 나가지 않는다).
 test("갱신이 도는 동안(3초 이상) 입력 중인 글과 초점이 유지되고 화면 밖 요청이 없다", async ({ page }) => {
   await open(page, CURRENT);
   const requests: string[] = [];
@@ -132,4 +136,44 @@ test("갱신이 도는 동안(3초 이상) 입력 중인 글과 초점이 유지
   await expect(box).toBeFocused();
   await expect(box).toHaveValue("계속 쓰는 중");
   expect(requests.filter((u) => !u.startsWith("http://127.0.0.1:4173"))).toEqual([]);
+});
+
+test("명령 메뉴를 열고 거르고 AI 모드로 바꿔 써 보고 닫아도 같은 출처 밖 요청 0 (네트워크 0)", async ({ page }) => {
+  await open(page, CURRENT);
+  const requests: string[] = [];
+  const posts: string[] = [];
+  page.on("request", (r) => {
+    requests.push(r.url());
+    if (r.method() !== "GET") posts.push(`${r.method()} ${r.url()}`);
+  });
+  await page.keyboard.press(`${MOD}+k`);
+  await expect(menu(page)).toBeVisible();
+  await page.keyboard.type("zzzz없는동작");
+  await page.keyboard.press("Enter");
+  await menu(page).getByRole("button", { name: CMD.aiToggle }).click();
+  await expect(menu(page).getByRole("button", { name: CMD.aiToggle })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.type("이 연구를 요약해 줘 한글 글자들");
+  await page.keyboard.press("Enter");
+  await menu(page).getByRole("button", { name: CMD.aiToggle }).click();
+  await page.keyboard.press("Escape");
+  await expect(menu(page)).toBeHidden();
+  await page.waitForTimeout(500);
+  expect(requests.filter((u) => !u.startsWith("http://127.0.0.1:4173"))).toEqual([]);
+  // AI 연결이 없다 — GET 이 아닌 요청(보내기)은 하나도 없다(글꼴 subset 같은 같은 출처 GET 은 허용)
+  expect(posts).toEqual([]);
+});
+
+test("ime: 명령 메뉴 검색 칸에서 한글 조합 중 Esc 는 메뉴를 닫지 않는다(조합 취소용 Esc)", async ({ page, context }) => {
+  await open(page, CURRENT);
+  await page.keyboard.press(`${MOD}+k`);
+  const input = menu(page).getByRole("combobox", { name: CMD.combobox });
+  await expect(input).toBeFocused();
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "ㅇ", selectionStart: 1, selectionEnd: 1 });
+  await page.keyboard.press("Escape");
+  await expect(menu(page)).toBeVisible();
+  await cdp.send("Input.insertText", { text: "이" });
+  await expect(input).toHaveValue("이");
+  await page.keyboard.press("Escape");
+  await expect(menu(page)).toBeHidden();
 });

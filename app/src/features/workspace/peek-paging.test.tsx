@@ -96,7 +96,7 @@ describe("순서 넘김", () => {
     await waitFor(() => expect(query(router).get("peek")).toBe("q-21"));
   });
 
-  it("Esc 로 닫으면 peek 가 지워지고 초점은 연 단추로 돌아간다(U1a 규칙 유지)", async () => {
+  it("넘긴 뒤 Esc 로 닫으면 peek 가 지워진다(초점 자리는 아래 시험이 고정한다)", async () => {
     const user = userEvent.setup();
     const { router } = await renderApp(CURRENT, { width: WIDTHS.wide1440 });
     await ready();
@@ -105,5 +105,53 @@ describe("순서 넘김", () => {
     fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(query(router).get("peek")).toBeNull());
     expect(screen.queryByRole("dialog", { name: NAMES.peek })).toBeNull();
+  });
+});
+
+describe("닫은 뒤 초점 자리 (R1 권장 8 — 의도로 고정)", () => {
+  it("넘기지 않고 닫으면 연 단추(#peek-q-21)로 돌아간다", async () => {
+    const user = userEvent.setup();
+    const { router } = await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    await open(user, 21);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(query(router).get("peek")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById("peek-q-21")));
+  });
+
+  it("q-21 을 연 뒤 '다음 질문' 으로 q-22 를 보다가 닫으면 지금 보던 질문의 단추(#peek-q-22)로 돌아간다 — 처음 연 단추가 아니다", async () => {
+    const user = userEvent.setup();
+    const { router } = await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    await open(user, 21);
+    await user.click(within(peek()).getByRole("button", { name: CMD.nextQ }));
+    await waitFor(() => expect(query(router).get("peek")).toBe("q-22"));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(query(router).get("peek")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById("peek-q-22")));
+    expect(document.activeElement).not.toBe(document.getElementById("peek-q-21"));
+  });
+
+  it("넘긴 뒤 '닫기' 단추로 닫아도 같다(#peek-q-22)", async () => {
+    const user = userEvent.setup();
+    const { router } = await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    await open(user, 21);
+    await user.click(within(peek()).getByRole("button", { name: CMD.nextQ }));
+    await user.click(within(peek()).getByRole("button", { name: /닫기/ }));
+    await waitFor(() => expect(query(router).get("peek")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById("peek-q-22")));
+  });
+
+  it("딥링크로 q-22 에서 시작해 '이전 질문' 으로 q-21 을 보고 닫으면 #peek-q-21", async () => {
+    const user = userEvent.setup();
+    const { router } = await renderApp(url("research", 2, "peek=q-22"), { width: WIDTHS.wide1440 });
+    await ready();
+    await screen.findByRole("dialog", { name: NAMES.peek });
+    await user.click(within(peek()).getByRole("button", { name: CMD.prevQ }));
+    await waitFor(() => expect(query(router).get("peek")).toBe("q-21"));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(query(router).get("peek")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById("peek-q-21")));
   });
 });

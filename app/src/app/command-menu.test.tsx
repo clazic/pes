@@ -315,9 +315,9 @@ describe("동작 목록 하나 — 맥락 메뉴가 같은 목록을 쓴다", ()
     await user.click(opener());
     const cmdItems = new Map(options().map((el) => [el.textContent?.replace(/\s+/g, " ").trim() ?? "", el.getAttribute("aria-keyshortcuts")] as const));
     for (const [label, keys] of ctxItems) {
-      expect([...cmdItems.keys()].some((l) => l.includes(label)), `명령 메뉴에 없는 라벨: ${label}`).toBe(true);
-      const match = [...cmdItems.entries()].find(([l]) => l.includes(label));
-      expect(match?.[1] ?? null, `단축키 표시 ${label}`).toBe(keys);
+      // 정확 일치(R1 권장 8) — 이름을 포함하는 다른 문구가 통과하지 않는다
+      expect(cmdItems.has(label), `명령 메뉴에 정확히 같은 라벨이 없다: ${label}`).toBe(true);
+      expect(cmdItems.get(label) ?? null, `단축키 표시 ${label}`).toBe(keys);
     }
   });
 

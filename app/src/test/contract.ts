@@ -121,6 +121,8 @@ export const ASK_WIDTH = { at1280: 380, at1440: 404 } as const;
  *     ChangesRead = { cursor: string; txs: { tx_id: string; touched: string[] }[] }
  *     - cursor: 서버가 주는 불투명 값. 화면은 해석하지 않고 다음 호출에 그대로 되돌려 준다(알림 번호를 커서로 쓰지 않는다 — 설계 12.5-2, R04).
  *       null = 처음(기준만 받는다 — txs 는 비어 있어도 된다).
+ *       [R1 권장 3 — 약속] **null = 기준만 받음**: 서버는 지금까지의 변경을 되풀이하지 않고 "여기부터"라는 기준 커서만 돌려준다(실제 API 의 "cursor 없음 = seq 0 부터 전부"와 다르다).
+ *       실제 API 클라이언트(U1b)가 이 약속을 맞춘다(null → 현재 끝 커서만 / has_more 를 따라 끝까지 훑지 않음). 이 약속이 없으면 첫 읽기와 기준 사이 변경을 놓친다.
  *     - txs: 공개 tx 묶음 단위(API 결정 13). 한 tx 가 읽기 키 여럿을 건드릴 수 있다. 숨은 사건이면 txs 가 비고 cursor 만 앞으로 간다.
  *     - touched 의 읽기 키 = 문자열 `"workspace"` | `"projects"` | `"round:<stage>/<round>"`(round = 숫자 또는 start. 예 "round:research/2").
  *       화면은 touched 에 든 읽기만 무효화한다(queryClient.invalidateQueries) — 그 밖의 읽기는 다시 받지 않는다. 같은 응답 안에서 같은 키는 한 번만.
@@ -129,6 +131,8 @@ export const ASK_WIDTH = { at1280: 380, at1440: 404 } as const;
  *     - 시간 초과: 던져진 Error 의 name 이 "TimeoutError". 오류와 같이 다루되 화면 자료를 지우지 않는다.
  *
  * [갱신 박자 — 가짜 시계로 본다]
+ *   - [R1 권장 3] 첫 getChanges 는 화면이 붙자마자(마운트 즉시, 3초 기다리지 않음) cursor=null 로 부른다 — 첫 읽기와 기준 커서 사이에 틈을 두지 않는다.
+ *     410/400 재동기화(읽기를 다시 받음) 뒤에도 3초를 기다리지 않고 곧바로(cursor=null) 기준을 다시 잡는다.
  *   - 활성(탭 보임 document.visibilityState === "visible"): 약 3초마다 getChanges 한 번(2~4초 사이 간격 허용). 응답이 오기 전에 다음 호출을 겹쳐 보내지 않는다(동시 1개).
  *   - 비활성(탭 숨김): 10초 동안 호출 0. 다시 보이면(visibilitychange) 곧바로(1초 안에) 한 번 받고 활성 박자로 돌아간다.
  *   - 오류·시간 초과 뒤: 다음 호출은 3.5초 안에 오지 않고(늦춤), 60초 안에는 다시 시도한다. 성공하면 3초 박자로 돌아간다. 오류로 화면 자료를 지우거나 질문 영역을 다시 만들지 않는다.
@@ -151,6 +155,10 @@ export const ASK_WIDTH = { at1280: 380, at1440: 404 } as const;
  *   - 한글 조합(compositionstart ~ compositionend) 중 값은 갱신으로 덮이지 않는다. 조합이 끝나면 확정된 값이 초안으로 저장된다.
  *
  * [명령 메뉴]
+ *   - [R1 필수 1] 검색 칸에서 한글 조합 중(KeyboardEvent.isComposing · keyCode 229 · compositionstart~end) Esc 는 대화 상자를 닫지 않고 검색어도 그대로 둔다(조합 취소용 Esc). 조합 밖 Esc 는 닫고 열기 전 요소로 초점을 돌린다.
+ *   - [R1 권장 6] Ctrl/Cmd+K 는 한글 자판 상태의 `key: "ㅏ"` 라도 `code: "KeyK"` 이면 연다(조합 중은 여전히 무시).
+ *   - [R1 권장 7] 메뉴가 열린 동안 화면이 동작 목록을 바꾸면(라운드 도착 등) 열린 목록이 새 목록으로 갱신되고, 고른 동작은 새 목록의 `run` 을 실행한다(옛 클로저 실행 금지).
+ *   - [R1 권장 5] 열 때마다 대화 상자 세션(검색어·강조·AI 모드 초기화)은 한 번만 새로 시작한다(StrictMode 두 번 그림에도 한 번).
  *   - 머리줄 단추(이름 /명령 찾기/)는 이제 aria-disabled 가 아니다. 누르거나 Ctrl+K / Cmd+K 로 연다(한글 조합 중 — KeyboardEvent.isComposing 또는 keyCode 229 — 은 무시). aria-haspopup="dialog".
  *   - 열리면 `role=dialog` 이름 "명령 메뉴"(모달). 안에 검색 칸(role=combobox, 이름에 "명령" 또는 "동작")에 초점, 동작 목록은 role=listbox 안의 role=option.
  *     목록은 부분 글자(대소문자 무시) 일치로 걸러진다. 첫 항목이 처음부터 강조되어 Enter 로 실행된다. ↑↓ 로 강조를 옮긴다(aria-activedescendant).
