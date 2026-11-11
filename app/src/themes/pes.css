@@ -1,0 +1,103 @@
+/*
+ * PES 공통 토큰 — 어느 테마에서나 같은 이름(설계 3.4·3.9). 테마 파일(tweakcn)의 shadcn 변수에서 만든다.
+ *
+ * - 테마 클래스(.theme-…)와 .dark 는 <html> 한 곳에 붙는다. 아래 :root / .dark 규칙도 <html>에서 계산되므로
+ *   var(--card) 같은 참조는 지금 테마의 값을 쓴다.
+ * - 상태 색(ok·warn·bad·off·unk)과 방식 색(mode-a·mode-b)은 뜻이 같아야 하므로 테마마다 바꾸지 않는다.
+ *   글자 색은 고정값, 옅은 바탕(-soft)·테두리(-line)는 테마의 카드 색과 섞어(color-mix, oklab) 테마에 어울리게 한다.
+ * - 대비(WCAG 2.1 AA)는 테마 4개 × 밝은/어두운 모드 8벌 모두에서 계산·실측했다(README “테마” 절).
+ *   글자 4.5:1 이상 · 입력 테두리·초점·계기·상태 모양 3:1 이상. 장식 테두리(line)는 정보 전달에 쓰지 않는다.
+ * - 강조색은 두 가지로 나눠 쓴다: --primary(채운 단추·배지 바탕, 위 글자는 --primary-foreground) /
+ *   --primary-ink(카드·바탕 위의 강조 글자·링크·작은 모양). 어두운 모드에서 둘이 달라질 수 있다.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* 강조 */
+  --primary-ink: var(--primary);
+  --primary-soft: color-mix(in oklab, var(--primary) 10%, var(--card));
+  --primary-line: color-mix(in oklab, var(--primary) 40%, var(--card));
+
+  /* 바탕·글자·선 */
+  --surface: var(--card);
+  --surface-soft: color-mix(in oklab, var(--muted) 60%, var(--card));
+  --surface-sunk: color-mix(in oklab, var(--secondary) 60%, var(--card));
+  --ink: var(--foreground);
+  --ink-2: color-mix(in oklab, var(--foreground) 70%, var(--muted-foreground));
+  --line: var(--border);
+  --line-strong: color-mix(in oklab, var(--foreground) 22%, var(--border));
+  /* 입력·스위치 테두리 — 카드·바탕·사이드바 위 3:1 이상 */
+  --control: color-mix(in oklab, var(--foreground) 58%, var(--card));
+
+  /* 상태 — 됨·켜짐·허용 */
+  --ok: #1a6b43;
+  --ok-soft: color-mix(in oklab, #2f9e66 10%, var(--card));
+  --ok-line: color-mix(in oklab, #2f9e66 45%, var(--card));
+  /* 주의·부분·새 버전 */
+  --warn: #7a4f00;
+  --warn-soft: color-mix(in oklab, #e0a800 14%, var(--card));
+  --warn-line: color-mix(in oklab, #e0a800 45%, var(--card));
+  /* 막힘·실패·충돌·차단 */
+  --bad: #9b2f2f;
+  --bad-soft: color-mix(in oklab, #d64545 10%, var(--card));
+  --bad-line: color-mix(in oklab, #d64545 45%, var(--card));
+  /* 꺼짐·금지·아직 */
+  --off: color-mix(in oklab, var(--foreground) 75%, var(--muted-foreground));
+  --off-soft: color-mix(in oklab, var(--muted) 70%, var(--card));
+  --off-line: color-mix(in oklab, var(--foreground) 18%, var(--border));
+
+  /* 방식 A(웹에서 바로) · 방식 B(내 컴퓨터 AI) */
+  --mode-a: #8f4500;
+  --mode-a-soft: color-mix(in oklab, #f08a24 10%, var(--card));
+  --mode-a-line: color-mix(in oklab, #f08a24 45%, var(--card));
+  --mode-b: #553896;
+  --mode-b-soft: color-mix(in oklab, #8b6be0 10%, var(--card));
+  --mode-b-line: color-mix(in oklab, #8b6be0 45%, var(--card));
+
+  /* 계기(여유 · 주의 · 넘음) — 채움/바탕 3:1 이상 */
+  --meter-fill: var(--primary-ink);
+  --meter-track: color-mix(in oklab, var(--primary-ink) 18%, var(--card));
+  --meter-warn-fill: #a56c00;
+  --meter-warn-track: color-mix(in oklab, #e0a800 28%, var(--card));
+  --meter-bad-fill: #b42f2f;
+  --meter-bad-track: color-mix(in oklab, #d64545 22%, var(--card));
+
+  /* 결과 글에서 고른 문장 */
+  --highlight: color-mix(in oklab, #ffd84d 38%, var(--card));
+}
+
+.dark {
+  color-scheme: dark;
+
+  --primary-soft: color-mix(in oklab, var(--primary) 14%, var(--card));
+  --line-strong: color-mix(in oklab, var(--foreground) 26%, var(--border));
+  --control: color-mix(in oklab, var(--foreground) 48%, var(--card));
+
+  --ok: oklch(0.8 0.13 155);
+  --ok-soft: color-mix(in oklab, oklch(0.65 0.14 155) 12%, var(--card));
+  --ok-line: color-mix(in oklab, oklch(0.65 0.14 155) 50%, var(--card));
+  --warn: oklch(0.85 0.13 85);
+  --warn-soft: color-mix(in oklab, oklch(0.75 0.15 80) 12%, var(--card));
+  --warn-line: color-mix(in oklab, oklch(0.75 0.15 80) 50%, var(--card));
+  --bad: oklch(0.78 0.13 22);
+  --bad-soft: color-mix(in oklab, oklch(0.62 0.19 25) 12%, var(--card));
+  --bad-line: color-mix(in oklab, oklch(0.62 0.19 25) 50%, var(--card));
+  --off: color-mix(in oklab, var(--foreground) 60%, var(--muted-foreground));
+  --off-line: color-mix(in oklab, var(--foreground) 24%, var(--border));
+
+  --mode-a: oklch(0.82 0.12 60);
+  --mode-a-soft: color-mix(in oklab, oklch(0.7 0.15 55) 12%, var(--card));
+  --mode-a-line: color-mix(in oklab, oklch(0.7 0.15 55) 50%, var(--card));
+  --mode-b: oklch(0.82 0.09 300);
+  --mode-b-soft: color-mix(in oklab, oklch(0.65 0.15 300) 12%, var(--card));
+  --mode-b-line: color-mix(in oklab, oklch(0.65 0.15 300) 50%, var(--card));
+
+  --meter-track: color-mix(in oklab, var(--primary-ink) 24%, var(--card));
+  --meter-warn-fill: oklch(0.85 0.13 85);
+  --meter-warn-track: color-mix(in oklab, oklch(0.75 0.15 80) 28%, var(--card));
+  --meter-bad-fill: oklch(0.78 0.13 22);
+  --meter-bad-track: color-mix(in oklab, oklch(0.62 0.19 25) 22%, var(--card));
+
+  --highlight: color-mix(in oklab, oklch(0.75 0.15 95) 30%, var(--card));
+}

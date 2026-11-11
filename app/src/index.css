@@ -1,0 +1,385 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+/* 테마: PES 공통 토큰(상태 색·파생 색) + tweakcn 테마 4개(테마별 클래스). 고르기는 머리줄 “테마” 메뉴(src/lib/theme.ts). */
+@import "./themes/pes.css";
+@import "./themes/modern-minimal.css";
+@import "./themes/vercel.css";
+@import "./themes/graphite.css";
+@import "./themes/clean-slate.css";
+
+/*! 글꼴 Pretendard(Copyright (c) 2021 Kil Hyung-jin) — SIL Open Font License 1.1, 번들에 함께 넣은 fonts/pretendard-OFL-1.1-LICENSE.txt 참고 */
+/*! 테마 색 값: tweakcn(github.com/jnsahaj/tweakcn) 테마 레지스트리 — Apache License 2.0(licenses/tweakcn-Apache-2.0-LICENSE.txt). 출처는 src/themes/*.css 머리 주석 */
+/*! 부품·블록: shadcn/ui(github.com/shadcn-ui/ui) — MIT(licenses/shadcn-ui-MIT-LICENSE.txt) */
+/*
+ * PES 대시보드 v2 — 디자인 토큰(설계 docs/plan/ui/dashboard-v2.md 3.4·3.9 · 12.9 “앱 셸·블록·테마”).
+ * 글꼴은 테마와 상관없이 Pretendard Variable 자체 호스팅(동적 subset, font-display: swap). 외부 CDN 없음.
+ * shadcn/ui 변수(--primary·--sidebar 등)는 테마 파일이, PES 변수(상태 색 ok·warn·bad·off·unk, 방식 색 mode-a·mode-b,
+ * surface·ink·line·control 등)는 themes/pes.css가 정한다.
+ */
+
+/* shadcn/tailwind.css 에서 이 시안이 쓰는 변형만 옮겨 둔다(shadcn CLI 의존 제거). */
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-selected {
+  &:where([data-selected="true"]) {
+    @slot;
+  }
+}
+@custom-variant data-disabled {
+  &:where([data-disabled="true"]),
+  &:where([data-disabled]:not([data-disabled="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-active {
+  &:where([data-state="active"]),
+  &:where([data-active]:not([data-active="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
+@custom-variant dark (&:is(.dark *));
+/* 휴대폰 = 좁은 폭 + 굵은 포인터(손가락). 데스크톱 200% 확대만으로는 휴대폰 규칙을 쓰지 않는다(설계 4.16, F08). */
+@custom-variant phone (@media (max-width: 899.98px) and (pointer: coarse));
+@custom-variant coarse (@media (pointer: coarse));
+
+@theme {
+  /* 배치 기준(설계 3.8): tab 900 · desk 1280 · wide 1440 · xwide 1600(AI 동료 칸 400px) */
+  --breakpoint-tab: 56.25rem;
+  --breakpoint-desk: 80rem;
+  --breakpoint-wide: 90rem;
+  --breakpoint-xwide: 100rem;
+  /* 작은 글자 한 단계 키움(사용자 2026-11-10): text-xs 최소 12px · text-sm 최소 13px. 사용자가 브라우저 글자를 키우면 rem 쪽을 따른다. */
+  --text-xs: max(0.75rem, 12px);
+  --text-sm: max(0.875rem, 13px);
+  /* 글자 크기 5단계(사용자 2026-11-10): 훑는 곳은 촘촘하게, 읽고 판단하는 글만 크게.
+     캡션 12 · 보조 13(표 · 칩 · 메뉴 · 단추) · 본문 15(질문 · 결과 글 · 설명) · 소제목 16(카드 제목) · 제목 20(화면 · 지금 할 일) */
+  --text-caption: max(0.75rem, 12px);
+  --text-caption--line-height: 1.5;
+  --text-meta: max(0.875rem, 13px);
+  --text-meta--line-height: 1.55;
+  --text-body: max(1.0714rem, 15px);
+  --text-body--line-height: 1.65;
+  --text-title: max(1.1428rem, 16px);
+  --text-title--line-height: 1.4;
+  --text-page: max(1.4286rem, 20px);
+  --text-page--line-height: 1.3;
+}
+
+@theme inline {
+  /* 글꼴: 테마의 font-sans/serif/mono는 받지 않는다(Pretendard 고정) */
+  --font-sans: "Pretendard Variable", Pretendard, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-heading: var(--font-sans);
+  --font-serif: var(--font-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* PES 전용 */
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-control: var(--control);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-line: var(--primary-line);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-bad-line: var(--bad-line);
+  --color-off: var(--off);
+  --color-off-soft: var(--off-soft);
+  --color-off-line: var(--off-line);
+  --color-mode-a: var(--mode-a);
+  --color-mode-a-soft: var(--mode-a-soft);
+  --color-mode-a-line: var(--mode-a-line);
+  --color-mode-b: var(--mode-b);
+  --color-mode-b-soft: var(--mode-b-soft);
+  --color-mode-b-line: var(--mode-b-line);
+  --color-meter-track: var(--meter-track);
+  --color-meter-fill: var(--meter-fill);
+  --color-meter-warn-track: var(--meter-warn-track);
+  --color-meter-warn-fill: var(--meter-warn-fill);
+  --color-meter-bad-track: var(--meter-bad-track);
+  --color-meter-bad-fill: var(--meter-bad-fill);
+  --color-highlight: var(--highlight);
+
+  /* 모서리: 테마의 --radius 하나에서 */
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: 999px;
+
+  /* 그림자: 테마 값(tweakcn shadow-2xs~2xl) */
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    /* 글자 크기 한 단계 줄임(사용자 2026-11-08): rem 기준 14px */
+    font-size: 87.5%;
+    background: var(--background);
+    -webkit-text-size-adjust: 100%;
+    /* 초점·#조각 이동이 붙어 있는 머리줄(56px)에 가리지 않게 */
+    scroll-padding-top: 4.5rem;
+  }
+  body {
+    @apply bg-background font-sans text-foreground;
+    margin: 0;
+    font-size: max(0.875rem, 13px);
+    line-height: 1.6;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  h1,
+  h2,
+  h3 {
+    line-height: 1.35;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  ::selection {
+    background: var(--primary-soft);
+    color: var(--ink);
+  }
+  /* 글 속 링크는 색만으로 구분하지 않는다(1.4.1) — 밑줄. 메뉴·단추 모양 링크는 no-underline */
+  a {
+    color: var(--primary-ink);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  a:hover {
+    text-decoration-thickness: 2px;
+  }
+  /* 초점 테두리 2px + 간격 2px(설계 3.9) */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* 화면이 바뀐 뒤 초점을 받는 제목·본문 영역은 테두리 없이 */
+  [data-screen-title]:focus,
+  main:focus {
+    outline: none;
+  }
+  textarea {
+    caret-color: var(--primary-ink);
+  }
+  textarea::placeholder {
+    color: var(--muted-foreground);
+  }
+  button:not(:disabled, [aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
+@layer components {
+  /* 휴대폰 입력 글자 16px(확대 방지) */
+  @media (max-width: 899.98px) and (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
+
+  /* ── 작업 공간 3/2/1영역(설계 3.8 · 12.9) ─────────────────────────────────────────
+   * ≥1280 3영역(단계·라운드 · 본문 · 질문) · 900~1279 2영역(단계·라운드 + 본문 또는 질문) · <900 1영역(view 가 고른 하나).
+   * 영역 고르기는 주소의 view(data-view)가 정하고, 폭은 CSS 가 정한다(첫 그림부터 맞음). 폭만으로 도구를 숨기지 않는다. */
+  /* 1280 미만은 머리줄 아래 보기 전환 줄도 붙어 있다 — 초점 이동이 둘에 가리지 않게 */
+  @media (max-width: 1279.98px) {
+    html {
+      scroll-padding-top: 8rem;
+    }
+  }
+  .ws-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+  .ws-grid > [data-area] {
+    display: none;
+    min-width: 0;
+  }
+  .ws-grid[data-view="nav"] > [data-area="nav"],
+  .ws-grid[data-view="body"] > [data-area="body"],
+  .ws-grid[data-view="ask"] > [data-area="ask"] {
+    display: block;
+  }
+  @media (min-width: 900px) {
+    .ws-grid {
+      grid-template-columns: 240px minmax(0, 1fr);
+    }
+    .ws-grid > [data-area="nav"],
+    .ws-grid[data-view="nav"] > [data-area="body"] {
+      display: block;
+    }
+    .ws-grid > [data-area="nav"] {
+      grid-column: 1;
+      grid-row: 1;
+      position: sticky;
+      top: 56px;
+      max-height: calc(100dvh - 56px);
+      overflow-y: auto;
+      border-right: 1px solid var(--line);
+    }
+    .ws-grid > [data-area="body"],
+    .ws-grid > [data-area="ask"] {
+      grid-column: 2;
+      grid-row: 1;
+    }
+  }
+  @media (min-width: 1280px) {
+    .ws-grid {
+      grid-template-columns: 240px minmax(0, 1fr) 380px;
+    }
+    .ws-grid > [data-area] {
+      display: block;
+    }
+    .ws-grid > [data-area="ask"] {
+      grid-column: 3;
+      position: sticky;
+      top: 56px;
+      max-height: calc(100dvh - 56px);
+      overflow-y: auto;
+      border-left: 1px solid var(--line);
+    }
+    .view-switch {
+      display: none;
+    }
+  }
+  @media (min-width: 1440px) {
+    .ws-grid {
+      grid-template-columns: 240px minmax(0, 1fr) 404px;
+    }
+  }
+}
+
+/*
+ * 굵은 포인터(손가락) — 누르는 곳 44px(설계 3.9 · 4.16). 층 밖 규칙이라 단추의 min-h-* 유틸리티를 이긴다.
+ * 데스크톱(가는 포인터)의 촘촘한 크기는 그대로 둔다.
+ */
+@media (pointer: coarse) {
+  :is(button, a)[data-variant],
+  [role="radio"],
+  [data-area="nav"] a {
+    min-height: 44px;
+  }
+  :is(button, a)[data-variant] {
+    min-width: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media print {
+  .skip-link,
+  .app-header,
+  .view-switch,
+  [data-area="nav"],
+  [data-area="ask"],
+  [data-print="hide"] {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff;
+  }
+}
