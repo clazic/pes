@@ -212,6 +212,37 @@ test("(c) watch: the same one line as 0.15 (D05 keeps the tail form during the t
   }
 });
 
+test("D17: watch refuses a project that is in neither the database nor a project.json folder — exit 1, empty stdout, one Korean line naming the path, nothing created; 0.15 printed the tail line for it (exit 0)", { timeout: 120_000 }, () => {
+  const ctx = make_ctx("pes-ts-watch-d17-");
+  try {
+    // 0.15 (pes.py cmd_watch, frozen here): `d = pdir(args[0]); print(f"tail -n0 -F {shell_quote(f'{d}/feedback.log')} | grep --line-buffered FEEDBACK")` — no existence check, exit 0.
+    const ZERO_FIFTEEN = /^tail -n0 -F .*feedback\.log'? \| grep --line-buffered FEEDBACK\n$/;
+    for (const target of [join(ctx.tmp, "없는-프로젝트"), "no-such-project-d17", join(ctx.tmp, "missing", "deeper")]) {
+      const before = readdirSync(ctx.tmp).sort();
+      const run = run_ts_cli(ctx, ["watch", target]);
+      assert.equal(run.status, 1, `${target}: ${run.stdout}${run.stderr}`);
+      assert.equal(run.stdout, "", `${target}: nothing on stdout (0.15's tail line would never fire)`);
+      assert.doesNotMatch(run.stdout, ZERO_FIFTEEN);
+      const lines = run.stderr.split("\n").filter((x) => x.trim() !== "");
+      assert.equal(lines.length, 1, `${target}: one line: ${JSON.stringify(run.stderr)}`);
+      assert.match(lines[0]!, /^project\.json 없음: /, "the Korean one-liner of cmd_watch");
+      assert.ok(!looks_like_stack_trace(lines), `${target}: no stack trace`);
+      assert.deepEqual(readdirSync(ctx.tmp).sort(), before, `${target}: the refusal creates nothing (no folder, no feedback.log)`);
+    }
+    // a project that exists still gets the 0.15 line, unchanged: a database project and an un-migrated old folder (read-only, D14)
+    const project = init_project(ctx, "watch-d17-ok");
+    const ok = run_ts_cli(ctx, ["watch", project]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, ZERO_FIFTEEN);
+    const old = synthetic_project(ctx, "legacy");
+    const old_run = run_ts_cli(ctx, ["watch", old]);
+    assert.equal(old_run.status, 0, old_run.stderr);
+    assert.match(old_run.stdout, ZERO_FIFTEEN);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 // ------------------------------------------------------------------------------------------------ (a) doctor
 type Row = { group: string; level: string; title: string; detail: string; fixable: boolean };
 

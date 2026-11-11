@@ -19,9 +19,49 @@ import { raw } from "./helpers/web_raw.ts";
 
 const MARK = "STALE-PROBE-마커";
 
-// R1 필수1 (/<slug>/index.html·/index.html 을 요청 때 DB 에서 짓는다: 답·쓰기 명령 뒤 즉시 반영) — 지웠다: PR18 의 DB 서버 기능이다.
-// scripts/serve.ts 는 render 가 짓는 정적 index.html 을 서빙한다('DB-built dashboard and hub pages' 는 serve.ts 머리말에서 SEL-77 이후로 미룸).
-// 쓰기 뒤 화면이 바뀌려면 render 가 필요하다 — 이 흐름은 test_web_screens W2f·W6 과 test_serve_ts_cases 가 지킨다. (처리표 '서버 갭')
+// 되살림 (SEL-74 시험 쪽): 83bc0b3 의 R1 그대로 — scripts/serve.ts 의 서버 갭 S3 (요청 때 DB 에서 짓는 화면), tests/README.md.
+test("R1 필수1 /<slug>/index.html·/index.html 도 요청 때 DB 에서 짓는다: 답·쓰기 명령 뒤 즉시 반영되고 /<slug>/ · / 와 같은 화면이다", async () => {
+  const c = await db_with_form(); // render 가 낡은 index.html 을 폴더에 써 둔 상태
+  try {
+    assert.ok(existsSync(join(c.folder, "index.html")), "낡은 정적 index.html 이 폴더에 있다(함정)");
+    await with_server(c, {}, async (s) => {
+      const same = async (what: string): Promise<void> => {
+        const a = await http(s, `/${SLUG}/`);
+        const b = await http(s, `/${SLUG}/index.html`);
+        assert.equal(a.status, 200, what);
+        assert.equal(b.status, 200, `${what}: /index.html`);
+        assert.match(b.headers.get("content-type") ?? "", /^text\/html/);
+        assert.deepEqual(normalize_data(page_data(b.text), []), normalize_data(page_data(a.text), []), `${what}: /<slug>/index.html 이 /<slug>/ 와 다른 데이터를 품었다(낡은 파일?)`);
+        const home = await http(s, "/");
+        const home_index = await http(s, "/index.html");
+        assert.equal(home_index.status, 200, `${what}: /index.html`);
+        assert.deepEqual(normalize_data(page_data(home_index.text), []), normalize_data(page_data(home.text), []), `${what}: /index.html 이 / 와 다르다`);
+      };
+      await same("처음");
+      const posted = await post_feedback(s, SLUG, feedback_body({ text: `${MARK} 답`, answers: { memo: MARK } }));
+      assert.equal(posted.status, 200, posted.text);
+      const idx = await http(s, `/${SLUG}/index.html`);
+      assert.ok(idx.text.includes(MARK), "답을 보낸 직후 /<slug>/index.html 에 그 답이 보인다");
+      await same("답 뒤");
+      const hub = page_data((await http(s, "/index.html")).text);
+      assert.ok(hub.projects.find((p: any) => p.slug === SLUG).pending >= 1 || JSON.stringify(hub).includes(SLUG), "허브(/index.html)도 최신");
+      // render 없이 쓰기 명령만: 항목 합치기·메모
+      step(c, ["merge", SLUG, "plan", write_json(c, "fresh.json", [{ id: 31, kind: "topic", title: "렌더 없이 합친 항목 FRESH-31", summary: "요약", status: "done" }])]);
+      step(c, ["note", SLUG, "렌더 없이 남긴 메모 FRESH-NOTE"]);
+      const after = await http(s, `/${SLUG}/index.html`);
+      assert.ok(after.text.includes("FRESH-31"), "merge 만 해도 /<slug>/index.html 에 반영");
+      assert.ok(after.text.includes("FRESH-NOTE"), "note 만 해도 반영");
+      await same("쓰기 명령 뒤");
+      // HEAD 도 정적 파일이 아니라 같은 화면의 머리글
+      const head = await raw(s, { method: "HEAD", path: `/${SLUG}/index.html` });
+      assert.equal(head.status, 200);
+      const live = await http(s, `/${SLUG}/index.html`);
+      assert.equal(Number(head.headers["content-length"]), Buffer.byteLength(live.text, "utf8"), "HEAD 의 길이 = GET 의 길이(낡은 정적 파일이 아니다)");
+    });
+  } finally {
+    c.close();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // R2 받은 답 읽기

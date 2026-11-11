@@ -134,7 +134,7 @@ test("W3d 원격 Origin·CSRF: 허용 안 된 Origin(없음 포함)은 403 + 힌
       }
       assert.equal(rejected[0]!.json.hint, `pes remote add ${evil}`);
       assert.equal(commit_count(c), before, "거부된 요청은 DB 에 아무것도 남기지 않는다");
-      // (세션 비밀이 있어도 다른 출처의 /api/v1 쓰기는 거부 — 지웠다: scripts/serve.ts 에는 /api/v1 통과 길이 없다. tests/README.md 처리표 '서버 갭')
+      // (세션 비밀이 있어도 다른 출처의 /api/v1 쓰기 거부 → 아래 W3d2)
       // 신뢰한 원격 출처(~/.pes/config.json trusted_origins, 예: Tailscale 주소)
       const remote = "https://pes-box.example.ts.net";
       const config = join(c.env.home.env.HOME as string, ".pes", "config.json");
@@ -160,15 +160,91 @@ test("W3e 소유자 세션 비밀은 어떤 정적 응답에도 실리지 않는
         assert.ok(!r.text.includes(SESSION_SECRET), `${path}: 세션 비밀이 응답에 있다`);
         assert.ok(!JSON.stringify([...r.headers]).includes(SESSION_SECRET), `${path}: 세션 비밀이 헤더에 있다`);
       }
-      // (세션 없이 /api/v1 은 401 봉투 — 지웠다: serve.ts 에 /api/v1 이 없다)
+      // (세션 없이 /api/v1 은 401 봉투 → 아래 W3e2)
     });
   } finally {
     c.close();
   }
 });
 
-// W3f (/api/v1 은 정적 서빙보다 먼저다)·W3g (/version 은 DB 변경 커서) — 지웠다: scripts/serve.ts 는 /api/v1 통과 길과 DB 커서 /version 을 두지 않는다
-// (SEL-77 이후 몫, docs/plan/migration-ts-equivalence.md 4.3). ts 의 /version 은 index.html·ask-*.html 의 시각(0.15 와 같은 계약)이고 test_serve_ts_cases·test_serve_ts_static 이 지킨다.
+// 되살림 (SEL-74 시험 쪽, leader 결정 2026-11-12): 전환 뒤 사용자의 화면은 scripts/serve.ts 가 띄운다 — PR18 의 로컬 화면 보장은 serve.ts 가 갖춘다.
+// 아래 W3d2·W3e2·W3f·W3g 는 83bc0b3 의 단언 그대로다(서버 갭 S1·S2, tests/README.md).
+
+test("W3d2 세션 비밀이 있어도 다른 출처의 /api/v1 쓰기는 거부: 403 forbidden 봉투 (서버 갭 S1)", async () => {
+  const c = await db_with_form();
+  try {
+    await with_server(c, {}, async (s) => {
+      const evil = "http://evil.example";
+      const before = commit_count(c);
+      const api = await http(s, "/api/v1/projects", { method: "POST", origin: evil, headers: { "x-pes-session": SESSION_SECRET, "Content-Type": "application/json" }, body: "{}" });
+      assert.equal(api.status, 403);
+      assert.equal(api.json?.error?.code, "forbidden");
+      assert.equal(commit_count(c), before, "거부된 요청은 DB 에 아무것도 남기지 않는다");
+    });
+  } finally {
+    c.close();
+  }
+});
+
+test("W3e2 세션 없이 /api/v1 은 401 봉투(정적 파일이 아니다) (서버 갭 S1)", async () => {
+  const c = await db_with_form();
+  try {
+    await with_server(c, {}, async (s) => {
+      const api = await http(s, "/api/v1/projects/none/overview");
+      assert.ok([401, 404].includes(api.status), `status ${api.status}`);
+      assert.equal(api.json?.format_version, "1.0");
+    });
+  } finally {
+    c.close();
+  }
+});
+
+test("W3f /api/v1 은 정적 서빙보다 먼저다: 폴더 이름이 api 여도 API 봉투가 온다 (해석 10, 서버 갭 S1)", async () => {
+  const c = await db_with_form();
+  try {
+    const trap = join(c.env.home.env.PES_HOME as string, "api", "v1");
+    mkdirSync(trap, { recursive: true });
+    writeFileSync(join(trap, "health.txt"), "STATIC-FILE-MUST-NOT-BE-SERVED", "utf8");
+    writeFileSync(join(trap, "..", "project.json"), JSON.stringify(plain_legacy("api")), "utf8");
+    await with_server(c, {}, async (s) => {
+      for (const path of ["/api/v1/health.txt", "/api/v1/", "/api/v1"]) {
+        const r = await http(s, path);
+        assert.ok(!r.text.includes("STATIC-FILE-MUST-NOT-BE-SERVED"), `${path}: 정적 파일이 먼저 나갔다`);
+        assert.equal(r.json?.format_version, "1.0", `${path}: API 봉투`);
+      }
+    });
+  } finally {
+    c.close();
+  }
+});
+
+test("W3g /version: DB 변경 커서 기반 — 변경이 없으면 같고, DB 쓰기가 있으면 커지며, 파일 mtime 과 무관하다 (해석 8, 서버 갭 S2)", async () => {
+  const c = await db_with_form();
+  try {
+    await with_server(c, {}, async (s) => {
+      const read = async () => {
+        const r = await http(s, `/${SLUG}/version`);
+        assert.equal(r.status, 200);
+        assert.equal(typeof r.json.v, "number");
+        assert.ok(Number.isInteger(r.json.v) && r.json.v >= 0);
+        return r.json.v as number;
+      };
+      const v0 = await read();
+      assert.equal(await read(), v0, "변경이 없으면 같은 값");
+      const future = new Date(Date.now() + 3_600_000);
+      if (existsSync(join(c.folder, "index.html"))) utimesSync(join(c.folder, "index.html"), future, future);
+      assert.equal(await read(), v0, "index.html 의 mtime 을 바꿔도 값이 안 변한다 (v0.15 는 변했다)");
+      step(c, ["note", SLUG, "합성 새 메모"]);
+      const v1 = await read();
+      assert.ok(v1 > v0, `DB 쓰기 뒤 커졌다 (${v0} -> ${v1})`);
+      const res = await post_feedback(s, SLUG, feedback_body());
+      assert.equal(res.status, 200);
+      assert.ok((await read()) > v1, "화면에서 보낸 답도 변경이다");
+    });
+  } finally {
+    c.close();
+  }
+});
 
 test("W3h 이전 판 폼에서 온 답: 그 판에 붙거나 409 로 거절한다 — 새 판에 몰래 붙이지 않는다 (해석 11)", async () => {
   const c = await db_with_form();

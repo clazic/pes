@@ -62,7 +62,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | 파일 | 하는 일 |
 |---|---|
 | `tests/helpers/compat_normalize.ts` | 정규화 N1~N13(시각·경로·JSON·순서·ID·HTML·인코딩·콘솔·파일 메타·의도된 차이·콘솔 상대경로·stdlib 오류 페이지·OS 파일 없음 문구) |
-| `tests/helpers/compat_env.ts` | 하네스: 대상은 `ts` 하나(`scripts/pes.ts`·`serve.ts`·`setup.ts` — `PES_COMPAT_TARGET=py` 는 거절), 상태 DTO(`project_state`), 의도된 차이 표(D01~D16) |
+| `tests/helpers/compat_env.ts` | 하네스: 대상은 `ts` 하나(`scripts/pes.ts`·`serve.ts`·`setup.ts` — `PES_COMPAT_TARGET=py` 는 거절), 상태 DTO(`project_state`), 의도된 차이 표(D01~D17) |
 | `tests/helpers/compat_cases.ts` + `tests/fixtures/compat/cases.json` | E01~E15 사례 표와 실행기. 0.15 기준값은 `tests/fixtures/compat/baseline/E??.json` |
 | `tests/helpers/home_guard.ts` | 실제 `~/.pes`·`~/pes-projects` 접근 0 — 아래 「home_guard 가 막는 것」 |
 | `tests/test_compat_harness.test.ts` | 정규화기·대상 선택·**미구현 목록이 표와 정확히 같다** |
@@ -128,7 +128,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 **의도된 차이 추가(SEL-77):** `D14`(DB 로 옮기지 않은 옛 0.15 폴더는 TS 에서 **읽기 전용** — TS 는 `project.json` 을 쓰지 않는다(D02). `status`·`digest`·`show`·`pending` 은 0.15 와 같게 읽고, `render`·`report`·`assemble`·`web` 같은 생성 명령은 exit 1 + 한국어 한 줄("이 프로젝트는 아직 새 형식으로 옮기지 않았습니다 — 먼저 이전하세요")로 거절하며 폴더의 바이트·mtime 을 바꾸지 않는다. 0.15 는 그 명령으로 바로 쓰므로 기준값 사례가 없고 `test_pes_ts_win_data` 의 D14 시험이 직접 고정한다). `E15` 는 `D02` 도 단다(TS 는 `project.json` 을 쓰지 않으므로 그 파일 해시는 비교에서 뺀다. 나머지 파일은 그대로 비교). `test_pes_ts_win_data` 의 "옛 데이터 → 새 쓰기" 는 옛 폴더를 **이전한 뒤**의 쓰기를 본다.
 
-**의도된 차이 추가(SEL-74, leader 결정 2026-11-12):** `D15`(`pes.ts` 사용법에 0.15 에는 없는 7줄이 있다 — 에이전트용 DB 전용 5명령 `context`·`claim`·`submit`·`wait`·`complete` 와 `migrate <dir>`·`migrate --all`. 하네스는 그 7줄**만** 정확히 빼고(`compat_cases.strip_d15`, 줄마다 한 번씩) 나머지가 0.15 기준값과 한 글자까지 같은지 본다 — 다른 줄이 하나라도 다르거나 더해지면 실패한다. 사례 X01 과 `test_pes_ts_contract`(인자 없는 사용법·'D15' 시험)가 쓴다), `D16`(TS 서버의 `/whoami` 는 0.15 의 `{root, single}` 에 서버 프로세스의 `pid` 를 더한다 — `pes stop` 이 기록 파일의 pid 를 이 값과 대조한다. 하네스는 `pid` 가 양의 정수임을 단언하고 지운 뒤 나머지를 기준값과 견준다. 사례 E13 과 `test_pes_ts_read_serve` (b)).
+**의도된 차이 추가(SEL-74, leader 결정 2026-11-12):** `D15`(`pes.ts` 사용법에 0.15 에는 없는 7줄이 있다 — 에이전트용 DB 전용 5명령 `context`·`claim`·`submit`·`wait`·`complete` 와 `migrate <dir>`·`migrate --all`. 하네스는 그 7줄**만** 정확히 빼고(`compat_cases.strip_d15`, 줄마다 한 번씩) 나머지가 0.15 기준값과 한 글자까지 같은지 본다 — 다른 줄이 하나라도 다르거나 더해지면 실패한다. 사례 X01 과 `test_pes_ts_contract`(인자 없는 사용법·'D15' 시험)가 쓴다), `D16`(TS 서버의 `/whoami` 는 0.15 의 `{root, single}` 에 서버 프로세스의 `pid` 를 더한다 — `pes stop` 이 기록 파일의 pid 를 이 값과 대조한다. 하네스는 `pid` 가 양의 정수임을 단언하고 지운 뒤 나머지를 기준값과 견준다. 사례 E13 과 `test_pes_ts_read_serve` (b)). **의도된 차이 추가(SEL-74, leader 결정 2026-11-12):** `D17`(`pes watch` 는 DB 에도, `project.json` 폴더로도 없는 프로젝트를 거절한다 — exit 1, stdout 비움, 한국어 한 줄 `project.json 없음: <경로>`, 아무것도 만들지 않는다. 0.15 는 폴더가 있는지 보지 않고 `tail -n0 -F <경로>/feedback.log | grep --line-buffered FEEDBACK` 한 줄을 찍고 exit 0 이었다(Monitor 가 영영 오지 않는 파일을 기다린다). 있는 프로젝트(DB 의 것, 옮기지 않은 옛 폴더)의 출력은 0.15 와 그대로다. 0.15 기준값 사례에 없는 입력이라 `test_pes_ts_read_serve` 의 'D17' 시험 하나가 고정한다 — `test_compat_harness` 의 '사례마다 쓰이는가' 검사는 D14 처럼 D17 을 면제한다).
 
 **SEL-77 1차 리뷰(R1) 시험 — `test_pes_ts_r1_review.test.ts`:** (1) pid 안전: `tests/helpers/ts_inject_kill.ts` 가 자식의 `process.kill` 을 기록기로 바꾼다(실제 신호 0건, 신호 0 은 통과) — `.pes-hub-server`·`.pes-server` 의 pid 가 null·0·-1·1·문자열·실수·너무 큰 수·없음이면 `stop`·`doctor --fix` 가 신호를 시도하지 않아야 하고(안전한 정수 > 1 만), `/whoami` 가 PES 홈 밖 root 를 답하는 가짜 예전 서버(8765~8775 중 첫 빈 포트, `allow_hub_port` 로 그 하나만 허용)는 건드리지 않는다(홈 안 root 는 대조로 SIGTERM 1번). (2) 의도된 차이: project.json 의 `NaN`·`Infinity` 는 한국어 한 줄 "지원하지 않는 값"(exit 1, 폴더 불변), **BOM 으로 시작하는 project.json 은 TS 가 읽는다**(0.15 는 JSONDecodeError — 관용, 같은 파일의 BOM 없는 쪽과 출력이 같음), `current` 가 없거나 단계 이름이 아니면 한 줄 오류(D11). (3) `doctor` exit 계약: 사용자가 쓰는 0.15 경로(`PES_DB_CORE` 없음)에서 텍스트 모드는 `bad` 행이 있으면 1, **`--json` 은 `bad` 여도 0** — TS 도 같다(py 기준값과 같음 + 직접 단언). (4) 깨진 project.json 에서 `serve`(exit 1·한 줄)·`open`(0, 파일 주소)·`list`(0, `[오류]`·`서버 꺼짐`)·`watch`(0)·`hub`(0)·`doctor` 의 exit 를 0.15 와 같게 고정, 폴더 불변. (5) `watch` 의 로그 경로는 `join(d, "feedback.log")` 한 가지 구분자 — 0.15 는 `f'{d}/feedback.log'` 라 Windows 에서 `\` 와 `/` 가 섞이므로 비교 때 py 줄만 win32 에서 `\feedback.log` 로 맞춘다(os_overrides 와 같은 장치).
 
@@ -270,9 +270,9 @@ Python 파일(`scripts/*.py`·`check_ddl.py`·옛 Python 시험·`tests/conftest
 | `test_state_final1_regress`·`r1_2`·`r1_3` | (ii); r1_2 의 '손으로 고친 project.json 의 null user_links'는 (iii) → `test_legacy_import_final1`·`r1` |
 | `test_state_load`·`_transitions`·`_settings_changes`·`test_reports_compat`·`test_restore_compat`·`test_questions_html` | (ii); `project.json` 손편집 준비는 명령(`set`)·가져오기로 대체 |
 | `test_pes_ts_win_data`·`_devices`·`_final1_77`·`_final1`·`_read_serve` | (ii)/(i): Python 으로 만들던 0.15 프로젝트는 손으로 쓴 0.15 폴더·`full` 픽스처, 0.15 출력은 `golden/`; `_final1` 시험 1개 (iii); read_serve (b) 는 D16 |
-| `test_web_parity`·`_screens`·`_server`·`_review1`·`_r1_3`·`_final1`·`_hardening_*` | (ii) + (i) `golden/web-v015-*`; (iii) 아래 '서버 갭' |
+| `test_web_parity`·`_screens`·`_server`·`_review1`·`_r1_3`·`_final1`·`_hardening_*` | (ii) + (i) `golden/web-v015-*`; 지웠던 서버 시험은 **되살렸다**(아래 '서버 갭'); 플래그 시험 H8a·H8b 는 ts 로 번역 |
 | `test_feedback_http`·`test_feedback_collision` | (iii) 파일 삭제 → `test_serve_ts_feedback`(Origin·크기·순서·재시작·40개 동시)·`test_serve_ts_cases` E13 |
-| `test_web_n1_reports` | (iii) 파일 삭제 (DB 가 서빙하는 보고서 URL — 서버 갭) |
+| `test_web_n1_reports` | 되살림 — 83bc0b3 그대로 (서버 갭 S4) |
 | e2e `workspace_*.spec.ts` | 도우미만 ts 로. 아래 '서버 갭' |
 
 ### 새로 더한 시험 (3번 — migrate 보강)
@@ -301,9 +301,56 @@ Python 파일(`scripts/*.py`·`check_ddl.py`·옛 Python 시험·`tests/conftest
 | G17 `current` 없는 옛 프로젝트 | `test_state_load` 'show reads the old folder…' | 단계를 명시한 `show` 도 한국어 오류로 거절(0.15 는 읽었다) |
 | G18 `reopen` | `test_state_transitions` 'reopen marks later stages stale…' | 다시 연 단계의 `review`(set 으로 쓴 값)를 비우지 않는다 |
 
-### 서버 갭 — 지운 시험과 e2e (결정 필요)
+### 서버 갭 — 되살린 서버 시험과 e2e (SEL-74 시험 쪽 3차, leader 결정 2026-11-12)
 
-`scripts/serve.ts` 머리말: '/api/v1/* 통과 길과 DB 로 짓는 화면은 여기 없다(SEL-77 이후)'. PR18 의 Python 서버가 하던 일 중 ts 서버에 대응이 없는 것의 시험은 **지웠고** 아래에 적는다 — 제품이 이 기능을 다시 원하면 시험을 되살려야 한다(git 이력 `83bc0b3`).
+전환 뒤 사용자의 대시보드·화면은 `scripts/serve.ts` 가 띄운다. 그래서 PR18 의 로컬 화면 보장은 serve.ts 가 갖춘다 — `serve.ts` 머리말의 '/api/v1/* 통과 길과 DB 로 짓는 화면은 여기 없다(SEL-77 이후)'는 이제 **구현할 일**이다. 2차에서 지웠던 서버 시험을 git `83bc0b3` 에서 되살려 ts 대상(`node scripts/serve.ts` — `web_env.start_server`)으로 옮겼다. 단언은 약화하지 않았다(`step(c, "1", …)` 의 플래그 자리만 뺐다). 지금은 모두 실패하는 것이 정상이고, worker 가 `serve.ts` 를 고쳐 통과시킨다. 아래 'worker 가 볼 목록'에서 갭 번호로 시험을 찾는다.
 
-- 지운 시험: `test_web_server` W3f(/api/v1 이 정적 서빙보다 먼저)·W3g(/version = DB 변경 커서), `test_web_hardening_http` H1b·H7(/api/v1 Origin·철자), `test_web_hardening_state` H5a·H5b(/version 커서)·H8a·H8b(플래그), H9(DB 보고서 URL), `test_web_review1` R1(요청 때 DB 에서 짓는 index.html), `test_web_n1_reports`(등록 보고서 URL 이 DB blob 과 같다).
-- Playwright e2e 11개가 ts 서버에서 실패한다(`npx playwright test`, 13 통과): `workspace_smoke` E1(홈 목록 `/`)·E5·E6·E10(run·Go 표시), `workspace_final` F2·F3·F4a·F4b, `workspace_hardening` X1, `workspace_n2` N2, `workspace_r13` R3a — 화면이 DB 에서 요청 때 지어지는 것에 기대던 것. CI 의 browser 잡이 이 상태로는 빨갛게 된다.
+| 갭 | 보장 | 시험 | 지금 serve.ts |
+|---|---|---|---|
+| S1 `/api/v1/*` 통과 | `/api/v1` 은 폴더 이름·`..` 철자와 무관하게 정적 서빙보다 먼저 API 다(`format_version: "1.0"` 봉투). 허용 안 된 Origin(null 포함)의 쓰기는 세션 비밀이 있어도 403 `forbidden`, 세션 없으면 401 | `test_web_server` W3d2·W3e2·W3f, `test_web_hardening_http` H1b·H7 | 길이 없다 — 정적 폴더/404 |
+| S2 `/version` DB 커서 | `/<slug>/version`·`/version` = 정수 하나: 변경 없으면 같고, 같은 프로젝트의 DB 쓰기(명령·화면 답)로 커지고, 읽기·실패한 POST·다른 프로젝트 쓰기로는 안 변하고(홈 값만 변한다), 파일 mtime 과 무관하고, 쿼리·끝 슬래시·`wait_ms` 잡음에도 바로 답한다 | `test_web_server` W3g, `test_web_hardening_state` H5a·H5b | `index.html`·`ask-*.html` 의 시각(0.15 계약) — DB 쓰기에 안 변한다; 홈 `/version` 은 404 |
+| S3 요청 때 DB 로 짓는 화면 | `/<slug>/`·`/<slug>/index.html`·`/`·`/index.html` 은 요청 때마다 DB 에서 짓는다(낡은 정적 파일을 내주지 않고, 답·`merge`·`note` 같은 쓰기 명령 뒤 `render` 없이 즉시 반영, 서로 같은 데이터, HEAD 길이 = GET 길이). `PES_DB_CORE` 같은 옛 환경 변수는 영향이 없다 | `test_web_review1` R1, `test_web_hardening_state` H8a (+ Playwright e2e 11개, 아래) | 폴더의 정적 `index.html` 을 그대로 서빙한다 — 홈 `/` 도 정적 파일 |
+| S4 DB 가 서빙하는 보고서·산출 | `/<slug>/reports/<단계>/<이름>`·`/<slug>/out/<이름>` 은 이 프로젝트의 DB 보고서·blob 이다: 만들지 않은 보고서는 404(다른 프로젝트 것을 대신 내주지 않음), 쿼리의 가짜 버전·`..`·blob 해시·저장 키 철자로 다른 프로젝트 내용이 안 나옴, 모양이 틀린 주소는 404(500·디렉터리 목록 아님), 이전·활성화한 프로젝트의 대시보드가 광고하는 등록 보고서 URL 은 모두 200 이고 바이트가 원본·DB ready blob 과 같다 | `test_web_hardening_state` H9, `test_web_n1_reports` N1 | 폴더 파일을 정적으로 서빙한다(폴더 URL 은 301) |
+| (G13) 심볼릭 링크 | 위 S4 와 함께 — `test_web_hardening_http` H6c 는 2차부터 있던 갭 G13 이다 | — | 아래 G13 |
+
+**통과해야 하는 것 (번역한 시험):** `H8b` — 옛 `project.json` 프로젝트는 `migrate` 전에는 답을 받지 않고(404, 폴더 불변, D14) 이전한 뒤에는 DB 로 받아 응답 `file` 이 처리 대기 이름이고 알림 줄이 `FEEDBACK plan R2 feedback <이름>` 형식이다. 이 시험은 갭이 아니다(지금 통과) — 구현이 깨뜨리지 않아야 한다. `H8a` 는 0.15 의 '플래그가 정확히 1 이 아니면 DB 를 쓰지 않는다'를 뒤집어 번역했다(ts 에는 플래그가 없다 — 어떤 값이어도 서버는 같다).
+
+**Playwright e2e (13 통과, 11 실패 — 이번 3차에서 돌리지 않았다, 2차 보고 기준):** `workspace_smoke` E1·E5·E6·E10, `workspace_final` F2·F3·F4a·F4b, `workspace_hardening` X1, `workspace_n2` N2, `workspace_r13` R3a. 화면이 요청 때 DB 에서 지어지는 것(S3)에 기대던 것이다. 시험은 그대로 두었고 `serve.ts` 로 돈다 — S3 가 구현되면 같이 풀리는지 worker 가 `npx playwright test` 로 확인한다. CI 의 browser 잡이 이 상태로는 빨갛다.
+
+### worker 가 볼 목록 — 시험 이름 ↔ 갭 번호
+
+`npm test` 에서 남는 실패는 이것뿐이어야 한다(그리고 Python 파일 존재를 단언하는 `test_sel74_e` 의 E1·E2·E3·E8·E10 — Python 파일 제거 PR 이 풀어 준다). 갭 번호는 위 'ts 구현 갭'(G, G4·G11·G12 는 번호가 비어 있다)과 '서버 갭'(S)의 것이다. 시험 이름은 `node --test` 출력의 제목 앞 글자다.
+
+| 시험 파일 | 시험 | 갭 |
+|---|---|---|
+| `test_cli_read_final2` | F1b ×2·F1c | G1 |
+| `test_cli_read_doctor` | 'DB 프로젝트…' | G1 |
+| `test_cli_read_doctor` | '공백·따옴표·괄호' | G2 |
+| `test_cli_read_doctor` | '깨진 DB' | G3 |
+| `test_cli_read_hardening` | H6 | G5 |
+| `test_cli_read_hardening` | H1·H1b | G6 |
+| `test_cli_read_v015` | 'pending…' | G6 |
+| `test_state_transitions` | 'round-start increments…' | G7 |
+| `test_state_settings_changes` | 'round-start 는 이전 라운드 changes…' | G7 |
+| `test_cli_set_report` | 'set changes…' | G7 |
+| `test_cli_set_report` | 'set review…' | G8 |
+| `test_cli_set_hardening` | '\ud800' | G9 |
+| `test_cli_write` | '두 번째 approve 로 승인 기록이 쌓이지 않는다' | G10 |
+| `test_web_hardening_http` | H6c | G13 |
+| `test_web_r1_3` | R1b | G14 |
+| `test_web_r1_3_show_if` | R3c | G15 |
+| `test_state_settings_changes` | ×2 ('기획 답(사용자)') | G16 |
+| `test_skill_pilot_state` | (qa-brief) | G16 |
+| `test_state_load` | 'show reads the old folder…' | G17 |
+| `test_state_transitions` | 'reopen marks later stages stale…' | G18 |
+| `test_web_server` | W3d2·W3e2·W3f | S1 |
+| `test_web_hardening_http` | H1b·H7 | S1 |
+| `test_web_server` | W3g | S2 |
+| `test_web_hardening_state` | H5a·H5b | S2 |
+| `test_web_review1` | R1 | S3 |
+| `test_web_hardening_state` | H8a | S3 |
+| `test_web_hardening_state` | H9 | S4 |
+| `test_web_n1_reports` | N1 | S4 |
+| e2e `workspace_*.spec.ts` (11개) | E1·E5·E6·E10·F2·F3·F4a·F4b·X1·N2·R3a | S3 (확인 필요) |
+
+갭 하나를 풀 때마다 이 표에서 그 줄을 지운다. 어떤 갭을 포기하기로 하면(제품이 그 기능을 원하지 않으면) 그 시험을 지우는 것은 worker 가 아니라 leader 가 결정한다.
