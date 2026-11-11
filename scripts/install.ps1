@@ -24,6 +24,8 @@ function Step($n, $t) { Write-Host "`n[$n/6] $t" -ForegroundColor Cyan }
 function Ok($t) { Write-Host "  OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "  !!  $t" -ForegroundColor Yellow }
 function Fail($t) { Write-Host "  XX  $t" -ForegroundColor Red }
+# a stop: exit 1 when run as a file (-File, CI, bootstrap path); the README way (irm | iex) just returns so the window stays open
+function Stop-Install { if ($PSCommandPath) { exit 1 } }
 function Refresh-Path {
   if ($env:PES_INSTALL_PATH_ONLY -eq "1") { return }
   $m = [Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -38,13 +40,13 @@ Step 1 "기본 도구 (Git · Node.js 26 이상)"
 $tmp = $null
 if ($env:PES_INSTALL_MIRROR) {
   $boot = Join-Path $env:PES_INSTALL_MIRROR "scripts\bootstrap.ps1"
-  if (-not (Test-Path $boot)) { Fail "bootstrap.ps1 을 찾지 못함: $boot"; return }
+  if (-not (Test-Path $boot)) { Fail "bootstrap.ps1 을 찾지 못함: $boot"; Stop-Install; return }
 } else {
   $tmp = Join-Path $env:TEMP "pes-bootstrap-$(Get-Random).ps1"
   $boot = $tmp
   try {
     Invoke-WebRequest "https://raw.githubusercontent.com/$Repo/main/scripts/bootstrap.ps1" -OutFile $tmp -UseBasicParsing
-  } catch { Fail "bootstrap.ps1 을 받지 못함: $($_.Exception.Message)"; return }
+  } catch { Fail "bootstrap.ps1 을 받지 못함: $($_.Exception.Message)"; Stop-Install; return }
 }
 $nodeCmd = $null
 # the PowerShell that runs this script (powershell.exe or pwsh.exe) by its full path — 'powershell' may not be on PATH
@@ -55,8 +57,8 @@ $psExe = (Get-Process -Id $PID).Path
 }
 if ($tmp) { Remove-Item $tmp -ErrorAction SilentlyContinue }
 Refresh-Path
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "git 이 없습니다 — Git for Windows 설치 후 다시 실행하세요 (https://git-scm.com/download/win)"; return }
-if (-not $nodeCmd -or $nodeCmd -eq "none") { Fail "Node.js 26 이상이 필요합니다 — https://nodejs.org 에서 설치한 뒤 새 PowerShell 창에서 다시 실행하세요"; return }
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "git 이 없습니다 — Git for Windows 설치 후 다시 실행하세요 (https://git-scm.com/download/win)"; Stop-Install; return }
+if (-not $nodeCmd -or $nodeCmd -eq "none") { Fail "Node.js 26 이상이 필요합니다 — https://nodejs.org 에서 설치한 뒤 새 PowerShell 창에서 다시 실행하세요"; Stop-Install; return }
 
 # 2. Claude (플러그인 등록에 쓸 claude 실행 파일)
 #   PES_TARGET=desktop : Claude Desktop 안에 들어 있는 Claude Code 를 쓴다 (별도 CLI 를 설치하지 않음)
@@ -99,7 +101,7 @@ if ($Claude -and -not $env:PES_NO_UPGRADE -and $Claude -notmatch "claude-code") 
   $before = & $Claude --version 2>$null; & $Claude update 2>&1 | Out-Null; $after = & $Claude --version 2>$null
   if ($after -ne $before) { Ok "claude 업그레이드: $before → $after" }
 }
-if ($Claude) { Ok "claude $(& $Claude --version 2>$null)" } elseif ($Target -ne "desktop") { Fail "claude 를 찾지 못함 — 새 PowerShell 창에서 다시 실행하세요"; return }
+if ($Claude) { Ok "claude $(& $Claude --version 2>$null)" } elseif ($Target -ne "desktop") { Fail "claude 를 찾지 못함 — 새 PowerShell 창에서 다시 실행하세요"; Stop-Install; return }
 
 # 3. PES 플러그인
 Step 3 "PES 플러그인"
@@ -117,7 +119,7 @@ if ($env:PES_INSTALL_MIRROR) {
   New-Item -ItemType Directory -Force -Path $Src | Out-Null
   Copy-Item -Path (Join-Path $env:PES_INSTALL_MIRROR "*") -Destination $Src -Recurse -Force
 } elseif (Test-Path (Join-Path $Src ".git")) { & git -C $Src pull -q 2>&1 | Out-Null } else { New-Item -ItemType Directory -Force -Path (Split-Path $Src) | Out-Null; & git clone -q "https://github.com/$Repo.git" $Src 2>&1 | Out-Null }
-if (-not (Test-Path (Join-Path $Src "scripts\setup.ts"))) { Fail "설치 도우미를 받지 못함 ($Src)"; return }
+if (-not (Test-Path (Join-Path $Src "scripts\setup.ts"))) { Fail "설치 도우미를 받지 못함 ($Src)"; Stop-Install; return }
 function NodeRun { & node @args }
 
 # 4. 조사 도구
