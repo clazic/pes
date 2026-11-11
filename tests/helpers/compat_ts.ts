@@ -294,6 +294,8 @@ export interface TsView {
   answers: Array<{ stage: string; round: number; kind: string; text: string }>;
   /** D03: answer texts not yet processed */
   pending_texts: string[];
+  /** D03: the names the DB gave the pending answers (what `mark` takes) */
+  pending_names: string[];
   /** D04: the live lock owner label (PES_OWNER session / agent run), or null */
   lock: { owner: string } | null;
 }
@@ -319,6 +321,7 @@ export function ts_view(home: TsHome, slug: string): TsView | undefined {
       project,
       answers: view.feedback.map((f: any) => ({ stage: String(f.stage), round: Number(f.round), kind: String(f.kind), text: String(f.text) })),
       pending_texts: view.pending.map((p) => p.text),
+      pending_names: view.pending.map((p) => p.name),
       lock,
     };
   } finally {

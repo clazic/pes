@@ -345,7 +345,11 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
       args = (raw.run as string[]).map((a) => substitute(a, ctx));
       label = raw.run;
       // D03 on ts: `mark` names the answer by the name the DB gave it (the last `pending` listing), not by the 0.15 file name
-      if (target === "ts" && d03 && args[0] === "mark" && last_pending.length > 0) args = ["mark", args[1] as string, ...last_pending.slice(0, args.length - 2)];
+      // (E07 lists `pending` first; X05 has no read step, so the names are taken from the DB itself)
+      if (target === "ts" && d03 && args[0] === "mark") {
+        const names = last_pending.length > 0 ? last_pending : (ts_view(ts_home, basename(substitute(def.project ?? "{P}", ctx)))?.pending_names ?? []);
+        if (names.length > 0) args = ["mark", args[1] as string, ...names.slice(0, args.length - 2)];
+      }
     } else if (raw.setup !== undefined) {
       args = raw.setup as string[];
       label = ["setup.py", ...args];

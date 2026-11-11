@@ -1504,16 +1504,6 @@
   },
   {
    "step": [
-    "list"
-   ],
-   "exit": 0,
-   "stdout": [
-    "프로젝트 없음: <TMP>/pes-projects"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
     "home"
    ],
    "exit": 0,

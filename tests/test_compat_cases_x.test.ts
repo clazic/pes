@@ -7,7 +7,7 @@ import { use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
 
-for (const id of ["X01", "X02", "X03", "X04"]) {
+for (const id of ["X01", "X02", "X03", "X04", "X05", "X06", "X07"]) {
   test(`${id} (py)`, { timeout: 180_000 }, async () => {
     await assert_case("py", id);
   });

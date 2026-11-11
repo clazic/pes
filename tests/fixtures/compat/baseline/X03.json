@@ -76,30 +76,6 @@
   },
   {
    "step": [
-    "digest",
-    "{P}",
-    "bogus"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
-   ]
-  },
-  {
-   "step": [
-    "show",
-    "{P}",
-    "bogus"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
-   ]
-  },
-  {
-   "step": [
     "qa-brief",
     "{P}",
     "bogus"
@@ -116,18 +92,6 @@
     "{P}",
     "bogus",
     "글"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "단계 이름은 plan, research, analyze, write, verify, publish 중 하나"
-   ]
-  },
-  {
-   "step": [
-    "report",
-    "{P}",
-    "bogus"
    ],
    "exit": 1,
    "stdout": [],
@@ -184,39 +148,6 @@
   {
    "step": [
     "reopen",
-    "{P}"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "traceback: IndexError: list index out of range"
-   ]
-  },
-  {
-   "step": [
-    "digest",
-    "{P}"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "traceback: IndexError: list index out of range"
-   ]
-  },
-  {
-   "step": [
-    "show",
-    "{P}"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "traceback: IndexError: list index out of range"
-   ]
-  },
-  {
-   "step": [
-    "report",
     "{P}"
    ],
    "exit": 1,
@@ -437,60 +368,6 @@
   },
   {
    "step": [
-    "digest",
-    "{P}",
-    "plan",
-    "--round",
-    "x"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "traceback: ValueError: invalid literal for int() with base 10: 'x'"
-   ]
-  },
-  {
-   "step": [
-    "digest",
-    "{P}",
-    "plan",
-    "--round",
-    "9"
-   ],
-   "exit": 0,
-   "stdout": [
-    "[기획 R1] 항목 0개 · 상태 active"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "show",
-    "{P}",
-    "plan",
-    "999"
-   ],
-   "exit": 0,
-   "stdout": [
-    "[]"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "show",
-    "{P}",
-    "plan",
-    "--fields"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "traceback: IndexError: list index out of range"
-   ]
-  },
-  {
-   "step": [
     "mark",
     "{P}"
    ],
@@ -513,19 +390,6 @@
   },
   {
    "step": [
-    "pending",
-    "{P}",
-    "--show",
-    "없는이름"
-   ],
-   "exit": 2,
-   "stdout": [],
-   "stderr": [
-    "받은 답이 없습니다: 없는이름"
-   ]
-  },
-  {
-   "step": [
     "lock",
     "{P}"
    ],
@@ -544,37 +408,6 @@
    "stdout": [
     "잠금 해제"
    ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "status",
-    "{P}"
-   ],
-   "exit": 0,
-   "stdout": [
-    "주제: 계약 주제  (<PROJECT>)",
-    "현재 단계: 기획",
-    "  ▶ 기획     active   R1 항목 0 (할 일 0)",
-    "    조사     pending  R0 항목 0 (할 일 0)",
-    "    분석·종합  pending  R0 항목 0 (할 일 0)",
-    "    집필     pending  R0 항목 0 (할 일 0)",
-    "    검증     pending  R0 항목 0 (할 일 0)",
-    "    산출·공유  pending  R0 항목 0 (할 일 0)",
-    "인계 메모 1개 (최근 5):",
-    "  - [<TIME>] ",
-    "처리 안 한 답: 0개",
-    "대시보드: 서버 꺼짐 — serve 합성 프로젝트"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "pending",
-    "{P}"
-   ],
-   "exit": 0,
-   "stdout": [],
    "stderr": []
   }
  ],

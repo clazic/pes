@@ -1,6 +1,6 @@
 {
-  "doc": "CLI 계약 사례 X01~X04 (SEL-71). 32개 명령(+set)의 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·프로젝트 없는 명령의 이름·인자 오류·exit·stdout/stderr 를 0.15 와 견준다. 기준값은 baseline/X0n.json(0.15 대상). 서버·프로세스를 띄우는 serve·hub·open·watch·doctor 는 인자 수 오류(사용법)만 — 실제 실행은 E13·E15(뒤 PR).",
-  "ts_not_yet_reason": "X 사례는 모두 implemented",
+  "doc": "CLI 계약 사례 X01~X07 (SEL-71). 32개 명령(+set)의 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·프로젝트 없는 명령의 이름·인자 오류·exit·stdout/stderr 를 0.15 와 견준다. 기준값은 baseline/X0n.json(0.15 대상). 서버·프로세스를 띄우는 serve·hub·open·watch·doctor 는 인자 수 오류(사용법)만 — 실제 실행은 E13·E15(뒤 PR). X01~X05 = SEL-71(쓰기 골격), X06·X07 = SEL-77(읽기). E04 는 status 를 써서 SEL-71 에 status 가 든다.",
+  "ts_not_yet_reason": "읽기·보고서 사례(X06·X07)는 SEL-77 몫 — SEL77_DONE (tests/test_pes_ts_contract.test.ts)",
   "cases": [
     {
       "id": "X01",
@@ -155,11 +155,6 @@
         },
         {
           "run": [
-            "list"
-          ]
-        },
-        {
-          "run": [
             "home"
           ]
         },
@@ -199,7 +194,7 @@
     },
     {
       "id": "X02",
-      "title": "없는 프로젝트 — 프로젝트를 받는 23개 명령",
+      "title": "없는 프로젝트(쓰기 명령) — 프로젝트를 받는 쓰기 명령",
       "section": "CLI 계약 X02",
       "group": "A",
       "kind": "cli",
@@ -262,18 +257,6 @@
         },
         {
           "run": [
-            "status",
-            "{T}/없는-프로젝트"
-          ]
-        },
-        {
-          "run": [
-            "pending",
-            "{T}/없는-프로젝트"
-          ]
-        },
-        {
-          "run": [
             "mark",
             "{T}/없는-프로젝트",
             "a.json"
@@ -285,33 +268,6 @@
             "{T}/없는-프로젝트",
             "plan",
             "글"
-          ]
-        },
-        {
-          "run": [
-            "assemble",
-            "{T}/없는-프로젝트"
-          ]
-        },
-        {
-          "run": [
-            "report",
-            "{T}/없는-프로젝트",
-            "plan"
-          ]
-        },
-        {
-          "run": [
-            "digest",
-            "{T}/없는-프로젝트",
-            "plan"
-          ]
-        },
-        {
-          "run": [
-            "show",
-            "{T}/없는-프로젝트",
-            "plan"
           ]
         },
         {
@@ -328,12 +284,6 @@
             "plan",
             "summary",
             "{T}/없는 값.txt"
-          ]
-        },
-        {
-          "run": [
-            "web",
-            "{T}/없는-프로젝트"
           ]
         },
         {
@@ -376,7 +326,7 @@
     },
     {
       "id": "X03",
-      "title": "나쁜 인자 — 단계 이름·빠진 인자·없는/깨진 파일·set·qa·digest 옵션",
+      "title": "나쁜 인자(쓰기 명령) — 단계 이름·빠진 인자·없는/깨진 파일·set·qa·ask-prep",
       "section": "CLI 계약 X03",
       "group": "A",
       "kind": "cli",
@@ -435,20 +385,6 @@
         },
         {
           "run": [
-            "digest",
-            "{P}",
-            "bogus"
-          ]
-        },
-        {
-          "run": [
-            "show",
-            "{P}",
-            "bogus"
-          ]
-        },
-        {
-          "run": [
             "qa-brief",
             "{P}",
             "bogus"
@@ -460,13 +396,6 @@
             "{P}",
             "bogus",
             "글"
-          ]
-        },
-        {
-          "run": [
-            "report",
-            "{P}",
-            "bogus"
           ]
         },
         {
@@ -498,24 +427,6 @@
         {
           "run": [
             "reopen",
-            "{P}"
-          ]
-        },
-        {
-          "run": [
-            "digest",
-            "{P}"
-          ]
-        },
-        {
-          "run": [
-            "show",
-            "{P}"
-          ]
-        },
-        {
-          "run": [
-            "report",
             "{P}"
           ]
         },
@@ -651,40 +562,6 @@
         },
         {
           "run": [
-            "digest",
-            "{P}",
-            "plan",
-            "--round",
-            "x"
-          ]
-        },
-        {
-          "run": [
-            "digest",
-            "{P}",
-            "plan",
-            "--round",
-            "9"
-          ]
-        },
-        {
-          "run": [
-            "show",
-            "{P}",
-            "plan",
-            "999"
-          ]
-        },
-        {
-          "run": [
-            "show",
-            "{P}",
-            "plan",
-            "--fields"
-          ]
-        },
-        {
-          "run": [
             "mark",
             "{P}"
           ]
@@ -693,14 +570,6 @@
           "run": [
             "note",
             "{P}"
-          ]
-        },
-        {
-          "run": [
-            "pending",
-            "{P}",
-            "--show",
-            "없는이름"
           ]
         },
         {
@@ -714,25 +583,13 @@
             "unlock",
             "{P}"
           ]
-        },
-        {
-          "run": [
-            "status",
-            "{P}"
-          ]
-        },
-        {
-          "run": [
-            "pending",
-            "{P}"
-          ]
         }
       ],
       "project": "{P}"
     },
     {
       "id": "X04",
-      "title": "프로젝트 없이 쓰는 명령과 홈 — list·home·remote·stop·which, 홈 안 프로젝트, home 이동",
+      "title": "프로젝트 없이 쓰는 명령과 홈(쓰기) — home·remote·stop, 홈 안 프로젝트 쓰기, home 이동",
       "section": "CLI 계약 X04",
       "group": "A",
       "kind": "cli",
@@ -745,11 +602,6 @@
         "status": "implemented"
       },
       "steps": [
-        {
-          "run": [
-            "list"
-          ]
-        },
         {
           "run": [
             "home"
@@ -826,12 +678,6 @@
         },
         {
           "run": [
-            "which",
-            "없는-도구-xyz"
-          ]
-        },
-        {
-          "run": [
             "init",
             "{R}/계약-프로젝트",
             "--topic",
@@ -840,24 +686,7 @@
         },
         {
           "run": [
-            "list"
-          ]
-        },
-        {
-          "run": [
             "home"
-          ]
-        },
-        {
-          "run": [
-            "status",
-            "계약-프로젝트"
-          ]
-        },
-        {
-          "run": [
-            "pending",
-            "계약-프로젝트"
           ]
         },
         {
@@ -876,13 +705,6 @@
         },
         {
           "run": [
-            "digest",
-            "계약-프로젝트",
-            "plan"
-          ]
-        },
-        {
-          "run": [
             "home",
             "{T}/옮긴 홈"
           ]
@@ -894,14 +716,364 @@
         },
         {
           "run": [
+            "home",
+            "{T}/옮긴 홈",
+            "--force"
+          ]
+        }
+      ],
+      "project": "{R}/계약-프로젝트"
+    },
+    {
+      "id": "X05",
+      "title": "E07 의 쓰기 부분 — init·round-start·merge·note·chat·답 파일·mark (읽기는 E07, SEL-77)",
+      "section": "CLI 계약 X05",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "답(D03)·processed·notes 상태 DTO, 쓰기 명령 stdout/exit",
+      "diffs": [
+        "D03",
+        "D01",
+        "D02"
+      ],
+      "ts": {
+        "status": "implemented"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "합성 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "research"
+          ]
+        },
+        {
+          "merge": {
+            "stage": "research",
+            "results": [
+              {
+                "id": 1,
+                "title": "첫 항목",
+                "summary": "첫 요약\n둘째 줄",
+                "confidence": "high",
+                "sources": [
+                  {
+                    "url": "https://example.test/a",
+                    "title": "출처 A",
+                    "method": "browser"
+                  }
+                ],
+                "stats": [
+                  {
+                    "label": "지표",
+                    "value": 3,
+                    "unit": "건"
+                  }
+                ],
+                "conflicts": [
+                  "충돌 하나"
+                ],
+                "open_questions": [
+                  "남은 질문"
+                ]
+              },
+              {
+                "id": 2,
+                "title": "둘째 항목",
+                "summary": "둘째 요약"
+              }
+            ]
+          }
+        },
+        {
+          "run": [
+            "note",
+            "{P}",
+            "합성 메모"
+          ]
+        },
+        {
+          "run": [
+            "chat",
+            "{P}",
+            "research",
+            "합성 지시",
+            "feedback"
+          ]
+        },
+        {
+          "write_json": "{P}/feedback/plan-R0-20260101-000000.json",
+          "json": {
+            "stage": "plan",
+            "round": 0,
+            "kind": "feedback",
+            "text": "합성 답",
+            "via": "html"
+          }
+        },
+        {
+          "run": [
+            "mark",
+            "{P}",
+            "plan-R0-20260101-000000.json"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "X06",
+      "title": "읽기 명령의 없는 프로젝트·나쁜 인자 (SEL-77)",
+      "section": "CLI 계약 X06",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "status·pending·digest·show·report·assemble·web 의 오류 처리. traceback 은 D11",
+      "diffs": [
+        "D01",
+        "D02",
+        "D11"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{P}",
+            "--topic",
+            "계약 주제"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "{P}",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "assemble",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{T}/없는-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "web",
+            "{T}/없는-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{P}",
+            "bogus"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "report",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "plan",
+            "--round",
+            "x"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "{P}",
+            "plan",
+            "--round",
+            "9"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "plan",
+            "999"
+          ]
+        },
+        {
+          "run": [
+            "show",
+            "{P}",
+            "plan",
+            "--fields"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{P}",
+            "--show",
+            "없는이름"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "{P}"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "{P}"
+          ]
+        }
+      ],
+      "project": "{P}"
+    },
+    {
+      "id": "X07",
+      "title": "읽기 명령 list·which·status·pending·digest 와 홈 안 프로젝트 (SEL-77)",
+      "section": "CLI 계약 X07",
+      "group": "A",
+      "kind": "cli",
+      "criteria": "list 형식·which 오류·홈 안 프로젝트 읽기",
+      "diffs": [
+        "D01",
+        "D02"
+      ],
+      "ts": {
+        "status": "not_yet"
+      },
+      "steps": [
+        {
+          "run": [
+            "init",
+            "{R}/계약-프로젝트",
+            "--topic",
+            "홈 안 프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "round-start",
+            "계약-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
             "list"
           ]
         },
         {
           "run": [
-            "home",
-            "{T}/옮긴 홈",
-            "--force"
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "which",
+            "없는-도구-xyz"
+          ]
+        },
+        {
+          "run": [
+            "list"
+          ]
+        },
+        {
+          "run": [
+            "status",
+            "계약-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "pending",
+            "계약-프로젝트"
+          ]
+        },
+        {
+          "run": [
+            "digest",
+            "계약-프로젝트",
+            "plan"
+          ]
+        },
+        {
+          "run": [
+            "list"
           ]
         }
       ],

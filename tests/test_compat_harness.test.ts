@@ -37,7 +37,7 @@ use_home_guard();
 // SEL-71 (PR26b) turned the ratchet from "per kind" into "per case": cases.json `ts.status` says, case by case, whether the ts target
 // must match 0.15 (implemented) or answers not_yet (and is not even run, whether scripts/pes.ts exists or not). Edit this list and
 // cases.json together; tests/test_pes_ts_contract.test.ts pins the SEL-71 completion list for good.
-const TS_IMPLEMENTED: string[] = ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E10", "E11", "E12"];
+const TS_IMPLEMENTED: string[] = ["E01", "E02", "E03", "E04", "E10"];
 const ALL_IDS = Array.from({ length: 15 }, (_x, i) => `E${String(i + 1).padStart(2, "0")}`);
 
 test("the table defines E01~E15 once each, with criteria, intended differences and a pinned 0.15 baseline", () => {

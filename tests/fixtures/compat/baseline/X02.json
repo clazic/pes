@@ -87,28 +87,6 @@
   },
   {
    "step": [
-    "status",
-    "{T}/없는-프로젝트"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
-   ]
-  },
-  {
-   "step": [
-    "pending",
-    "{T}/없는-프로젝트"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
-   ]
-  },
-  {
-   "step": [
     "mark",
     "{T}/없는-프로젝트",
     "a.json"
@@ -125,53 +103,6 @@
     "{T}/없는-프로젝트",
     "plan",
     "글"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
-   ]
-  },
-  {
-   "step": [
-    "assemble",
-    "{T}/없는-프로젝트"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
-   ]
-  },
-  {
-   "step": [
-    "report",
-    "{T}/없는-프로젝트",
-    "plan"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
-   ]
-  },
-  {
-   "step": [
-    "digest",
-    "{T}/없는-프로젝트",
-    "plan"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
-   ]
-  },
-  {
-   "step": [
-    "show",
-    "{T}/없는-프로젝트",
-    "plan"
    ],
    "exit": 1,
    "stdout": [],
@@ -203,17 +134,6 @@
    "stdout": [],
    "stderr": [
     "set: 값을 읽지 못했습니다 (<TMP>/work/없는 값.txt): [Errno 2] No such file or directory: '<TMP>/work/없는 값.txt'"
-   ]
-  },
-  {
-   "step": [
-    "web",
-    "{T}/없는-프로젝트"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "project.json 없음: <TMP>/work/없는-프로젝트"
    ]
   },
   {

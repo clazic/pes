@@ -121,10 +121,10 @@ test("D04: the lock owner is read from the live lease (PES_OWNER label), `--forc
 test("the cases carry the devices they need: D02 on every cli case that writes project.json, D03 on E07, D04 on E10, D10 on the cases with generated files, D11 where 0.15 crashes", () => {
   const table = [...load_table().cases, ...load_contract_table().cases];
   const diffs = (id: string): string[] => table.find((c) => c.id === id)?.diffs ?? [];
-  for (const id of ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E10", "E11", "E12"]) assert.ok(diffs(id).includes("D02"), `${id} needs D02 (project.json is not written by ts)`);
-  assert.ok(diffs("E07").includes("D03") && diffs("E10").includes("D04"));
+  for (const id of ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E10", "E11", "E12", "X05"]) assert.ok(diffs(id).includes("D02"), `${id} needs D02 (project.json is not written by ts)`);
+  assert.ok(diffs("E07").includes("D03") && diffs("X05").includes("D03") && diffs("E10").includes("D04"));
   for (const id of ["E02", "E05", "E06", "E11"]) assert.ok(diffs(id).includes("D10"), `${id} needs D10`);
-  for (const id of ["E02", "E03", "E12", "X02", "X03"]) assert.ok(diffs(id).includes("D11"), `${id} has a 0.15 traceback step`);
+  for (const id of ["E02", "E03", "E12", "X02", "X03", "X06"]) assert.ok(diffs(id).includes("D11"), `${id} has a 0.15 traceback step`);
   // every traceback step of every baseline is covered by a case that lists D11 (nothing hides behind a missing difference)
   for (const def of table) {
     const rec = read_baseline(def.id);
@@ -133,7 +133,7 @@ test("the cases carry the devices they need: D02 on every cli case that writes p
   }
   const e10 = read_baseline("E10").steps.filter((s: any) => "exit" in s);
   assert.ok(e10.every((s: any) => "lock" in s), "E10 records the lock owner after every step (D04 device)");
-  assert.ok((read_baseline("E07") as CaseRecord).answers?.length === 2, "E07 records its answers (D03 device)");
+  assert.ok((read_baseline("E07") as CaseRecord).answers?.length === 2 && (read_baseline("X05") as CaseRecord).answers?.length === 2, "E07 and its write half X05 record their answers (D03 device)");
 });
 
 test("D10 (W1·W2): the ts target is held to the posix baseline on EVERY OS — win32 os_overrides are not applied; a CR or a backslash path in the output fails", () => {

@@ -1,9 +1,9 @@
 // SEL-71 (PR26b): scripts/pes.ts — the 32 CLI commands as a TypeScript entry point, difference 0 against 0.15 (intended differences D01~D11 aside).
 //
 // This file is the contract of the issue, written before the code (it fails until scripts/pes.ts exists):
-//   1. the SEL-71 completion list is pinned (the per-case ratchet may only turn these cases, and all of them, in this issue);
+//   1. the SEL-71 completion list is pinned (a: skeleton + write commands; SEL-77 owns the reads);
 //   2. the run method is pinned: `node scripts/pes.ts` (Node 26 strips types) — also bare, unguarded, with a clean stderr;
-//   3. every implemented case runs on the ts target and equals the pinned 0.15 baseline (E01~E07, E10~E12, X01~X04);
+//   3. every implemented case runs on the ts target and equals the pinned 0.15 baseline (E01~E04, E10, X01~X05);
 //   4. the real-home guard covers the real child: nothing of the (fake and the account's) real ~/.pes / ~/pes-projects is touched.
 // The ts target always runs here, whatever PES_COMPAT_TARGET says (test_compat_cases_* keep running the py side).
 import assert from "node:assert/strict";
@@ -15,24 +15,19 @@ import { all_cases, assert_case, case_def, implemented_ids, load_contract_table,
 import { PES_PY, make_ctx, pes } from "./helpers/compat_env.ts";
 import { PES_TS_FILE, REPO_ROOT, run_ts_bare, run_ts_cli } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { LATER, SEL71_DONE, SEL77_DONE, sel77_on } from "./helpers/sel_scope.ts";
 
 use_home_guard();
 
-/** The SEL-71 completion list (Linear SEL-71: "E01~E07·E10~E12 차이 0") plus the CLI contract cases of this PR. */
-const SEL71_DONE = ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E10", "E11", "E12", "X01", "X02", "X03", "X04"];
-/** Not part of SEL-71: serve.ts / setup.ts / doctor come in later PRs. They stay not_yet however far pes.ts gets. */
-const NOT_THIS_ISSUE = ["E08", "E09", "E13", "E14", "E15"];
-
-test("SEL-71 completion list: exactly these cases are implemented on ts — E01~E07, E10~E12 and the contract cases X01~X04; the server / setup / doctor cases stay not_yet", () => {
+test("SEL-71 completion list (a: pes.ts skeleton + write commands): exactly E01~E04, E10, X01~X05 are implemented on ts; SEL-77's read cases are not_yet until SEL-77 turns them on; server / setup / doctor stay not_yet", () => {
   assert.deepEqual([...implemented_ids()].sort(), [...SEL71_DONE].sort(), "cases.json / contract.json ts.status differ from the SEL-71 completion list");
-  for (const id of NOT_THIS_ISSUE) assert.equal(case_def(id).ts.status, "not_yet", `${id} is not part of SEL-71`);
-  assert.deepEqual(
-    load_table().cases.filter((c) => c.kind !== "cli" && c.ts.status === "implemented"),
-    [],
-    "http / setup cases need serve.ts / setup.ts (a later PR)",
-  );
+  for (const id of SEL77_DONE) assert.equal(case_def(id).ts.status, "not_yet", `${id} belongs to SEL-77 (reads / reports) — not_yet until that issue turns SEL77_DONE on`);
+  assert.equal(sel77_on(), false, "SEL-77 flips all of SEL77_DONE at once; SEL-71 leaves them off");
+  for (const id of LATER) assert.equal(case_def(id).ts.status, "not_yet", `${id} is not part of SEL-71`);
+  assert.deepEqual(load_table().cases.filter((c) => c.kind !== "cli" && c.ts.status === "implemented"), [], "http / setup cases need serve.ts / setup.ts (a later PR)");
   assert.equal(all_cases().length, 15 + load_contract_table().cases.length);
-  for (const id of SEL71_DONE) assert.ok(existsSync(join(REPO_ROOT, "tests", "fixtures", "compat", "baseline", `${id}.json`)), `${id}: pinned 0.15 baseline`);
+  assert.deepEqual([...SEL71_DONE, ...SEL77_DONE, ...LATER].sort(), all_cases().map((c) => c.id).sort(), "every case has exactly one owner");
+  for (const id of [...SEL71_DONE, ...SEL77_DONE]) assert.ok(existsSync(join(REPO_ROOT, "tests", "fixtures", "compat", "baseline", `${id}.json`)), `${id}: pinned 0.15 baseline`);
 });
 
 test("the run method: scripts/pes.ts exists, runs as plain `node scripts/pes.ts` (Node >= 26 strips the types) and needs no tsx / build / loader", () => {
@@ -82,7 +77,8 @@ test("every command name 0.15 knows (the 33 old ones; context·claim·submit·wa
   const ctx = make_ctx("pes-ts-names-");
   try {
     const usage = read_baseline("X01").steps[0] as any;
-    const needs_project = known.filter((n) => !["list", "hub", "home", "doctor", "stop", "remote", "serve", "open", "watch", "which", "init"].includes(n));
+    // SEL-71 = the write commands (+ status); the read / report commands are SEL-77's and are checked there
+    const needs_project = known.filter((n) => !["list", "hub", "home", "doctor", "stop", "remote", "serve", "open", "watch", "which", "init", "pending", "digest", "show", "report", "assemble", "web"].includes(n));
     for (const name of needs_project) {
       const args = name === "ask-prep" || name === "round-start" || name === "approve" || name === "reopen" || name === "report" || name === "digest" || name === "show" || name === "qa-brief" || name === "qa" ? [name, join(ctx.tmp, "없는-프로젝트"), "plan"] : [name, join(ctx.tmp, "없는-프로젝트"), "a"];
       const run = run_ts_cli(ctx, args);
@@ -106,7 +102,7 @@ test("the real child never touches the real home: a battery of commands under th
   const ctx = make_ctx("pes-ts-realhome-");
   try {
     const project = join(ctx.tmp, "guard-project");
-    const calls: string[][] = [["home"], ["list"], ["remote"], ["init", project, "--topic", "합성 주제"], ["round-start", project, "plan"], ["status", project], ["note", project, "메모"], ["pending", project], ["render", project], ["report", project, "plan"], ["stop"]];
+    const calls: string[][] = [["home"], ["remote"], ["init", project, "--topic", "합성 주제"], ["round-start", project, "plan"], ["status", project], ["note", project, "메모"], ["render", project], ["stop"]];
     for (const args of calls) {
       // run_ts_cli itself fails the test on a PESHomeAccessViolation line, on a real path in stdout / stderr, and on a real-home env
       const run = run_ts_cli(ctx, args);

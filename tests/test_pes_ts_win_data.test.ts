@@ -11,6 +11,7 @@ import { assert_posix_storage, d02_canon, norm_out } from "./helpers/compat_case
 import { dto_from_project_json, init_project, make_ctx, merge, pes, walk_files, type CompatCtx } from "./helpers/compat_env.ts";
 import { PES_TS_FILE, answers_multiset, run_ts_cli, ts_seed_legacy, ts_view } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { sel77_on } from "./helpers/sel_scope.ts";
 
 use_home_guard();
 
@@ -96,7 +97,8 @@ test("old data: the importer reads the Windows-style twin into the same database
 /** The commands that only read: both twins must print the same thing (after the root names are normalised). */
 const READS: string[][] = [["status"], ["digest", "plan"], ["show", "plan"], ["show", "plan", "1", "--fields", "title,summary,sources"], ["pending"]];
 
-test("old data, read straight from the folder (no import): status / digest / show / pending print the same for the posix and the Windows-style twin, and as 0.15 does", () => {
+test("old data, read straight from the folder (no import): status / digest / show / pending print the same for the posix and the Windows-style twin, and as 0.15 does (SEL-77: reads)", () => {
+  if (!sel77_on()) return; // the read commands are SEL-77's; test_pes_ts_contract pins that they are still off
   assert.ok(existsSync(PES_TS_FILE), "scripts/pes.ts does not exist yet — SEL-71 writes it");
   const ctx = make_ctx("pes-win-read-");
   try {
@@ -118,7 +120,8 @@ test("old data, read straight from the folder (no import): status / digest / sho
   }
 });
 
-test("old data → new writes: after reading the Windows-style project, ts `render`, `report`, `assemble`, `web` store `/` paths and write LF only (D10), on every OS", () => {
+test("old data → new writes: after reading the Windows-style project, ts `render`, `report`, `assemble`, `web` store `/` paths and write LF only (D10), on every OS (SEL-77: report generation, W2)", () => {
+  if (!sel77_on()) return; // report / assemble / web generation is SEL-77's (W2); `render` LF is covered by E02/E03 (D10) in SEL-71
   assert.ok(existsSync(PES_TS_FILE), "scripts/pes.ts does not exist yet — SEL-71 writes it");
   const ctx = make_ctx("pes-win-write-");
   try {

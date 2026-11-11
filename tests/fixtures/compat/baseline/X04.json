@@ -3,16 +3,6 @@
  "steps": [
   {
    "step": [
-    "list"
-   ],
-   "exit": 0,
-   "stdout": [
-    "프로젝트 없음: <TMP>/pes-projects"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
     "home"
    ],
    "exit": 0,
@@ -147,17 +137,6 @@
   },
   {
    "step": [
-    "which",
-    "없는-도구-xyz"
-   ],
-   "exit": 1,
-   "stdout": [],
-   "stderr": [
-    "없는-도구-xyz 를 찾지 못함 — /pes:doctor 로 설치 상태 확인"
-   ]
-  },
-  {
-   "step": [
     "init",
     "{R}/계약-프로젝트",
     "--topic",
@@ -171,52 +150,12 @@
   },
   {
    "step": [
-    "list"
-   ],
-   "exit": 0,
-   "stdout": [
-    "1. [내 차례] 홈 안 프로젝트  (계약-프로젝트)",
-    "   기획 R0 · 기획 시작 질문에 답하기 · 갱신 <TIME> · 서버 꺼짐"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
     "home"
    ],
    "exit": 0,
    "stdout": [
     "PES 홈: <TMP>/pes-projects  (PES_HOME 환경변수) · 프로젝트 1개"
    ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "status",
-    "계약-프로젝트"
-   ],
-   "exit": 0,
-   "stdout": [
-    "주제: 홈 안 프로젝트  (<PROJECT>)",
-    "현재 단계: 기획",
-    "  ▶ 기획     asking   R0 항목 0 (할 일 0)",
-    "    조사     pending  R0 항목 0 (할 일 0)",
-    "    분석·종합  pending  R0 항목 0 (할 일 0)",
-    "    집필     pending  R0 항목 0 (할 일 0)",
-    "    검증     pending  R0 항목 0 (할 일 0)",
-    "    산출·공유  pending  R0 항목 0 (할 일 0)",
-    "처리 안 한 답: 0개",
-    "대시보드: 서버 꺼짐 — serve 계약-프로젝트"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "pending",
-    "계약-프로젝트"
-   ],
-   "exit": 0,
-   "stdout": [],
    "stderr": []
   },
   {
@@ -245,18 +184,6 @@
   },
   {
    "step": [
-    "digest",
-    "계약-프로젝트",
-    "plan"
-   ],
-   "exit": 0,
-   "stdout": [
-    "[기획 R1] 항목 0개 · 상태 active"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
     "home",
     "{T}/옮긴 홈"
    ],
@@ -275,16 +202,6 @@
    "exit": 0,
    "stdout": [
     "PES 홈: <TMP>/pes-projects  (PES_HOME 환경변수) · 프로젝트 0개"
-   ],
-   "stderr": []
-  },
-  {
-   "step": [
-    "list"
-   ],
-   "exit": 0,
-   "stdout": [
-    "프로젝트 없음: <TMP>/pes-projects"
    ],
    "stderr": []
   },

@@ -69,7 +69,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | `tests/test_compat_cases_{a,b,c}.test.ts` | E01~E15를 0.15 대상에서 기준값과 대조 |
 | `tests/test_compat_review.test.ts` | 최종 리뷰 1 반영: N6 요약이 제목 escape·공용 모듈 수를 보는지, N2 공백 경로(Windows 철자), 가짜 허브가 떠 있어도 E15 가 같고 접속 0, 상태 DTO 키 전수, `PES_TEST_GUARD` 를 끌 수 없음 |
 
-**대상 바꾸기:** `PES_COMPAT_TARGET=py`(기본) 또는 `ts`. `ts` 에서 아직 없는 명령은 건너뛰지 않고 `not_yet` 으로 단언한다. **래칫은 사례 단위다(SEL-71, PR26b):** `cases.json` 의 사례마다 `ts.status` 가 `implemented`/`not_yet` 이다. `not_yet` 사례는 `scripts/pes.ts` 가 있어도 **실행하지 않고** `not_yet` 으로 단언하고(`compat_cases.run_case`), `implemented` 사례는 0.15 기준값과 같아야 한다(`compare_ts_record`). 사례 종류마다 ts 파일이 하나씩 있다 — `cli` = `scripts/pes.ts`(PR26b 에서 연결됨), `http`(E08·E09·E13) = `scripts/serve.ts`, `setup`(E14) = `scripts/setup.ts`(아직 `ts_gate` 로 막혀 있다: 파일이 생기면 그 종류 사례 실행이 throw). **SEL-71 완료 목록**은 `tests/test_pes_ts_contract.test.ts` 의 `SEL71_DONE` 에 못 박혀 있다 — E01~E07·E10~E12 와 CLI 계약 사례 X01~X04 가 전부 `implemented`, E08·E09·E13·E14·E15 는 `not_yet`. 사례 표는 둘이다: `cases.json`(7.4 의 E01~E15)과 `contract.json`(CLI 계약 X01~X04, 기준값 `baseline/X0n.json`).
+**대상 바꾸기:** `PES_COMPAT_TARGET=py`(기본) 또는 `ts`. `ts` 에서 아직 없는 명령은 건너뛰지 않고 `not_yet` 으로 단언한다. **래칫은 사례 단위다(SEL-71, PR26b):** `cases.json` 의 사례마다 `ts.status` 가 `implemented`/`not_yet` 이다. `not_yet` 사례는 `scripts/pes.ts` 가 있어도 **실행하지 않고** `not_yet` 으로 단언하고(`compat_cases.run_case`), `implemented` 사례는 0.15 기준값과 같아야 한다(`compare_ts_record`). 사례 종류마다 ts 파일이 하나씩 있다 — `cli` = `scripts/pes.ts`(PR26b 에서 연결됨), `http`(E08·E09·E13) = `scripts/serve.ts`, `setup`(E14) = `scripts/setup.ts`(아직 `ts_gate` 로 막혀 있다: 파일이 생기면 그 종류 사례 실행이 throw). **누가 어느 사례를 켜나**는 `tests/helpers/sel_scope.ts` 에 있다. SEL-71(a: pes.ts 골격 + 쓰기 명령, `status` 포함 — E04 가 쓴다) = `SEL71_DONE`: E01~E04·E10·X01~X05 가 `implemented`. SEL-77(b: 읽기·보고서) = `SEL77_DONE`: E05·E06·E07·E11·E12·X06·X07 은 지금 `not_yet`이고 SEL-77 이 한꺼번에 켠다(`sel77_on()`). E08·E09·E13·E14·E15 는 뒤 PR. E07 은 쓰기·읽기가 섞여서 E07 전체는 SEL-77 이 켜고, 쓰기 절반은 계약 사례 X05 로 SEL-71 이 맡는다. 사례 표는 둘이다: `cases.json`(7.4 의 E01~E15)과 `contract.json`(CLI 계약 X01~X07, 기준값 `baseline/X0n.json`).
 
 **`implemented` 의 뜻(`compat_cases.compare_ts_record`):** ts 기록이 py 와 같은 단언을 통과해야 한다 — `steps`(stdout·stderr 종류·exit)·상태 DTO·**산출 파일(`files`)** 전부 0.15 기준값과 같아야 한다. 의도된 차이는 각자 자기 단언을 가진다: D01 항목 id 는 값을 버리되 '있고 서로 다르다', D03 `processed` 는 버리되 '같은 길이의 목록', D06 은 구멍이 아니라 **값**(E03 항목 7 의 depth 는 0.15 의 3 이 아니라 2), D07 은 `snapshots/**` 를 이름으로 비교하지 않고 내용 해시가 하나도 빠지지 않았는지 본다(ts 기록기는 보관한 판을 `snapshots/**` 아래에 모은다). `files` 가 다르면 실패한다는 것은 기준값 사본을 가짜 ts 기록으로 주입한 시험(`test_compat_harness`)이 지킨다. PR26b 에서 ts 기록기를 만들 때 정규화 N4(순서)·N5(ID → `<ID:n>`)를 ts DTO·표 비교에 연결한다 — 지금은 두 쪽이 모두 Python 이라 `compat_normalize` 의 `n4_*`·`n5_ids` 가 단위 시험에서만 쓰인다.
 
@@ -104,8 +104,8 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 | `tests/helpers/ts_child_guard.ts` | 자식 안에서 `--import` 로 도는 시험 전용 가드(읽기 가드 + 허브 차단) |
 | `tests/helpers/ts_inject_fs.ts` | SEL-75 오류 주입(잠금 파일 EPERM·EEXIST, 가짜 시계) |
 | `tests/helpers/ts_guard_probe.ts`·`ts_inject_probe.ts` | 위 둘의 자기 시험용 가짜 자식(pes.ts 없이 돈다) |
-| `tests/fixtures/compat/contract.json` + `baseline/X0n.json` | CLI 계약 사례: 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·홈 명령 |
-| `tests/test_pes_ts_contract.test.ts` | SEL-71 완료 목록, 실행 방법, 사례 14개를 ts 에서 |
+| `tests/fixtures/compat/contract.json` + `baseline/X0n.json` | CLI 계약 사례 X01~X07: 이름·인자 수·없는 프로젝트·나쁜 단계/파일/JSON·홈 명령 (쓰기 X01~X05, 읽기 X06·X07) |
+| `tests/test_pes_ts_contract.test.ts` | SEL-71/77 담당 목록, 실행 방법, (a) 사례 10개를 ts 에서 |
 | `tests/test_pes_ts_guard.test.ts` | 가드·주입 장치 자기 시험 (지금도 통과) |
 | `tests/test_pes_ts_devices.test.ts` | D02·D03·D04 비교 장치와 D10·D11 규칙 자기 시험 (지금도 통과) |
 | `tests/test_pes_ts_win_data.test.ts` | W1·W2: 옛 역슬래시·CRLF 데이터 읽기, `/`·LF 쓰기 |
