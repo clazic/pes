@@ -9,11 +9,12 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { roundHref } from "@/features/workspace/paths";
 import { placeLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
+import { Kbd } from "@/components/pes/kbd";
+import { useCommandMenu } from "./CommandMenu";
 import { ThemeMenu } from "./ThemeMenu";
 
 /** 기능 없는 자리의 이유(U1a) — 단추는 숨기지 않고 aria-disabled + 이유 글(설계 3.9 · 12.6 R05) */
 const REASON = {
-  command: "명령 찾기(Ctrl+K)는 아직 없어요. 다음 작업(U1c)에서 열립니다.",
   notifications: "알림은 아직 없어요. 다음 작업(U1d)에서 열립니다.",
   user: "로그인·사용자 메뉴는 아직 없어요. 이 컴퓨터에서만 쓰는 화면입니다.",
 };
@@ -52,10 +53,11 @@ function useCrumbs(): Crumb[] {
 
 /**
  * 머리줄 — 승인 시안의 SiteHeader(shadcn-admin 머리줄 구조 참고) 그대로의 자리:
- * 왼쪽: 사이드바 접기 · 빵부스러기 / 오른쪽: 명령 찾기 · 알림 · 테마 · 사용자. 명령 찾기 · 알림 · 사용자는 U1a 에서 자리만.
+ * 왼쪽: 사이드바 접기 · 빵부스러기 / 오른쪽: 명령 찾기(명령 메뉴 — U1c) · 알림 · 테마 · 사용자. 알림 · 사용자는 아직 자리만.
  */
 export function SiteHeader() {
   const crumbs = useCrumbs();
+  const command = useCommandMenu();
   return (
     <header aria-label="PES 전역 머리줄" className="site-header sticky top-0 z-20 flex h-(--header-h) shrink-0 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur-sm tab:px-4">
       <SidebarTrigger className="-ml-1" />
@@ -82,19 +84,21 @@ export function SiteHeader() {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="flex shrink-0 items-center gap-1 tab:gap-1.5">
-        <PlaceholderButton
+        <Button
           variant="outline"
-          reasonId="header-command-reason"
-          reason={REASON.command}
+          onClick={command.open}
+          aria-haspopup="dialog"
+          aria-keyshortcuts="Control+K Meta+K"
           aria-label="명령 찾기 (Ctrl+K)"
-          className="h-9 gap-2 px-2.5 font-normal shadow-none max-tab:w-9 max-tab:px-0 tab:w-48 tab:justify-start desk:w-56"
+          className="h-9 gap-2 px-2.5 font-normal text-muted-foreground shadow-none max-tab:w-9 max-tab:px-0 tab:w-48 tab:justify-start desk:w-56"
         >
           <SearchIcon aria-hidden="true" />
           <span className="hidden tab:inline">명령 찾기 · 이동</span>
-          <span className="ml-auto hidden text-caption tab:inline" aria-hidden="true">
-            준비 중
+          <span className="ml-auto hidden items-center gap-0.5 tab:inline-flex" aria-hidden="true">
+            <Kbd>Ctrl</Kbd>
+            <Kbd>K</Kbd>
           </span>
-        </PlaceholderButton>
+        </Button>
         <PlaceholderButton variant="ghost" size="icon" reasonId="header-notifications-reason" reason={REASON.notifications}>
           <BellIcon aria-hidden="true" />
           <span className="sr-only">알림</span>

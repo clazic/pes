@@ -117,10 +117,12 @@ describe("단계·라운드 탐색 = 사이드바 연구 흐름 나무 · 과거
     await title();
     await user.click(roundLinks(flow()).find((l) => /R1/.test(l.textContent ?? "") && /\/s\/research\//.test(l.getAttribute("href") ?? ""))!);
     await waitFor(() => expect(router.state.location.pathname).toBe(url("research", 1)));
-    expect((await title()).textContent).toContain("조사 R1");
+    // the address changes before the heading re-renders: wait for the CURRENT heading to say it (same assertion, waited for).
+    // Flaky three times on CI (#58·#60 Windows, #61 macOS) when the old h1 was read right after the address moved.
+    await waitFor(async () => expect((await title()).textContent).toContain("조사 R1"));
     await router.navigate(-1);
     await waitFor(() => expect(router.state.location.pathname).toBe(CURRENT));
-    expect((await title()).textContent).toContain("조사 R2");
+    await waitFor(async () => expect((await title()).textContent).toContain("조사 R2"));
   });
 });
 

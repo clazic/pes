@@ -103,3 +103,98 @@ export const MAIN_MIN_REM = 46;
 
 /** 질문 영역 폭(px): 1280~1439 는 380, 1440 이상은 404 (설계 12.9 2차) */
 export const ASK_WIDTH = { at1280: 380, at1440: 404 } as const;
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
+ * SEL-83 U1c 시험 계약 — 입력 초안 보존 · 커서 갱신 · 명령 메뉴 (설계 dashboard-v2.md 3.9·4.15·12.5·12.6, 결정 0017, stage-3.md U1)
+ * 이슈 문구(draft.js·cursor.js·command-menu.js 는 React 결정 전 표현 — 같은 역할을 app/src 훅·화면이 맡는다)에서 뽑은 해석이다.
+ * 이름을 바꿔야 하면 구현이 아니라 이 머리말과 시험을 고치고 leader 에게 알린다. 구현 파일 위치는 제안일 뿐 — 시험은 화면(role·이름)과 아래 "모듈 계약"만 본다.
+ *
+ * [시험 심(seam) — 구현이 만들어야 하는 것]
+ *   - `@/app/routes` 가 `routes` 외에 `createRoutes(options?: { client?: PesClient }): RouteObject[]` 도 내보낸다.
+ *     `routes` === `createRoutes()` (기본은 가짜 클라이언트). client 를 주면 RootLayout 이 그것을 ClientContext 로 공급한다(가짜 클라이언트를 안 만든다).
+ *   - 시험은 시간을 vitest 가짜 시계(setTimeout·setInterval·Date)로 움직인다 → 구현은 전역 setTimeout/clearTimeout/Date.now 만 쓴다(Web Worker·requestIdleCallback·performance 전용 타이머 금지).
+ *   - 쓰기 열쇠는 이전과 같다: 읽기 호출은 PesClient 메서드만 지난다. 시험이 아는 읽기 메서드 = listProjects · getWorkspace · getRound · getChanges. 그 밖의 메서드 호출은 "다른 쓰기/전송"이다.
+ *
+ * [PesClient 확장 — 변경분 읽기 (types.ts 에 추가, U1b 가 같은 모양을 HTTP 로 채운다)]
+ *   getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>
+ *     ChangesRead = { cursor: string; txs: { tx_id: string; touched: string[] }[] }
+ *     - cursor: 서버가 주는 불투명 값. 화면은 해석하지 않고 다음 호출에 그대로 되돌려 준다(알림 번호를 커서로 쓰지 않는다 — 설계 12.5-2, R04).
+ *       null = 처음(기준만 받는다 — txs 는 비어 있어도 된다).
+ *       [R1 권장 3 — 약속] **null = 기준만 받음**: 서버는 지금까지의 변경을 되풀이하지 않고 "여기부터"라는 기준 커서만 돌려준다(실제 API 의 "cursor 없음 = seq 0 부터 전부"와 다르다).
+ *       실제 API 클라이언트(U1b)가 이 약속을 맞춘다(null → 현재 끝 커서만 / has_more 를 따라 끝까지 훑지 않음). 이 약속이 없으면 첫 읽기와 기준 사이 변경을 놓친다.
+ *     - txs: 공개 tx 묶음 단위(API 결정 13). 한 tx 가 읽기 키 여럿을 건드릴 수 있다. 숨은 사건이면 txs 가 비고 cursor 만 앞으로 간다.
+ *     - touched 의 읽기 키 = 문자열 `"workspace"` | `"projects"` | `"round:<stage>/<round>"`(round = 숫자 또는 start. 예 "round:research/2").
+ *       화면은 touched 에 든 읽기만 무효화한다(queryClient.invalidateQueries) — 그 밖의 읽기는 다시 받지 않는다. 같은 응답 안에서 같은 키는 한 번만.
+ *     - 거절: PesApiError 의 body.error.code 가 "cursor_expired"(410, 만료) 또는 "cursor_invalid"(400). → 재동기화: 화면에 보이는 읽기(workspace + 지금 라운드)만 다시 받고
+ *       다음 호출은 cursor=null 로 다시 시작한다. 전체 새로고침(location.reload)·주소 변경·질문 영역 다시 만들기(초안 사라짐) 없음.
+ *     - 시간 초과: 던져진 Error 의 name 이 "TimeoutError". 오류와 같이 다루되 화면 자료를 지우지 않는다.
+ *
+ * [갱신 박자 — 가짜 시계로 본다]
+ *   - [R1 권장 3] 첫 getChanges 는 화면이 붙자마자(마운트 즉시, 3초 기다리지 않음) cursor=null 로 부른다 — 첫 읽기와 기준 커서 사이에 틈을 두지 않는다.
+ *     410/400 재동기화(읽기를 다시 받음) 뒤에도 3초를 기다리지 않고 곧바로(cursor=null) 기준을 다시 잡는다.
+ *   - 활성(탭 보임 document.visibilityState === "visible"): 약 3초마다 getChanges 한 번(2~4초 사이 간격 허용). 응답이 오기 전에 다음 호출을 겹쳐 보내지 않는다(동시 1개).
+ *   - 비활성(탭 숨김): 10초 동안 호출 0. 다시 보이면(visibilitychange) 곧바로(1초 안에) 한 번 받고 활성 박자로 돌아간다.
+ *   - 오류·시간 초과 뒤: 다음 호출은 3.5초 안에 오지 않고(늦춤), 60초 안에는 다시 시도한다. 성공하면 3초 박자로 돌아간다. 오류로 화면 자료를 지우거나 질문 영역을 다시 만들지 않는다.
+ *   - 갱신은 queryClient 읽기 무효화로만 한다(폴링으로 읽기를 직접 다시 부르지 않음 — 결정 0017).
+ *
+ * [초안 — `@/lib/draft` 모듈 계약]
+ *   - `draftKey(parts: { project: string; user: string; edition: number; form: number; question: string; version: number; field: "answer" | "opinion" }): string`
+ *     = useDraft 에 넘기는 논리 키. 여섯 칸(프로젝트·사용자·판·폼 버전·질문·질문 버전)과 field 중 하나라도 다르면 키가 다르고, 각 값이 키 글자에 그대로 들어 있다.
+ *     실제 sessionStorage 키는 지금처럼 `pes-draft:` + 논리 키(끝이 논리 키로 끝난다).
+ *   - 화면의 답/의견 칸은 사용자 칸에 `U1C.draftUser`("local" — 로그인 없는 이 컴퓨터 화면) 를 쓴다.
+ *   - `clearDraft(key: string): void` — 확정(영수증) 성공 뒤 U2 의 보내기가 부를 지우개. sessionStorage 항목과 메모리 대체 값을 모두 지운다(다른 키는 그대로).
+ *     U1c 에는 보내는 쓰기가 없어 화면 시험은 못 한다 — 모듈로만 본다.
+ *   - 저장소를 못 쓰면(sessionStorage 접근 자체가 예외) 모듈 안 메모리에 둔다: 같은 탭(같은 JS 모듈) 안에서 훅이 사라졌다 다시 생겨도(화면 이동) 글이 남는다. 훅 하나가 아니라 모듈 수준이다.
+ *   - 질문이 새 버전(version 2)이 되어 라운드를 다시 받으면: 옛 버전 초안을 새 칸으로 몰래 옮기지 않는다. 그 질문 항목 안에 `[data-draft-review="<질문 id>"]` 영역이 생기고
+ *     (1) "새 버전" 안내 글 (2) 옛 초안 글(읽기 전용 — textbox 아님)을 보이며 (3) 단추 "이전 초안 가져오기"로 사람이 눈으로 본 뒤 새 칸에 채울 수 있다. 새 칸은 비어 있다. 옛 키 저장값은 지우지 않는다.
+ *     그 영역에는 role=status 가 있어 안내가 읽힌다. 가져오기를 누르면 새 칸에 옛 글이 들어가고(새 키에 저장) 영역은 닫힌다.
+ *
+ * [입력 중 갱신에 대한 보존 — 같은 DOM 노드]
+ *   - changes 로 라운드가 다시 읽혀 같은 질문(같은 id·같은 버전)이 다시 그려져도 답/의견 textarea 는 다시 만들어지지 않는다(같은 DOM 노드): 초점·선택 범위·값이 그대로.
+ *   - 한글 조합(compositionstart ~ compositionend) 중 값은 갱신으로 덮이지 않는다. 조합이 끝나면 확정된 값이 초안으로 저장된다.
+ *
+ * [명령 메뉴]
+ *   - [R1 필수 1] 검색 칸에서 한글 조합 중(KeyboardEvent.isComposing · keyCode 229 · compositionstart~end) Esc 는 대화 상자를 닫지 않고 검색어도 그대로 둔다(조합 취소용 Esc). 조합 밖 Esc 는 닫고 열기 전 요소로 초점을 돌린다.
+ *   - [R1 권장 6] Ctrl/Cmd+K 는 한글 자판 상태의 `key: "ㅏ"` 라도 `code: "KeyK"` 이면 연다(조합 중은 여전히 무시).
+ *   - [R1 권장 7] 메뉴가 열린 동안 화면이 동작 목록을 바꾸면(라운드 도착 등) 열린 목록이 새 목록으로 갱신되고, 고른 동작은 새 목록의 `run` 을 실행한다(옛 클로저 실행 금지).
+ *   - [R1 권장 5] 열 때마다 대화 상자 세션(검색어·강조·AI 모드 초기화)은 한 번만 새로 시작한다(StrictMode 두 번 그림에도 한 번).
+ *   - 머리줄 단추(이름 /명령 찾기/)는 이제 aria-disabled 가 아니다. 누르거나 Ctrl+K / Cmd+K 로 연다(한글 조합 중 — KeyboardEvent.isComposing 또는 keyCode 229 — 은 무시). aria-haspopup="dialog".
+ *   - 열리면 `role=dialog` 이름 "명령 메뉴"(모달). 안에 검색 칸(role=combobox, 이름에 "명령" 또는 "동작")에 초점, 동작 목록은 role=listbox 안의 role=option.
+ *     목록은 부분 글자(대소문자 무시) 일치로 걸러진다. 첫 항목이 처음부터 강조되어 Enter 로 실행된다. ↑↓ 로 강조를 옮긴다(aria-activedescendant).
+ *   - 동작 목록은 하나다(`CMD.labels`). 같은 라벨이 명령 메뉴 option · 질문 맥락 메뉴 menuitem 에 쓰이며, 맥락 메뉴의 라벨은 모두 명령 메뉴 라벨의 부분 집합이다. 단축키가 있는 동작은 aria-keyshortcuts 로 알린다.
+ *   - 맥락 메뉴: 질문 항목 안에서 contextmenu 이벤트 또는 키보드 ContextMenu 키(Shift+F10 도 같음)로 `role=menu` 이름 "질문 동작" 이 열린다. Esc 로 닫으면 열기 전 초점으로 돌아간다.
+ *   - 동작을 고르면 메뉴가 닫히고 그 동작이 실행된다. 닫힌 뒤 초점: 화면 이동이 있으면 U1a 의 "화면 바뀜" 규칙을 따르고, 없으면 메뉴를 열기 전 요소(단추로 열었으면 그 단추)로 돌아간다.
+ *   - 검색 결과가 없으면 `role=status` 에 "찾는 동작이 없습니다 …검색어를 AI에게 보내지 않습니다" 형태의 안내. Enter 를 눌러도 아무 일도 없다(AI 모드로 바꾸지 않고, 어떤 클라이언트 메서드도 부르지 않는다).
+ *   - AI 모드는 명시적으로만: 대화 상자 안의 단추 "AI 모드"(aria-pressed). 누르면 true, 검색 칸 이름이 "AI에게 묻기"로, 동작 목록 대신 보낼 글 입력 + 단추 "AI에게 보내기". U1c 는 AI 연결이 없다 →
+ *     "AI에게 보내기"는 ActionButton(aria-disabled + 이유 글)이고 눌러도 아무것도 보내지 않는다. AI 모드를 끄면 다시 동작 목록.
+ *   - Tab 보조: 검색 칸에서 조합 중이 아닐 때 Tab 은 강조된 option 의 라벨을 검색 칸에 채운다(preventDefault). 조합 중(isComposing/keyCode 229)이면 아무것도 하지 않고 preventDefault 도 하지 않는다.
+ *     (Tab 이 덫이 되지 않게: 칸이 이미 강조 항목의 라벨과 같거나 강조 항목이 없으면 평소 Tab 이동.)
+ *
+ * [미리보기 · 순서 넘김 틀]
+ *   - 미리보기 대화 상자(role=dialog 이름 "미리보기", 비모달)에 단추 "이전 질문" · "다음 질문"(질문 영역의 질문 순서). 첫/마지막에서 해당 단추는 aria-disabled="true"(숨기지 않음).
+ *     누르면 peek 쿼리만 옆 질문으로 바뀐다(replace). 다른 쿼리(view·focus)·경로(지난 라운드이면 그 지난 라운드)는 그대로 — 같은 화면 상태 유지. 초점은 대화 상자 안에 남는다.
+ *   - 명령 메뉴에 질문마다 option "질문 N 미리보기"(N = 질문 번호)가 있고 열린 질문 · 지난 라운드 모두에서 같은 대화 상자를 연다.
+ */
+export const U1C = {
+  draftUser: "local",
+  /** 가짜 시계 박자(ms) */
+  active: { every: 3000, minGap: 2000, maxGap: 4000 },
+  inactiveQuietMs: 10_000,
+  backoff: { notBeforeMs: 3500, retryWithinMs: 60_000 },
+} as const;
+
+export const CMD = {
+  dialog: "명령 메뉴",
+  combobox: /명령|동작/,
+  aiToggle: "AI 모드",
+  aiSend: "AI에게 보내기",
+  noMatch: /찾는 동작이 없습니다/,
+  contextMenu: "질문 동작",
+  prevQ: "이전 질문",
+  nextQ: "다음 질문",
+  reviewButton: "이전 초안 가져오기",
+  /** 명령 메뉴에 반드시 있는 동작 라벨(질문 미리보기는 `질문 N 미리보기`) */
+  labels: { goAsk: "질문으로 가기", goBody: "본문으로 가기", print: "인쇄 미리보기 열기" },
+  peek: (n: number) => `질문 ${n} 미리보기`,
+} as const;
