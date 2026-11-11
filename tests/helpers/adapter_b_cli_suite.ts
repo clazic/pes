@@ -66,8 +66,10 @@ export class FakeKeyStore {
 export interface CliSpec {
   /** Test title prefix and actor slug. */
   label: string;
-  runtime: "codex_cli" | "opencode_tui";
+  runtime: "codex_cli" | "opencode_tui" | "codex_app" | "opencode_app";
   provider: string;
+  /** SEL-55: the app suites leave the mode-A claim probe to SEL-68 (the refusal of an external_agent mode=A claim). */
+  skip_mode_a_probe?: boolean;
   /** the adapter functions under test */
   entry(input: { command: string; server_script: string; project_id: string; api_base_url: string; model?: string }): any;
   launch_env(input: { key_store: unknown; project_id: string }): Promise<Record<string, string>>;
@@ -144,11 +146,11 @@ function assert_subset(actual: any, expected: any, where: string): void {
   } else assert.deepEqual(actual, expected, where);
 }
 
-function a_run_row(env: CliEnv, run_id: string): string {
+export function a_run_row(env: CliEnv, run_id: string): string {
   return wire(env.db.get("SELECT * FROM runs WHERE id = ?", run_id));
 }
 
-function a_side_counts(env: CliEnv): Record<string, bigint> {
+export function a_side_counts(env: CliEnv): Record<string, bigint> {
   // every table that belongs to the built-in (mode A) runner: dispatches, usage, Go gauges, connections
   const names = env.db
     .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND (name LIKE '%dispatch%' OR name LIKE '%usage%' OR name LIKE 'go_%' OR name LIKE '%connection%') ORDER BY name")
@@ -342,7 +344,7 @@ export function define_cli_suite(spec: CliSpec): void {
     });
   });
 
-  t("a B connection never claims on the Go route: the run provider/model are not opencode-go", async () => {
+  if (spec.skip_mode_a_probe !== true) t("a B connection never claims on the Go route: the run provider/model are not opencode-go", async () => {
     await with_cli(spec, async (env, open) => {
       const client = open(await env.cli_client());
       const claim = await client.ok("pes_claim", { idempotency_key: "go-claim" });
@@ -437,7 +439,7 @@ export function define_cli_suite(spec: CliSpec): void {
     const store = new FakeKeyStore();
     await store.put(ref, token);
     const other = new FakeKeyStore();
-    await other.put(`pes-agent-token-${spec.runtime === "codex_cli" ? "opencode_tui" : "codex_cli"}-${project_id}`, "other-tool-token");
+    await other.put(`pes-agent-token-${spec.runtime.startsWith("codex") ? "opencode_tui" : "codex_cli"}-${project_id}`, "other-tool-token");
     store.calls.length = 0;
     other.calls.length = 0;
 
