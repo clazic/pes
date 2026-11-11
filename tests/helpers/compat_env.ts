@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { account_home, assert_isolated_env, assert_no_real_path, assert_no_violation } from "./home_guard.ts";
 import { hub_block_code } from "./hub_block.ts";
 import { run_ts_cli, ts_cli_exists, ts_view } from "./compat_ts.ts";
-import { adapt_ts_setup_stdout, run_ts_setup } from "./compat_ts_srv.ts";
+import { adapt_ts_doctor_stdout, adapt_ts_setup_stdout, run_ts_setup } from "./compat_ts_srv.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
 import { n1_json, n1_time, n2_paths, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
 
@@ -229,7 +229,10 @@ export function run_pes(target: Target, ctx: CompatCtx, args: (string | number)[
     // pes.ts missing → "not_yet" (a counted absence). Whether a CASE may run it is decided per case by cases.json (compat_cases).
     if (!ts_cli_exists()) return ts_gate("cli", () => false);
     const { PES_OWNER, ...rest } = options.env ?? {};
-    return { kind: "ran", ...run_ts_cli(ctx, argv, { env: PES_OWNER === undefined ? rest : { ...rest, PES_OWNER }, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd, extra_read: options.narrow_path === true ? [ctx.narrow_bin] : [] }) };
+    // doctor looks for external tools (a child process per tool, PATH narrowed by the case): the permission model must let it try —
+    // a denied spawn would hide the "tool missing" answer behind ERR_ACCESS_DENIED
+    const run = run_ts_cli(ctx, argv, { env: PES_OWNER === undefined ? rest : { ...rest, PES_OWNER }, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd, extra_read: options.narrow_path === true ? [ctx.narrow_bin] : [], allow_child_process: argv[0] === "doctor" });
+    return { kind: "ran", ...run, stdout: argv[0] === "doctor" ? adapt_ts_doctor_stdout(argv, run.stdout) : run.stdout };
   }
   return { kind: "ran", ...spawn_python(PES_PY, argv, ctx, options) };
 }
@@ -469,7 +472,7 @@ export const KNOWN_DIFFS: Record<string, KnownDiff> = {
   D05: { id: "D05", title: "watch tail 명령 → long-poll/이벤트", reason: "출력 형식 호환 또는 새 대기 방식을 명시한다" },
   D06: { id: "D06", title: "merge depth 재제출 증가 (0.15 결함 ②, SEL-12)", reason: "0.15 는 같은 병합을 다시 보내면 depth 가 또 오른다 — 새 코어는 고친 동작이 정답이다 (E03: 같은 결과를 다시 보낸 항목 7 의 depth 는 0.15 의 3 이 아니라 2). 같은 값을 담는 산출 파일(index.html 의 data JSON·snapshots/**)에도 같은 규칙: ts 쪽 항목 7 의 depth 만 0.15 값으로 되돌린(+1) 뒤 비교하고 나머지 필드는 그대로 비교한다", override: { E03: { "stages.research.items.2.depth": 2 } }, file_depth: { E03: { item_id: 7, delta: 1 } } },
   D07: { id: "D07", title: "같은 라운드 snapshot (대응표 7.5 '덮어쓰기' — 0.15 는 이미 첫 상태를 지킨다)", reason: "0.15 현재 동작은 snapshot 의 첫 상태를 기본 파일에 두고 이후 상태는 snapshots/<단계>-R<n>/<k>.json 에 모은다(덮어쓰기 결함은 고쳐졌다). 새 코어는 DB 판(editions)으로 보관하므로 파일 이름·위치는 비교하지 않고 '첫 상태 보존·이후 상태 유실 0'만 비교한다 (ts 기록기는 보관한 판을 snapshots/** 아래에 모으고, 그 내용 해시가 하나도 빠지지 않아야 한다 — compat_cases.compare_ts_record)", drop_files: ["snapshots/**"], files_check: "snapshot_contents" },
-  D08: { id: "D08", title: "doctor 의 Python/템플릿 검사", reason: "런타임 변경 — TS 런타임 검사로 바꾸고 섹션·exit 를 유지한다" },
+  D08: { id: "D08", title: "doctor 의 Python/템플릿 검사 (SEL-77 해석)", reason: "런타임 변경 — TS 런타임 검사로 바꾸고 섹션·level·exit 를 유지한다. `doctor --json` 에서 환경 그룹의 `Python <버전>` 행은 없고(PES TS 는 Python 을 실행하지 않는다, migration-ts-equivalence 9.1) 그 자리에 `Node <버전>` 행(그룹 환경·level ok·detail 빈 문자열·fixable false)이 정확히 하나 있다. 그 밖의 모든 행(템플릿·PES 홈·PES_OWNER·서버·프로젝트 그룹)은 0.15 와 group·level·title·detail·fixable 이 같다 — 하네스가 두 사실을 먼저 단언한 뒤 0.15 철자로 되돌려 한 번에 견준다 (compat_ts_srv.adapt_ts_doctor_stdout)" },
   D09: { id: "D09", title: "hub/serve 정적 HTML 생성 → DB/API 서버", reason: "URL·포트·응답 계약은 같고 내부 구현은 다르다" },
   D10: { id: "D10", title: "Windows 0.15 차이 W1·W2 (SEL-71 결정 2026-11-11): ts 는 저장 경로 `/`·생성 텍스트 LF", reason: "0.15 는 Windows 에서 보고서 경로를 역슬래시로 저장하고 파일을 CRLF 로 써서 bytes 가 커진다(W1·W2, tests/README.md). ts 는 어느 OS 에서나 `/` 와 LF 로 통일한다 — 그래서 ts 대상은 win32 os_overrides 를 쓰지 않고 macOS/Linux 기준값(`/`·LF 바이트)과 같아야 하며, 폴더의 생성 텍스트에 CR 이 없어야 한다. 옛 데이터(역슬래시·CRLF 가 든 project.json)는 두 철자를 모두 읽는다(test_pes_ts_win_data)", posix_storage: true },
   D11: { id: "D11", title: "0.15 Python traceback → 분명한 한국어 한 줄 오류 (PR26a 관찰 3건, SEL-71 결정)", reason: "0.15 는 없는 결과 파일(merge·ask)·깨진 project.json·`current` 없는 큰 프로젝트(status)에서 traceback 으로 죽는다. 이것은 결함이지 계약이 아니다: ts 는 같은 종료 코드와 스택 추적 없는 한국어 한 줄 오류를 낸다(stdout 은 비교하지 않는다). 결함을 고쳐 성공해도 되는 단계는 표에 `fixable` 로 적는다", traceback_fix: { fixable: { E12: [["status", "{T}/large"]] } } },

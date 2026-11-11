@@ -510,3 +510,22 @@ export function adapt_ts_feedback_log(text: string, project_dir: string): string
     })
     .join("\n");
 }
+
+/**
+ * D08 — the one place `doctor --json` is not a copy of 0.15, written down once: the environment group has no `Python <version>` row
+ * (PES TS runs no Python) and has exactly one `Node <version>` row (level ok, empty detail, not fixable) instead. The adapter ASSERTS
+ * that first (so a worker cannot fake it away), then writes the 0.15 row back at the same place so one comparison with the baseline
+ * stays whole. The tool rows (`도구`) are per PC and are dropped by the case's `doctor_schema` post-processor.
+ */
+export function adapt_ts_doctor_stdout(args: readonly string[], stdout: string): string {
+  if (!args.includes("--json")) return stdout;
+  assert.ok(stdout.trim() !== "", "doctor --json printed nothing (exit code / stderr tell why)");
+  const rows = JSON.parse(stdout) as Array<Record<string, unknown>>;
+  assert.ok(Array.isArray(rows), "doctor --json prints an array of rows");
+  assert.ok(!rows.some((row) => /^Python\b/.test(String(row.title))), "doctor (ts) must not report a Python row (D08)");
+  const node = rows.filter((row) => row.group === "환경" && /^Node \d+\.\d+\.\d+/.test(String(row.title)));
+  assert.equal(node.length, 1, `doctor (ts) reports exactly one "Node <version>" row in the environment group (D08), got ${JSON.stringify(rows.map((r) => r.title))}`);
+  assert.deepEqual({ level: node[0]?.level, detail: node[0]?.detail, fixable: node[0]?.fixable }, { level: "ok", detail: "", fixable: false }, "the Node row is a plain ok row (D08)");
+  const back = rows.map((row) => (row === node[0] ? { ...row, title: "Python 3.9.0" } : row));
+  return `${JSON.stringify(back, null, 1)}\n`;
+}
