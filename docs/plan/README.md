@@ -19,7 +19,7 @@
 ## 1. 읽는 순서
 
 1. **배경**: [00-brief.md](00-brief.md) → [stage-0.md](stage-0.md).
-2. **1단계 확정 설계**: [stage-1-db.md](stage-1-db.md) → [stage-1-api.md](stage-1-api.md) → [stage-1-ui.md](stage-1-ui.md) → [stage-1-runners.md](stage-1-runners.md). 함께 [DDL 초안](schemas/stage-1-ddl-draft.sql)·[DDL 검사](schemas/check_ddl.py)·[API 계약 픽스처](fixtures/api-v1/README.md)를 본다.
+2. **1단계 확정 설계**: [stage-1-db.md](stage-1-db.md) → [stage-1-api.md](stage-1-api.md) → [stage-1-ui.md](stage-1-ui.md) → [stage-1-runners.md](stage-1-runners.md). 함께 [DDL 초안](schemas/stage-1-ddl-draft.sql)·[DDL 검사](schemas/check_ddl.py)(TS: `npm run check:ddl` = `scripts/check_ddl.ts`)·[API 계약 픽스처](fixtures/api-v1/README.md)를 본다.
 3. **전체 지도**: [roadmap.md](roadmap.md)의 2절(이슈 수)·3절(의존)·4절(위험)·5절(사용자 결정)을 먼저 본다. 비개발자 승인용으로는 [summary-for-approval.md](summary-for-approval.md)를 함께 본다. 단계 문서의 누적 이슈 수는 숫자 대신 로드맵 2절을 따른다.
 4. **구현 단계**: [stage-2.md](stage-2.md) → [stage-3.md](stage-3.md) → [stage-4.md](stage-4.md) → [stage-5.md](stage-5.md) → [stage-6.md](stage-6.md).
 5. **Linear 등록 원고**: [issues/stage-2.md](issues/stage-2.md) ~ [issues/stage-6.md](issues/stage-6.md). 등록 전에 각 단계의 `*-review.md`를 함께 본다.
@@ -48,6 +48,7 @@
 | [migration-map.md](migration-map.md) | legacy `project.json`·파일 → DDL 표·열 대응(2단계 PR11). | 확정 |
 | [ddl-gaps.md](ddl-gaps.md) | 2~6단계가 요구하지만 1단계 DDL에 없는 표·열·상태 값과 마이그레이션 귀속. | 초안 |
 | [skill-neutral-inventory.md](skill-neutral-inventory.md) | 스킬·명령의 Claude 전용 표기·직접 쓰기 인벤토리(2단계 PR17). | 초안 |
+| [migration-ts-equivalence.md](migration-ts-equivalence.md) | 0.15 → TS 동등성 대응표(PR26). 9.1절에 외부 Python 경계(kosis·vworld 등 외부 도구는 경계 밖, 이 저장소의 Python 요구는 0.15 도구뿐이며 TS 코어는 Python 을 실행하지 않음). | 초안 |
 | [webmcp-tools.md](webmcp-tools.md) | 3단계 WebMCP 실험의 노출 도구 목록·금지 API 초안. | 초안 |
 | [defects.md](defects.md) | 재현한 결함만 적는 운영 결함 기록. | 운영 기록 |
 
@@ -56,7 +57,7 @@
 | 문서 | 한 줄 설명 | 상태 |
 |---|---|---|
 | [schemas/stage-1-ddl-draft.sql](schemas/stage-1-ddl-draft.sql) | 1단계 확정 DDL 초안(61개 표, REF1·MAT1·5차 동기화 표 포함). 마이그레이션의 기준 문서. | 확정 |
-| [schemas/check_ddl.py](schemas/check_ddl.py) | DDL을 임시 SQLite에서 실행하고 성공·거부·롤백을 검사하는 스크립트. | 확정 |
+| [schemas/check_ddl.py](schemas/check_ddl.py) | DDL을 임시 SQLite에서 실행하고 성공·거부·롤백을 검사하는 스크립트. 이제 필수 검사는 TS 판 [`scripts/check_ddl.ts`](../../scripts/check_ddl.ts)(`npm run check:ddl`)이고, 이 Python 판은 PR26 끝까지 동등성 기준으로만 남는다. | 확정 |
 | [schemas/project-v0.15.json](schemas/project-v0.15.json) | 현행 `project.json` 기준 JSON Schema. | 확정 |
 
 ## 4. fixtures/ — 계약 시험 픽스처
