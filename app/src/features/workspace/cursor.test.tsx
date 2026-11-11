@@ -200,7 +200,9 @@ describe("오류·시간 초과·커서 무효", () => {
 
   it.each(["cursor_expired", "cursor_invalid"])("%s 이면 보이는 읽기(workspace·지금 라운드)만 다시 받고 커서는 null 로 다시 시작", async (code) => {
     const { s } = await boot();
-    s.queueChanges({ cursor: "c1", txs: [] }, apiError(code));
+    // a cursor name the fake never hands out by itself ("c1" is its default answer, so the mount-time first call — R1 권장 3 —
+    // would also carry "c1" and the search below would pick the wrong call). The assertion is unchanged.
+    s.queueChanges({ cursor: "queued-before-invalid", txs: [] }, apiError(code));
     await advance(40_000);
     const calls = s.changesCalls();
     expect(s.count("getWorkspace")).toBeGreaterThanOrEqual(1);
@@ -208,7 +210,7 @@ describe("오류·시간 초과·커서 무효", () => {
     // 다른 라운드를 끌어오지 않는다
     expect(s.calls.filter((c) => c.method === "getRound" && !(c.args[2] === "research" && c.args[3] === "2"))).toEqual([]);
     // 무효 응답 뒤 첫 호출의 커서는 null
-    const idx = calls.findIndex((c) => c.args[2] === "c1");
+    const idx = calls.findIndex((c) => c.args[2] === "queued-before-invalid");
     expect(idx).toBeGreaterThan(-1);
     // calls[idx] 가 무효 응답을 받은 호출 → 그다음 호출은 처음부터
     expect(calls[idx + 1]?.args[2], "무효 응답 다음 호출").toBeNull();
