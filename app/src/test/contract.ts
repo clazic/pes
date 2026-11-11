@@ -58,4 +58,29 @@ export const NAMES = {
   ackError: "오류 확인",
 } as const;
 
+/**
+ * 1차 리뷰(R1) 반영 — 앱 셸 계약(승인 시안: shadcn sidebar-07 앱 셸 + 머리줄 + 연구 공간 틀, 설계 12.9·결정 0017 영향 12).
+ *   - 머리줄 `header`(banner) 하나: 사이드바 접기 단추(이름에 "사이드바", aria-expanded) · 빵부스러기 `nav` "현재 위치"(현재 곳 aria-current="page", 프로젝트 이름 포함)
+ *     · 명령 찾기 · 알림(둘 다 U1c·U1d 몫이라 U1a 에서는 자리만: aria-disabled="true" + aria-describedby 이유 글) · 테마 단추("테마") · 사용자 단추(이름에 "사용자").
+ *   - 사이드바: `nav` 이름에 "연구 흐름"(단계 링크 + 상태 글자 — 상태 사전 이름 그대로: "승인됨" · "현재 · 나의 할 일" · "시작 전") · 링크 "모든 프로젝트".
+ *     폭 ≥1280 에서 펼침, 그 아래는 아이콘 줄, <900 에서는 접힌 채 단추로 여는 대화 상자(Sheet). Ctrl/Cmd+B 로 접고 펴기(한글 조합 중 무시), 쿠키 `sidebar_state`.
+ *   - 랜드마크: banner 1 · main 1. `complementary`(질문 영역)는 main 안에 있지 않다(최상위 랜드마크).
+ *   - 작업 공간 3/2/1영역은 이 틀의 본문 안. 가운데 영역 위 "지금 할 일" 줄에 차례 말("나의 할 일 1건")이 상태 사전 이름 그대로 나온다.
+ *   - 2영역(900~1279)의 보기 전환에는 "단계·라운드"가 없다(두 영역이 이미 함께 보임) — 본문 · 질문 둘.
+ *   - 쓰기(오류 확인)는 멱등 키 하나를 받는다: `client.acknowledgeAlert(slug, edition, alertId, idempotencyKey)`.
+ */
+export const SHELL = {
+  banner: "PES 전역 머리줄",
+  sidebarToggle: /사이드바/,
+  crumbs: "현재 위치",
+  sidebarNav: /연구 흐름/,
+  backToAll: /모든 프로젝트/,
+  command: /명령 찾기/,
+  notifications: /^알림/,
+  theme: "테마",
+  user: /사용자/,
+  turnYou: "나의 할 일 1건",
+  stageStates: { approved: "승인됨", currentYou: "현재 · 나의 할 일", pending: "시작 전" },
+} as const;
+
 export const AREAS = ["nav", "body", "ask"] as const;

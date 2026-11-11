@@ -8,11 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
 
-const home = mkdtempSync(join(tmpdir(), "pes-app-e2e-"));
+// 임시 홈은 주 프로세스에서 한 번만 만든다(워커·설정 재로드는 환경변수로 물려받음) — 끝나면 globalTeardown 이 지운다
+process.env.PES_APP_E2E_HOME ??= mkdtempSync(join(tmpdir(), "pes-app-e2e-"));
+const home = process.env.PES_APP_E2E_HOME;
 
 export default defineConfig({
   testDir: "e2e",
   testMatch: "**/*.spec.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
