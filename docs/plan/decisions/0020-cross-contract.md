@@ -25,7 +25,7 @@
 - **해석 1 — 오류는 code·효과로 같게 한다.** 같은 code(core 철자)·같은 target·같은 효과(쓰기 0)를 계약으로 삼는다. 문장은 통일하지 않는다: A 도구는 모델에게 core의 영어 문장을 `code: message`로 보이고, B(HTTP·MCP)는 code마다 고정된 한국어 문장을 보인다. B의 여섯 도구는 같은 code에 byte 단위로 같은 한국어 문장을 내고, A는 같은 상태에서 매번 같은 문장을 내며, 둘 다 SQL·표 이름·스택을 보이지 않는다.
 - **해석 3 — 옛 guard 거부 code는 현재 동작을 계약으로 고정한다.** 옛 lease/fence guard의 거부 code가 `heartbeat`·`release`·`input-receipts`는 `lease_lost`, `submit`·`wait`·`complete`는 `conflict`로 갈린다. 둘 다 거부하고 쓰기 0인 것이 계약이고, 철자 통일은 후속이다(바꾸면 8.17의 B 도구 오류 표와 클라이언트가 같이 바뀐다).
 - **해석 13 — 채택 전 제출 버전은 다음 context에 보이지 않는다.** 제출은 승인이 아니다. 새 버전은 DB에 저장되지만 사람이 채택하기 전에는 자료의 current가 아니라서 다음 실행의 context에 나오지 않는다. 이것은 유실이 아니다. 유실 0은 버전 사슬이 DB에 그대로 남는 것으로 시험한다.
-- **D1 교차 시험은 001 스키마 한정.** D1에는 마이그레이션 001만 적용한다(8.16: 002의 `foreign_keys=off` 방식은 D1에서 안 된다, 5단계 별도 절차). 그래서 D1 쪽 A run은 001의 Go 라벨 쌍(mode A + opencode-go)으로 표현한다. **002의 D1 적용은 검증하지 않았다.** 표의 SQL은 서비스 코드가 아니라 같은 모양을 다시 쓴 것이므로, `commands/runs.ts`의 claim·release·heartbeat UPDATE 모양이 바뀌면 이 표도 같이 고친다.
+- **D1 교차 시험은 001 스키마 한정.** D1에는 마이그레이션 001만 적용한다(8.16: 002의 `foreign_keys=off` 방식은 D1에서 안 된다, 5단계 별도 절차). 그래서 D1 쪽 A run은 001의 Go 라벨 쌍(mode A + opencode-go)으로 표현한다. **002의 D1 적용은 검증하지 않았다.** 표의 SQL은 서비스 코드를 import하지 않고 다시 쓴 것이다. **release·heartbeat는 `commands/runs.ts`와 같은 모양이고, claim은 D1에서 쓸 CAS 변형(`fence`·만료 조건 추가)이며 `runs.ts`의 claim UPDATE와 다르다.** 따라서 이 표는 서비스 SQL의 D1 등가 증명이 아니라 "D1에서 claim을 CAS로 쓰면 SQLite와 같은 결과를 낸다"는 시험이다. 5단계에서 D1 claim을 CAS로 바꿀 때 이 표를 기준으로 삼고, `runs.ts`의 release·heartbeat UPDATE 모양이 바뀌면 이 표도 같이 고친다.
 - **B의 외부 비용은 PES가 집행했다고 표시하지 않는다.** B run은 dispatch 행·사용량·단가·A 설정이 없고, B에 대한 API·MCP 답·사건·영수증에 비용 필드가 없다(프로젝트 정책 묶음 `policy`는 B run의 비용이 아니므로 제외). B가 어떤 모델을 얼마에 쓰는지 PES는 모르고, 막지도 않는다.
 
 **F1 — 죽은 `running` run은 자기 행위자가 이어받는다.**
@@ -55,6 +55,7 @@
 - B 도구의 오류 표나 클라이언트가 `lease_lost`/`conflict` 구분을 쓰게 되거나 버려질 때.
 - D1에 마이그레이션 002를 적용하는 절차(5단계)가 정해질 때.
 - 죽은 run 이어받기 때문에 한 run에 lease 세대가 여러 개 쌓여 감사·정산이 어려워질 때.
+- 이어받기도 `run.interrupted` 사건을 남기고 run은 `running`으로 이어진다. 대시보드가 사건 종류로 상태를 그리기 시작하면 payload에 `resumed` 표지를 넣거나 사건 이름을 나눈다.
 
 ## 상태
 
