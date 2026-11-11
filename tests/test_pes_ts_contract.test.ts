@@ -15,18 +15,19 @@ import { all_cases, assert_case, case_def, implemented_ids, load_contract_table,
 import { PES_PY, make_ctx, pes } from "./helpers/compat_env.ts";
 import { PES_TS_FILE, REPO_ROOT, run_ts_bare, run_ts_cli } from "./helpers/compat_ts.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { SEL72_DONE } from "./helpers/sel72_scope.ts";
 import { LATER, SEL71_DONE, SEL77_DONE, sel77_on } from "./helpers/sel_scope.ts";
 
 use_home_guard();
 
-test("SEL-71 completion list (a: pes.ts skeleton + write commands): exactly E01~E04, E10, X01~X05, X08~X11 are implemented on ts; SEL-77's read cases are not_yet until SEL-77 turns them on; server / setup / doctor stay not_yet", () => {
-  assert.deepEqual([...implemented_ids()].sort(), [...SEL71_DONE].sort(), "cases.json / contract.json ts.status differ from the SEL-71 completion list");
+test("SEL-71 completion list (a: pes.ts skeleton + write commands): exactly E01~E04, E10, X01~X05, X08~X11 are implemented on ts; SEL-77's read cases are not_yet until SEL-77 turns them on; server / setup are SEL-72 (implemented), doctor stays not_yet", () => {
+  assert.deepEqual([...implemented_ids()].sort(), [...SEL71_DONE, ...SEL72_DONE].sort(), "cases.json / contract.json ts.status differ from the SEL-71 + SEL-72 completion lists");
   for (const id of SEL77_DONE) assert.equal(case_def(id).ts.status, "not_yet", `${id} belongs to SEL-77 (reads / reports) — not_yet until that issue turns SEL77_DONE on`);
   assert.equal(sel77_on(), false, "SEL-77 flips all of SEL77_DONE at once; SEL-71 leaves them off");
-  for (const id of LATER) assert.equal(case_def(id).ts.status, "not_yet", `${id} is not part of SEL-71`);
-  assert.deepEqual(load_table().cases.filter((c) => c.kind !== "cli" && c.ts.status === "implemented"), [], "http / setup cases need serve.ts / setup.ts (a later PR)");
+  for (const id of LATER) assert.equal(case_def(id).ts.status, "not_yet", `${id} is not part of SEL-71 / SEL-72`);
+  assert.deepEqual(load_table().cases.filter((c) => c.kind !== "cli" && c.ts.status === "implemented").map((c) => c.id), [...SEL72_DONE], "http / setup cases are exactly SEL-72's (serve.ts / setup.ts)");
   assert.equal(all_cases().length, 15 + load_contract_table().cases.length);
-  assert.deepEqual([...SEL71_DONE, ...SEL77_DONE, ...LATER].sort(), all_cases().map((c) => c.id).sort(), "every case has exactly one owner");
+  assert.deepEqual([...SEL71_DONE, ...SEL72_DONE, ...SEL77_DONE, ...LATER].sort(), all_cases().map((c) => c.id).sort(), "every case has exactly one owner");
   for (const id of [...SEL71_DONE, ...SEL77_DONE]) assert.ok(existsSync(join(REPO_ROOT, "tests", "fixtures", "compat", "baseline", `${id}.json`)), `${id}: pinned 0.15 baseline`);
 });
 

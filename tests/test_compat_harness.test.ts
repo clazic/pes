@@ -139,8 +139,8 @@ test("the not-yet list on the TS target equals the table exactly (an implemented
   const expected = ALL_IDS.filter((id) => !TS_IMPLEMENTED.includes(id));
   assert.deepEqual(not_yet_ids(), expected, "cases.json ts.status and TS_IMPLEMENTED disagree");
   assert.equal(expected.length, 15 - TS_IMPLEMENTED.length);
-  // serve.ts / setup.ts cases stay not_yet in SEL-71: no http / setup case may be implemented
-  for (const kind of ["http", "setup"] as CaseKind[]) assert.deepEqual(TS_IMPLEMENTED.filter((id) => kind_of(id) === kind), [], `${kind} cases are not part of SEL-71`);
+  // the implemented http / setup cases are exactly SEL-72's (serve.ts / setup.ts)
+  assert.deepEqual(TS_IMPLEMENTED.filter((id) => kind_of(id) !== "cli"), [...SEL72_DONE], "http / setup cases are SEL-72's");
   // per-case ratchet: a not-yet case answers not_yet WITHOUT running anything, whether or not scripts/pes.ts exists
   for (const id of expected) {
     const outcome = await run_case("ts", id);
