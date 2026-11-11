@@ -1,7 +1,7 @@
 // SEL-81 U1a — 작업 공간 앱 셸 e2e (Playwright, 빌드한 앱 + vite preview). 구현 전이므로 실패가 정상(앱 화면이 없다).
 // 계약(이름·합성 fixture)은 src/test/contract.ts. 픽셀 기준선 없음 — 위치·겹침·초점·요청만 본다.
 import { expect, test, type Page } from "@playwright/test";
-import { AREAS, CURRENT, NAMES, PAST, STAGE_START, WIDTHS, url } from "../src/test/contract";
+import { AREAS, CURRENT, NAMES, PAST, SHELL, STAGE_START, WIDTHS, url } from "../src/test/contract";
 
 const HEIGHT = 800;
 
@@ -45,11 +45,14 @@ async function expectNoBreakage(page: Page, expectedCount: number) {
   for (const [n, r] of list) expect(r.x + r.w, `${n} 오른쪽이 화면 밖`).toBeLessThanOrEqual(sizes.win + 1);
 }
 
-test.describe("3/2/1영역 · 고정 헤더", () => {
+/** 단계·라운드 나무 = 사이드바 연구 흐름 nav (최종 리뷰 필수 1(d)) */
+const flow = (page: Page) => page.getByRole("navigation", { name: SHELL.sidebarNav });
+
+test.describe("열 배치(≥1280 사이드바|본문|질문, <1280 한 열) · 고정 헤더", () => {
   for (const [label, width, count] of [
-    ["1366", WIDTHS.wide1366, 3],
-    ["1440", WIDTHS.wide1440, 3],
-    ["중간 1100", WIDTHS.mid, 2],
+    ["1366", WIDTHS.wide1366, 2],
+    ["1440", WIDTHS.wide1440, 2],
+    ["중간 1100", WIDTHS.mid, 1],
     ["200% 확대(1366→683)", WIDTHS.zoom200of1366, 1],
     ["200% 확대(1440→720)", WIDTHS.zoom200of1440, 1],
   ] as const) {
@@ -59,8 +62,8 @@ test.describe("3/2/1영역 · 고정 헤더", () => {
     });
   }
 
-  test("1영역에서는 view 가 고른 하나만 보인다(nav·body·ask 각각)", async ({ page }) => {
-    for (const v of ["nav", "body", "ask"] as const) {
+  test("1영역에서는 view 가 고른 하나만 보인다(body·ask 각각) — 모르는 값 nav 는 본문", async ({ page }) => {
+    for (const v of ["body", "ask"] as const) {
       await open(page, `${CURRENT}?view=${v}`, WIDTHS.zoom200of1366);
       const areas = await visibleAreas(page);
       expect(Object.keys(areas), `view=${v}`).toEqual([v]);
@@ -68,11 +71,13 @@ test.describe("3/2/1영역 · 고정 헤더", () => {
     }
   });
 
-  test("2영역에서는 단계·라운드 + (view=ask 면 질문, 아니면 본문)", async ({ page }) => {
+  test("900~1279 도 한 열이다(2영역 없음) — view 기본은 본문, view=ask 면 질문, view=nav 는 본문", async ({ page }) => {
     await open(page, CURRENT, WIDTHS.mid);
-    expect(Object.keys(await visibleAreas(page)).sort()).toEqual(["body", "nav"]);
+    expect(Object.keys(await visibleAreas(page))).toEqual(["body"]);
     await open(page, `${CURRENT}?view=ask`, WIDTHS.mid);
-    expect(Object.keys(await visibleAreas(page)).sort()).toEqual(["ask", "nav"]);
+    expect(Object.keys(await visibleAreas(page))).toEqual(["ask"]);
+    await open(page, `${CURRENT}?view=nav`, WIDTHS.mid);
+    expect(Object.keys(await visibleAreas(page))).toEqual(["body"]);
   });
 
   test("머리줄은 고정이다 — 긴 스크롤 뒤에도 맨 위, 초점 받은 질문이 머리줄에 가리지 않는다", async ({ page }) => {
@@ -88,16 +93,17 @@ test.describe("3/2/1영역 · 고정 헤더", () => {
     expect(qt).toBeGreaterThanOrEqual(hb - 1);
   });
 
-  test("단계/라운드 표시·과거/현재 구분·단계 시작이 1366 에서 보인다", async ({ page }) => {
+  test("단계/라운드 표시·과거/현재 구분·단계 시작이 1366 사이드바 나무에서 보인다", async ({ page }) => {
     await open(page, CURRENT, WIDTHS.wide1366);
-    const nav = page.getByRole("navigation", { name: NAMES.nav });
+    const nav = flow(page);
     await expect(nav).toBeVisible();
-    for (const t of [/기획/, /조사/, /분석/, /승인/, /현재 진행/, /아직/, /단계 시작/]) await expect(nav).toContainText(t);
+    for (const t of [/기획/, /조사/, /분석/, /승인됨/, /현재 진행/, /시작 전/, /단계 시작/]) await expect(nav).toContainText(t);
     await expect(nav.locator('a[aria-current="page"]')).toHaveCount(1);
+    await expect(page.getByRole("navigation", { name: "단계와 라운드" }), "옛 열은 없다").toHaveCount(0);
     await open(page, url("research", 1), WIDTHS.wide1366);
     await expect(page.getByRole("main")).toContainText("지난 라운드");
     await expect(page.getByRole("main")).toContainText("보는 중");
-    await expect(page.getByRole("navigation", { name: NAMES.nav })).toContainText("현재 진행");
+    await expect(flow(page)).toContainText("현재 진행");
     await open(page, STAGE_START, WIDTHS.wide1366);
     await expect(page.locator("main [data-screen-title]")).toContainText("조사 단계 시작");
     await expect(page.locator("body")).not.toContainText(/\bR0\b/);
@@ -131,7 +137,7 @@ test.describe("URL — 새로고침·뒤로/앞으로·딥링크가 같은 화�
   test("라운드를 옮겼다가 뒤로 → 앞으로 가면 각 화면과 초점이 돌아온다", async ({ page }) => {
     await open(page, `${CURRENT}?view=ask&focus=q-21`);
     await expect.poll(() => focusedId(page)).toBe("q-21");
-    await page.getByRole("navigation", { name: NAMES.nav }).locator(`a[href="${url("research", 1)}"]`).first().click();
+    await flow(page).locator(`a[href="${url("research", 1)}"]`).first().click();
     await expect(page.locator("main [data-screen-title]")).toContainText("조사 R1");
     await expect.poll(() => page.evaluate(() => document.activeElement?.hasAttribute("data-screen-title"))).toBe(true);
     await page.goBack();
@@ -169,7 +175,7 @@ test.describe("키보드만으로", () => {
       const d = await page.evaluate(() => {
         const e = document.activeElement;
         if (!e || e === document.body || e === document.documentElement) return null;
-        return { key: `${e.tagName}#${e.id}|${e.getAttribute("href") ?? ""}|${(e.textContent ?? "").trim().slice(0, 24)}`, inNav: !!e.closest('[data-area="nav"]'), id: e.id, text: (e.textContent ?? "").trim() };
+        return { key: `${e.tagName}#${e.id}|${e.getAttribute("href") ?? ""}|${(e.textContent ?? "").trim().slice(0, 24)}`, inNav: !!e.closest('nav[aria-label*="연구 흐름"]'), id: e.id, text: (e.textContent ?? "").trim() };
       });
       if (!d) break; // 문서 끝에서 브라우저 바깥으로 나갔다 = 덫 없음
       if (i === 0) first = d.text;
@@ -294,7 +300,7 @@ test.describe("네트워크 요청 0 (가짜 클라이언트 외)", () => {
     page.on("websocket", (ws) => bad.push(`websocket ${ws.url()}`));
     for (const path of [CURRENT, PAST, STAGE_START, `${CURRENT}?view=ask&peek=q-21`, `${CURRENT}?print=1`]) {
       await open(page, path, WIDTHS.wide1366);
-      await page.getByRole("navigation", { name: NAMES.nav }).getByRole("link").first().hover();
+      await flow(page).getByRole("link").first().hover();
       await page.keyboard.press("Tab");
     }
     await page.waitForTimeout(500);

@@ -5,15 +5,17 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { CURRENT, NAMES, SHELL, WIDTHS } from "@/test/contract";
+import { CURRENT, NAMES, REMOVED, SHELL, SIDEBAR_STORAGE_KEY, WIDTHS } from "@/test/contract";
 
 const ready = async () => {
   await screen.findByRole("main");
   await waitFor(() => expect(screen.getByRole("main").querySelector("[data-screen-title]")).not.toBeNull());
 };
-const clearSidebarCookie = () => {
+const clearStores = () => {
   document.cookie = "sidebar_state=; max-age=0; path=/";
+  window.localStorage.clear();
 };
+const sidebarEntries = () => Object.keys({ ...window.localStorage }).filter((k) => SIDEBAR_STORAGE_KEY.test(k));
 const toggle = () => screen.getByRole("button", { name: SHELL.sidebarToggle });
 const sidebarNav = () => screen.queryByRole("navigation", { name: SHELL.sidebarNav });
 const reasonOf = (btn: HTMLElement) =>
@@ -25,7 +27,7 @@ const reasonOf = (btn: HTMLElement) =>
     .trim();
 
 beforeEach(() => {
-  clearSidebarCookie();
+  clearStores();
   document.documentElement.className = "";
 });
 
@@ -47,8 +49,10 @@ describe("랜드마크", () => {
     expect(side).not.toBeNull();
     expect(screen.getByRole("main").contains(side)).toBe(false);
     expect(screen.getByRole("banner").contains(side)).toBe(false);
-    // 본문 안 단계·라운드 탐색(3영역의 한 영역)은 따로 그대로 있다
-    expect(screen.getByRole("navigation", { name: NAMES.nav })).toBeInTheDocument();
+    // 최종 리뷰 필수 1(d): 단계·라운드는 사이드바 나무 하나뿐 — 본문 쪽 "단계와 라운드" 열(navigation)은 없고 연구 흐름 navigation 도 문서에 하나
+    expect(screen.queryByRole("navigation", { name: REMOVED.navName })).toBeNull();
+    expect(document.querySelector(`[data-area="${REMOVED.navArea}"]`)).toBeNull();
+    expect(screen.getAllByRole("navigation", { name: SHELL.sidebarNav })).toHaveLength(1);
   });
 });
 
@@ -120,17 +124,42 @@ describe("사이드바 — 단계·상태 이름은 상태 사전 그대로", ()
 });
 
 describe("사이드바 접기", () => {
-  it("≥1280 은 펼침, 단추 → 접힘 → 다시 펼침, 쿠키 sidebar_state 가 남는다", async () => {
+  it("≥1280 은 펼침, 단추 → 접힘 → 다시 펼침 — 접힘 상태는 localStorage 에만 남고 쿠키는 0 (최종 리뷰 필수 1(b): 서버가 읽지 않음)", async () => {
     const user = userEvent.setup();
     await renderApp(CURRENT, { width: WIDTHS.wide1440 });
     await ready();
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
     await user.click(toggle());
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
-    expect(document.cookie).toContain("sidebar_state=false");
+    expect(sidebarEntries().length, "localStorage 에 sidebar 키가 있어야 한다").toBeGreaterThan(0);
+    expect(document.cookie, "쿠키 0 — 접힘 상태는 서버가 읽지 않는다").toBe("");
     await user.click(toggle());
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
-    expect(document.cookie).toContain("sidebar_state=true");
+    expect(document.cookie).toBe("");
+  });
+
+  it("접은 채 다시 열어도(새로고침) 접혀 있고, 다시 펴면 그것도 남는다 — 쿠키는 끝까지 0", async () => {
+    const user = userEvent.setup();
+    const a = await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    await user.click(toggle());
+    a.unmount();
+    const b = await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle());
+    b.unmount();
+    await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(document.cookie).toBe("");
+  });
+
+  it("옛 쿠키 sidebar_state 는 더 이상 읽지도 쓰지도 않는다", async () => {
+    document.cookie = "sidebar_state=false; path=/";
+    await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+    await ready();
+    expect(toggle(), "쿠키가 아니라 localStorage 가 기준 — 저장소가 비면 폭 기준(≥1280 펼침)").toHaveAttribute("aria-expanded", "true");
   });
 
   it("접혀도 단계 링크의 이름은 남는다(아이콘 줄 — 화면 읽기·툴팁 이름)", async () => {
@@ -156,11 +185,18 @@ describe("사이드바 접기", () => {
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("사람이 바꾼 상태(쿠키)는 폭과 상관없이 처음 상태를 이긴다", async () => {
-    document.cookie = "sidebar_state=false; path=/";
-    await renderApp(CURRENT, { width: WIDTHS.wide1440 });
+  it("사람이 바꾼 상태(localStorage)는 폭과 상관없이 처음 상태를 이긴다 — 1100 에서 펴 두면 다시 열어도 펼침", async () => {
+    const user = userEvent.setup();
+    const a = await renderApp(CURRENT, { width: WIDTHS.mid });
     await ready();
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    a.unmount();
+    await renderApp(CURRENT, { width: WIDTHS.mid });
+    await ready();
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(document.cookie).toBe("");
   });
 
   it("1280 미만(900~1279)은 처음에 아이콘 줄(접힘)", async () => {

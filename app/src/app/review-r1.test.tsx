@@ -23,36 +23,35 @@ beforeEach(() => {
 });
 
 describe("보기 전환(radiogroup) 키보드 — WAI-ARIA 라디오 패턴", () => {
-  it("1영역(683)에는 단계·라운드 · 본문 · 질문 세 개, 고른 것만 tabindex=0 (roving)", async () => {
-    await renderApp(CURRENT, { width: WIDTHS.zoom200of1366 });
+  it.each([WIDTHS.zoom200of1366, WIDTHS.mid])("%ipx 에는 본문 · 질문 두 개(<1280 어디서나 같다), 고른 것만 tabindex=0 (roving)", async (width) => {
+    await renderApp(CURRENT, { width });
     await ready();
-    expect(radios().map((r) => r.textContent?.trim())).toEqual([NAMES.viewNav, NAMES.viewBody, NAMES.viewAsk]);
+    expect(radios().map((r) => r.textContent?.trim())).toEqual([NAMES.viewBody, NAMES.viewAsk]);
     expect(radios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1);
     expect(radios().filter((r) => r.getAttribute("aria-checked") === "true")).toHaveLength(1);
     expect(within(group()).getByRole("radio", { name: NAMES.viewBody })).toHaveAttribute("tabindex", "0");
   });
 
-  it("ArrowLeft/ArrowUp 은 앞으로, ArrowRight/ArrowDown 은 뒤로 — 끝에서 처음/끝으로 돈다, 초점이 따라간다", async () => {
+  it("두 칸 라디오: ArrowRight/ArrowDown 은 뒤로, ArrowLeft/ArrowUp 은 앞으로 — 끝에서 돈다, 초점이 따라간다", async () => {
     const user = userEvent.setup();
     const { router } = await renderApp(CURRENT, { width: WIDTHS.zoom200of1366 });
     await ready();
-    const body = within(group()).getByRole("radio", { name: NAMES.viewBody });
-    body.focus();
-    await user.keyboard("{ArrowLeft}");
-    await waitFor(() => expect(query(router).get("view")).toBe("nav"));
-    expect(document.activeElement).toBe(within(group()).getByRole("radio", { name: NAMES.viewNav }));
-    await user.keyboard("{ArrowLeft}"); // 처음 → 끝으로 돈다
+    within(group()).getByRole("radio", { name: NAMES.viewBody }).focus();
+    await user.keyboard("{ArrowRight}");
     await waitFor(() => expect(query(router).get("view")).toBe("ask"));
     expect(document.activeElement).toBe(within(group()).getByRole("radio", { name: NAMES.viewAsk }));
     await user.keyboard("{ArrowRight}"); // 끝 → 처음으로 돈다
-    await waitFor(() => expect(query(router).get("view")).toBe("nav"));
+    await waitFor(() => expect(query(router).get("view")).toBe("body"));
+    expect(document.activeElement).toBe(within(group()).getByRole("radio", { name: NAMES.viewBody }));
+    await user.keyboard("{ArrowLeft}"); // 처음 → 끝으로 돈다
+    await waitFor(() => expect(query(router).get("view")).toBe("ask"));
     await user.keyboard("{ArrowDown}");
     await waitFor(() => expect(query(router).get("view")).toBe("body"));
     await user.keyboard("{ArrowUp}");
-    await waitFor(() => expect(query(router).get("view")).toBe("nav"));
+    await waitFor(() => expect(query(router).get("view")).toBe("ask"));
   });
 
-  it("Home 은 첫 번째, End 는 마지막 라디오를 고른다", async () => {
+  it("Home 은 첫 번째(본문), End 는 마지막(질문) 라디오를 고른다", async () => {
     const user = userEvent.setup();
     const { router } = await renderApp(`${CURRENT}?view=body`, { width: WIDTHS.zoom200of1366 });
     await ready();
@@ -60,21 +59,8 @@ describe("보기 전환(radiogroup) 키보드 — WAI-ARIA 라디오 패턴", ()
     await user.keyboard("{End}");
     await waitFor(() => expect(query(router).get("view")).toBe("ask"));
     await user.keyboard("{Home}");
-    await waitFor(() => expect(query(router).get("view")).toBe("nav"));
+    await waitFor(() => expect(query(router).get("view")).toBe("body"));
     expect(radios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1);
-  });
-
-  it("2영역(900~1279)의 보기 전환에는 '단계·라운드'가 없다 — 본문 · 질문 둘 (단계·라운드는 이미 함께 보임)", async () => {
-    await renderApp(CURRENT, { width: WIDTHS.mid });
-    await ready();
-    expect(radios().map((r) => r.textContent?.trim())).toEqual([NAMES.viewBody, NAMES.viewAsk]);
-  });
-
-  it("2영역에서 view=nav 주소로 들어와도 오류 없이 본문과 같은 화면(모르는 값처럼 기본)으로 그린다", async () => {
-    await renderApp(`${CURRENT}?view=nav`, { width: WIDTHS.mid });
-    await ready();
-    expect(screen.queryByText(/찾을 수 없/)).toBeNull();
-    expect(within(group()).getByRole("radio", { name: NAMES.viewBody })).toHaveAttribute("aria-checked", "true");
   });
 });
 

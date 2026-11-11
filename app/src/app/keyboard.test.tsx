@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { CURRENT, NAMES, url } from "@/test/contract";
+import { CURRENT, NAMES, SHELL, url } from "@/test/contract";
 
 const describeEl = (el: Element | null) => (el ? `${el.tagName.toLowerCase()}#${el.id}|${el.getAttribute("href") ?? ""}|${(el.textContent ?? "").trim().slice(0, 30)}` : "null");
 const ready = async () => {
@@ -30,9 +30,13 @@ describe("Tab 순서", () => {
     await ready();
     const seen = await tabAll(user);
     expect(seen[0]).toBe(screen.getByRole("link", { name: NAMES.skip }));
-    const nav = screen.getByRole("navigation", { name: NAMES.nav });
+    const nav = screen.getByRole("navigation", { name: SHELL.sidebarNav });
     expect(seen.some((e) => nav.contains(e) && /기획|조사|분석/.test(e.textContent ?? ""))).toBe(true);
     expect(seen.some((e) => nav.contains(e) && /R1/.test(e.textContent ?? ""))).toBe(true);
+    // 사이드바(단계·라운드)는 본문·질문보다 먼저 닿는다 — 읽는 순서와 Tab 순서가 같다
+    const firstBody = seen.findIndex((e) => screen.getByRole("main").contains(e) || screen.getByRole("complementary", { name: NAMES.ask }).contains(e));
+    const lastFlow = seen.map((e) => nav.contains(e)).lastIndexOf(true);
+    expect(lastFlow).toBeLessThan(firstBody);
     expect(seen.map((e) => e.id)).toEqual(expect.arrayContaining(["q-21", "q-22"]));
   });
 

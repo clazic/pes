@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { renderApp, query } from "@/test/render-app";
-import { CURRENT, NAMES, PAST, url } from "@/test/contract";
+import { CURRENT, NAMES, PAST, SHELL, url } from "@/test/contract";
 
 const titleEl = () => screen.getByRole("main").querySelector("[data-screen-title]") as HTMLElement | null;
 const ready = async () => {
@@ -72,7 +72,7 @@ describe("화면이 바뀌면 새 화면 제목으로 초점", () => {
     const user = userEvent.setup();
     await renderApp(CURRENT);
     await ready();
-    const nav = screen.getByRole("navigation", { name: NAMES.nav });
+    const nav = screen.getByRole("navigation", { name: SHELL.sidebarNav });
     const link = Array.from(nav.querySelectorAll("a")).find((a) => a.getAttribute("href") === url("research", 1))!;
     await user.click(link);
     await waitFor(() => expect(titleEl()?.textContent).toContain("조사 R1"));

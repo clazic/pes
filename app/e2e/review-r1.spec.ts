@@ -1,7 +1,7 @@
 // SEL-81 U1a (R1 필수 1·2·3, 권장 6·8·10) — 1차 리뷰가 실제 Chromium 에서 재현한 결함을 고정하는 e2e. 구현 전/수정 전에는 실패가 정상.
 // jsdom 은 CSS 가 없어 못 보는 것: 1·2영역의 display:none · 스크롤 되돌림 · 가려짐 · 인쇄 모드.
 import { expect, test, type Page } from "@playwright/test";
-import { CURRENT, NAMES, SHELL, WIDTHS } from "../src/test/contract";
+import { CURRENT, NAMES, REMOVED, SHELL, WIDTHS } from "../src/test/contract";
 
 async function open(page: Page, path: string, width: number, height: number) {
   await page.setViewportSize({ width, height });
@@ -144,37 +144,33 @@ test.describe("권장 6 — 미리보기 대화 상자(peek)", () => {
   }
 });
 
-test.describe("권장 8 — 2영역(900~1279) 머리줄·전환 줄에 단계·라운드 탐색이 가려지지 않는다", () => {
-  test("1100×360: 아래로 스크롤해도 탐색 영역의 보이는 부분은 머리줄·전환 줄에 덮이지 않는다", async ({ page }) => {
+test.describe("권장 8 → 최종 리뷰: <1280 은 한 열 — 보기 전환 라디오는 본문·질문 둘뿐, 낮은 창에서도 머리줄·전환 줄에 본문이 가려지지 않는다", () => {
+  for (const [label, w, h] of [["1100×360", WIDTHS.mid, 360], ["683×600", WIDTHS.zoom200of1366, 600], ["1100×600", WIDTHS.mid, 600]] as const) {
+    test(`${label}: 라디오 둘(본문·질문), '단계·라운드' 라디오·열 없음`, async ({ page }) => {
+      await open(page, CURRENT, w, h);
+      const group = page.getByRole("radiogroup", { name: NAMES.viewGroup });
+      await expect(group.getByRole("radio")).toHaveCount(2);
+      await expect(group.getByRole("radio", { name: REMOVED.viewRadio })).toHaveCount(0);
+      await expect(page.getByRole("navigation", { name: REMOVED.navName })).toHaveCount(0);
+      await expect(page.locator(`[data-area="${REMOVED.navArea}"]`)).toHaveCount(0);
+    });
+  }
+
+  test("1100×360: 아래로 스크롤해도 본문 제목·도구는 머리줄·전환 줄에 덮인 채 멈추지 않는다(초점을 주면 보인다)", async ({ page }) => {
     await open(page, CURRENT, WIDTHS.mid, 360);
     for (const y of [0, 80, 200, 400]) {
       await page.evaluate((yy) => window.scrollTo(0, yy), y);
       await page.waitForTimeout(120);
-      const covered = await page.evaluate(() => {
-        const nav = document.querySelector<HTMLElement>('[data-area="nav"]');
-        if (!nav) return "nav 없음";
-        const cs = getComputedStyle(nav);
-        if (cs.display === "none") return "nav 숨김";
-        const bad: string[] = [];
-        for (const el of nav.querySelectorAll<HTMLElement>("h2, h3, a, button")) {
-          const r = el.getBoundingClientRect();
-          if (r.height < 2 || r.bottom <= 0 || r.top >= window.innerHeight) continue; // 화면 밖은 가려진 게 아니라 스크롤 밖
-          const cx = r.left + r.width / 2;
-          const cy = Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1);
-          const top = document.elementFromPoint(cx, cy);
-          if (top && !nav.contains(top)) bad.push(`${el.tagName} "${(el.textContent ?? "").trim().slice(0, 12)}" 이(가) <${top.tagName.toLowerCase()} ${top.className.toString().slice(0, 30)}> 에 덮임 (top=${Math.round(r.top)})`);
-        }
-        return bad.join("; ");
-      });
-      expect(covered, `scrollY=${y}`).toBe("");
     }
-  });
-
-  test("1100×600: 라디오(보기 전환)에 단계·라운드가 없다", async ({ page }) => {
-    await open(page, CURRENT, WIDTHS.mid, 600);
-    const group = page.getByRole("radiogroup", { name: NAMES.viewGroup });
-    await expect(group.getByRole("radio")).toHaveCount(2);
-    await expect(group.getByRole("radio", { name: NAMES.viewNav })).toHaveCount(0);
+    await page.getByRole("button", { name: NAMES.print }).focus();
+    await page.waitForTimeout(150);
+    const covered = await page.evaluate(() => {
+      const e = document.activeElement as HTMLElement;
+      const r = e.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1));
+      return !!top && !(e === top || e.contains(top) || top.contains(e));
+    });
+    expect(covered, "초점 받은 단추가 머리줄·전환 줄에 가림").toBe(false);
   });
 });
 
@@ -271,7 +267,7 @@ test.describe("앱 셸(필수 3) — 사이드바·머리줄 기하", () => {
 });
 
 test.describe("권장 5(b) — Tab 순서가 읽는 순서와 같다", () => {
-  test("1440: 건너뛰기 링크 → 머리줄/사이드바 → 단계·라운드 → 본문 도구 → 질문 q-21 → q-22 순서", async ({ page }) => {
+  test("1440: 건너뛰기 링크 → 머리줄/사이드바 → 사이드바 단계·라운드 → 본문 도구 → 질문 q-21 → q-22 순서", async ({ page }) => {
     await open(page, `${CURRENT}?view=ask`, WIDTHS.wide1440, 800);
     const order: string[] = [];
     for (let i = 0; i < 120; i++) {
@@ -286,15 +282,18 @@ test.describe("권장 5(b) — Tab 순서가 읽는 순서와 같다", () => {
     }
     const idx = (pred: (s: string) => boolean) => order.findIndex(pred);
     const skip = idx((s) => s.includes(NAMES.skip));
-    const nav = idx((s) => s.startsWith("nav:"));
+    const stage = idx((s) => s.startsWith("sidebar:") && /기획|조사|분석/.test(s));
+    const round = idx((s) => s.startsWith("sidebar:") && /R1|단계 시작/.test(s));
     const q21 = idx((s) => s.endsWith(":q-21"));
     const q22 = idx((s) => s.endsWith(":q-22"));
     expect(skip, order.join(" > ")).toBe(0);
-    expect(nav, "단계·라운드 링크가 Tab 에 걸린다").toBeGreaterThan(skip);
-    expect(q21, "q-21").toBeGreaterThan(nav);
+    expect(stage, "사이드바 단계 링크가 Tab 에 걸린다").toBeGreaterThan(skip);
+    expect(round, "사이드바 나무의 라운드 링크가 단계 링크 뒤에 걸린다").toBeGreaterThan(stage);
+    expect(order.some((s) => s.startsWith("nav:")), "옛 '단계와 라운드' 열(data-area=nav)은 Tab 에 걸리면 안 된다").toBe(false);
+    expect(q21, "q-21").toBeGreaterThan(round);
     expect(q22, "q-22").toBeGreaterThan(q21);
     // 머리줄·사이드바는 본문(영역)보다 먼저 온다
-    const firstArea = idx((s) => /^(nav|body|ask):/.test(s));
+    const firstArea = idx((s) => /^(body|ask):/.test(s));
     for (const [i, s] of order.entries()) if (/^(header|sidebar):/.test(s)) expect(i, `${s} 는 본문 영역보다 앞`).toBeLessThan(firstArea);
   });
 });
