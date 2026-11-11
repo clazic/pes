@@ -101,6 +101,43 @@ export function changes_page(
 }
 
 // ---------------------------------------------------------------------------
+// the current place of an edition (SEL-82): the one rule behind GET P/workspace `current` and the address `pes open <slug> --app` prints
+
+export interface PlaceStage {
+  id: string;
+  key: string;
+  status: string;
+}
+
+export interface PlaceRound {
+  stage_id: string;
+  round_no: bigint;
+  state: string;
+}
+
+/**
+ * The stage an edition is at (its current stage, else the first not approved, else the last) and the round the screen opens there:
+ * the open round, else — unless the stage is still asking — the last round; round_id null = the stage-start place (there is no R0).
+ * `stages` are in stage order, `rounds` in (stage, round_no) order. Pure: rows in, answer out.
+ */
+export function current_place<S extends PlaceStage>(
+  current_stage_id: string | null,
+  stages: readonly S[],
+  rounds: readonly PlaceRound[],
+): { stage: S; round_id: number | null; open_round: PlaceRound | undefined } | undefined {
+  const stage =
+    stages.find((candidate) => candidate.id === current_stage_id) ??
+    stages.find((candidate) => candidate.status !== "approved") ??
+    stages[stages.length - 1];
+  if (stage === undefined) return undefined;
+  const open_round = rounds.find((round) => round.stage_id === stage.id && round.state === "open");
+  const last_round = [...rounds].reverse().find((round) => round.stage_id === stage.id);
+  const round_id =
+    open_round !== undefined ? Number(open_round.round_no) : stage.status === "asking" || last_round === undefined ? null : Number(last_round.round_no);
+  return { stage, round_id, open_round };
+}
+
+// ---------------------------------------------------------------------------
 // runs, leases, inputs
 
 export interface RunInfo {

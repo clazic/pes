@@ -73,6 +73,9 @@ H = 사람(소유자), E = 프로젝트 토큰의 에이전트(내부 A·외부 
 | 답·의견 제출 | `POST P/submissions` | **H만**(에이전트는 403 `human_required`, 2026-11-10 SEL-47 결정. 에이전트는 답을 `inputs`로 읽기만 한다) | 불가(초안은 브라우저 폼) |
 | 입력 기다리기 / 영수증 | `GET P/runs/{r}/inputs?cursor=&wait_ms=` / `POST P/runs/{r}/input-receipts` | E | 불가 |
 | 변경분 | `GET P/changes?cursor=` | H/E/W | 선택 범위 읽기 |
+| 작업 공간 읽기 | `GET P/workspace` | H/E/W | 읽기 가능 — 3단계 U1b(SEL-82)에서 등록. 현재 단계·라운드·단계별 보기·차례·**권한별 가능 동작(+비활성 이유, 서버 검사 대체 아님)**·기록 개수(가정·결정·의견, 없으면 `empty`). 기계 값만(화면 글자는 앱이 만든다), 읽기 전용·새 표 없음, `context:read` |
+| 변경 머리 커서 | `GET P/changes?cursor=head` | H/E/W | 사건을 읽지 않고 지금 머리 커서만 — `{events:[], next_cursor, has_more:false, epoch}`. 앱 `getChanges(null)` 의 기준 받기(SEL-82). 보통 changes 와 같은 인증·자격 묶음, 읽기 전용 |
+| 앱 세션 넘기기 | CLI `pes open <slug> --app` (API 아님) | E | 서버는 앱 페이지에 세션을 심지 않는다(SEL-82 R1). CLI 가 `http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드>#pes=<base64url JSON {session, projects}>` 를 연다 — 조각은 서버·Referer 로 가지 않는다. 앱은 렌더 전에 조각을 같은 탭 sessionStorage 로 옮기고 주소에서 지운다. 앱 빌드 자산은 `/_app/`(프로젝트 이름은 `_` 로 시작할 수 없다). **알려진 한계(SEL-82 최종 리뷰):** 조각 있는 주소가 브라우저 기록에 남을 수 있고 `PES_NO_BROWSER=1` 이면 stdout 에 찍힌다 — 회전은 `local_session_secret` 파일 삭제. **에이전트·스킬은 `pes open --app` 을 부르지 않는다**(1회용 코드 교환은 SEL-85). 같은 출처 보고서·산출물 HTML 의 sessionStorage 접근은 SEL-86(CSP sandbox)에서 막는다 — 앱이 보고서로 같은 탭 이동을 갖기 전에 병합 |
 | 파일 | `POST P/uploads` → `PUT` → `POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | H/E | 불가 |
 | 첨언·답글 | `POST P/threads`, `P/threads/{t}/messages` | H/E/W | 가능 |
 | 해결·후속 적용 | `POST P/threads/{t}/resolutions`, `P/followups/{f}/apply` | H/허가된 E(reopen 적용은 H) | 불가 |

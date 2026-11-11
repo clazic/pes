@@ -1,5 +1,5 @@
 // Builds the synthetic workspace the Playwright smoke serves, then prints one JSON line:
-//   { root, home, pes_home, slug }
+//   { root, home, pes_home, slug, project_id }
 // Run it with plain Node (`node tests/e2e/helpers/seed_workspace.ts`), not under Playwright's loader: it reuses the
 // node:test harness (isolated HOME / USERPROFILE / PES_HOME, node scripts/pes.ts CLI, DB bootstrap). Everything is synthetic.
 //
@@ -62,4 +62,4 @@ if (policy !== undefined && blob !== undefined) {
   }
 }
 db.close();
-console.log(JSON.stringify({ root: c.env.home.root, home: c.env.home.env.HOME, pes_home: c.env.home.env.PES_HOME, slug: SLUG, dispatches: policy !== undefined && blob !== undefined }));
+console.log(JSON.stringify({ root: c.env.home.root, home: c.env.home.env.HOME, pes_home: c.env.home.env.PES_HOME, slug: SLUG, project_id: p.project_id, dispatches: policy !== undefined && blob !== undefined }));

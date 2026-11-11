@@ -25,6 +25,7 @@ import {
   inputs_page,
   latest_approval_id,
   lease_info,
+  current_place,
   max_event_seq,
   operation_receipt,
   owner_user_id,
@@ -201,6 +202,22 @@ interface LeaseRow {
 type Who = "any" | "agent" | "human" | "owner" | "session";
 type Bucket = "general" | "control";
 
+/** Why an operation refuses a caller; null = it does not. One rule for the real check (#bind) and the screen's `enabled` (#action_refusal). */
+type Denial =
+  | { by: "session_is_not_agent" }
+  | { by: "human_required" | "owner_required" | "session_only" }
+  | { by: "scope"; scope: string };
+
+/** The permission rule of an operation (who may call it): pure, no database, no side effect. */
+function permission_denial(op: { who: Who; scope?: string }, caller: { session: boolean; scopes: readonly string[] | null }): Denial | null {
+  if (caller.session) return op.who === "agent" ? { by: "session_is_not_agent" } : null;
+  if (op.who === "human") return { by: "human_required" };
+  if (op.who === "owner") return { by: "owner_required" };
+  if (op.who === "session") return { by: "session_only" };
+  if (op.scope !== undefined && !(caller.scopes ?? []).includes(op.scope)) return { by: "scope", scope: op.scope };
+  return null;
+}
+
 interface Op {
   who: Who;
   scope?: string;
@@ -254,6 +271,19 @@ const QUESTION_FIELDS = [
   "show_if",
   "help",
   "importance",
+];
+/** The operations the workspace read model reports as actions (names are the route table's operation names). */
+const ACTION_OPERATIONS: readonly string[] = [
+  "submissions.create",
+  "questions.create",
+  "questions.revise",
+  "rounds.create",
+  "rounds.seal",
+  "stages.approve",
+  "stages.reopen",
+  "runs.create",
+  "uploads.create",
+  "policies.opencode_go.revise",
 ];
 const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
 
@@ -540,6 +570,10 @@ export class ApiApp {
       route("GET", `${P}/changes`, "changes.list", {
         who: "any", scope: "context:read", go: true,
         act: async (r, project, auth) => this.#changes(r, project, auth),
+      }),
+      route("GET", `${P}/workspace`, "workspace.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (_r, project, auth) => this.#workspace(project, auth),
       }),
       route("POST", `${P}/runs`, "runs.create", {
         who: "session",
@@ -926,13 +960,29 @@ export class ApiApp {
   }
 
   #bind(project: ProjectRow, credential: Credential, op: Op): AuthInfo {
-    if (credential.session) {
-      if (op.who === "agent") {
-        throw new Fail("forbidden", {
-          target: "$.headers.x-pes-session",
-          next_action: "use_agent_token",
-        });
+    const denial = permission_denial(op, { session: credential.session, scopes: credential.scopes });
+    if (denial !== null) {
+      const actor_kind = credential.kind as string;
+      switch (denial.by) {
+        case "session_is_not_agent":
+          throw new Fail("forbidden", { target: "$.headers.x-pes-session", next_action: "use_agent_token" });
+        case "human_required":
+        case "owner_required":
+          throw new Fail(denial.by, {
+            target: "$.headers.Authorization",
+            details: { actor_kind, required: denial.by === "human_required" ? "human_owner" : "owner_human" },
+          });
+        case "session_only":
+          throw new Fail("forbidden", { target: "$.headers.Authorization", details: { actor_kind } });
+        case "scope":
+          throw new Fail("forbidden", {
+            target: "$.headers.Authorization",
+            details: { required_scope: denial.scope },
+            next_action: "request_scope",
+          });
       }
+    }
+    if (credential.session) {
       return {
         actor_id: this.#owner_actor(project.id),
         kind: "human",
@@ -941,29 +991,9 @@ export class ApiApp {
         token_id: null,
       };
     }
-    const actor_kind = credential.kind as string;
-    if (op.who === "human" || op.who === "owner") {
-      throw new Fail(op.who === "human" ? "human_required" : "owner_required", {
-        target: "$.headers.Authorization",
-        details: {
-          actor_kind,
-          required: op.who === "human" ? "human_owner" : "owner_human",
-        },
-      });
-    }
-    if (op.who === "session") {
-      throw new Fail("forbidden", { target: "$.headers.Authorization", details: { actor_kind } });
-    }
-    if (op.scope !== undefined && !(credential.scopes ?? []).includes(op.scope)) {
-      throw new Fail("forbidden", {
-        target: "$.headers.Authorization",
-        details: { required_scope: op.scope },
-        next_action: "request_scope",
-      });
-    }
     return {
       actor_id: credential.actor_id as string,
-      kind: actor_kind,
+      kind: credential.kind as string,
       session: false,
       scopes: credential.scopes,
       token_id: credential.token_id,
@@ -1512,10 +1542,179 @@ export class ApiApp {
     };
   }
 
+  // workspace (SEL-82 U1b): the one read model the app's work-space screens read. Read-only: no write, no new table, and the
+  // only new SQL of U1 lives in #workspace_data. Machine values only; the screen makes its own words.
+
+  async #workspace(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const data = read_tx(this.#db, () => this.#workspace_data(this.#project(project.id), auth));
+    return { status: 200, data };
+  }
+
+  /** Can this caller run the operation? null = yes; otherwise the reason, in Korean (the rule #bind enforces — permission_denial; display only). */
+  #action_refusal(operation: string, auth: AuthInfo): string | null {
+    const op = this.#table.find((spec) => spec.operation === operation)?.op;
+    if (op === undefined) return "이 서버가 지원하지 않는 동작입니다.";
+    const denial = permission_denial(op, { session: auth.session, scopes: auth.scopes });
+    if (denial === null) return null;
+    switch (denial.by) {
+      case "session_is_not_agent":
+        return "에이전트 토큰으로만 할 수 있는 동작입니다.";
+      case "scope":
+        return `이 토큰에는 ${denial.scope} 권한이 없습니다.`;
+      default:
+        return "소유자 본인(사람)만 할 수 있는 동작입니다.";
+    }
+  }
+
+  #workspace_data(project: ProjectRow, auth: AuthInfo): unknown {
+    if (project.active_edition_id === null) throw new ApiError("conflict", "the project has no active edition");
+    const edition = this.#db.get<EditionRow>(
+      "SELECT id, edition_no, status, current_stage_id FROM editions WHERE project_id = ? AND id = ?",
+      project.id,
+      project.active_edition_id,
+    );
+    if (edition === undefined) throw new ApiError("conflict", "the project has no active edition");
+    const stage_rows = this.#db.all<StageRow>(
+      `SELECT id, key, ordinal, status, rev, stale_since_event_seq
+         FROM stages WHERE project_id = ? AND edition_id = ? ORDER BY ordinal`,
+      project.id,
+      edition.id,
+    );
+    const round_rows = this.#db.all<{ stage_id: string; round_no: bigint; state: string }>(
+      `SELECT stage_id, round_no, state FROM rounds
+        WHERE project_id = ? AND edition_id = ? ORDER BY stage_id, round_no`,
+      project.id,
+      edition.id,
+    );
+    // the newest run of each stage tells whose turn it is while the stage is active
+    const run_rows = this.#db.all<{ stage_id: string; status: string; mode: string }>(
+      `SELECT r.stage_id AS stage_id, r.status AS status, r.mode AS mode
+         FROM runs r
+        WHERE r.project_id = ? AND r.edition_id = ?
+          AND r.rowid = (SELECT MAX(r2.rowid) FROM runs r2
+                          WHERE r2.project_id = r.project_id AND r2.edition_id = r.edition_id AND r2.stage_id = r.stage_id)`,
+      project.id,
+      edition.id,
+    );
+    const latest_run = this.#db.get<{ mode: string }>(
+      "SELECT mode FROM runs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1",
+      project.id,
+    );
+    const counts = this.#db.all<{ kind: string; n: bigint }>(
+      `SELECT kind, COUNT(*) AS n FROM objects
+        WHERE project_id = ? AND archived_at IS NULL AND kind IN ('assumption', 'decision', 'message')
+        GROUP BY kind`,
+      project.id,
+    );
+    const count_of = (kind: string): number => Number(counts.find((row) => row.kind === kind)?.n ?? 0n);
+
+    const run_of = new Map(run_rows.map((row) => [row.stage_id, row.status]));
+    const place = current_place(edition.current_stage_id, stage_rows, round_rows);
+    if (place === undefined) throw new ApiError("conflict", "the project has no stages");
+    const current_stage = place.stage;
+
+    const view_of = (stage: StageRow): string => {
+      if (stage.status === "approved") return stage.stale_since_event_seq === null ? "approved" : "stale";
+      if (stage.id !== current_stage.id) return "pending";
+      if (stage.status === "asking") return "current_you";
+      const run = run_of.get(stage.id);
+      if (run === "running" || run === "queued") return "current_ai";
+      if (run === "blocked_usage") return "current_blocked";
+      return "current_you";
+    };
+
+    const stages = stage_rows.map((stage) => {
+      const mine = round_rows.filter((round) => round.stage_id === stage.id);
+      const open = mine.some((round) => round.state === "open");
+      const rounds: Array<{ round_id: number | null; state: "closed" | "current" }> = [];
+      // the stage-start questions are the round_id = null place (no made-up R0); a stage not started yet has none
+      if (stage.status !== "pending" || mine.length > 0) {
+        rounds.push({ round_id: null, state: stage.status === "asking" && !open ? "current" : "closed" });
+      }
+      for (const round of mine) rounds.push({ round_id: Number(round.round_no), state: round.state === "open" ? "current" : "closed" });
+      return { key: stage.key, view: view_of(stage), rounds };
+    });
+
+    const open_round = place.open_round;
+    const current_round_id = place.round_id;
+
+    const everything_approved = stage_rows.every((stage) => stage.status === "approved" && stage.stale_since_event_seq === null);
+    const current_view = stages.find((stage) => stage.key === current_stage.key)?.view ?? "pending";
+    const side = everything_approved ? "done" : current_view === "current_ai" ? "ai" : current_view === "current_blocked" ? "waiting" : "you";
+
+    const policy_mode = ((): string => {
+      try {
+        return current_policy(this.#db, project.id).allow_opencode_go ? "A" : "B";
+      } catch {
+        return "B";
+      }
+    })();
+
+    // which actions this caller can take (display only: the server still checks every write), and why not
+    const has_open_round = open_round !== undefined;
+    const state_refusal = (operation: string): string | null => {
+      switch (operation) {
+        case "submissions.create":
+          return current_stage.status === "asking" || has_open_round ? null : "지금 답할 질문이 없습니다.";
+        case "stages.approve":
+          return current_stage.status === "active" ? null : "승인할 수 있는 상태의 단계가 아닙니다.";
+        case "stages.reopen":
+          return stage_rows.some((stage) => stage.status === "approved") ? null : "다시 열 수 있는 승인된 단계가 없습니다.";
+        case "rounds.seal":
+          return has_open_round ? null : "열려 있는 라운드가 없습니다.";
+        default:
+          return null;
+      }
+    };
+    const actions = ACTION_OPERATIONS.map((operation) => {
+      const reason = this.#action_refusal(operation, auth) ?? state_refusal(operation);
+      return { action: operation, enabled: reason === null, disabled_reason: reason };
+    });
+
+    const assumptions = count_of("assumption");
+    const decisions = count_of("decision");
+    const comments = count_of("message");
+    return {
+      slug: project.slug,
+      title: project.topic,
+      edition: Number(edition.edition_no),
+      mode: latest_run?.mode ?? policy_mode,
+      current: { stage: current_stage.key, round_id: current_round_id },
+      stages,
+      turn: { side },
+      actions,
+      records: {
+        assumptions: { count: assumptions },
+        decisions: { count: decisions },
+        comments: { count: comments },
+        empty: assumptions + decisions + comments === 0,
+      },
+    };
+  }
+
   async #changes(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const limit = this.#query_limit(request, "limit", 1, LIST_MAX_ITEMS, LIST_MAX_ITEMS);
     const scope = auth.session ? "owner" : "agent";
     let given: ReturnType<typeof read_cursor> = null;
+    if (request.query.get("cursor") === "head") {
+      // SEL-82: "just the head" — no event is read; the cursor a full read would end on (every event of the project is scanned, hidden ones too)
+      const data = read_tx(this.#db, () => {
+        const meta = db_meta(this.#db);
+        return {
+          events: [],
+          next_cursor: make_cursor(this.#secret, {
+            p: project.id,
+            s: scope,
+            d: meta.database_instance_id,
+            e: meta.cursor_epoch,
+            q: max_event_seq(this.#db, project.id).toString(),
+          }),
+          has_more: false,
+          epoch: meta.cursor_epoch,
+        };
+      });
+      return { status: 200, data };
+    }
     if (request.query.has("cursor")) {
       given = read_cursor(this.#secret, request.query.get("cursor") as string);
       if (given === null || given.p !== project.id || given.s !== scope) {

@@ -42,6 +42,7 @@ import {
 } from "./content.ts";
 import { connect, connect_read_only, load_migrations, migrate, probe_database, type Db } from "./db.ts";
 import { approve_stage, reopen_stage, seal_round, start_round } from "./editions.ts";
+import { current_place } from "./commands/api_reads.ts";
 import { UnitOfWorkDb } from "./commands/unit.ts";
 import { ApiError } from "./errors.ts";
 import { FORM_REVISED } from "./commands/records.ts";
@@ -2624,9 +2625,35 @@ const migrate_op: Handler = async (s, req) => {
   }
 };
 
-const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "form_set", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
+/** Where the web app opens a project (`pes open <slug> --app`): the same rule as GET P/workspace `current` (current_place), read straight from the database. */
+const app_place: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  if (project.active_edition_id === null) throw new Refusal("conflict", `활성 판이 없는 프로젝트입니다: ${project.slug}`);
+  const edition = s.db.get<{ edition_no: bigint; current_stage_id: string | null }>(
+    "SELECT edition_no, current_stage_id FROM editions WHERE project_id = ? AND id = ?",
+    project.id,
+    project.active_edition_id,
+  );
+  if (edition === undefined) throw new Refusal("conflict", `활성 판이 없는 프로젝트입니다: ${project.slug}`);
+  const stages = s.db.all<{ id: string; key: string; status: string }>(
+    "SELECT id, key, status FROM stages WHERE project_id = ? AND edition_id = ? ORDER BY ordinal",
+    project.id,
+    project.active_edition_id,
+  );
+  const rounds = s.db.all<{ stage_id: string; round_no: bigint; state: string }>(
+    "SELECT stage_id, round_no, state FROM rounds WHERE project_id = ? AND edition_id = ? ORDER BY stage_id, round_no",
+    project.id,
+    project.active_edition_id,
+  );
+  const place = current_place(edition.current_stage_id, stages, rounds);
+  if (place === undefined) throw new Refusal("conflict", `단계가 없는 프로젝트입니다: ${project.slug}`);
+  return { id: project.id, edition: Number(edition.edition_no), stage: place.stage.key, round_id: place.round_id };
+};
+
+const READ_ONLY_OPS = new Set(["app_place", "slugs", "active_slugs", "route", "read_project", "screen", "version", "form_set", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
 
 const HANDLERS: Record<string, Handler> = {
+  app_place,
   slugs,
   active_slugs,
   form_set,

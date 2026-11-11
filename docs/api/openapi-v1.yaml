@@ -892,6 +892,7 @@ paths:
   /api/v1/projects/{id}/changes:
     get:
       summary: Change feed after an opaque cursor (whole transactions, ascending event_seq)
+      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security: [{ agentToken: [] }, { localSession: [] }]
@@ -906,6 +907,24 @@ paths:
         "403": { description: Not allowed for this caller, scope, or policy }
         "404": { description: Unknown project or target }
         "410": { description: Cursor expired; resync }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/workspace:
+    get:
+      summary: "Work-space read model for the web app (SEL-82 U1b): slug, title, edition, mode, current stage and round, stages with their rounds, whose turn it is, the actions this caller can take (with a reason when one cannot), and record counts. Read-only; machine values only (the screen makes its own words)"
+      description: "data = { slug, title, edition, mode (A|B), current {stage, round_id|null}, stages [{key, view, rounds [{round_id|null, state}]}], turn {side}, actions [{action, enabled, disabled_reason|null}], records {assumptions, decisions, comments: {count}, empty} }. round_id null is the stage-start place (there is no R0). actions are for display; the server still checks every write."
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/operations/{op}:

@@ -85,6 +85,13 @@ jobs:
       - name: Install Chromium
         run: npx playwright install chromium
 
+      # 서버가 내주는 앱 빌드(app/dist) — 루트 화면 시험(tests/e2e/app_real_api.spec.ts)이 이것을 연다 (SEL-82 U1b)
+      - name: Install and build the web app
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+
       - name: Run browser smoke
         run: npx playwright test
 

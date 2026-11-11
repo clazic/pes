@@ -28,6 +28,7 @@
             "GET /api/v1/projects/{id}/context",
             "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
             "GET /api/v1/projects/{id}/changes",
+            "GET /api/v1/projects/{id}/workspace",
             "POST /api/v1/projects/{id}/runs",
             "POST /api/v1/projects/{id}/claims",
             "POST /api/v1/projects/{id}/runs/{r}/wait",
@@ -111,6 +112,9 @@
                 "supported": true
               },
               "changes.list": {
+                "supported": true
+              },
+              "workspace.get": {
                 "supported": true
               },
               "runs.create": {

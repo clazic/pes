@@ -17,6 +17,12 @@
 //  - /<slug>/ and /<slug>/index.html, / and /index.html of a project (home) the database serves are BUILT FROM THE DATABASE on every request;
 //      the reports (/<slug>/reports/<stage>/<name>, /<slug>/out/<name>) are the database's reports and files, never a file of the folder.
 //  - /version, /<slug>/version = one integer: the database change cursor (the home's moves with any project's change).
+//  - The web app (SEL-82 U1b, built by `cd app && npm run build`; the folder is PES_APP_DIR, default <repo>/app/dist):
+//      GET /p/<slug>/**  → the app's index.html (the app routes by its own address), GET /_app/<file> → a file of that folder (the app is built with
+//      base "/_app/": a project name cannot start with "_", so no project's page is ever hidden — /app/ and /p/ stay a project's own when it has that name).
+//      The folder is a jail: no `..`, no link that leads out of it. Nothing is added to the page (no session value, no cookie): `pes open <slug> --app`
+//      hands the owner's session to the app in the URL fragment, so it never reaches the server, a Referer or another Origin. Without a build both are a plain 404.
+//      PES_APP_DIR should name a build folder only (an absolute path); a missing one is announced once at start-up.
 //
 // Safety: binds 127.0.0.1 only, never asks DNS for a host name (SEL-33: socket.getfqdn() stalled 30 s on some macOS runners), never
 // contacts the hub ports 8760~8775, never starts another program.
@@ -26,7 +32,8 @@ import { createHash } from "node:crypto";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ApiApp } from "./pes_core/api.ts";
 import type { BridgeReply } from "./pes_core/cli_bridge.ts";
@@ -378,6 +385,71 @@ async function start(config: Config): Promise<void> {
     });
   };
 
+  /** The folder of the built web app: PES_APP_DIR, else <repo>/app/dist. Read on every request (a build made after the server started is found). */
+  const app_dir = (): string => resolve(process.env.PES_APP_DIR ?? join(dirname(fileURLToPath(import.meta.url)), "..", "app", "dist"));
+
+  /** A file of the app folder, or null: no `..` / drive / back-slash word, and the real path (links followed) stays inside the real folder. */
+  const app_file = (words: string[]): string | null => {
+    try {
+      const base = realpathSync.native(app_dir());
+      if (words.some((word) => word === "." || word === ".." || /[\\/\0]/.test(word) || /^[A-Za-z]:/.test(word))) return null;
+      const real = realpathSync.native(words.length === 0 ? base : join(base, ...words));
+      if (real !== base && !real.startsWith(base.endsWith(sep) ? base : `${base}${sep}`)) return null;
+      return statSync(real).isFile() ? real : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const send_app_file = (req: IncomingMessage, res: ServerResponse, target: string): void => {
+    let stat: Stats;
+    try {
+      stat = statSync(target);
+    } catch {
+      return not_found(req, res);
+    }
+    const headers = { "Content-Type": guess_type(target), "Content-Length": stat.size, "Last-Modified": new Date(stat.mtimeMs).toUTCString(), "Cache-Control": "no-store" };
+    if (req.method === "HEAD") {
+      res.writeHead(200, headers);
+      res.end();
+      return;
+    }
+    const stream = createReadStream(target);
+    stream.once("error", () => {
+      if (res.headersSent) res.destroy();
+      else not_found(req, res);
+    });
+    stream.once("open", () => {
+      res.writeHead(200, headers);
+      stream.pipe(res);
+    });
+  };
+
+  /**
+   * /p/<slug>/** is the app (its own router reads the rest), /_app/<file> is its build (base "/_app/"). A project name can never start with "_"
+   * (SLUG), so the build's address never hides a project's page — unlike "/app/", which a project called "app" owns. Returns true when it answered.
+   */
+  const handle_app_get = async (req: IncomingMessage, res: ServerResponse, path: string): Promise<boolean> => {
+    const words = py_unquote(path).split("/").filter((word) => word !== "");
+    if (words[0] === "_app" && words.length >= 2) {
+      const target = app_file(words.slice(1));
+      if (target === null) not_found(req, res);
+      else send_app_file(req, res, target);
+      return true;
+    }
+    if (words[0] === "p" && words.length >= 2 && SLUG.test(words[1] as string)) {
+      // a project that is itself called "p" keeps its own pages (/p/ping, /p/version, /p/index.html, /p/ask-*.html, /p/reports/…, /p/out/…); every other /p/<slug>/… is still the app
+      const second = words[1] as string;
+      const own_page = second === "ping" || second === "version" || second === "index.html" || second === "reports" || second === "out" || /^ask-.+\.html$/.test(second);
+      if (own_page && (existsSync(join(root, "p", "project.json")) || (await db.route("p")) === "database")) return false;
+      const target = app_file(["index.html"]);
+      if (target === null) not_found(req, res);
+      else send_app_file(req, res, target);
+      return true;
+    }
+    return false;
+  };
+
   const send_html = (req: IncomingMessage, res: ServerResponse, text: string): void => send(req, res, 200, { "Content-Type": "text/html; charset=utf-8" }, text);
   const db_down = (req: IncomingMessage, res: ServerResponse): void => send_json(req, res, 503, { ok: false, error: "db" });
 
@@ -526,6 +598,11 @@ async function start(config: Config): Promise<void> {
   const handle_get = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const path = raw_path(req.url);
     if (path === "/whoami") return send_json(req, res, 200, { root, single: true, pid: process.pid }, { cors: true });
+    if (await handle_app_get(req, res, path)) return;
+    // the retired base of the app build (/app/…, before SEL-82 R1): a project called "app" owns every /app/… address; without one it is a plain 404
+    if (py_unquote(path).split("/").filter((word) => word !== "")[0] === "app" && !existsSync(join(root, "app", "project.json")) && (await db.route("app")) !== "database") {
+      return not_found(req, res);
+    }
     if (await handle_db_get(req, res, path)) return;
     if (path === "/version" || path.endsWith("/version")) {
       const { dir } = project_of(path.slice(0, -"version".length) || "/");
@@ -800,6 +877,17 @@ async function start(config: Config): Promise<void> {
   });
   // listen on the IP literal: no host-name lookup of any kind
   server.listen({ port, host: "127.0.0.1" }, () => {
+    const given_app_dir = process.env.PES_APP_DIR;
+    if (given_app_dir !== undefined && given_app_dir !== "") {
+      let is_dir = false;
+      try {
+        is_dir = statSync(app_dir()).isDirectory();
+      } catch {
+        is_dir = false;
+      }
+      if (!is_dir) process.stderr.write(`serve.ts: 경고 — PES_APP_DIR 가 가리키는 폴더가 없습니다 (${app_dir()}) — 웹 앱 주소(/p/…, /_app/…)는 404 입니다. 빌드 폴더의 절대 경로를 쓰세요\n`);
+      else if (!isAbsolute(given_app_dir)) process.stderr.write(`serve.ts: 경고 — PES_APP_DIR 가 상대 경로입니다 (서버를 켠 폴더 기준으로 읽습니다) — 절대 경로를 쓰세요\n`);
+    }
     process.stdout.write(`serving ${root} at http://127.0.0.1:${port}/\n`);
   });
 }

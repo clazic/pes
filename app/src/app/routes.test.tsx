@@ -116,6 +116,8 @@ describe("단계·라운드 탐색 = 사이드바 연구 흐름 나무 · 과거
     const { router } = await renderApp(CURRENT);
     await title();
     await user.click(roundLinks(flow()).find((l) => /R1/.test(l.textContent ?? "") && /\/s\/research\//.test(l.getAttribute("href") ?? ""))!);
+    // 주소와 화면 둘 다 바뀔 때까지 기다린다(고정 시간 없음) — 제목은 라운드 자료가 도착해야 바뀐다. Windows CI 에서 주소만 바뀐 순간
+    // 제목이 아직 앞 화면("조사 R2")이라 한 번 실패했다(2026-11-12).
     await waitFor(() => expect(router.state.location.pathname).toBe(url("research", 1)));
     // the address changes before the heading re-renders: wait for the CURRENT heading to say it (same assertion, waited for).
     // Flaky three times on CI (#58·#60 Windows, #61 macOS) when the old h1 was read right after the address moved.

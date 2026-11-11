@@ -257,6 +257,10 @@ export async function db_dashboard_html(d: string, slug: string): Promise<string
   const p = legacy_project(sc.project as Dict);
   const asks = existsSync(d) ? readdirSync(d).filter((n) => /^ask-.*\.html$/.test(n)).sort() : [];
   const page: Dict = {
+    // SEL-82: the topic and the current stage also stand at the top, where the web app's workspace read model (GET P/workspace) can be compared
+    // with them: title === topic, current.stage === current (a project that names no current stage has no `current` here). The dashboard itself reads D.project, as before.
+    topic: p.topic ?? null,
+    ...(typeof p.current === "string" ? { current: p.current } : {}),
     project: library_view(p),
     stages: STAGES.map(([key, label]) => ({ key, label })),
     snapshots: sc.snapshots,

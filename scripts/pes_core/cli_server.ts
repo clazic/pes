@@ -9,11 +9,12 @@ import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { hub_ports, kill_pid, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
+import { local_session_secret } from "./api_secret.ts";
+import { hub_ports, kill_pid, root_port, serve_root, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
 import { need_project, project_exists, slug_of } from "./cli_records.ts";
 import { load_legacy } from "./cli_legacy_read.ts";
 import { build_index, fill, legacy_project } from "./cli_screens.ts";
-import { LABEL, ROOT, STAGES, Die, arg_at, bridge, bridge_soft, die, expanduser, home_dir, is_record, missing_args, now, pdir, pes_home, resolve_path, say, write_text } from "./cli_support.ts";
+import { LABEL, ROOT, STAGES, Die, arg_at, bridge, bridge_soft, die, env, expanduser, home_dir, is_record, missing_args, now, pdir, pes_home, resolve_path, say, write_text } from "./cli_support.ts";
 
 type Dict = Record<string, any>;
 
@@ -264,7 +265,34 @@ function open_browser(url: string): void {
   }
 }
 
+/**
+ * `pes open <slug> --app` (SEL-82 U1b): the address of the web app at the project's current place, with the owner's session in the URL
+ * FRAGMENT (`#pes=<base64url JSON {session, projects:{slug:id}}>`). A fragment never goes to a server or into a Referer, and another Origin cannot
+ * read it; the app takes it out of the address bar before anything is drawn. Nothing is started: the server must already be on.
+ * With PES_NO_BROWSER=1 the one address line is printed; otherwise the browser opens it and only the address without the fragment is printed.
+ */
+async function open_app(target: string): Promise<void> {
+  const d = pdir(target);
+  const slug = slug_of(d);
+  const route = await bridge("route", slug);
+  if (route.serving === "none") die(`프로젝트를 찾을 수 없습니다: ${slug}`, 1);
+  if (route.serving !== "database") die(`이 프로젝트는 아직 새 형식으로 옮기지 않았습니다 (${slug}) — 먼저 pes migrate ${slug}`, 1);
+  const port = await root_port(await serve_root(d));
+  if (port === null) die(`서버가 꺼져 있습니다 — 먼저 pes serve ${slug} 로 서버를 켠 뒤 다시 하세요`, 1);
+  const place = await bridge("app_place", slug);
+  const round = typeof place.round_id === "number" ? String(place.round_id) : "start";
+  const address = `http://127.0.0.1:${port}/p/${encodeURIComponent(slug)}/e/${String(place.edition)}/s/${String(place.stage)}/r/${round}`;
+  const handoff = Buffer.from(JSON.stringify({ session: local_session_secret(env()), projects: { [slug]: place.id } }), "utf8").toString("base64url");
+  if (process.env.PES_NO_BROWSER === "1") {
+    say(`${address}#pes=${handoff}`);
+    return;
+  }
+  open_browser(`${address}#pes=${handoff}`);
+  say(`앱을 브라우저로 열었습니다: ${address}`);
+}
+
 export async function cmd_open(args: string[]): Promise<void> {
+  if (args.includes("--app")) return open_app(arg_at(args.filter((a) => a !== "--app"), 0, "open"));
   let target = arg_at(args, 0, "open");
   if (!target.startsWith("http")) {
     const d = pdir(target);

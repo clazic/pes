@@ -17,10 +17,11 @@ export const LIVE = { activeMs: 3000, backoffMs: [5000, 10_000, 20_000, 40_000, 
 
 const RESYNC_CODES = new Set(["cursor_expired", "cursor_invalid"]);
 
-/** 읽기 키 글자 → 쿼리 키. 모르는 키는 null(무시) */
+/** 읽기 키 글자 → 쿼리 키. 모르는 키는 null(무시). 'round:*' 는 그 판의 모든 라운드 읽기(앞부분 키 — U1b: 서버 사건에 라운드가 없다) */
 export function touchedToQueryKey(touched: string, slug: string, edition: number): QueryKey | null {
   if (touched === "workspace") return keys.workspace(slug, edition);
   if (touched === "projects") return keys.projects;
+  if (touched === "round:*") return ["round", slug, edition];
   const m = /^round:([a-z]+)\/([1-9]\d*|start)$/.exec(touched);
   return m ? keys.round(slug, edition, m[1]!, m[2]!) : null;
 }
@@ -54,7 +55,8 @@ export function useLiveChanges(slug: string | undefined, edition: number) {
         seen.add(t);
         const key = touchedToQueryKey(t, slug, edition);
         // 지금 화면에 붙은 읽기만 다시 받는다 — 나머지는 낡음 표시만(다음에 볼 때 받음)
-        if (key) void qc.invalidateQueries({ queryKey: key, exact: true, refetchType: "active" });
+        // 'round:*' 는 앞부분 키라 exact 를 끈다 — 지금 붙은 라운드 읽기만 다시 받는 것은 같다
+        if (key) void qc.invalidateQueries({ queryKey: key, exact: t !== "round:*", refetchType: "active" });
       }
     };
 

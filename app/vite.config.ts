@@ -2,13 +2,30 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-// 자료는 앱 안 가짜 클라이언트(합성 fixture)뿐이다 — 네트워크 호출 없음(U1a). 서버 연결은 U1b.
+/**
+ * 서버(scripts/serve.ts)는 앱 화면 주소 `/p/<slug>/…` 에서 앱의 index.html 을 내주고, 빌드 파일은 `/_app/…` 에서 내준다 → base "/_app/"(프로젝트 이름은 `_` 로 시작할 수 없어 어떤 프로젝트 쪽도 가리지 않는다).
+ * 개발·미리보기 서버도 같게 `/p/…` 를 앱 index.html 로 되돌린다(주소창의 `/p/…` 는 그대로 — 앱 라우터가 읽는다).
+ */
+const appAddress = (): Plugin => {
+  const rewrite = (req: { url?: string; method?: string }, _res: unknown, next: () => void) => {
+    if ((req.method === "GET" || req.method === "HEAD") && /^\/p\//.test(req.url ?? "")) req.url = "/_app/index.html";
+    next();
+  };
+  return {
+    name: "pes-app-address",
+    configureServer: (server) => void server.middlewares.use(rewrite),
+    configurePreviewServer: (server) => void server.middlewares.use(rewrite),
+  };
+};
+
+// window.__PES_APP__ 설정(열어 준 쪽이 넘긴 세션)이 있을 때만 서버 API 를 읽는다. 앱 안 가짜 클라이언트(합성 fixture)는 production 이 아닌 모드(dev·vitest·--mode e2e)만(U1b, src/api/select-client.ts).
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  base: "/_app/",
+  plugins: [react(), tailwindcss(), appAddress()],
   resolve: { alias: { "@": path.resolve(here, "./src") } },
   server: { host: "127.0.0.1", port: 5173, strictPort: true },
   preview: { host: "127.0.0.1", port: 4173, strictPort: true },
