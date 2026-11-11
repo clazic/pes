@@ -15,11 +15,12 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { get } from "node:http";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { looks_like_stack_trace, norm_out } from "./helpers/compat_cases.ts";
+import { shell_words } from "./helpers/cli_read_env.ts";
 import { free_port, init_project, make_ctx, pes, synthetic_project, walk_files, type CompatCtx } from "./helpers/compat_env.ts";
 import { adapt_ts_doctor_stdout } from "./helpers/compat_ts_srv.ts";
 import { run_ts_cli, type TsRunOptions } from "./helpers/compat_ts.ts";
@@ -188,7 +189,14 @@ test("(c) watch: the same one line as 0.15 (D05 keeps the tail form during the t
       assert.equal(got.status, 0, got.stderr);
       assert.equal(got.stderr, "");
       const roots = ctx.roots(project);
-      assert.deepEqual(norm_out(got.stdout, roots), norm_out(want.out, roots), `${name}: watch line differs from 0.15`);
+      // Reason (R1 권장 8): 0.15 builds `f'{d}/feedback.log'`, which on Windows mixes `\\` and `/` (`C:\\x\\proj/feedback.log`); ts uses join(d, "feedback.log")
+      // — one separator, the OS's own. The py line is aligned to that single separator on win32 (same device as an os_overrides entry); elsewhere the two are identical.
+      const want_out = process.platform === "win32" ? want.out.replace("/feedback.log", "\\feedback.log") : want.out;
+      assert.deepEqual(norm_out(got.stdout, roots), norm_out(want_out, roots), `${name}: watch line differs from 0.15`);
+      const log_word = shell_words(got.stdout.trim())[3] as string;
+      assert.equal(basename(log_word), "feedback.log");
+      assert.equal(realpathSync.native(dirname(log_word)), realpathSync.native(project), `${name}: the log path is the project's own folder`);
+      assert.equal(log_word.includes(process.platform === "win32" ? "/" : "\\"), false, `${name}: one separator only (join(d, "feedback.log")): ${log_word}`);
       assert.match(got.stdout, /^tail -n0 -F .*feedback\.log'? \| grep --line-buffered FEEDBACK\n$/);
       assert.deepEqual(walk_files(project), before, "watch writes nothing");
     }
@@ -214,7 +222,7 @@ function doctor_rows(ctx: CompatCtx, who: "py" | "ts", args: string[]): { exit: 
   return { exit: run.status, rows, stdout };
 }
 
-test("(a) doctor on a project whose project.json is broken: same exit as 0.15 (whatever 0.15 does), same rows (group·level·title·detail·fixable)", { timeout: 240_000 }, () => {
+test("(a) doctor on a project whose project.json is broken: same exit as 0.15, same rows (group·level·title·detail·fixable); the exit contract is explicit — text mode 1 with a bad row, `--json` 0 even with a bad row (R1 필수 2)", { timeout: 240_000 }, () => {
   const ctx = make_ctx("pes-ts-doctor-bad-");
   try {
     const broken = synthetic_project(ctx, "broken");
@@ -222,7 +230,14 @@ test("(a) doctor on a project whose project.json is broken: same exit as 0.15 (w
     const got = doctor_rows(ctx, "ts", [broken]);
     assert.equal(got.exit, want.exit, "doctor's exit code is exactly 0.15's (py oracle)");
     assert.deepEqual(got.rows, want.rows);
-    // Reason: the former assumption "exit 1 whenever a `bad` row exists" is false for 0.15's --json mode (pes.py cmd_doctor exits 1 on a bad row in --json only on the DB path; text mode always does). The oracle is 0.15 itself, so the assumption assertion is dropped and the exact-exit comparison above stays.
+    // The contract, stated outright (not only "equal to the oracle"): the 0.15 path the user runs has no PES_DB_CORE, and there `--json` ends with 0 whatever the rows say.
+    assert.ok(got.rows.some((r) => r.level === "bad"), "the broken project.json gives a bad row");
+    assert.equal(want.exit, 0, "0.15 (no PES_DB_CORE): --json with a bad row ends with 0");
+    assert.equal(got.exit, 0, "ts: --json with a bad row ends with 0 (same as 0.15)");
+    const text_want = pes(ctx, "doctor", broken);
+    const text_got = run_ts_cli(ctx, ["doctor", broken], { narrow_path: true, extra_read: [ctx.narrow_bin], allow_child_process: true });
+    assert.equal(text_want.code, 1, "0.15: text mode with a bad row ends with 1");
+    assert.equal(text_got.status, 1, `ts: text mode with a bad row ends with 1 (same as 0.15): ${text_got.stderr}`);
   } finally {
     ctx.cleanup();
   }
@@ -283,6 +298,7 @@ test("(d) broken project.json: every read / report command ends with exit 1 and 
     }
     assert.deepEqual(readdirSync(broken), ["project.json"], "no file was added to the broken folder");
     assert.equal(basename(broken).startsWith("broken"), true);
+    // serve · hub · open · list · watch · doctor (R1 권장 6) and the project.json shapes NaN / BOM / `current` (권장 4·5): tests/test_pes_ts_r1_review.test.ts, same rules.
   } finally {
     ctx.cleanup();
   }

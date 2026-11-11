@@ -148,6 +148,12 @@ test("old data → new writes: after the Windows-style project is MIGRATED, ts `
       if (rel === "project.json" || !/\.(md|html|json|log|txt)$/.test(rel) || rel.startsWith("feedback/")) continue;
       assert.ok(!readFileSync(join(windows, ...rel.split("/")), "utf8").includes("\r"), `${rel}: the ts CLI wrote CR`);
     }
+    // R1 권장 7: the backslash-path check (assert_posix_storage's second half) comes back for everything TS generated — only project.json (not a TS output, D02) and feedback/ are left out.
+    // A raw `reports\plan` (html / md) and the escaped `reports\\plan` of a .json both contain `reports\`.
+    for (const rel of walk_files(windows)) {
+      if (rel === "project.json" || !/\.(md|html|json|log|txt)$/.test(rel) || rel.startsWith("feedback/")) continue;
+      assert.doesNotMatch(readFileSync(join(windows, ...rel.split("/")), "utf8"), /(reports|library|out)\\+[A-Za-z0-9_-]/, `${rel}: a backslash path in a generated file`);
+    }
     // migrated: the state lives in the database (D02), so the stored report paths are read from there — never from project.json
     const view = ts_view(home_of(ctx), seeded.slug);
     assert.ok(view !== undefined, "the migrated project is in the database");
