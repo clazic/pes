@@ -38,6 +38,7 @@ import {
   submission_received_at,
   type ReceiptRow,
 } from "./commands/api_reads.ts";
+import { HANDOFF_APPS } from "./commands/handoff_import.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
@@ -1600,7 +1601,7 @@ export class ApiApp {
     if (!is_record(source)) invalid_field("import");
     const at = "$.body.import";
     for (const field of Object.keys(source)) {
-      if (!["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_control_rev", "expected_heads"].includes(field)) {
+      if (!["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_control_rev", "expected_heads", "app"].includes(field)) {
         invalid(`${at}.${field}`);
       }
     }
@@ -1616,6 +1617,11 @@ export class ApiApp {
       if (value !== undefined && value !== null && (typeof value !== "string" || value.length === 0 || !value.isWellFormed())) {
         invalid(`${at}.${field}`);
       }
+    }
+    // The app the paste comes from, a closed list (PR20c). Absent is the Claude app; anything else is refused here
+    // and again by the command, before a row is written.
+    if (Object.hasOwn(source, "app") && (typeof source.app !== "string" || !Object.hasOwn(HANDOFF_APPS, source.app))) {
+      invalid(`${at}.app`);
     }
     const base = Object.hasOwn(source, "expected_control_rev")
       ? parse_decimal(source.expected_control_rev, `${at}.expected_control_rev`)
