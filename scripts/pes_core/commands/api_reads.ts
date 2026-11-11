@@ -242,11 +242,12 @@ export interface ReceiptRow {
   result_json: string;
   lease_id: string | null;
   fence: bigint | null;
+  run_id: string | null;
 }
 
 export function operation_receipt(db: Db, project_id: string, id: string): ReceiptRow | undefined {
   return db.get<ReceiptRow>(
-    `SELECT id, actor_id, client_request_id, action, created_at, result_json, lease_id, fence
+    `SELECT id, actor_id, client_request_id, action, created_at, result_json, lease_id, fence, run_id
        FROM mutation_commits
       WHERE project_id = ? AND id = ? AND action IN ('run.interrupted', 'run.cancelled')`,
     project_id,
@@ -262,14 +263,14 @@ export function request_receipt(
 ): ReceiptRow | undefined {
   return actor_id === null
     ? db.get<ReceiptRow>(
-        `SELECT id, actor_id, client_request_id, action, created_at, result_json, lease_id, fence
+        `SELECT id, actor_id, client_request_id, action, created_at, result_json, lease_id, fence, run_id
            FROM mutation_commits WHERE project_id = ? AND client_request_id = ?
           ORDER BY rowid LIMIT 1`,
         project_id,
         key,
       )
     : db.get<ReceiptRow>(
-        `SELECT id, actor_id, client_request_id, action, created_at, result_json, lease_id, fence
+        `SELECT id, actor_id, client_request_id, action, created_at, result_json, lease_id, fence, run_id
            FROM mutation_commits WHERE project_id = ? AND client_request_id = ? AND actor_id = ?`,
         project_id,
         key,

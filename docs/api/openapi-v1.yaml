@@ -215,6 +215,36 @@ components:
         runtime: { type: string, minLength: 1 }
         provider: { type: string, minLength: 1 }
         model: { type: string, minLength: 1 }
+    RunImport:
+      type: object
+      description: "Explicit hand-off import (owner session only): the owner's own hand-off run, the pasted results and the end of the run in one step. The receipt and the run belong to the owner (a human actor), via is import, provenance.verified is false; there is no claim, lease or fence. The Idempotency-Key must be import-<request_id>, otherwise 400 invalid_payload ($.headers.idempotency-key), so one bundle cannot be imported twice under two keys. Refusals write nothing: 409 conflict when the stage is approved or the round is sealed (the declared round, or the stage's current round when none is declared; a human reopens the stage or starts a new round first), 400 invalid_payload when one import names the same object more than once (once per object is allowed) or when round_id comes without stage_id."
+      required: [import]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        import:
+          type: object
+          required: [results, request_id]
+          additionalProperties: false
+          properties:
+            results: { type: array, minItems: 1, maxItems: 20, items: { type: object } }
+            request_id: { type: string, minLength: 1 }
+            stage_id: { type: string }
+            round_id: { type: string }
+            claimed_tool: { type: string, description: "A claim of the pasted text, never verified" }
+            claimed_model: { type: string, description: "A claim of the pasted text, never verified" }
+            expected_control_rev: { type: string }
+            expected_heads:
+              type: array
+              maxItems: 1000
+              description: "The object heads the bundle was copied from. Compared with the current heads in the import's own transaction; any difference (or an archived/missing object) is 409 rev_conflict with details.object_id and nothing is written."
+              items:
+                type: object
+                required: [object_id, version_id]
+                additionalProperties: false
+                properties:
+                  object_id: { type: string, minLength: 1 }
+                  version_id: { type: string, minLength: 1 }
     ClaimFresh:
       type: object
       required: [mode, runtime, provider, model]
@@ -339,7 +369,14 @@ components:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         lease_id: { type: string, minLength: 1 }
         fence: { type: string }
-        progress: { type: object, description: "Checked, not stored" }
+        progress:
+          type: object
+          description: "Optional progress note {phase, observed_at?}; observed_at defaults to the server clock. It is stored in the run.heartbeat receipt and event, and the answer carries the stored note as data.progress (a replay carries the first one) next to run_id, lease and server_time."
+          additionalProperties: false
+          required: [phase]
+          properties:
+            phase: { type: string, minLength: 1 }
+            observed_at: { type: integer, minimum: 0 }
     ReleaseBody:
       type: object
       required: [lease_id, fence]
@@ -599,7 +636,7 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs:
     post:
-      summary: Owner queues a run for an agent actor (no lease is taken)
+      summary: Owner queues a run for an agent actor (no lease is taken), or imports a pasted hand-off result
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -608,7 +645,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/RunCreate" }
+            schema:
+              oneOf:
+                - { $ref: "#/components/schemas/RunCreate" }
+                - { $ref: "#/components/schemas/RunImport" }
       responses:
         "201":
           description: Queued run
@@ -674,12 +714,12 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/runs/{r}/results:
     post:
-      summary: Submit 1-20 version appends as one atomic result bundle
+      summary: Submit 1-20 version appends as one atomic result bundle (agent tokens only; an owner session gets 403, an owner import goes through POST /runs)
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/IdempotencyKey"
-      security: [{ agentToken: [] }, { localSession: [] }]
+      security: [{ agentToken: [] }]
       requestBody:
         required: true
         content:
@@ -884,6 +924,7 @@ paths:
   /api/v1/projects/{id}/requests/{key}:
     get:
       summary: Look up a finished request by its Idempotency-Key
+      description: "data carries the receipt: action, tx_id, the original status and run_id (the run the request belonged to, or null when it had none)."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RequestKey"
@@ -904,6 +945,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RunId"
+        - name: limit
+          in: query
+          required: false
+          description: "How many answers one read returns at most (1-100, default 100). The next_cursor follows the last answer returned, so a smaller page is read on from there with no gap. The MCP adapter asks for fewer so its reply stays small."
+          schema: { type: integer, minimum: 1, maximum: 100 }
       security: [{ agentToken: [] }]
       responses:
         "200":

@@ -552,7 +552,7 @@ export class ApiApp {
         act: async (r, project, auth) => this.#wait(r, project, auth),
       }),
       route("POST", `${P}/runs/{r}/results`, "results.submit", {
-        who: "any", scope: "run:submit",
+        who: "agent", scope: "run:submit",
         act: async (r, project, auth) => this.#results(r, project, auth),
       }),
       route("POST", `${P}/runs/{r}/complete`, "runs.complete", {
@@ -1563,9 +1563,52 @@ export class ApiApp {
   // -------------------------------------------------------------------------
   // runs (PR13)
 
+  /**
+   * An explicit hand-off import (PR20a): the owner session records a result the human pasted back from an AI
+   * app that has no connection to PES. It creates the owner's own run, appends the results and ends the run,
+   * all in one step, as an import (via 'import'). It is the only way a result is written without a lease.
+   */
+  async #handoff_import(
+    project: ProjectRow,
+    auth: AuthInfo,
+    key: string,
+    body: Record<string, unknown>,
+  ): Promise<HandlerResult> {
+    reject_unknown(body, ["import"]);
+    const source = body.import;
+    if (!is_record(source)) invalid_field("import");
+    const at = "$.body.import";
+    for (const field of Object.keys(source)) {
+      if (!["results", "request_id", "stage_id", "round_id", "claimed_tool", "claimed_model", "expected_control_rev", "expected_heads"].includes(field)) {
+        invalid(`${at}.${field}`);
+      }
+    }
+    if (!Array.isArray(source.results) || source.results.length < 1 || source.results.length > MAX_RESULTS_PER_BATCH) {
+      invalid(`${at}.results`);
+    }
+    const request_id = require_text(source, "request_id", at);
+    // One bundle is imported once: its Idempotency-Key is the bundle's own request id, so another key for the
+    // same request_id is refused here instead of importing the bundle a second time.
+    if (key !== `import-${request_id}`) invalid("$.headers.idempotency-key");
+    for (const field of ["stage_id", "round_id", "claimed_tool", "claimed_model"]) {
+      const value = source[field];
+      if (value !== undefined && value !== null && (typeof value !== "string" || value.length === 0 || !value.isWellFormed())) {
+        invalid(`${at}.${field}`);
+      }
+    }
+    const base = Object.hasOwn(source, "expected_control_rev")
+      ? parse_decimal(source.expected_control_rev, `${at}.expected_control_rev`)
+      : undefined;
+    const { expected_control_rev: _base, ...payload } = source;
+    const ctx = { ...this.#ctx(project, auth, key, base), via: "import" as const };
+    const out = await this.#exec(() => create_run(this.#service, ctx, { import: payload }));
+    return { status: 201, data: { ...result_record(out.result), mode: "B" }, replayed: out.replayed };
+  }
+
   async #runs_create(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
+    if (Object.hasOwn(body, "import")) return this.#handoff_import(project, auth, key, body);
     reject_unknown(body, ["actor_id", "mode", "runtime", "provider", "model"]);
     const actor_id = require_text(body, "actor_id");
     const mode = require_mode(body);
@@ -1588,7 +1631,26 @@ export class ApiApp {
     return { status: 201, data: { ...result_record(out.result), mode }, replayed: out.replayed };
   }
 
+  /**
+   * A claim that names a run PES does not have is answered as not_found even when the Idempotency-Key is
+   * missing: the thing asked for is looked at before the shape of the request. (Nothing is written either way.)
+   */
+  #unknown_claim_target(request: RouteRequest, project: ProjectRow): void {
+    if (request.key !== null || request.body === null) return;
+    try {
+      const bytes = typeof request.body === "string" ? Buffer.from(request.body, "utf8") : request.body;
+      if (bytes.byteLength > MAX_BODY_BYTES) return;
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      if (is_record(parsed) && typeof parsed.run_id === "string" && run_info(this.#db, project.id, parsed.run_id) === undefined) {
+        throw new Fail("not_found");
+      }
+    } catch (error) {
+      if (error instanceof Fail) throw error;
+    }
+  }
+
   async #claims(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    this.#unknown_claim_target(request, project);
     const key = this.#require_key(request);
     const body = this.#json_body(request);
     const has_run = Object.hasOwn(body, "run_id");
@@ -1731,7 +1793,13 @@ export class ApiApp {
     }
     if (run_info(this.#db, project.id, run_id) === undefined) throw new Fail("not_found");
     const out = await this.#exec(
-      () => run_heartbeat(this.#service, this.#ctx(project, auth, key), { run_id, lease_id, fence }),
+      () =>
+        run_heartbeat(this.#service, this.#ctx(project, auth, key), {
+          run_id,
+          lease_id,
+          fence,
+          ...(Object.hasOwn(body, "progress") ? { progress: body.progress } : {}),
+        }),
       (error) => {
         const failure = fail_from(error);
         return failure.code === "conflict" ? this.#lease_lost(project.id, String(body.fence), auth) : failure;
@@ -1748,6 +1816,8 @@ export class ApiApp {
           expires_at: Number(result.expires_at),
         },
         server_time: this.#now(),
+        // the stored note, so a replay and the event agree with what was saved
+        ...(is_record(result.progress) ? { progress: result.progress } : {}),
       },
       replayed: out.replayed,
     };
@@ -1958,6 +2028,7 @@ export class ApiApp {
   async #inputs(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const run_id = request.params[1] as string;
     const wait_ms = this.#query_limit(request, "wait_ms", 0, MAX_WAIT_MS, 0);
+    const limit = this.#query_limit(request, "limit", 1, LIST_MAX_ITEMS, LIST_MAX_ITEMS);
     const scope = `run:${run_id}:${auth.actor_id}`;
     const given = request.query.has("cursor") ? read_cursor(this.#secret, request.query.get("cursor") as string) : undefined;
     const op = this.#table.find((spec) => spec.operation === "runs.inputs")?.op as Op;
@@ -1994,7 +2065,7 @@ export class ApiApp {
           after = BigInt(given.q);
         }
         const page = read_page
-          ? inputs_page(this.#db, current.id, run_id, run.actor_id, after, LIST_MAX_ITEMS)
+          ? inputs_page(this.#db, current.id, run_id, run.actor_id, after, limit)
           : { items: [], has_more: false };
         return { meta, after, page };
       });
@@ -2148,6 +2219,7 @@ export class ApiApp {
         status,
         operation_id: ACCEPTED_ACTIONS.has(row.action) ? row.id : null,
         tx_id: row.id,
+        run_id: row.run_id,
       },
     };
   }
