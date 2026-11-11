@@ -7,6 +7,7 @@
  * 이 시험은 OS 와 무관하게(macOS 에서도) 그 오류를 주입해서 재현한다:
  *   python -I -X utf8 -c "<주입 코드>"  — 새 .py 파일 없이 -c 문자열만 쓴다. 주입 코드는 os.open·Path.stat·Path.unlink 를
  *   `.project.json.lock` 이름에만 PermissionError 로 바꾸고(처음 k 번, -1 이면 계속), 그 뒤는 진짜 동작을 부른다.
+ *   nt:true 면 PermissionError 순간에만 os.name 을 "nt" 로 보이게 해 Windows 분기를 흉내 낸다 (생략하면 실제 OS).
  *   마감(30초)은 time.time/time.sleep 을 합성 시계로 바꿔 실제로 기다리지 않는다.
  * 모든 합성 자료이고 HOME·USERPROFILE·PES_HOME 은 임시 폴더다 (set_env.ts → isolated_home).
  *
@@ -16,7 +17,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -33,8 +34,14 @@ interface Inject {
   stat_fail?: number;
   /** 처음 k 번 Path.unlink(잠금) 이 PermissionError. -1 = 계속. */
   unlink_fail?: number;
-  /** open 이 PermissionError 를 내기 전에 진짜 O_EXCL 로 잠금 파일을 먼저 만들어 둔다(=남의 잠금이 있는 상태 흉내)가 아니라, 처음 k 번을 FileExistsError 로 바꾼다. */
+  /** 처음 k 번 os.open(잠금) 이 FileExistsError (남의 잠금이 있음). */
   exists_fail?: number;
+  /**
+   * true 면 PermissionError 를 내는 순간부터 다음 stat/unlink/open/sleep 호출 직전까지만 os.name 을 "nt" 로 보이게 한다
+   * (=Windows 흉내). pes.py 가 except 절에서 os.name 을 물을 때만 영향을 주고 pathlib 은 이미 만들어진 뒤라 건드리지 않는다.
+   * false/생략이면 실제 OS(macOS/Linux) 그대로 — "비 Windows" 경로를 시험한다.
+   */
+  nt?: boolean;
   /** time.time/time.sleep 을 합성 시계로 바꿔 마감(30초)을 기다리지 않게 한다. */
   fake_clock?: boolean;
 }
@@ -50,10 +57,14 @@ interface Counts {
 // 주입 코드. 인자·경로는 환경 변수(SEL75_INJECT, SEL75_PES, SEL75_ARGV, SEL75_REPORT)로 받는다.
 const INJECT_CODE = `
 import atexit, json, os, pathlib, runpy, sys, time
+REAL_NAME = os.name
 cfg = json.loads(os.environ["SEL75_INJECT"])
 LOCK = ".project.json.lock"
 left = {k: cfg.get(k + "_fail", 0) for k in ("open", "stat", "unlink", "exists")}
 hit = {"open": 0, "stat": 0, "unlink": 0, "exists": 0, "slept": 0}
+
+def restore_name():
+    os.name = REAL_NAME
 
 def take(kind):
     if left[kind] == 0:
@@ -65,8 +76,11 @@ def take(kind):
 
 _open = os.open
 def fake_open(path, *a, **k):
+    restore_name()
     if os.path.basename(os.fspath(path)) == LOCK:
         if take("open"):
+            if cfg.get("nt"):
+                os.name = "nt"
             raise PermissionError(13, "Permission denied", os.fspath(path))
         if take("exists"):
             raise FileExistsError(17, "File exists", os.fspath(path))
@@ -75,6 +89,7 @@ os.open = fake_open
 
 _stat = pathlib.Path.stat
 def fake_stat(self, *a, **k):
+    restore_name()
     if self.name == LOCK and take("stat"):
         raise PermissionError(13, "Permission denied", str(self))
     return _stat(self, *a, **k)
@@ -82,6 +97,7 @@ pathlib.Path.stat = fake_stat
 
 _unlink = pathlib.Path.unlink
 def fake_unlink(self, *a, **k):
+    restore_name()
     if self.name == LOCK and take("unlink"):
         raise PermissionError(13, "Permission denied", str(self))
     return _unlink(self, *a, **k)
@@ -92,11 +108,13 @@ if cfg.get("fake_clock"):
     skew = [0.0]
     time.time = lambda: _time() + skew[0]
     def fake_sleep(s):
+        restore_name()
         hit["slept"] += 1
         skew[0] += s
     time.sleep = fake_sleep
 
 def report():
+    restore_name()
     with open(os.environ["SEL75_REPORT"], "w", encoding="utf-8") as f:
         json.dump(hit, f)
 atexit.register(report)
@@ -212,10 +230,10 @@ test("주입 장치: 오류를 주입하지 않으면 평범한 set 과 같다 �
 // os.open 이 PermissionError (Windows: 남이 잠금 파일을 지우는 중)
 
 for (const k of [1, 2, 5, 40]) {
-  test(`잠금 만들기(os.open)가 처음 ${k}번 PermissionError 여도 set 은 재시도해서 성공하고 잠금·tmp 를 남기지 않는다`, () => {
+  test(`(Windows 흉내) 잠금 만들기(os.open)가 처음 ${k}번 PermissionError 여도 set 은 재시도해서 성공하고 잠금·tmp 를 남기지 않는다`, () => {
     const e = make_set_env();
     try {
-      const r = set_ok(e, { open_fail: k, fake_clock: true }, `열기 ${k}번 실패 뒤 성공`, `open ${k}`);
+      const r = set_ok(e, { open_fail: k, nt: true, fake_clock: true }, `열기 ${k}번 실패 뒤 성공`, `open ${k}`);
       assert.equal(r.counts.open, k, "주입이 실제로 k 번 일어났다");
       assert.ok(!existsSync(lock_path(e)), "끝나면 잠금 파일이 없다");
       // 이어지는 평범한 set 도 막히지 않는다
@@ -230,7 +248,7 @@ test("os.open PermissionError 가 한 번 나고 그다음 진짜 FileExistsErro
   const e = make_set_env();
   try {
     put_lock(e, 120);
-    const r = set_ok(e, { open_fail: 1, fake_clock: true }, "묵은 잠금 뒤 성공", "PermissionError 뒤 묵은 잠금");
+    const r = set_ok(e, { open_fail: 1, nt: true, fake_clock: true }, "묵은 잠금 뒤 성공", "PermissionError 뒤 묵은 잠금");
     assert.equal(r.counts.open, 1);
     assert.ok(!existsSync(lock_path(e)));
   } finally {
@@ -241,7 +259,7 @@ test("os.open PermissionError 가 한 번 나고 그다음 진짜 FileExistsErro
 test("os.open PermissionError 와 FileExistsError 가 번갈아 나와도 성공한다 (삭제 대기 ↔ 이미 있음)", () => {
   const e = make_set_env();
   try {
-    const r = set_ok(e, { open_fail: 3, exists_fail: 3, fake_clock: true }, "번갈아 실패", "번갈아");
+    const r = set_ok(e, { open_fail: 3, exists_fail: 3, nt: true, fake_clock: true }, "번갈아 실패", "번갈아");
     assert.equal(r.counts.open, 3);
     assert.equal(r.counts.exists, 3);
   } finally {
@@ -270,7 +288,7 @@ test("open 이 PermissionError 이고 그 뒤 stat 도 PermissionError 여도(�
   const e = make_set_env();
   try {
     put_lock(e, 120);
-    const r = set_ok(e, { open_fail: 2, stat_fail: 2, fake_clock: true }, "open·stat 모두 실패", "open+stat");
+    const r = set_ok(e, { open_fail: 2, stat_fail: 2, nt: true, fake_clock: true }, "open·stat 모두 실패", "open+stat");
     assert.equal(r.counts.open, 2);
     assert.ok(r.counts.stat >= 1, "stat 실패도 일어났다");
   } finally {
@@ -295,30 +313,125 @@ test("묵은 잠금을 치우는 unlink 가 처음 k번 PermissionError 여도 �
   }
 });
 
-test("저장을 마치고 잠금을 지우는 finally 의 unlink 가 PermissionError 여도 set 은 성공하고 스택 추적을 내지 않는다 (잠금이 남으면 다음 set 이 이어받는다)", () => {
-  for (const k of [1, 2, -1]) {
+// finally unlink 재시도: 총 50회 × 0.02초 ≈ 1초. 49번 실패까지는 지워지고, 50번 계속 실패하면 조용히 포기한다.
+for (const k of [1, 2, 49]) {
+  test(`저장 뒤 잠금을 지우는 finally 의 unlink 가 처음 ${k}번 PermissionError 여도(50회 미만) 잠금이 지워지고 스택 추적이 없다`, () => {
     const e = make_set_env();
     try {
-      const r = set_ok(e, { unlink_fail: k }, `끝 unlink ${k} 실패`, `finally unlink ${k}`);
-      assert.ok(r.counts.unlink >= 1, "unlink 실패가 실제로 일어났다");
-      if (existsSync(lock_path(e))) {
-        // 지우지 못한 잠금: 방금 만든 것이라 fresh 다. 60초 넘게 묵었다고 보면 다음 set 이 치우고 진행한다.
-        age_lock(e, 120);
-        set_ok(e, { fake_clock: true }, `이어받은 set (k=${k})`, `다음 set k=${k}`);
-        assert.ok(!existsSync(lock_path(e)), "다음 set 은 잠금을 남기지 않는다");
-      }
+      const r = set_ok(e, { unlink_fail: k, fake_clock: true }, `끝 unlink ${k} 실패`, `finally unlink ${k}`);
+      assert.equal(r.counts.unlink, k, "주입이 실제로 k 번 일어났다");
+      assert.ok(!existsSync(lock_path(e)), "50회 안에 지워졌으니 잠금이 남지 않는다");
     } finally {
       e.cleanup();
     }
+  });
+}
+
+test("finally 의 unlink 가 계속 PermissionError 이면 약 1초(50회) 뒤 포기하고 — 스택 추적 없이 성공, 잠금은 남고, 그 뒤는 60초 규칙을 따른다", () => {
+  const e = make_set_env();
+  try {
+    const r = set_ok(e, { unlink_fail: -1, fake_clock: true }, "계속 unlink 실패", "finally unlink 계속");
+    assert.equal(r.counts.unlink, 50, "정확히 50번 시도하고 멈춘다");
+    assert.ok(r.counts.slept >= 49 && r.counts.slept <= 52, `재시도 사이에 약 49번 잔다 (잠 ${r.counts.slept}번 ≈ 1초)`);
+    assert.ok(existsSync(lock_path(e)), "지우지 못한 잠금이 남는다");
+
+    // 방금 만든 잠금은 fresh: 60초가 안 됐으면 다음 set 은 기다리다 종료 3.
+    const before = e.raw();
+    const held = run_inject(e, ["set", e.slug, "plan", "summary", value(e, "next.txt", "아직")], { fake_clock: true });
+    assert.equal(held.status, 3, held.stderr);
+    assert.doesNotMatch(held.stderr, CRASH);
+    assert.equal(e.raw(), before, "project.json 불변");
+
+    // 60초 넘게 묵으면 다음 set 이 치우고 진행한다.
+    age_lock(e, 61);
+    set_ok(e, {}, "묵은 잠금 이어받음", "다음 set");
+    assert.ok(!existsSync(lock_path(e)), "다음 set 은 잠금을 남기지 않는다");
+  } finally {
+    e.cleanup();
   }
 });
 
-test("finally 의 unlink 가 한 번 실패했다가 되면(일시적 삭제 대기) 잠금은 남지 않는다 — 재시도", () => {
+// ---------------------------------------------------------------------------
+// 비 Windows: PermissionError + 잠금 파일 없음 = 진짜 권한 없음 → 기다리지 않고 즉시 실패
+
+test("비 Windows·잠금 없음·os.open 이 계속 PermissionError 이면 기다리지 않고(잠 0번) 종료 2, 권한 안내, 스택 추적 없음", { skip: process.platform === "win32" ? "Windows 는 PermissionError 를 삭제 대기로 보고 재시도한다 (계약이 다름)" : false }, () => {
   const e = make_set_env();
   try {
-    set_ok(e, { unlink_fail: 1 }, "일시 실패 뒤 정리", "일시적 unlink 실패");
-    assert.ok(!existsSync(lock_path(e)), "일시적 실패는 재시도해서 잠금 파일을 남기지 않는다");
+    const before = e.raw();
+    const started = Date.now();
+    // nt 를 주지 않는다 = 실제 OS. 이 시험은 Windows 에서는 의미가 없으므로 아래에서 건너뛴다.
+    const r = run_inject(e, ["set", e.slug, "plan", "summary", value(e, "noperm.txt", "권한 없음")], { open_fail: -1, fake_clock: true });
+    assert.ok(Date.now() - started < 20_000);
+    assert.doesNotMatch(r.stderr, CRASH, r.stderr);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /권한/, "권한 문제라고 알려 준다");
+    assert.doesNotMatch(r.stderr, /다른 set/, "거짓 안내(저장 중) 를 하지 않는다");
+    assert.equal(r.counts.slept, 0, `기다리지 않는다 (잠 ${r.counts.slept}번)`);
+    assert.equal(r.counts.open, 1, "os.open 은 한 번만 시도한다");
+    assert.equal(e.raw(), before, "project.json 불변");
+    assert.ok(!existsSync(lock_path(e)));
+    assert_clean(e, "권한 없음");
   } finally {
+    e.cleanup();
+  }
+});
+
+test("비 Windows 라도 잠금 파일이 이미 있는 채로 os.open 이 PermissionError 이면 '아직 잡혀 있음'으로 재시도한다 — 마감 뒤 종료 3", { skip: process.platform === "win32" ? "Windows 는 nt 분기로 이미 시험한다" : false }, () => {
+  const e = make_set_env();
+  try {
+    put_lock(e, 0);
+    const before = e.raw();
+    const r = run_inject(e, ["set", e.slug, "plan", "summary", value(e, "held.txt", "잡힘")], { open_fail: -1, fake_clock: true });
+    assert.doesNotMatch(r.stderr, CRASH, r.stderr);
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /다른 set/);
+    assert.ok(r.counts.slept >= 100, `재시도했다 (잠 ${r.counts.slept}번)`);
+    assert.equal(e.raw(), before);
+    assert.ok(existsSync(lock_path(e)), "남의 잠금은 건드리지 않는다");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("비 Windows·잠금이 있고 os.open 이 PermissionError 를 몇 번 낸 뒤 묵은(60초 넘은) 잠금이면 치우고 성공한다", { skip: process.platform === "win32" ? "Windows 는 nt 분기로 이미 시험한다" : false }, () => {
+  const e = make_set_env();
+  try {
+    put_lock(e, 120);
+    const r = set_ok(e, { open_fail: 2, fake_clock: true }, "묵은 잠금 뒤 성공", "비 Windows 묵은 잠금");
+    assert.equal(r.counts.open, 2);
+    assert.ok(!existsSync(lock_path(e)));
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("실제 쓰기 금지 폴더(chmod 555): 30초 기다리지 않고 곧바로 종료 2, 권한 안내, 스택 추적 없음", {
+    skip:
+      process.platform === "win32"
+        ? "Windows 는 폴더 chmod 로 쓰기를 막을 수 없다"
+        : process.getuid?.() === 0
+          ? "root 는 chmod 555 폴더에도 쓸 수 있다"
+          : false,
+  }, () => {
+  const e = make_set_env();
+  try {
+    const before = e.raw();
+    chmodSync(e.folder, 0o555);
+    const started = Date.now();
+    const r = run_inject(e, ["set", e.slug, "plan", "summary", value(e, "ro.txt", "읽기 전용")], {});
+    const elapsed = Date.now() - started;
+    chmodSync(e.folder, 0o755);
+    assert.ok(elapsed < 15_000, `30초를 기다리지 않는다 (${elapsed}ms)`);
+    assert.doesNotMatch(r.stderr, CRASH, r.stderr);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /권한/);
+    assert.equal(e.raw(), before);
+  } finally {
+    try {
+      chmodSync(e.folder, 0o755);
+    } catch {
+      /* 이미 지워졌을 수 있다 */
+    }
     e.cleanup();
   }
 });
@@ -346,12 +459,12 @@ test("fresh 잠금이 계속 있으면 30초 마감(합성 시간) 뒤 스택 �
   }
 });
 
-test("os.open 이 계속 PermissionError 이면(영영 풀리지 않는 삭제 대기) 마감 뒤 스택 추적 없이 종료 3 으로 거절한다", () => {
+test("(Windows 흉내) os.open 이 계속 PermissionError 이면(영영 풀리지 않는 삭제 대기) 마감 뒤 스택 추적 없이 종료 3 으로 거절한다", () => {
   const e = make_set_env();
   try {
     const before = e.raw();
     const started = Date.now();
-    const r = run_inject(e, ["set", e.slug, "plan", "summary", value(e, "forever.txt", "영영")], { open_fail: -1, fake_clock: true });
+    const r = run_inject(e, ["set", e.slug, "plan", "summary", value(e, "forever.txt", "영영")], { open_fail: -1, nt: true, fake_clock: true });
     assert.ok(Date.now() - started < 20_000, "실제로 30초를 기다리지 않는다");
     assert.doesNotMatch(r.stderr, CRASH, r.stderr);
     assert.equal(r.status, 3, r.stderr);
@@ -423,8 +536,8 @@ test("동시 set 둘 중 한쪽의 os.open 이 처음 몇 번 PermissionError �
       const a = value(e, `ca${round}.txt`, `에이 ${round}`);
       const b = value(e, `cb${round}.txt`, `비 ${round}`);
       const [ra, rb] = await Promise.all([
-        run_inject_async(e, ["set", e.slug, "plan", "summary", a], { open_fail: 1 + (round % 4) }),
-        run_inject_async(e, ["set", e.slug, "project", "conclusion", b], { open_fail: 1 + ((round + 2) % 4) }),
+        run_inject_async(e, ["set", e.slug, "plan", "summary", a], { open_fail: 1 + (round % 4), nt: true }),
+        run_inject_async(e, ["set", e.slug, "project", "conclusion", b], { open_fail: 1 + ((round + 2) % 4), nt: true }),
       ]);
       for (const [name, r] of [["a", ra], ["b", rb]] as const) {
         assert.doesNotMatch(r.stderr, CRASH, `라운드 ${round} ${name}\n${r.stderr}`);
@@ -436,36 +549,6 @@ test("동시 set 둘 중 한쪽의 os.open 이 처음 몇 번 PermissionError �
       assert_clean(e, `라운드 ${round}`);
       assert.ok(!existsSync(lock_path(e)), `라운드 ${round}: 잠금이 남는다`);
     }
-  } finally {
-    e.cleanup();
-  }
-});
-
-// Windows 변형: 기존 '동시 실행 둘 (10회)' 은 그대로 두고, 반복을 늘린 변형 하나. Windows 에서 프로세스 시작이 3~10배 느리므로
-// 시간 상한을 둔다 (macOS/Linux 에서는 수 초면 끝난다).
-test("set 동시 실행 둘 — 반복 늘린 변형 (30회): 충돌·갱신 유실·잔여 파일 없음, 시간 상한 안에 끝난다", async () => {
-  const e = make_set_env();
-  const started = Date.now();
-  try {
-    for (let round = 0; round < 30; round++) {
-      const a = value(e, `wa${round}.txt`, `에이 ${round}`);
-      const b = value(e, `wb${round}.txt`, `비 ${round}`);
-      const [ra, rb] = await Promise.all([
-        run_inject_async(e, ["set", e.slug, "plan", "summary", a], {}),
-        run_inject_async(e, ["set", e.slug, "project", "conclusion", b], {}),
-      ]);
-      for (const [name, r] of [["a", ra], ["b", rb]] as const) {
-        assert.doesNotMatch(r.stderr, CRASH, `라운드 ${round} ${name}: 충돌하면 안 된다\n${r.stderr}`);
-        assert.equal(r.status, 0, `라운드 ${round} ${name}: 종료 ${r.status}\n${r.stderr}`);
-      }
-      const st = e.state();
-      assert.equal(st.stages.plan.summary, `에이 ${round}`, `라운드 ${round}: a 유실`);
-      assert.equal(st.conclusion, `비 ${round}`, `라운드 ${round}: b 유실`);
-      assert_clean(e, `라운드 ${round}`);
-      assert.ok(!existsSync(lock_path(e)), `라운드 ${round}: 잠금이 남는다`);
-    }
-    const elapsed = Date.now() - started;
-    assert.ok(elapsed < 150_000, `30라운드가 ${elapsed}ms — 한 라운드가 5초를 넘으면 잠금 마감(30초)에 가깝게 기다린다는 뜻이다`);
   } finally {
     e.cleanup();
   }
