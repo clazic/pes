@@ -5,8 +5,9 @@ import { useWorkspace } from "@/api/queries";
 import type { WorkspaceView } from "@/api/types";
 import { StatusMark, TONE_TEXT, turnLabel } from "@/components/pes/status";
 import { lookup } from "@/components/pes/status-registry";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
-import { placeLabel, STAGE_LABEL } from "@/lib/labels";
+import { RoundDot } from "@/components/pes/stage-mark";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem, useSidebar } from "@/components/ui/sidebar";
+import { placeLabel, roundLabel, STAGE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { roundHref } from "@/features/workspace/paths";
 
@@ -38,35 +39,44 @@ function blockedLink(e: React.MouseEvent) {
   e.preventDefault();
 }
 
-/** 연구 흐름 — 단계 링크 + 상태 사전 이름(승인됨 · 현재 · 나의 할 일 · 시작 전). 접혀도 링크 이름은 남는다(아이콘 줄 · 툴팁) */
+/**
+ * 연구 흐름 — 단계 아래 라운드 나무(설계 4.5 · 4.7 · 12.9 “왼쪽 탐색 열은 사이드바로”). 단계·라운드 탐색은 이 나무 하나뿐이다.
+ *  - 단계 링크: 모양 + 상태 사전 이름(승인됨 · 현재 · 나의 할 일 · 시작 전). 그 단계의 가장 최근 라운드로 간다. 접혀도 이름은 남는다(아이콘 줄 · 툴팁).
+ *  - 라운드: 현재 단계와 지금 보는 단계 아래에만 펼친다. 단계 시작은 round_id = NULL 이라 “단계 시작”(가짜 R0 없음).
+ *    보는 라운드만 aria-current="page", 현재 진행 라운드는 늘 “현재 진행”(지난 라운드를 볼 때도 함께 보인다).
+ *  - 휴대폰 판(Sheet)에서는 링크를 누르면 판을 닫는다(초점은 새 화면 제목 — arrival 이 맡음).
+ */
 function ResearchFlow({ ws }: { ws: WorkspaceView }) {
   const { setOpenMobile } = useSidebar();
   const m = useMatch("/p/:slug/e/:edition/s/:stage/r/:round");
+  const viewStage = m?.params.stage;
+  const viewRound = m?.params.round === "start" ? null : Number(m?.params.round);
+  const close = () => setOpenMobile(false);
   return (
-    <nav aria-label="연구 흐름 — 단계">
+    <nav aria-label="연구 흐름">
       <SidebarGroup>
         <SidebarGroupLabel>연구 흐름 · {ws.edition}판</SidebarGroupLabel>
         <SidebarMenu>
           {ws.stages.map((s) => {
             const def = lookup("stage", s.view);
             const latest = s.rounds.at(-1);
-            const here = m?.params.stage === s.key;
+            const here = viewStage === s.key;
+            const expanded = s.rounds.length > 0 && (here || ws.current.stage === s.key);
             const reasonId = `sidebar-stage-${s.key}-reason`;
             return (
               <SidebarMenuItem key={s.key}>
                 <SidebarMenuButton asChild isActive={here} tooltip={`${STAGE_LABEL[s.key]} · ${def.label}`}>
                   <Link
                     to={latest ? roundHref(ws.slug, ws.edition, s.key, latest.round_id) : "#"}
-                    aria-current={here ? "step" : undefined}
                     aria-disabled={latest ? undefined : true}
                     aria-describedby={latest ? undefined : reasonId}
-                    onClick={latest ? () => setOpenMobile(false) : blockedLink}
+                    onClick={latest ? close : blockedLink}
                     className="no-underline aria-disabled:pointer-events-auto aria-disabled:opacity-100"
                   >
                     <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center">
                       <StatusMark shape={def.shape} className={cn("size-2.5!", TONE_TEXT[def.tone])} />
                     </span>
-                    <span className="min-w-0 truncate">{STAGE_LABEL[s.key]}</span>
+                    <span className="min-w-0 truncate font-medium">{STAGE_LABEL[s.key]}</span>
                     <span className={cn("ml-auto shrink-0 text-caption", def.tone === "you" ? "font-semibold" : "opacity-75")}>
                       <span className="sr-only"> · </span>
                       {def.label}
@@ -78,6 +88,33 @@ function ResearchFlow({ ws }: { ws: WorkspaceView }) {
                     {PENDING_REASON}
                   </span>
                 )}
+                {expanded ? (
+                  <SidebarMenuSub className="mr-0 pr-0">
+                    {s.rounds.map((r) => {
+                      const viewing = here && viewRound === r.round_id;
+                      const current = r.state === "current";
+                      return (
+                        <SidebarMenuSubItem key={r.round_id ?? "start"}>
+                          <SidebarMenuSubButton asChild isActive={viewing} className="h-auto min-h-7 py-1 text-meta data-active:font-semibold">
+                            <Link to={roundHref(ws.slug, ws.edition, s.key, r.round_id)} aria-current={viewing ? "page" : undefined} onClick={close}>
+                              <RoundDot current={current} />
+                              <span className="min-w-0 truncate">{roundLabel(r.round_id)}</span>
+                              {current ? (
+                                <span className="ml-auto shrink-0 rounded-sm border border-primary-line px-1.5 text-caption font-medium text-primary-ink">
+                                  <span className="sr-only"> · </span>현재 진행
+                                </span>
+                              ) : viewing ? (
+                                <span className="ml-auto shrink-0 text-caption opacity-75">
+                                  <span className="sr-only"> · </span>보는 중
+                                </span>
+                              ) : null}
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                ) : null}
               </SidebarMenuItem>
             );
           })}
@@ -89,7 +126,7 @@ function ResearchFlow({ ws }: { ws: WorkspaceView }) {
 
 /**
  * 앱 셸 사이드바 — 승인 시안의 shadcn sidebar-07 블록(아이콘으로 접힘, collapsible="icon") 연구 공간판(설계 16.2).
- * 머리: “← 모든 프로젝트” · 프로젝트 자리 / 몸: 연구 흐름(단계). 900px 미만은 같은 내용이 왼쪽 판(Sheet)으로 열린다.
+ * 머리: “← 모든 프로젝트” · 프로젝트 자리 / 몸: 연구 흐름(단계 아래 라운드 나무). 900px 미만은 같은 내용이 왼쪽 판(Sheet)으로 열린다.
  * U1a 범위 밖인 것(프로젝트 전환 · 이 연구 메뉴 · 관리 공간)은 쓰는 이슈에서 시안 그대로 더한다.
  */
 export function AppSidebar() {

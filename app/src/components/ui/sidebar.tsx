@@ -25,8 +25,26 @@ import { PanelLeftIcon } from "lucide-react"
 // - Ctrl/Cmd+B는 한글 조합 중 무시 · 초점은 2px 실선 + 간격 2px(설계 3.9)
 // - U1a: 접기 단추 이름 “사이드바 …” + aria-expanded, 휴대폰 판을 닫으면 접기 단추로 초점(radix는 Dialog.Trigger 가 없으면 body 로 보냄)
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+// 접힘 상태는 이 브라우저(localStorage)에만 둔다 — 서버가 읽지 않으므로 쿠키를 쓰지 않는다(설계 12.9 · leader 결정 2026-11-12)
+export const SIDEBAR_STORAGE_KEY = "pes-sidebar-open"
+
+/** 저장된 접힘 상태(없거나 저장소를 못 쓰면 null) */
+export function readSidebarOpen(): boolean | null {
+  try {
+    const v = window.localStorage.getItem(SIDEBAR_STORAGE_KEY)
+    return v === "true" ? true : v === "false" ? false : null
+  } catch {
+    return null
+  }
+}
+
+function writeSidebarOpen(open: boolean) {
+  try {
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(open))
+  } catch {
+    // 저장소를 못 쓰면(사생활 보호 창 등) 이번 화면에서만 기억한다
+  }
+}
 const SIDEBAR_WIDTH = "15rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
@@ -82,8 +100,7 @@ function SidebarProvider({
         _setOpen(openState)
       }
 
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+      writeSidebarOpen(openState)
     },
     [setOpenProp, open]
   )
@@ -204,7 +221,7 @@ function Sidebar({
         >
           <SheetHeader className="sr-only">
             <SheetTitle>사이드바 메뉴</SheetTitle>
-            <SheetDescription>연구 흐름 · 단계</SheetDescription>
+            <SheetDescription>연구 흐름 · 단계와 라운드</SheetDescription>
           </SheetHeader>
           <div className="flex flex-col size-full">{children}</div>
         </SheetContent>

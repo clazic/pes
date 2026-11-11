@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, ScrollRestoration } from "react-router";
 import { createFakeClient } from "@/api/fake-client";
 import { ClientContext } from "@/api/queries";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { readSidebarOpen, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ArrivalContext, useArrivalRoot } from "./arrival";
 import { AppSidebar } from "./AppSidebar";
@@ -22,11 +22,9 @@ function makeQueryClient() {
   });
 }
 
-/** 사이드바 처음 상태: 사람이 접었거나 편 기록(쿠키 sidebar_state)이 있으면 그대로, 없으면 1280px 이상에서만 펼침(승인 시안과 같음) */
+/** 사이드바 처음 상태: 사람이 접었거나 편 기록(이 브라우저의 localStorage)이 있으면 그대로, 없으면 1280px 이상에서만 펼침(승인 시안과 같음). 쿠키는 쓰지 않는다 */
 function initialSidebarOpen() {
-  const m = document.cookie.match(/(?:^|; )sidebar_state=(true|false)/);
-  if (m) return m[1] === "true";
-  return window.innerWidth >= 1280;
+  return readSidebarOpen() ?? window.innerWidth >= 1280;
 }
 
 /**

@@ -12,11 +12,29 @@ function AlertCard({ alert, slug, edition }: { alert: AlertView; slug: string; e
   const ack = useAcknowledgeAlert(slug, edition);
   // 한 번 누름에 멱등 키 하나 — 응답을 못 받아 다시 누르면 같은 키로 다시 보낸다(두 번 처리되지 않음)
   const key = React.useRef<string | null>(null);
-  const onAck = () => {
+  // 사람이 이 단추로 확인했으면, 단추가 결과 줄로 바뀌는 그 순간 결과 줄로 초점을 옮긴다(BODY 로 떨어지지 않게)
+  const wantFocus = React.useRef(false);
+  const resultRef = React.useRef<HTMLSpanElement>(null);
+  const sending = ack.isPending;
+  const onAck = (e: React.MouseEvent) => {
+    // 보내는 동안은 disabled 대신 aria-disabled + 무시 — disabled 는 초점을 빼앗는다(설계 12.6 R05)
+    if (sending) {
+      e.preventDefault();
+      return;
+    }
     key.current ??= newIdempotencyKey();
+    wantFocus.current = true;
     ack.mutate({ alertId: alert.id, key: key.current });
   };
+  const acknowledged = !!alert.acknowledged;
+  React.useLayoutEffect(() => {
+    if (acknowledged && wantFocus.current) {
+      wantFocus.current = false;
+      resultRef.current?.focus();
+    }
+  }, [acknowledged]);
   const titleId = `${alert.id}-title`;
+  const sendingId = `${alert.id}-sending`;
   return (
     <section aria-labelledby={titleId} className="mt-5 flex gap-3 rounded-lg border border-bad-line bg-bad-soft px-4 py-3" data-print="hide">
       <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-bad" />
@@ -30,13 +48,20 @@ function AlertCard({ alert, slug, edition }: { alert: AlertView; slug: string; e
             <time dateTime={alert.raised_at}>{formatAt(alert.raised_at)}</time>
           </span>
           {alert.acknowledged ? (
-            <span className="text-caption font-medium text-ink-2">
+            <span ref={resultRef} tabIndex={-1} className="rounded-sm text-caption font-medium text-ink-2 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
               확인함 · 접수 {alert.acknowledged.receipt_no}
             </span>
           ) : (
-            <Button variant="outline" size="sm" disabled={ack.isPending} onClick={onAck}>
-              오류 확인
-            </Button>
+            <>
+              <Button variant="outline" size="sm" aria-disabled={sending || undefined} aria-describedby={sending ? sendingId : undefined} onClick={onAck}>
+                오류 확인
+              </Button>
+              {sending ? (
+                <span id={sendingId} className="text-caption text-ink-2">
+                  보내는 중…
+                </span>
+              ) : null}
+            </>
           )}
           <span role="status" className="sr-only">
             {alert.acknowledged ? "오류를 확인했습니다" : ""}
@@ -108,7 +133,7 @@ export function BodyPane({
           <Printer aria-hidden="true" />
           인쇄 미리보기
         </Button>
-        <Button variant="outline" size="sm" onClick={copy.copy} aria-expanded={copy.state === "fallback"} aria-controls="copy-fallback">
+        <Button variant="outline" size="sm" onClick={copy.copy} aria-expanded={copy.state === "fallback"} aria-controls={copy.state === "fallback" ? "copy-fallback" : undefined}>
           <Copy aria-hidden="true" />
           프롬프트 복사
         </Button>
@@ -119,7 +144,7 @@ export function BodyPane({
           reasonId="annotate-reason"
           reasonClassName="max-w-56"
           aria-expanded={annotateBlocked ? undefined : annotating}
-          aria-controls={annotateBlocked ? undefined : "annotate-panel"}
+          aria-controls={!annotateBlocked && annotating ? "annotate-panel" : undefined}
           onClick={() => setAnnotating((v) => !v)}
         >
           <MessageSquarePlus aria-hidden="true" />

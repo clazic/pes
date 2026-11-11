@@ -8,12 +8,11 @@ import { NotFound } from "@/app/NotFound";
 import { Status, turnKey, turnLabel } from "@/components/pes/status";
 import { Button } from "@/components/ui/button";
 import { placeLabel } from "@/lib/labels";
-import { useIsPhone, useIsTwoArea } from "@/lib/media";
+import { useIsPhone } from "@/lib/media";
 import { AskPane } from "./AskPane";
 import { BodyPane } from "./BodyPane";
 import { PeekDialog, PrintPreview, ViewSwitch } from "./Overlays";
 import { parseView, roundHref, type View } from "./paths";
-import { StageNav } from "./StageNav";
 
 const PHONE_REASON = {
   edit: "휴대폰에서는 질문을 고칠 수 없어요 — 데스크톱에서 해 주세요.",
@@ -28,9 +27,10 @@ const PAST_REASON = {
 const focusLost = () => !document.activeElement || document.activeElement === document.body;
 
 /**
- * 작업 공간 — 연구 공간 틀 안의 3/2/1영역(설계 3.8 · 4.5 · 4.7 · 12.3 · 12.9). 주소가 상태다:
+ * 작업 공간 — 연구 공간 틀(사이드바 · 머리줄) 안의 본문 · 질문(설계 3.8 · 4.5 · 4.7 · 12.3 · 12.9). 단계·라운드 탐색은 사이드바 나무가 맡는다.
+ * ≥1280 본문 | 질문 나란히, <1280 한 열 + 보기 전환(본문/질문). 주소가 상태다:
  * 경로 = 단계·라운드, view = 좁은 화면 보기, focus = 초점 자리, peek = 미리보기, print = 인쇄 미리보기.
- * 랜드마크: 단계·라운드 `nav` · 본문 `main`(화면 제목 · 지금 할 일 · 본문 영역) · 질문 `aside` 가 서로 형제다(aside 는 최상위 랜드마크).
+ * 랜드마크: 본문 `main`(화면 제목 · 지금 할 일 · 본문 영역) · 질문 `aside` 가 서로 형제다(aside 는 최상위 랜드마크).
  *
  * 초점 규칙: 주소를 바꾼 뒤 초점을 옮겨야 하면(질문으로 가기 · 인쇄 미리보기 열기/닫기) “그 주소가 그려진 다음”에 옮긴다 —
  * 좁은 화면에서는 주소가 바뀌어야 그 영역이 보이므로(display:none 인 동안 focus() 는 듣지 않는다).
@@ -46,7 +46,6 @@ export function WorkspaceScreen() {
   const ws = useWorkspace(slug, edition);
   const rq = useRound(slug, edition, stage, roundParam);
   const phone = useIsPhone();
-  const twoArea = useIsTwoArea();
   const ready = !!ws.data && !!rq.data && !rq.isPlaceholderData;
   useArrival(ready);
 
@@ -134,9 +133,8 @@ export function WorkspaceScreen() {
   if (ws.isPending || (rq.isPending && !rq.data)) {
     return (
       <div className="ws-frame">
-        <ViewSwitch view={view} twoArea={twoArea} onChange={() => {}} />
+        <ViewSwitch view={view} onChange={() => {}} />
         <div className="ws-grid" data-view={view}>
-          <nav aria-label="단계와 라운드" data-area="nav" />
           <main id="main" tabIndex={-1} aria-busy="true" className="ws-main">
             <p className="px-4 pt-5 pb-3 text-meta text-muted-foreground tab:px-6">불러오는 중</p>
             <div data-area="body" />
@@ -169,11 +167,8 @@ export function WorkspaceScreen() {
 
   return (
     <div className="ws-frame">
-      <ViewSwitch view={view} twoArea={twoArea} onChange={onView} />
+      <ViewSwitch view={view} onChange={onView} />
       <div className="ws-grid" data-view={view} data-printing={print ? "" : undefined}>
-        <nav aria-label="단계와 라운드" data-area="nav">
-          <StageNav ws={w} viewing={{ stage: round.stage, round_id: round.round_id }} />
-        </nav>
         <main id="main" tabIndex={-1} className="ws-main">
           <ScreenHead ws={w} round={round} title={title} past={past} onGoToQuestions={onGoToQuestions} />
           {print ? <PrintPreview round={round} title={`${w.title} — ${title}`} headingRef={printHeading} onClose={onClosePrint} /> : null}

@@ -59,8 +59,7 @@ function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="breadcrumb-page"
-      role="link"
-      aria-disabled="true"
+      // PES: 현재 곳은 aria-current="page" 만 — 링크 역할·aria-disabled 를 쓰지 않는다(aria-disabled 는 이유 글과 함께만 쓰는 규칙, 최종 리뷰 권장 5)
       aria-current="page"
       className={cn("font-normal text-foreground", className)}
       {...props}

@@ -274,19 +274,18 @@
     }
   }
 
-  /* ── 작업 공간 3/2/1영역(설계 3.8 · 12.9) — 연구 공간 틀(사이드바 · 머리줄) 본문 안 ─────────────────────────
-   * 랜드마크는 형제: 단계·라운드 nav · 본문 main(화면 머리 + 본문 영역) · 질문 aside.
-   * ≥1280 3영역 · 900~1279 2영역(단계·라운드 + 본문 또는 질문) · <900 1영역(view 가 고른 하나).
-   * 화면 머리(제목 · 지금 할 일)는 main 안이라 어느 보기에서나 보이고, view 는 main 안의 본문 영역과 nav · aside 만 고른다.
-   * 영역 고르기는 주소의 view(data-view)가 정하고, 폭은 CSS 가 정한다(첫 그림부터 맞음). 폭만으로 도구를 숨기지 않는다. */
+  /* ── 작업 공간 열 배치(설계 3.8 · 12.9) — 연구 공간 틀(사이드바 · 머리줄) 본문 안 ────────────────────────────
+   * 단계·라운드 탐색은 사이드바 나무 하나뿐이다(“왼쪽 탐색 열은 사이드바로”). 작업 공간의 영역은 본문 · 질문 둘.
+   * 랜드마크는 형제: 본문 main(화면 머리 + 본문 영역) · 질문 aside.
+   * ≥1280: 사이드바(≤240) | 본문 | 질문 380(≥1440 은 404). <1280: 한 열 + 보기 전환(view 가 본문 또는 질문을 고른다).
+   * 화면 머리(제목 · 지금 할 일)는 main 안이라 어느 보기에서나 보인다. 영역 고르기는 주소의 view(data-view)가, 폭은 CSS 가 정한다
+   * (첫 그림부터 맞음). 폭만으로 도구를 숨기지 않는다.
+   * 본문 하한 46rem(결과 글 읽기 폭): 1280 − 사이드바 펼침 15rem(210px) − 질문 380 = 690px ≥ 644px. */
   .ws-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "main" "nav" "ask";
+    grid-template-areas: "main" "ask";
     align-items: start;
-  }
-  .ws-grid > [data-area="nav"] {
-    grid-area: nav;
   }
   .ws-grid > .ws-main {
     grid-area: main;
@@ -299,32 +298,14 @@
     display: none;
     min-width: 0;
   }
-  .ws-grid[data-view="nav"] [data-area="nav"],
   .ws-grid[data-view="body"] [data-area="body"],
   .ws-grid[data-view="ask"] [data-area="ask"] {
     display: block;
   }
-  @media (min-width: 900px) {
-    .ws-grid {
-      grid-template-columns: 240px minmax(0, 1fr);
-      grid-template-areas: "nav main" "nav ask";
-    }
-    .ws-grid > [data-area="nav"],
-    .ws-grid[data-view="nav"] [data-area="body"] {
-      display: block;
-    }
-    .ws-grid > [data-area="nav"] {
-      position: sticky;
-      top: var(--header-h);
-      max-height: calc(100dvh - var(--header-h));
-      overflow-y: auto;
-      border-right: 1px solid var(--line);
-    }
-  }
   @media (min-width: 1280px) {
     .ws-grid {
-      grid-template-columns: 240px minmax(0, 1fr) 380px;
-      grid-template-areas: "nav main ask";
+      grid-template-columns: minmax(0, 1fr) 380px;
+      grid-template-areas: "main ask";
     }
     .ws-grid [data-area] {
       display: block;
@@ -342,7 +323,7 @@
   }
   @media (min-width: 1440px) {
     .ws-grid {
-      grid-template-columns: 240px minmax(0, 1fr) 404px;
+      grid-template-columns: minmax(0, 1fr) 404px;
     }
   }
 }
@@ -354,7 +335,7 @@
 @media (pointer: coarse) {
   :is(button, a)[data-variant],
   [role="radio"],
-  [data-area="nav"] a {
+  [data-sidebar="menu-sub-button"] {
     min-height: 44px;
   }
   :is(button, a)[data-variant] {
@@ -373,12 +354,11 @@
 }
 
 @media print {
-  /* 조작 요소(건너뛰기 · 머리줄 · 사이드바 · 보기 전환 · 단계·라운드 · 질문 영역)는 찍지 않는다 */
+  /* 조작 요소(건너뛰기 · 머리줄 · 사이드바 · 보기 전환 · 질문 영역)는 찍지 않는다 */
   .skip-link,
   .site-header,
   [data-slot="sidebar"],
   .view-switch,
-  [data-area="nav"],
   [data-area="ask"],
   [data-print="hide"] {
     display: none !important;

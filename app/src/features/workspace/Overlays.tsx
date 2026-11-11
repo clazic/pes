@@ -120,7 +120,6 @@ export function PrintPreview({ round, title, headingRef, onClose }: { round: Rou
 }
 
 const VIEWS: { value: View; label: string }[] = [
-  { value: "nav", label: "단계·라운드" },
   { value: "body", label: "본문" },
   { value: "ask", label: "질문" },
 ];
@@ -128,12 +127,11 @@ const VIEWS: { value: View; label: string }[] = [
 /**
  * 좁은 화면 보기 전환(설계 12.4 C12) — 탭 모양 라디오 묶음(WAI-ARIA radio group): Tab 으로는 고른 칸 하나에 닿고,
  * 화살표(←↑ 앞 · →↓ 뒤, 끝에서 돈다 · Home · End)로 옮기면 바로 고른다. Space 로도 고른다.
- * 2영역(900~1279)에서는 단계·라운드가 이미 함께 보이므로 본문 · 질문 둘만. 1280 이상에서는 숨는다(3영역이 다 보임).
+ * 1280 미만 어디서나 본문 · 질문 둘이다(단계·라운드는 사이드바 나무). 1280 이상에서는 숨는다(본문 · 질문이 나란히 보임).
  */
-export function ViewSwitch({ view, twoArea, onChange }: { view: View; twoArea: boolean; onChange: (v: View) => void }) {
-  const views = twoArea ? VIEWS.filter((v) => v.value !== "nav") : VIEWS;
-  // 2영역에서 view=nav 는 본문과 같은 화면이다(모르는 값처럼 기본)
-  const current = twoArea && view === "nav" ? "body" : view;
+export function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+  const views = VIEWS;
+  const current = view;
   const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const move = (to: number) => {
     const i = (to + views.length) % views.length;
@@ -150,7 +148,7 @@ export function ViewSwitch({ view, twoArea, onChange }: { view: View; twoArea: b
   };
   return (
     <div className="view-switch border-b px-3 py-2" data-print="hide">
-      <div role="radiogroup" aria-label="보기" className={`mx-auto grid max-w-md gap-1 rounded-lg bg-muted p-1 ${views.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+      <div role="radiogroup" aria-label="보기" className="mx-auto grid max-w-xs grid-cols-2 gap-1 rounded-lg bg-muted p-1">
         {views.map((v, i) => {
           const checked = v.value === current;
           return (

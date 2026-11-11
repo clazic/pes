@@ -115,7 +115,7 @@ export function AskPane({
           reasonId="edit-reason"
           reasonClassName="max-w-48"
           aria-expanded={editBlocked ? undefined : editNote}
-          aria-controls={editBlocked ? undefined : "edit-note"}
+          aria-controls={!editBlocked && editNote ? "edit-note" : undefined}
           onClick={() => setEditNote((v) => !v)}
         >
           <PenLine aria-hidden="true" />
