@@ -14,7 +14,7 @@
 | 형식 변환 도구 (hwpx·docx·pdf·slides) | `anthropic-skills:hwpx-uri`(HWPX, 울산연구원 양식 점검 포함)·`anthropic-skills:docx`·`anthropic-skills:pdf`·`anthropic-skills:pptx` 스킬 |
 | 답 대기 (`watch`) | `Monitor` 도구에 `$PES watch <dir>`가 출력하는 명령을 `timeout_ms` 1800000으로 건다. 만료되면 다시 건다 |
 | 환경변수 (`LAW_OC`·`NODE_EXTRA_CA_CERTS`) | `~/.claude/settings.json`의 `env`. 사용자가 줄 때만 넣고 값을 채팅에 다시 쓰지 않는다 |
-| 플러그인 경로 | `${CLAUDE_PLUGIN_ROOT}`. 비어 있으면 스킬의 Base directory 기준 `../../scripts/pes.py` |
+| 플러그인 경로 | `${CLAUDE_PLUGIN_ROOT}`. 비어 있으면 스킬의 Base directory 기준 `../../scripts/pes.ts` |
 | 세션 표시 (`PES_OWNER`) | 세션 처음에 ID를 정해(모르면 `uuidgen`) 모든 pes 호출에 붙인다 |
 | 다른 프로젝트 열기 | 다른 터미널 탭의 Claude Code 세션에서 `/pes:run <폴더>` |
 | eli5 보고서 | `eli5:eli5` 스킬의 원칙 |

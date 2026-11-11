@@ -1,5 +1,5 @@
 ---
-description: PES 진단 — 환경(Python·도구·API 키·포트·PES 홈)과 프로젝트(단계 상태·잠금·답·보고서·연결)를 점검하고, "fix"를 붙이면 안전한 것만 고친다
+description: PES 진단 — 환경(Node.js·도구·API 키·포트·PES 홈)과 프로젝트(단계 상태·잠금·답·보고서·연결)를 점검하고, "fix"를 붙이면 안전한 것만 고친다
 argument-hint: "[프로젝트 이름|폴더] [fix]"
 ---
 

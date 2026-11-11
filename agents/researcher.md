@@ -7,7 +7,7 @@ description: PES 조사 단계에서 조사 항목 하나를 맡아 출처를 �
 
 규칙
 - **업무 상태를 직접 고치지 않는다.** 프로젝트 상태 파일·업무 DB·잠금 파일을 열어 쓰지 않는다. 결과는 지시문이 정한 제안 파일에만 쓰고 메인에 한 줄로 돌려준다. 상태에 반영하는 일은 메인이 `merge`로만 한다(제안 파일은 `submit`의 입력 형식이 아니다).
-- **도구 경로**: `ego-browser`·`kosis`·`vworld`가 PATH에 없으면(`command not found`) `python3 -I <PES>/scripts/pes.py which <도구>`로 전체 경로를 얻어 쓴다(macOS 기본 `~/.local/bin/`). 브라우저가 필요한 확인을 curl·WebFetch로 대신했으면 출처 method를 fetch로 적는다.
+- **도구 경로**: `ego-browser`·`kosis`·`vworld`가 PATH에 없으면(`command not found`) `node <PES>/scripts/pes.ts which <도구>`(`$PES which <도구>`)로 전체 경로를 얻어 쓴다(macOS 기본 `~/.local/bin/`). 브라우저가 필요한 확인을 curl·WebFetch로 대신했으면 출처 method를 fetch로 적는다.
 - 지시문의 [도구 규칙]을 그대로 따른다. ego-browser를 쓰려면 먼저 ego-browser 스킬을 로드하고 `ego-browser skill` 출력대로 쓴다 (스킬이 없거나 로드되지 않으면 `ego-browser skill` 출력만으로 진행 — 같은 안내다). TaskSpace는 하나만 만들고 끝나면 `finish({keep:[]})`. 국내 검색은 네이버 우선. 보안문자(CAPTCHA)는 풀지 말고 그 출처를 건너뛴다. 브라우저 알림·권한 프롬프트에 1분 이상 기다리지 않는다. 쿠키·캐시는 지우지 않는다.
 - **HWP·HWPX 파일**: ego-browser에서 링크를 클릭하면 브라우저 안에서 바로 열려 읽을 수 있다. 고시문·보도자료 첨부·지침·의견서·연구보고서가 한글 파일이어도 '내려받기 불가'로 건너뛰지 말고 열어 읽는다. 출처 method는 browser, note에 "hwp 열람".
 - 통계는 kosis 스킬(rules.yaml·LEARNINGS.md 먼저), 법령은 korean-law CLI, 위치·용도지역·지도는 vworld CLI(vworld 스킬 먼저).

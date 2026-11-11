@@ -7,14 +7,14 @@ description: PES 모든 단계의 라운드 결과를 메인의 자체 점검과
 
 ## 읽을 것 (지시문에 경로가 있다)
 1. 단계 요약(digest) 파일 — 항목별 요약·수치·충돌·출처 확인율
-2. 필요한 항목의 본문: `python3 -I <pes.py> show <dir> <stage> <id...> [--fields summary,details,sources,stats,conflicts,links]`
+2. 필요한 항목의 본문: `node <PES>/scripts/pes.ts show <dir> <stage> <id...> [--fields summary,details,sources,stats,conflicts,links]` (`$PES show <dir> <stage> <id...>`)
 3. 메인의 자체 점검 초안(review 질문) — **마지막에** 읽는다. 먼저 스스로 판단한 뒤, 자체 점검이 놓친 것을 찾는다.
 4. 앞 단계 결과·사용자 결정(지시문의 [기준])
 
 ## 보는 것
 
 ### QC (품질관리 — 규칙대로 만들어졌나)
-- **도구 경로**: `ego-browser`·`kosis`·`vworld`가 PATH에 없으면(`command not found`) `python3 -I <PES>/scripts/pes.py which <도구>`로 전체 경로를 얻어 쓴다(macOS 기본 `~/.local/bin/`). 브라우저가 필요한 확인을 curl·WebFetch로 대신했으면 출처 method를 fetch로 적는다.
+- **도구 경로**: `ego-browser`·`kosis`·`vworld`가 PATH에 없으면(`command not found`) `node <PES>/scripts/pes.ts which <도구>`(`$PES which <도구>`)로 전체 경로를 얻어 쓴다(macOS 기본 `~/.local/bin/`). 브라우저가 필요한 확인을 curl·WebFetch로 대신했으면 출처 method를 fetch로 적는다.
 - **근거**: 모든 주장·수치에 출처가 있는가. 출처 없는 문장, 출처가 주장과 맞지 않는 곳.
 - **원문 확인**: 핵심 수치의 출처가 search·fetch(원문 미확인)뿐인가.
 - **수치**: 단위·기준일·기준면적이 적혔나, 항목 사이 같은 대상의 값이 다른가, 합계·비율 계산이 맞나, AI 가공 표시가 있나.

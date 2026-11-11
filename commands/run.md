@@ -3,12 +3,13 @@ description: PES 프로젝트를 이어서 진행 — 처리 안 한 답을 읽�
 argument-hint: "[프로젝트 폴더]"
 ---
 
-0. 먼저 `python3 -I ${CLAUDE_PLUGIN_ROOT}/scripts/setup.py needed`(Windows는 `py -3`) — 종료 코드 1이면 한 줄 알리고 `/pes:setup` 절차를 먼저 끝낸 뒤 돌아온다.
+0. 먼저 `node ${CLAUDE_PLUGIN_ROOT}/scripts/setup.ts needed` — 종료 코드 1이면 한 줄 알리고 `/pes:setup` 절차를 먼저 끝낸 뒤 돌아온다.
 
 `pes:core`를 로드해 따른다. 인자: $ARGUMENTS
 
 1. 프로젝트 폴더: 인자. 인자가 없으면 `list`를 실행해 — 프로젝트가 1개면 그것, 2개 이상이면 사람에게 고르게 한다(질문 폼 또는 환경의 선택 수단; 선택지: 「내 차례」 → 최근 순, 라벨=주제, 설명=단계·할 일. 4개 넘으면 상위 3개 + '목록 화면 열기'(`hub` 후 open)).
    고른 뒤 `lock <dir>`. 다른 세션이 쓰는 중이라고 나오면 멈추고 알린다(그 세션을 닫았으면 `--force`로 가져올지 묻는다).
+   `먼저 이전하세요 — pes migrate …` 거절이 나오는 예전 형식 폴더라면 `pes:core`의 「옛 형식(0.15) 프로젝트 — 이전」을 따른다: 사용자에게 먼저 묻고, 동의하면 `migrate <폴더>` 한 뒤 이어서 진행한다.
 2. `status`(인계 메모 포함) → 현재 단계 스킬(`pes:plan|research|analyze|write|verify|publish`)을 로드.
 3. `pending`의 답 파일을 오래된 순으로 읽어 처리(시작 질문 답 → 설정 저장 후 R1 / 점검 답·피드백 → 다음 라운드 / 승인 → 승인 절차) → `mark`.
 4. 처리할 답이 없으면: 단계 status가 asking이면 시작 질문 폼을 (다시) 띄우고, active면 현재 라운드 결과와 점검 질문이 대시보드에 있는지 확인한 뒤 답 대기(`watch`)를 건다.
