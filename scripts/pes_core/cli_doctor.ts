@@ -563,7 +563,9 @@ async function doctor_db(R: Report, h: string): Promise<void> {
   const file = db_file();
   const st = await bridge_soft("db_status");
   if (st === undefined) R.add("데이터베이스", "bad", `데이터베이스를 점검하지 못함 ${file}`, "코어를 실행하지 못했습니다 — Node 26 이상이 필요합니다");
-  else if (st.state === "missing") R.add("데이터베이스", "info", `데이터베이스 아직 없음 ${file}`, "첫 init 이나 이전 때 만들어집니다");
+  else if (st.state === "missing") {
+    // no row: a home that has never had a database reads exactly like 0.15 (E15)
+  }
   else if (st.state === "broken") {
     R.add("데이터베이스", "bad", `데이터베이스를 열 수 없음 ${file}`, `${String(st.message ?? "")} — doctor 는 DB 를 고치지 않습니다. 백업에서 복원하거나 파일을 옮겨 두고 다시 시작하세요`);
   } else if (st.schema_current !== true) R.add("데이터베이스", "warn", `데이터베이스 스키마가 최신이 아님 ${file}`, "새 코어 버전으로 DB 를 올려야 합니다");
@@ -652,7 +654,8 @@ export async function cmd_doctor(args: string[]): Promise<void> {
         1,
       ),
     );
-    if (bad) process.exitCode = 1; // the database path of 0.15: a problem row ends --json with exit 1 too
+    // 0.15: --json ends with exit 0 whatever a project row says; a problem with the database itself ends it with 1 too
+    if (R.rows.some((r) => r.level === "bad" && r.group === "데이터베이스")) process.exitCode = 1;
     return;
   }
   const MARK: Record<Level, string> = { ok: "[정상]", info: "[참고]", warn: "[주의]", bad: "[문제]" };

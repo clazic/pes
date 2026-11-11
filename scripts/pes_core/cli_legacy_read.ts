@@ -2,9 +2,9 @@
 // The old folder is only READ here, never written: no migration, no repair (the write commands refuse it, cli_records.need_project).
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
-import { Die, KEYS, bridge, die, py_json_error } from "./cli_support.ts";
+import { KEYS, bridge, die, pes_home, py_json_error } from "./cli_support.ts";
 import { normalize_project } from "./report.ts";
 
 type Dict = Record<string, any>;
@@ -25,22 +25,13 @@ export interface ReadState {
   legacy: boolean;
 }
 
-async function db_slugs(): Promise<Set<string>> {
-  try {
-    return new Set(((await bridge("slugs")).slugs as string[] | undefined) ?? []);
-  } catch (error) {
-    if (error instanceof Die) return new Set();
-    throw error;
-  }
-}
-
 function read_text(path: string): string {
   const text = readFileSync(path, "utf8");
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 /** An old project.json project as 0.15's `load(d)` returns it (the report paths of a Windows-written file read with "/"). */
-function load_legacy(d: string): ReadState {
+export function load_legacy(d: string): ReadState {
   const file = join(d, "project.json");
   let text: string;
   try {
@@ -92,10 +83,33 @@ function load_legacy(d: string): ReadState {
   return { slug: basename(d), project, pending, legacy: true };
 }
 
-/** The project of folder `d` for a read command: the database's when it serves the folder's name, else the old project.json, else exit 1. */
+/**
+ * True when the database serves folder `d`: its project is active (PR12 serving_path) and the folder is one of the PES home or has no
+ * project.json of its own (a project made with an absolute path outside the home lives in the database by name). A folder outside the
+ * home that holds a project.json is that file's project, even when its name is a database project's — unless the file is that project's
+ * own source (same topic), which is how a project made from a folder outside the home keeps being found by that folder.
+ */
+export async function db_serves(d: string): Promise<boolean> {
+  const route = await bridge("route", basename(d));
+  if (route.serving !== "database") return false;
+  if (dirname(d) === pes_home() || !existsSync(join(d, "project.json"))) return true;
+  // a folder outside the home with its own project.json is the database project only when it is that project's source: the same topic
+  try {
+    const raw: unknown = JSON.parse(read_text(join(d, "project.json")));
+    return raw !== null && typeof raw === "object" && (raw as Dict).topic === route.topic;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The project of folder `d` for a read command: the database's when it serves a folder of the PES home (PR12 serving_path: an active
+ * project), else the old project.json of that folder — a staging, failed or archived project, a name the database does not know and any
+ * folder outside the PES home (even one named like a database project) are read from their own file —, else exit 1.
+ */
 export async function load_for_read(d: string): Promise<ReadState> {
   const slug = basename(d);
-  if ((await db_slugs()).has(slug)) {
+  if (await db_serves(d)) {
     const data = await bridge("read_project", slug);
     return { slug, project: data.project as Dict, pending: (data.pending as PendingAnswer[] | undefined) ?? [], legacy: false };
   }

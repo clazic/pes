@@ -12,7 +12,8 @@ import { pathToFileURL } from "node:url";
 import { OWNER_STUB_SLUG } from "./cli_bridge.ts";
 import { hub_ports, kill_pid, root_port, server_url, stop_legacy, stop_server, whoami, whoami_info } from "./cli_home.ts";
 import { need_project, project_exists, slug_of } from "./cli_records.ts";
-import { build_index, fill } from "./cli_screens.ts";
+import { load_legacy } from "./cli_legacy_read.ts";
+import { build_index, fill, legacy_project } from "./cli_screens.ts";
 import { LABEL, ROOT, STAGES, Die, arg_at, bridge, bridge_soft, die, expanduser, home_dir, is_record, missing_args, now, pdir, pes_home, resolve_path, say, write_text } from "./cli_support.ts";
 
 type Dict = Record<string, any>;
@@ -138,16 +139,43 @@ function brief_of(slug: string, path: string, p: Dict, npend: number, lock: Dict
   };
 }
 
+/** 0.15 `time.strftime("%Y-%m-%d %H:%M", localtime)`. */
+function stamp(ms: number): string {
+  const d = new Date(ms);
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+/** An old project.json folder the database does not serve (not migrated, or staging / failed / archived): read from its file, once. */
+function legacy_brief(root: string, slug: string): Dict {
+  const d = join(root, slug);
+  try {
+    const state = load_legacy(d);
+    const times = [join(d, "project.json"), ...state.pending.map((x) => x.name)].map((p) => {
+      try {
+        return statSync(p).mtimeMs;
+      } catch {
+        return 0;
+      }
+    });
+    const outs = existsSync(join(d, "out")) ? readdirSync(join(d, "out"), { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort().join(", ") : "-";
+    return brief_of(slug, d, legacy_project(state.project) as Dict, state.pending.length, null, stamp(Math.max(...times)), outs === "" ? "-" : outs);
+  } catch (error) {
+    if (!(error instanceof Die)) throw error;
+    return { slug, topic: slug, error: error.message.slice(0, 200), stages: [], who: "err", todo: "읽기 실패 — 폴더를 확인하세요" };
+  }
+}
+
 /** The projects of a home: the ones the database serves; an old project.json folder the database does not serve yet is listed as an error row. */
 export async function all_briefs(root: string): Promise<Dict[]> {
   const out: Dict[] = [];
   const at_home = existsSync(root) && resolve_path(root) === pes_home();
   // the project that only holds the owner of a fresh database (made by `migrate`) is not a project of the user
-  const served = new Set<string>(at_home ? (((await bridge_soft("active_slugs"))?.slugs as string[] | undefined) ?? []).filter((x) => x !== OWNER_STUB_SLUG) : []);
+  const served = new Set<string>(at_home ? (((await bridge("active_slugs")).slugs as string[] | undefined) ?? []).filter((x) => x !== OWNER_STUB_SLUG) : []);
   if (existsSync(root)) {
     for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       if (!entry.isDirectory() || served.has(entry.name) || !existsSync(join(root, entry.name, "project.json"))) continue;
-      out.push({ slug: entry.name, topic: entry.name, error: "DB 로 이전하지 않은 옛 project.json 프로젝트", stages: [], who: "err", todo: "읽기 실패 — DB 로 이전하세요" });
+      out.push(legacy_brief(root, entry.name));
     }
   }
   for (const slug of [...served].sort()) {

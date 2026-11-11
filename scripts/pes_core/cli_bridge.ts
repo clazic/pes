@@ -1821,9 +1821,9 @@ const route: Handler = async (s, req) => {
   if (typeof req.slug !== "string" || req.slug.length === 0) {
     throw new Refusal("invalid_payload", "프로젝트 이름이 필요합니다", 2);
   }
-  const row = s.db.get<{ id: string }>("SELECT id FROM projects WHERE slug = ?", req.slug);
+  const row = s.db.get<{ id: string; topic: string }>("SELECT id, topic FROM projects WHERE slug = ?", req.slug);
   if (row === undefined) return { serving: "none" };
-  return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy" };
+  return { serving: serving_path(s.db, row.id) === "database" ? "database" : "legacy", topic: row.topic };
 };
 
 const active_slugs: Handler = async (s) => {

@@ -5,7 +5,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { server_url } from "./cli_home.ts";
-import { load_for_read } from "./cli_legacy_read.ts";
+import { db_serves, load_for_read } from "./cli_legacy_read.ts";
 import {
   LABEL,
   STAGES,
@@ -47,7 +47,9 @@ export async function project_exists(d: string): Promise<boolean> {
 /** `load(d)`: the project must exist. A 0.15 folder the database does not serve yet is refused with the migration notice. */
 export async function need_project(d: string, what = "쓰기"): Promise<string> {
   const slug = slug_of(d);
-  if ((await db_slugs()).has(slug)) return slug;
+  // the database serves a folder of the PES home only while the project is active; a staging, failed or archived one, a name the database
+  // does not know and a folder outside the PES home are 0.15 folders here (read-only, D14)
+  if (await db_serves(d)) return slug;
   const legacy = join(d, "project.json");
   if (existsSync(legacy)) {
     // a project.json that cannot be read is a broken folder, not a project waiting for its migration: one plain line, the folder untouched (D11)
