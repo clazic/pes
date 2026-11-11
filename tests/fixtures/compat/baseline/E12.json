@@ -1,0 +1,172 @@
+{
+ "id": "E12",
+ "steps": [
+  {
+   "step": [
+    "status",
+    "{T}/broken"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: json.decoder.JSONDecodeError: Expecting value: line 1 column 21 (char 20)"
+   ]
+  },
+  {
+   "step": {
+    "snapshot": "broken_after_status"
+   },
+   "files": {
+    "project.json": "invalid-json:d85ff52f6d65fa06"
+   }
+  },
+  {
+   "step": [
+    "status",
+    "{T}/large"
+   ],
+   "exit": 1,
+   "stdout": [
+    "주제: 합성 주제  (<PROJECT>)"
+   ],
+   "stderr": [
+    "traceback: KeyError: 'current'"
+   ]
+  },
+  {
+   "step": [
+    "round-start",
+    "{T}/large",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "{T}/large"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 합성 주제  (<PROJECT>)",
+    "현재 단계: 기획",
+    "  ▶ 기획     active   R1 항목 0 (할 일 0)",
+    "    조사     pending  R0 항목 0 (할 일 0)",
+    "    분석·종합  pending  R0 항목 0 (할 일 0)",
+    "    집필     pending  R0 항목 0 (할 일 0)",
+    "    검증     pending  R0 항목 0 (할 일 0)",
+    "    산출·공유  pending  R0 항목 0 (할 일 0)",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve large"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "합성 주제",
+  "current": "plan",
+  "processed": [],
+  "notes": [],
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "project.json": "fa7cb6971243dbcd"
+ }
+}

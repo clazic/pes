@@ -22,6 +22,7 @@ import { normalize, PY, plain_json_legacy, read_lf, run_py, shell_words, write_l
 import { FIXTURES, legacy, tree_digest } from "./helpers/legacy_env.ts";
 import { backup_dir_of, migration, owner_of, pes_home_of } from "./helpers/migration_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
+import { hub_blocked_argv } from "./helpers/hub_block.ts";
 
 const OFF = { flag: undefined } as const;
 
@@ -205,7 +206,7 @@ function run_async(c: CliEnv, args: string[]): Promise<CliResult> {
   return new Promise((resolve, reject) => {
     const env: Record<string, string | undefined> = { ...c.env.home.env, PES_DB_CORE: "1", PES_OWNER: undefined, PES_TOKEN: undefined };
     for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
-    const child = spawn(PY, ["-I", "-X", "utf8", PES_PY, ...args], { env: env as NodeJS.ProcessEnv, cwd: c.env.home.root });
+    const child = spawn(PY, hub_blocked_argv(["-I", "-X", "utf8", PES_PY, ...args]), { env: env as NodeJS.ProcessEnv, cwd: c.env.home.root });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString("utf8")));

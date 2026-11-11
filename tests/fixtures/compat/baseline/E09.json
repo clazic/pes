@@ -1,0 +1,21 @@
+{
+ "id": "E09",
+ "steps": [
+  {
+   "step": {
+    "burst": 12
+   },
+   "statuses": [
+    200
+   ],
+   "all_ok": true,
+   "files": 12,
+   "distinct_texts": 12,
+   "lost": 0
+  }
+ ],
+ "dto": null,
+ "files": {
+  "count": "12"
+ }
+}

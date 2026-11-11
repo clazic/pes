@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
 import { PES_PY, REPO, SLUG, type CliEnv, type CliResult } from "./cli_write_env.ts";
+import { hub_blocked_argv } from "./hub_block.ts";
 
 /** The last main commit whose read commands are pure v0.15 (project.json readers). */
 export const READ_BASELINE_REF = "03fc81b";
@@ -75,6 +76,8 @@ export interface RunOptions {
   input?: string;
   /** Exact PATH for the child. `doctor` defaults to doctor_path() (a narrow PATH, see below) unless this is given. */
   path?: string;
+  /** hub-block exceptions: ports of stand-ins the TEST started itself (everything else in 8760~8775 stays blocked) */
+  allow_hub_ports?: number[];
 }
 
 /** A file named `name` (plus PATHEXT extensions on Windows) in the caller's real PATH; no `which`, no shell. */
@@ -133,7 +136,7 @@ export function run_py(c: HomeLike, args: string[], opts: RunOptions = {}): CliR
   assert.equal(child.HOME, c.env.home.env.HOME, "the CLI runs in the isolated HOME");
   assert.equal(child.USERPROFILE, c.env.home.env.HOME);
   assert.ok(child.PES_HOME !== undefined && child.PES_HOME.length > 0, "PES_HOME is set (isolated)");
-  const result = spawnSync(PY, ["-I", "-X", "utf8", opts.script ?? PES_PY, ...args], {
+  const result = spawnSync(PY, hub_blocked_argv(["-I", "-X", "utf8", opts.script ?? PES_PY, ...args], opts.allow_hub_ports), {
     env: child as NodeJS.ProcessEnv,
     cwd: opts.cwd ?? c.env.home.root,
     encoding: "utf8",

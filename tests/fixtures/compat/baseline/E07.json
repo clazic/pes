@@ -1,0 +1,439 @@
+{
+ "id": "E07",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "research",
+    "<2 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사: 2건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 합성 주제  (<PROJECT>)",
+    "현재 단계: 조사",
+    "    기획     asking   R0 항목 0 (할 일 0)",
+    "  ▶ 조사     active   R1 항목 2 (할 일 0)",
+    "    분석·종합  pending  R0 항목 0 (할 일 0)",
+    "    집필     pending  R0 항목 0 (할 일 0)",
+    "    검증     pending  R0 항목 0 (할 일 0)",
+    "    산출·공유  pending  R0 항목 0 (할 일 0)",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve 합성 프로젝트"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "digest",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "[조사 R1] 항목 2개 · 상태 active",
+    "",
+    "#1 첫 항목 [/done/R1] 신뢰도 high · 출처 1(원문 1) · ",
+    "  요약: 첫 요약 둘째 줄",
+    "  수치: 지표 = 3 건 (-; -)",
+    "  충돌: 충돌 하나",
+    "",
+    "#2 둘째 항목 [/done/R1] 신뢰도 - · 출처 0(원문 0) · ",
+    "  요약: 둘째 요약",
+    "",
+    "남은 질문·제안 1개:",
+    "  - [#1] 남은 질문"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "digest",
+    "{P}",
+    "research",
+    "--round",
+    "1"
+   ],
+   "exit": 0,
+   "stdout": [
+    "[조사 R1] 항목 2개 · 상태 active",
+    "",
+    "#1 첫 항목 [/done/R1] 신뢰도 high · 출처 1(원문 1) · ",
+    "  요약: 첫 요약 둘째 줄",
+    "  수치: 지표 = 3 건 (-; -)",
+    "  충돌: 충돌 하나",
+    "",
+    "#2 둘째 항목 [/done/R1] 신뢰도 - · 출처 0(원문 0) · ",
+    "  요약: 둘째 요약",
+    "",
+    "남은 질문·제안 1개:",
+    "  - [#1] 남은 질문"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "show",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "{",
+    " \"status\": \"active\",",
+    " \"round\": 1,",
+    " \"settings\": {},",
+    " \"review\": null,",
+    " \"suggestions\": [",
+    "  \"[#1] 남은 질문\"",
+    " ],",
+    " \"warnings\": [],",
+    " \"changes\": [],",
+    " \"history\": [],",
+    " \"summary\": \"\",",
+    " \"approved_at\": null,",
+    " \"stale\": false,",
+    " \"reports\": [],",
+    " \"items\": [",
+    "  \"#1 첫 항목 [/done]\",",
+    "  \"#2 둘째 항목 [/done]\"",
+    " ]",
+    "}"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "show",
+    "{P}",
+    "research",
+    "1",
+    "--fields",
+    "title,summary"
+   ],
+   "exit": 0,
+   "stdout": [
+    "[",
+    " {",
+    "  \"id\": 1,",
+    "  \"title\": \"첫 항목\",",
+    "  \"summary\": \"첫 요약\\n둘째 줄\"",
+    " }",
+    "]"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "show",
+    "{P}",
+    "research",
+    "--fields",
+    "changes,settings"
+   ],
+   "exit": 0,
+   "stdout": [
+    "{",
+    " \"changes\": [],",
+    " \"settings\": {}",
+    "}"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "note",
+    "{P}",
+    "합성 메모"
+   ],
+   "exit": 0,
+   "stdout": [
+    "인계 메모 1개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "chat",
+    "{P}",
+    "research",
+    "합성 지시",
+    "feedback"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/feedback/research-R1-<TIME>.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "pending",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/feedback/plan-R0-<TIME>.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "mark",
+    "{P}",
+    "plan-R0-20260101-000000.json"
+   ],
+   "exit": 0,
+   "stdout": [
+    "처리 완료 표시 1개"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "pending",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "{P}"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 합성 주제  (<PROJECT>)",
+    "현재 단계: 조사",
+    "    기획     asking   R0 항목 0 (할 일 0)",
+    "  ▶ 조사     active   R1 항목 2 (할 일 0)",
+    "    분석·종합  pending  R0 항목 0 (할 일 0)",
+    "    집필     pending  R0 항목 0 (할 일 0)",
+    "    검증     pending  R0 항목 0 (할 일 0)",
+    "    산출·공유  pending  R0 항목 0 (할 일 0)",
+    "인계 메모 1개 (최근 5):",
+    "  - [<TIME>] 합성 메모",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve 합성 프로젝트"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "research",
+  "complete": false,
+  "settings": {},
+  "processed": [
+   "research-R1-<TIME>.json",
+   "plan-R0-<TIME>.json"
+  ],
+  "notes": [
+   {
+    "time": "<TIME>",
+    "stage": "research",
+    "text": "합성 메모"
+   }
+  ],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [
+     "[#1] 남은 질문"
+    ],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 1,
+      "title": "첫 항목",
+      "kind": "",
+      "question": "",
+      "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
+      "summary": "첫 요약\n둘째 줄",
+      "details": "",
+      "sources": [
+       {
+        "url": "https://example.test/a",
+        "title": "출처 A",
+        "method": "browser"
+       }
+      ],
+      "stats": [
+       {
+        "label": "지표",
+        "value": 3,
+        "unit": "건",
+        "name": "지표"
+       }
+      ],
+      "shots": [],
+      "confidence": "high",
+      "conflicts": [
+       "충돌 하나"
+      ],
+      "verify": null,
+      "links": {},
+      "user_links": []
+     },
+     {
+      "id": 2,
+      "title": "둘째 항목",
+      "kind": "",
+      "question": "",
+      "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
+      "summary": "둘째 요약",
+      "details": "",
+      "sources": [],
+      "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
+     }
+    ]
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback/plan-R0-<TIME>.json": "40493e5fcf3ef975",
+  "feedback/research-R1-<TIME>.json": "054de5084fd407ed",
+  "feedback.log": "e3b0c44298fc1c14",
+  "project.json": "dedbeba9fa4c1308"
+ }
+}

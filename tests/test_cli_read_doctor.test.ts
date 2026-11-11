@@ -211,7 +211,7 @@ setInterval(()=>{},1000);`,
       t.skip("8760~8764 가 모두 이미 쓰이고 있어 시험용 점유를 만들 수 없다");
       return;
     }
-    const rows = doctor_rows(run_py(c, ["doctor", "--json"], { timeout: 120_000 }), "doctor");
+    const rows = doctor_rows(run_py(c, ["doctor", "--json"], { timeout: 120_000, allow_hub_ports: held }), "doctor");
     for (const port of held) {
       const row = rows.find((r) => r.group === "서버" && r.title.includes(`:${port}`));
       assert.ok(row, `포트 ${port} 점유 행: ${JSON.stringify(rows.filter((r) => r.group === "서버"))}`);

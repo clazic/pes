@@ -1,0 +1,319 @@
+{
+ "id": "E11",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<TMP>/work/합성 프로젝트/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "plan",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "round-start",
+    "{P}",
+    "write"
+   ],
+   "exit": 0,
+   "stdout": [
+    "집필 R1 시작"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "merge",
+    "{P}",
+    "write",
+    "<1 result file(s)>"
+   ],
+   "exit": 0,
+   "stdout": [
+    "집필: 1건 병합"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "status",
+    "{T}/복원 위치/사본 프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "주제: 합성 주제  (<PROJECT>)",
+    "현재 단계: 집필",
+    "    기획     active   R1 항목 1 (할 일 0)",
+    "    조사     pending  R0 항목 0 (할 일 0)",
+    "    분석·종합  pending  R0 항목 0 (할 일 0)",
+    "  ▶ 집필     active   R1 항목 1 (할 일 0)",
+    "    검증     pending  R0 항목 0 (할 일 0)",
+    "    산출·공유  pending  R0 항목 0 (할 일 0)",
+    "처리 안 한 답: 0개",
+    "대시보드: 서버 꺼짐 — serve 사본 프로젝트"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "render",
+    "{T}/복원 위치/사본 프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/index.html"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "report",
+    "{T}/복원 위치/사본 프로젝트",
+    "plan"
+   ],
+   "exit": 0,
+   "stdout": [
+    "기획보고서: 웹 보고서 reports/plan/report.html, 마크다운 reports/plan/report.md",
+    "eli5: <PROJECT>/reports/plan/eli5.json 를 써야 합니다 (스키마는 pes:core 「단계 보고서」) — 쓴 뒤 report 를 다시 실행"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "assemble",
+    "{T}/복원 위치/사본 프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/out/report.md  (장·절 1개, 각주 1개)"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "web",
+    "{T}/복원 위치/사본 프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/out/report.html  (출처 1개 · 확인됨 0개 · 표지 정보 없음: out/cover.json 을 쓰면 연구진·기관·발주처가 표지에 나온다)"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "write",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [
+     {
+      "format": "html",
+      "label": "웹 보고서",
+      "path": "reports/plan/report.html",
+      "bytes": 10058,
+      "round": 1
+     },
+     {
+      "format": "md",
+      "label": "마크다운",
+      "path": "reports/plan/report.md",
+      "bytes": 497,
+      "round": 1
+     }
+    ],
+    "history": [],
+    "reports_built": "<TIME>",
+    "items": [
+     {
+      "id": 1,
+      "title": "복원 질문",
+      "kind": "rq",
+      "question": "",
+      "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
+      "summary": "복원 요약",
+      "details": "",
+      "sources": [
+       {
+        "url": "https://example.test/restore",
+        "title": "복원 출처"
+       }
+      ],
+      "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
+     }
+    ]
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "active",
+    "round": 1,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": [
+     {
+      "id": 1,
+      "title": "복원 장",
+      "kind": "section",
+      "question": "",
+      "status": "done",
+      "request": "",
+      "depth": 1,
+      "updated_round": 1,
+      "summary": "",
+      "details": "복원 본문.[^1]",
+      "sources": [
+       {
+        "url": "https://example.test/restore",
+        "title": "복원 출처"
+       }
+      ],
+      "stats": [],
+      "shots": [],
+      "confidence": "",
+      "conflicts": [],
+      "verify": null,
+      "links": {},
+      "user_links": []
+     }
+    ]
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "index.html": "276d80a1053ffa47",
+  "out/report.html": "309407129282207c",
+  "out/report.md": "5ffc8670cf139fb4",
+  "out/sources.json": "3a90dfd9070e3687",
+  "project.json": "6229500728e04608",
+  "reports/plan/report.html": "450c9006da471148",
+  "reports/plan/report.md": "24aeb69f836135d0",
+  "snapshots/write-R1.json": "09559b4bc996385a"
+ }
+}

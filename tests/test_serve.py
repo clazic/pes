@@ -14,7 +14,7 @@ import urllib.request
 
 import pytest
 
-from conftest import GUARD, ROOT
+from conftest import GUARD, HUB_BLOCK, ROOT
 
 SERVE = ROOT / "scripts" / "serve.py"
 MAX_BODY = 256 * 1024
@@ -122,7 +122,7 @@ class Server:
         self.workdir = Path(workdir)
         self.startup = self.workdir / "serve-startup"
         self.startup.mkdir(parents=True)
-        script = GUARD
+        script = GUARD + HUB_BLOCK
         if slow_fqdn is not None:
             script += _slow_fqdn_injection(slow_fqdn)
         if collision is not None:

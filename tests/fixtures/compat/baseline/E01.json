@@ -1,0 +1,182 @@
+{
+ "id": "E01",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "합성 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "다른 주제"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "이미 프로젝트가 있습니다: <PROJECT>/project.json  (이어하기는 ask-prep <PROJECT> resume)"
+   ]
+  },
+  {
+   "step": [
+    "init",
+    "{T}/no-topic"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "--topic 필요"
+   ]
+  },
+  {
+   "step": [
+    "init",
+    "{T}/잘못된 인자",
+    "--topic",
+    "주제",
+    "--bogus",
+    "x"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "알 수 없는 인자: --bogus"
+   ]
+  },
+  {
+   "step": [
+    "init",
+    "{T}/가져온 프로젝트",
+    "--topic",
+    "가져오기 주제",
+    "--import",
+    "{T}/research-loop"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<TMP>/work/가져온 프로젝트/project.json",
+    "참고자료로 가져옴: 항목 1개 (R3까지, <TMP>/work/research-loop)"
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "합성 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "plan",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "analyze": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "project.json": "c865bbcd39ea157c"
+ }
+}

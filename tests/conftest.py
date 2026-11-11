@@ -132,6 +132,25 @@ for _name in ("stat", "lstat"):
         return _original(self, *args, **kwargs)
     setattr(Path, _name, _guarded)
 '''
+# No test may reach a REAL PES hub (127.0.0.1:8760~8775, /whoami returns the real project root). Same rule as tests/helpers/hub_block.ts.
+HUB_BLOCK = r'''
+import socket as _hb_socket
+def _hb_port(address):
+    try:
+        return 8760 <= int(address[1]) <= 8775
+    except Exception:
+        return False
+_hb_connect_ex = _hb_socket.socket.connect_ex
+_hb_connect = _hb_socket.socket.connect
+def _hb_socket_connect_ex(self, address):
+    return 111 if _hb_port(address) else _hb_connect_ex(self, address)
+def _hb_socket_connect(self, address):
+    if _hb_port(address):
+        raise ConnectionRefusedError(111, "blocked by the test harness")
+    return _hb_connect(self, address)
+_hb_socket.socket.connect_ex = _hb_socket_connect_ex
+_hb_socket.socket.connect = _hb_socket_connect
+'''
 _guard_namespace = {}
 exec(GUARD, _guard_namespace)
 PESHomeAccessViolation = _guard_namespace["PESHomeAccessViolation"]
@@ -150,6 +169,25 @@ def isolated_home(tmp_path, monkeypatch):
     return home
 
 
+@pytest.fixture(autouse=True)
+def no_real_hub(monkeypatch):
+    import socket
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    def port_blocked(address):
+        try:
+            return 8760 <= int(address[1]) <= 8775
+        except Exception:
+            return False
+    def connect(self, address):
+        if port_blocked(address):
+            raise ConnectionRefusedError(111, "blocked by the test harness")
+        return real_connect(self, address)
+    def connect_ex(self, address):
+        return 111 if port_blocked(address) else real_connect_ex(self, address)
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+
+
 @pytest.fixture
 def pes(isolated_home, monkeypatch):
     spec = importlib.util.spec_from_file_location("pes_test_module", SCRIPT)
@@ -163,7 +201,7 @@ def pes(isolated_home, monkeypatch):
 def cli(isolated_home, tmp_path):
     startup = tmp_path / "startup"
     startup.mkdir()
-    (startup / "sitecustomize.py").write_text(GUARD, encoding="utf-8")
+    (startup / "sitecustomize.py").write_text(GUARD + HUB_BLOCK, encoding="utf-8")
     def run(*args):
         env = os.environ.copy()
         env["PYTHONPATH"] = str(startup)
