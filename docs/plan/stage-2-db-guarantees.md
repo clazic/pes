@@ -487,7 +487,7 @@ MCP 서버(`scripts/pes_core/mcp_server.ts`)와 어댑터(`scripts/pes_core/adap
 A(내장 실행기, `internal_ai`)와 B(MCP·HTTP, `external_agent` — 직접 연결 다섯 길과 앱 세 개의 전달 경로)가 **같은 시작 상태에서 같은 의미·권한·오류**를 내고, 인계·중복·충돌에서 유실이 없음을 가짜 AI 서버·가짜 MCP 클라이언트·합성 자료로 시험한다. 결정은 [0020](decisions/0020-cross-contract.md).
 
 - **오류는 code·효과로 같다(해석 1).** 같은 code·같은 target·쓰기 0. 문장은 같게 하지 않는다 — A는 영어 `code: message`, B는 code마다 고정된 한국어 문장(B의 여섯 도구는 byte 단위로 같다). SQL·표 이름·스택은 둘 다 보이지 않는다.
-- **옛 guard 거부 code(해석 3).** `heartbeat`·`release`·`input-receipts`는 `lease_lost`, `submit`·`wait`·`complete`는 `conflict`로 갈린다. 현재 동작을 계약으로 고정하고(둘 다 거부·쓰기 0), 통일은 후속이다.
+- **옛 guard 거부 code(해석 3).** `heartbeat`·`release`는 `lease_lost`, `submit`·`wait`·`complete`는 `conflict`로 갈린다. `input-receipts`는 시험으로 고정하지 못했다(가시성 검사가 guard보다 먼저 돌아 guard 거부 code가 드러나지 않음) — 시험 안 함, 계약에 넣지 않는다. 현재 동작을 계약으로 고정하고(둘 다 거부·쓰기 0), 통일은 후속이다.
 - **인계(해석 9~12).** 인계 = lease를 내려놓음(release·만료·interrupt) 뒤 다른 쪽의 새 claim. B는 A run을 `run_id`로 이어받지 못하고(SEL-68) 새 run·새 lease가 선다. fence는 프로젝트 lease 한 줄에서 claim마다 정확히 +1. 같은 키의 재전송은 lease가 넘어간 뒤에도 처음 답 재생. 경합에서 진 claim은 `conflict`이고 흔적 0(A 쪽은 owner가 먼저 만든 `queued` run 1개가 남을 수 있다).
 - **제출은 승인이 아니다(해석 13).** 채택 전 제출 버전은 DB에 남지만 다음 context에는 보이지 않는다 — 유실이 아니다.
 - **지연·종료·Go OFF·사용량 문턱.** 늦게 온 답은 채택하지 않고 run은 `blocked_usage`·lease 해제. 프로세스 종료는 run이 `running`·lease `active`·호출 `sent`로 남고(해석 14·15), lease TTL 뒤 B의 새 claim이 그 run을 `interrupted`(`lease_expired` 사건)로 끝낸다. Go OFF·비용 상한·구독 문턱은 A만 막고 B는 영향이 없다(해석 5·16).
