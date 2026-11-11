@@ -58,6 +58,9 @@ async function start(prefix: string, with_dist = true, options: StartOptions = {
   for (const slug of options.extra_projects ?? []) {
     mkdirSync(join(fx.root, slug), { recursive: true });
     writeFileSync(join(fx.root, slug, "project.json"), JSON.stringify({ pes: 1, topic: `합성 ${slug}`, stages: { plan: { items: [{ id: 1, title: "합성 항목" }] } } }), "utf8");
+    // the exported ask form, as the main synthetic project has it (the DB does not make ask files) — so '/<slug>/ask-plan.html'
+    // below checks that the app's routes do not shadow it, not whether the fixture made the file
+    writeFileSync(join(fx.root, slug, "ask-plan.html"), "<html>ask</html>", "utf8");
     await srv_seed_project(fx.ctx, join(fx.root, slug));
   }
   const dist = join(fx.ctx.home.root, "app-dist");
@@ -300,9 +303,10 @@ test("R1 필수 2: slug `app` and `p` projects keep /<slug>/ping · version · d
       assert.match(dash.text(), /<script id="data" type="application\/json">/, `/${slug}/index.html is the project's dashboard, not the app index`);
       assert.notEqual(dash.text(), APP_INDEX);
       assert.equal((await f.server.request(`/${slug}/ask-plan.html`)).status, 200, `/${slug}/ask-plan.html`);
+      // before the first render the project's own question form is its first page (0.15 rule): /<slug>/ → 302 to it, never the app index
       const root_page = await f.server.request(`/${slug}/`);
-      assert.equal(root_page.status, 200, `/${slug}/`);
-      assert.notEqual(root_page.text(), APP_INDEX);
+      assert.equal(root_page.status, 302, `/${slug}/`);
+      assert.equal(root_page.headers.location, `/${slug}/ask-plan.html`);
     }
     // the app index still opens for every other project, and its files are served from /_app/
     assert.equal((await f.server.request("/p/synthetic/e/1/s/research/r/2")).status, 200);

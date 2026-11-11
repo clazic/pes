@@ -183,7 +183,8 @@ test("B4 slug 가 서버 맵에 없는 주소는 '찾을 수 없음' 이다(조�
   const response = await page.goto(url.href);
   expect(response?.status()).toBe(200);
   await expect(page.getByText(/찾을 수 없/).first()).toBeVisible();
-  expect((await seen.done()).filter((r) => r.url.pathname.includes("no-such-project"))).toEqual([]);
+  // the document request itself carries the slug in its path; what must not happen is an API read for it
+  expect((await seen.done()).filter((r) => r.url.pathname.startsWith("/api/") && r.url.pathname.includes("no-such-project"))).toEqual([]);
 });
 
 /** 조각 없음·깨진 조각: 안내(`pes open`)가 보이고, 합성 자료도 서버 자료도 없고, /api/ 요청이 0 이다. */
