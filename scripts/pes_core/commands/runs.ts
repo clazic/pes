@@ -31,6 +31,7 @@ import { ApiError } from "../errors.ts";
 import { run_import_handoff } from "./handoff_import.ts";
 import { BUILTIN_RUNTIME } from "../a_runtime/spec.ts";
 import { builtin_run_settings, write_builtin_run_settings } from "./ai.ts";
+import { check_go_allowed } from "../policy.ts";
 
 const CLAIMABLE_RUN_STATUSES = new Set(["queued", "waiting_human", "blocked_usage", "interrupted"]);
 const COMPLETE_RUN_STATUSES = new Set(["succeeded", "failed"]);
@@ -249,6 +250,12 @@ function claim_runtime_scope(runtime: CommandRuntime): {
   return { scope: require_scope(runtime), payload: require_record(runtime.payload) };
 }
 
+/** A mode A path needs the project's Go switch ON; the refusal is the closed `policy_denied` code (before any write). */
+function require_go_on(runtime: CommandRuntime, project_id: string): void {
+  const decision = check_go_allowed(runtime.db, project_id);
+  if (!decision.allowed) throw new ApiError("policy_denied", decision.reason ?? "OpenCode Go is turned off for this project");
+}
+
 function run_claim(runtime: CommandRuntime): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
   // The service has already replayed a matching receipt; this is the in-tx CAS
@@ -278,7 +285,8 @@ function run_claim(runtime: CommandRuntime): CommandResult {
       throw new ApiError("not_found", `run not found: ${requested_run_id}`);
     }
     // SEL-68: a mode A / Go-labelled run is taken by an internal_ai actor only (no lease, no receipt otherwise).
-    require_internal_ai_for_go_run(read_credential_actor(runtime.db, scope.actor_id)?.kind, run);
+    require_internal_ai_for_go_run(read_credential_actor(runtime.db, scope.actor_id)?.kind, run, "run_id");
+    if (run.mode === "A") require_go_on(runtime, scope.project_id);
     if (!CLAIMABLE_RUN_STATUSES.has(run.status)) {
       throw new ApiError("conflict", "the run cannot be claimed in its current status");
     }
@@ -304,6 +312,8 @@ function run_claim(runtime: CommandRuntime): CommandResult {
     if (requested_mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
       throw new ApiError("invalid_payload", "mode A requires the opencode-go provider and model prefix");
     }
+    // The Go policy runs on every mode A path whatever the actor kind (internal_ai is the only one that gets here).
+    if (requested_mode === "A") require_go_on(runtime, scope.project_id);
     fresh = { mode: requested_mode, runtime: runtime_name, provider, model };
     run_id = runtime.new_id();
   }
@@ -514,6 +524,10 @@ function run_create(runtime: CommandRuntime): CommandResult {
   const runtime_name = require_non_empty_string(payload, "runtime");
   const provider = require_non_empty_string(payload, "provider");
   const model = require_non_empty_string(payload, "model");
+  // SEL-68: who may receive the run is decided first (a mode A / Go-labelled run goes to an internal_ai actor only),
+  // the same order as the API: permission, then the shape, then the Go policy. A missing target is not_found below.
+  const target = read_credential_actor(runtime.db, actor_id);
+  if (target !== undefined) require_internal_ai_for_go_run(target.kind, { mode, provider, model });
   // A built-in run (PR19) names a registered AI connection; every other mode A run is the legacy Go pair.
   const ai_connection_id = optional_string(payload, "ai_connection_id");
   if (ai_connection_id !== null) {
@@ -525,15 +539,13 @@ function run_create(runtime: CommandRuntime): CommandResult {
   } else if (runtime_name === BUILTIN_RUNTIME) {
     throw new ApiError("invalid_payload", "a pes_builtin run needs ai_connection_id");
   }
+  if (mode === "A") require_go_on(runtime, scope.project_id);
   const builtin =
     ai_connection_id === null ? null : builtin_run_settings(runtime, scope.project_id, ai_connection_id, provider, model);
 
-  const target = read_credential_actor(runtime.db, actor_id);
   if (target === undefined) {
     throw new ApiError("not_found", "the run actor is not allowed in this project");
   }
-  // SEL-68: a mode A / Go-labelled run is created for an internal_ai actor only.
-  require_internal_ai_for_go_run(target.kind, { mode, provider, model });
   const member = runtime.db.get<{ ok: bigint }>(
     "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?",
     scope.project_id,

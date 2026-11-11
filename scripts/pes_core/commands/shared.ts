@@ -391,11 +391,12 @@ export const GO_PROVIDER = "opencode-go";
 export const GO_MODEL_PREFIX = "opencode-go/";
 
 /**
- * Folds a label the way adapters/opencode_tui.ts `on_go_route` does: trimmed, Unicode compatibility folding
- * (full-width letters), format characters removed (zero-width, soft hyphen, BOM), lower case, every hyphen-like
- * character, underscore and space read as one separator. A look-alike from another script stays unfolded.
+ * Folds a label for the Go test: trimmed, Unicode compatibility folding (full-width letters), format characters
+ * removed (zero-width, soft hyphen, BOM), lower case, every hyphen-like character, underscore and space read as one
+ * separator, leading separators dropped. A look-alike from another script stays unfolded. The one fold both the
+ * server rule below and adapters/opencode_tui.ts `on_go_route` use; only the test applied to the folded text differs.
  */
-function fold_go_label(value: string): string {
+export function fold_go_label(value: string): string {
   return value
     .trim()
     .normalize("NFKC")
@@ -406,26 +407,39 @@ function fold_go_label(value: string): string {
 }
 
 /**
- * A Go label: provider `opencode-go` or a model starting with `opencode-go/`, compared after folding so
- * case, padding, full-width and zero-width spellings do not slip a Go-labelled run past the actor rule.
- * Only this label test folds; the mode A check (`provider === GO_PROVIDER`, `GO_MODEL_PREFIX`) stays exact.
+ * Which field of a run carries the Go label: "mode" for mode A, else "provider" (folded `opencode-go`) or "model"
+ * (folded `opencode-go/` prefix), or null. Only this test folds; the mode A shape check stays on the exact spelling.
  */
+export function go_label_field(run: { mode: unknown; provider: unknown; model: unknown }): "mode" | "provider" | "model" | null {
+  if (run.mode === "A") return "mode";
+  if (typeof run.provider === "string" && fold_go_label(run.provider) === GO_PROVIDER) return "provider";
+  if (typeof run.model === "string" && fold_go_label(run.model).startsWith(GO_MODEL_PREFIX)) return "model";
+  return null;
+}
+
+/** A Go label: provider `opencode-go` or a model starting with `opencode-go/`, compared after folding. */
 export function is_go_label(provider: unknown, model: unknown): boolean {
-  if (typeof provider === "string" && fold_go_label(provider) === GO_PROVIDER) return true;
-  return typeof model === "string" && fold_go_label(model).startsWith(GO_MODEL_PREFIX);
+  const field = go_label_field({ mode: null, provider, model });
+  return field === "provider" || field === "model";
 }
 
 /**
  * SEL-68: a mode A run (the PES built-in runner) and any Go-labelled run belong to an internal_ai actor only.
  * A claim, a run_id claim, or a run created for any other actor kind (external_agent, human) is 403 forbidden
  * before anything is written. One rule for the HTTP API and the core commands (the CLI calls the commands).
+ * `details` is `{ actor_kind, field }`: the kind that was refused and the run field that carries the label.
  */
 export function require_internal_ai_for_go_run(
   actor_kind: string | null | undefined,
   run: { mode: unknown; provider: unknown; model: unknown },
+  field_override?: string,
 ): void {
-  if ((run.mode === "A" || is_go_label(run.provider, run.model)) && actor_kind !== "internal_ai") {
-    throw new ApiError("forbidden", "a mode A or OpenCode Go run belongs to an internal AI actor only");
+  const field = go_label_field(run);
+  if (field !== null && actor_kind !== "internal_ai") {
+    throw new ApiError("forbidden", "a mode A or OpenCode Go run belongs to an internal AI actor only", {
+      actor_kind: actor_kind ?? null,
+      field: field_override ?? field,
+    });
   }
 }
 

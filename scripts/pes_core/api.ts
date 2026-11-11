@@ -974,6 +974,26 @@ export class ApiApp {
     if (!decision.allowed) throw new Fail("policy_blocked");
   }
 
+  /**
+   * SEL-68: the shared actor rule as an API refusal — 403 forbidden with target `$.body.<field>` (the field that
+   * carries the Go label, or `run_id`) and details.actor_kind (the kind that was refused), before any write.
+   */
+  #require_internal_for_go(
+    kind: string,
+    run: { mode: unknown; provider: unknown; model: unknown },
+    field?: string,
+  ): void {
+    try {
+      require_internal_ai_for_go_run(kind, run, field);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "forbidden") {
+        const detail = error.details as { actor_kind: string; field: string };
+        throw new Fail("forbidden", { target: `$.body.${detail.field}`, details: { actor_kind: detail.actor_kind } });
+      }
+      throw error;
+    }
+  }
+
   #run_mode(project_id: string, run_id: string): string | null {
     return run_info(this.#db, project_id, run_id)?.mode ?? null;
   }
@@ -1618,7 +1638,7 @@ export class ApiApp {
     const model = require_text(body, "model");
     // SEL-68: a mode A / Go-labelled run is made for an internal_ai actor only — refused before any write.
     const target = read_credential_actor(this.#db, actor_id);
-    if (target !== undefined) require_internal_ai_for_go_run(target.kind, { mode, provider, model });
+    if (target !== undefined) this.#require_internal_for_go(target.kind, { mode, provider, model });
     if (mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
       invalid_field("provider");
     }
@@ -1677,7 +1697,7 @@ export class ApiApp {
         project.id,
         run_id,
       );
-      if (held !== undefined) require_internal_ai_for_go_run(auth.kind, held);
+      if (held !== undefined) this.#require_internal_for_go(auth.kind, held, "run_id");
       if (held?.mode === "A") this.#require_go(project.id);
       payload = { run_id };
     } else {
@@ -1686,7 +1706,7 @@ export class ApiApp {
       const provider = require_text(body, "provider");
       const model = require_text(body, "model");
       // SEL-68: mode A and a Go label belong to an internal_ai caller; any other kind is 403 before a write.
-      require_internal_ai_for_go_run(auth.kind, { mode, provider, model });
+      this.#require_internal_for_go(auth.kind, { mode, provider, model });
       if (mode === "A" && (provider !== GO_PROVIDER || !model.startsWith(GO_MODEL_PREFIX))) {
         invalid_field("provider");
       }
