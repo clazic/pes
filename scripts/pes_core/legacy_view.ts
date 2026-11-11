@@ -82,6 +82,43 @@ function record(value: unknown): Dict {
   return is_dict(value) ? value : {};
 }
 
+
+/**
+ * A library item as the old research-loop state.json (and 0.15's `library`) showed it: the keys it had, with the values it had.
+ * An empty value of a key the item may have lacked is left out (the import keeps no record of an absent key).
+ */
+function library_item(row: Row, extra: Dict, sources: Dict[]): Dict {
+  const item: Dict = { id: extra.legacy_id };
+  item.title = "title_original" in extra ? extra.title_original : row.title;
+  const put = (key: string, value: unknown, keep_empty = false): void => {
+    if (value === undefined || value === null) return;
+    if (!keep_empty && (value === "" || (Array.isArray(value) && value.length === 0))) return;
+    item[key] = value;
+  };
+  put("summary", typeof extra.summary !== "undefined" ? extra.summary : row.summary);
+  put("details", typeof extra.details !== "undefined" ? extra.details : row.body_md);
+  put("question", typeof extra.question !== "undefined" ? extra.question : row.question);
+  put("confidence", typeof extra.confidence !== "undefined" ? extra.confidence : row.confidence);
+  put("status", typeof extra.status !== "undefined" ? extra.status : row.status === "new" ? undefined : row.status);
+  put("sources", sources);
+  put("stats", typeof extra.stats !== "undefined" ? extra.stats : parse(row.stats, []));
+  put("conflicts", typeof extra.conflicts !== "undefined" ? extra.conflicts : parse(row.conflicts, []));
+  put("verify", parse(row.verify, null));
+  if ("kind_original" in extra) put("kind", extra.kind_original);
+  else if (row.kind !== "note") put("kind", row.kind);
+  const skip = new Set(["legacy_id", "title_original", "summary", "details", "question", "confidence", "status", "stats", "conflicts", "kind_original", "stat_floats", "confidence_original", "status_original"]);
+  for (const [key, value] of Object.entries(extra)) if (!skip.has(key)) item[key] = value;
+  if ("confidence_original" in extra) item.confidence = extra.confidence_original;
+  if ("status_original" in extra) item.status = extra.status_original;
+  return item;
+}
+
+/** The manifest name of a round that `approve` opened and sealed by itself (cli_bridge compat_approve); the read model does not count it as a round. */
+export const IMPLICIT_MANIFEST = "implicit-approval.json";
+
+/** The `reason` of the reopen `approve` does by itself to approve a stage a second time (v0.15 allowed that); it leaves no history line. */
+export const REAPPROVE_REASON = "pes-cli:re-approve";
+
 export interface PendingAnswer {
   name: string;
   stage: string;
@@ -141,20 +178,33 @@ export function build_project_view(
     project_id,
     edition_id ?? "",
   );
-  const rounds = db.all<{ stage_id: string; round_no: bigint; start_rowid: bigint | null }>(
-    `SELECT r.stage_id AS stage_id, r.round_no AS round_no,
+  const rounds = db.all<{ id: string; stage_id: string; round_no: bigint; start_rowid: bigint | null; implicit: bigint | null }>(
+    `SELECT r.id AS id, r.stage_id AS stage_id, r.round_no AS round_no,
             (SELECT mc.rowid FROM mutation_commits mc
               WHERE mc.project_id = r.project_id AND mc.action = 'round.started'
-                AND json_extract(mc.result_json, '$.round_id') = r.id) AS start_rowid
-       FROM rounds r WHERE r.project_id = ? AND r.edition_id = ?`,
+                AND json_extract(mc.result_json, '$.round_id') = r.id) AS start_rowid,
+            (SELECT 1 FROM snapshots sn JOIN blobs b ON b.project_id = sn.project_id AND b.id = sn.manifest_blob_id
+              WHERE sn.project_id = r.project_id AND sn.id = r.sealed_snapshot_id AND b.original_name = ?) AS implicit
+       FROM rounds r WHERE r.project_id = ? AND r.edition_id = ? ORDER BY r.stage_id, r.round_no`,
+    IMPLICIT_MANIFEST,
     project_id,
     edition_id ?? "",
   );
+  // A round the CLI opened only to seal an `approve` that came without one (v0.15 approved any stage) is not a round of the work:
+  // it has no number of its own, so the stage shows the rounds a person started (round_display, 0 = none).
   const round_no_of = new Map<string, number>();
   const rounds_by_stage = new Map<string, Array<{ no: number; start: number | null }>>();
+  const seen_visible = new Map<string, number>();
   for (const row of rounds) {
+    const visible = seen_visible.get(row.stage_id) ?? 0;
+    if (row.implicit !== null) {
+      round_no_of.set(row.id, visible);
+      continue;
+    }
+    seen_visible.set(row.stage_id, visible + 1);
+    round_no_of.set(row.id, visible + 1);
     const list = rounds_by_stage.get(row.stage_id) ?? [];
-    list.push({ no: num(row.round_no), start: row.start_rowid === null ? null : num(row.start_rowid) });
+    list.push({ no: visible + 1, start: row.start_rowid === null ? null : num(row.start_rowid) });
     rounds_by_stage.set(row.stage_id, list);
   }
   const stage_key_of = new Map<string, string>();
@@ -175,6 +225,8 @@ export function build_project_view(
   if (edition?.current_stage_id) {
     const key = stage_key_of.get(edition.current_stage_id);
     if (key !== undefined) p.current = key;
+  } else if (edition !== undefined) {
+    delete p.current; // a hand-written v0.15 file that never named a current stage has none
   }
 
   const approved_rows = db.all<{ stage_id: string; origin: string; note: string | null; created_at: bigint }>(
@@ -236,10 +288,7 @@ export function build_project_view(
     ...pin_params,
     project_id,
   );
-  const round_no_by_id = new Map<string, number>();
-  for (const row of db.all<{ id: string; round_no: bigint }>("SELECT id, round_no FROM rounds WHERE project_id = ?", project_id)) {
-    round_no_by_id.set(row.id, num(row.round_no));
-  }
+  const round_no_by_id = round_no_of;
   const citations = new Map<string, Dict[]>();
   for (const row of db.all<Row>(
     `SELECT c.artifact_version_id AS version_id, sv.title AS title, sv.url AS url, sv.method AS method,
@@ -269,7 +318,8 @@ export function build_project_view(
   const qas = new Map<string, Array<{ rowid: number; qa: Dict }>>();
   const review_logs = new Map<string, Array<{ rowid: number; log: Dict }>>();
   const report_versions: Array<{ stage_key: string | null; version_id: string; role: string; round: number; meta: Dict; rowid: number }> = [];
-  let library_items = 0;
+  const library_items: Dict[] = [];
+  const chat_inputs: Array<{ name: string; text: string }> = [];
 
   for (const row of artifacts) {
     const meta = record(parse(row.metadata_json, {}));
@@ -281,8 +331,18 @@ export function build_project_view(
     const rowid = num(row.version_rowid);
 
     if (kind === "note") {
+      if (role === "chat_input") {
+        // `pes chat`: v0.15 wrote an answer file (via chat) and marked it processed at once
+        const stamp = local_stamp(num(row.created_at));
+        const name = `chat-${String(row.object_id)}.json`;
+        chat_inputs.push({
+          name,
+          text: JSON.stringify({ stage: typeof meta.stage === "string" ? meta.stage : "", round: typeof meta.round === "number" ? meta.round : 0, time: `${stamp.slice(0, 10).replace(/-/g, "")}-${stamp.slice(11, 13)}${stamp.slice(14, 16)}00`, kind: typeof meta.input_kind === "string" ? meta.input_kind : "feedback", text: row.body_md ?? "", via: "chat" }),
+        });
+        continue;
+      }
       if (role === "handoff_note") {
-        notes.push({ rowid, note: { time: local_stamp(num(row.created_at)), stage: typeof meta.stage === "string" ? meta.stage : p.current, text: row.body_md ?? "" } });
+        notes.push({ rowid, note: { time: local_stamp(num(row.created_at)), stage: typeof meta.stage === "string" ? meta.stage : meta.stage === null ? null : p.current, text: row.body_md ?? "" } });
         continue;
       }
       if (role === "" && truthy(extra.note) && !("legacy_id" in extra)) {
@@ -292,6 +352,16 @@ export function build_project_view(
       if (!("legacy_id" in extra) && !("legacy_id" in meta)) continue;
     }
     if (kind === "review") {
+      // `pes set`: one value per (stage or project, field), kept in the newest version of an invisible review artifact (cli_bridge set_field)
+      if ((meta.role === "stage_field" || meta.role === "project_field") && typeof meta.field === "string") {
+        if (meta.role === "stage_field" && stage_key !== null) {
+          (p.stages[stage_key] as Dict)[meta.field] = meta.value;
+          if (stage_key === "plan" && meta.field === "settings" && is_dict(meta.value)) p.settings = meta.value;
+        } else if (meta.role === "project_field") {
+          p[meta.field] = meta.value;
+        }
+        continue;
+      }
       if (stage_key !== null && truthy(meta.qa)) {
         const list = qas.get(stage_key) ?? [];
         list.push({ rowid, qa: record(meta.qa) });
@@ -320,7 +390,7 @@ export function build_project_view(
       if (!("legacy_id" in extra) && !("legacy_id" in meta)) continue;
     }
     if (stage_key === null) {
-      if ("legacy_id" in extra) library_items += 1;
+      if ("legacy_id" in extra) library_items.push(library_item(row, extra, citations.get(String(row.version_id)) ?? []));
       continue;
     }
 
@@ -406,14 +476,27 @@ export function build_project_view(
 
   notes.sort((a, b) => a.rowid - b.rowid);
   p.notes = notes.map((entry) => entry.note);
+  // v0.15 wrote `notes` into project.json with its first save; a project nothing has been saved to (only created, asked) has no such key
+  const touched = rounds.length > 0 || approved_rows.length > 0 || Object.values(p.stages as Record<string, Dict>).some((st) => (st.items as unknown[]).length > 0);
+  if (!touched && notes.length === 0 && options.pin === undefined) delete p.notes;
   for (const key of STAGE_KEYS) {
     const st = p.stages[key] as Dict;
     st.suggestions = suggestions.get(key) ?? [];
     st.qa = (qas.get(key) ?? []).sort((a, b) => a.rowid - b.rowid).map((entry) => entry.qa);
     st.review_log = (review_logs.get(key) ?? []).sort((a, b) => a.rowid - b.rowid).map((entry) => entry.log);
   }
-  if (library_items > 0 || truthy(edition_extra.library)) {
-    p.library = { ...record(edition_extra.library), items: new Array(library_items).fill(null).map((_, i) => ({ id: i + 1, title: "", summary: "", confidence: "", sources: [] })) };
+  // the library's own keys (source, imported, round, topic, settings ...): the importer keeps them in the edition, `pes init --import` in the event
+  let library_shell = record(edition_extra.library);
+  if (!truthy(edition_extra.library)) {
+    const imported = db.get<{ payload: string }>(
+      `SELECT payload FROM events WHERE project_id = ? AND type = 'content.library_imported' AND json_extract(payload, '$.original') IS NOT NULL ORDER BY event_seq LIMIT 1`,
+      project_id,
+    );
+    const original = record(record(parse(imported?.payload, {})).original);
+    library_shell = Object.fromEntries(Object.entries(original).filter(([key]) => key !== "items"));
+  }
+  if (library_items.length > 0 || truthy(library_shell)) {
+    p.library = { ...library_shell, items: library_items };
     if (!("source" in p.library)) p.library.source = "";
   }
 
@@ -432,13 +515,32 @@ export function build_project_view(
 
   // processed names and the history lines the importer kept as events
   const processed = new Set<string>();
-  for (const event of db.all<{ type: string; payload: string }>(
-    `SELECT type, payload FROM events
-      WHERE project_id = ? AND type IN ('legacy.processed', 'input.marked_processed', 'legacy.history')
-      ORDER BY rowid`,
+  const snapshot_round = new Map<string, number>();
+  for (const row of db.all<{ id: string; round_id: string | null }>("SELECT id, round_id FROM snapshots WHERE project_id = ?", project_id)) {
+    if (row.round_id !== null && round_no_of.has(row.round_id)) snapshot_round.set(row.id, round_no_of.get(row.round_id) as number);
+  }
+  for (const event of db.all<{ type: string; payload: string; at: bigint | null }>(
+    `SELECT e.type AS type, e.payload AS payload,
+            (SELECT mc.created_at FROM mutation_commits mc WHERE mc.project_id = e.project_id AND mc.id = e.tx_id) AS at
+       FROM events e
+      WHERE e.project_id = ?
+        AND (e.type IN ('legacy.processed', 'input.marked_processed', 'legacy.history', 'stage.reopened')
+             OR (e.type = 'stage.approved'
+                 AND EXISTS (SELECT 1 FROM approvals ap WHERE ap.project_id = e.project_id AND ap.id = json_extract(e.payload, '$.approval_id') AND ap.origin = 'new')))
+      ORDER BY e.rowid`,
     project_id,
   )) {
     const payload = record(parse(event.payload, {}));
+    // what v0.15 wrote into a stage's history when a stage was approved / reopened (the CLI's quiet reopen of a re-approval is not one)
+    if (event.type === "stage.approved" || event.type === "stage.reopened") {
+      const key = typeof payload.stage_id === "string" ? stage_key_of.get(payload.stage_id) : undefined;
+      const st = key === undefined ? undefined : (p.stages[key] as Dict | undefined);
+      if (st === undefined || (event.type === "stage.reopened" && payload.reason === REAPPROVE_REASON)) continue;
+      const stamp = local_stamp(num(event.at));
+      if (event.type === "stage.reopened") st.history.push(`다시 열기 ${stamp}`);
+      else st.history.push(`승인 ${stamp} (R${typeof payload.snapshot_id === "string" ? (snapshot_round.get(payload.snapshot_id) ?? 0) : 0})`);
+      continue;
+    }
     if (event.type === "legacy.processed" && typeof payload.name === "string") processed.add(payload.name);
     else if (event.type === "input.marked_processed" && Array.isArray(payload.names)) {
       for (const name of payload.names) if (typeof name === "string") processed.add(name);
@@ -447,6 +549,7 @@ export function build_project_view(
       if (st !== undefined) st.history.push(payload.line);
     }
   }
+  for (const chat of chat_inputs) processed.add(chat.name);
   p.processed = [...processed];
 
   // unprocessed answers: imported answer files that nobody marked as processed
@@ -486,6 +589,7 @@ export function build_project_view(
       text: typeof doc.text === "string" ? doc.text : "",
     });
   }
+  files.push(...chat_inputs);
   return { project: p, pending, feedback: feedback_entries(files, processed) };
 }
 

@@ -318,3 +318,13 @@ PES 코어는 TypeScript 하나다(결정 0016). 이 저장소에서 Python 이 
 | 8 | Python 테스트·코드 제거, 0.16.0 단일 코드베이스 확인 | PR26 완료 |
 
 **열린 결정**: 런타임(Node/Bun)·테스트 러너·패키지 관리자, `/feedback` 호환 응답 shape, `watch` 대체 방식, `doctor --json` 스키마 동결, legacy 읽기 경로 제거 시점. 이 문서는 후보만 적고 확정하지 않는다.
+
+## 12. PR26b-1(SEL-71) 진행 기록 — `scripts/pes.ts` 골격과 쓰기 명령
+
+- 진입: `node scripts/pes.ts <명령>`(Node 26 타입 제거). 이 쪽 설계·고정 규칙은 [stage-2-db-guarantees.md](stage-2-db-guarantees.md) 8.21, 시험은 `tests/README.md`의 "pes.ts — TS 진입점 시험".
+- 옮긴 것: 2.1절 쓰기 명령 중 init·ask-prep·ask·round-start·merge·render·approve·reopen·mark·chat·note·qa-brief·qa·remote·stop·home·lock·unlock·set(허용 필드 화이트리스트), 그리고 E04 가 쓰는 `status`. `serve`·`hub`·`open`·읽기·보고서 명령은 SEL-77 과 뒤 PR 몫이다(이름만 알고 한국어 한 줄로 거절).
+- 이번에 시험이 짚어 준 0.15 와 DB 사이의 틈과 닫은 방식은 8.21 에 있다(any_order·implicit-approval·set 저장·읽기 모델 보강). 닫지 못한 것은 이 문서 10절의 "저장 방식 변경으로 바이트 동등성 불가" 항목의 구체 사례다:
+  - E03: `index.html`(마지막 render 의 `data`)과 `snapshots/**` 는 그때의 `depth` 를 그대로 담는다. 0.15 는 같은 병합을 다시 보내면 depth 를 올리지만(3) D06 은 고친 값(2)을 정답으로 둔다 — 그러면 같은 상태에서 만든 화면·스냅샷의 해시가 0.15 기준값과 같을 수 없다(D06 이 상태 DTO 에만 걸려 있다).
+  - E10: 손으로 쓴 최소 `project.json`(slug·created·settings·complete 없음)을 가져온 DB 의 상태 DTO 는 그 키들을 늘 채운다 — DB 에는 "원본에 없던 키"의 기록이 없다(slug 는 하네스가 사본에 직접 넣는다).
+  - X04: `home` 이 폴더만 옮기고 DB 프로젝트는 그대로라, 옮긴 뒤에도 같은 이름의 DB 프로젝트가 읽힌다(0.15 기준값은 옛 폴더에 project.json 이 없어 DTO 가 null).
+

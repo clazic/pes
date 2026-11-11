@@ -335,13 +335,15 @@ function build_project(runtime: CommandRuntime, hooks: BuildHooks): CommandResul
   for (const [index, key] of STAGE_KEYS.entries()) {
     const stage_id = runtime.new_id();
     stage_ids[key] = stage_id;
+    // `plan_asking` (scripts/pes.ts init): v0.15 made a new project's plan stage "asking" at once, before any question form existed
     runtime.db.run(
-      "INSERT INTO stages (id, project_id, edition_id, key, ordinal) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO stages (id, project_id, edition_id, key, ordinal, status) VALUES (?, ?, ?, ?, ?, ?)",
       stage_id,
       project_id,
       edition_id,
       key,
       index + 1,
+      key === "plan" && payload.plan_asking === true ? "asking" : "pending",
     );
   }
 

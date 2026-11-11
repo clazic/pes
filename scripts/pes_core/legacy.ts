@@ -2581,8 +2581,8 @@ function build_stage_content(ctx: BuildContext): void {
 
     const reports = as_array(raw.reports);
     for (const [index, value] of reports.entries()) {
-      const report = as_record(value);
-      if (report === null) {
+      const given = as_record(value);
+      if (given === null) {
         plan_entry_category(
           ctx.entries,
           "unknown_field",
@@ -2592,6 +2592,8 @@ function build_stage_content(ctx: BuildContext): void {
         );
         continue;
       }
+      // W1 (SEL-71): 0.15 on Windows stored report paths with backslashes; the database keeps "/" on every OS
+      const report = typeof given.path === "string" && given.path.includes("\\") ? { ...given, path: given.path.replace(/\\/g, "/") } : given;
       const path = typeof report.path === "string" ? report.path : null;
       const round_no = integer_or(report.round, 0);
       const round_key = round_no >= 1 ? `${stage_key}:${round_no}` : null;

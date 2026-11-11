@@ -46,7 +46,7 @@ import { ApiError } from "./errors.ts";
 import { FORM_REVISED } from "./commands/records.ts";
 import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex, write_storage_bytes } from "./files.ts";
 import { serving_path } from "./migration.ts";
-import { build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
+import { IMPLICIT_MANIFEST, REAPPROVE_REASON, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -126,6 +126,7 @@ interface LeaseInfo {
   owner_actor_id: string;
   fence: number;
   heartbeat_at: number;
+  acquired_at: number;
   expires_at: number;
   session: string | null;
 }
@@ -148,6 +149,8 @@ class Session {
   readonly clock = new SystemClock();
   readonly service: CommandService;
   readonly objects: string;
+  /** The project folder the caller named (scripts/pes.ts passes it): the messages that tell a person what to type use it, as 0.15 did. */
+  dir_label: string | undefined;
   /** Object files this run wrote; they are removed again when the run fails (the rows roll back). */
   readonly fresh_files: Array<{ project_id: string; storage_key: string }> = [];
 
@@ -294,10 +297,11 @@ class Session {
       owner_actor_id: string | null;
       fence: bigint;
       heartbeat_at: bigint;
+      acquired_at: bigint;
       expires_at: bigint;
       state: string;
     }>(
-      `SELECT lease_id, run_id, owner_actor_id, fence, heartbeat_at, expires_at, state
+      `SELECT lease_id, run_id, owner_actor_id, fence, heartbeat_at, acquired_at, expires_at, state
          FROM project_leases WHERE project_id = ?`,
       project.id,
     );
@@ -321,6 +325,7 @@ class Session {
       owner_actor_id: row.owner_actor_id,
       fence: Number(row.fence),
       heartbeat_at: Number(row.heartbeat_at),
+      acquired_at: Number(row.acquired_at),
       expires_at: Number(row.expires_at),
       session: run?.external_session_ref ?? null,
     };
@@ -383,8 +388,8 @@ class Session {
     const minutes = Math.max(0, Math.floor((this.now() - lease.heartbeat_at) / 60_000));
     throw new Refusal(
       "locked",
-      `다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 ${(lease.session ?? "에이전트 run").slice(0, 8)}…, ` +
-        `마지막 기록 ${minutes}분 전). 그 세션을 닫았다면 \`lock ${project.slug} --force\`로 가져오세요.`,
+      `다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 ${Array.from(lease.session ?? "에이전트 run").slice(0, 8).join("")}…, ${local_stamp(lease.acquired_at)}부터, ` +
+        `마지막 기록 ${minutes}분 전). 그 세션을 닫았다면 \`lock ${this.dir_label ?? project.slug} --force\`로 가져오세요.`,
       3,
     );
   }
@@ -471,7 +476,9 @@ const init: Handler = async (s, req) => {
   const args = req.args ?? {};
   const slug = text_arg(args, "slug");
   const topic = text_arg(args, "topic");
-  if (!SLUG.test(slug)) {
+  // scripts/pes.ts names a project by its folder, whatever the folder is called (0.15's rule); scripts/pes.py keeps the strict name
+  const folder_named = args.any_name === true && !/[\\/]/.test(slug) && slug.length <= 255;
+  if (!folder_named && !SLUG.test(slug)) {
     throw new Refusal("invalid_payload", "프로젝트 이름은 소문자·숫자·하이픈(1~64자)만 쓸 수 있습니다", 2);
   }
   if (s.db.get("SELECT 1 AS ok FROM projects WHERE slug = ?", slug) !== undefined) {
@@ -482,6 +489,7 @@ const init: Handler = async (s, req) => {
       slug,
       topic,
       owner_display_name: "로컬 소유자",
+      ...(args.any_name === true ? { plan_asking: true } : {}),
     });
     const created = result_of(out);
     let imported = 0;
@@ -495,11 +503,29 @@ const init: Handler = async (s, req) => {
   });
 };
 
+/**
+ * The number a person sees for a round: the rounds `approve` opened by itself (implicit, see compat_approve) are not counted.
+ * Without any implicit round this is the stored round number.
+ */
+function display_round_no(s: Session, project_id: string, stage_id: string, round_no: number): number {
+  const hidden = s.db.get<{ n: bigint }>(
+    `SELECT count(*) AS n FROM rounds r
+       JOIN snapshots sn ON sn.project_id = r.project_id AND sn.id = r.sealed_snapshot_id
+       JOIN blobs b ON b.project_id = sn.project_id AND b.id = sn.manifest_blob_id
+      WHERE r.project_id = ? AND r.stage_id = ? AND r.round_no < ? AND b.original_name = ?`,
+    project_id,
+    stage_id,
+    round_no,
+    IMPLICIT_MANIFEST,
+  );
+  return round_no - Number(hidden?.n ?? 0n);
+}
+
 const round_start: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const stage = s.stage(project, req.args?.stage);
-  const out = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id });
-  return { round_no: result_of(out).round_no, round_id: result_of(out).round_id };
+  const out = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id, ...(req.args?.any_order === true ? { any_order: true } : {}) });
+  return { round_no: display_round_no(s, project.id, stage.id, Number(result_of(out).round_no)), round_id: result_of(out).round_id };
 };
 
 interface VersionRef {
@@ -752,7 +778,7 @@ function find_library_item(s: Session, project: ProjectInfo, reuse: unknown): Pr
        JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
        JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
       WHERE o.project_id = ? AND a.stage_id IS NULL AND o.kind = 'artifact'
-        AND a.kind NOT IN ('note', 'review', 'report', 'output')
+        AND a.kind NOT IN ('review', 'report', 'output')
         AND json_extract(v.metadata_json, '$.legacy_extra.legacy_id') = ?
       LIMIT 1`,
     project.id,
@@ -815,9 +841,234 @@ const reopen: Handler = async (s, req) => {
   return { marked: later.map((row) => row.key) };
 };
 
+// compat_* : v0.15's render / approve / reopen on top of the rounds and snapshots (scripts/pes.ts) ---------------------------------
+
+interface StageNow {
+  status: string;
+  stale: bigint | null;
+  current_round_id: string | null;
+}
+
+function stage_now(s: Session, project: ProjectInfo, stage: StageInfo): StageNow {
+  const row = s.db.get<StageNow>(
+    "SELECT status, stale_since_event_seq AS stale, current_round_id FROM stages WHERE project_id = ? AND id = ?",
+    project.id,
+    stage.id,
+  );
+  if (row === undefined) throw new Refusal("not_found", "단계를 찾을 수 없습니다");
+  return { ...row };
+}
+
+/** Seals one open round: the manifest goes to the object store, then the core seals it (one unit). Returns the snapshot id. */
+async function seal_with_manifest(
+  s: Session,
+  project: ProjectInfo,
+  auth: Auth,
+  guard: Record<string, unknown>,
+  round_id: string,
+  versions: VersionRef[],
+  manifest_name: string,
+  manifest_extra: Record<string, unknown>,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify({ versions, ...manifest_extra }));
+  const sealed = await s.unit(async () => {
+    const reserved = await reserve_upload(s.service, s.ctx(project, auth), {
+      sha256: sha256_hex(bytes),
+      size: bytes.byteLength,
+      media_type: "application/json",
+      original_name: manifest_name,
+    });
+    const blob = result_of(reserved);
+    const blob_id = String(blob.blob_id);
+    if (blob.state !== "ready") {
+      await store_blob({ db: s.db, objects_dir: s.objects }, project.id, blob_id, bytes);
+      await complete_upload(s.service, { db: s.db, objects_dir: s.objects }, s.ctx(project, auth), { blob_id });
+    }
+    return seal_round(s.service, s.ctx(project, auth), { round_id, manifest_blob_id: blob_id, versions, ...guard });
+  });
+  return String(result_of(sealed).snapshot_id);
+}
+
+/** A round has to hold at least one version to be sealed; a stage without items gets one invisible marker note. */
+async function approval_marker(s: Session, project: ProjectInfo, auth: Auth, stage: StageInfo): Promise<VersionRef> {
+  const made = await create_object(s.service, s.ctx(project, auth), { kind: "artifact", edition_id: stage.edition_id });
+  const object_id = String(result_of(made).object_id);
+  const added = await add_artifact(s.service, s.ctx(project, auth), {
+    object_id,
+    artifact_kind: "note",
+    stage_id: stage.id,
+    title: "(승인 표지)",
+    status: "done",
+    metadata: { role: "approval_marker", stage: stage.key },
+  });
+  return { object_id, version_id: String(result_of(added).version_id) };
+}
+
+/** v0.15 `render`: seal the open round when it has content. A round that is sealed already, or has nothing in it, is left as it is. */
+const compat_render: Handler = async (s, req) => {
+  const { project, auth, guard } = await write_auth(s, req);
+  const stage = s.stage(project, req.args?.stage);
+  const round = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
+  if (round === undefined) return { sealed: false };
+  const versions = manifest_parts(s, project, stage).all;
+  if (versions.length === 0) return { sealed: false };
+  await seal_with_manifest(s, project, auth, guard, round.id, versions, "manifest.json", {});
+  return { sealed: true };
+};
+
+/**
+ * v0.15 `approve`: any stage, any time. The database approves a stage on a sealed round of its own and only once, so:
+ *  - an approved stage that is approved again is reopened quietly first (the reopen leaves no history line);
+ *  - the open round is sealed; with none (or one sealed before the stage was last invalidated) a round is opened and sealed by the
+ *    CLI itself — marked implicit (its manifest) so the read model does not count it as a round of the work.
+ */
+const compat_approve: Handler = async (s, req) => {
+  const { project, auth, guard } = await write_auth(s, req);
+  const stage = s.stage(project, req.args?.stage);
+  return s.unit(async () => {
+    let now_row = stage_now(s, project, stage);
+    if (now_row.status === "approved" && now_row.stale === null) {
+      await reopen_stage(s.service, s.ctx(project, auth), { stage_id: stage.id, reason: REAPPROVE_REASON });
+      now_row = stage_now(s, project, stage);
+    }
+    const open = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
+    let snapshot_id: string | null = null;
+    if (open === undefined && now_row.current_round_id !== null) {
+      const sealed = s.db.get<{ sealed_snapshot_id: string | null; through: bigint | null }>(
+        `SELECT r.sealed_snapshot_id AS sealed_snapshot_id, sn.through_event_seq AS through
+           FROM rounds r LEFT JOIN snapshots sn ON sn.project_id = r.project_id AND sn.id = r.sealed_snapshot_id
+          WHERE r.project_id = ? AND r.id = ? AND r.state = 'sealed'`,
+        project.id,
+        now_row.current_round_id,
+      );
+      const reopened = s.db.get<{ n: bigint | null }>(
+        "SELECT max(event_seq) AS n FROM events WHERE project_id = ? AND type = 'stage.reopened' AND json_extract(payload, '$.stage_id') = ?",
+        project.id,
+        stage.id,
+      );
+      const invalidation = now_row.stale !== null ? Number(now_row.stale) : reopened?.n === null || reopened === undefined ? null : Number(reopened.n);
+      if (sealed?.sealed_snapshot_id && (invalidation === null || (sealed.through !== null && Number(sealed.through) >= invalidation))) {
+        snapshot_id = sealed.sealed_snapshot_id;
+      }
+    }
+    if (snapshot_id === null) {
+      let round_id: string;
+      let implicit = false;
+      if (open !== undefined) {
+        round_id = open.id;
+      } else {
+        const started = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id });
+        round_id = String(result_of(started).round_id);
+        implicit = true;
+      }
+      let versions = manifest_parts(s, project, stage).all;
+      if (versions.length === 0) versions = [await approval_marker(s, project, auth, stage)];
+      snapshot_id = await seal_with_manifest(s, project, auth, guard, round_id, versions, implicit ? IMPLICIT_MANIFEST : "manifest.json", implicit ? { implicit: true } : {});
+    }
+    const approved = await approve_stage(s.service, s.ctx(project, auth), { stage_id: stage.id, snapshot_id });
+    let made: { made: number; reused: number } | null = null;
+    if (stage.key === "plan") made = await hand_over_plan(s, project, auth, stage, snapshot_id);
+    const result = result_of(approved);
+    let next: { key: string; status: string } | null = null;
+    if (typeof result.next_stage_id === "string") {
+      const row = s.db.get<{ key: string; status: string }>("SELECT key, status FROM stages WHERE project_id = ? AND id = ?", project.id, result.next_stage_id);
+      next = row === undefined ? null : { ...row };
+    }
+    return { next, complete: result.edition_completed === true, handed_over: made === null ? null : made.made, reused: made === null ? null : made.reused };
+  });
+};
+
+/** v0.15 `reopen`: the stage is approved again-able, later stages that were started are marked "check again". */
+const compat_reopen: Handler = async (s, req) => {
+  const { project, auth } = await write_auth(s, req);
+  const stage = s.stage(project, req.args?.stage);
+  if (stage_now(s, project, stage).status !== "approved") {
+    throw new Refusal("conflict", `${stage.key} 단계는 승인된 단계가 아니라 다시 열 수 없습니다`);
+  }
+  await reopen_stage(s.service, s.ctx(project, auth), { stage_id: stage.id });
+  const later = s.db.all<{ key: string }>(
+    `SELECT key FROM stages
+      WHERE project_id = ? AND edition_id = ? AND ordinal > ? AND status <> 'pending' AND stale_since_event_seq IS NOT NULL
+      ORDER BY ordinal`,
+    project.id,
+    stage.edition_id,
+    stage.ordinal,
+  );
+  return { marked: later.map((row) => row.key) };
+};
+
+// set_field : `pes set` — one whitelisted field, replaced whole (scripts/pes.ts) ---------------------------------------------------
+
+const SET_STAGE_FIELDS = new Set(["summary", "changes", "carry_over", "settings", "review"]);
+const SET_PROJECT_FIELDS = new Set(["executive_summary", "conclusion"]);
+
+/**
+ * The values `set` writes have no table of their own: each (stage or project, field) is one invisible "review" artifact whose newest
+ * version carries the value (metadata role stage_field / project_field). Review artifacts are in no snapshot and no item list; the read
+ * model (legacy_view) puts the value back where v0.15 kept it. Writing the same value again changes nothing.
+ */
+const set_field: Handler = async (s, req) => {
+  const { project, auth } = await write_auth(s, req);
+  const args = req.args ?? {};
+  const target = args.target;
+  const field = args.field;
+  if (typeof target !== "string" || typeof field !== "string") throw new Refusal("invalid_payload", "set: 대상과 필드가 필요합니다", 2);
+  const whole_project = target === "project";
+  if (!(whole_project ? SET_PROJECT_FIELDS : SET_STAGE_FIELDS).has(field) || !("value" in args)) {
+    throw new Refusal("invalid_payload", `set: 쓸 수 없는 필드입니다: ${target}.${field}`, 2);
+  }
+  const stage = whole_project ? null : s.stage(project, target);
+  const role = whole_project ? "project_field" : "stage_field";
+  const current = s.db.get<{ object_id: string; version_id: string; metadata_json: string }>(
+    `SELECT o.id AS object_id, v.version_id AS version_id, v.metadata_json AS metadata_json
+       FROM objects o
+       JOIN artifacts a ON a.project_id = o.project_id AND a.object_id = o.id
+       JOIN artifact_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+      WHERE o.project_id = ? AND o.kind = 'artifact' AND a.kind = 'review'
+        AND ((? IS NULL AND a.stage_id IS NULL) OR a.stage_id = ?)
+        AND json_extract(v.metadata_json, '$.role') = ? AND json_extract(v.metadata_json, '$.field') = ?
+      ORDER BY o.display_no LIMIT 1`,
+    project.id,
+    stage === null ? null : stage.id,
+    stage === null ? null : stage.id,
+    role,
+    field,
+  );
+  const metadata = { role, field, value: args.value, stage: stage === null ? null : stage.key };
+  if (current !== undefined && same_json(parse_json_field(current.metadata_json, {}), metadata)) return { changed: false };
+  await s.unit(async () => {
+    const title = `(${whole_project ? "프로젝트" : stage?.key} ${field})`;
+    if (current === undefined) {
+      const created = await create_object(s.service, s.ctx(project, auth), { kind: "artifact", edition_id: project.active_edition_id });
+      const object_id = String(result_of(created).object_id);
+      await add_artifact(s.service, s.ctx(project, auth), {
+        object_id,
+        artifact_kind: "review",
+        ...(stage === null ? {} : { stage_id: stage.id }),
+        title,
+        status: "done",
+        metadata,
+      });
+    } else {
+      const appended = await append_version(s.service, s.ctx(project, auth), {
+        object_id: current.object_id,
+        based_on_version_id: current.version_id,
+        title,
+        status: "done",
+        metadata,
+      });
+      await set_current(s.service, s.ctx(project, auth), { object_id: current.object_id, version_id: String(result_of(appended).version_id) });
+    }
+  });
+  return { changed: true };
+};
+
 const note: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
-  const out = await add_note(s.service, s.ctx(project, auth), { text: text_arg(req.args ?? {}, "text") });
+  const args = req.args ?? {};
+  // scripts/pes.ts: `note <dir>` with no text stored an empty note in v0.15 and still does (allow_blank); the API and pes.py refuse blank text
+  const payload = args.allow_blank === true && args.text === "" ? { text: "", allow_blank: true } : { text: text_arg(args, "text") };
+  const out = await add_note(s.service, s.ctx(project, auth), payload);
   return { note_count: result_of(out).note_count };
 };
 
@@ -873,6 +1124,43 @@ const ask: Handler = async (s, req) => {
 };
 
 // merge -----------------------------------------------------------------
+
+/** Would merging `raw` change the stored item `prev`? (everything the merge writes, except the depth it counts up) */
+function fields_changed(s: Session, project: ProjectInfo, prev: PrevArtifact, fields: Record<string, unknown>, raw: Record<string, unknown>): boolean {
+  const prev_meta = parse_json_field(prev.metadata_json, {}) as Record<string, unknown>;
+  const next_meta = { ...(fields.metadata as Record<string, unknown>), depth: prev_meta.depth };
+  const now_fields: Record<string, unknown> = {
+    title: prev.title,
+    summary: prev.summary,
+    question: prev.question,
+    body_md: prev.body_md,
+    status: prev.status,
+    confidence: prev.confidence,
+    stats: parse_json_field(prev.stats, []),
+    conflicts: parse_json_field(prev.conflicts, []),
+    verify: parse_json_field(prev.verify, null),
+    metadata: prev_meta,
+  };
+  const next_fields: Record<string, unknown> = { ...fields, metadata: next_meta };
+  for (const key of Object.keys(now_fields)) {
+    if (!same_json(now_fields[key], next_fields[key])) return true;
+  }
+  const have = new Set(
+    s.db
+      .all<{ url: string | null }>(
+        `SELECT sv.url AS url FROM citations c JOIN source_versions sv ON sv.project_id = c.project_id AND sv.version_id = c.source_version_id
+          WHERE c.project_id = ? AND c.artifact_version_id = ?`,
+        project.id,
+        prev.version_id,
+      )
+      .map((row) => row.url),
+  );
+  for (const src of Array.isArray(raw.sources) ? raw.sources : []) {
+    if (!is_record(src)) continue;
+    if (typeof src.url !== "string" || src.url.length === 0 || !have.has(src.url)) return true;
+  }
+  return false;
+}
 
 interface PrevArtifact {
   object_id: string;
@@ -1113,6 +1401,11 @@ const merge: Handler = async (s, req) => {
       verify: raw.verify !== undefined ? raw.verify : parse_json_field(prev_fields.verify ?? "null", null),
       metadata,
     };
+    // v0.15 defect (D06, SEL-12): sending the same result again raised `depth` again. scripts/pes.ts (v015) keeps the item as it is.
+    if (req.args?.v015 === true && prev !== undefined && !control_only && !fields_changed(s, project, prev, fields, raw)) {
+      merged += 1;
+      continue;
+    }
     let object_id: string;
     let version_id: string;
     let appended_version = false;
@@ -1268,7 +1561,7 @@ const qa_data: Handler = async (s, req) => {
   return {
     topic: project.topic,
     stage: stage.key,
-    round_no: Number(round?.n ?? 0n),
+    round_no: round?.n === null || round === undefined ? 0 : display_round_no(s, project.id, stage.id, Number(round.n) + 1) - 1,
     items: items.map((row) => ({
       id: typeof row.legacy_id === "bigint" ? Number(row.legacy_id) : (row.legacy_id ?? Number(row.display_no)),
       kind: row.kind,
@@ -1330,8 +1623,8 @@ const lock: Handler = async (s, req) => {
     if (!force) {
       throw new Refusal(
         "locked",
-        `다른 세션이 사용 중: ${(lease.session ?? "에이전트 run").slice(0, 8)}… ` +
-          `(마지막 기록 ${Math.floor((s.now() - lease.heartbeat_at) / 60_000)}분 전). 그 세션이 끝났으면 --force`,
+        `다른 세션이 사용 중: ${Array.from(lease.session ?? "에이전트 run").slice(0, 8).join("")}… ` +
+          `(${local_stamp(lease.acquired_at)}부터, 마지막 기록 ${Math.floor((s.now() - lease.heartbeat_at) / 60_000)}분 전). 그 세션이 끝났으면 --force`,
         3,
       );
     }
@@ -1508,6 +1801,7 @@ const read_project: Handler = async (s, req) => {
   return {
     project: view.project,
     pending: view.pending,
+    feedback: view.feedback,
     lock: lease === null ? null : { owner: lease.session ?? `agent-run:${lease.run_id}`, since: local_stamp(lease.heartbeat_at) },
     updated: local_stamp(Number(last?.at ?? 0n)),
   };
@@ -2116,6 +2410,10 @@ const HANDLERS: Record<string, Handler> = {
   init,
   "round-start": in_unit(round_start),
   render: in_unit(render),
+  compat_render,
+  compat_approve,
+  compat_reopen,
+  set_field,
   approve: in_unit(approve),
   reopen: in_unit(reopen),
   note: in_unit(note),
@@ -2154,47 +2452,52 @@ function reply(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-async function main(): Promise<void> {
-  const env = process.env as Environment;
-  let request: Request;
-  try {
-    request = JSON.parse(readFileSync(0, "utf8")) as Request;
-  } catch {
-    reply({ ok: false, code: "invalid_payload", message: "요청을 읽지 못했습니다", exit: 1 });
-    return;
-  }
+/** What one bridge call answers: the JSON line `main` prints, or what `scripts/pes.ts` reads in-process. */
+export type BridgeReply =
+  | { ok: true; data: unknown }
+  | { ok: false; code: string; message: string; exit: number; stack?: string };
+
+export interface BridgeRequest {
+  op: string;
+  slug?: string | null;
+  session?: string | null;
+  token?: string | null;
+  args?: Record<string, unknown> | null;
+}
+
+/**
+ * One request, one reply, no process in between: the body of `main`, shared with scripts/pes.ts (which calls the core in its own
+ * process instead of spawning this file). Nothing is printed here; an unexpected error comes back as `internal_error` with its stack.
+ */
+export async function handle_request(env: Environment, input: BridgeRequest): Promise<BridgeReply> {
+  const request = { ...input } as Request;
   // Python sends null for "not given".
   for (const field of ["slug", "session", "token"] as const) {
-    if (request[field] === null) delete request[field];
+    if ((request as unknown as Record<string, unknown>)[field] === null) delete request[field];
   }
-  if (request.args === null) delete request.args;
+  if ((request as unknown as { args?: unknown }).args === null) delete request.args;
   if (request.op === "db_status") {
-    reply({ ok: true, data: probe_database(db_path(env)) });
-    return;
+    return { ok: true, data: probe_database(db_path(env)) };
   }
   const handler = HANDLERS[request.op];
   if (handler === undefined) {
-    reply({ ok: false, code: "unknown_command", message: `알 수 없는 작업: ${String(request.op)}`, exit: 1 });
-    return;
+    return { ok: false, code: "unknown_command", message: `알 수 없는 작업: ${String(request.op)}`, exit: 1 };
   }
   const file = db_path(env);
   const creating = request.op === "init";
   if (!creating && !existsSync(file)) {
     if (request.op === "slugs" || request.op === "live_locks" || request.op === "active_slugs") {
-      reply({ ok: true, data: { slugs: [], locks: {} } });
-      return;
+      return { ok: true, data: { slugs: [], locks: {} } };
     }
     if (request.op === "route") {
-      reply({ ok: true, data: { serving: "none" } });
-      return;
+      return { ok: true, data: { serving: "none" } };
     }
-    reply({
+    return {
       ok: false,
       code: "not_found",
       message: "PES 데이터베이스가 없습니다 — 옛 project.json 프로젝트는 이전하기 전에는 쓸 수 없습니다",
       exit: 1,
-    });
-    return;
+    };
   }
   if (creating) mkdirSync(pes_dir(env), { recursive: true });
   const read_only = READ_ONLY_OPS.has(request.op);
@@ -2203,12 +2506,12 @@ async function main(): Promise<void> {
   try {
     if (creating) migrate(db);
     else if (!schema_is_current(db)) {
-      reply({ ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 });
-      return;
+      return { ok: false, code: "schema_not_ready", message: "PES 데이터베이스가 최신이 아닙니다", exit: 1 };
     }
     session = new Session(env, db, !read_only);
+    if (typeof request.args?.dir === "string") session.dir_label = request.args.dir;
     const data = await handler(session, request);
-    reply({ ok: true, data });
+    return { ok: true, data };
   } catch (error) {
     try {
       session?.discard_fresh_files();
@@ -2216,20 +2519,38 @@ async function main(): Promise<void> {
       // best effort: the next gc removes an orphan file
     }
     if (error instanceof Refusal) {
-      reply({ ok: false, code: error.code, message: error.message, exit: error.exit });
-    } else if (error instanceof ApiError) {
-      reply({ ok: false, code: error.code, message: `${error.code}: ${error.message}`, exit: 1 });
-    } else {
-      process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
-      reply({ ok: false, code: "internal_error", message: "내부 오류", exit: 1 });
+      return { ok: false, code: error.code, message: error.message, exit: error.exit };
     }
+    if (error instanceof ApiError) {
+      return { ok: false, code: error.code, message: `${error.code}: ${error.message}`, exit: 1 };
+    }
+    return { ok: false, code: "internal_error", message: "내부 오류", exit: 1, stack: error instanceof Error ? (error.stack ?? error.message) : String(error) };
   } finally {
     db.close();
   }
 }
 
+async function main(): Promise<void> {
+  let request: BridgeRequest;
+  try {
+    request = JSON.parse(readFileSync(0, "utf8")) as BridgeRequest;
+  } catch {
+    reply({ ok: false, code: "invalid_payload", message: "요청을 읽지 못했습니다", exit: 1 });
+    return;
+  }
+  const answer = await handle_request(process.env as Environment, request);
+  if (!answer.ok && answer.stack !== undefined) {
+    process.stderr.write(`${answer.stack}\n`);
+    const { stack: _stack, ...rest } = answer;
+    reply(rest);
+    return;
+  }
+  reply(answer);
+}
 
-main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
-  process.exitCode = 1;
-});
+if (import.meta.main) {
+  main().catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

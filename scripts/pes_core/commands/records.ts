@@ -86,7 +86,7 @@ function new_ids(runtime: CommandRuntime): RecordIds {
 function write_record_artifact(
   runtime: CommandRuntime,
   scope: Scope,
-  stage: KeyedStage,
+  stage: { id: string | null; edition_id: string },
   artifact_kind: "note" | "review",
   fields: ArtifactFields,
   ids: RecordIds,
@@ -150,15 +150,37 @@ function note_count(runtime: CommandRuntime, project_id: string): number {
   return Number(row?.n ?? 0n);
 }
 
+
+/**
+ * The stage a note belongs to: the one named, else the current one. A project without a current stage (a hand-written v0.15 file that never
+ * named one) keeps the note on no stage, as v0.15 did (`stage: null`).
+ */
+function note_stage(
+  runtime: CommandRuntime,
+  project_id: string,
+  key: unknown,
+): { id: string | null; key: string | null; edition_id: string } {
+  try {
+    return resolve_stage_key(runtime, project_id, key);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "not_found" || (key !== undefined && key !== null)) throw error;
+    const edition = runtime.db.get<{ id: string }>("SELECT active_edition_id AS id FROM projects WHERE id = ?", project_id);
+    if (edition === undefined || edition.id === null) throw error;
+    return { id: null, key: null, edition_id: edition.id };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // project.add_note
 
 function run_add_note(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["text", "stage"]);
-  const text = require_text(payload, "text");
+  reject_unknown_fields(payload, ["text", "stage", "allow_blank"]);
+  // `allow_blank`: v0.15's `note <dir>` with no text stored an empty note; scripts/pes.ts keeps that (a person-facing CLI rule, not an API one)
+  const blank_ok = payload.allow_blank === true && payload.text === "";
+  const text = blank_ok ? "" : require_text(payload, "text");
   const scope = scope_of(runtime);
-  const stage = resolve_stage_key(runtime, scope.project_id, payload.stage);
+  const stage = note_stage(runtime, scope.project_id, payload.stage);
   const ids = new_ids(runtime);
   const result = {
     project_id: scope.project_id,
@@ -179,7 +201,7 @@ function run_add_note(runtime: CommandRuntime): CommandResult {
     scope,
     stage,
     "note",
-    record_fields(first_line(text, 80), text, "done", { role: "handoff_note", stage: stage.key }),
+    record_fields(blank_ok ? "(빈 메모)" : first_line(text, 80), text, "done", { role: "handoff_note", stage: stage.key }),
     ids,
   );
   return {

@@ -498,3 +498,26 @@ A(내장 실행기, `internal_ai`)와 B(MCP·HTTP, `external_agent` — 직접 �
 - **시험**: `tests/test_cross_contract.test.ts`(같은 시작 상태 표), `test_cross_handoff.test.ts`(인계·옛 fence), `test_cross_scenarios.test.ts`(지연·종료·Go OFF·사용량·F1), `test_cross_unknown.test.ts`(예약 보존), `test_cross_d1.test.ts`(SQLite/D1); 도우미 `tests/helpers/cross_{env,driver}.ts`; 표 `tests/fixtures/contracts/cross/{same_outcome,b_tools,d1_scenarios}.json`.
 - **D1 로컬 smoke 조건**: `PES_D1_SMOKE=1` 또는 `tests/d1/node_modules`(miniflare)가 있으면 D1 부분을 돌리고, 꺼져 있으면 사유와 함께 skip한다(`PES_D1_SMOKE=1`인데 도구가 없으면 실패). CI는 `d1-smoke` 워크플로가 돌린다(paths에 `tests/test_cross_d1.test.ts`·`tests/fixtures/contracts/cross/**` 포함).
 - **한계**: 해석 3의 code 통일은 후속. D1 교차는 001뿐. 실제 모델·실제 B 에이전트는 호출하지 않았다.
+
+### 8.21 TypeScript CLI `scripts/pes.ts` — 0.15 동작을 DB 위에서 (PR26b-1, SEL-71)
+
+`node scripts/pes.ts <명령>`은 Node 26이 타입을 지워 바로 돌린다(tsx·ts-node·빌드·로더 없음). 진입 파일은 얇고(`scripts/pes.ts`), 본문은 `scripts/pes_core/cli_main.ts`와 `cli_*.ts` 모듈이다. 쓰기는 모두 코어 한 번 호출(`cli_bridge.handle_request`, Python 이 자식 프로세스로 부르던 그 코드 — 이제 같은 프로세스 안에서)이고, `project.json`·`.pes-lock`·업무 SQL 은 이 파일들에 없다. 이 PR 이 옮긴 명령: init·ask-prep·ask·round-start·merge·render·approve·reopen·status·mark·chat·note·set·qa-brief·qa·lock·unlock·home·remote·stop. 읽기·보고서 명령(pending·digest·show·report·assemble·web·list·hub·open·which·doctor·serve·watch)은 이름만 알고 "아직 없다"는 한국어 한 줄과 종료 1로 답한다(SEL-77).
+
+사용법 글은 `pes.py` 의 `__doc__` 그대로이고 첫 줄의 실행 명령만 `node scripts/pes.ts`다. 인자 오류·종료 코드·stdout/stderr 는 0.15 와 같다. 0.15 가 Python 스택 추적으로 죽던 곳(없는 결과·질문 파일, 깨진 JSON, 모자란 인자)은 같은 종료 코드와 스택 없는 한국어 한 줄이다(D11). 문서가 만든 파일은 어느 OS 에서나 UTF-8·LF 이고 저장 경로는 `/`다(D10, W1·W2).
+
+0.15 는 어느 단계든 언제든 쓸 수 있었고 DB 는 단계 순서·라운드·봉인을 지킨다. 그 틈을 CLI 가 메우는 방식(모두 `scripts/pes.ts` 가 켜는 선택 항목이다 — 기본 동작과 `pes.py` 경로, 기존 코어 시험은 바뀌지 않는다):
+
+- **`round.start { any_order }`**: 앞 단계가 승인되지 않아도 그 단계의 라운드를 열고, 그 단계가 프로젝트의 `current` 가 된다(0.15 `round-start`).
+- **`approve` = `compat_approve`**: 열린 라운드가 있으면 봉인하고, 없거나 낡았으면(reopen 뒤) 라운드를 하나 열어 CLI 가 스스로 봉인한 뒤 승인한다. 이 라운드의 매니페스트 이름은 `implicit-approval.json`이고 읽기 모델은 이것을 **라운드로 세지 않는다**(`stages.<단계>.round` 는 사람이 연 라운드 수, 승인 기록 "(R0)"도 그 번호). 항목이 하나도 없는 단계는 보이지 않는 "승인 표지" 노트 하나를 봉인에 담는다(`kind note`, 어느 항목 목록·매니페스트에도 안 나온다). 이미 승인된(낡지 않은) 단계를 다시 승인하면 먼저 `reason = pes-cli:re-approve` 로 조용히 다시 열었다가 승인한다 — 이 reopen 은 읽기 모델의 history 에 한 줄도 남기지 않는다.
+- **history 줄**: `stage.approved`(origin `new`)·`stage.reopened` 사건에서 `승인 <시각> (R<n>)`·`다시 열기 <시각>`을 읽기 모델이 만든다(importer 가 남긴 `legacy.history` 와 겹치지 않게 origin `new` 만).
+- **`render` = `compat_render`**: 열린 라운드에 내용이 있으면 봉인하고, 이미 봉인된 라운드를 다시 `render` 해도 거절하지 않는다. `snapshots/<단계>-R<n>.json`(같은 라운드의 다른 상태는 `<단계>-R<n>/<k>.json`)은 0.15 처럼 폴더에 쓴다 — 읽기 모델의 그 단계 상태를 그대로.
+- **`merge { v015 }`**: 같은 결과를 다시 보내면 `depth` 를 올리지 않는다(0.15 결함 ②, D06). 바뀐 내용이 있을 때만 새 판이다.
+- **`note { allow_blank }`**: 글 없는 `note <dir>` 은 0.15 처럼 빈 메모를 남긴다. 현재 단계가 없는 손으로 쓴 옛 파일의 프로젝트는 메모를 단계 없이(`stage: null`) 둔다.
+- **`init { any_name }`**: 프로젝트 이름은 폴더 이름 그대로다(한글·공백 가능, 0.15 `pdir` 규칙). `pes.py` 경로는 소문자·숫자·하이픈 규칙을 그대로 둔다. `plan_asking` 이면 기획 단계가 처음부터 `asking`(0.15 init).
+- **`set` = `set_field`**: 허용 필드 7개 값은 각각 눈에 안 띄는 `review` 종류 artifact 의 최신 판(`metadata.role` = `stage_field`/`project_field`, `field`, `value`)에 둔다. 읽기 모델이 값을 0.15 가 두던 자리(`stages.<단계>.summary`·`changes`·`carry_over`·`settings`·`review`, 최상위 `executive_summary`·`conclusion`, `plan settings` 는 최상위 `settings` 도)에 되돌려 놓는다. 같은 값을 또 쓰면 아무것도 바뀌지 않는다. 새 코어 명령은 없다(등록표 불변). 읽고 고쳐 쓰는 동안 `<프로젝트 폴더>/.project.json.lock`(배타 생성·60초 묵은 잠금 정리·30초 기다림 후 종료 3·권한 오류는 Windows 이거나 잠금을 본 경우만 재시도, 아니면 종료 2 "권한", 끝나면 지우기 50번 재시도 뒤 조용히 포기 — SEL-75)을 잡는다.
+- **lock·unlock**: `.pes-lock` 의 owner 는 lease 의 `runs.external_session_ref`(= `PES_OWNER`)다(D04). 거절 문구는 0.15 처럼 `<시작 시각>부터`를 넣고 `lock <폴더> --force` 안내에 사용자가 쓴 폴더를 보인다.
+- **읽기 모델 보강**: 가져온 참고자료 항목을 빈 껍데기가 아니라 옛 state.json 항목 모양으로(`id·title·summary·details·confidence·status·sources·stats·shots·conflicts`), `pes init --import` 의 참고자료 머리(`source·imported·round·topic…`)는 사건에서, 채팅 입력은 "처리 끝난 답"으로 보인다. `notes` 키는 아무것도 저장하지 않은 프로젝트에는 없다(0.15 는 첫 저장 때 만들었다). 현재 단계를 모르는 손으로 쓴 옛 프로젝트는 `current` 가 없다.
+- **W1(옛 Windows 데이터)**: importer 는 `reports[].path` 의 역슬래시를 `/`로 읽는다.
+- **서버 꺼짐 판단**: `whoami` 를 허브 포트(8760~8764, 옛 8765~8775)에 `fetch` 로 물어 연결 거부(ECONNREFUSED)·시간 초과를 "서버 꺼짐"으로 본다(시험 가드가 막은 포트도 같다).
+
+알려진 한계: 같은 폴더 이름의 프로젝트는 PES 홈 밖에서도 하나로 본다(slug = 폴더 이름). 승인되지 않은 단계의 `reopen` 은 0.15 와 달리 "승인된 단계가 아니라 다시 열 수 없다"로 거절한다. `qa-brief` 는 읽기 명령 `digest` 가 아직 없어 DB 방식 지시문(`pes.py` DB 경로와 같은 글)을 쓴다.

@@ -515,10 +515,12 @@ function run_edition_create(runtime: CommandRuntime): CommandResult {
 
 function run_round_start(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage_id", "base_stage_rev"]);
+  reject_unknown_fields(payload, ["stage_id", "base_stage_rev", "any_order"]);
   const project = command_project(runtime);
   const stage_id = require_non_empty_string(payload, "stage_id");
   const base_stage_rev = optional_rev(payload, "base_stage_rev");
+  // `any_order` (scripts/pes.ts): v0.15 let a person start a round of any stage; the stage becomes the project's current one
+  const any_order = payload.any_order === true;
   const stage = read_stage(runtime, project.id, stage_id);
   check_stage_rev(stage, base_stage_rev);
 
@@ -560,11 +562,13 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
   }
 
   // A stage whose earlier stages are not all approved cannot be the active one yet.
-  require_earlier_stages_approved(runtime, project.id, stage, {
-    reason: "stage_not_active",
-    stage_id,
-    stage_status: stage.status,
-  });
+  if (!any_order) {
+    require_earlier_stages_approved(runtime, project.id, stage, {
+      reason: "stage_not_active",
+      stage_id,
+      stage_status: stage.status,
+    });
+  }
 
   const base = runtime.db.get<{ sealed_snapshot_id: string | null }>(
     `SELECT sealed_snapshot_id FROM rounds
@@ -618,6 +622,14 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
   );
   if (updated.changes !== 1n) {
     throw new Error("the stage current round was not set");
+  }
+  if (any_order) {
+    runtime.db.run(
+      "UPDATE editions SET current_stage_id = ?, rev = rev + 1 WHERE project_id = ? AND id = ?",
+      stage_id,
+      project.id,
+      stage.edition_id,
+    );
   }
 
   return {
