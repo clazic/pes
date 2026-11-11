@@ -775,14 +775,34 @@ test("F2 review reproduction: a checker that UPDATEs projects.topic in check() c
 
 test("F2 the real DbPolicyChecker still reads the policy through the guarded handle (Go gate works, OFF and ON)", async () => {
   await with_env(async (env) => {
+    // Go OFF: the guarded policy read stops a mode A Go claim itself (SEL-68: claim is a Go send), nothing is written.
     await go_off(env, "f2g-off");
-    const l = await claim_go(env, "f2g-claim"); // claim is not a Go send, so OFF does not stop it
+    const before_denied = state_signature(env.db);
     await rejects_with_api_error(
-      prepare_dispatch(env.service, env.ai_ctx("f2g-prep-off"), prepare_payload(env, l, "rk-f2g-b")),
+      claim(env.service, env.ai_ctx("f2g-claim-off"), {
+        mode: "A",
+        runtime: "synthetic-runtime",
+        provider: "opencode-go",
+        model: GO_MODEL,
+      }),
       "policy_denied",
     );
-    await go_on(env, "f2g-on");
-    const next = await do_prepare(env, "f2g-prep-on", l, "rk-f2g-c");
+    assert.equal(state_signature(env.db), before_denied, "a denied Go claim writes nothing");
+    // Go ON: the gate opens, the claim works.
+    await go_on(env, "f2g-on-1");
+    const l = await claim_go(env, "f2g-claim");
+    // Turning OFF revokes the active mode A lease, so the old guard is refused (stale lease or the OFF policy).
+    await go_off(env, "f2g-off-2");
+    const before_prep = state_signature(env.db);
+    await rejects_with_api_error(
+      prepare_dispatch(env.service, env.ai_ctx("f2g-prep-off"), prepare_payload(env, l, "rk-f2g-b")),
+      STALE,
+    );
+    assert.equal(state_signature(env.db), before_prep, "a refused prepare writes nothing");
+    // Go ON again: a fresh claim and prepare go through.
+    await go_on(env, "f2g-on-2");
+    const l2 = await claim_go(env, "f2g-claim-2");
+    const next = await do_prepare(env, "f2g-prep-on", l2, "rk-f2g-c");
     assert.equal(dispatch_row(env.db, next).state, "prepared");
   });
 });
