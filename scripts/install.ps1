@@ -2,15 +2,17 @@
 #   irm https://raw.githubusercontent.com/clazic/pes/main/scripts/install.ps1 | iex
 #
 # 하는 일
-#   1. Git(Git Bash) · Python 3 · Node.js 확인, 없으면 winget 으로 설치
+#   1. Git(Git Bash) · Node.js 26 이상 확인, 없으면 winget 으로 설치
 #   2. 플러그인을 등록할 claude 찾기 — PATH 의 Claude Code, 없으면 Claude Desktop 안의 Claude Code, 둘 다 없으면 CLI 설치
 #      (Claude Desktop 전용: install-desktop.ps1 또는 $env:PES_TARGET='desktop')
 #   3. PES 플러그인 등록·설치 (claude plugin marketplace add clazic/pes → install pes@pes-local)
 #   4. 조사 도구 설치: kosis · vworld · korean-law (ego lite 는 내려받기 페이지를 연다)
 #   5. API 키 입력 화면(브라우저) — 키는 이 컴퓨터의 각 도구 설정에만 저장된다
 #   6. 진단(doctor) 후 완료 표시
-# 다시 실행해도 된다 — 없는 것은 설치, 이미 있는 것은 최신 버전으로 업그레이드.
+# 다시 실행해도 된다 — 없는 것은 설치, 이미 있는 것은 최신 버전으로 업그레이드 (PES 0.15 위에 그대로 덮는다).
 # 환경변수: PES_TARGET=desktop|cli (기본 auto), PES_REPO (기본 clazic/pes), PES_SKIP_KEYS=1 (키 화면 건너뛰기), PES_NO_UPGRADE=1 (업그레이드 안 함)
+#   시험·CI 용 이음매: PES_INSTALL_MIRROR=<폴더> (네트워크·git clone 대신 이 폴더가 저장소 — bootstrap 과 %USERPROFILE%\.pes\src 의 원본),
+#   PES_INSTALL_PATH_ONLY=1 (PATH 를 부른 쪽이 준 그대로 쓴다), PES_SKIP_TOOLS=1 (4단계 조사 도구 설치·업그레이드를 건너뜀)
 
 $ErrorActionPreference = "Continue"
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
@@ -23,6 +25,7 @@ function Ok($t) { Write-Host "  OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "  !!  $t" -ForegroundColor Yellow }
 function Fail($t) { Write-Host "  XX  $t" -ForegroundColor Red }
 function Refresh-Path {
+  if ($env:PES_INSTALL_PATH_ONLY -eq "1") { return }
   $m = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $u = [Environment]::GetEnvironmentVariable("Path", "User")
   $env:Path = "$m;$u;$env:USERPROFILE\.local\bin"
@@ -30,22 +33,28 @@ function Refresh-Path {
 
 Write-Host "PES 설치를 시작합니다 ($Repo)" -ForegroundColor Cyan
 
-# 1. 기본 도구 — 저장소를 받기 전이므로 bootstrap 을 직접 내려받아 실행
-Step 1 "기본 도구 (Git · Python · Node.js)"
-$tmp = Join-Path $env:TEMP "pes-bootstrap-$(Get-Random).ps1"
-try {
-  Invoke-WebRequest "https://raw.githubusercontent.com/$Repo/main/scripts/bootstrap.ps1" -OutFile $tmp -UseBasicParsing
-} catch { Fail "bootstrap.ps1 을 받지 못함: $($_.Exception.Message)"; return }
-$py = $null
-& powershell -NoProfile -ExecutionPolicy Bypass -File $tmp | ForEach-Object {
-  $line = "$_"
-  if ($line -like "PYTHON *") { $py = $line.Substring(7).Trim() } elseif ($line -like "OK *" -or $line -like "INSTALLED *") { Ok $line } elseif ($line -like "FAIL *" -or $line -like "MISSING *") { Fail $line } else { Write-Host "  $line" }
+# 1. 기본 도구 — 저장소를 받기 전이므로 bootstrap 을 직접 내려받아 실행 (PES_INSTALL_MIRROR 가 있으면 그 폴더의 것)
+Step 1 "기본 도구 (Git · Node.js 26 이상)"
+$tmp = $null
+if ($env:PES_INSTALL_MIRROR) {
+  $boot = Join-Path $env:PES_INSTALL_MIRROR "scripts\bootstrap.ps1"
+  if (-not (Test-Path $boot)) { Fail "bootstrap.ps1 을 찾지 못함: $boot"; return }
+} else {
+  $tmp = Join-Path $env:TEMP "pes-bootstrap-$(Get-Random).ps1"
+  $boot = $tmp
+  try {
+    Invoke-WebRequest "https://raw.githubusercontent.com/$Repo/main/scripts/bootstrap.ps1" -OutFile $tmp -UseBasicParsing
+  } catch { Fail "bootstrap.ps1 을 받지 못함: $($_.Exception.Message)"; return }
 }
-Remove-Item $tmp -ErrorAction SilentlyContinue
+$nodeCmd = $null
+& powershell -NoProfile -ExecutionPolicy Bypass -File $boot | ForEach-Object {
+  $line = "$_"
+  if ($line -like "NODE *") { $nodeCmd = $line.Substring(5).Trim() } elseif ($line -like "OK *" -or $line -like "INSTALLED *") { Ok $line } elseif ($line -like "FAIL *" -or $line -like "MISSING *") { Fail $line } else { Write-Host "  $line" }
+}
+if ($tmp) { Remove-Item $tmp -ErrorAction SilentlyContinue }
 Refresh-Path
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "git 이 없습니다 — Git for Windows 설치 후 다시 실행하세요 (https://git-scm.com/download/win)"; return }
-if (-not $py -or $py -eq "none") { Fail "Python 3.9+ 를 찾지 못했습니다 — 새 PowerShell 창에서 다시 실행하세요"; return }
-$pyArgs = $py -split " "
+if (-not $nodeCmd -or $nodeCmd -eq "none") { Fail "Node.js 26 이상이 필요합니다 — https://nodejs.org 에서 설치한 뒤 새 PowerShell 창에서 다시 실행하세요"; return }
 
 # 2. Claude (플러그인 등록에 쓸 claude 실행 파일)
 #   PES_TARGET=desktop : Claude Desktop 안에 들어 있는 Claude Code 를 쓴다 (별도 CLI 를 설치하지 않음)
@@ -101,36 +110,39 @@ if ($Claude) {
   if ($plist -match "pes") { Ok "pes@pes-local 설치됨 (Claude Desktop Code 탭과 Claude Code 가 함께 씀: $env:USERPROFILE\.claude)" } else { Warn "플러그인 목록에서 pes 를 확인하지 못함 — Claude Desktop 에서 /reload-plugins 후 /pes:doctor" }
 } else { Warn "설정 파일에만 등록함 — Claude Desktop Code 탭을 열고 /reload-plugins, 안 보이면 + → Add plugins 에서 $Repo" }
 
-# 설치 도우미 스크립트 (같은 저장소를 ~/.pes/src 에 받아 둔다)
-if (Test-Path (Join-Path $Src ".git")) { & git -C $Src pull -q 2>&1 | Out-Null } else { New-Item -ItemType Directory -Force -Path (Split-Path $Src) | Out-Null; & git clone -q "https://github.com/$Repo.git" $Src 2>&1 | Out-Null }
-$Setup = Join-Path $Src "scripts\setup.py"
-$Pes = Join-Path $Src "scripts\pes.py"
-if (-not (Test-Path $Setup)) { Fail "설치 도우미를 받지 못함 ($Src)"; return }
-function PY { & $pyArgs[0] @($pyArgs[1..9] | Where-Object { $_ }) -I @args }
+# 설치 도우미는 같은 저장소를 ~/.pes/src 에 받아 둔 것 (이미 있으면 최신으로 — 0.15 설치 위에도 그대로 덮는다)
+if ($env:PES_INSTALL_MIRROR) {
+  New-Item -ItemType Directory -Force -Path $Src | Out-Null
+  Copy-Item -Path (Join-Path $env:PES_INSTALL_MIRROR "*") -Destination $Src -Recurse -Force
+} elseif (Test-Path (Join-Path $Src ".git")) { & git -C $Src pull -q 2>&1 | Out-Null } else { New-Item -ItemType Directory -Force -Path (Split-Path $Src) | Out-Null; & git clone -q "https://github.com/$Repo.git" $Src 2>&1 | Out-Null }
+if (-not (Test-Path (Join-Path $Src "scripts\setup.ts"))) { Fail "설치 도우미를 받지 못함 ($Src)"; return }
+function NodeRun { & node @args }
 
 # 4. 조사 도구
 Step 4 "조사 도구 (kosis · vworld · korean-law · ego lite)"
-PY $Setup install missing | ForEach-Object {
-  $l = "$_"
-  if ($l -like "OK *") { Ok $l } elseif ($l -like "USER *") { Warn $l } elseif ($l -like "FAIL *") { Fail $l } elseif ($l -like "SKIP *") { Write-Host "  $l" }
-}
-Refresh-Path
-if ($env:PES_NO_UPGRADE -ne "1") {
-  Write-Host "  이미 있던 도구를 최신 버전으로 맞춥니다"
-  PY $Setup upgrade all | ForEach-Object {
+if ($env:PES_SKIP_TOOLS -eq "1") { Warn "건너뜀 (PES_SKIP_TOOLS=1)" } else {
+  NodeRun (Join-Path $Src "scripts\setup.ts") install missing | ForEach-Object {
     $l = "$_"
-    if ($l -like "UPGRADED *") { Ok $l } elseif ($l -like "OK *") { Write-Host "  $l" } elseif ($l -like "FAIL *") { Warn $l }
+    if ($l -like "OK *") { Ok $l } elseif ($l -like "USER *") { Warn $l } elseif ($l -like "FAIL *") { Fail $l } elseif ($l -like "SKIP *") { Write-Host "  $l" }
+  }
+  Refresh-Path
+  if ($env:PES_NO_UPGRADE -ne "1") {
+    Write-Host "  이미 있던 도구를 최신 버전으로 맞춥니다"
+    NodeRun (Join-Path $Src "scripts\setup.ts") upgrade all | ForEach-Object {
+      $l = "$_"
+      if ($l -like "UPGRADED *") { Ok $l } elseif ($l -like "OK *") { Write-Host "  $l" } elseif ($l -like "FAIL *") { Warn $l }
+    }
   }
 }
 
 # 5. API 키
 Step 5 "API 키"
-if ($env:PES_SKIP_KEYS -eq "1") { Warn "건너뜀 (PES_SKIP_KEYS=1) — 나중에 Claude 에서 /pes:setup keys" } else { PY $Setup keys --wait | ForEach-Object { Write-Host "  $_" } }
+if ($env:PES_SKIP_KEYS -eq "1") { Warn "건너뜀 (PES_SKIP_KEYS=1) — 나중에 Claude 에서 /pes:setup keys" } else { NodeRun (Join-Path $Src "scripts\setup.ts") keys --wait | ForEach-Object { Write-Host "  $_" } }
 
 # 6. 진단
 Step 6 "진단"
-PY $Pes doctor --net | ForEach-Object { Write-Host "  $_" }
-PY $Setup mark | ForEach-Object { Ok $_ }
+NodeRun (Join-Path $Src "scripts\pes.ts") doctor --net | ForEach-Object { Write-Host "  $_" }
+NodeRun (Join-Path $Src "scripts\setup.ts") mark | ForEach-Object { Ok $_ }
 
 Write-Host "`n완료. Claude Desktop 을 완전히 종료했다가(작업 표시줄 아이콘에서도) 다시 열고, Code 탭에서 /pes:start <주제> 로 시작하세요." -ForegroundColor Cyan
 Write-Host "ego lite 를 이번에 설치했다면 앱에서 첫 실행 안내(온보딩)를 마쳐야 브라우저 조사를 쓸 수 있습니다."

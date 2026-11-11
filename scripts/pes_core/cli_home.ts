@@ -107,12 +107,13 @@ export function kill_pid(pid: unknown): boolean {
  * (final review 1 필수 1; the same rule on Windows, where pids are reused often). SEL-74 G1: the answer must also name the recorded pid
  * (`pid` in /whoami, an integer) — the right root with another pid (or none: an older server) cannot confirm the record, nothing is signalled.
  */
-async function kill_recorded(record: Record<string, unknown> | undefined, owner: string, fallback_port?: unknown): Promise<boolean> {
+async function kill_recorded(record: Record<string, unknown> | undefined, owner: string, fallback_port?: unknown, need_pid = true): Promise<boolean> {
   if (record === undefined || !signalable_pid(record.pid)) return false;
   const port = valid_port(record.port) ?? valid_port(fallback_port);
   if (port === null) return false;
   const info = await whoami_info(port);
-  if (info === null || info.root !== owner || info.pid !== record.pid) return false;
+  // `need_pid` false: the old per-project servers (0.15 `.pes-server`) never told their pid — only the root can confirm their record
+  if (info === null || info.root !== owner || (need_pid && info.pid !== record.pid)) return false;
   return kill_pid(record.pid);
 }
 
@@ -156,7 +157,7 @@ export function inside_pes_home(d: string): boolean {
 
 /** The old per-project server (8765~): stop it by its record, forget the record. */
 export async function stop_legacy(d: string): Promise<void> {
-  await kill_recorded(read_json_quiet(join(d, ".pes-server")), d, read_text_quiet(join(d, ".pes-port")));
+  await kill_recorded(read_json_quiet(join(d, ".pes-server")), d, read_text_quiet(join(d, ".pes-port")), false);
   for (const name of [".pes-server", ".pes-port"]) unlink_quiet(join(d, name));
   for (const port of legacy_ports()) {
     if ((await whoami(port)) === d) {
