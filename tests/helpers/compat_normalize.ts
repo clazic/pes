@@ -276,8 +276,43 @@ export interface KnownDiff {
    * error (no stack trace), stdout is not compared; `fixable` lists steps (by label) that may instead succeed with exit 0.
    */
   traceback_fix?: { fixable?: Record<string, unknown[][]> };
+  /**
+   * D06 on the produced files: case → the one item whose `depth` the fixed behaviour lowers. The files that carry the same value as the
+   * state DTO (index.html data JSON, snapshots/**) are baselined as hashes of 0.15 content, so the ts side is rewritten back to the 0.15
+   * value before hashing (`depth += delta`, only on objects `{id: item_id, depth: <number>}`); every other field is compared as is.
+   */
+  file_depth?: Record<string, DepthFix>;
   /** D10: the ts target stores `/` paths and LF text on every OS — the win32 `os_overrides` do NOT apply to it (the posix baseline does) */
   posix_storage?: boolean;
+}
+
+/** `delta` = the 0.15 depth minus the fixed depth of the item (the resubmitted merge no longer counts). */
+export interface DepthFix {
+  item_id: number;
+  delta: number;
+}
+
+/** The D06 file fix of a case (undefined when D06 does not apply to it). */
+export function d06_depth_fix(case_id: string, ids: string[], table: Record<string, KnownDiff>): DepthFix | undefined {
+  for (const id of ids) {
+    const fix = table[id]?.file_depth?.[case_id];
+    if (fix !== undefined) return fix;
+  }
+  return undefined;
+}
+
+/** A deep copy where every `{id: fix.item_id, depth: <number>}` object has `depth + delta`; nothing else changes. No fix → the value itself. */
+export function d06_file_fix(value: unknown, fix: DepthFix | undefined): unknown {
+  if (fix === undefined || value === null || typeof value !== "object") return value;
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node === null || typeof node !== "object") return node;
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) out[key] = walk(child);
+    if (out.id === fix.item_id && typeof out.depth === "number") out.depth = out.depth + fix.delta;
+    return out;
+  };
+  return walk(value);
 }
 
 function glob_to_regex(pattern: string): RegExp {

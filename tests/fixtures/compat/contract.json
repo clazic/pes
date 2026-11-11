@@ -722,7 +722,14 @@
           ]
         }
       ],
-      "project": "{R}/계약-프로젝트"
+      "project": "{R}/계약-프로젝트",
+      "moved_state": {
+        "folder": "{T}/옮긴 홈/계약-프로젝트",
+        "current": "plan",
+        "notes": [
+          "홈 메모"
+        ]
+      }
     },
     {
       "id": "X05",

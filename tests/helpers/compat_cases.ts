@@ -36,7 +36,7 @@ import {
   type Target,
 } from "./compat_env.ts";
 import { answers_multiset, ts_age_lease, ts_cli_exists, ts_seed_feedback, ts_seed_legacy, ts_rename_slug, ts_view } from "./compat_ts.ts";
-import { dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n12_stdlib_error_page, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type Roots } from "./compat_normalize.ts";
+import { d06_depth_fix, d06_file_fix, dropped_digests, lines, n1_json, n1_time, n10_apply, n10_checks, n10_files, n10_override, n12_stdlib_error_page, n2_paths, n3_json, n6_html, n7_text, n8_console, n9_text_hash, stderr_kind, type DepthFix, type Roots } from "./compat_normalize.ts";
 
 export interface CaseDef {
   id: string;
@@ -49,6 +49,12 @@ export interface CaseDef {
   ts: { status: "not_yet" | "implemented" };
   steps: Record<string, any>[];
   project: string | null;
+  /**
+   * ts only (X04, SEL-71 decision 2.7): `home <new>` moves the folders but the DB (~/.pes) stays. The 0.15 meaning of "has state" is
+   * "the project is at that folder path" (absent after the move → dto null on both sides); on top of that the DB must still serve the
+   * same slug with nothing lost: the moved folder exists, `current` and every listed note text are there.
+   */
+  moved_state?: { folder: string; current: string; notes: string[] };
   /** "count": only the number of produced answer files is recorded (their names carry a race-dependent suffix) */
   files?: "count";
   /** parts of the 7.4 row that are deliberately not run automatically, with the reason */
@@ -191,28 +197,28 @@ function post_process(post: string | undefined, stdout: string, roots: Roots): s
   throw new Error(`unknown post-processor ${post}`);
 }
 
-export function file_digest(rel: string, bytes: Buffer, roots: Roots): string {
+export function file_digest(rel: string, bytes: Buffer, roots: Roots, depth_fix?: DepthFix): string {
   const text = bytes.toString("utf8");
   if (rel.endsWith(".json") || rel.endsWith(".pes-lock")) {
     try {
-      return n9_text_hash(n3_json(n1_json(JSON.parse(text), roots)), roots);
+      return n9_text_hash(n3_json(n1_json(d06_file_fix(JSON.parse(text), depth_fix), roots)), roots);
     } catch {
       return `invalid-json:${n9_text_hash(text, roots)}`;
     }
   }
   if (rel.endsWith(".html")) {
     const view = n6_html(text, roots);
-    return n9_text_hash(n3_json({ title: view.title, raw_title: view.raw_title, blocks: view.blocks, data: view.data ?? null, text: view.text }), roots);
+    return n9_text_hash(n3_json({ title: view.title, raw_title: view.raw_title, blocks: view.blocks, data: d06_file_fix(view.data ?? null, depth_fix), text: view.text }), roots);
   }
   return n9_text_hash(ports(text), roots);
 }
 
-function collect_files(dir: string, roots: Roots): Record<string, string> {
+function collect_files(dir: string, roots: Roots, depth_fix?: DepthFix): Record<string, string> {
   const out: Record<string, string> = {};
   if (!existsSync(dir)) return out;
   for (const rel of walk_files(dir)) {
     const name = n1_time(rel);
-    out[name] = file_digest(rel, readFileSync(join(dir, ...rel.split("/"))), roots);
+    out[name] = file_digest(rel, readFileSync(join(dir, ...rel.split("/"))), roots, depth_fix);
   }
   return out;
 }
@@ -259,6 +265,8 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
   const ts_home = { env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir };
   const d03 = def.diffs.includes("D03");
   const d04 = def.diffs.includes("D04");
+  // D06 on the produced files: only the ts side is rewritten (its fixed depth → the 0.15 value, depth fields of the named item only)
+  const file_depth_fix = target === "ts" ? d06_depth_fix(def.id, def.diffs, KNOWN_DIFFS) : undefined;
   let merge_n = 0;
   let last_pending: string[] = [];
   for (const raw of def.steps) {
@@ -319,7 +327,7 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
       continue;
     }
     if (raw.snapshot !== undefined) {
-      steps.push({ step: { snapshot: raw.name }, files: collect_files(substitute(raw.snapshot, ctx), roots()) });
+      steps.push({ step: { snapshot: raw.name }, files: collect_files(substitute(raw.snapshot, ctx), roots(), file_depth_fix) });
       continue;
     }
     if (raw.move_project !== undefined) {
@@ -376,13 +384,14 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
     steps.push(entry);
   }
   const project = def.project === null ? undefined : substitute(def.project, ctx);
+  if (target === "ts" && def.moved_state !== undefined && project !== undefined) assert_moved_state(def, ctx, project);
   const dto_run = project !== undefined && has_state(target, ctx, project) ? read_state_dto(target, ctx, project) : undefined;
   if (dto_run?.kind === "not_yet") return { kind: "not_yet", reason: dto_run.reason };
   const record: CaseRecord = {
     id: def.id,
     steps,
     dto: dto_run === undefined ? null : normalized_dto(dto_run.dto, roots()),
-    files: project === undefined ? {} : collect_files(project, roots()),
+    files: project === undefined ? {} : collect_files(project, roots(), file_depth_fix),
   };
   if (d03 && project !== undefined) {
     const found = target === "ts" ? (ts_view(ts_home, basename(project))?.answers ?? []) : py_answers(project);
@@ -392,10 +401,25 @@ async function run_cli_like(target: Target, def: CaseDef, ctx: CompatCtx): Promi
   return { kind: "ran", record };
 }
 
+/** CaseDef.moved_state: the folder moved with the home, the DB kept the state under the same slug (lost 0). */
+function assert_moved_state(def: CaseDef, ctx: CompatCtx, project: string): void {
+  const moved = def.moved_state as NonNullable<CaseDef["moved_state"]>;
+  const folder = substitute(moved.folder, ctx);
+  assert.ok(existsSync(folder), `${def.id}: the moved project folder ${folder} is missing`);
+  assert.ok(!existsSync(project), `${def.id}: the old folder ${project} must be gone after the home move`);
+  const view = ts_view({ env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir }, basename(project));
+  assert.ok(view !== undefined, `${def.id}: the DB lost slug ${basename(project)} after the home move`);
+  assert.equal(basename(folder), basename(project), `${def.id}: the moved folder keeps the slug as its name`);
+  assert.equal(view.project.current, moved.current, `${def.id}: current differs after the home move`);
+  const texts = (view.project.notes ?? []).map((n: any) => n.text);
+  for (const text of moved.notes) assert.ok(texts.includes(text), `${def.id}: note ${JSON.stringify(text)} was lost after the home move (${JSON.stringify(texts)})`);
+}
+
 /** Does the project exist in a form a DTO can be read from — project.json (py) / the DB or an old project.json (ts)? */
 function has_state(target: Target, ctx: CompatCtx, project: string): boolean {
   if (target === "py") return existsSync(join(project, "project.json")) && safe_json(join(project, "project.json"));
   if (!ts_cli_exists()) return true; // read_state_dto answers not_yet
+  if (!existsSync(project)) return false; // 0.15 meaning: the project is AT this folder path (a moved home leaves the DB behind, see CaseDef.moved_state)
   const ts_home = { env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir };
   if (ts_view(ts_home, basename(project)) !== undefined) return true;
   return existsSync(join(project, "project.json")) && safe_json(join(project, "project.json"));
@@ -591,13 +615,32 @@ export function d02_canon(dto: unknown): unknown {
   return copy;
 }
 
+/**
+ * D02 sub-rule: a hand-written minimal project.json (E10) lacks keys 0.15 never fills, while the DB read model always carries them.
+ * The fixed list below may be present on the ts side ONLY IF the baseline DTO lacks the key AND the ts value is the default — slug =
+ * the folder name (the 0.15 `pdir` rule), created = "", settings = {}, complete = false. Any other extra key, or a different value,
+ * is left in place and fails the DTO comparison.
+ */
+export const D02_DEFAULT_KEYS = ["slug", "created", "settings", "complete"] as const;
+export function d02_drop_defaults(got: unknown, base: unknown, folder_name: string): unknown {
+  if (got === null || typeof got !== "object" || base === null || typeof base !== "object") return got;
+  const defaults: Record<string, unknown> = { slug: folder_name, created: "", settings: {}, complete: false };
+  const copy = JSON.parse(JSON.stringify(got)) as Record<string, unknown>;
+  for (const key of D02_DEFAULT_KEYS) {
+    if (key in (base as object) || !(key in copy)) continue;
+    if (isDeepStrictEqual(copy[key], defaults[key])) delete copy[key];
+  }
+  return copy;
+}
+
 export function compare_ts_record(def: CaseDef, got: CaseRecord, base: CaseRecord): void {
   const id = def.id;
   const diffs = def.diffs;
   const canon = diffs.includes("D02") ? d02_canon : (x: unknown) => x;
   compare_steps(def, got.steps, base.steps);
+  const got_dto = diffs.includes("D02") ? d02_drop_defaults(got.dto, base.dto, basename(def.project ?? "")) : got.dto;
   assert.deepEqual(
-    n10_apply(canon(got.dto), diffs, KNOWN_DIFFS),
+    n10_apply(canon(got_dto), diffs, KNOWN_DIFFS),
     n10_apply(canon(n10_override(base.dto, id, diffs, KNOWN_DIFFS)), diffs, KNOWN_DIFFS),
     `${id}: state DTO differs beyond ${diffs.join(",") || "no"} intended differences`,
   );
@@ -610,8 +653,10 @@ export function compare_ts_record(def: CaseDef, got: CaseRecord, base: CaseRecor
   }
   if (diffs.some((d) => KNOWN_DIFFS[d]?.files_check === "snapshot_contents")) {
     // D07: where the snapshots live is not compared, but none of their contents may be lost (the first state and every later one).
-    const have = dropped_digests(got.files, diffs, KNOWN_DIFFS);
-    for (const digest of dropped_digests(base.files, diffs, KNOWN_DIFFS)) {
+    // only the files D07 itself releases from the by-name comparison (not project.json / library.json — D02 owns those)
+    const d07 = diffs.filter((d) => KNOWN_DIFFS[d]?.files_check === "snapshot_contents");
+    const have = dropped_digests(got.files, d07, KNOWN_DIFFS);
+    for (const digest of dropped_digests(base.files, d07, KNOWN_DIFFS)) {
       const at = have.indexOf(digest);
       assert.ok(at >= 0, `${id}: a snapshot state of 0.15 (${digest}) is missing — the first state or a later one was lost`);
       have.splice(at, 1);

@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { baseline_for, baseline_path, compare_ts_record, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
+import { baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
 import { KNOWN_DIFFS, STAGES, TS_FILES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available, ts_gate, type CaseKind } from "./helpers/compat_env.ts";
 import {
+  d06_depth_fix,
+  d06_file_fix,
   html_unescape,
   lines,
   n1_json,
@@ -397,4 +399,40 @@ test("every os_overrides entry names a README item and a reason", () => {
       for (const item of o.item.split(",")) assert.ok(readFileSync(new URL("./README.md", import.meta.url), "utf8").includes(`**${item}.`), `${c.id}: README has no item ${item}`);
     }
   }
+});
+
+// ---------------------------------------------------------------- SEL-71 sorting of E03 / E10 (mutation tests)
+test("D06 on produced files: only the named item's depth is rewritten — any other field difference still changes the digest", () => {
+  const fix = d06_depth_fix("E03", ["D01", "D06"], KNOWN_DIFFS);
+  assert.deepEqual(fix, { item_id: 7, delta: 1 });
+  assert.equal(d06_depth_fix("E01", ["D06"], KNOWN_DIFFS), undefined, "D06 has no file rule for other cases");
+  const state = (depth: number, summary: string) => ({ state: { items: [{ id: 1, depth: 2, summary: "a" }, { id: 7, depth, summary }] } });
+  const bytes = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
+  const digest = (value: unknown, apply = true) => file_digest("snapshots/x.json", bytes(value), {}, apply ? fix : undefined);
+  // 0.15 content (depth 3) == ts content with the fixed depth (2) after the rewrite; the item id 1 is left alone
+  assert.equal(digest(state(2, "s")), digest(state(3, "s"), false));
+  // mutations: another field, another item's depth, a depth that is not the fixed one — all stay different
+  assert.notEqual(digest(state(2, "t")), digest(state(3, "s"), false), "a summary difference must still fail");
+  assert.notEqual(digest(state(3, "s")), digest(state(3, "s"), false), "depth 3 on ts is not the fixed value (+1 → 4)");
+  assert.notEqual(digest({ state: { items: [{ id: 1, depth: 3, summary: "a" }, { id: 7, depth: 2, summary: "s" }] } }), digest(state(3, "s"), false), "item 1 depth is not rewritten");
+  // html: the data JSON gets the same rewrite, the rest of the page is compared as is
+  const page = (depth: number, text: string) => Buffer.from(`<html><head><title>t</title></head><body>${text}<script id="data" type="application/json">${JSON.stringify(state(depth, "s"))}</script></body></html>`, "utf8");
+  assert.equal(file_digest("index.html", page(2, "x"), {}, fix), file_digest("index.html", page(3, "x"), {}));
+  assert.notEqual(file_digest("index.html", page(2, "y"), {}, fix), file_digest("index.html", page(3, "x"), {}), "visible text difference must still fail");
+  assert.equal(d06_file_fix(state(2, "s"), undefined) !== undefined, true);
+});
+
+test("D02 default keys (E10): only slug / created / settings / complete, only at their defaults, only when the baseline lacks them", () => {
+  const base = { pes: 1, topic: "t", stages: {} };
+  const got = { ...base, slug: "legacy-project", created: "", settings: {}, complete: false };
+  assert.deepEqual(d02_drop_defaults(got, base, "legacy-project"), base);
+  // wrong values stay and fail the comparison
+  assert.notDeepEqual(d02_drop_defaults({ ...got, slug: "other" }, base, "legacy-project"), base);
+  assert.notDeepEqual(d02_drop_defaults({ ...got, created: "2026-01-01" }, base, "legacy-project"), base);
+  assert.notDeepEqual(d02_drop_defaults({ ...got, settings: { a: 1 } }, base, "legacy-project"), base);
+  assert.notDeepEqual(d02_drop_defaults({ ...got, complete: true }, base, "legacy-project"), base);
+  // a key outside the list is never dropped
+  assert.notDeepEqual(d02_drop_defaults({ ...got, extra: 1 }, base, "legacy-project"), base);
+  // a key the baseline has is compared as is (the baseline value wins)
+  assert.deepEqual(d02_drop_defaults({ ...got, slug: "x" }, { ...base, slug: "legacy-project" }, "legacy-project"), { ...base, slug: "x" });
 });
