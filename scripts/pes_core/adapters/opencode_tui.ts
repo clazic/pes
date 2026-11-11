@@ -4,7 +4,9 @@
 // starts it nor sees or caps what it spends, and the Go subscription meter belongs to mode A only. So this adapter
 // refuses a model on the Go route (`opencode-go/...`); a person who wants Go through PES uses mode A.
 //
-// Like the Codex adapter, this file only describes the `mcp.pes` entry of opencode.json. It reads and writes no
+// Like the Codex adapter, this file only describes the `mcp.servers.pes` entry of opencode.json (the current form
+// of the OpenCode docs: server names live under `mcp.servers`, a server is on unless `disabled` is true, and the
+// request timeout defaults to 12 hours, so no `timeout` is needed for pes_wait). It reads and writes no
 // file and starts no process. OpenCode expands `{env:VAR}` itself, so the token is a reference, never a value.
 // OpenCode is multi-provider, so the provider is "unknown"; the model is "unknown" unless the caller knows it.
 
@@ -23,7 +25,6 @@ export interface OpencodeTuiMcpEntry {
     PES_MODEL: string;
     PES_AGENT_TOKEN: "{env:PES_AGENT_TOKEN}";
   };
-  enabled: true;
 }
 
 /**
@@ -65,7 +66,6 @@ export function opencode_tui_mcp_entry(input: CliMcpEntryInput): OpencodeTuiMcpE
       // by reference: OpenCode expands {env:PES_AGENT_TOKEN} from the environment it was started in
       PES_AGENT_TOKEN: "{env:PES_AGENT_TOKEN}",
     },
-    enabled: true,
   };
 }
 

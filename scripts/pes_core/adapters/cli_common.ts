@@ -2,12 +2,13 @@
 //
 // Neither adapter reads or writes a file, starts a process, or looks at a tool's own configuration folder. They
 // only build the entry a person puts into the tool's MCP configuration, and read the agent token from the key
-// store at launch. The key store type below has the same shape as the PR19 KeyStore (put/get/delete/where), kept
-// here as a minimal structural type so this PR does not depend on PR19's file. The adapters only call get(ref).
+// store at launch. The key store is the PR19 KeyStore (scripts/pes_core/a_runtime/keystore.ts), imported as a TYPE
+// only (no run-time dependency, nothing of the built-in runner is loaded): the adapters need get(ref) and nothing
+// else, so a change of that signature fails to compile here.
 
-export interface TokenKeyStore {
-  get(ref: string): string | null | undefined | Promise<string | null | undefined>;
-}
+import type { KeyStore } from "../a_runtime/keystore.ts";
+
+export type TokenKeyStore = Pick<KeyStore, "get">;
 
 export interface CliMcpEntryInput {
   /** Absolute path of the node executable. It is given, never looked up with `which` (Git Bash paths on Windows). */
@@ -122,7 +123,12 @@ export async function read_launch_env(runtime: CliRuntime, input: CliLaunchEnvIn
   if (input.key_store === null || typeof input.key_store !== "object" || typeof input.key_store.get !== "function") {
     throw new TypeError("key_store must have get(ref)");
   }
-  const token = await input.key_store.get(token_ref(runtime, project_id));
+  const ref = token_ref(runtime, project_id);
+  // the real key store accepts only this alphabet; refuse early with the adapter's own code instead of a store error
+  if (!/^[A-Za-z0-9._:-]{1,200}$/.test(ref)) {
+    throw new InputError("field_invalid", "project_id에 키 저장소 이름으로 쓸 수 없는 문자가 있거나 너무 깁니다.");
+  }
+  const token = await input.key_store.get(ref);
   if (typeof token !== "string" || token.length === 0) {
     throw new AdapterError(
       "token_missing",
