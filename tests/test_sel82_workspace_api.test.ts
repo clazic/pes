@@ -157,3 +157,63 @@ test("workspace is a registered route of the API contract, not a hidden one (cap
     assert.ok((caps.routes as string[]).includes("GET /api/v1/projects/{id}/workspace"), "capabilities.routes lists GET workspace");
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// R1 권장 2 (작성 모드 2): 화면의 `enabled` 와 서버 검사가 갈라지지 않는다. `#action_refusal` 이 `#bind` 의 권한 규칙을 복제하므로,
+// 자격(세션 · 토큰 scope 조합)마다 모든 action 에 대해 "enabled == 실제로 그 동작을 불렀을 때 권한 때문에 거절되지 않음" 을 확인한다.
+// (작업 공간 읽기에 context:read 가 필요하므로 모든 토큰 조합이 context:read 를 가진다.)
+// 해석: 권한 거절 = 401/403. 본문 `{}`·가짜 id 로 부르므로 enabled 인 동작은 400/404/409/422 같은 다른 이유로 끝나도 된다(권한 거절만 아니면 됨).
+//   - enabled=true  ⇒ 응답이 401/403 이 아니다 (화면이 켠 버튼이 서버에서 권한으로 막히면 안 된다).
+//   - 응답이 401/403 ⇒ enabled=false (거꾸로 같은 말).
+//   - 상태 조건이 없는 동작(아래 NO_STATE_RULE) 은 enabled 와 (응답이 401/403 아님) 이 정확히 같다 — 권한만으로 꺼진 것이 서버에서는 통과하는 어긋남도 잡는다.
+
+const ACTION_CALLS: Record<string, { method: string; path: (env: ApiEnv) => string }> = {
+  "submissions.create": { method: "POST", path: (e) => P(e, "/submissions") },
+  "questions.create": { method: "POST", path: (e) => P(e, "/questions") },
+  "questions.revise": { method: "POST", path: (e) => P(e, "/questions/no-such-question/revisions") },
+  "rounds.create": { method: "POST", path: (e) => P(e, "/stages/plan/rounds") },
+  "rounds.seal": { method: "POST", path: (e) => P(e, "/rounds/no-such-round/seal") },
+  "stages.approve": { method: "POST", path: (e) => P(e, "/stages/plan/approve") },
+  "stages.reopen": { method: "POST", path: (e) => P(e, "/stages/plan/reopen") },
+  "runs.create": { method: "POST", path: (e) => P(e, "/runs") },
+  "uploads.create": { method: "POST", path: (e) => P(e, "/uploads") },
+  "policies.opencode_go.revise": { method: "POST", path: (e) => P(e, "/policies/opencode-go/revisions") },
+};
+const NO_STATE_RULE = ["questions.create", "questions.revise", "rounds.create", "runs.create", "uploads.create", "policies.opencode_go.revise"];
+
+test("R1 권장 2: for every credential (owner, tokens of each scope mix) every action's `enabled` equals what the server really does", async () => {
+  await with_api(async (env) => {
+    const credentials: Array<[string, { token: string } | "owner"]> = [["owner", "owner"]];
+    for (const [name, scopes] of [
+      ["read", ["context:read"]],
+      ["read+submit", ["context:read", "run:submit"]],
+      ["read+claim", ["context:read", "run:claim"]],
+      ["read+files", ["context:read", "file:write", "file:read"]],
+      ["read+claim+submit", ["context:read", "run:claim", "run:submit"]],
+      ["all", ["context:read", "run:claim", "run:submit", "file:write", "file:read"]],
+    ] as const) {
+      const agent = await make_agent(env, `parity-${name}`, scopes);
+      credentials.push([`token(${scopes.join(",")})`, { token: agent.token }]);
+    }
+    // read every credential's view first: the calls below may change the project
+    const views: Array<[string, { token: string } | "owner", Array<{ action: string; enabled: boolean }>]> = [];
+    for (const [label, auth] of credentials) {
+      const data = assert_ok(await call(env, { method: "GET", path: WS(env), auth }));
+      const names = data.actions.map((a: any) => a.action);
+      for (const known of Object.keys(ACTION_CALLS)) assert.ok(names.includes(known), `${label}: action ${known} is listed`);
+      for (const name of names) assert.ok(name in ACTION_CALLS, `${label}: the test does not know action ${name} — add its call to ACTION_CALLS`);
+      views.push([label, auth, data.actions]);
+    }
+    const mismatches: string[] = [];
+    for (const [label, auth, actions] of views) {
+      for (const a of actions) {
+        const spec = ACTION_CALLS[a.action] as { method: string; path: (env: ApiEnv) => string };
+        const res = await call(env, { method: spec.method, path: spec.path(env), auth, body: {} });
+        const refused = res.status === 401 || res.status === 403;
+        if (a.enabled && refused) mismatches.push(`${label} ${a.action}: shown enabled but the server answered ${res.status} ${res.json?.error?.code}`);
+        if (!a.enabled && NO_STATE_RULE.includes(a.action) && !refused) mismatches.push(`${label} ${a.action}: shown disabled but the server did not refuse it (${res.status})`);
+      }
+    }
+    assert.deepEqual(mismatches, []);
+  });
+});

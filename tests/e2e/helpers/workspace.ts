@@ -20,7 +20,12 @@ export interface Workspace {
   session: string;
   base: string;
   port: number;
-  pes(args: string[]): { status: number | null; stdout: string; stderr: string };
+  pes(args: string[], extra_env?: Record<string, string>): { status: number | null; stdout: string; stderr: string };
+  /**
+   * The address `pes open <slug> --app` gives (SEL-82 R1 필수 1): http://127.0.0.1:<port>/p/<slug>/e/../s/../r/..#pes=<base64url JSON>.
+   * Runs the real CLI in the isolated home with PES_NO_BROWSER=1 (no browser) and PES_HUB_PORTS=<this server's port> (it finds this server).
+   */
+  open_app(): string;
   pending(): string[];
   close(): Promise<void>;
 }
@@ -76,8 +81,8 @@ export async function open_workspace(extra_env: Record<string, string> = {}): Pr
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  const pes = (args: string[]) => {
-    const r = spawnSync(process.execPath, [join(REPO, "scripts", "pes.ts"), ...args], { env, cwd: info.root, encoding: "utf8", timeout: 60_000 });
+  const pes = (args: string[], extra: Record<string, string> = {}) => {
+    const r = spawnSync(process.execPath, [join(REPO, "scripts", "pes.ts"), ...args], { env: { ...env, ...extra }, cwd: info.root, encoding: "utf8", timeout: 60_000 });
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   };
   return {
@@ -87,6 +92,11 @@ export async function open_workspace(extra_env: Record<string, string> = {}): Pr
     base,
     port,
     pes,
+    open_app() {
+      const r = pes(["open", info.slug, "--app"], { PES_NO_BROWSER: "1", PES_HUB_PORTS: `${port}-${port}` });
+      if (r.status !== 0) throw new Error(`pes open --app failed (${r.status}): ${r.stderr}${r.stdout}`);
+      return r.stdout.trim();
+    },
     pending() {
       const r = pes(["pending", info.slug]);
       if (r.status !== 0) throw new Error(`pending failed: ${r.stderr}`);
