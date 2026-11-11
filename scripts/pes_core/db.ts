@@ -379,6 +379,24 @@ function has_db_meta(db: Db): boolean {
 }
 
 /**
+ * A migration that rebuilds a table (SQLite cannot alter a CHECK in place) says so in its first lines:
+ * `-- pes:foreign_keys=off`. migrate() then switches foreign key enforcement off around the one transaction
+ * (the pragma is a no-op inside a transaction), runs PRAGMA foreign_key_check before it commits, and always
+ * switches enforcement back on. A single row that points nowhere rolls the whole migration back.
+ */
+const FOREIGN_KEYS_OFF_MARKER = /^--[ \t]*pes:foreign_keys=off[ \t]*$/m;
+
+function needs_foreign_keys_off(migration: Migration): boolean {
+  return FOREIGN_KEYS_OFF_MARKER.test(migration.sql.split("\n").slice(0, 5).join("\n"));
+}
+
+function stored_schema_version(db: Db): bigint {
+  if (!has_db_meta(db)) return 0n;
+  const meta = db.get<{ schema_version: bigint }>("SELECT schema_version FROM db_meta WHERE id = 1");
+  return meta === undefined ? 0n : meta.schema_version;
+}
+
+/**
  * Apply numbered migrations in order. All schema checks and the application
  * itself run under one BEGIN IMMEDIATE, so a concurrent initializer either sees
  * a completed schema (and reports `applied: false`) or waits for the lock. A
@@ -387,8 +405,28 @@ function has_db_meta(db: Db): boolean {
  */
 export function migrate(db: Db, options: MigrateOptions = {}): MigrateResult {
   const migrations = ordered_migrations(options.migrations ?? load_migrations());
+  const current = stored_schema_version(db);
+  const rebuilds = migrations.some((migration) => BigInt(migration.version) > current && needs_foreign_keys_off(migration));
+  if (!rebuilds) return migrate_in_tx(db, migrations, false);
+
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    return migrate_in_tx(db, migrations, true);
+  } finally {
+    assert_foreign_keys(db);
+  }
+}
+
+function migrate_in_tx(db: Db, migrations: Migration[], check_foreign_keys: boolean): MigrateResult {
   const newest = migrations[migrations.length - 1];
   const newest_version = BigInt(newest.version);
+  const verify = (): void => {
+    if (!check_foreign_keys) return;
+    const broken = db.all("PRAGMA foreign_key_check");
+    if (broken.length > 0) {
+      throw new Error(`migration left ${broken.length} row(s) with a foreign key that points nowhere; rolled back`);
+    }
+  };
 
   return tx<MigrateResult>(db, () => {
     if (!has_db_meta(db)) {
@@ -401,6 +439,7 @@ export function migrate(db: Db, options: MigrateOptions = {}): MigrateResult {
       for (const migration of migrations) {
         db.exec(migration.sql);
       }
+      verify();
       db.prepare(
         "INSERT INTO db_meta (id, schema_version, database_instance_id, cursor_epoch) VALUES (1, ?, ?, 1)",
       ).run(newest_version, new_id());
@@ -428,6 +467,7 @@ export function migrate(db: Db, options: MigrateOptions = {}): MigrateResult {
         db.exec(migration.sql);
       }
     }
+    verify();
     db.prepare("UPDATE db_meta SET schema_version = ? WHERE id = 1").run(newest_version);
     return { applied: true, schema_version: newest_version };
   });

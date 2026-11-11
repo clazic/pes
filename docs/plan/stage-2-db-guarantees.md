@@ -369,6 +369,68 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **시험**: `tests/test_web_*.test.ts`(HTTP로 v0.15와 DB를 같은 합성 자료로 비교)와 `tests/e2e/workspace_smoke.spec.ts`(Playwright 1.65.0, Chromium). CI는 `browser` 잡(windows-latest·macos-latest)이 `npm ci && npx playwright install chromium && npx playwright test`를 돌린다 — 브라우저를 받지 못하면 잡이 실패한다.
 - **알려진 차이(요약)**: 스냅샷의 `changes`는 빈 목록·`status`는 `active`; 같은 라운드의 여러 스냅샷 판 없음; 화면의 답이 질문별 `answers` 행으로 나뉘지 않음; 폼 spec은 `ask` 때의 파일에서 온다; 홈 `/version`은 DB 전체 커서; 화면 서버는 DB 프로젝트마다 요청 때 Node 브리지를 한 번 이상 띄운다(로컬 사용 규모; 후속: `/<slug>/version` 한 번이 `route`+`version` 프로세스 둘이므로 `version` 답에 판정을 함께 싣거나 `route` 기억 시간을 늘린다, 봉인 라운드가 많은 프로젝트의 `/<slug>/` 시간도 잴 것).
 
+### 8.16 A 내장 실행기·AI 연결(PR19, SEL-52)
+
+방식 A의 AI는 사용자가 등록한 **AI 연결**이다([0019](decisions/0019-ai-connection-registration.md)). 실행기(`scripts/pes_core/a_runtime/`)와 사용 방법은 [docs/adapters/a-builtin.md](../adapters/a-builtin.md)에 있다. **DDL 표가 늘어나므로(마이그레이션 002) PR에 "사람 확인 필요"를 표시한다.**
+
+**0019 "정할 것" 확정(leader 결정, 2026-11-11)**
+
+1. **요청 형식·모델 목록**: `openai_compatible`(Chat Completions; 구독형 API·직접 입력·로컬 모델 포함)과 `anthropic`(Messages)을 구현한다. 모델 목록은 각 형식의 `GET …/models`(`/v1`까지 적은 OpenAI 호환 주소) 또는 `GET …/v1/models`(Anthropic)이다. **Google API는 연결 종류로 등록·저장만 되고 실행은 지원하지 않는다**(`supported: false`, 시험 호출도 하지 않으며 run 시작은 `conflict`). 자세한 주소·헤더·본문은 어댑터 노트에 있다.
+2. **구독형 사용량**: 제공사의 사용량 조회 공식 API는 **확인하지 못했다(미확인)**. 그래서 PES가 센 토큰과 사람이 넣은 한도(5시간·주간·월간)로 3구간 이동 창을 추정한다. 멈춤 문턱은 한도의 `stop_percent`(기본 90%)이고 호출 전에 이번 호출의 예약(추정 입력 + 출력 상한)을 더해 본다. 결과를 모르는 호출(unknown)은 사람이 정리할 때까지 계속 센다. **한도를 모르면 등록도 시작도 하지 않는다(fail-closed).**
+3. **단가**: 출처는 **사람 입력**(모델별 입력·출력 100만 토큰당 단가와 통화, 입력한 사람·시각)이다. 단가가 바뀌면 **다음 run부터** 적용하고, 진행 중인 run은 시작 때 `ai_run_settings`에 복사한 단가(**스냅샷**)로 계산한다. 단가가 없는 모델로는 시작하지 않는다(0으로 두지 않음). 비용은 정수 연산(토큰 × 마이크로 단가, 올림)이다.
+4. **이름**: 아래 표 이름과 명령 이름.
+
+**새 표(마이그레이션 `002_ai_connections.sql`)**
+
+| 표 | 내용 |
+|---|---|
+| `ai_connections` | 사용자(`owner_user_id`) 소유의 연결: 이름·종류·요청 형식·주소·과금 방식·키 참조(`key_ref`)·**끝 4자리**·저장 위치 이름·키를 바꾼 사람/시각·구독 한도 3개·`stop_percent`·비용 상한(통화·마이크로)·`credential_rev`(키나 주소를 바꿀 때마다 1 오른다, 처음 1). 키 자체는 열이 아니다. 지우면 `removed_at`만 채운다 |
+| `ai_connection_prices` | 단가 항목(추가만 됨, 모델별 최신 항목이 현재 단가) |
+| `project_ai_selections` | 프로젝트가 고른 연결·모델(추가만 됨, 최신이 현재). 바꿔도 다음 run부터 |
+| `ai_run_settings` | 내장 run마다 한 행: 연결·모델·형식·과금·`stop_percent`·단가 스냅샷 |
+| `ai_reauth_codes` | 1회용 재인증 코드의 해시·만료·사용 시각 |
+| `ai_extra_charge_off_confirmations` | 구독 연결의 "추가 요금 꺼짐" 사람 확인: 계정 범위·확인한 사람/시각·유효 기한·그때의 `credential_rev`(추가만 됨, 연결의 지금 `credential_rev`인 것 중 최신이 현재). 최종 리뷰 1/2 F4, 2/2 N4 |
+| `ai_usage_baselines` | 구독 연결 계정의 사용량 기준점(사람이 읽은 토큰 수·기록 시각·그때의 `credential_rev`, 추가만 됨). 최종 리뷰 1/2 F4, 2/2 N4 |
+| `dispatch_resolutions` | unknown 호출(과 실행기가 죽어 남은 `prepared`·`authorized`·`sent` 호출)을 사람이 "청구 안 됨/청구됨"으로 정리한 기록(호출 행은 그대로 둔다) |
+
+`runs` 표는 CHECK 두 개를 넓히려고 다시 만들었다: `go_block_reason`에 **`cost_cap`**을 더하고, mode A 제약을 "(provider=`opencode-go` 이고 model `opencode-go/%`) **또는 runtime=`pes_builtin`**"으로 바꿨다(기존 행·기존 Go 쌍은 그대로 통과). 데이터는 모두 복사하고 지우는 것이 없다.
+
+- `migrate()`는 마이그레이션 첫 줄의 `-- pes:foreign_keys=off`를 읽으면 그 한 트랜잭션 동안만 외래 키 검사를 끄고(PRAGMA는 트랜잭션 안에서 바뀌지 않는다), 끝내기 전에 `PRAGMA foreign_key_check`를 돌려 어긋난 행이 하나라도 있으면 전부 되돌린다. 끝나면 항상 다시 켠다. 그 밖의 마이그레이션은 이전과 같다.
+- **D1(운영)**: 같은 방식이 D1에서는 안 된다(`runs`를 가리키는 RESTRICT 외래 키는 `defer_foreign_keys`로 미룰 수 없다). 5단계의 D1 적용에서 별도 절차가 필요하다. 지금은 로컬 SQLite만 검증했다. `tests/test_d1_smoke.test.ts`는 001만 적용한다.
+
+**새 명령(등록표 +12)** — 모두 사람 소유자만(에이전트는 `forbidden`)인 것은 *표시*
+
+| 명령 | 하는 일 |
+|---|---|
+| `ai_connection.issue_reauth` * | 1회용 재인증 코드 해시를 저장(5분) |
+| `ai_connection.register` * | 연결 등록(재인증 소모). `api_key` 필드는 `invalid_payload` |
+| `ai_connection.update` * | 이름·주소·한도·상한·키 4자리 변경 |
+| `ai_connection.remove` * | `removed_at` 표시 |
+| `ai_connection.test` * | 시험했다는 기록(결과 `ok`·`error_code`·모델 수만; 네트워크는 명령 밖) |
+| `ai_connection.set_price` * | 단가 항목 추가 |
+| `ai_connection.confirm_extra_charge_off` * | 구독 연결의 추가 요금 꺼짐 확인(`account_scope`·`valid_for_ms` 1ms~400일, 재인증 소모) |
+| `ai_connection.record_usage_baseline` * | 구독 연결의 사용량 기준점(`account_used_tokens`, 재인증 소모) |
+| `project.set_ai_connection` * | 프로젝트 연결·모델 선택 |
+| `dispatch.resolve_unknown` * | unknown 호출, 그리고 실행기가 죽어 남은 `prepared`·`authorized`·`sent` 호출(그 run의 lease가 끝난 뒤만)의 사람 정리(`not_charged`/`charged`). 호출 행은 그대로. 정리 전까지 게이트는 그 호출을 센다 |
+| `dispatch.settle` | 호출 기록 결과: `sent→response`(답 해시·토큰·비용·`billing_source` = 답이 말한 과금 `pay_per_use`|`subscription`|`unrecognized`|`not_reported`) · `sent→failed`(`error_code`는 PES 고정 내부 코드만) · `sent/response→unknown`(받은 답의 해시·토큰·비용·`billing_source`를 보존) · `response→adopted`. run의 실행자만, lease는 필요 없다(lease를 잃은 뒤에도 쓴 토큰은 기록해야 한다) |
+| `run.block_usage` | `blocked_usage` + 사유(`usage_limit`·`cost_cap`·`usage_unknown`·`manual_hold`·`extra_usage_off`) + 시각 + lease 해제 |
+
+`dispatch.prepare`(`provider=ai_connection`)는 필수 필드 `reservation{input_tokens,output_tokens}`를 받아 **같은 트랜잭션에서 사용량·비용 문턱을 판정**하고(넘으면 `conflict`, `details.reason`=`usage_limit`|`cost_cap`|`extra_usage_off`·`reset_at`), 예약을 `allowance_json`에 기록한다. 문턱은 완료된 호출뿐 아니라 진행 중(`prepared`·`authorized`·`sent`) 호출의 예약도 센다. 사람이 정리하지 않은 호출(`unknown` 포함)은 시각과 무관하게 모든 창에서 센다. 구독 연결은 연결의 지금 `credential_rev`로 기록된 유효한 추가 요금 꺼짐 확인과 기준점이 없으면, 또는 그 확인 뒤 과금 신호가 기록됐으면(그 호출이 `unknown`이든, 사람이 어떻게 정리했든) `extra_usage_off`다. 비용이 숫자 범위를 넘는 답은 `unknown`으로 정산하고 run을 `usage_unknown`으로 멈춘다.
+
+기존 명령의 변경: `run.create`는 선택 필드 `ai_connection_id`·`stage_id`·`round_id`를 받는다(`runtime=pes_builtin`, mode A일 때만 연결 필드; 프로젝트의 현재 선택과 같은 연결·모델이어야 하고, 연결이 지원 형식·살아 있음·쓴 만큼 과금이면 단가와 같은 통화의 상한이 있어야 한다). `dispatch.prepare`는 provider `opencode-go` 말고 `ai_connection`도 받는다(그 run에 `ai_run_settings`가 있어야 한다).
+
+**보장**
+
+- 키는 표·사건·영수증·명령 입력·로그·DTO·응답 어디에도 없다(표에는 끝 4자리와 저장 위치 이름만). 키 저장소는 인터페이스이고 로컬은 OS 비밀 저장소(구현만; 시험은 가짜 저장소).
+- 연결 시험은 PES 서버가 하고, 실패하면 키 저장소도 표도 바뀌지 않는다. 등록·변경·삭제·시험·단가는 요청마다 재인증 코드를 쓴다.
+- 모델 호출마다 호출 기록(`prepared→authorized→sent`)이 **요청 전에** 있다. 응답 유실·시간 초과·저장 실패는 `unknown`이고 자동 재호출은 없다. 쓴 비용·토큰은 `response`/`adopted` 행(그리고 정리 안 된 unknown 행)에서 센다.
+- 정책 스위치(`allow_opencode_go`)는 AI 연결 전체의 스위치로 호출마다 본다. 꺼지면 다음 호출은 나가지 않고 run은 `interrupted`(사건 `policy_off`)다.
+- 공급자 답(모델 목록 포함)에 현재 키(전체 또는 8글자 조각 — `\uXXXX` 여러 겹·`%xx`·base64로 감싼 것, 도구 인자의 두 번째 JSON 해석 결과까지)가 있으면 그 답은 명령·표·DTO·다음 요청에 가지 않고 `unknown`(`key_in_reply`) + `usage_unknown`이다(모델 목록이면 연결 시험 실패 `key_in_reply`). 키 검사는 모든 층을 되짚기 없는 선형 스캔으로 벗기고 작업량 상한을 단계 전에 깎아 정해진 시간 안에 끝난다. 검사가 예외나 작업량 상한으로 끝나지 못하면 닫힌 쪽으로 보아 `unknown`(`key_check_failed`) + `usage_unknown`이다(모델 목록이면 연결 시험 실패 `key_check_failed`). 모양을 읽을 수 없는 답(배열 안 `null` 등)은 예외 대신 `unknown`(`unreadable_reply`) + `usage_unknown`이다. 공급자 오류의 `code`·`type` 원문은 저장하지 않는다. 과금 신호는 HTTP 상태 판정 전에 읽어, 과금됨·읽을 수 없음 신호가 있는 오류 답(429 포함)·끊긴 본문은 `failed`가 아니라 `unknown`(`charged_error`, 신호·예약 보존) + `usage_unknown`이고 구독 연결의 꺼짐 확인을 무효로 한다. 도구 이름은 전송 이름(`context_get` 등)과 고정 표로 매핑한다.
+- 정산 저장(`dispatch.settle`)도 같은 요청 키로 `save_retries`번 다시 하고, 끝내 실패하면 `unknown`(답 해시·토큰 보존) + `usage_unknown`이다. 연결 키·주소 변경·삭제는 연결마다 직렬화하고, 실패한 변경의 되돌리기는 저장소에 자기 키가 남아 있을 때만 한다. 실행기와 연결 시험은 주소와 키를 같은 잠금 아래에서 함께 읽고 키 끝 4자리를 표와 대조한다(새 키가 이전 주소로, 이전 키가 새 주소로 가지 않는다).
+- 새 사건 type: `ai_connection.reauth_issued|registered|updated|removed|tested|price_set|extra_charge_off_confirmed|usage_baseline_recorded`, `project.ai_connection_set`, `dispatch.response_recorded|failed|adopted|unknown_resolved`, `run.blocked_usage`. (`dispatch.unknown`은 기존 type을 재사용한다.)
+
+**알려진 한계**: 호출 중 실행기가 죽으면 호출이 `sent`로 남아 재개를 막는다 — 사람이 `dispatch.resolve_unknown`으로 정리할 수 있고(정리 전까지 게이트는 예약으로 계속 센다), 재시작 이어가기는 PR21이다. OpenAI 호환 본문은 `max_tokens`만 쓴다(`max_completion_tokens`만 받는 모델은 미지원, 확인 필요). 응답 본문은 8MiB까지만 읽는다. `thread.reply`는 대응 명령이 없어 미연결(allowlist에만 있고 모델에게는 노출하지 않는다 — 명령이 생기면 노출), 제안 도구 4개는 `project.add_note` 메모다. 구독형 사용량 공식 API와 OS 키체인 실동작은 미확인이다.
+
 ### 8.17 방식 B 어댑터 — Claude Code·Claude 앱(PR20a)
 
 MCP 서버(`scripts/pes_core/mcp_server.ts`)와 어댑터(`scripts/pes_core/adapters/{claude_code,claude_app,api_client,http_api}.ts`)는 **PES HTTP API 위의 얇은 층**이다. 새 코어 명령도 새 HTTP 경로도 새 표도 없다(명령 등록표·경로표·마이그레이션 불변). 공통 계약과 예시는 `docs/adapters/adapter-contract.md`이고, 그 문서의 `json pes-example` 블록은 시험이 그대로 실행한다.

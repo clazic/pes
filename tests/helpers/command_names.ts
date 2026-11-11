@@ -4,6 +4,14 @@
  * COMMANDS 자신에서 기대값을 뽑지 않는다(그러면 시험이 약해진다).
  */
 export const EXPECTED_COMMAND_NAMES: readonly string[] = [
+  "ai_connection.confirm_extra_charge_off",
+  "ai_connection.issue_reauth",
+  "ai_connection.record_usage_baseline",
+  "ai_connection.register",
+  "ai_connection.remove",
+  "ai_connection.set_price",
+  "ai_connection.test",
+  "ai_connection.update",
   "answer.submit",
   "content.add_artifact",
   "content.add_citation",
@@ -17,6 +25,8 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "dispatch.block",
   "dispatch.mark_sent",
   "dispatch.prepare",
+  "dispatch.resolve_unknown",
+  "dispatch.settle",
   "edition.carry_over",
   "edition.create",
   "edition.release_completion",
@@ -37,6 +47,7 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "project.add_note",
   "project.bootstrap",
   "project.register",
+  "project.set_ai_connection",
   "project.set_topic",
   "qa.record",
   "qa.record_brief",
@@ -46,6 +57,7 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "result.submit",
   "round.seal",
   "round.start",
+  "run.block_usage",
   "run.cancel",
   "run.claim",
   "run.complete",
@@ -61,3 +73,10 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "token.issue",
   "token.revoke",
 ];
+
+/**
+ * `ai_connection.update` is a domain command (a re-authenticated human changes the model, cap, or limits of an AI
+ * connection), not table CRUD, but its `.update` ending matches the "no *.update" name-shape checks of older tests.
+ * Those checks skip exactly this name — nothing else is exempt, so a generic `x.update` still fails them.
+ */
+export const NAME_SHAPE_EXEMPT: readonly string[] = ["ai_connection.update"];

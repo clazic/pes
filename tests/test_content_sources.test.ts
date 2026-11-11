@@ -93,7 +93,7 @@ import { connect, migrate, type Db, type RunResult, type SqlValue } from "../scr
 import { ApiError } from "../scripts/pes_core/errors.ts";
 import { db_path } from "../scripts/pes_core/paths.ts";
 import { CONTENT_COMMAND_ENTRIES } from "../scripts/pes_core/commands/content.ts";
-import { EXPECTED_COMMAND_NAMES } from "./helpers/command_names.ts";
+import { EXPECTED_COMMAND_NAMES, NAME_SHAPE_EXEMPT } from "./helpers/command_names.ts";
 import { isolated_home, type IsolatedHome } from "./helpers/isolated_home.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
 
@@ -367,7 +367,7 @@ test("the full registry lists exactly the expected names, content.* included", (
 test("the registry has no update/delete/overwrite command for versions, citations, relations or sources, and no table CRUD", () => {
   const bad =
     /(update|delete|remove|edit|overwrite|replace|rewrite|patch|truncate|purge).*(version|citation|relation|component)|(version|citation|relation|component).*(update|delete|remove|edit|overwrite|replace|rewrite|patch|truncate|purge)|\.(insert|update|delete|upsert|sql|exec|ops?|crud)$/i;
-  const hits = [...COMMANDS.keys()].filter((k) => bad.test(k));
+  const hits = [...COMMANDS.keys()].filter((k) => !NAME_SHAPE_EXEMPT.includes(k) && bad.test(k)); // exempt: see command_names.ts
   assert.deepEqual(hits, []);
 });
 
