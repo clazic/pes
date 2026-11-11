@@ -292,6 +292,10 @@ function build_project(runtime: CommandRuntime, hooks: BuildHooks): CommandResul
   const slug = require_non_empty_string(payload, "slug");
   const topic = require_non_empty_string(payload, "topic");
   const owner_display_name = require_non_empty_string(payload, "owner_display_name");
+  // `plan_asking` (scripts/pes.ts init, below): only the CLI transport may ask for it (the API also fixes its payload — two layers)
+  if ("plan_asking" in payload && (payload.plan_asking !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "plan_asking is not accepted here");
+  }
 
   const project_id = runtime.new_id();
   const owner_user_id = runtime.new_id();

@@ -183,7 +183,7 @@ export async function cmd_chat(args: string[]): Promise<void> {
   const text = args[2] === undefined ? missing_args("chat") : args[2];
   const kind = args[3] ?? "feedback";
   const slug = await need_project(d);
-  const data = await bridge("chat", slug, { stage: s, text, kind, dir: d });
+  const data = await bridge("chat", slug, { stage: s, text, kind, allow_blank: true, dir: d });
   say(`채팅 입력 기록: ${String(data.object_id)}`);
 }
 

@@ -1117,12 +1117,13 @@ const chat: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);
   const args = req.args ?? {};
   const stage = s.stage(project, args.stage);
-  // 0.15 recorded an empty or blank answer (exit 0, like `note` with no text): the text may be blank here, not absent
-  if (typeof args.text !== "string") throw new Refusal("invalid_payload", "text 값이 필요합니다", 2);
+  // scripts/pes.ts `chat`: 0.15 recorded an empty or blank answer (exit 0, like `note` with no text) — only when the caller asks
+  // (allow_blank, sent by cmd_chat). pes.py's DB path does not ask, so it refuses blank text as before SEL-71.
+  const blank_ok = args.allow_blank === true;
+  if (blank_ok && typeof args.text !== "string") throw new Refusal("invalid_payload", "text 값이 필요합니다", 2);
   const out = await record_chat(s.service, s.ctx(project, auth), {
     stage: stage.key,
-    text: args.text,
-    allow_blank: true,
+    ...(blank_ok ? { text: args.text, allow_blank: true } : { text: text_arg(args, "text") }),
     kind: typeof args.kind === "string" && args.kind.length > 0 ? args.kind : "feedback",
   });
   return { object_id: result_of(out).object_id };

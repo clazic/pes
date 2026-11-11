@@ -521,6 +521,10 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
   const base_stage_rev = optional_rev(payload, "base_stage_rev");
   // `any_order` (scripts/pes.ts): v0.15 let a person start a round of any stage; the stage becomes the project's current one
   const any_order = payload.any_order === true;
+  // like `implicit`, only the CLI transport may lift the stage order (the API also fixes its payload — two layers)
+  if ("any_order" in payload && (payload.any_order !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "any_order is not accepted here");
+  }
   // `implicit` (scripts/pes.ts `approve`): the round the CLI opens by itself only to seal an approval. Only the CLI transport may say
   // so; the mark lives in the receipt (server side), so no uploaded name or free text can imitate it.
   const implicit = payload.implicit === true;
