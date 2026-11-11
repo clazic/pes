@@ -1,0 +1,13 @@
+{
+  "contract": "cross/b_tools",
+  "version": 1,
+  "description": "방식 B 도구 6개와 각 어댑터의 연결 경로 표. direct = MCP 직접 연결(run.runtime = 도구 이름, actor = external_agent, 영수증 via 가 import 가 아님), handoff = 명시적 전달(앱 → 사람이 붙여넣기: run.runtime = <도구>_handoff, actor = 사람 소유자, via = import). Claude 앱은 직접 연결이 없다. 이 표의 도구 이름 집합이 교차 계약 표의 전부이며, 어느 도구도 빠지면 시험이 실패한다.",
+  "tools": [
+    { "id": "claude_code", "direct": { "runtime": "claude_code", "provider": "anthropic" }, "handoff": null },
+    { "id": "claude_app", "direct": null, "handoff": { "runtime": "claude_app_handoff", "provider": "anthropic" } },
+    { "id": "codex_cli", "direct": { "runtime": "codex_cli", "provider": "openai" }, "handoff": null },
+    { "id": "opencode_tui", "direct": { "runtime": "opencode_tui", "provider": "unknown" }, "handoff": null },
+    { "id": "codex_app", "direct": { "runtime": "codex_app", "provider": "openai" }, "handoff": { "runtime": "codex_app_handoff", "provider": "openai" } },
+    { "id": "opencode_app", "direct": { "runtime": "opencode_app", "provider": "unknown" }, "handoff": { "runtime": "opencode_app_handoff", "provider": "unknown" } }
+  ]
+}
