@@ -13,13 +13,34 @@ import { ACTION_GROUPS, filterActions, type PesAction } from "./actions";
  *  - 한글 조합 중(isComposing · keyCode 229 · compositionstart~end)에는 단축키 · Enter · Tab 보조가 아무것도 하지 않는다.
  *  - 결과가 없으면 안내만 — 검색어를 AI에게 보내지 않는다. AI 모드는 단추 "AI 모드"로만 켠다(U1c 는 AI 연결 없음 → 보내기는 막힌 자리).
  *  - 닫힌 뒤 초점: 동작이 화면 안 다른 곳으로 초점을 옮기면 그 동작이 맡고, 아니면 열기 전 요소(단추 · 글 칸)로 돌아간다.
- * 동작은 지금 화면(작업 공간)이 등록한다 — 등록은 ref 로만 해서 화면이 다시 그려질 때마다 메뉴를 다시 그리지 않는다.
+ * 동작은 지금 화면(작업 공간)이 등록한다 — 작은 저장소(useSyncExternalStore)에 두고, 열려 있는 대화 상자만 구독한다.
+ *   내용(id · 이름 · 묶음 · run)이 그대로면 알리지 않아 화면이 다시 그려질 때마다 메뉴를 다시 그리지 않고, 열어 둔 사이 바뀐 목록(새 run 포함)은 곧바로 반영된다.
  */
 interface CommandMenuApi {
   open: () => void;
   /** 화면이 내놓는 동작을 등록한다(마지막 등록이 이긴다) */
   setActions: (list: PesAction[]) => void;
 }
+
+/** 등록된 동작 목록 저장소 — 내용이 같은 목록으로 다시 등록해도 알리지 않는다 */
+function createActionStore() {
+  let list: PesAction[] = [];
+  const listeners = new Set<() => void>();
+  const same = (a: PesAction[], b: PesAction[]) => a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.label === b[i]!.label && x.group === b[i]!.group && x.keys === b[i]!.keys && x.run === b[i]!.run);
+  return {
+    get: () => list,
+    set(next: PesAction[]) {
+      if (same(list, next)) return;
+      list = next;
+      listeners.forEach((fn) => fn());
+    },
+    subscribe(fn: () => void) {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+  };
+}
+type ActionStore = ReturnType<typeof createActionStore>;
 
 const CommandMenuContext = React.createContext<CommandMenuApi | null>(null);
 
@@ -48,20 +69,21 @@ export function CommandMenuProvider({ children }: { children: React.ReactNode })
   const [open, setOpen] = React.useState(false);
   /** 열 때마다 하나씩 — 대화 상자 안 상태(검색어 · 강조 · AI 모드)를 처음으로 */
   const [session, setSession] = React.useState(0);
-  const actions = React.useRef<PesAction[]>([]);
+  const [store] = React.useState(createActionStore);
+  /** 열려 있는가 — openMenu 가 상태 업데이터 밖에서 한 번만 세션을 올리도록 */
+  const isOpen = React.useRef(false);
   /** 열기 전 초점(단추 · 글 칸) — 동작 없이 닫히면 곧바로 여기로 돌려준다 */
   const returnTo = React.useRef<HTMLElement | null>(null);
   const openMenu = React.useCallback(() => {
-    setOpen((was) => {
-      if (!was) {
-        returnTo.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
-        setSession((n) => n + 1);
-      }
-      return true;
-    });
+    if (isOpen.current) return;
+    isOpen.current = true;
+    returnTo.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    setSession((n) => n + 1);
+    setOpen(true);
   }, []);
   /** 닫기: 동작을 고른 경우(handOff)는 동작이 초점을 맡고, 아니면 가두기를 걷어 낸 뒤 열기 전 요소로 */
   const close = React.useCallback((handOff: boolean) => {
+    isOpen.current = false;
     flushSync(() => setOpen(false));
     if (!handOff) returnTo.current?.focus();
     returnTo.current = null;
@@ -76,7 +98,9 @@ export function CommandMenuProvider({ children }: { children: React.ReactNode })
       composing.current = false;
     };
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      // 한글 자판에서는 key 가 'ㅏ' 로 올 수 있다 — 같은 자리(KeyK)도 본다
+      if (e.key.toLowerCase() !== "k" && e.code !== "KeyK") return;
       if (composingKey(e, composing.current)) return; // 조합 확정용 키를 빼앗지 않는다
       e.preventDefault();
       openMenu();
@@ -94,16 +118,14 @@ export function CommandMenuProvider({ children }: { children: React.ReactNode })
   const api = React.useMemo<CommandMenuApi>(
     () => ({
       open: openMenu,
-      setActions: (list) => {
-        actions.current = list;
-      },
+      setActions: store.set,
     }),
-    [openMenu],
+    [openMenu, store],
   );
   return (
     <CommandMenuContext.Provider value={api}>
       {children}
-      <CommandMenuDialog key={session} open={open} onClose={close} actions={actions} />
+      <CommandMenuDialog key={session} open={open} onClose={close} store={store} />
     </CommandMenuContext.Provider>
   );
 }
@@ -111,7 +133,7 @@ export function CommandMenuProvider({ children }: { children: React.ReactNode })
 const LIST_ID = "command-menu-list";
 const optionId = (a: PesAction) => `command-option-${a.id.replace(/[^\w-]/g, "-")}`;
 
-function CommandMenuDialog({ open, onClose, actions }: { open: boolean; onClose: (handOff: boolean) => void; actions: React.RefObject<PesAction[]> }) {
+function CommandMenuDialog({ open, onClose, store }: { open: boolean; onClose: (handOff: boolean) => void; store: ActionStore }) {
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState(0);
   const [ai, setAi] = React.useState(false);
@@ -120,7 +142,8 @@ function CommandMenuDialog({ open, onClose, actions }: { open: boolean; onClose:
   const inputRef = React.useRef<HTMLInputElement>(null);
   const composing = React.useRef(false);
 
-  const all = open ? actions.current : [];
+  const registered = React.useSyncExternalStore(store.subscribe, store.get);
+  const all = open ? registered : [];
   const shown = ai ? [] : filterActions(all, query);
   const current = shown[Math.min(active, shown.length - 1)];
 
@@ -176,6 +199,10 @@ function CommandMenuDialog({ open, onClose, actions }: { open: boolean; onClose:
           onOpenAutoFocus={(e) => {
             e.preventDefault();
             inputRef.current?.focus();
+          }}
+          // 한글 조합 중 Esc 는 조합을 취소하는 키다 — 메뉴를 닫지 않는다(조합 밖 Esc 만 닫고 초점 복귀)
+          onEscapeKeyDown={(e) => {
+            if (composingKey(e, composing.current)) e.preventDefault();
           }}
           // 초점 복귀는 닫는 쪽(close)이 곧바로 한다 — radix 의 늦은 복귀가 동작이 옮긴 초점을 빼앗지 않게
           onCloseAutoFocus={(e) => e.preventDefault()}

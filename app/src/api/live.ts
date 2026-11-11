@@ -5,6 +5,7 @@ import { PesApiError } from "./types";
 
 /**
  * 커서 갱신(설계 12.5 · 결정 0017 · U1c) — 폴링으로 읽기를 다시 부르지 않고, 변경분(getChanges)만 묻는다.
+ *  - 첫 호출은 마운트 즉시(cursor=null → 기준만 받는다). 410 재동기화 뒤에도 곧바로 기준을 다시 잡는다.
  *  - 활성(탭 보임): 약 3초마다 한 번. 응답이 오기 전에는 다음 호출을 보내지 않는다(동시 1개).
  *  - 비활성(탭 숨김): 부르지 않는다. 다시 보이면 곧바로 한 번 받고 활성 박자로.
  *  - 오류 · 시간 초과: 늦춘다(5초 → 10 → 20 → 40, 최대 60초). 성공하면 3초 박자로. 화면 자료는 지우지 않는다.
@@ -88,7 +89,7 @@ export function useLiveChanges(slug: string | undefined, edition: number) {
           cursor = null;
           failures = 0;
           resync();
-          schedule(LIVE.activeMs);
+          schedule(0); // 기준 커서를 곧바로 다시 잡는다(재요청한 읽기와 기준 사이 틈을 없앤다)
           return;
         }
         const wait = LIVE.backoffMs[Math.min(failures, LIVE.backoffMs.length - 1)]!;
@@ -109,8 +110,8 @@ export function useLiveChanges(slug: string | undefined, edition: number) {
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
-    // 처음 읽기는 방금 받았다 — 한 박자 뒤 기준 커서(null)부터 묻는다
-    schedule(LIVE.activeMs);
+    // 마운트 즉시 기준 커서(null)부터 묻는다 — 첫 읽기와 기준 사이에 놓친 변경이 없게
+    schedule(0);
 
     return () => {
       stopped = true;

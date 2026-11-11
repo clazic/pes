@@ -31,10 +31,19 @@ export function draftKey(p: DraftParts): string {
 const memory = new Map<string, string>();
 const listeners = new Map<string, Set<() => void>>();
 
+/** 저장소 접근 자체가 막혀 있던 중인가 — 다시 열리면 그 사이 메모리 글은 옛 것으로 보고 버린다(저장소 값과 섞여 이어 붙지 않게) */
+let unavailable = false;
+
 function storage(): Storage | null {
   try {
-    return window.sessionStorage;
+    const s = window.sessionStorage;
+    if (unavailable) {
+      unavailable = false;
+      memory.clear();
+    }
+    return s;
   } catch {
+    unavailable = true;
     return null;
   }
 }
@@ -43,7 +52,8 @@ function readStored(storageKey: string): string {
   const s = storage();
   if (s) {
     try {
-      return s.getItem(storageKey) ?? "";
+      // 저장소에 값이 없으면 메모리 대체도 본다(쓰기만 실패한 글 — 저장소에 쓰면 메모리 값은 지워져 섞이지 않는다)
+      return s.getItem(storageKey) ?? memory.get(storageKey) ?? "";
     } catch {
       /* 읽기만 막힘 — 메모리로 */
     }
