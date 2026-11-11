@@ -1,6 +1,6 @@
 # 어댑터 계약 — 방식 B (AI 도구가 PES에 접속해 일한다)
 
-방식 B는 사람이 직접 켠 AI 도구(Claude Code, 뒤이어 Codex CLI·OpenCode TUI)가 PES의 로컬 API로 일하는 방식이다. 이 문서는 도구마다 달라지지 않는 **공통 계약**이다. 도구별 차이는 [claude-code.md](claude-code.md)·[claude-app.md](claude-app.md)에 적는다. 구현은 `scripts/pes_core/mcp_server.ts`(MCP 도구 11개)와 `scripts/pes_core/adapters/`다.
+방식 B는 사람이 직접 켠 AI 도구(Claude Code, Codex CLI, OpenCode TUI)가 PES의 로컬 API로 일하는 방식이다. 이 문서는 도구마다 달라지지 않는 **공통 계약**이다. 도구별 차이는 [claude-code.md](claude-code.md)·[claude-app.md](claude-app.md)·[codex.md](codex.md)·[opencode-tui.md](opencode-tui.md)에 적는다. 구현은 `scripts/pes_core/mcp_server.ts`(MCP 도구 11개)와 `scripts/pes_core/adapters/`다.
 
 이 문서의 JSON 예시는 시험이 그대로 실행한다(「문서만 보고 재현」). 예시를 고치면 같은 PR에서 시험이 맞는지 확인한다.
 
@@ -140,7 +140,7 @@ MCP 서버는 환경변수로 설정한다.
 | `PES_PROJECT_ID` | 일할 프로젝트 |
 | `PES_API_BASE_URL` | 이 컴퓨터의 PES 서버 주소(루프백 `http://127.0.0.1:…`만 받는다) |
 | `PES_AGENT_TOKEN` | 에이전트 토큰. 설정 파일에는 **참조**(`${PES_AGENT_TOKEN}`)만 적고 값은 사용자의 환경에 둔다 |
-| `PES_RUNTIME`·`PES_PROVIDER`·`PES_MODEL` | 새 claim이 쓰는 실행기 표시. 서버는 도구를 짐작하지 않는다: 안 정하면 `mcp`·`unknown`·`unknown`이다. 연결 항목을 만드는 어댑터가 명시한다(Claude Code: `PES_RUNTIME=claude_code`, `PES_PROVIDER=anthropic`). 모델은 알 수 없으면 `unknown` |
+| `PES_RUNTIME`·`PES_PROVIDER`·`PES_MODEL` | 새 claim이 쓰는 실행기 표시. 서버는 도구를 짐작하지 않는다: 안 정하면 `mcp`·`unknown`·`unknown`이다. 연결 항목을 만드는 어댑터가 명시한다(Claude Code: `PES_RUNTIME=claude_code`, `PES_PROVIDER=anthropic`; Codex CLI: `codex_cli`·`openai`; OpenCode TUI: `opencode_tui`·`unknown` — 각각 [codex.md](codex.md)·[opencode-tui.md](opencode-tui.md)). 모델은 알 수 없으면 `unknown` |
 
 pes link와 pes sync는 도우미(helper)가 이 컴퓨터에서 쓰는 **로컬 계약**이다. 도우미는 AI 도구의 MCP 자격과 **다른 종류**(`helper_device`)의 자격을 갖는다. link 응답에는 에이전트 토큰이 없다. sync는 커서를 요청과 응답 양쪽에 싣고, 같은 커서로 다시 보내면 같은 결과를 준다. 이 두 명령의 CLI 구현은 이 PR의 범위 밖이다. 아래는 **초안 계약**으로, 이미 있는 API에 이렇게 대응시킨다. 대응이 없는 부분은 구현 PR에서 확정한다.
 
