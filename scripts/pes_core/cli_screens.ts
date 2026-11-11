@@ -244,6 +244,33 @@ function folder_listing(d: string, name: string): string[] {
     .sort();
 }
 
+/** pes.py `with_overlay`: the DB screen's additions (kept drafts, receipts, conflict notice, run display) go in front of `</body>`. */
+export function with_overlay(page: string, name: string): string {
+  const extra = readFileSync(join(TPL, "db", name), "utf8");
+  const at = page.lastIndexOf("</body>");
+  return at < 0 ? page + extra : `${page.slice(0, at)}${extra}\n${page.slice(at)}`;
+}
+
+/** The dashboard of a project the database serves, built from the database on every request (a screen file is not state). */
+export async function db_dashboard_html(d: string, slug: string): Promise<string> {
+  const sc = await bridge("screen", slug);
+  const p = legacy_project(sc.project as Dict);
+  const asks = existsSync(d) ? readdirSync(d).filter((n) => /^ask-.*\.html$/.test(n)).sort() : [];
+  const page: Dict = {
+    project: library_view(p),
+    stages: STAGES.map(([key, label]) => ({ key, label })),
+    snapshots: sc.snapshots,
+    feedback: sc.feedback,
+    asks,
+    outputs: sc.outputs,
+    built: now(),
+    qlabels: all_qlabels(),
+    runs: sc.runs ?? [],
+    dispatches: sc.dispatches ?? [],
+  };
+  return with_overlay(fill("dashboard.html", `${String(p.topic ?? "프로젝트")} · PES`, page), "overlay-dashboard.html");
+}
+
 /** 0.15 `build_index`: writes <d>/index.html from the project (database) and the folder (snapshots, asks, out/). Returns its path. */
 export async function build_index(d: string, slug: string): Promise<string> {
   const data = await bridge("read_project", slug);

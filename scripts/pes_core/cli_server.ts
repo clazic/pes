@@ -195,6 +195,12 @@ export async function all_briefs(root: string): Promise<Dict[]> {
   return out;
 }
 
+/** The home page of the projects the database serves, built on every request. */
+export async function db_hub_html(root: string): Promise<string> {
+  const briefs = await all_briefs(root);
+  return fill("hub.html", "PES 프로젝트", { projects: briefs, root, built: now(), stages: STAGES.map(([key, label]) => ({ key, label })) });
+}
+
 export async function build_hub(root: string): Promise<string> {
   const briefs = await all_briefs(root);
   const data = { projects: briefs, root, built: now(), stages: STAGES.map(([key, label]) => ({ key, label })) };

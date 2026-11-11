@@ -2226,6 +2226,24 @@ const screen: Handler = async (s, req) => {
   };
 };
 
+/**
+ * The newest question set (form version) of a published form: what the form page of that form key shows now. The local screen sends its
+ * id with the answer; a form revised since is refused. args: form_key, stage (optional).
+ */
+const form_set: Handler = async (s, req) => {
+  const project = served_project(s, req);
+  const key = text_arg(req.args ?? {}, "form_key");
+  const requested = typeof req.args?.stage === "string" && STAGE_KEYS.includes(req.args.stage) ? req.args.stage : undefined;
+  const stage = s.stage(project, requested);
+  const row = s.db.get<{ id: string }>(
+    "SELECT id FROM question_sets WHERE project_id = ? AND stage_id = ? AND form_key = ? ORDER BY version_no DESC LIMIT 1",
+    project.id,
+    stage.id,
+    key,
+  );
+  return { set_id: row === undefined ? null : row.id };
+};
+
 const version: Handler = async (s, req) => {
   if (req.slug === undefined) {
     // the home list: any project's change
@@ -2526,11 +2544,12 @@ const migrate_op: Handler = async (s, req) => {
   }
 };
 
-const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
+const READ_ONLY_OPS = new Set(["slugs", "active_slugs", "route", "read_project", "screen", "version", "form_set", "report_file", "answer_texts", "live_locks", "overview", "context", "qa-data"]);
 
 const HANDLERS: Record<string, Handler> = {
   slugs,
   active_slugs,
+  form_set,
   migrate: migrate_op,
   route,
   read_project,
