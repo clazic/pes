@@ -876,7 +876,7 @@ def short_write_lock(d: Path):
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)
             break
-        except FileExistsError:
+        except (FileExistsError, PermissionError):  # Windows: 다른 프로세스가 잠금을 지우는 중이면 PermissionError 가 난다 — 아직 잡혀 있음으로 본다
             try:
                 if time.time() - lock.stat().st_mtime > 60:  # 죽은 프로세스가 남긴 흔적
                     lock.unlink(missing_ok=True)
@@ -889,7 +889,14 @@ def short_write_lock(d: Path):
     try:
         yield
     finally:
-        lock.unlink(missing_ok=True)
+        for attempt in range(10):  # Windows 삭제 대기: 짧게 몇 번 다시 지워 본다
+            try:
+                lock.unlink(missing_ok=True)
+                break
+            except OSError:
+                if attempt == 9:
+                    break  # 조용히 넘긴다 — 남은 잠금은 60초 묵은 잠금 규칙이 치운다
+                time.sleep(0.02)
 
 
 def cmd_set(args):
