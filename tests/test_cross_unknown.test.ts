@@ -86,7 +86,7 @@ function settlements(env: CrossEnv): number {
 }
 
 /** (a) the row is untouched, (b) nobody settled it, (d) the run cannot resume, and no model call left. */
-async function assert_still_unknown(env: CrossEnv, f: Frozen, why: string): Promise<void> {
+async function assert_still_unknown(env: CrossEnv, f: Frozen, why: string, expected_code: "conflict" | "policy_denied" = "conflict"): Promise<void> {
   assert.equal(snapshot(env, f.dispatch_id), f.row, `${why}: the call row is byte-for-byte what it was`);
   assert.equal(settlements(env), 0, `${why}: nobody settled it`);
   assert.equal(unknown_dispatches(env).length, 1, `${why}: still exactly one unknown call`);
@@ -94,7 +94,7 @@ async function assert_still_unknown(env: CrossEnv, f: Frozen, why: string): Prom
   set_script(env, [FINISH]);
   const resume = await resume_outcome(env, f.run_id);
   assert.ok(resume.error, `${why}: the run cannot resume`);
-  assert.ok(["conflict", "policy_denied"].includes(resume.error!.code), `${why}: refused (${resume.error!.code})`);
+  assert.equal(resume.error!.code, expected_code, `${why}: refused (${resume.error!.code})`);
   assert.equal(env.fake.calls.length, calls, `${why}: and nothing was sent`);
 }
 
@@ -151,7 +151,7 @@ test("an unknown call survives Go OFF and Go ON: row unchanged, still refused to
   await with_cross_env("openai_compatible", async (env) => {
     const f = await make_unknown(env);
     await policy_off(env);
-    await assert_still_unknown(env, f, "Go OFF");
+    await assert_still_unknown(env, f, "Go OFF", "policy_denied");
     await policy_on(env);
     await assert_still_unknown(env, f, "Go ON again");
     await policy_off(env);

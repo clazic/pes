@@ -36,7 +36,7 @@ import { state_signature } from "./helpers/state_signature.ts";
 import { assert_error, assert_ok, call, go_off, make_agent, with_api, type ApiEnv, type ApiResponse, type Auth } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { expect_rejected, json_out, with_cli, SLUG } from "./helpers/cli_write_env.ts";
-import { Driver, type Guard, type Side } from "./helpers/cross_driver.ts";
+import { b_stale_guard_raw_code, Driver, type Guard, type Side } from "./helpers/cross_driver.ts";
 import { B_TOOLS, lease_row, make_cross_env, ready_cross, run_info, versions_of, with_cross_env, type CrossEnv } from "./helpers/cross_env.ts";
 import {
   FINISH,
@@ -659,7 +659,7 @@ test("F1 (2) API/SEL-68: a dead mode A run — an external token, a demoted acto
     assert_error(await claim_http(env, { token: int.token }, { run_id: held.run_id }), 403, "policy_blocked");
     assert.equal(state_signature(env.db), before, "Go OFF refuses the takeover with no write");
     const row = env.db.get<{ status: string }>("SELECT status FROM runs WHERE id = ?", held.run_id);
-    assert.ok(row?.status === "running" || row?.status === "interrupted", "Go OFF may interrupt a live A run; the refusals themselves did not");
+    assert.equal(row?.status, "interrupted", "Go OFF interrupted the live A run; the refusals themselves wrote nothing");
 
     // ON again: takeover works under key K; then the actor is demoted / Go switched off and K is resent
     const { set_policy } = await import("../scripts/pes_core/policy.ts");
@@ -754,6 +754,7 @@ async function refuse_every_guard_op(env: CrossEnv, who: Driver, old: Guard, lab
     const got = await who.step({ op, guard_value: old });
     assert.equal(got.ok, false, `${label}: ${op} must be refused`);
     assert.equal(got.code, "conflict", `${label}: ${op} → conflict (got ${got.code})`);
+    if (who.side.kind === "B") assert.equal(got.raw_code, b_stale_guard_raw_code(op), `${label}: ${op} B's own spelling (got ${got.raw_code})`);
     assert.deepEqual(got.events, [], `${label}: ${op} wrote no event`);
     assert.deepEqual(got.receipts, [], `${label}: ${op} left no receipt`);
     assert.equal(state_signature(env.db), before, `${label}: ${op} changed nothing`);
@@ -795,7 +796,11 @@ test("F1 (4)(6)(7)(8) MCP: a restarted B client takes its dead run back by run_i
     assert.equal(taken.is_error, false, JSON.stringify(taken.data));
     assert.equal(taken.data.run_id, old.run_id);
     assert.equal(Number(taken.data.fence), old.fence + 1);
-    assert.equal(lease.state, "active");
+    const after = lease_row(env)!;
+    assert.equal(after.state, "active");
+    assert.equal(after.lease_id, taken.data.lease_id, "the lease row is the new one");
+    assert.equal(after.fence, old.fence + 1, "fence rose by exactly one");
+    assert.notEqual(after.lease_id, lease.lease_id);
     const types = env.db
       .all<{ type: string }>("SELECT type FROM events WHERE project_id = ? AND event_seq > ? ORDER BY event_seq", env.p.project_id, ev)
       .map((r) => r.type);

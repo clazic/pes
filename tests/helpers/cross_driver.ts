@@ -64,6 +64,11 @@ export interface StepResult {
   raw_code: string | null;
 }
 
+/** B's own spelling of the refusal of an OLD guard, per tool (decision 0020, interpretation 3) */
+export function b_stale_guard_raw_code(op: string): string {
+  return op === "heartbeat" || op === "release" ? "lease_lost" : "conflict";
+}
+
 export type Side = { kind: "A" } | { kind: "B"; tool: BTool };
 
 const GUARD_OPS = new Set(["submit", "ask", "wait", "release", "complete", "heartbeat"]);
@@ -317,8 +322,7 @@ export class Driver {
         const guard = this.#guard_for(step);
         const tool = { wait: "pes_wait", release: "pes_release", complete: "pes_complete", heartbeat: "pes_heartbeat" }[step.op]!;
         const args: Record<string, unknown> = { ...explicit(guard) };
-        if (step.op !== "heartbeat") args.idempotency_key = this.#key(step.op);
-        else args.idempotency_key = this.#key(step.op);
+        args.idempotency_key = this.#key(step.op);
         if (step.op === "complete" && step.status !== undefined) args.status = step.status;
         const out = await must(tool, args);
         if (step.op !== "heartbeat" && step.guard_value === undefined && (step.guard ?? "current") === "current") {

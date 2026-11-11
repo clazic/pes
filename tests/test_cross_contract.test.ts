@@ -192,8 +192,11 @@ for (const scenario of TABLE.scenarios) {
     }
     // A and B agree wherever the table says "same"
     const steps = TABLE.scenarios.find((s) => s.name === scenario.name)!.steps;
+    assert.equal(a.trace.length, steps.length, `${scenario.name}: A ran every step`);
+    assert.equal(base.length, steps.length, `${scenario.name}: B ran every step`);
     steps.forEach((step, i) => {
-      if (step.expect.same === undefined || a.trace[i] === undefined || base[i] === undefined) return;
+      if (step.expect.same === undefined) return;
+      assert.ok(a.trace[i] !== undefined && base[i] !== undefined, `${scenario.name} step ${i}: both sides ran it`);
       const keys = Object.keys(step.expect.same).filter((k) => k !== "b_raw_code") as Array<keyof StepResult>;
       for (const key of keys) assert.deepEqual(a.trace[i]![key], base[i]![key], `${scenario.name} step ${i} ${String(key)}: A equals B`);
     });
@@ -305,7 +308,7 @@ for (const tool of B_TOOLS.filter((t) => t.handoff !== null)) {
       assert.equal(run.runtime, row.handoff!.runtime);
       assert.equal(run.status, "succeeded");
       assert.equal(env.db.get<{ kind: string }>("SELECT kind FROM actors WHERE id = ?", run.actor_id)!.kind, "human", "an import is the owner's own act");
-      assert.equal(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM mutation_commits WHERE run_id = ? AND via = 'import'", run.id)!.n >= 1n, true);
+      assert.equal(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM mutation_commits WHERE run_id = ? AND via = 'import'", run.id)!.n, 1n);
       assert.deepEqual(event_types_since(env, ev), ["run.created", "result.submitted", "run.completed"], "one import = the run, the result and its end, in one step");
       assert.deepEqual(receipt_actions_since(env, rc), ["run.created"], "one receipt for the whole import (via import)");
       assert.equal(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM ai_run_settings WHERE run_id = ?", run.id)!.n, 0n);
@@ -328,7 +331,7 @@ test("hand-off / the same bundle imported twice is refused and adds nothing", as
     const result_text = JSON.stringify({ results: [{ op: "append_version", object_id: opened.object_id, title: "한 번만" }] });
     await adapter.import_result({ bundle_text: text, result_text });
     const versions = env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM object_versions WHERE object_id = ?", opened.object_id)!.n;
-    await assert.rejects(adapter.import_result({ bundle_text: text, result_text }), (e: any) => e?.code === "duplicate_import" || e?.code === "bundle_stale");
+    await assert.rejects(adapter.import_result({ bundle_text: text, result_text }), (e: any) => e?.code === "duplicate_import");
     assert.equal(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM object_versions WHERE object_id = ?", opened.object_id)!.n, versions, "no second version");
   });
 });

@@ -14,8 +14,10 @@
  *  해석 19  D1 은 001 만 적용한다(문서 8.16: 002 의 foreign_keys=off 방식은 D1 에서 안 된다, 5단계 별도 절차). 그래서 D1 쪽의
  *           A run 은 001 의 Go 라벨 쌍(mode A + opencode-go)으로 표현한다 — SQLite 쪽 pes_builtin 경로는 이 표가 아니라
  *           다른 cross 시험들이 본다. 002 의 D1 적용 여부는 이 이슈 밖(5단계)이다.
- *  해석 20  표의 SQL 은 서비스 코드를 import 하지 않고 같은 모양을 다시 쓴 것이다(서비스는 node:sqlite 동기 API 라 D1 에서
- *           못 돈다). 그래서 '같은 모양'의 근거는 commands/runs.ts 의 claim/release/heartbeat UPDATE 문이고, 모양이 바뀌면
+ *  해석 20  표의 SQL 은 서비스 코드를 import 하지 않고 다시 쓴 것이다(서비스는 node:sqlite 동기 API 라 D1 에서 못 돈다).
+ *           release·heartbeat 는 commands/runs.ts 와 같은 모양이다. claim 은 D1 에서 쓸 CAS 변형(fence·만료 조건 추가)이며
+ *           runs.ts 의 claim UPDATE(WHERE project_id = ? 뿐, 살아 있는 lease 검사는 TS 가 같은 tx 안에서 먼저 한다)와
+ *           다르다 — 5단계 D1 claim CAS 의 기준 표이지 서비스 쿼리의 등가 증명이 아니다. release·heartbeat 모양이 바뀌면
  *           이 표도 같이 고쳐야 한다(worker 몫으로 보고서에 적음).
  */
 
@@ -214,8 +216,8 @@ function define_table_tests(kind: "sqlite" | "d1"): void {
 
 // ---------------------------------------------------------------------------------------------------------
 
-test("fixture: ten named scenarios, each step states its outcome, and the table covers success, conflict and partial failure", () => {
-  assert.ok(TABLE.scenarios.length >= 10);
+test("fixture: eleven named scenarios, each step states its outcome, and the table covers success, conflict and partial failure", () => {
+  assert.ok(TABLE.scenarios.length >= 11);
   const names = new Set<string>();
   const outcomes = new Set<string>();
   for (const scenario of TABLE.scenarios) {

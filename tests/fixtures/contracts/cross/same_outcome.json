@@ -178,6 +178,9 @@
               "lease": "released",
               "run_status": "queued",
               "versions_added": 0
+            },
+            "B": {
+              "b_raw_code": "conflict"
             }
           }
         }
@@ -312,6 +315,9 @@
               "lease": "released",
               "run_status": "waiting_human",
               "versions_added": 0
+            },
+            "B": {
+              "b_raw_code": "conflict"
             }
           }
         }
@@ -366,6 +372,9 @@
               "lease": "released",
               "run_status": "succeeded",
               "versions_added": 0
+            },
+            "B": {
+              "b_raw_code": "conflict"
             }
           }
         }

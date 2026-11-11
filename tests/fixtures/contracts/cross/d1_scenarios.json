@@ -1,7 +1,7 @@
 {
  "contract": "cross/d1_scenarios",
  "version": 1,
- "description": "SQLite(node:sqlite)와 로컬 D1(miniflare)이 같은 lease/fence 시나리오에서 같은 성공·충돌·부분 실패를 내는지 보는 표. 문장은 commands/runs.ts 의 실제 claim/release/heartbeat SQL 과 같은 모양이다(CAS 는 require_change 로 0행 → 실패). expect: ok(모든 문장 성공, changes 를 주면 문장별 변경 수가 같다) | zero_rows(ZeroRowsError, 앞 문장 되돌림) | error(그 밖의 SQL 오류: 제약 위반 등, 앞 문장 되돌림). then: 그 step 직후 표 상태. 값은 전부 합성.",
+ "description": "SQLite(node:sqlite)와 로컬 D1(miniflare)이 같은 lease/fence 시나리오에서 같은 성공·충돌·부분 실패를 내는지 보는 표. release·heartbeat 문장은 commands/runs.ts 와 같은 모양이고, claim 문장은 D1 에서 쓸 CAS 변형(fence·만료 조건 추가)이라 runs.ts 의 claim UPDATE 와 다르다(5단계 D1 claim CAS 의 기준 표). CAS 는 require_change 로 0행 → 실패. expect: ok(모든 문장 성공, changes 를 주면 문장별 변경 수가 같다) | zero_rows(ZeroRowsError, 앞 문장 되돌림) | error(그 밖의 SQL 오류: 제약 위반 등, 앞 문장 되돌림). then: 그 step 직후 표 상태. 값은 전부 합성.",
  "seed": [
   {
    "sql": "INSERT INTO users (id, display_name) VALUES (?, ?)",
@@ -1342,6 +1342,223 @@
      ]
     }
    ]
-  }
+  },
+ {
+   "name": "same_run_takeover_after_expiry",
+   "why": "F1: 만료된 lease 의 run 을 같은 owner 가 이어받는다 — run 은 running 인 채 lease 행의 run_id 가 같고 fence 만 1 오른다; 옛 fence 의 heartbeat 는 0행",
+   "steps": [
+     {
+       "label": "B claims",
+       "batch": [
+         {
+           "sql": "INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, status, base_control_rev, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+           "params": [
+             "run_b1",
+             "p1",
+             "e1",
+             "act_b",
+             "B",
+             "claude_code",
+             "anthropic",
+             "unknown",
+             "running",
+             1000
+           ]
+         },
+         {
+           "sql": "INSERT INTO project_leases (project_id, lease_id, run_id, owner_actor_id, fence, state, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+           "params": [
+             "p1",
+             "lease_b1",
+             "run_b1",
+             "act_b",
+             1,
+             1000,
+             1000,
+             121000
+           ]
+         }
+       ],
+       "expect": "ok",
+       "changes": [
+         1,
+         1
+       ]
+     },
+     {
+       "label": "same run takes over before expiry is refused",
+       "batch": [
+         {
+           "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+           "params": [
+             "lease_b2",
+             "run_b1",
+             "act_b",
+             2,
+             50000,
+             50000,
+             170000,
+             "p1",
+             1,
+             50000
+           ],
+           "require_change": true
+         }
+       ],
+       "expect": "zero_rows",
+       "then": [
+         {
+           "sql": "SELECT lease_id, run_id, fence, state FROM project_leases WHERE project_id = ?",
+           "params": [
+             "p1"
+           ],
+           "rows": [
+             {
+               "lease_id": "lease_b1",
+               "run_id": "run_b1",
+               "fence": 1,
+               "state": "active"
+             }
+           ]
+         }
+       ]
+     },
+     {
+       "label": "same run takes over after expiry",
+       "batch": [
+         {
+           "sql": "UPDATE runs SET status = 'running', started_at = COALESCE(started_at, ?), ended_at = NULL WHERE project_id = ? AND id = ?",
+           "params": [
+             130000,
+             "p1",
+             "run_b1"
+           ]
+         },
+         {
+           "sql": "UPDATE project_leases SET lease_id = ?, run_id = ?, owner_actor_id = ?, fence = ?, state = 'active', acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND fence = ? AND (state <> 'active' OR expires_at <= ?)",
+           "params": [
+             "lease_b2",
+             "run_b1",
+             "act_b",
+             2,
+             130000,
+             130000,
+             250000,
+             "p1",
+             1,
+             130000
+           ],
+           "require_change": true
+         }
+       ],
+       "expect": "ok",
+       "changes": [
+         1,
+         1
+       ],
+       "then": [
+         {
+           "sql": "SELECT lease_id, run_id, owner_actor_id, fence, state FROM project_leases WHERE project_id = ?",
+           "params": [
+             "p1"
+           ],
+           "rows": [
+             {
+               "lease_id": "lease_b2",
+               "run_id": "run_b1",
+               "owner_actor_id": "act_b",
+               "fence": 2,
+               "state": "active"
+             }
+           ]
+         },
+         {
+           "sql": "SELECT id, status, started_at FROM runs WHERE project_id = ? ORDER BY id",
+           "params": [
+             "p1"
+           ],
+           "rows": [
+             {
+               "id": "run_b1",
+               "status": "running",
+               "started_at": 1000
+             }
+           ]
+         }
+       ]
+     },
+     {
+       "label": "heartbeat with the old lease and fence changes nothing",
+       "batch": [
+         {
+           "sql": "UPDATE project_leases SET heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+           "params": [
+             140000,
+             260000,
+             "p1",
+             "lease_b1",
+             1,
+             140000
+           ],
+           "require_change": true
+         }
+       ],
+       "expect": "zero_rows",
+       "then": [
+         {
+           "sql": "SELECT lease_id, fence, heartbeat_at, expires_at FROM project_leases WHERE project_id = ?",
+           "params": [
+             "p1"
+           ],
+           "rows": [
+             {
+               "lease_id": "lease_b2",
+               "fence": 2,
+               "heartbeat_at": 130000,
+               "expires_at": 250000
+             }
+           ]
+         }
+       ]
+     },
+     {
+       "label": "heartbeat with the new lease and fence",
+       "batch": [
+         {
+           "sql": "UPDATE project_leases SET heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
+           "params": [
+             140000,
+             260000,
+             "p1",
+             "lease_b2",
+             2,
+             140000
+           ],
+           "require_change": true
+         }
+       ],
+       "expect": "ok",
+       "changes": [
+         1
+       ],
+       "then": [
+         {
+           "sql": "SELECT lease_id, fence, heartbeat_at, expires_at FROM project_leases WHERE project_id = ?",
+           "params": [
+             "p1"
+           ],
+           "rows": [
+             {
+               "lease_id": "lease_b2",
+               "fence": 2,
+               "heartbeat_at": 140000,
+               "expires_at": 260000
+             }
+           ]
+         }
+       ]
+     }
+   ]
+ }
  ]
 }

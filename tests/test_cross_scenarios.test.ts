@@ -387,8 +387,9 @@ test("cost cap reached: A stops BEFORE the next call (blocked_usage cost_cap), i
     // a human resume goes through the cap again: still over, nothing sent
     set_script(env, [FINISH]);
     const again = await resume_outcome(env, res.run_id, { max_output_tokens: 3_600 });
-    if (again.result !== null) assert.equal(again.result.status, "blocked_usage");
-    else assert.ok(again.error);
+    assert.equal(again.result, null, "a resume over the cap is refused, not run");
+    assert.equal(again.error?.code, "conflict");
+    assert.deepEqual((again.error as { details?: unknown }).details, { reason: "cost_cap", reset_at: null });
     assert.equal(env.fake.calls.length, 1);
     assert.equal(num(run_row(env, res.run_id).go_blocked_at) !== null, true);
   });

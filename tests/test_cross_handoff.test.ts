@@ -21,7 +21,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { Driver, type Guard, type Side } from "./helpers/cross_driver.ts";
+import { b_stale_guard_raw_code, Driver, type Guard, type Side } from "./helpers/cross_driver.ts";
 import {
   B_TOOLS,
   lease_row,
@@ -66,6 +66,7 @@ async function assert_old_guard_refused(env: CrossEnv, who: Driver, old: Guard, 
     const got = await who.step({ op, guard_value: old });
     assert.equal(got.ok, false, `${label}: ${op} with an old guard must be refused`);
     assert.equal(got.code, "conflict", `${label}: ${op} → conflict (got ${got.code})`);
+    if (who.side.kind === "B") assert.equal(got.raw_code, b_stale_guard_raw_code(op), `${label}: ${op} B's own spelling (got ${got.raw_code})`);
     assert.deepEqual(got.events, [], `${label}: ${op} wrote no event`);
     assert.deepEqual(got.receipts, [], `${label}: ${op} left no receipt`);
     assert.deepEqual(world(env), before, `${label}: ${op} changed nothing`);
