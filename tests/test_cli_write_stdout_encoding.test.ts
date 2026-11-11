@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 import { PES_PY, SLUG, with_cli, type CliEnv } from "./helpers/cli_write_env.ts";
+import { hub_blocked_argv } from "./helpers/hub_block.ts";
 
 function run_cp1252(c: CliEnv, args: string[], extra: Record<string, string | undefined> = {}) {
   const child: Record<string, string | undefined> = {
@@ -25,7 +26,7 @@ function run_cp1252(c: CliEnv, args: string[], extra: Record<string, string | un
   assert.equal(child.HOME, c.env.home.env.HOME, "격리 HOME");
   assert.equal(child.USERPROFILE, c.env.home.env.HOME, "격리 USERPROFILE");
   assert.ok(child.PES_HOME, "격리 PES_HOME");
-  const r = spawnSync("python3", [PES_PY, ...args], {
+  const r = spawnSync("python3", hub_blocked_argv([PES_PY, ...args]), {
     env: child as NodeJS.ProcessEnv,
     cwd: c.env.home.root,
     encoding: "buffer",

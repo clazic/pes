@@ -20,6 +20,7 @@ import { join } from "node:path";
 
 import { make_cli_env, PES_PY, SLUG, type CliEnv } from "./cli_write_env.ts";
 import { PY, plain_legacy, root_forms, run_py, seed, write_json, write_legacy, type HomeLike } from "./cli_read_env.ts";
+import { hub_blocked_argv } from "./hub_block.ts";
 
 export const SERVE_PY = join(PES_PY, "..", "serve.py");
 /** The last main commit whose screens (render / ask / hub / serve) are pure v0.15. */
@@ -68,7 +69,7 @@ export async function start_server(c: HomeLike, opts: ServerOptions = {}): Promi
   assert.equal(env.HOME, c.env.home.env.HOME, "the server runs in the isolated HOME");
   assert.equal(env.USERPROFILE, c.env.home.env.HOME);
   assert.ok(env.PES_HOME !== undefined && env.PES_HOME.length > 0, "PES_HOME is set (isolated)");
-  const child: ChildProcess = spawn(PY, ["-I", "-X", "utf8", opts.script ?? SERVE_PY, env.PES_HOME as string, String(port)], {
+  const child: ChildProcess = spawn(PY, hub_blocked_argv(["-I", "-X", "utf8", opts.script ?? SERVE_PY, env.PES_HOME as string, String(port)]), {
     env: env as NodeJS.ProcessEnv,
     cwd: c.env.home.root,
     stdio: ["ignore", "ignore", "pipe"],

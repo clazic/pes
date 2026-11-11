@@ -3,7 +3,7 @@
 //   3 E15 (doctor) never connects to the real hub                              4 the state DTO covers every key of a 0.15 project.json
 //   5 a case env cannot switch the audit hook off
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,8 +11,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { file_digest, read_baseline, run_case } from "./helpers/compat_cases.ts";
-import { EXCLUDED_KEYS, ITEM_KEYS, REPO, STAGE_KEYS, TOP_KEYS, dto_from_project_json, make_ctx, project_json, run_pes, run_py_code, unmapped_keys } from "./helpers/compat_env.ts";
+import { EXCLUDED_KEYS, ITEM_KEYS, PYTHON, REPO, STAGE_KEYS, TOP_KEYS, dto_from_project_json, make_ctx, project_json, run_pes, run_py_code, unmapped_keys } from "./helpers/compat_env.ts";
 import { n2_paths } from "./helpers/compat_normalize.ts";
+import { hub_blocked_argv } from "./helpers/hub_block.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
@@ -59,6 +60,9 @@ test("N2: backslashes below a root are made uniform through folder names with sp
   // the path ends where the words that follow hold no separator
   assert.equal(n2_paths(`${tmp}\\work\\a.json and more`, roots), "<TMP>/work/a.json and more");
   assert.equal(n2_paths(`저장: ${tmp}\\work\\합성 프로젝트\\project.json 에 썼다`, roots), "저장: <TMP>/work/합성 프로젝트/project.json 에 썼다");
+  // KNOWN LIMIT: a folder name with 2+ spaces (`a b c`) is cut after its first word — the next word holds no separator. No fixture has such a
+  // name (tests/README.md: don't add one). If this ever starts normalizing fully, change the expected value to "<TMP>/work/a b c/x.json".
+  assert.equal(n2_paths(`${tmp}\\work\\a b c\\x.json`, roots), "<TMP>/work/a b c\\x.json");
   // POSIX roots are unaffected
   assert.equal(n2_paths("/t/work/합성 프로젝트/project.json", { TMP: "/t" }), "<TMP>/work/합성 프로젝트/project.json");
 });
@@ -71,7 +75,8 @@ interface FakeHub {
 }
 
 async function free_hub_port(): Promise<number> {
-  for (let port = 8760; port <= 8775; port += 1) {
+  // doctor treats 8760~8764 as hub ports (HUB_PORTS); a stand-in outside that range would not be found by it
+  for (let port = 8760; port <= 8764; port += 1) {
     const free = await new Promise<boolean>((done) => {
       const probe = createServer();
       probe.once("error", () => done(false));
@@ -79,7 +84,7 @@ async function free_hub_port(): Promise<number> {
     });
     if (free) return port;
   }
-  throw new Error("no free port in 8760~8775 for the stand-in hub");
+  throw new Error("no free port in 8760~8764 for the stand-in hub (a real hub or another test holds all of them) — doctor only looks at those ports");
 }
 
 /** A recording stand-in for the hub (own process: the case child runs with spawnSync, which would freeze an in-process server). */
@@ -137,19 +142,20 @@ test("positive control: an unblocked child does reach the stand-in hub (so '0 co
   }
 });
 
-test("every pes.py child is hub-blocked: with a stand-in hub up, doctor reports no server; only allow_hub lets it see the stand-in", async () => {
+test("every pes.py child is hub-blocked: with a stand-in hub up, doctor reports no server; only allow_hub_port (that one port) lets it see the stand-in", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pes-fake-hub-"));
   const hub = await fake_hub(dir);
   const ctx = make_ctx("pes-compat-hubblock-");
   try {
-    const seen = (options: { allow_hub?: boolean }): string => {
+    const seen = (options: { allow_hub_port?: number }): string => {
       const run = run_pes("py", ctx, ["doctor", "--json"], { narrow_path: true, ...options });
       assert.ok(run.kind === "ran" && run.status === 0);
       return run.kind === "ran" ? run.stdout : "";
     };
     const blocked = seen({});
     assert.ok(!blocked.includes("고아 서버") && blocked.includes("PES 서버 꺼짐"), "a blocked child must see no server");
-    const open_run = seen({ allow_hub: true });
+    assert.equal(hub.connections(), 0, "the blocked child must not have reached the stand-in");
+    const open_run = seen({ allow_hub_port: hub.port });
     assert.ok(open_run.includes("고아 서버"), `control: without the block the same command sees the stand-in hub: ${JSON.stringify(JSON.parse(open_run).filter((r: any) => r.group === "서버"))}`);
   } finally {
     ctx.cleanup();
@@ -209,5 +215,27 @@ test("DTO: an unknown 0.15 key is reported (a new field cannot be dropped silent
     assert.deepEqual(unmapped_keys(data), ["top.new_top", "stages.plan.new_stage_key"]);
   } finally {
     EXCLUDED_KEYS.item.pop();
+  }
+});
+
+// ---------------------------------------------------------------- hub_blocked_argv wraps any python -I [-X utf8] child
+test("hub_blocked_argv: keeps flags + script + args, and the child cannot connect to 8760~8775 except the one allowed port", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pes-fake-hub-"));
+  const hub = await fake_hub(dir);
+  try {
+    const script = join(dir, "probe.py");
+    writeFileSync(script, `import socket, sys\nprobe = int(sys.argv[1])\ns = socket.socket()\nprint(sys.argv[1:], s.connect_ex(("127.0.0.1", probe)))\n`, "utf8");
+    const run = (allow?: number) => spawnSync(PYTHON, hub_blocked_argv(["-I", "-X", "utf8", script, String(hub.port)], allow), { encoding: "utf8" });
+    const blocked = run();
+    assert.equal(blocked.status, 0, blocked.stderr);
+    assert.match(blocked.stdout, /\['\d+'\] 111/);
+    assert.equal(hub.connections(), 0, "the blocked child reached the hub");
+    const open = run(hub.port);
+    assert.match(open.stdout, /\['\d+'\] 0/);
+    assert.ok(hub.connections() >= 1);
+    assert.throws(() => hub_blocked_argv(["-I"]), /no script/);
+  } finally {
+    hub.stop();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

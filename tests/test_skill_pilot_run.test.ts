@@ -19,6 +19,7 @@ import { test } from "node:test";
 import { disk_path } from "./helpers/blob_env.ts";
 import { make_cli_env, type CliEnv } from "./helpers/cli_write_env.ts";
 import { mentioned_commands, PES_PY, pes_cmds, REPO, repo_doc } from "./helpers/skill_docs.ts";
+import { hub_blocked_argv } from "./helpers/hub_block.ts";
 
 const SLUG = "pilot-synth";
 const CMDS = pes_cmds();
@@ -87,7 +88,7 @@ function run_pes(c: CliEnv, args: string[], extra: Record<string, string | undef
   assert.equal(env.USERPROFILE, c.env.home.env.HOME, "격리된 USERPROFILE");
   assert.equal(realpathSync.native(env.PES_HOME as string), realpathSync.native(c.env.home.env.PES_HOME as string), "격리된 PES_HOME");
   // -I 는 PYTHON* 환경 변수를 무시하므로 UTF-8 은 -X utf8 로 강제한다.
-  const res = spawnSync("python3", ["-X", "utf8", "-I", PES_PY, ...args], {
+  const res = spawnSync("python3", hub_blocked_argv(["-X", "utf8", "-I", PES_PY, ...args]), {
     env: env as NodeJS.ProcessEnv,
     cwd: c.env.home.root,
     encoding: "utf8",

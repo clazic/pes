@@ -22,6 +22,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { account_home, assert_isolated_env, assert_no_real_path, assert_no_violation } from "./home_guard.ts";
+import { hub_block_code } from "./hub_block.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
 import { n1_json, n1_time, n2_paths, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
 
@@ -101,8 +102,9 @@ export function py_guard_source(): string {
  * `python -I -X utf8 <script> <args…>` was run (argv, __file__, __main__, exit code), with the audit hook installed first.
  * `extra` is test-only code that runs after the hook and before the script (the sitecustomize-style injections).
  */
-export function guarded_script_argv(script: string, args: string[], extra = ""): string[] {
-  const code = `${py_guard_source()}\n${extra}\nimport runpy as _pes_runpy, sys as _pes_sys\n_pes_sys.argv = _pes_sys.argv[1:]\n_pes_runpy.run_path(_pes_sys.argv[0], run_name="__main__")\n`;
+export function guarded_script_argv(script: string, args: string[], extra = "", allow_hub_port?: number | readonly number[]): string[] {
+  // every guarded child also gets the hub block (no real PES hub is ever contacted); only `allow_hub_port` stays open
+  const code = `${py_guard_source()}\n${hub_block_code(allow_hub_port)}\n${extra}\nimport runpy as _pes_runpy, sys as _pes_sys\n_pes_sys.argv = _pes_sys.argv[1:]\n_pes_runpy.run_path(_pes_sys.argv[0], run_name="__main__")\n`;
   return [...PY_FLAGS, "-c", code, script, ...args];
 }
 
@@ -170,42 +172,13 @@ export function make_ctx(prefix = "pes-compat-"): CompatCtx {
   };
 }
 
-/**
- * Test-only code that EVERY pes.py / setup.py child gets (runs after the audit hook, before the script): nothing may connect to the PES server ports
- * 8760~8775 — `urlopen` raises URLError, `connect` / `connect_ex` answer "refused". `doctor` (and any command that looks for a server: init, status, open …) then sees "no server" on every PC, and the
- * real hub of a developer PC is never contacted (0 connections; test_compat_harness runs a recording stand-in on one of the ports).
- */
-export const HUB_BLOCK = `
-import socket as _hb_socket, urllib.error as _hb_error, urllib.request as _hb_request
-def _hb_port(address):
-    try:
-        return 8760 <= int(address[1]) <= 8775
-    except Exception:
-        return False
-_hb_connect_ex = _hb_socket.socket.connect_ex
-_hb_connect = _hb_socket.socket.connect
-def _hb_socket_connect_ex(self, address):
-    return 111 if _hb_port(address) else _hb_connect_ex(self, address)
-def _hb_socket_connect(self, address):
-    if _hb_port(address):
-        raise ConnectionRefusedError(111, "blocked by the test harness")
-    return _hb_connect(self, address)
-_hb_socket.socket.connect_ex = _hb_socket_connect_ex
-_hb_socket.socket.connect = _hb_socket_connect
-_hb_urlopen = _hb_request.urlopen
-def _hb_guarded_urlopen(url, *args, **kwargs):
-    target = url.full_url if hasattr(url, "full_url") else str(url)
-    if "127.0.0.1:87" in target or "localhost:87" in target:
-        raise _hb_error.URLError("blocked by the test harness")
-    return _hb_urlopen(url, *args, **kwargs)
-_hb_request.urlopen = _hb_guarded_urlopen
-`;
+export { HUB_BLOCK, hub_block_code } from "./hub_block.ts";
 
 export interface RunOptions {
   /** test-only Python run after the audit hook and before the script (after HUB_BLOCK) */
   extra?: string;
-  /** do not block the hub ports (8760~8775) — only for a test that starts its own hub on purpose */
-  allow_hub?: boolean;
+  /** the ONE hub port (of 8760~8775) that stays open — only for a test that starts its own stand-in hub; the other ports stay blocked */
+  allow_hub_port?: number | readonly number[];
   env?: Record<string, string | undefined>;
   /** replace PATH by the empty folder of the ctx (+ on Windows the system folder, which python needs) */
   narrow_path?: boolean;
@@ -232,7 +205,7 @@ function child_env(ctx: CompatCtx, options: RunOptions): NodeJS.ProcessEnv {
 
 function spawn_python(script: string, args: string[], ctx: CompatCtx, options: RunOptions): RunResult {
   const env = child_env(ctx, options);
-  const result = spawnSync(PYTHON, guarded_script_argv(script, args, options.allow_hub === true ? options.extra : `${HUB_BLOCK}\n${options.extra ?? ""}`), {
+  const result = spawnSync(PYTHON, guarded_script_argv(script, args, options.extra ?? "", options.allow_hub_port), {
     env,
     cwd: options.cwd ?? ctx.home.root,
     encoding: "utf8",

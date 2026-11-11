@@ -15,6 +15,7 @@ import { test } from "node:test";
 import { PES_PY } from "./helpers/cli_write_env.ts";
 import { PY } from "./helpers/cli_read_env.ts";
 import { expect_refused, ok_run, with_set, type SetEnv } from "./helpers/set_env.ts";
+import { hub_blocked_argv } from "./helpers/hub_block.ts";
 
 function bytes_file(e: SetEnv, name: string, data: Buffer | string): string {
   const file = join(e.home.root, name);
@@ -190,7 +191,7 @@ function py_async(e: SetEnv, args: string[], extra: Record<string, string> = {})
   return new Promise((resolve, reject) => {
     const env: Record<string, string | undefined> = { ...e.home.env, PES_OWNER: undefined, PES_TOKEN: undefined, PES_DB_CORE: undefined, ...extra };
     for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
-    const child = spawn(PY, ["-I", "-X", "utf8", PES_PY, ...args], { env: env as NodeJS.ProcessEnv, cwd: e.home.root });
+    const child = spawn(PY, hub_blocked_argv(["-I", "-X", "utf8", PES_PY, ...args]), { env: env as NodeJS.ProcessEnv, cwd: e.home.root });
     let out = "";
     let err = "";
     child.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));

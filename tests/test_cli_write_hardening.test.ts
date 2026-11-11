@@ -28,6 +28,7 @@ import { baseline_dir as shared_baseline_dir } from "./helpers/cli_read_env.ts";
 import { expect_rejected, json_out, make_cli_env, PES_PY, REPO, SLUG, with_cli, type CliEnv, type CliResult } from "./helpers/cli_write_env.ts";
 import { make_content, seal, start } from "./helpers/editions_env.ts";
 import { state_signature, table_counts } from "./helpers/state_signature.ts";
+import { hub_blocked_argv } from "./helpers/hub_block.ts";
 
 // `which python3`는 Windows Git Bash에서 /c/... 경로를 주어 Node spawnSync가 ENOENT를 낸다.
 // python3가 스스로 밝히는 실행 파일 경로(sys.executable)는 그 OS의 원래 경로라 PATH를 비운 시험에서도 쓸 수 있다.
@@ -68,7 +69,7 @@ function run_with(c: CliEnv, args: string[], extra: Record<string, string | unde
     ...extra,
   };
   for (const key of Object.keys(child)) if (child[key] === undefined) delete child[key];
-  const r = spawnSync(python, ["-I", ...py_flags, script, ...args], {
+  const r = spawnSync(python, hub_blocked_argv(["-I", ...py_flags, script, ...args]), {
     env: child as NodeJS.ProcessEnv,
     cwd: c.env.home.root,
     encoding: "utf8",

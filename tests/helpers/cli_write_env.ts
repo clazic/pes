@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { issue_agent_token } from "../../scripts/pes_core/actors.ts";
 import { make_env, type Env } from "./blob_env.ts";
 import { stage_ids, type StageKey } from "./editions_env.ts";
+import { hub_blocked_argv } from "./hub_block.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
@@ -124,7 +125,7 @@ export async function make_cli_env(): Promise<CliEnv> {
       for (const key of Object.keys(child_env)) if (child_env[key] === undefined) delete child_env[key];
       assert.equal(child_env.HOME, env.home.env.HOME, "the CLI runs in the isolated HOME");
       assert.equal(child_env.USERPROFILE, env.home.env.HOME);
-      const result = spawnSync("python3", ["-I", PES_PY, ...args], {
+      const result = spawnSync("python3", hub_blocked_argv(["-I", PES_PY, ...args]), {
         env: child_env as NodeJS.ProcessEnv,
         cwd: env.home.root,
         encoding: "utf8",

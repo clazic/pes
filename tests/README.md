@@ -101,7 +101,8 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 **훅이 보지 못하는 것(그래서 따로 막거나 아직 못 막는다):**
 
-- **HTTP 접속.** 감사 훅은 파일 접근만 본다. `doctor` 등은 포트 8760~8775 의 `/whoami` 로 실제 허브의 루트를 읽을 수 있다. 그래서 모든 `pes.py` 자식은 `compat_env.HUB_BLOCK` 을 받는다(`urlopen`·`socket.connect`/`connect_ex` 가 그 포트에서 실패). 허브를 일부러 쓰는 시험만 `allow_hub: true`. `test_compat_review` 가 기록하는 가짜 허브로 접속 0 을 단언한다.
+- **HTTP 접속.** 감사 훅은 파일 접근만 본다. `doctor` 등은 포트 8760~8775 의 `/whoami` 로 실제 허브의 루트를 읽을 수 있다. 그래서 **저장소 시험이 띄우는 모든 Python 자식**(`pes.py`·`serve.py`·`setup.py`)이 허브 차단(`tests/helpers/hub_block.ts`)을 받는다: `urlopen` 은 URLError, `socket.connect` 는 ConnectionRefusedError, `connect_ex` 는 111 — 8760~8775 어느 포트에서나. 범위: `compat_env`(`guarded_script_argv`), `cli_read_env`·`cli_write_env`·`web_env`, e2e `workspace`, 자식을 직접 띄우는 시험 파일은 `hub_blocked_argv([...python 인자])` 로 감싼다. pytest 쪽은 `tests/conftest.py` 의 `no_real_hub`(자동, 프로세스 안)과 `HUB_BLOCK`(`cli` 픽스처·`test_serve` 의 sitecustomize). 새 Python 자식을 띄우는 도우미는 반드시 이 감싸기를 쓴다. 허브를 일부러 쓰는 시험만 `allow_hub_port: <포트>` 로 **그 포트 하나**만 연다(나머지는 계속 막힘). 막힌 시도는 "서버 없음"으로 보일 뿐 시험을 실패시키지는 않는다(`doctor` 는 원래 그 포트를 두드린다) — 실제 허브가 받는 요청 수가 0 인지는 `test_compat_review`·`test_compat_harness` 의 가짜 허브와 아래 8760 재현으로 확인한다.
+- **N2 한계.** 정규화(`n2_paths`)는 공백이 두 개 이상인 폴더 이름(`a b c\\x.json`, Windows 역슬래시)을 첫 단어 뒤에서 끊는다. 기준값·fixture 에 그런 폴더 이름을 넣지 않는다(`test_compat_review` 가 이 한계를 단언한다).
 - **`sqlite3.connect`.** 감사 이벤트가 있지만(파이썬 3.10+) `GUARD` 에 넣지 않았다. 0.15 는 sqlite 를 쓰지 않는다.
 - **`os.access`·`chmod`·`utime`·`truncate`** 등 일부 호출, **ctypes 로 직접 부르는 `open(2)`** (0.15 코드에 ctypes 는 없다).
 - **손자 프로세스.** 예: `doctor` 의 `find_tool` 이 PATH 밖(`/opt/homebrew/bin` 등)의 vworld·kosis 를 띄운다. 자식 안 훅은 손자에게 이어지지 않는다. HOME 은 임시 폴더로 격리되어 있고, 시험은 `narrow_path`·임시 `LOCALAPPDATA` 로 도구를 좁힌다.

@@ -8,6 +8,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
+import { hub_blocked_argv } from "../../helpers/hub_block.ts";
 
 export const REPO = resolve(process.cwd());
 export const SESSION_SECRET = "synthetic-owner-session-secret-sel51-e2e";
@@ -46,7 +47,7 @@ export async function open_workspace(): Promise<Workspace> {
   }
 
   const port = await free_port();
-  const server: ChildProcess = spawn("python3", ["-I", "-X", "utf8", join(REPO, "scripts", "serve.py"), info.pes_home, String(port)], {
+  const server: ChildProcess = spawn("python3", hub_blocked_argv(["-I", "-X", "utf8", join(REPO, "scripts", "serve.py"), info.pes_home, String(port)]), {
     env,
     cwd: info.root,
     stdio: ["ignore", "ignore", "pipe"],
@@ -73,7 +74,7 @@ export async function open_workspace(): Promise<Workspace> {
   }
 
   const pes = (args: string[]) => {
-    const r = spawnSync("python3", ["-I", "-X", "utf8", join(REPO, "scripts", "pes.py"), ...args], { env, cwd: info.root, encoding: "utf8", timeout: 60_000 });
+    const r = spawnSync("python3", hub_blocked_argv(["-I", "-X", "utf8", join(REPO, "scripts", "pes.py"), ...args]), { env, cwd: info.root, encoding: "utf8", timeout: 60_000 });
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   };
   return {
