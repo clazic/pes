@@ -138,6 +138,9 @@ async function scene(prefix: string, node: "real" | string | "none" = "real", ex
     PES_SKIP_TOOLS: "1",
     PES_TEST_LOG_DIR: logs,
     PES_HUB_PORTS: `${port}-${port}`,
+    // Windows needs these to resolve `git` → git.cmd and to start powershell.exe at all (PR #58 windows run 43094452053:
+    // without PATHEXT the fakes were invisible and 'powershell' was "not recognized")
+    ...(WIN ? { PATHEXT: process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD", SystemRoot: process.env.SystemRoot ?? "C:\\Windows", windir: process.env.windir ?? process.env.SystemRoot ?? "C:\\Windows", ComSpec: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", SystemDrive: process.env.SystemDrive ?? "C:" } : {}),
     PES_TEST_GUARD: "1",
     PES_TEST_REAL_HOME: real_homes().join(delimiter),
     NODE_OPTIONS: `--import ${pathToFileURL(GUARD).href}`,

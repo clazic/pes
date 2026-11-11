@@ -83,6 +83,8 @@ export function normalize(text: string, roots: string[]): string {
   // a path under a root is printed with the native separator (Windows: '\\'); the 0.15 records were made on macOS ('/').
   // Only the part right after <ROOT> is folded — the same path, written two ways (PR #58 windows run 43091570453).
   out = out.replace(/<ROOT>[^\s"'`,)\]]*/g, (path) => path.replace(/\\\\?/g, "/"));
+  // a shell-quoted path was quoted only because of the Windows '\\' (shlex/shell_quote): once folded to '/', drop those quotes
+  out = out.replace(/'(<ROOT>\/[A-Za-z0-9_@%+=:,.\/-]*)'/g, "$1");
   return out
     .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?/g, "<TS>")
     .replace(/\d{8}-\d{6}/g, "<STAMP>")

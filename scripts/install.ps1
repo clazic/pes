@@ -47,7 +47,9 @@ if ($env:PES_INSTALL_MIRROR) {
   } catch { Fail "bootstrap.ps1 을 받지 못함: $($_.Exception.Message)"; return }
 }
 $nodeCmd = $null
-& powershell -NoProfile -ExecutionPolicy Bypass -File $boot | ForEach-Object {
+# the PowerShell that runs this script (powershell.exe or pwsh.exe) by its full path — 'powershell' may not be on PATH
+$psExe = (Get-Process -Id $PID).Path
+& $psExe -NoProfile -ExecutionPolicy Bypass -File $boot | ForEach-Object {
   $line = "$_"
   if ($line -like "NODE *") { $nodeCmd = $line.Substring(5).Trim() } elseif ($line -like "OK *" -or $line -like "INSTALLED *") { Ok $line } elseif ($line -like "FAIL *" -or $line -like "MISSING *") { Fail $line } else { Write-Host "  $line" }
 }
