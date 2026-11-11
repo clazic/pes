@@ -41,11 +41,15 @@ export function useRound(slug: string, edition: number, stage: string, round: st
   });
 }
 
+/** 새 멱등 키 — 한 번 누름에 하나. 다시 시도(같은 누름)는 같은 키를 쓴다 */
+export const newIdempotencyKey = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
 export function useAcknowledgeAlert(slug: string, edition: number) {
   const client = useClient();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (alertId: string) => client.acknowledgeAlert(slug, edition, alertId),
+    mutationFn: ({ alertId, key }: { alertId: string; key: string }) => client.acknowledgeAlert(slug, edition, alertId, key),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["round", slug, edition] }),
   });
 }

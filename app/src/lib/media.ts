@@ -21,3 +21,17 @@ const snapshot = () => window.matchMedia(NARROW).matches && window.matchMedia(CO
 export function useIsPhone(): boolean {
   return React.useSyncExternalStore(subscribe, snapshot, () => false);
 }
+
+/** 2영역 폭(900~1279) — 보기 전환에서 “단계·라운드”를 빼는 데 쓴다(두 영역이 이미 함께 보임). 배치 자체는 CSS 가 정한다 */
+const TWO_AREA = "(min-width: 900px) and (max-width: 1279.98px)";
+export function useIsTwoArea(): boolean {
+  return React.useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia(TWO_AREA);
+      m.addEventListener("change", cb);
+      return () => m.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(TWO_AREA).matches,
+    () => false,
+  );
+}

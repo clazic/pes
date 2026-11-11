@@ -1,9 +1,14 @@
 import * as React from "react";
 import { useParams, useSearchParams } from "react-router";
+import { ArrowRight } from "lucide-react";
 import { useRound, useWorkspace } from "@/api/queries";
+import type { RoundView, WorkspaceView } from "@/api/types";
 import { useArrival } from "@/app/arrival";
 import { NotFound } from "@/app/NotFound";
-import { useIsPhone } from "@/lib/media";
+import { Status, turnKey, turnLabel } from "@/components/pes/status";
+import { Button } from "@/components/ui/button";
+import { placeLabel } from "@/lib/labels";
+import { useIsPhone, useIsTwoArea } from "@/lib/media";
 import { AskPane } from "./AskPane";
 import { BodyPane } from "./BodyPane";
 import { PeekDialog, PrintPreview, ViewSwitch } from "./Overlays";
@@ -19,12 +24,17 @@ const PAST_REASON = {
   annotate: "지난 라운드는 읽기 전용이라 첨언을 쓸 수 없어요.",
 };
 
-/** 다음 그림 뒤에 그 요소로 초점(주소를 바꾼 뒤 화면이 따라 그려진 다음) */
-const focusSoon = (get: () => HTMLElement | null | undefined) => window.setTimeout(() => get()?.focus(), 0);
+/** 초점이 사라진 요소와 함께 빠졌는가(닫힌 대화 상자 · 미리보기 안에 있던 초점) */
+const focusLost = () => !document.activeElement || document.activeElement === document.body;
 
 /**
- * 작업 공간 — 3/2/1영역(설계 3.8 · 4.5 · 4.7 · 12.3). 주소가 상태다:
+ * 작업 공간 — 연구 공간 틀 안의 3/2/1영역(설계 3.8 · 4.5 · 4.7 · 12.3 · 12.9). 주소가 상태다:
  * 경로 = 단계·라운드, view = 좁은 화면 보기, focus = 초점 자리, peek = 미리보기, print = 인쇄 미리보기.
+ * 랜드마크: 단계·라운드 `nav` · 본문 `main`(화면 제목 · 지금 할 일 · 본문 영역) · 질문 `aside` 가 서로 형제다(aside 는 최상위 랜드마크).
+ *
+ * 초점 규칙: 주소를 바꾼 뒤 초점을 옮겨야 하면(질문으로 가기 · 인쇄 미리보기 열기/닫기) “그 주소가 그려진 다음”에 옮긴다 —
+ * 좁은 화면에서는 주소가 바뀌어야 그 영역이 보이므로(display:none 인 동안 focus() 는 듣지 않는다).
+ * 같은 화면에서 검색어만 바꾸는 이동은 preventScrollReset — 스크롤 복원이 화면을 맨 위로 되돌려 초점을 화면 밖에 두지 않게.
  */
 export function WorkspaceScreen() {
   const params = useParams();
@@ -36,49 +46,70 @@ export function WorkspaceScreen() {
   const ws = useWorkspace(slug, edition);
   const rq = useRound(slug, edition, stage, roundParam);
   const phone = useIsPhone();
+  const twoArea = useIsTwoArea();
   const ready = !!ws.data && !!rq.data && !rq.isPlaceholderData;
   useArrival(ready);
 
   const view = parseView(sp.get("view"));
   const print = sp.get("print") === "1";
   const peekParam = sp.get("peek");
+  const search = sp.toString();
   const [peekFocus, setPeekFocus] = React.useState(false);
   const askRef = React.useRef<HTMLElement>(null);
   const printHeading = React.useRef<HTMLHeadingElement>(null);
 
-  // 주소 검색어 바꾸기. 한 번의 동작에서 여러 번 바꿔도(닫기 → 초점 따라가기) 앞의 변경을 잃지 않게 마지막 값을 따로 들고 있는다
+  // 주소 검색어 바꾸기. 한 번의 동작에서 여러 번 바꿔도 앞의 변경을 잃지 않게 마지막 값을 따로 들고 있는다
   const latest = React.useRef(sp);
   React.useLayoutEffect(() => {
     latest.current = sp;
   }, [sp]);
+  /** 바꾼 뒤 그려지면 초점을 둘 곳(그 주소가 그려진 다음에 한 번) */
+  const pendingFocus = React.useRef<{ search: string; get: () => HTMLElement | null | undefined } | null>(null);
   const setParams = React.useCallback(
-    (change: Record<string, string | null>, replace: boolean) => {
+    (change: Record<string, string | null>, replace: boolean, focusAfter?: () => HTMLElement | null | undefined) => {
       const next = new URLSearchParams(latest.current);
       for (const [k, v] of Object.entries(change)) {
         if (v === null) next.delete(k);
         else next.set(k, v);
       }
+      const same = next.toString() === latest.current.toString();
       latest.current = next;
-      setSp(next, { replace });
+      pendingFocus.current = null;
+      if (same) {
+        // 주소가 그대로면 화면도 그대로 — 바로 옮긴다
+        focusAfter?.()?.focus();
+        return;
+      }
+      if (focusAfter) pendingFocus.current = { search: next.toString(), get: focusAfter };
+      setSp(next, { replace, preventScrollReset: true });
     },
     [setSp],
   );
 
-  const w = ws.data;
-  const round = rq.data;
-  const title = round ? (round.round_id === null ? `${round.stage_label} 단계 시작` : `${round.stage_label} ${round.label}`) : "";
+  // 주소가 그려진 다음 — 맡겨 둔 초점을 옮긴다
   React.useEffect(() => {
-    if (ready && w) document.title = `${title} · ${w.title} · PES`;
-  }, [ready, title, w]);
+    const p = pendingFocus.current;
+    if (!p || p.search !== search || !ready) return;
+    pendingFocus.current = null;
+    p.get()?.focus();
+  }, [search, ready]);
+
+  // 미리보기 · 인쇄 미리보기가 어떤 길로든(닫기 · Esc · 뒤로 가기) 닫혀 초점이 빠졌으면 연 단추로 돌려준다
+  const prev = React.useRef({ peek: peekParam, print });
+  React.useEffect(() => {
+    const was = prev.current;
+    prev.current = { peek: peekParam, print };
+    if (!ready) return;
+    if (was.peek && !peekParam && focusLost()) document.getElementById(`peek-${was.peek}`)?.focus();
+    if (was.print && !print && focusLost()) document.getElementById("tool-print")?.focus();
+  }, [peekParam, print, ready]);
 
   const closePeek = React.useCallback(() => {
-    const id = peekParam;
     setPeekFocus(false);
     setParams({ peek: null }, true);
-    focusSoon(() => (id ? document.getElementById(`peek-${id}`) : null));
-  }, [peekParam, setParams]);
+  }, [setParams]);
 
-  // 질문 영역 안에서 초점을 옮기면 주소의 focus 가 따라간다(기록 칸을 쌓지 않음 — replace)
+  // 질문 영역 안에서 초점을 옮기면 주소의 focus 가 따라간다(기록 칸을 쌓지 않음 — replace, 스크롤 그대로)
   const focusParam = sp.get("focus");
   React.useEffect(() => {
     const el = askRef.current;
@@ -92,22 +123,27 @@ export function WorkspaceScreen() {
     return () => el.removeEventListener("focusin", onFocusIn);
   }, [focusParam, setParams, ready]);
 
+  const w = ws.data;
+  const round = rq.data;
+  const title = round ? placeLabel(round.stage, round.round_id) : "";
+  React.useEffect(() => {
+    if (ready && w) document.title = `${title} · ${w.title} · PES`;
+  }, [ready, title, w]);
+
   // 불러오는 동안에도 같은 틀(영역 셋 · 하나의 <main>)을 그린다 — 자료가 오면 그 안만 바뀐다
   if (ws.isPending || (rq.isPending && !rq.data)) {
     return (
-      <>
-        <main id="main" tabIndex={-1} aria-busy="true" className="min-w-0">
-          <div className="px-4 pt-5 pb-3 text-meta text-muted-foreground tab:px-6">불러오는 중</div>
-          <ViewSwitch view={view} onChange={() => {}} />
-          {null}
-          <div className="ws-grid" data-view={view}>
-            <nav aria-label="단계와 라운드" data-area="nav" />
+      <div className="ws-frame">
+        <ViewSwitch view={view} twoArea={twoArea} onChange={() => {}} />
+        <div className="ws-grid" data-view={view}>
+          <nav aria-label="단계와 라운드" data-area="nav" />
+          <main id="main" tabIndex={-1} aria-busy="true" className="ws-main">
+            <p className="px-4 pt-5 pb-3 text-meta text-muted-foreground tab:px-6">불러오는 중</p>
             <div data-area="body" />
-            <aside aria-label="질문" data-area="ask" />
-          </div>
-        </main>
-        {null}
-      </>
+          </main>
+          <aside aria-label="질문" data-area="ask" />
+        </div>
+      </div>
     );
   }
   if (!w || !round) {
@@ -120,59 +156,66 @@ export function WorkspaceScreen() {
   const annotateBlocked = past ? PAST_REASON.annotate : phone ? PHONE_REASON.annotate : undefined;
   const peekQ = peekParam ? round.questions.find((q) => q.id === peekParam) : undefined;
   const draftScope = `${w.slug}:${w.edition}:${round.stage}:${round.round_id ?? "start"}:f${round.form_version}`;
+  const firstOpen = round.questions.find((q) => !q.sent && q.required) ?? round.questions.find((q) => !q.sent);
 
   const onView = (v: View) => setParams({ view: v }, true);
   const onPeek = (id: string) => {
     setPeekFocus(true);
     setParams({ peek: id }, false);
   };
-  const onPrint = () => {
-    setParams({ print: "1" }, false);
-    focusSoon(() => printHeading.current);
-  };
-  const onClosePrint = () => {
-    setParams({ print: null }, true);
-    focusSoon(() => document.getElementById("tool-print"));
-  };
-  const onGoToQuestions = () => {
-    const first = round.questions.find((q) => !q.sent && q.required) ?? round.questions.find((q) => !q.sent);
-    setParams({ view: "ask", focus: first?.id ?? null }, true);
-    focusSoon(() => (first ? document.getElementById(first.id) : null));
-  };
+  const onPrint = () => setParams({ print: "1" }, false, () => printHeading.current);
+  const onClosePrint = () => setParams({ print: null }, true, () => document.getElementById("tool-print"));
+  const onGoToQuestions = firstOpen && !past ? () => setParams({ view: "ask", focus: firstOpen.id }, true, () => document.getElementById(firstOpen.id)) : undefined;
 
   return (
-    <>
-      <main id="main" tabIndex={-1} className="min-w-0">
-        <ScreenTitle title={title} edition={w.edition} past={past} count={round.questions.length} />
-        <ViewSwitch view={view} onChange={onView} />
-        {print ? <PrintPreview round={round} title={`${w.title} — ${title}`} headingRef={printHeading} onClose={onClosePrint} /> : null}
-        <div className="ws-grid" data-view={view}>
-          <nav aria-label="단계와 라운드" data-area="nav">
-            <StageNav ws={w} viewing={{ stage: round.stage, round_id: round.round_id }} />
-          </nav>
+    <div className="ws-frame">
+      <ViewSwitch view={view} twoArea={twoArea} onChange={onView} />
+      <div className="ws-grid" data-view={view} data-printing={print ? "" : undefined}>
+        <nav aria-label="단계와 라운드" data-area="nav">
+          <StageNav ws={w} viewing={{ stage: round.stage, round_id: round.round_id }} />
+        </nav>
+        <main id="main" tabIndex={-1} className="ws-main">
+          <ScreenHead ws={w} round={round} title={title} past={past} onGoToQuestions={onGoToQuestions} />
+          {print ? <PrintPreview round={round} title={`${w.title} — ${title}`} headingRef={printHeading} onClose={onClosePrint} /> : null}
           <div data-area="body" className="min-w-0">
-            <BodyPane ws={w} round={round} annotateBlocked={annotateBlocked} onPrint={onPrint} onGoToQuestions={onGoToQuestions} />
+            <BodyPane ws={w} round={round} annotateBlocked={annotateBlocked} onPrint={onPrint} />
           </div>
-          <aside ref={askRef} aria-label="질문" data-area="ask">
-            <AskPane round={round} draftScope={draftScope} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} />
-          </aside>
-        </div>
-      </main>
-      {peekQ ? <PeekDialog q={peekQ} focusOnOpen={peekFocus} onClose={closePeek} /> : null}
-    </>
+        </main>
+        <aside ref={askRef} aria-label="질문" data-area="ask">
+          {peekQ ? <PeekDialog q={peekQ} focusOnOpen={peekFocus} onClose={closePeek} /> : null}
+          <AskPane round={round} draftScope={draftScope} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} />
+        </aside>
+      </div>
+    </div>
   );
 }
 
-/** 화면 제목 줄 — 세 영역 위에 걸쳐 어느 보기에서나 보인다. 화면이 바뀌면 초점이 이 제목으로 온다(data-screen-title) */
-function ScreenTitle({ title, edition, past, count }: { title: string; edition: number; past: boolean; count: number }) {
+/**
+ * 화면 머리(가운데 영역 위) — 화면 제목(화면이 바뀌면 초점이 여기로, data-screen-title) · 판 · 현재/지난 ·
+ * “지금 할 일” 줄: 차례 말(상태 사전 그대로 — “나의 할 일 1건”) · 먼저 할 일 한 줄 · 질문으로 가기.
+ */
+function ScreenHead({ ws, round, title, past, onGoToQuestions }: { ws: WorkspaceView; round: RoundView; title: string; past: boolean; onGoToQuestions?: () => void }) {
+  const open = round.questions.filter((q) => !q.sent).length;
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-4 pt-4 pb-3 tab:px-6">
-      <h1 data-screen-title="" tabIndex={-1} className="text-page text-ink">
-        {title}
-      </h1>
-      <p className="text-meta text-muted-foreground">
-        판 {edition} · {past ? "지난 라운드" : "현재 진행"} · 질문 {count}개
-      </p>
+    <div className="border-b px-4 pt-4 pb-3 tab:px-6">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 data-screen-title="" tabIndex={-1} className="text-page text-ink">
+          {title}
+        </h1>
+        <p className="text-meta text-muted-foreground">
+          {ws.edition}판 · {past ? "지난 라운드" : "현재 진행"} · 질문 {round.questions.length}개{past ? "" : ` · 답할 질문 ${open}개`}
+        </p>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2" data-print="hide">
+        <Status of="turn" value={turnKey(ws.turn)} label={turnLabel(ws.turn)} />
+        {ws.turn.text ? <p className="min-w-0 flex-[1_1_14rem] text-meta text-ink">{ws.turn.text}</p> : null}
+        {onGoToQuestions && ws.turn.side === "you" ? (
+          <Button variant="default" size="sm" onClick={onGoToQuestions}>
+            질문으로 가기
+            <ArrowRight aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

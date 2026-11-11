@@ -2,10 +2,13 @@ import * as React from "react";
 import { X } from "lucide-react";
 import type { QuestionView, RoundView } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { formatAt, IMPORTANCE_LABEL, SOURCE_LABEL } from "@/lib/labels";
 import type { View } from "./paths";
 
 /**
- * 질문 미리보기(설계 4.7) — 비모달 대화 상자. 화면의 나머지는 그대로 쓸 수 있고, Esc · 닫기로 닫으면 연 단추로 초점이 돌아간다.
+ * 질문 미리보기(설계 4.7) — 비모달 대화 상자. 질문 영역 맨 위에 흐름 안으로 들어간다(떠 있는 판이 아니라 —
+ * 떠 있으면 그 아래 질문 칸에 초점이 가도 가려진다, WCAG 2.4.11). 화면의 나머지는 그대로 쓸 수 있다.
+ * Esc · 닫기 · 뒤로 가기로 닫으면 연 단추로 초점이 돌아간다(작업 공간이 맡음). Esc 는 다른 층(메뉴 · 판)이 먼저 받았으면 넘긴다.
  * 주소의 peek 가 열림 상태다(딥링크 · 새로고침 · 뒤로 가기에 같은 화면).
  */
 export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focusOnOpen: boolean; onClose: () => void }) {
@@ -15,7 +18,8 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
   }, [focusOnOpen, q.id]);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.isComposing) {
+      // 메뉴 · 판(radix 층)이 먼저 Esc 를 받아 닫았으면(defaultPrevented) 미리보기는 그대로 둔다
+      if (e.key === "Escape" && !e.isComposing && !e.defaultPrevented) {
         e.preventDefault();
         onClose();
       }
@@ -28,18 +32,20 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
       ref={ref}
       role="dialog"
       aria-modal="false"
-      aria-label="미리보기"
+      aria-labelledby={`peek-title-${q.id}`}
       tabIndex={-1}
-      className="fixed inset-x-3 bottom-3 z-40 max-h-[70dvh] overflow-y-auto rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg outline-none tab:inset-x-auto tab:right-5 tab:bottom-5 tab:w-[26rem]"
+      className="mx-4 mt-4 rounded-lg border border-primary-line bg-popover p-4 text-popover-foreground shadow-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="text-title text-ink">질문 {q.number} 미리보기</h2>
+          <h2 id={`peek-title-${q.id}`} className="text-title text-ink">
+            미리보기
+          </h2>
           <p className="text-caption text-muted-foreground">
-            버전 {q.version} · {q.source_label} · {q.required ? "필수" : "선택"} · 중요도 {q.importance}
+            질문 {q.number} · 버전 {q.version} · {SOURCE_LABEL[q.source]} · {q.required ? "필수" : "선택"} · 중요도 {IMPORTANCE_LABEL[q.importance]}
           </p>
         </div>
-        <Button variant="ghost" size="icon-sm" aria-label="닫기" onClick={onClose}>
+        <Button variant="ghost" size="icon-sm" aria-label="미리보기 닫기" onClick={onClose}>
           <X aria-hidden="true" />
         </Button>
       </div>
@@ -49,7 +55,7 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
         <p className="mt-3 rounded-md bg-surface-sunk px-3 py-2 text-meta text-ink">
           보낸 답: {q.sent.answer}
           <span className="block text-caption text-muted-foreground">
-            {q.sent.at} · {q.sent.receipt_no}
+            <time dateTime={q.sent.committed_at}>{formatAt(q.sent.committed_at)}</time> · 접수 {q.sent.receipt_no}
           </span>
         </p>
       ) : (
@@ -66,7 +72,7 @@ export function PeekDialog({ q, focusOnOpen, onClose }: { q: QuestionView; focus
 export function PrintPreview({ round, title, headingRef, onClose }: { round: RoundView; title: string; headingRef: React.RefObject<HTMLHeadingElement | null>; onClose: () => void }) {
   const sent = round.questions.filter((q) => q.sent);
   return (
-    <section aria-label="인쇄 미리보기" className="mx-3 mt-4 mb-2 rounded-lg border bg-surface-soft p-3 tab:mx-6 tab:p-4">
+    <section aria-label="인쇄 미리보기" data-print-preview="" className="border-b bg-surface-soft px-4 py-4 tab:px-6">
       <div className="flex flex-wrap items-center gap-2" data-print="hide">
         <h2 ref={headingRef} tabIndex={-1} className="mr-auto text-title text-ink outline-none">
           인쇄 미리보기
@@ -78,7 +84,7 @@ export function PrintPreview({ round, title, headingRef, onClose }: { round: Rou
           미리보기 닫기
         </Button>
       </div>
-      <div className="mt-3 rounded-md border bg-background px-5 py-6 shadow-xs">
+      <div className="print-paper mt-3 max-w-[46rem] rounded-md border bg-background px-5 py-6 shadow-sm">
         <p className="text-caption text-muted-foreground">출력 시점 고정 · 보내지 않은 초안은 빠집니다</p>
         <p className="mt-1 text-title font-semibold text-ink">{title}</p>
         <h3 className="mt-4 text-meta font-semibold text-ink">질문과 보낸 답</h3>
@@ -98,7 +104,9 @@ export function PrintPreview({ round, title, headingRef, onClose }: { round: Rou
         )}
         {round.result ? (
           <>
-            <h3 className="mt-4 text-meta font-semibold text-ink">{round.result.title}</h3>
+            <h3 className="mt-4 text-meta font-semibold text-ink">
+              {round.result.title} <span className="font-normal text-muted-foreground">v{round.result.version} · {round.result.status === "adopted" ? "채택본" : "초안"}</span>
+            </h3>
             {round.result.paragraphs.map((p) => (
               <p key={p} className="mt-1 text-meta text-ink">
                 {p}
@@ -119,28 +127,32 @@ const VIEWS: { value: View; label: string }[] = [
 
 /**
  * 좁은 화면 보기 전환(설계 12.4 C12) — 탭 모양 라디오 묶음(WAI-ARIA radio group): Tab 으로는 고른 칸 하나에 닿고,
- * 화살표(←→↑↓ · Home · End)로 옮기면 바로 고른다. Space 로도 고른다. 1280 이상에서는 숨는다(3영역이 다 보임).
+ * 화살표(←↑ 앞 · →↓ 뒤, 끝에서 돈다 · Home · End)로 옮기면 바로 고른다. Space 로도 고른다.
+ * 2영역(900~1279)에서는 단계·라운드가 이미 함께 보이므로 본문 · 질문 둘만. 1280 이상에서는 숨는다(3영역이 다 보임).
  */
-export function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+export function ViewSwitch({ view, twoArea, onChange }: { view: View; twoArea: boolean; onChange: (v: View) => void }) {
+  const views = twoArea ? VIEWS.filter((v) => v.value !== "nav") : VIEWS;
+  // 2영역에서 view=nav 는 본문과 같은 화면이다(모르는 값처럼 기본)
+  const current = twoArea && view === "nav" ? "body" : view;
   const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const move = (to: number) => {
-    const i = (to + VIEWS.length) % VIEWS.length;
-    onChange(VIEWS[i]!.value);
+    const i = (to + views.length) % views.length;
+    onChange(views[i]!.value);
     refs.current[i]?.focus();
   };
   const onKeyDown = (e: React.KeyboardEvent, i: number) => {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
     if (step) move(i + step);
     else if (e.key === "Home") move(0);
-    else if (e.key === "End") move(VIEWS.length - 1);
+    else if (e.key === "End") move(views.length - 1);
     else return;
     e.preventDefault();
   };
   return (
-    <div className="view-switch sticky top-14 z-20 border-b bg-background/95 px-3 py-2 backdrop-blur-sm" data-print="hide">
-      <div role="radiogroup" aria-label="보기" className="mx-auto grid max-w-md grid-cols-3 gap-1 rounded-lg bg-muted p-1">
-        {VIEWS.map((v, i) => {
-          const checked = v.value === view;
+    <div className="view-switch border-b px-3 py-2" data-print="hide">
+      <div role="radiogroup" aria-label="보기" className={`mx-auto grid max-w-md gap-1 rounded-lg bg-muted p-1 ${views.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+        {views.map((v, i) => {
+          const checked = v.value === current;
           return (
             <button
               key={v.value}

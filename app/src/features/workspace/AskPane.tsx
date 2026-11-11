@@ -4,6 +4,7 @@ import type { QuestionView, RoundView } from "@/api/types";
 import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
 import { useDraft } from "@/lib/draft";
+import { formatAt, IMPORTANCE_LABEL, SOURCE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 const fieldClass =
@@ -31,8 +32,8 @@ function QuestionItem({ q, draftScope, open, onPeek }: { q: QuestionView; draftS
       <div className="flex flex-wrap items-center gap-1.5">
         <h3 className="text-meta font-semibold text-ink">{head}</h3>
         {q.required ? <Chip tone="strong">필수</Chip> : null}
-        <Chip>중요도 {q.importance}</Chip>
-        <span className="text-caption text-muted-foreground">{q.source_label}</span>
+        <Chip>중요도 {IMPORTANCE_LABEL[q.importance]}</Chip>
+        <span className="text-caption text-muted-foreground">{SOURCE_LABEL[q.source]}</span>
         <Button
           id={`peek-${q.id}`}
           variant="ghost"
@@ -53,7 +54,7 @@ function QuestionItem({ q, draftScope, open, onPeek }: { q: QuestionView; draftS
         <div className="mt-3 rounded-md bg-surface-sunk px-3 py-2">
           <p className="text-body text-ink">{q.sent.answer}</p>
           <p className="mt-1 text-caption text-muted-foreground">
-            보냄 · {q.sent.at} · {q.sent.receipt_no}
+            보냄 · <time dateTime={q.sent.committed_at}>{formatAt(q.sent.committed_at)}</time> · 접수 {q.sent.receipt_no}
           </p>
         </div>
       ) : (

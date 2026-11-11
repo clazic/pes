@@ -50,8 +50,18 @@ export function useArrival(ready: boolean) {
       if (document.activeElement === target) return;
     }
     if (initial || !pathChanged) return;
-    const title = document.querySelector<HTMLElement>("main [data-screen-title]");
     // 스크롤은 ScrollRestoration 이 맡는다(앞으로 = 맨 위, 뒤로 = 그 자리)
-    title?.focus({ preventScroll: true });
+    const toTitle = () => document.querySelector<HTMLElement>("main [data-screen-title]")?.focus({ preventScroll: true });
+    // 휴대폰 사이드바 판(모달)에서 링크를 눌렀으면 판이 닫히며 초점을 돌려준 다음에 옮긴다(판 안 초점 가두기와 다투지 않게)
+    if (!document.querySelector('[data-slot="sheet-content"]')) return void toTitle();
+    let tries = 0;
+    const t = window.setInterval(() => {
+      tries += 1;
+      if (!document.querySelector('[data-slot="sheet-content"]') || tries > 20) {
+        window.clearInterval(t);
+        toTitle();
+      }
+    }, 50);
+    return () => window.clearInterval(t);
   }, [state, ready, key, pathname, search, navType]);
 }

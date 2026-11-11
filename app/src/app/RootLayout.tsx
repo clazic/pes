@@ -1,10 +1,13 @@
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Outlet, ScrollRestoration, useMatch } from "react-router";
+import { Outlet, ScrollRestoration } from "react-router";
 import { createFakeClient } from "@/api/fake-client";
-import { ClientContext, useWorkspace } from "@/api/queries";
+import { ClientContext } from "@/api/queries";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ArrivalContext, useArrivalRoot } from "./arrival";
-import { ThemeMenu } from "./ThemeMenu";
+import { AppSidebar } from "./AppSidebar";
+import { SiteHeader } from "./SiteHeader";
 
 /**
  * 서버 자료는 TanStack Query 가 맡는다(설계 12.5) — 폴링 없음 · 창 초점 재조회 없음 · 시간으로 다시 받지 않음.
@@ -19,37 +22,23 @@ function makeQueryClient() {
   });
 }
 
-function SiteHeader() {
-  const m = useMatch("/p/:slug/e/:edition/*");
-  const edition = Number(m?.params.edition ?? 0);
-  const ws = useWorkspace(m?.params.slug, edition).data;
-  return (
-    <header className="app-header sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur-sm tab:px-5">
-      <span className="shrink-0 text-meta font-bold tracking-wide text-ink">PES</span>
-      {ws ? (
-        <>
-          <span aria-hidden="true" className="h-5 w-px shrink-0 bg-border" />
-          <p className="min-w-0 truncate text-meta">
-            <span className="font-semibold text-ink">{ws.title}</span>
-            <span className="text-muted-foreground"> · 판 {ws.edition}</span>
-          </p>
-        </>
-      ) : null}
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        <ThemeMenu />
-      </div>
-    </header>
-  );
+/** 사이드바 처음 상태: 사람이 접었거나 편 기록(쿠키 sidebar_state)이 있으면 그대로, 없으면 1280px 이상에서만 펼침(승인 시안과 같음) */
+function initialSidebarOpen() {
+  const m = document.cookie.match(/(?:^|; )sidebar_state=(true|false)/);
+  if (m) return m[1] === "true";
+  return window.innerWidth >= 1280;
 }
 
 /**
- * 앱 셸(설계 12.9): 건너뛰기 링크(첫 Tab) · 붙어 있는 머리줄 · 화면(Outlet). 본문 `<main>` 은 화면이 하나만 그린다.
+ * 앱 셸(설계 12.9 · 결정 0017 영향 12, 승인 시안 RootLayout 그대로의 틀): 건너뛰기 링크(첫 Tab) · shadcn sidebar-07 사이드바 ·
+ * 붙어 있는 머리줄 · 화면(Outlet = 연구 공간 틀). 본문 `<main>` 은 화면이 하나만 그린다(질문 영역 aside 는 main 밖 최상위 랜드마크).
  * 공급자(Query · 클라이언트 · 도착 초점)는 여기서 만든다 — routes 만으로 앱이 완결된다.
  */
 export function RootLayout() {
   const [queryClient] = React.useState(makeQueryClient);
   const [client] = React.useState(createFakeClient);
   const arrival = useArrivalRoot();
+  const [sidebarOpen] = React.useState(initialSidebarOpen);
   return (
     <QueryClientProvider client={queryClient}>
       <ClientContext.Provider value={client}>
@@ -64,8 +53,16 @@ export function RootLayout() {
           >
             본문으로 건너뛰기
           </a>
-          <SiteHeader />
-          <Outlet />
+          <TooltipProvider>
+            <SidebarProvider defaultOpen={sidebarOpen}>
+              <AppSidebar />
+              <SidebarInset className="min-w-0">
+                <SiteHeader />
+                <Outlet />
+              </SidebarInset>
+            </SidebarProvider>
+          </TooltipProvider>
+          {/* 뒤로·앞으로 가기에서 스크롤 자리를 되살린다. 같은 화면의 검색어만 바꾸는 이동은 preventScrollReset 으로 건드리지 않는다 */}
           <ScrollRestoration />
         </ArrivalContext.Provider>
       </ClientContext.Provider>

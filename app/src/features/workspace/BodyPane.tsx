@@ -1,14 +1,21 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { ArrowRight, CircleAlert, Copy, MessageSquarePlus, Printer } from "lucide-react";
-import { useAcknowledgeAlert } from "@/api/queries";
+import { CircleAlert, Copy, MessageSquarePlus, Printer } from "lucide-react";
+import { newIdempotencyKey, useAcknowledgeAlert } from "@/api/queries";
 import type { AlertView, RoundView, WorkspaceView } from "@/api/types";
 import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
+import { formatAt, placeLabel } from "@/lib/labels";
 import { roundHref } from "./paths";
 
 function AlertCard({ alert, slug, edition }: { alert: AlertView; slug: string; edition: number }) {
   const ack = useAcknowledgeAlert(slug, edition);
+  // 한 번 누름에 멱등 키 하나 — 응답을 못 받아 다시 누르면 같은 키로 다시 보낸다(두 번 처리되지 않음)
+  const key = React.useRef<string | null>(null);
+  const onAck = () => {
+    key.current ??= newIdempotencyKey();
+    ack.mutate({ alertId: alert.id, key: key.current });
+  };
   const titleId = `${alert.id}-title`;
   return (
     <section aria-labelledby={titleId} className="mt-5 flex gap-3 rounded-lg border border-bad-line bg-bad-soft px-4 py-3" data-print="hide">
@@ -19,19 +26,26 @@ function AlertCard({ alert, slug, edition }: { alert: AlertView; slug: string; e
         </h2>
         <p className="mt-0.5 text-meta text-ink">{alert.detail}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-caption text-ink-2">{alert.at}</span>
+          <span className="text-caption text-ink-2">
+            <time dateTime={alert.raised_at}>{formatAt(alert.raised_at)}</time>
+          </span>
           {alert.acknowledged ? (
             <span className="text-caption font-medium text-ink-2">
-              확인함 · {alert.acknowledged.receipt_no}
+              확인함 · 접수 {alert.acknowledged.receipt_no}
             </span>
           ) : (
-            <Button variant="outline" size="sm" disabled={ack.isPending} onClick={() => ack.mutate(alert.id)}>
+            <Button variant="outline" size="sm" disabled={ack.isPending} onClick={onAck}>
               오류 확인
             </Button>
           )}
           <span role="status" className="sr-only">
             {alert.acknowledged ? "오류를 확인했습니다" : ""}
           </span>
+          {ack.isError ? (
+            <span role="alert" className="text-caption font-medium text-bad">
+              확인하지 못했어요. {ack.error.message} 다시 눌러 주세요.
+            </span>
+          ) : null}
         </div>
       </div>
     </section>
@@ -56,29 +70,24 @@ function useCopy(text: string) {
 }
 
 /**
- * 본문 영역(설계 4.7 · 14절 정보 밀도): 화면 제목 · (지난 라운드면 읽기 전용 안내) · 나의 할 일 하나 · 도구 · 오류 알림 · 결과 글.
+ * 본문 영역(설계 4.7 · 14절 정보 밀도): (지난 라운드면 읽기 전용 안내) · 도구 · 오류 알림 · 결과 글. 화면 제목 · 지금 할 일은 화면 머리(main 위쪽)가 맡는다.
  */
 export function BodyPane({
   ws,
   round,
   annotateBlocked,
   onPrint,
-  onGoToQuestions,
 }: {
   ws: WorkspaceView;
   round: RoundView;
   annotateBlocked?: string;
   onPrint: () => void;
-  onGoToQuestions: () => void;
 }) {
   const past = round.state !== "current";
   const isStart = round.round_id === null;
-  const currentStage = ws.stages.find((s) => s.key === ws.current.stage);
-  const currentRound = currentStage?.rounds.find((r) => r.round_id === ws.current.round_id);
-  const currentName = currentStage && currentRound ? `${currentStage.label} ${currentRound.round_id === null ? "단계 시작" : currentRound.label}` : "";
+  const currentName = placeLabel(ws.current.stage, ws.current.round_id);
   const copy = useCopy(round.prompt);
   const [annotating, setAnnotating] = React.useState(false);
-  const open = round.questions.filter((q) => !q.sent);
 
   return (
     <div className="mx-auto w-full max-w-[46rem] px-4 pt-5 pb-16 tab:px-6">
@@ -92,20 +101,9 @@ export function BodyPane({
             </Link>
           ) : null}
         </p>
-      ) : ws.turn.side === "you" && open.length ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-primary-line bg-primary-soft px-4 py-3">
-          <p className="min-w-0 flex-1 text-body text-ink">
-            <span className="mr-2 rounded-sm bg-primary px-1.5 py-0.5 text-caption font-semibold text-primary-foreground">나의 할 일</span>
-            {ws.turn.text}
-          </p>
-          <Button variant="default" size="sm" onClick={onGoToQuestions}>
-            질문으로 가기
-            <ArrowRight aria-hidden="true" />
-          </Button>
-        </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-start gap-2" data-print="hide">
+      <div className="mt-4 flex flex-wrap items-start gap-2 first:mt-0" data-print="hide">
         <Button id="tool-print" variant="outline" size="sm" onClick={onPrint}>
           <Printer aria-hidden="true" />
           인쇄 미리보기
@@ -164,7 +162,9 @@ export function BodyPane({
             <h2 id="result-title" className="text-title text-ink">
               {round.result.title}
             </h2>
-            <p className="mt-0.5 text-caption text-muted-foreground">{round.result.meta}</p>
+            <p className="mt-0.5 text-caption text-muted-foreground">
+              v{round.result.version} · {round.result.status === "adopted" ? "채택본" : "초안"} · <time dateTime={round.result.updated_at}>{formatAt(round.result.updated_at, false)}</time>
+            </p>
             <div className="mt-3 space-y-4">
               {round.result.paragraphs.map((p) => (
                 <p key={p} className="text-body text-ink">
