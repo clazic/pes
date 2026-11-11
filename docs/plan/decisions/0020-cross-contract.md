@@ -32,6 +32,7 @@
 
 - 증상: 보유자가 죽으면 run은 `running`인 채 lease만 만료된다. 지금까지는 다른 claim(그 run을 `interrupted`로 바꿈)이나 소유자 cancel만 그 run을 움직였다. 그래서 재시작한 같은 행위자가 자기 run을 이어받지 못했다(B `pes_claim {run_id}`, A resume 모두 상태 conflict).
 - 결정: **`running`이고 프로젝트에 살아 있는 lease가 없는(만료된) run은 같은 행위자가 이어받을 수 있다.** 새 lease는 fence를 +1 해서 받고, 만료된 옛 lease는 새 lease로 교체되기 전에 사건 `run.interrupted`(`reason: lease_expired`, 옛 `lease_id`·`fence`)로 남긴다. run 자체는 `running`으로 이어진다.
+- **옛 규칙을 바꿈**: 8.5·PR5의 "`run_id` 재개는 `queued`·`waiting_human`·`blocked_usage`·`interrupted`에서만"과 그 규칙을 못 박은 옛 시험 둘(`test_api_hardening` "re-claim … after expiry is refused", `test_runs_leases_hardening` "claim … (running) is refused")은 이 결정으로 대체된다. stage-2-db-guarantees.md의 claim 규칙 줄(151행)도 고쳤다.
 - B: `commands/runs.ts` `run_claim`의 `run_id` 분기가 이 경우를 받아들인다. 활성 lease가 살아 있으면 여전히 `conflict`. 다른 행위자의 run(`the run belongs to another actor`)·SEL-68 규칙(mode A·Go 라벨 run은 `internal_ai`만)·`PRE_REPLAY_TABLE` 재전송 검사는 그대로다.
 - A: `a_runtime/loop.ts`의 resume 상태 검사가 같은 경우를 받아들인다. **정산 안 된 dispatch(`prepared`·`authorized`·`sent`·`unknown`)가 있으면 여전히 `conflict`** — `unknown`의 자동 해제 금지는 그대로이고, 사람이 `dispatch.resolve_unknown`으로 정리한 뒤에만 이어받는다. 옛 guard(옛 lease_id·fence)는 이어받은 뒤에도 계속 거부된다.
 
