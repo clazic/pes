@@ -99,6 +99,24 @@ export interface CommandDefinition {
   run(runtime: CommandRuntime): CommandResult;
 }
 
+/**
+ * SEL-68: an optional current-state check before a matching success receipt is replayed, kept in its own table
+ * (command name -> check) beside the registry so a definition keeps its fixed shape. CommandService calls it in the
+ * same transaction only when it is about to return a stored result, never on a first run (run() does its own checks
+ * then). It may throw an ApiError to refuse the replay; returning means "replay as stored". It cannot write: it gets
+ * the read-only handle of with_readonly_db (get/all, one SELECT/WITH, SQLite query_only=ON, dead after the call) and
+ * a copy of the payload. A command without an entry replays exactly as before.
+ */
+export type PreReplayHook = (check: PreReplayCheck) => void;
+
+/** What a pre-replay check sees: a read-only view of the transaction, the resolved scope and a payload copy. */
+export interface PreReplayCheck {
+  readonly db: ReadonlyDbHandle;
+  readonly project_id: string | null;
+  readonly actor_id: string | null;
+  readonly payload: unknown;
+}
+
 export function require_well_formed(value: string, field: string): string {
   if (!value.isWellFormed()) {
     throw new ApiError("invalid_payload", `${field} must be well-formed Unicode`);
@@ -391,19 +409,34 @@ export const GO_PROVIDER = "opencode-go";
 export const GO_MODEL_PREFIX = "opencode-go/";
 
 /**
- * Folds a label for the Go test: trimmed, Unicode compatibility folding (full-width letters), format characters
- * removed (zero-width, soft hyphen, BOM), lower case, every hyphen-like character, underscore and space read as one
- * separator, leading separators dropped. A look-alike from another script stays unfolded. The one fold both the
- * server rule below and adapters/opencode_tui.ts `on_go_route` use; only the test applied to the folded text differs.
+ * Folds a label for the Go test. The one order, in one place (both the server rule below and
+ * adapters/opencode_tui.ts `on_go_route` use it; only the test applied to the folded text differs):
+ *   1. Unicode compatibility folding (NFKC: full-width letters, NBSP and ideographic space become plain ones);
+ *   2. format characters (\p{Cf}: zero-width, soft hyphen, BOM, word joiner, bidi marks) removed;
+ *   3. surrounding whitespace (any Unicode space) trimmed — after 1 and 2, so a space hidden behind a format
+ *      character cannot survive as a separator;
+ *   4. lower case;
+ *   5. every run of hyphen-like characters, underscores and spaces folded to one "-", a separator next to "/"
+ *      dropped (`opencode-go /x` is `opencode-go/x`), and leading separators dropped.
+ * A step can expose work for an earlier one (removing a format character can let NFKC compose), so the steps repeat
+ * until the text stops changing: the result is a fixed point, fold_go_label(fold_go_label(x)) === fold_go_label(x).
+ * A look-alike from another script stays unfolded.
  */
 export function fold_go_label(value: string): string {
-  return value
-    .trim()
-    .normalize("NFKC")
-    .replace(/\p{Cf}/gu, "")
-    .toLowerCase()
-    .replace(/[\p{Pd}\u2212_\s]+/gu, "-")
-    .replace(/^-+/, "");
+  let current = value;
+  for (let pass = 0; pass < 8; pass++) {
+    const next = current
+      .normalize("NFKC")
+      .replace(/\p{Cf}/gu, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\p{Pd}\u2212_\s]+/gu, "-")
+      .replace(/-*\/-*/g, "/")
+      .replace(/^-+/, "");
+    if (next === current) return next;
+    current = next;
+  }
+  return current;
 }
 
 /**

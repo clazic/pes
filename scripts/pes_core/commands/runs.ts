@@ -16,6 +16,7 @@ import {
   GO_MODEL_PREFIX,
   GO_PROVIDER,
   is_human_owner_actor,
+  is_record,
   reject_unknown_fields,
   require_base_control_rev,
   require_human_owner_actor,
@@ -26,6 +27,9 @@ import {
   type CommandResult,
   type CommandRuntime,
   type EventDraft,
+  type PreReplayCheck,
+  type PreReplayHook,
+  type ReadonlyDbHandle,
 } from "./shared.ts";
 import { ApiError } from "../errors.ts";
 import { run_import_handoff } from "./handoff_import.ts";
@@ -251,9 +255,56 @@ function claim_runtime_scope(runtime: CommandRuntime): {
 }
 
 /** A mode A path needs the project's Go switch ON; the refusal is the closed `policy_denied` code (before any write). */
-function require_go_on(runtime: CommandRuntime, project_id: string): void {
-  const decision = check_go_allowed(runtime.db, project_id);
+function require_go_on(db: ReadonlyDbHandle, project_id: string): void {
+  const decision = check_go_allowed(db, project_id);
   if (!decision.allowed) throw new ApiError("policy_denied", decision.reason ?? "OpenCode Go is turned off for this project");
+}
+
+/** SEL-68 for a run_id claim: the caller's current kind against the run's labels, then the Go policy (mode A). */
+function require_run_id_claim_allowed(
+  db: ReadonlyDbHandle,
+  project_id: string,
+  actor_id: string,
+  run: { mode: string | null; provider: string | null; model: string | null },
+): void {
+  require_internal_ai_for_go_run(read_credential_actor(db, actor_id)?.kind, run, "run_id");
+  if (run.mode === "A") require_go_on(db, project_id);
+}
+
+/**
+ * SEL-68 pre_replay of run.claim: a stored claim result is replayed only while the same checks still pass now —
+ * the caller's current actor kind (403 forbidden), then the Go policy for mode A (policy_denied). The shape (400)
+ * needs no second look: the receipt matched the request hash of a payload that already passed it. Read-only.
+ */
+function run_claim_pre_replay(check: PreReplayCheck): void {
+  if (check.project_id === null || check.actor_id === null || !is_record(check.payload)) return;
+  const payload = check.payload;
+  if (typeof payload.run_id === "string") {
+    const run = check.db.get<{ mode: string | null; provider: string | null; model: string | null }>(
+      "SELECT mode, provider, model FROM runs WHERE project_id = ? AND id = ?",
+      check.project_id,
+      payload.run_id,
+    );
+    if (run !== undefined) require_run_id_claim_allowed(check.db, check.project_id, check.actor_id, run);
+    return;
+  }
+  const labels = { mode: payload.mode, provider: payload.provider, model: payload.model };
+  require_internal_ai_for_go_run(read_credential_actor(check.db, check.actor_id)?.kind, labels);
+  if (labels.mode === "A") require_go_on(check.db, check.project_id);
+}
+
+/**
+ * SEL-68 pre_replay of run.create: the target actor's current kind (403 forbidden), then the Go policy for mode A
+ * (policy_denied), in the same order as run_create. A hand-off import (fixed mode B) has nothing to re-check.
+ */
+function run_create_pre_replay(check: PreReplayCheck): void {
+  if (check.project_id === null || !is_record(check.payload)) return;
+  const payload = check.payload;
+  if (Object.hasOwn(payload, "import")) return;
+  const labels = { mode: payload.mode, provider: payload.provider, model: payload.model };
+  const target = typeof payload.actor_id === "string" ? read_credential_actor(check.db, payload.actor_id) : undefined;
+  if (target !== undefined) require_internal_ai_for_go_run(target.kind, labels);
+  if (labels.mode === "A") require_go_on(check.db, check.project_id);
 }
 
 function run_claim(runtime: CommandRuntime): CommandResult {
@@ -285,8 +336,7 @@ function run_claim(runtime: CommandRuntime): CommandResult {
       throw new ApiError("not_found", `run not found: ${requested_run_id}`);
     }
     // SEL-68: a mode A / Go-labelled run is taken by an internal_ai actor only (no lease, no receipt otherwise).
-    require_internal_ai_for_go_run(read_credential_actor(runtime.db, scope.actor_id)?.kind, run, "run_id");
-    if (run.mode === "A") require_go_on(runtime, scope.project_id);
+    require_run_id_claim_allowed(runtime.db, scope.project_id, scope.actor_id, run);
     if (!CLAIMABLE_RUN_STATUSES.has(run.status)) {
       throw new ApiError("conflict", "the run cannot be claimed in its current status");
     }
@@ -313,7 +363,7 @@ function run_claim(runtime: CommandRuntime): CommandResult {
       throw new ApiError("invalid_payload", "mode A requires the opencode-go provider and model prefix");
     }
     // The Go policy runs on every mode A path whatever the actor kind (internal_ai is the only one that gets here).
-    if (requested_mode === "A") require_go_on(runtime, scope.project_id);
+    if (requested_mode === "A") require_go_on(runtime.db, scope.project_id);
     fresh = { mode: requested_mode, runtime: runtime_name, provider, model };
     run_id = runtime.new_id();
   }
@@ -539,7 +589,7 @@ function run_create(runtime: CommandRuntime): CommandResult {
   } else if (runtime_name === BUILTIN_RUNTIME) {
     throw new ApiError("invalid_payload", "a pes_builtin run needs ai_connection_id");
   }
-  if (mode === "A") require_go_on(runtime, scope.project_id);
+  if (mode === "A") require_go_on(runtime.db, scope.project_id);
   const builtin =
     ai_connection_id === null ? null : builtin_run_settings(runtime, scope.project_id, ai_connection_id, provider, model);
 
@@ -1103,3 +1153,9 @@ const RUN_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> = 
 export const RUN_COMMAND_ENTRIES: ReadonlyArray<readonly [string, CommandDefinition]> = Object.freeze(
   RUN_COMMAND_INPUTS.map((entry) => Object.freeze([entry[0], entry[1]] as const)),
 );
+
+/** SEL-68: the read-only checks run before a stored run.claim / run.create result is replayed (see PreReplayHook). */
+export const RUN_PRE_REPLAY_ENTRIES: ReadonlyArray<readonly [string, PreReplayHook]> = Object.freeze([
+  Object.freeze(["run.create", run_create_pre_replay] as const),
+  Object.freeze(["run.claim", run_claim_pre_replay] as const),
+]);
