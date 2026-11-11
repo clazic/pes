@@ -36,7 +36,9 @@ function ports_env(port: number): Record<string, string> {
 
 function http_json(port: number, path: string): Promise<{ status: number; json: any }> {
   return new Promise((done, fail) => {
-    const req = get({ host: "127.0.0.1", port, path, timeout: 10_000 }, (res) => {
+    // Reason: node's http rejects raw non-ASCII request paths (ERR_UNESCAPED_CHARACTERS); browsers percent-encode each path segment, so the test client does the same (a test bug, not an implementation one).
+    const wire_path = path.split("/").map((seg) => encodeURIComponent(seg)).join("/");
+    const req = get({ host: "127.0.0.1", port, path: wire_path, timeout: 10_000 }, (res) => {
       let body = "";
       res.setEncoding("utf8").on("data", (c: string) => (body += c)).on("end", () => {
         try {
@@ -212,15 +214,15 @@ function doctor_rows(ctx: CompatCtx, who: "py" | "ts", args: string[]): { exit: 
   return { exit: run.status, rows, stdout };
 }
 
-test("(a) doctor on a project whose project.json is broken: same exit, same rows (group·level·title·detail·fixable) as 0.15 — a `bad` row makes exit 1", { timeout: 240_000 }, () => {
+test("(a) doctor on a project whose project.json is broken: same exit as 0.15 (whatever 0.15 does), same rows (group·level·title·detail·fixable)", { timeout: 240_000 }, () => {
   const ctx = make_ctx("pes-ts-doctor-bad-");
   try {
     const broken = synthetic_project(ctx, "broken");
     const want = doctor_rows(ctx, "py", [broken]);
     const got = doctor_rows(ctx, "ts", [broken]);
-    assert.equal(got.exit, want.exit, "doctor's exit code (0.15: 1 when a row is `bad`)");
+    assert.equal(got.exit, want.exit, "doctor's exit code is exactly 0.15's (py oracle)");
     assert.deepEqual(got.rows, want.rows);
-    assert.equal(want.rows.some((r) => r.level === "bad"), want.exit === 1, "0.15 itself: exit 1 exactly when a bad row exists");
+    // Reason: the former assumption "exit 1 whenever a `bad` row exists" is false for 0.15's --json mode (pes.py cmd_doctor exits 1 on a bad row in --json only on the DB path; text mode always does). The oracle is 0.15 itself, so the assumption assertion is dropped and the exact-exit comparison above stays.
   } finally {
     ctx.cleanup();
   }

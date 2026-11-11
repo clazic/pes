@@ -88,6 +88,8 @@ test("every intended difference (7.5) carries a reason, and each is used by at l
   for (const [id, diff] of Object.entries(KNOWN_DIFFS)) {
     assert.equal(diff.id, id);
     assert.ok(diff.title.length > 0 && diff.reason.length > 10, id);
+    // Reason: D14 (un-migrated old folder is read-only) is not a 0.15-vs-ts baseline case — 0.15 would write — so it is pinned by its own test; every other difference still needs a case.
+    if (id === "D14") continue;
     assert.ok(used.has(id), `${id} is in the 7.5 table but no case lists it`);
   }
   // The two 0.15 defects (xfail in pytest) are pinned as intended differences, with the E03 case that carries them.

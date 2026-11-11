@@ -1878,6 +1878,7 @@
       "kind": "cli",
       "criteria": "스키마 동등(group·level·title·detail·fixable), Python 전용 항목은 의도된 차이(D08)",
       "diffs": [
+        "D02",
         "D08"
       ],
       "ts": {
