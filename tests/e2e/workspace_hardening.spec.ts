@@ -148,8 +148,9 @@ async function polls(page: Page, n: number): Promise<void> {
   for (let i = 0; i < n; i += 1) {
     const answered = page.waitForResponse((r) => /\/version$/.test(new URL(r.url()).pathname), { timeout: 15_000 });
     await page.clock.runFor(11_000);
-    await answered;
-    await page.waitForTimeout(250);
+    // SEL-78: wait for the whole body (the screen reads it right after), then one event-loop turn in the page; no fixed sleep
+    await (await answered).finished();
+    await page.evaluate("new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)))");
   }
 }
 
@@ -189,13 +190,19 @@ test("X4 필수2 공백이 든 올바른 상대 경로는 링크가 그대로 �
  */
 async function goto_settled(page: Page, path: string): Promise<void> {
   let ok = 0;
-  const on_response = (r: { url(): string; status(): number }) => {
-    if (/\/version$/.test(new URL(r.url()).pathname) && r.status() === 200) ok += 1;
+  const pending: Array<Promise<unknown>> = [];
+  const on_response = (r: { url(): string; status(): number; finished(): Promise<unknown> }) => {
+    if (/\/version$/.test(new URL(r.url()).pathname) && r.status() === 200) {
+      ok += 1;
+      // SEL-78: the event fires at the headers; also wait until the body is fully received
+      pending.push(r.finished().catch(() => null));
+    }
   };
   page.on("response", on_response);
   try {
     await page.goto(url(path));
     await expect.poll(() => ok, { message: "처음 /version 두 번이 끝나야 한다", timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    await Promise.all(pending);
     // 응답 본문을 화면 스크립트가 읽어 기준값을 잡는 마이크로태스크까지 한 번 비운다(시간이 아니라 이벤트 루프 기준)
     await page.evaluate("new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)))");
   } finally {

@@ -12,6 +12,9 @@ import { SYNTHETIC_KEY } from "./a_builtin_env.ts";
 export const MAX_RATIO = 9;
 /** below this a time is noise, not growth (the ratio divides by at least this) */
 export const FLOOR_MS = 8;
+/** a CPU-time window shorter than this is not trusted (two Windows ticks); the scan is repeated inside the window until it is longer */
+const MIN_READING_MS = 30;
+const MAX_BATCH = 4096;
 
 /**
  * best (smallest) CPU time of `runs` calls, in ms: process.cpuUsage() user + system.
@@ -22,13 +25,25 @@ export const FLOOR_MS = 8;
  * ~15 ms) a reading is rounded to ticks, which the FLOOR_MS floor and the "lowest of several runs" absorb; a square
  * (x16) is far above that.
  */
-export function best_ms(go: () => unknown, runs = 3): number {
+export function best_ms(go: () => unknown, runs = 3, tick_ms = 0): number {
   let best = Number.POSITIVE_INFINITY;
   for (let i = 0; i < runs; i += 1) {
-    const before = process.cpuUsage();
-    go();
-    const used = process.cpuUsage(before);
-    best = Math.min(best, (used.user + used.system) / 1000);
+    // SEL-78: a reading under MIN_READING_MS is only a tick or two on a coarse clock (Windows ~15 ms: a 5 ms scan reads 0).
+    // Run the scan k times inside ONE cpuUsage window, doubling k until the window is long enough, and take the mean.
+    let k = 1;
+    for (;;) {
+      const before = process.cpuUsage();
+      for (let j = 0; j < k; j += 1) go();
+      const used = process.cpuUsage(before);
+      let ms = (used.user + used.system) / 1000;
+      // test hook: model a coarse OS clock that rounds a reading DOWN to whole ticks
+      if (tick_ms > 0) ms = Math.floor(ms / tick_ms) * tick_ms;
+      if (ms >= MIN_READING_MS || k >= MAX_BATCH) {
+        best = Math.min(best, ms / k);
+        break;
+      }
+      k *= 2;
+    }
   }
   return best;
 }
@@ -54,6 +69,7 @@ export function measure_growth(
   small: number,
   large: number,
   attempts = 3,
+  tick_ms = 0,
 ): Growth {
   const small_text = build(small);
   const large_text = build(large);
@@ -61,8 +77,8 @@ export function measure_growth(
   let small_min = Number.POSITIVE_INFINITY;
   let large_min = Number.POSITIVE_INFINITY;
   for (let i = 0; i < attempts; i += 1) {
-    small_min = Math.min(small_min, best_ms(() => scan(small_text)));
-    large_min = Math.min(large_min, best_ms(() => scan(large_text)));
+    small_min = Math.min(small_min, best_ms(() => scan(small_text), 3, tick_ms));
+    large_min = Math.min(large_min, best_ms(() => scan(large_text), 3, tick_ms));
     const g: Growth = { small_ms: small_min, large_ms: large_min, ratio: large_min / Math.max(small_min, FLOOR_MS) };
     if (best === null || g.ratio < best.ratio) best = g;
     if (g.ratio < MAX_RATIO) break;
