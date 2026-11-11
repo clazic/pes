@@ -390,9 +390,29 @@ export function require_human_owner_actor(runtime: CommandRuntime): string {
 export const GO_PROVIDER = "opencode-go";
 export const GO_MODEL_PREFIX = "opencode-go/";
 
-/** A Go label: provider `opencode-go` or a model starting with `opencode-go/`. */
+/**
+ * Folds a label the way adapters/opencode_tui.ts `on_go_route` does: trimmed, Unicode compatibility folding
+ * (full-width letters), format characters removed (zero-width, soft hyphen, BOM), lower case, every hyphen-like
+ * character, underscore and space read as one separator. A look-alike from another script stays unfolded.
+ */
+function fold_go_label(value: string): string {
+  return value
+    .trim()
+    .normalize("NFKC")
+    .replace(/\p{Cf}/gu, "")
+    .toLowerCase()
+    .replace(/[\p{Pd}\u2212_\s]+/gu, "-")
+    .replace(/^-+/, "");
+}
+
+/**
+ * A Go label: provider `opencode-go` or a model starting with `opencode-go/`, compared after folding so
+ * case, padding, full-width and zero-width spellings do not slip a Go-labelled run past the actor rule.
+ * Only this label test folds; the mode A check (`provider === GO_PROVIDER`, `GO_MODEL_PREFIX`) stays exact.
+ */
 export function is_go_label(provider: unknown, model: unknown): boolean {
-  return provider === GO_PROVIDER || (typeof model === "string" && model.startsWith(GO_MODEL_PREFIX));
+  if (typeof provider === "string" && fold_go_label(provider) === GO_PROVIDER) return true;
+  return typeof model === "string" && fold_go_label(model).startsWith(GO_MODEL_PREFIX);
 }
 
 /**
