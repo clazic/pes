@@ -293,7 +293,7 @@ export interface Outcome {
 /**
  * The HTTP/MCP names of three refusals, in the core spelling the built-in runner shows: Go OFF is `policy_blocked`
  * over HTTP (`policy_denied` in the core), a human-only action is `human_required` / `owner_required` (`forbidden`),
- * and a stale guard on heartbeat / release / input-receipts is `lease_lost` (the other lease routes say `conflict`).
+ * and a stale guard on heartbeat / release is `lease_lost` (input-receipts is not tested, decision 0020 note 3) (the other lease routes say `conflict`).
  * The comparison is by meaning; the raw B spelling is pinned separately by the fixture (`b_raw_code`).
  */
 export const HTTP_TO_CORE_CODE: Record<string, string> = {

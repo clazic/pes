@@ -17,7 +17,7 @@
  *          (b) A 는 같은 상태에서 매번 같은 문장을 낸다, (c) 둘 다 SQL·표 이름·스택을 새기지 않는다 로 시험한다.
  *  해석 2  오류 code 철자 세 가지는 같은 뜻으로 묶는다: policy_blocked=policy_denied, human_required/owner_required=
  *          forbidden, lease_lost=conflict. B 쪽 원래 철자는 fixture 의 `b_raw_code` 로 따로 고정한다.
- *  해석 3  옛 guard 거부 code 는 B 안에서도 갈린다: heartbeat·release·input-receipts 는 `lease_lost`, 제출·대기·완료는
+ *  해석 3  옛 guard 거부 code 는 B 안에서도 갈린다: heartbeat·release 는 `lease_lost`(input-receipts 는 시험 안 함 — 0020 해석 3), 제출·대기·완료는
  *          `conflict`. 이 표는 현재 동작(둘 다 거부, 쓰기 0)을 고정하고, 철자 통일 여부는 worker/leader 결정으로 둔다.
  *  해석 4  A 도구의 인자 검사 거절(예: results 가 배열이 아님)은 `code:` 접두 없는 문장이다. 이 표는 그것을
  *          invalid_payload 로 본다(B 는 invalid_payload 를 명시).

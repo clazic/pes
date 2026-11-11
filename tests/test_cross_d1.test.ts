@@ -2,7 +2,7 @@
  * SEL-56 PR21 — A·B 교차 계약, SQLite/D1 편 (tester, 작성 모드). 완료 조건 6:
  *   SQLite 와 D1(로컬 miniflare)이 같은 시나리오에서 같은 성공·충돌·부분 실패를 낸다.
  * The scenario table is tests/fixtures/contracts/cross/d1_scenarios.json: the claim / release / heartbeat / receipt
- * statements of the A and B paths (the same SQL shapes commands/runs.ts and mutation_commits use), run as ONE batch per step.
+ * statements of the A and B paths (release / heartbeat use the same SQL shapes as commands/runs.ts; the claim is the CAS variant planned for D1 and differs from the runs.ts claim UPDATE — see note 20; the run-recovery UPDATE is a shortened form), run as ONE batch per step.
  * The reference engine (node:sqlite) always runs. The local D1 (miniflare) part follows the existing smoke
  * (tests/test_d1_smoke.test.ts): it runs when tests/d1/node_modules has miniflare, is skipped WITH a reason when it has not,
  * and PES_D1_SMOKE=1 without the tool is a hard failure. On top of that an always-running test PRINTS whether D1 ran, so a
