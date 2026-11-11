@@ -6,7 +6,7 @@
 //   1. 업무 상태를 직접 바꾸는 경로 — 코드 블록·인라인 코드(명령 예제) 안의
 //      project.json 쓰기, 업무 표(sqlite) 쓰기 SQL, 잠금 파일(.pes-lock) 조작.
 //      산문 문장은 보지 않는다("project.json 을 직접 고치지 않는다" 같은 정상 문장을 막지 않기 위해).
-//   3. Python 호출 — 코드 블록·인라인 코드 안의 `python3 …pes.py`·`py -3`·`python3 -I -` 꼴 (SEL-74: PES 도구는 `node …/scripts/pes.ts`·`setup.ts`).
+//   3. Python 호출 — 코드 블록·인라인 코드 안에서 파이썬 인터프리터로 파이썬 파일을 부르는 꼴·Windows 런처·표준입력 프로그램 (SEL-74: PES 도구는 `node …/scripts/pes.ts`·`setup.ts`).
 //      산문에서 Python 이라는 낱말을 말하는 것은 막지 않는다.
 //      자식 제안 파일(rounds/ 아래 결과 JSON 등)·읽기·이름만 적은 언급은 허용한다.
 //   2. Claude 전용 표기(anthropic-skills:*, AskUserQuestion, Agent/Task 도구 호출 표기)가
@@ -624,7 +624,7 @@ function check_lock(seg: Segment, file: string, out: Violation[]): void {
 // ---------------------------------------------------------------------------
 // 규칙 3 — Python 호출 (SEL-74)
 
-/** 인터프리터 + (옵션 `-I`·`-X utf8` …) + `.py` 파일, `py -3`, 표준입력으로 프로그램을 읽는 `python3 -I -`·`python3 - <<` (`-` 바로 뒤가 줄 끝이나 `<`; 인자가 붙은 읽기 전용 히어독은 잡지 않는다). */
+/** 인터프리터 + (옵션 `-I`·`-X utf8` …) + 파이썬 파일, Windows 런처의 3 버전 옵션, 표준입력으로 프로그램을 읽는 `python3 -I -`·`python3 - <<` (`-` 바로 뒤가 줄 끝이나 `<`; 인자가 붙은 읽기 전용 히어독은 잡지 않는다). */
 const PYTHON_CALL = /\b(?:python3?|py)(?:\.exe)?\b(?:\s+(?:-\S+|utf8))*\s+\S*\.py\b|\bpy\s+-3\b|\bpython3?(?:\.exe)?\s+(?:-I\s+)?-\s*(?:<|$)/i;
 
 function check_python(seg: Segment, file: string, out: Violation[]): void {

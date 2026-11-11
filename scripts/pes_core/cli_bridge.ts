@@ -48,7 +48,7 @@ import { FORM_REVISED } from "./commands/records.ts";
 import { attach_version, complete_upload, delete_storage_file, read_storage_bytes, reserve_upload, store_blob, sha256_hex, write_storage_bytes } from "./files.ts";
 import { import_project } from "./legacy.ts";
 import { activate_import, serving_path, validate_import } from "./migration.ts";
-import { IMPLICIT_MANIFEST, REAPPROVE_REASON, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
+import { IMPLICIT_MANIFEST, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
 import { DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
@@ -531,7 +531,7 @@ function topic_particle(name: string): string {
 }
 
 const round_start: Handler = async (s, req) => {
-  const { project, auth } = await write_auth(s, req);
+  const { project, auth, guard } = await write_auth(s, req);
   const stage = s.stage(project, req.args?.stage);
   if (req.args?.any_order === true) {
     // D13 (intended difference from 0.15, which let a round start on an approved stage): the database keeps an approved stage closed
@@ -539,6 +539,13 @@ const round_start: Handler = async (s, req) => {
     if (now_row.status === "approved" && now_row.stale === null) {
       const label = STAGE_LABEL[stage.key] ?? stage.key;
       throw new Refusal("conflict", `round-start: ${label}${topic_particle(label)} 이미 승인됐습니다 — 먼저 reopen 하세요`, 1);
+    }
+    // 0.15 opened rounds back to back; the database wants an open round sealed first. A round with nothing in it (so `render` had nothing
+    // to seal) is closed here with the invisible marker an `approve` uses; one with content still has to be sealed by `render` (conflict).
+    const open = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
+    if (open !== undefined && manifest_parts(s, project, stage).all.length === 0) {
+      const marker = await approval_marker(s, project, auth, stage);
+      await seal_with_manifest(s, project, auth, guard, open.id, [marker], "manifest.json", {});
     }
   }
   const out = await start_round(s.service, s.ctx(project, auth), { stage_id: stage.id, ...(req.args?.any_order === true ? { any_order: true } : {}) });
@@ -937,7 +944,7 @@ const compat_render: Handler = async (s, req) => {
  * v0.15 `approve`, on the database's order rule (intended difference D13): a stage whose earlier stage is not approved is refused
  * with one Korean line — v0.15 approved it, the database's guarantee that an approval rests on approved work is not loosened.
  * The database approves a stage on a sealed round of its own and only once, so:
- *  - an approved stage that is approved again is reopened quietly first (the reopen leaves no history line);
+ *  - an approved stage (not invalidated) that is approved again stays as it is: one approval per approved state, nothing is written;
  *  - the open round is sealed; with none (or one sealed before the stage was last invalidated) a round is opened and sealed by the
  *    CLI itself — marked implicit (in the round's receipt, set by the server) so the read model does not count it as a round of the work.
  */
@@ -958,8 +965,31 @@ const compat_approve: Handler = async (s, req) => {
   return s.unit(async () => {
     let now_row = stage_now(s, project, stage);
     if (now_row.status === "approved" && now_row.stale === null) {
-      await reopen_stage(s.service, s.ctx(project, auth), { stage_id: stage.id, reason: REAPPROVE_REASON, quiet: true });
-      now_row = stage_now(s, project, stage);
+      // 0.15 took a second `approve` of the same stage and wrote another history line; the database keeps ONE approval per approved
+      // state, so the stage stays as it is (nothing new is handed over, the person gets the same answer as for the first one). The only
+      // trace is an invisible review artifact the read model turns into that history line.
+      const made = await create_object(s.service, s.ctx(project, auth), { kind: "artifact", edition_id: stage.edition_id });
+      await add_artifact(s.service, s.ctx(project, auth), {
+        object_id: String(result_of(made).object_id),
+        artifact_kind: "review",
+        stage_id: stage.id,
+        title: "(승인 다시 받음)",
+        status: "done",
+        metadata: { role: "reapproval", stage: stage.key },
+      });
+      const after = s.db.get<{ key: string; status: string }>(
+        "SELECT key, status FROM stages WHERE project_id = ? AND edition_id = ? AND ordinal = ?",
+        project.id,
+        stage.edition_id,
+        stage.ordinal + 1,
+      );
+      const edition = s.db.get<{ status: string }>("SELECT status FROM editions WHERE project_id = ? AND id = ?", project.id, stage.edition_id);
+      return {
+        next: after === undefined ? null : { ...after },
+        complete: edition?.status === "completed",
+        handed_over: stage.key === "plan" ? 0 : null,
+        reused: stage.key === "plan" ? 0 : null,
+      };
     }
     const open = s.db.get<{ id: string }>("SELECT id FROM rounds WHERE project_id = ? AND stage_id = ? AND state = 'open'", project.id, stage.id);
     let snapshot_id: string | null = null;
@@ -1619,8 +1649,16 @@ const qa_data: Handler = async (s, req) => {
       sources: Number(row.sources),
     })),
     notes: notes.map((row) => row.body_md ?? "").reverse(),
+    ...qa_state(s, project, stage),
   };
 };
+
+/** What the review brief quotes from the state v0.15 kept in project.json: the user's answers, this round's changes and the self-check. */
+function qa_state(s: Session, project: ProjectInfo, stage: StageInfo): Record<string, unknown> {
+  const view = build_project_view(s.db, project.id, s.objects).project as { settings?: unknown; stages?: Record<string, Record<string, unknown>> };
+  const st = view.stages?.[stage.key] ?? {};
+  return { settings: view.settings ?? {}, stage_settings: st.settings ?? {}, review: st.review ?? null, changes: st.changes ?? [] };
+}
 
 const qa_brief: Handler = async (s, req) => {
   const { project, auth } = await write_auth(s, req);

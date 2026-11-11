@@ -1,5 +1,6 @@
-// The usage page of `node scripts/pes.ts` — the text of scripts/pes.py's module docstring (0.15), word for word. The one word that
-// differs is how the program is started (`python3 -I pes.py` → `node scripts/pes.ts`) in the first command line.
+// The usage page of `node scripts/pes.ts` — the usage text of PES 0.15 (its Python tool, gone since SEL-74; tests/fixtures/compat/baseline
+// keeps it), word for word. The one word that differs is how the program is started (0.15 started it with the Python interpreter,
+// now `node scripts/pes.ts`) in the first command line.
 export const USAGE: string = `PES (Project Execution System) — 프로젝트 상태 CLI.
 
 프로젝트 하나 = 폴더 하나. project.json 이 단일 진실 원천이고, 단계(기획→조사→분석·종합→집필→검증→산출·공유)마다
