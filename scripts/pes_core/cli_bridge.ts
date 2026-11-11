@@ -2371,8 +2371,10 @@ const web_feedback: Handler = async (s, req) => {
     }
   }
 
-  const now = s.now();
-  const stamp = file_stamp(now);
+  // The time of the answer: when the local server received it (args.received_ms, scripts/serve.ts), else now. Answers that arrive together
+  // then carry one time, so a burst is not split by a second boundary while it is written one after another.
+  const received = typeof args.received_ms === "number" && Number.isFinite(args.received_ms) ? args.received_ms : s.now();
+  const stamp = file_stamp(received);
   const doc: Record<string, unknown> = {
     stage: stage.key,
     round,
@@ -2593,6 +2595,7 @@ async function main(): Promise<void> {
   reply(answer);
 }
 
+// Only when run as the program (`node cli_bridge.ts`): scripts/pes.ts and scripts/serve.ts import this file for handle_request() and must not start main().
 if (import.meta.main) {
   main().catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
