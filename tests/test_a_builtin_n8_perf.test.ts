@@ -5,39 +5,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { reply_key_check } from "../scripts/pes_core/a_runtime/formats.ts";
-import { SYNTHETIC_KEY } from "./helpers/a_builtin_env.ts";
 import { PATHOLOGIES, with_hidden_key, with_plain_key } from "./helpers/a_pathology.ts";
+import { FLOOR_MS, MAX_RATIO, best_ms, scan_answer_text } from "./helpers/a_scan_time.ts";
 
 const SMALL = 10_000;
 const LARGE = 40_000;
 /** absolute limit for the 40 KB input; the lead's aim is 100 ms, this leaves room for a slow Windows runner */
 const ABSOLUTE_MS = 400;
-/** linear is ~4, quadratic ~16; 9 leaves room for noise */
-const MAX_RATIO = 9;
-const FLOOR_MS = 8;
-
-function best_of_three(go: () => unknown): number {
-  let best = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < 3; i += 1) {
-    const t0 = process.hrtime.bigint();
-    go();
-    best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6);
-  }
-  return best;
-}
 
 /** the answer body the way a provider sends it: the text inside a JSON string */
 function check(text: string): () => string {
-  const body = { id: "x", choices: [{ message: { role: "assistant", content: text } }] };
-  const raw = JSON.stringify(body);
-  return () => reply_key_check(SYNTHETIC_KEY, raw, body);
+  return () => scan_answer_text(text);
 }
 
 for (const pathology of PATHOLOGIES) {
   test(`N8 perf: ${pathology.label} - 40 KB checked fast, time grows about linearly`, () => {
-    const small = best_of_three(check(pathology.build(SMALL)));
-    const large = best_of_three(check(pathology.build(LARGE)));
+    const small = best_ms(check(pathology.build(SMALL)));
+    const large = best_ms(check(pathology.build(LARGE)));
     assert.ok(large < ABSOLUTE_MS, `${pathology.label}: ${LARGE} chars took ${large.toFixed(0)} ms (limit ${ABSOLUTE_MS} ms)`);
     const ratio = large / Math.max(small, FLOOR_MS);
     assert.ok(ratio < MAX_RATIO, `${pathology.label}: x4 input took x${ratio.toFixed(1)} the time (${small.toFixed(1)} -> ${large.toFixed(1)} ms): quadratic growth`);
