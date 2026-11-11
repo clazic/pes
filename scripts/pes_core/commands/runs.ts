@@ -736,12 +736,15 @@ function run_heartbeat(runtime: CommandRuntime): CommandResult {
   const { scope, payload } = claim_runtime_scope(runtime);
   const guard = require_guard(payload);
   const progress = optional_progress(payload, runtime.now_ms);
-  require_current_lease(runtime, guard);
+  const lease = require_current_lease(runtime, guard);
 
-  const expires_at = runtime.now_ms + runtime.run_config.lease_ttl_ms;
+  // A clock that went backwards must not shorten the lease or break the
+  // CHECK(acquired_at <= heartbeat_at < expires_at) of the lease row.
+  const heartbeat_at = Math.max(runtime.now_ms, Number(lease.acquired_at));
+  const expires_at = Math.max(Number(lease.expires_at), runtime.now_ms + runtime.run_config.lease_ttl_ms);
   const written = runtime.db.run(
     "UPDATE project_leases SET heartbeat_at = ?, expires_at = ? WHERE project_id = ? AND lease_id = ? AND fence = ? AND state = 'active' AND expires_at > ?",
-    runtime.now_ms,
+    heartbeat_at,
     expires_at,
     scope.project_id,
     guard.lease_id,
