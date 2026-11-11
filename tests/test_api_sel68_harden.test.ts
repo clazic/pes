@@ -96,26 +96,72 @@ test("SEL-68 harden: Go-label variants as mode B are refused 403 for an external
   });
 });
 
-test("SEL-68 harden: case/whitespace Go-label spellings do not slip a Go-labelled run to an external token (observation: only exact spelling is policy-relevant)", async () => {
+// HARDEN2: leader decision — fail-closed, same folding as opencode_tui.ts (NFKC, format chars, hyphen-likes, case, space).
+const FOLDED_PROVIDERS = ["OPENCODE-GO", "OpenCode-Go", " opencode-go", "opencode-go ", " opencode-go ", "\topencode-go", "\uFF4F\uFF50\uFF45\uFF4E\uFF43\uFF4F\uFF44\uFF45-\uFF47\uFF4F", "opencode\u2011go", "opencode\u2212go", "opencode-go\u200B", "open\u200Bcode-go"];
+const FOLDED_MODELS = ["OPENCODE-GO/x", "OpenCode-Go/x", " opencode-go/x", "\uFF4F\uFF50\uFF45\uFF4E\uFF43\uFF4F\uFF44\uFF45-\uFF47\uFF4F/x", "opencode\u2011go/x", "opencode-go\u200B/x"];
+
+test("SEL-68 harden2: folded Go-label spellings (case, padding, NFKC, hyphen-likes, zero-width) are 403 forbidden for external token and owner, nothing written", async () => {
   await with_api(async (env) => {
-    const agent = await make_agent(env, "v-go2");
-    for (const [label, provider, model] of GO_VARIANTS.slice(3)) {
-      const res = await claim(env, { token: agent.token }, { mode: "B", runtime: "codex_cli", provider, model });
-      // 403 (strict) or a plain mode B run (the spelling is not the Go label). Never mode A.
-      assert.ok(res.status === 403 || res.status === 200 || res.status === 400, `${label}: ${res.status}`);
-      assert.equal(a_runs_n(env), 0, label);
-      if (res.status === 200) {
-        const row = env.db.get<{ mode: string }>("SELECT mode FROM runs WHERE id = ?", res.json.data.run_id);
-        assert.equal(row?.mode, "B", label);
-        // free the project lease for the next variant
-        await call(env, {
-          method: "POST",
-          path: P(env, `/runs/${res.json.data.run_id}/release`),
-          auth: { token: agent.token },
-          body: { lease_id: res.json.data.lease_id, fence: res.json.data.fence },
-        });
+    const agent = await make_agent(env, "v-fold");
+    const before = sig(env.db);
+    const full = state_signature(env.db);
+    const bodies: Array<[string, Record<string, unknown>]> = [
+      ...FOLDED_PROVIDERS.map((provider): [string, Record<string, unknown>] => [`provider ${JSON.stringify(provider)}`, { mode: "B", runtime: "codex_cli", provider, model: "plain-model" }]),
+      ...FOLDED_MODELS.map((model): [string, Record<string, unknown>] => [`model ${JSON.stringify(model)}`, { mode: "B", runtime: "codex_cli", provider: "synthetic", model }]),
+    ];
+    for (const [label, body] of bodies) {
+      refused(await claim(env, { token: agent.token }, body), `ext ${label}`);
+      refused(await claim(env, "owner", body), `owner ${label}`);
+      assert.equal(sig(env.db), before, label);
+    }
+    assert.equal(state_signature(env.db), full);
+    assert.equal(runs_n(env), 0);
+  });
+});
+
+test("SEL-68 harden2: folded Go-label spellings are 403 forbidden for POST /runs to a non-internal actor, and run_id claim of such a stored run", async () => {
+  await with_api(async (env) => {
+    const ext = await make_agent(env, "v-fold-run");
+    const human = env.db.get<{ id: string }>("SELECT id FROM actors WHERE kind = 'human' LIMIT 1")!.id;
+    const before = sig(env.db);
+    for (const [provider, model] of [...FOLDED_PROVIDERS.map((x) => [x, "plain"]), ...FOLDED_MODELS.map((x) => ["synthetic", x])]) {
+      for (const actor_id of [ext.actor_id, human]) {
+        const res = await create_run(env, { actor_id, mode: "B", runtime: "synthetic-runtime", provider, model });
+        assert.equal(res.status, 403, `${JSON.stringify([provider, model])} ${actor_id}: ${res.status}`);
+        assert.equal(res.json.error.code, "forbidden");
+        assert.equal(sig(env.db), before);
       }
     }
+    // a stored run carrying such a label cannot be taken by run_id by an external token
+    const edition = env.db.get<{ active_edition_id: string }>("SELECT active_edition_id FROM projects WHERE id = ?", env.p.project_id)!;
+    env.db.run(
+      `INSERT INTO runs (id, project_id, edition_id, actor_id, mode, runtime, provider, model, role, status, base_control_rev, started_at)
+       VALUES ('legacy-fold', ?, ?, ?, 'B', 'synthetic-runtime', 'OpenCode-Go', 'plain', 'worker', 'queued', 0, 1)`,
+      env.p.project_id,
+      edition.active_edition_id,
+      ext.actor_id,
+    );
+    const mid = sig(env.db);
+    refused(await claim(env, { token: ext.token }, { run_id: "legacy-fold" }), "stored folded label");
+    assert.equal(sig(env.db), mid);
+  });
+});
+
+test("SEL-68 harden2: internal_ai asking mode A with a folded spelling stays 400 invalid_payload (exact spelling required), nothing written (regression)", async () => {
+  await with_api(async (env) => {
+    const int = await make_agent(env, "v-fold-int", undefined, "internal_ai");
+    const before = sig(env.db);
+    for (const [provider, model] of [
+      ["OpenCode-Go", GO_MODEL],
+      [" opencode-go", GO_MODEL],
+      ["opencode-go", "OpenCode-Go/x"],
+      ["opencode\u2011go", GO_MODEL],
+    ]) {
+      assert_error(await claim(env, { token: int.token }, { mode: "A", runtime: "pes_builtin", provider, model }), 400, "invalid_payload");
+      assert.equal(sig(env.db), before, JSON.stringify([provider, model]));
+    }
+    // exact spelling still works
+    assert_ok(await claim(env, { token: int.token }, A_BODY));
   });
 });
 
