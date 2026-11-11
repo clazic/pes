@@ -34,7 +34,7 @@ const QUICK = ["이 문단 다시 써 줘", "근거 더 찾아 줘", "반대 근
  * - 부탁은 “접수됨”까지가 사실이다. 방식 B는 내 컴퓨터 AI가 받아야 처리되고(받음 ≠ 읽음), 답이 오기 전에는 “답 없음”.
  * - 연결·사용량은 맨 아래 한 줄(작게). 문제가 되면 막힌 것·풀 것에 올라온다.
  */
-type AiPartnerProps = { ws: WorkspaceView; idPrefix?: string; className?: string; onCollapse?: () => void };
+type AiPartnerProps = { ws: WorkspaceView; idPrefix?: string; className?: string; onCollapse?: () => void; collapseLabel?: string };
 
 /**
  * 프로젝트가 바뀌면 칸의 지역 상태(부탁 초안·가정 일괄 대화 상자)를 새 프로젝트로 가져가지 않는다 —
@@ -44,7 +44,7 @@ export function AiPartner(props: AiPartnerProps) {
   return <AiPartnerView key={props.ws.slug} {...props} />;
 }
 
-function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartnerProps) {
+function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse, collapseLabel }: AiPartnerProps) {
   const { role } = useMockSettings();
   const sheet = useAiSheet();
   const paragraphs = ws.result?.paragraphs.map((_, i) => `문단 ${i + 1}`) ?? [];
@@ -132,7 +132,7 @@ function AiPartnerView({ ws, idPrefix = "aip", className, onCollapse }: AiPartne
           </Button>
           {onCollapse ? (
             <Button size="sm" variant="ghost" className="text-xs" aria-expanded="true" onClick={onCollapse}>
-              접기
+              {collapseLabel ?? "접기"}
             </Button>
           ) : null}
         </div>

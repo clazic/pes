@@ -23,6 +23,7 @@ import { useMockSettings } from "@/lib/mock-settings";
 import { answersSent, hasOpenOverlay, isTypingTarget, researchUi, useResearchUi } from "@/lib/research-ui";
 import { cn } from "@/lib/utils";
 import { usePhoneTools } from "./phone-tools";
+import { QuestionHelper } from "./QuestionHelper";
 
 function answerTextFor(q: QuestionView, key: string) {
   return draftToAnswerText(readDraftNow(key), q.options);
@@ -250,6 +251,7 @@ function QuestionCard({ q, slug, formVersion, readOnly, onDraftChange }: { q: Qu
               </MoreContent>
             </MoreRoot>
           )}
+          <QuestionHelper q={q} />
           {/* 보내기는 한 길(아래 “답 검토 후 보내기”) — 카드에는 초안 상태만 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line pt-2">
             <span role="status">{draft ? <Status of="answer" value="draft" /> : <Status of="answer" value="none" />}</span>
