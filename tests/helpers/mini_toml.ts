@@ -76,6 +76,7 @@ function read_value(text: string, at: number): [TomlValue, number] {
       j = skip_space(text, after_key, false);
       if (text[j] !== "=") throw new SyntaxError("inline table expects =");
       const [value, next] = read_value(text, j + 1);
+      if (key in table) throw new SyntaxError(`duplicate key ${key} in inline table`);
       table[key] = value;
       j = skip_space(text, next, false);
       if (text[j] === ",") j = skip_space(text, j + 1, false);
@@ -114,7 +115,7 @@ export function parse_toml(source: string): { [key: string]: TomlValue } {
           continue;
         }
         if (text[i] !== "]") throw new SyntaxError(`table header expects ] at ${i}`);
-        i += 1;
+        i = skip_space(text, i + 1, false);
         break;
       }
     } else {
