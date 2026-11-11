@@ -113,9 +113,18 @@ export function stderr_kind(stderr: string, roots: Roots): string[] {
   if (body.length === 0) return [];
   if (body.some((line) => line.startsWith("Traceback (most recent call last)"))) {
     const last = [...body].reverse().find((line) => /^[A-Za-z_.]+(Error|Exception|Exit)\b/.test(line)) ?? body[body.length - 1] ?? "";
-    return [`traceback: ${last}`];
+    return [`traceback: ${n13_os_not_found(last)}`];
   }
   return body;
+}
+
+/**
+ * N13: the OS wording of "no such file / folder" in a Python exception line. Windows says `[WinError 2] The system cannot find the
+ * file specified:` / `[WinError 3] The system cannot find the path specified:`; POSIX says `[Errno 2] No such file or directory:`.
+ * Same meaning (FileNotFoundError), so only these two Windows phrases fold to the POSIX one; every other message stays as is.
+ */
+export function n13_os_not_found(line: string): string {
+  return line.replace(/^(FileNotFoundError: )\[WinError [23]\] The system cannot find the (?:file|path) specified:/, "$1[Errno 2] No such file or directory:");
 }
 
 // ---------------------------------------------------------------- N3 JSON
@@ -264,6 +273,63 @@ export interface KnownDiff {
   override?: Record<string, Record<string, unknown>>;
   /** extra DTO assertions that replace a dropped path (run on the ts DTO against the baseline DTO) */
   checks?: ("ids_distinct" | "processed_count")[];
+  /**
+   * D03: the answers (`feedback/*.json` on 0.15, submissions/answers in the DB) are compared as a multiset of {stage, round, kind, text}
+   * (record.answers), and the answer-name lines of `chat` / `pending` are reduced to what is common (compat_cases.d03_stdout).
+   */
+  answers_check?: boolean;
+  /** D04: every step also records who holds the lock afterwards (`.pes-lock` owner on 0.15, the live lease label in the DB); compared whole */
+  lock_check?: boolean;
+  /**
+   * D11: a 0.15 step that ends in a Python traceback is a defect. The ts step must end with the same exit code and a plain Korean one-line
+   * error (no stack trace), stdout is not compared; `fixable` lists steps (by label) that may instead succeed with exit 0.
+   */
+  traceback_fix?: { fixable?: Record<string, unknown[][]> };
+  /**
+   * D06 on the produced files: case → the one item whose `depth` the fixed behaviour lowers. The files that carry the same value as the
+   * state DTO (index.html data JSON, snapshots/**) are baselined as hashes of 0.15 content, so the ts side is rewritten back to the 0.15
+   * value before hashing (`depth += delta`, only on objects `{id: item_id, depth: <number>}`); every other field is compared as is.
+   */
+  file_depth?: Record<string, DepthFix>;
+  /**
+   * D13 (SEL-71 review 1, leader decision (b)): steps whose ts behaviour is deliberately NOT the 0.15 one. Per case: the step (by label,
+   * flagged `"d13": true` in the case table) and the exact result ts must give — exit code, stdout and the stderr lines (no stack trace,
+   * no English `code:` text, one Korean line). Every other step is compared with the 0.15 baseline as usual. Because the divergent step
+   * changes nothing on ts, the state DTO / produced files / answers are compared with `ts_end` of the baseline: the 0.15 record of the
+   * same case run WITHOUT its d13 steps (so the end state is pinned by 0.15 itself, not by a hand-written override).
+   */
+  ts_steps?: Record<string, { step: unknown; exit: number; stdout: string[]; stderr: string[] }[]>;
+  /** D10: the ts target stores `/` paths and LF text on every OS — the win32 `os_overrides` do NOT apply to it (the posix baseline does) */
+  posix_storage?: boolean;
+}
+
+/** `delta` = the 0.15 depth minus the fixed depth of the item (the resubmitted merge no longer counts). */
+export interface DepthFix {
+  item_id: number;
+  delta: number;
+}
+
+/** The D06 file fix of a case (undefined when D06 does not apply to it). */
+export function d06_depth_fix(case_id: string, ids: string[], table: Record<string, KnownDiff>): DepthFix | undefined {
+  for (const id of ids) {
+    const fix = table[id]?.file_depth?.[case_id];
+    if (fix !== undefined) return fix;
+  }
+  return undefined;
+}
+
+/** A deep copy where every `{id: fix.item_id, depth: <number>}` object has `depth + delta`; nothing else changes. No fix → the value itself. */
+export function d06_file_fix(value: unknown, fix: DepthFix | undefined): unknown {
+  if (fix === undefined || value === null || typeof value !== "object") return value;
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node === null || typeof node !== "object") return node;
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) out[key] = walk(child);
+    if (out.id === fix.item_id && typeof out.depth === "number") out.depth = out.depth + fix.delta;
+    return out;
+  };
+  return walk(value);
 }
 
 function glob_to_regex(pattern: string): RegExp {

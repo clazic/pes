@@ -1,0 +1,202 @@
+{
+ "id": "X02",
+ "steps": [
+  {
+   "step": [
+    "ask-prep",
+    "{T}/없는-프로젝트",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/없는-프로젝트/ask'"
+   ]
+  },
+  {
+   "step": [
+    "ask",
+    "{T}/없는-프로젝트",
+    "{T}/없는 질문.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "traceback: FileNotFoundError: [Errno 2] No such file or directory: '<TMP>/work/없는 질문.json'"
+   ]
+  },
+  {
+   "step": [
+    "round-start",
+    "{T}/없는-프로젝트",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "merge",
+    "{T}/없는-프로젝트",
+    "plan",
+    "{T}/없는 결과.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "render",
+    "{T}/없는-프로젝트"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "approve",
+    "{T}/없는-프로젝트",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "reopen",
+    "{T}/없는-프로젝트",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "mark",
+    "{T}/없는-프로젝트",
+    "a.json"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "chat",
+    "{T}/없는-프로젝트",
+    "plan",
+    "글"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "note",
+    "{T}/없는-프로젝트",
+    "글"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "set",
+    "{T}/없는-프로젝트",
+    "plan",
+    "summary",
+    "{T}/없는 값.txt"
+   ],
+   "exit": 2,
+   "stdout": [],
+   "stderr": [
+    "set: 값을 읽지 못했습니다 (<TMP>/work/없는 값.txt): [Errno 2] No such file or directory: '<TMP>/work/없는 값.txt'"
+   ]
+  },
+  {
+   "step": [
+    "qa-brief",
+    "{T}/없는-프로젝트",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "qa",
+    "{T}/없는-프로젝트",
+    "plan"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "lock",
+    "{T}/없는-프로젝트"
+   ],
+   "env": {
+    "PES_OWNER": "alice-session"
+   },
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "project.json 없음: <TMP>/work/없는-프로젝트"
+   ]
+  },
+  {
+   "step": [
+    "unlock",
+    "{T}/없는-프로젝트"
+   ],
+   "exit": 0,
+   "stdout": [
+    "잠금 해제"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "init",
+    "{T}/없는-프로젝트"
+   ],
+   "exit": 1,
+   "stdout": [],
+   "stderr": [
+    "--topic 필요"
+   ]
+  }
+ ],
+ "dto": null,
+ "files": {}
+}

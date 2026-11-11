@@ -1,0 +1,50 @@
+// The usage page of `node scripts/pes.ts` — the text of scripts/pes.py's module docstring (0.15), word for word. The one word that
+// differs is how the program is started (`python3 -I pes.py` → `node scripts/pes.ts`) in the first command line.
+export const USAGE: string = `PES (Project Execution System) — 프로젝트 상태 CLI.
+
+프로젝트 하나 = 폴더 하나. project.json 이 단일 진실 원천이고, 단계(기획→조사→분석·종합→집필→검증→산출·공유)마다
+라운드를 돈다. Claude 는 이 CLI 로 상태를 바꾸고, 사용자는 대시보드(index.html)·질문 폼(ask-*.html)으로 답한다.
+
+사용: node scripts/pes.ts <명령> <프로젝트 폴더> [인자]
+  init <dir> --topic "주제" [--slug s] [--import <research-loop 폴더>]   새 프로젝트 (기획 단계부터)
+  ask-prep <dir> <stage|resume>        질문 은행을 ask/<id>.json 으로 복사 (Claude 가 다듬는다)
+  ask <dir> <spec.json>                질문 폼 HTML 생성 → ask-<id>.html
+  round-start <dir> <stage>            라운드 +1 (현재 단계로 지정, changes 비움)
+  merge <dir> <stage> <result.json...> 서브에이전트 결과 병합 (출처 누적, 제안 수집)
+  render <dir> [stage]                 스냅샷 저장 + 대시보드 index.html 생성
+  approve <dir> <stage>                단계 승인 → 다음 단계로 (기획→조사는 조사 항목 자동 생성)
+  reopen <dir> <stage>                 앞 단계 다시 열기 (뒤 단계에 '다시 확인 필요' 표시)
+  status <dir>                         한눈 요약 (단계·라운드·받지 않은 답)
+  pending <dir> [--show [이름...]]     처리 안 한 답 목록 (옛 방식은 파일 경로, DB 방식은 읽을 이름). --show 는 답 원문을 읽는다(이름 없으면 처리 안 한 것 전부)
+  mark <dir> <feedback 파일...>         처리 완료 표시
+  chat <dir> <stage> "텍스트" [kind]    채팅으로 받은 지시를 답 파일로 기록 (처리 완료로)
+  digest <dir> <stage> [--round N]     AI 점검용 압축 요약 (항목별 요약 첫 줄·수치·충돌·신뢰도·출처 확인율·남은 질문)
+  show <dir> <stage> [id...] [--fields a,b]  필요한 항목·필드만 보기 (project.json 을 통째로 읽지 않는다)
+                                       (--fields 가 changes·carry_over·settings·review 뿐이고 id 가 없으면 단계 값을 보여 준다)
+  note <dir> "메모"                     인계 메모 추가 (대화에서 나온 결정·선호 — 새 세션이 먼저 읽는다)
+  set <dir> <stage> <field> <file|->   단계 필드 하나를 통째로 바꾼다 (허용: summary·changes·carry_over·settings·review — 값은 파일 또는 \`-\`(표준 입력);
+                                       summary 는 텍스트, changes 는 문자열 배열, carry_over 는 객체 배열, settings·review 는 JSON 객체)
+  set <dir> project <field> <file|->   프로젝트 필드 하나를 바꾼다 (허용: executive_summary·conclusion — 텍스트). 허용 밖 필드는 거부
+  report <dir> <stage>                 단계 보고서: reports/<stage>/report.md·report.html 생성, eli5.json 이 있으면
+                                       eli5.html 렌더, 폴더의 다른 형식(docx·hwpx·pdf…)까지 stages.<stage>.reports 에 등록
+  assemble <dir>                       집필 원고를 out/report.md 로 조립 (각주 번호 정리) + out/sources.json
+  web <dir> [--assemble]               최종 웹 보고서 out/report.html (표지·목차·각주·출처 부록·인쇄용). 표지 정보는 out/cover.json
+  remote [list|add <주소>|remove <주소>] 다른 기기(Tailscale serve 등) 화면에서도 답 보내기 허용 — 허용한 주소의 사람은 답·승인을 보낼 수 있다
+  qa-brief <dir> <stage>               독립 검토(QC/QA) 지시문 rounds/<stage>-R<n>/qa-brief.md (digest·자체 점검 초안·기준 포함)
+  qa <dir> <stage> [--file f]          독립 검토 결과 qa.json 을 stages.<stage>.qa 에 기록 (자체 점검은 review_log 에)
+  serve <dir>                          로컬 서버 시작 (홈마다 포트 하나 — 이미 떠 있으면 이 프로젝트 주소만)
+  stop [dir]                           로컬 서버 종료 (그 홈의 목록·모든 프로젝트 화면이 함께 꺼짐)
+  watch <dir>                          Monitor 에 넣을 명령 출력
+  home                                 PES 홈(프로젝트들이 모이는 폴더) 보기 — 기본 ~/pes-projects
+  home <새 폴더> [--from <옛 폴더>]     PES 홈 변경: 서버를 끄고 모든 프로젝트를 새 폴더로 옮긴 뒤 다시 켠다
+  open <dir|주소>                      기본 브라우저로 열기 (macOS·Windows 공통)
+  list                                 프로젝트 목록 (차례·단계·서버)
+  hub                                  프로젝트 목록 화면 생성 + 서버(8760) 시작, 주소 출력
+  <dir> 자리에 경로 대신 프로젝트 이름(slug)만 쓰면 PES 홈 아래에서 찾는다.
+  doctor [dir] [--fix] [--net] [--json] 진단 (--net: 법령·KOSIS API 실제 연결 확인): 환경(Python·도구·키·포트·PES 홈)과 프로젝트(상태·잠금·답·보고서·연결)
+                                       --fix 는 안전한 것만 고친다 (낡은 잠금·포트 파일, 남은 .tmp, 대시보드 재생성, 보고서 등록 갱신)
+  which <도구>                          도구 경로 (PATH + ~/.local/bin, Windows LOCALAPPDATA\\Programs)
+  lock <dir> [--force]                 이 세션이 프로젝트를 쓴다고 표시 (환경변수 PES_OWNER 필요)
+  unlock <dir>                         표시 해제
+  쓰기 명령은 다른 세션(PES_OWNER 다름)이 최근 2시간 안에 잠근 프로젝트면 거부한다.
+`;

@@ -1,0 +1,257 @@
+{
+ "id": "X08",
+ "steps": [
+  {
+   "step": [
+    "init",
+    "{P}",
+    "--topic",
+    "계약 주제"
+   ],
+   "exit": 0,
+   "stdout": [
+    "<PROJECT>/project.json"
+   ],
+   "stderr": []
+  },
+  {
+   "step": [
+    "approve",
+    "{P}",
+    "research"
+   ],
+   "exit": 0,
+   "stdout": [
+    "조사 승인",
+    "다음 단계: 분석·종합 (상태 asking)",
+    "단계 보고서를 만드세요: report <PROJECT> research  (형식: md, html, eli5)",
+    "대화에서 나온 결정·선호가 파일에 없으면 note 로 남기세요. 그 뒤 대화를 비워도(/clear) `/pes:run 합성 프로젝트`로 이어집니다."
+   ],
+   "stderr": []
+  }
+ ],
+ "dto": {
+  "pes": 1,
+  "topic": "계약 주제",
+  "slug": "합성 프로젝트",
+  "created": "<DATE>",
+  "current": "analyze",
+  "complete": false,
+  "settings": {},
+  "processed": [],
+  "notes": [],
+  "executive_summary": "",
+  "conclusion": "",
+  "library": null,
+  "stages": {
+   "plan": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "research": {
+    "status": "approved",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": "<TIME>",
+    "stale": false,
+    "reports": [],
+    "history": [
+     "승인 <TIME> (R0)"
+    ],
+    "items": []
+   },
+   "analyze": {
+    "status": "asking",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "write": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "verify": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   },
+   "publish": {
+    "status": "pending",
+    "round": 0,
+    "settings": {},
+    "review": null,
+    "suggestions": [],
+    "warnings": [],
+    "changes": [],
+    "summary": "",
+    "approved_at": null,
+    "stale": false,
+    "reports": [],
+    "history": [],
+    "items": []
+   }
+  }
+ },
+ "files": {
+  "feedback.log": "e3b0c44298fc1c14",
+  "index.html": "3bba69f6ca8c647d",
+  "project.json": "c35a6e32376d1754"
+ },
+ "ts_end": {
+  "dto": {
+   "pes": 1,
+   "topic": "계약 주제",
+   "slug": "합성 프로젝트",
+   "created": "<DATE>",
+   "current": "plan",
+   "complete": false,
+   "settings": {},
+   "processed": [],
+   "executive_summary": "",
+   "conclusion": "",
+   "library": null,
+   "stages": {
+    "plan": {
+     "status": "asking",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "research": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "analyze": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "write": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "verify": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    },
+    "publish": {
+     "status": "pending",
+     "round": 0,
+     "settings": {},
+     "review": null,
+     "suggestions": [],
+     "warnings": [],
+     "changes": [],
+     "summary": "",
+     "approved_at": null,
+     "stale": false,
+     "reports": [],
+     "history": [],
+     "items": []
+    }
+   }
+  },
+  "files": {
+   "feedback.log": "e3b0c44298fc1c14",
+   "project.json": "fd8784e5abe81131"
+  }
+ }
+}

@@ -13,6 +13,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["scripts/pes_core/**/*.ts", "tests/**/*.ts"],
+  "include": ["scripts/*.ts", "scripts/pes_core/**/*.ts", "tests/**/*.ts"],
   "exclude": ["spikes", "node_modules", "**/node_modules"]
 }

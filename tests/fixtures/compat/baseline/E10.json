@@ -10,7 +10,8 @@
    "stdout": [],
    "stderr": [
     "PES_OWNER 환경변수(이 세션 ID)가 필요합니다"
-   ]
+   ],
+   "lock": null
   },
   {
    "step": [
@@ -24,7 +25,10 @@
    "stdout": [
     "잠금: legacy-project (세션 alice-se…)"
    ],
-   "stderr": []
+   "stderr": [],
+   "lock": {
+    "owner": "alice-session"
+   }
   },
   {
    "step": [
@@ -38,7 +42,10 @@
    "stdout": [],
    "stderr": [
     "다른 세션이 사용 중: alice-se… (<TIME>부터, 마지막 기록 0분 전). 그 세션이 끝났으면 --force"
-   ]
+   ],
+   "lock": {
+    "owner": "alice-session"
+   }
   },
   {
    "step": [
@@ -53,7 +60,10 @@
    "stdout": [],
    "stderr": [
     "다른 세션이 이 프로젝트를 쓰고 있습니다 (세션 alice-se…, <TIME>부터, 마지막 기록 0분 전). 그 세션을 닫았다면 `lock <PROJECT> --force`로 가져오세요."
-   ]
+   ],
+   "lock": {
+    "owner": "alice-session"
+   }
   },
   {
    "step": [
@@ -67,7 +77,10 @@
    "stdout": [],
    "stderr": [
     "다른 세션의 잠금입니다 (--force 로 해제)"
-   ]
+   ],
+   "lock": {
+    "owner": "alice-session"
+   }
   },
   {
    "step": [
@@ -82,7 +95,10 @@
    "stdout": [
     "잠금: legacy-project (세션 bob-sess…)"
    ],
-   "stderr": []
+   "stderr": [],
+   "lock": {
+    "owner": "bob-session"
+   }
   },
   {
    "step": [
@@ -96,7 +112,10 @@
    "stdout": [],
    "stderr": [
     "다른 세션의 잠금입니다 (--force 로 해제)"
-   ]
+   ],
+   "lock": {
+    "owner": "bob-session"
+   }
   },
   {
    "step": [
@@ -110,7 +129,8 @@
    "stdout": [
     "잠금 해제"
    ],
-   "stderr": []
+   "stderr": [],
+   "lock": null
   },
   {
    "step": [
@@ -124,7 +144,10 @@
    "stdout": [
     "잠금: legacy-project (세션 alice-se…)"
    ],
-   "stderr": []
+   "stderr": [],
+   "lock": {
+    "owner": "alice-session"
+   }
   },
   {
    "step": [
@@ -138,7 +161,10 @@
    "stdout": [
     "잠금: legacy-project (세션 bob-sess…)"
    ],
-   "stderr": []
+   "stderr": [],
+   "lock": {
+    "owner": "bob-session"
+   }
   },
   {
    "step": [
@@ -153,7 +179,10 @@
    "stdout": [
     "인계 메모 1개"
    ],
-   "stderr": []
+   "stderr": [],
+   "lock": {
+    "owner": "bob-session"
+   }
   }
  ],
  "dto": {

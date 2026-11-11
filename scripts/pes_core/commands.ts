@@ -292,6 +292,10 @@ function build_project(runtime: CommandRuntime, hooks: BuildHooks): CommandResul
   const slug = require_non_empty_string(payload, "slug");
   const topic = require_non_empty_string(payload, "topic");
   const owner_display_name = require_non_empty_string(payload, "owner_display_name");
+  // `plan_asking` (scripts/pes.ts init, below): only the CLI transport may ask for it (the API also fixes its payload — two layers)
+  if ("plan_asking" in payload && (payload.plan_asking !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "plan_asking is not accepted here");
+  }
 
   const project_id = runtime.new_id();
   const owner_user_id = runtime.new_id();
@@ -335,13 +339,15 @@ function build_project(runtime: CommandRuntime, hooks: BuildHooks): CommandResul
   for (const [index, key] of STAGE_KEYS.entries()) {
     const stage_id = runtime.new_id();
     stage_ids[key] = stage_id;
+    // `plan_asking` (scripts/pes.ts init): v0.15 made a new project's plan stage "asking" at once, before any question form existed
     runtime.db.run(
-      "INSERT INTO stages (id, project_id, edition_id, key, ordinal) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO stages (id, project_id, edition_id, key, ordinal, status) VALUES (?, ?, ?, ?, ?, ?)",
       stage_id,
       project_id,
       edition_id,
       key,
       index + 1,
+      key === "plan" && payload.plan_asking === true ? "asking" : "pending",
     );
   }
 

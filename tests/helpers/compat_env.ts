@@ -3,12 +3,12 @@
 //
 // Targets
 //   py  python -I -X utf8 -c "<conftest GUARD>; runpy.run_path(scripts/pes.py | serve.py | setup.py)"   (no PES_DB_CORE: pure v0.15)
-//   ts  scripts/pes.ts | serve.ts | setup.ts                           (none exists yet: every run answers "not_yet")
+//   ts  node [--permission --import ts_child_guard.ts] scripts/pes.ts   (serve.ts / setup.ts do not exist yet: "not_yet")
 //
-// A target that cannot run a command says so with { kind: "not_yet" } — a case is never skipped silently; the list of not-yet
-// cases must equal tests/fixtures/compat/cases.json exactly (tests/test_compat_harness.test.ts), so implementing a command
-// forces the table entry to be removed. All three ts files are guarded alike (`ts_gate`): once one exists, running its kind of
-// case throws until the ts target is wired in and the not-yet entries are removed.
+// A target that cannot run a command says so with { kind: "not_yet" } — a case is never skipped silently. The ratchet is PER CASE
+// (SEL-71): cases.json `ts.status` says whether the ts target must match 0.15 (implemented) or answers not_yet (and is not run at all,
+// scripts/pes.ts or not — compat_cases.run_case). The cli kind is wired to scripts/pes.ts (compat_ts.run_ts_cli, guarded); the http and
+// setup kinds still go through `ts_gate`: once serve.ts / setup.ts exists, running their cases throws until they are wired too.
 //
 // Isolation: every child gets HOME, USERPROFILE and PES_HOME inside one temp folder (assert_isolated_env), and the py side runs
 // with a narrowed PATH when the case asks for it. The py child also runs the audit hook of tests/conftest.py (reads included,
@@ -18,11 +18,12 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { account_home, assert_isolated_env, assert_no_real_path, assert_no_violation } from "./home_guard.ts";
 import { hub_block_code } from "./hub_block.ts";
+import { run_ts_cli, ts_cli_exists, ts_view } from "./compat_ts.ts";
 import { isolated_home, type IsolatedHome } from "./isolated_home.ts";
 import { n1_json, n1_time, n2_paths, n7_text, n9_text_hash, stderr_kind, lines, n8_console, type KnownDiff, type Roots } from "./compat_normalize.ts";
 
@@ -225,7 +226,12 @@ function spawn_python(script: string, args: string[], ctx: CompatCtx, options: R
 /** Runs one `pes` CLI command on a target. PES_OWNER may be passed through options.env (the lock tests need it). */
 export function run_pes(target: Target, ctx: CompatCtx, args: (string | number)[], options: RunOptions = {}): TargetRun {
   const argv = args.map(String);
-  if (target === "ts") return ts_gate("cli");
+  if (target === "ts") {
+    // pes.ts missing → "not_yet" (a counted absence). Whether a CASE may run it is decided per case by cases.json (compat_cases).
+    if (!ts_cli_exists()) return ts_gate("cli", () => false);
+    const { PES_OWNER, ...rest } = options.env ?? {};
+    return { kind: "ran", ...run_ts_cli(ctx, argv, { env: PES_OWNER === undefined ? rest : { ...rest, PES_OWNER }, narrow_path: options.narrow_path, timeout_ms: options.timeout_ms, input: options.input, cwd: options.cwd, extra_read: options.narrow_path === true ? [ctx.narrow_bin] : [] }) };
+  }
   return { kind: "ran", ...spawn_python(PES_PY, argv, ctx, options) };
 }
 
@@ -425,7 +431,17 @@ export function dto_from_project_json(data: any, library?: any): StateDto {
 }
 
 export function read_state_dto(target: Target, ctx: CompatCtx, project: string): ({ kind: "ran"; dto: StateDto } | { kind: "not_yet"; reason: string }) {
-  if (target === "ts") return { kind: "not_yet", reason: "TS 상태 DTO 는 이전 결과 DB(PR11)에서 만든다 — 대상 CLI 가 없다" };
+  if (target === "ts") {
+    if (!ts_cli_exists()) return { kind: "not_yet", reason: "TS 상태 DTO 는 DB 에서 만든다 — 대상 CLI(scripts/pes.ts)가 없다" };
+    // D02: the DB is the source (slug = the folder name, the 0.15 `pdir` rule); a folder the DB does not serve is read as the old project.json
+    const view = ts_view({ env: ctx.env, pes_home: ctx.pes_home, home_dir: ctx.home_dir }, basename(project));
+    if (view !== undefined) return { kind: "ran", dto: dto_from_project_json(view.project, view.project.library ?? undefined) };
+    const legacy_path = join(project, "project.json");
+    assert.ok(existsSync(legacy_path), `ts: neither the database (slug ${basename(project)}) nor ${legacy_path} holds the project`);
+    const legacy = project_json(project);
+    const library_file = join(project, "library.json");
+    return { kind: "ran", dto: dto_from_project_json(legacy, existsSync(library_file) ? read_json(library_file) : undefined) };
+  }
   const data = project_json(project);
   const library_path = join(project, "library.json");
   const library = existsSync(library_path) ? read_json(library_path) : undefined;
@@ -442,14 +458,17 @@ export function normalized_dto(dto: StateDto, roots: Roots): unknown {
 // ---------------------------------------------------------------- intended differences (7.5) — shown in the case table
 export const KNOWN_DIFFS: Record<string, KnownDiff> = {
   D01: { id: "D01", title: "새 ID(UUID·tx·event·lease) vs 0.15 정수 item id", reason: "새 코어가 DB·버전·사건을 쓴다 (N5 로 치환, 참조만 비교)", drop: ["stages.*.items.*.id"], checks: ["ids_distinct"] },
-  D02: { id: "D02", title: "project.json 단일 원본 → SQLite 원본", reason: "상태 DTO 로 비교한다. project.json 은 legacy 읽기 전용" },
-  D03: { id: "D03", title: "feedback/*.json 파일 → submissions/answers", reason: "/feedback 호환 응답·영수증 의미를 비교한다", drop: ["processed"], checks: ["processed_count"] },
-  D04: { id: "D04", title: ".pes-lock·PES_OWNER → project_leases/토큰", reason: "CLI exit·owner 의미만 비교한다" },
+  D02: { id: "D02", title: "project.json 단일 원본 → SQLite 원본", reason: "상태 DTO 로 비교한다(ts 는 DB 에서 읽고 — DB 에 없으면 폴더의 옛 project.json 에서 — 같은 DTO 를 만든다, compat_env.read_state_dto). project.json·library.json 의 파일 내용은 비교하지 않는다: 옛 형식 파일은 ts 가 쓰지 않는다. 그 대신 폴더의 나머지 파일(index.html·보고서·out…)은 그대로 비교한다", drop_files: ["project.json", "library.json"] },
+  D03: { id: "D03", title: "feedback/*.json 파일 → submissions/answers", reason: "/feedback 호환 응답·영수증 의미를 비교한다: 답은 파일 이름·시각이 아니라 {단계, 라운드, 종류, 글} 의 모음(multiset)으로 견주고(record.answers), `chat` 이 찍는 답 식별자 줄과 `pending` 이 찍는 이름은 공통 부분만 본다", drop: ["processed"], drop_files: ["feedback/**"], checks: ["processed_count"], answers_check: true },
+  D04: { id: "D04", title: ".pes-lock·PES_OWNER → project_leases/토큰", reason: "CLI exit·stdout·stderr 는 그대로 견주고, 잠금 파일 대신 '지금 누가 쥐었나'(record 의 각 단계 lock.owner)를 견준다 — 옛 .pes-lock 의 owner 와 DB 의 살아 있는 lease 라벨", drop_files: [".pes-lock"], lock_check: true },
   D05: { id: "D05", title: "watch tail 명령 → long-poll/이벤트", reason: "출력 형식 호환 또는 새 대기 방식을 명시한다" },
-  D06: { id: "D06", title: "merge depth 재제출 증가 (0.15 결함 ②, SEL-12)", reason: "0.15 는 같은 병합을 다시 보내면 depth 가 또 오른다 — 새 코어는 고친 동작이 정답이다 (E03: 같은 결과를 다시 보낸 항목 7 의 depth 는 0.15 의 3 이 아니라 2)", override: { E03: { "stages.research.items.2.depth": 2 } } },
+  D06: { id: "D06", title: "merge depth 재제출 증가 (0.15 결함 ②, SEL-12)", reason: "0.15 는 같은 병합을 다시 보내면 depth 가 또 오른다 — 새 코어는 고친 동작이 정답이다 (E03: 같은 결과를 다시 보낸 항목 7 의 depth 는 0.15 의 3 이 아니라 2). 같은 값을 담는 산출 파일(index.html 의 data JSON·snapshots/**)에도 같은 규칙: ts 쪽 항목 7 의 depth 만 0.15 값으로 되돌린(+1) 뒤 비교하고 나머지 필드는 그대로 비교한다", override: { E03: { "stages.research.items.2.depth": 2 } }, file_depth: { E03: { item_id: 7, delta: 1 } } },
   D07: { id: "D07", title: "같은 라운드 snapshot (대응표 7.5 '덮어쓰기' — 0.15 는 이미 첫 상태를 지킨다)", reason: "0.15 현재 동작은 snapshot 의 첫 상태를 기본 파일에 두고 이후 상태는 snapshots/<단계>-R<n>/<k>.json 에 모은다(덮어쓰기 결함은 고쳐졌다). 새 코어는 DB 판(editions)으로 보관하므로 파일 이름·위치는 비교하지 않고 '첫 상태 보존·이후 상태 유실 0'만 비교한다 (ts 기록기는 보관한 판을 snapshots/** 아래에 모으고, 그 내용 해시가 하나도 빠지지 않아야 한다 — compat_cases.compare_ts_record)", drop_files: ["snapshots/**"], files_check: "snapshot_contents" },
   D08: { id: "D08", title: "doctor 의 Python/템플릿 검사", reason: "런타임 변경 — TS 런타임 검사로 바꾸고 섹션·exit 를 유지한다" },
   D09: { id: "D09", title: "hub/serve 정적 HTML 생성 → DB/API 서버", reason: "URL·포트·응답 계약은 같고 내부 구현은 다르다" },
+  D10: { id: "D10", title: "Windows 0.15 차이 W1·W2 (SEL-71 결정 2026-11-11): ts 는 저장 경로 `/`·생성 텍스트 LF", reason: "0.15 는 Windows 에서 보고서 경로를 역슬래시로 저장하고 파일을 CRLF 로 써서 bytes 가 커진다(W1·W2, tests/README.md). ts 는 어느 OS 에서나 `/` 와 LF 로 통일한다 — 그래서 ts 대상은 win32 os_overrides 를 쓰지 않고 macOS/Linux 기준값(`/`·LF 바이트)과 같아야 하며, 폴더의 생성 텍스트에 CR 이 없어야 한다. 옛 데이터(역슬래시·CRLF 가 든 project.json)는 두 철자를 모두 읽는다(test_pes_ts_win_data)", posix_storage: true },
+  D11: { id: "D11", title: "0.15 Python traceback → 분명한 한국어 한 줄 오류 (PR26a 관찰 3건, SEL-71 결정)", reason: "0.15 는 없는 결과 파일(merge·ask)·깨진 project.json·`current` 없는 큰 프로젝트(status)에서 traceback 으로 죽는다. 이것은 결함이지 계약이 아니다: ts 는 같은 종료 코드와 스택 추적 없는 한국어 한 줄 오류를 낸다(stdout 은 비교하지 않는다). 결함을 고쳐 성공해도 되는 단계는 표에 `fixable` 로 적는다", traceback_fix: { fixable: { E12: [["status", "{T}/large"]] } } },
+  D13: { id: "D13", title: "순서 없는 approve · 승인된 단계의 round-start 는 거절 (SEL-71 1차 리뷰 필수 1, 선택지 b)", reason: "0.15 는 앞 단계가 승인되지 않아도 approve 를 받고, 승인된 단계에도 round-start 로 라운드를 +1 한다. 스킬은 승인을 순서대로 하고 승인된 단계는 reopen 뒤에 round-start 한다(skills/core/SKILL.md). DB 보장(앞 단계 승인 필요·승인된 단계 잠금)을 CLI 호환 때문에 풀지 않으므로 ts 는 exit 1 과 스택·영어 code 없는 한국어 한 줄로 거절하고 아무것도 바꾸지 않는다. 그 단계의 0.15 결과(exit 0)는 기준값에, ts 의 기대 문구는 ts_steps 에 둘 다 고정하고, 끝 상태는 0.15 를 그 단계 없이 돌린 기록(baseline.ts_end)과 같아야 한다", ts_steps: { X08: [{ step: ["approve", "{P}", "research"], exit: 1, stdout: [], stderr: ["approve: 앞 단계(기획)가 아직 승인되지 않았습니다"] }], X09: [{ step: ["round-start", "{P}", "plan"], exit: 1, stdout: [], stderr: ["round-start: 기획은 이미 승인됐습니다 — 먼저 reopen 하세요"] }] } },
 };
 
 // ---------------------------------------------------------------- HTTP server (serve.py) harness

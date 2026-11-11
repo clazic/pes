@@ -515,10 +515,22 @@ function run_edition_create(runtime: CommandRuntime): CommandResult {
 
 function run_round_start(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage_id", "base_stage_rev"]);
+  reject_unknown_fields(payload, ["stage_id", "base_stage_rev", "any_order", "implicit"]);
   const project = command_project(runtime);
   const stage_id = require_non_empty_string(payload, "stage_id");
   const base_stage_rev = optional_rev(payload, "base_stage_rev");
+  // `any_order` (scripts/pes.ts): v0.15 let a person start a round of any stage; the stage becomes the project's current one
+  const any_order = payload.any_order === true;
+  // like `implicit`, only the CLI transport may lift the stage order (the API also fixes its payload — two layers)
+  if ("any_order" in payload && (payload.any_order !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "any_order is not accepted here");
+  }
+  // `implicit` (scripts/pes.ts `approve`): the round the CLI opens by itself only to seal an approval. Only the CLI transport may say
+  // so; the mark lives in the receipt (server side), so no uploaded name or free text can imitate it.
+  const implicit = payload.implicit === true;
+  if ("implicit" in payload && (payload.implicit !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "implicit is not accepted here");
+  }
   const stage = read_stage(runtime, project.id, stage_id);
   check_stage_rev(stage, base_stage_rev);
 
@@ -560,11 +572,13 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
   }
 
   // A stage whose earlier stages are not all approved cannot be the active one yet.
-  require_earlier_stages_approved(runtime, project.id, stage, {
-    reason: "stage_not_active",
-    stage_id,
-    stage_status: stage.status,
-  });
+  if (!any_order) {
+    require_earlier_stages_approved(runtime, project.id, stage, {
+      reason: "stage_not_active",
+      stage_id,
+      stage_status: stage.status,
+    });
+  }
 
   const base = runtime.db.get<{ sealed_snapshot_id: string | null }>(
     `SELECT sealed_snapshot_id FROM rounds
@@ -590,6 +604,7 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
     stage_id,
     round_id,
     round_no,
+    ...(implicit ? { implicit: true } : {}),
   };
 
   insert_receipt(runtime, {
@@ -618,6 +633,14 @@ function run_round_start(runtime: CommandRuntime): CommandResult {
   );
   if (updated.changes !== 1n) {
     throw new Error("the stage current round was not set");
+  }
+  if (any_order) {
+    runtime.db.run(
+      "UPDATE editions SET current_stage_id = ?, rev = rev + 1 WHERE project_id = ? AND id = ?",
+      stage_id,
+      project.id,
+      stage.edition_id,
+    );
   }
 
   return {
@@ -947,10 +970,16 @@ function run_stage_approve(runtime: CommandRuntime): CommandResult {
 function run_stage_reopen(runtime: CommandRuntime): CommandResult {
   require_human_owner_actor(runtime);
   const payload = require_record(runtime.payload);
-  reject_unknown_fields(payload, ["stage_id", "reason", "expected_stage_rev"]);
+  reject_unknown_fields(payload, ["stage_id", "reason", "expected_stage_rev", "quiet"]);
   const project = command_project(runtime);
   const stage_id = require_non_empty_string(payload, "stage_id");
   const reason = optional_text(payload, "reason");
+  // `quiet` (scripts/pes.ts `approve` of an approved stage): the reopen the CLI does by itself so that v0.15's second approval works.
+  // Only the CLI transport may say so; the mark lives in the receipt (server side), not in the free `reason` text.
+  const quiet = payload.quiet === true;
+  if ("quiet" in payload && (payload.quiet !== true || runtime.ctx.via !== "cli")) {
+    throw new ApiError("invalid_payload", "quiet is not accepted here");
+  }
   const expected_stage_rev = optional_rev(payload, "expected_stage_rev");
   const stage = read_stage(runtime, project.id, stage_id);
   check_stage_rev(stage, expected_stage_rev);
@@ -1020,6 +1049,7 @@ function run_stage_reopen(runtime: CommandRuntime): CommandResult {
     stale_stage_ids,
     cancelled_run_ids,
     edition_status,
+    ...(quiet ? { quiet: true } : {}),
   };
 
   insert_receipt(runtime, {
