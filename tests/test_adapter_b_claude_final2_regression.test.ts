@@ -130,25 +130,27 @@ test("N1: a REAL successful wait/release with the remembered guard (run, lease a
   }
 });
 
-test("N1: a successful wait/release that names ANOTHER run's guard leaves the remembered guard alone (a different run_id is not cleared)", async () => {
+test("N1: replaying run 1's wait/release key while run 2 holds the lease (a different run_id) leaves run 2's guard alone", async () => {
+  // the project has one lease, so a second run exists only after the first one let go of it
   for (const tool of ["pes_wait", "pes_release"] as const) {
     await with_cleanup(async (env, open) => {
       const client = open(await env.client());
-      // run 1 is held, then waits; a second fresh claim becomes the remembered guard
       const one = await claim_fresh(client);
-      let two: Claimed;
-      try {
-        two = await claim_fresh(client);
-      } catch {
-        return; // the project allows one active run at a time: no second guard can exist, nothing more to check
-      }
-      if (two.run_id === one.run_id) return;
+      await client.ok(tool, { idempotency_key: `n1-other-${tool}` });
+      const two = await claim_fresh(client); // fails the test if a fresh run cannot be made
+      assert.notEqual(two.run_id, one.run_id, "a second, different run");
       env.tick();
-      // end run 1 by naming its own guard explicitly
-      const ended = await client.tool(tool, { run_id: one.run_id, lease_id: one.lease_id, fence: one.fence, idempotency_key: `n1-other-${tool}` });
-      if (ended.is_error) return; // the API refuses it (single lease): the case cannot be built, covered by the equal-guard test
+
+      const sig = state_signature(env.db);
+      const replay = await client.ok(tool, { idempotency_key: `n1-other-${tool}` });
+      assert.equal(replay.replayed, true);
+      assert.equal(state_signature(env.db), sig, "a replay writes nothing");
       const beat = await client.tool("pes_heartbeat", { idempotency_key: `n1-other-${tool}-hb` });
-      assert.equal(beat.is_error, false, `the other run's end cleared the remembered guard: ${JSON.stringify(beat.data)}`);
+      assert.equal(beat.is_error, false, `run 1's replay cleared run 2's guard: ${JSON.stringify(beat.data)}`);
+      const held = lease_of(env);
+      assert.equal(held.run_id, two.run_id);
+      assert.equal(held.lease_id, two.lease_id);
+      assert.equal(String(held.fence), two.fence);
     });
   }
 });
