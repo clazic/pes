@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_contract_table, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
+import { ts_baseline, baseline_for, baseline_path, compare_ts_record, d02_drop_defaults, file_digest, load_contract_table, load_table, not_yet_ids, read_baseline, run_case, type CaseDef, type CaseRecord } from "./helpers/compat_cases.ts";
 import { KNOWN_DIFFS, STAGES, TS_FILES, dto_from_project_json, make_ctx, read_state_dto, run_pes, run_setup, target_from_env, ts_available, ts_gate, type CaseKind } from "./helpers/compat_env.ts";
 import {
   d06_depth_fix,
@@ -407,6 +407,15 @@ test("os_overrides: win32 edits apply on win32 only, a path that is not in the b
   // a patch whose path is gone fails loudly
   const broken = { ...base, dto: null } as any;
   assert.throws(() => baseline_for("E05", "win32", broken), /not in the baseline/);
+});
+
+test("os_overrides split: ts baseline on win32 has W3 (gitbash row) but not W1·W2; py baseline has all", () => {
+  const names = (r: any) => JSON.parse(r.steps[1].stdout[0]).names as string[];
+  assert.ok(names(ts_baseline("E14", "win32")).includes("gitbash"), "W3 applies to ts");
+  assert.ok(names(baseline_for("E14", "win32")).includes("gitbash"));
+  assert.equal(names(ts_baseline("E14", "darwin")).includes("gitbash"), false, "no W3 off Windows");
+  for (const id of ["E05", "E11"]) assert.deepEqual(ts_baseline(id, "win32"), read_baseline(id), `${id}: W1·W2 not applied to ts`);
+  for (const c of load_table().cases) for (const o of Object.values(c.os_overrides ?? {})) assert.equal(o.applies_to_ts === true, o.item === "W3", `${c.id}: only W3 applies to ts`);
 });
 
 test("every os_overrides entry names a README item and a reason", () => {

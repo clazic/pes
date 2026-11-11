@@ -1822,7 +1822,7 @@
       ],
       "os_overrides": {
         "win32": {
-          "item": "W3",
+          "item": "W3", "applies_to_ts": true,
           "what": "setup check 가 Windows 에서만 gitbash 행(group 기본)을 더한다",
           "why": "scripts/setup.py gitbash() — 답 자동 수신(Monitor)에 Git Bash 가 필요하다. 설계된 OS 별 점검 항목이지 결함이 아니다",
           "edits": [
@@ -1935,5 +1935,5 @@
       ]
     }
   ],
-  "os_note_doc": "E13~E15 에 남는 OS·PC 차이와 그 처리(정규화 / 제외 / 임시 HOME). 처리가 '제외'인 곳은 이유를 적는다. OS 별 기준값 파일은 두지 않는다 — 정규화와 제외로 하나의 기준값을 쓴다 (Windows 러너에서 처음 돌릴 때 드러나는 차이는 여기에 추가한다)."
+  "os_note_doc": "E13~E15 에 남는 OS·PC 차이와 그 처리(정규화 / 제외 / 임시 HOME). 처리가 '제외'인 곳은 이유를 적는다. OS 별 기준값 파일은 두지 않는다 (os_overrides 는 두 종류: W1·W2 같은 0.15 의 데이터 차이는 py 대상에만, W3 같은 OS 별 설계 항목은 `applies_to_ts: true` 로 py·ts 모두에 적용) — 정규화와 제외로 하나의 기준값을 쓴다 (Windows 러너에서 처음 돌릴 때 드러나는 차이는 여기에 추가한다)."
 }

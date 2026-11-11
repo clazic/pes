@@ -75,6 +75,11 @@ export interface OsOverride {
   item: string;
   what: string;
   why: string;
+  /**
+   * true = an OS-specific DESIGN item (W3): the ts target is held to it too. Absent/false = 0.15's Windows DATA difference
+   * (W1·W2): ts stores `/` and LF everywhere (D10), so the ts target never gets it.
+   */
+  applies_to_ts?: boolean;
   edits: OsEdit[];
 }
 
@@ -591,10 +596,10 @@ export function read_baseline(id: string): CaseRecord {
  * The baseline for one OS: the single stored record plus that OS's `os_overrides` edits. A path that does not exist in the record
  * throws (an override must not silently stop matching when the baseline changes). `platform` is injectable for the unit test.
  */
-export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id)): CaseRecord {
+export function baseline_for(id: string, platform: string = process.platform, base: CaseRecord = read_baseline(id), target: "py" | "ts" = "py"): CaseRecord {
   const override = case_def(id).os_overrides?.[platform];
   const out = JSON.parse(JSON.stringify(base)) as CaseRecord;
-  if (override === undefined) return out;
+  if (override === undefined || (target === "ts" && override.applies_to_ts !== true)) return out;
   for (const edit of override.edits) {
     const parent = edit.at.slice(0, -1).reduce<any>((node, key) => node?.[key], out);
     const last = edit.at[edit.at.length - 1]!;
@@ -610,12 +615,13 @@ export function baseline_for(id: string, platform: string = process.platform, ba
 }
 
 /**
- * The pinned 0.15 record the ts target is held to: the single stored baseline WITHOUT any os_overrides, on every OS. The win32
- * overrides are 0.15's Windows data (W1 backslash paths, W2 CRLF sizes); ts stores `/` and LF everywhere (D10), so on Windows it must
- * equal the macOS/Linux record — that is stronger than ignoring the difference.
+ * The pinned 0.15 record the ts target is held to on one OS: the stored baseline plus ONLY the `os_overrides` marked
+ * `applies_to_ts` (W3: designed per-OS items such as the Windows `gitbash` row of `setup check`). The data overrides (W1 backslash
+ * paths, W2 CRLF sizes) are NOT applied — ts stores `/` and LF everywhere (D10), so on Windows it must equal the macOS/Linux
+ * record there; that is stronger than ignoring the difference. `platform` is injectable for the unit test.
  */
-export function ts_baseline(id: string): CaseRecord {
-  return JSON.parse(JSON.stringify(read_baseline(id))) as CaseRecord;
+export function ts_baseline(id: string, platform: string = process.platform): CaseRecord {
+  return baseline_for(id, platform, read_baseline(id), "ts");
 }
 
 export function write_baseline(record: CaseRecord): void {
