@@ -51,3 +51,45 @@ export async function read_all_inputs(client: FakeMcpClient, run_id?: string): P
   }
   assert.fail("the cursor never ended after 40 calls");
 }
+
+// SEL-53 1차 리뷰 r1-3 R1: pes_context 한 호출의 응답 크기 상한. 구현 상수가 정해지면 이 한 줄만 고친다.
+/** 한 호출 응답(text 블록 + structuredContent 합)의 바이트 상한. */
+export const MAX_CONTEXT_RESPONSE_BYTES = 64 * 1024;
+
+/** 한 호출 응답이 와이어에서 차지하는 바이트: 모든 content 블록 text + structuredContent JSON. */
+export function response_bytes(raw: { content?: Array<{ text?: string }>; structuredContent?: unknown }): number {
+  const texts = (raw.content ?? []).map((block) => block.text ?? "").join("");
+  return Buffer.byteLength(texts, "utf8") + Buffer.byteLength(JSON.stringify(raw.structuredContent ?? null), "utf8");
+}
+
+/** read_all_inputs 와 같지만 호출마다 응답 바이트를 함께 돌려준다. */
+export async function read_all_inputs_sized(
+  client: FakeMcpClient,
+  run_id?: string,
+): Promise<{ inputs: any[]; sizes: number[] }> {
+  const inputs: any[] = [];
+  const sizes: number[] = [];
+  let cursor: string | null = null;
+  for (let call_no = 0; call_no < 80; call_no += 1) {
+    const args: Record<string, unknown> = {};
+    if (run_id !== undefined) args.run_id = run_id;
+    if (cursor !== null) args[INPUTS_CURSOR_ARG] = cursor;
+    const out = await client.tool("pes_context", args);
+    assert.equal(out.is_error, false, `pes_context failed: ${JSON.stringify(out.data)}`);
+    sizes.push(response_bytes(out.raw));
+    const data = out.data;
+    assert.ok(Array.isArray(data.inputs), "inputs is an array");
+    inputs.push(...data.inputs);
+    let next: string | null = null;
+    for (const field of INPUTS_NEXT_FIELDS) {
+      if (typeof data[field] === "string" && data[field].length > 0) {
+        next = data[field];
+        break;
+      }
+    }
+    if (data.inputs_has_more === false || data.has_more === false || data.inputs.length === 0) return { inputs, sizes };
+    assert.ok(next !== null && next !== cursor, "has_more is true, so a new cursor must come back");
+    cursor = next;
+  }
+  assert.fail("the cursor never ended after 80 calls");
+}
