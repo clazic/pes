@@ -57,8 +57,8 @@ export async function need_project(d: string, what = "쓰기"): Promise<string> 
       broken = `읽을 수 없음 (${(error as NodeJS.ErrnoException).code ?? "읽기 오류"})`;
     }
     if (broken !== null) die(`project.json 을 읽지 못했습니다: ${legacy} (${broken}) — 폴더는 그대로 두었습니다`, 1);
-    if (what === "읽기") die(`${what}: ${slug} 는 아직 DB 로 이전하지 않은 옛 project.json 프로젝트입니다 — 먼저 이전(import → 검증 → 활성화)하세요`, 2);
-    die(`${what}: ${slug} 는 아직 DB 로 이전하지 않은 옛 project.json 프로젝트라 쓸 수 없습니다 — 먼저 이전(import → 검증 → 활성화)하세요`, 2);
+    // a project nobody migrated yet is read-only here (D14): the read commands show it, every command that would write refuses, the folder stays as it is
+    die(`${what}: 이 프로젝트는 아직 새 형식으로 옮기지 않았습니다 — 먼저 이전(import → 검증 → 활성화)하세요 (${slug})`, 1);
   }
   return die(`project.json 없음: ${d}`, 1);
 }

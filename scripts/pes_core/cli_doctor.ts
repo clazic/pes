@@ -505,8 +505,7 @@ export async function cmd_doctor(args: string[]): Promise<void> {
         1,
       ),
     );
-    if (bad) process.exitCode = 1;
-    return;
+    return; // 0.15: --json ends with exit 0 whatever the rows say
   }
   const MARK: Record<Level, string> = { ok: "[정상]", info: "[참고]", warn: "[주의]", bad: "[문제]" };
   let last: string | null = null;

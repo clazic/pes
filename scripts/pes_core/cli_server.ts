@@ -187,7 +187,7 @@ export async function cmd_list(args: string[]): Promise<void> {
 
 export async function cmd_serve(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "serve"));
-  const slug = await need_project(d, "읽기");
+  const slug = await need_project(d, "serve");
   await stop_legacy(d);
   if (!existsSync(join(d, "index.html"))) await build_index(d, slug);
   const root = dirname(d);

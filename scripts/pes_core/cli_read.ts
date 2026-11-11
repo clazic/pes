@@ -174,7 +174,7 @@ const REPORT_SUFFIXES = new Set([".md", ".html", ".docx", ".hwpx", ".pdf", ".ppt
 export async function cmd_report(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "report"));
   const s = stage_arg(args[1] === undefined ? missing_args("report") : args[1]);
-  const slug = await need_project(d, "읽기");
+  const slug = await need_project(d, "report");
   const rd = join(d, "reports", s);
   // eli5.json is read only: the person's / the skill's picture description (0.15: rendered into eli5.html when it exists)
   const eli5_file = join(rd, "eli5.json");
@@ -216,7 +216,7 @@ function warn_lines(data: Dict): void {
 
 export async function cmd_assemble(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "assemble"));
-  const slug = await need_project(d, "읽기");
+  const slug = await need_project(d, "assemble");
   const data = await bridge("assemble", slug, { dir: d });
   await write_out_files(d, slug, ["report.md", "sources.json"]);
   warn_lines(data);
@@ -225,7 +225,7 @@ export async function cmd_assemble(args: string[]): Promise<void> {
 
 export async function cmd_web(args: string[]): Promise<void> {
   const d = pdir(arg_at(args, 0, "web"));
-  const slug = await need_project(d, "읽기");
+  const slug = await need_project(d, "web");
   const od = join(d, "out");
   const cover_file = join(od, "cover.json");
   const cover = existsSync(cover_file) ? read_json_file(cover_file, "out/cover.json") : {};
