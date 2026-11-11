@@ -58,10 +58,6 @@ export function TeamSwitcher({ ws }: { ws?: WorkspaceView }) {
               </div>
               <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">{title}</span>
-                <span className="flex min-w-0 items-center gap-1 text-xs">
-                  {ws?.turn ? <TurnMark turn={ws.turn} className="size-2.5" /> : null}
-                  <span className="truncate">{sub}</span>
-                </span>
               </div>
               <ChevronsUpDownIcon className="ml-auto" aria-hidden="true" />
             </SidebarMenuButton>
