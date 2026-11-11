@@ -467,7 +467,7 @@ test("F1 (6) core: the same key resent (before and after a later takeover) retur
     const other = await claim_new(env, "k-other", env.q);
     sig = state_signature(env.db);
     const reuse = await code_of(claim(env.service, env.ctx("k-1"), { run_id: other.run_id }));
-    assert.ok(["idempotency_key_reuse", "conflict", "not_found"].includes(reuse), `got ${reuse}`);
+    assert.equal(reuse, "idempotency_key_reuse", "the key check comes before any run lookup");
     assert.equal(state_signature(env.db), sig);
 
     // the process dies again; a second takeover under a new key
