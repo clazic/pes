@@ -67,31 +67,60 @@ test("M1: a failed validation activates nothing (exit 1, one Korean line naming 
   });
 });
 
-test("M2: the staging project is not shown as a project: `list` gives it only the 'migrate it' error row (no topic, no turn, no stage line), `status` refuses with one line, and the home page lists no normal row for it", { timeout: 300_000 }, async () => {
-  await with_ctx("pes-mig-staging2-", async (ctx) => {
-    broken_folder(ctx);
-    assert.equal(pes_ts(ctx, ["migrate", SLUG]).status, 1);
+// M2 (leader decision, 2026-11-12): a staging project left by a FAILED `pes migrate` is treated exactly like any other not-migrated old folder,
+// because the folder itself is byte-for-byte untouched. Before: `list` showed only an error row without topic and `status` refused.
+// Now: read commands read project.json, `list` shows the topic, write commands answer the D14 refusal, doctor says "이전 필요", and the
+// staging row in the DB never shows up as a second project. (The old assertions — no topic, `status` refused — were replaced on purpose,
+// not weakened: they described the old contract.)
+const WRITE_ARGS: string[][] = [["note", SLUG, "메모"], ["round-start", SLUG, "plan"], ["approve", SLUG, "plan"], ["render", SLUG]];
 
+test("M2: a failed-migrate staging folder is treated like any not-migrated old folder — reads use project.json (topic shown), writes get the D14 refusal, doctor says 이전 필요, `list` has no duplicate", { timeout: 300_000 }, async () => {
+  await with_ctx("pes-mig-staging2-", async (ctx) => {
+    const { dir } = broken_folder(ctx);
+    assert.equal(pes_ts(ctx, ["migrate", SLUG]).status, 1);
+    assert.deepEqual(slug_rows(ctx, SLUG), ["staging"]);
+    const bytes = bytes_digest(dir);
+    const times = mtime_map(dir);
+
+    // list: the topic is shown, exactly once (the DB staging record is not a second project)
     const list = pes_ts(ctx, ["list"]);
     assert.equal(list.status, 0, list.stderr);
     const out = norm_root(list.stdout, ctx.home.root);
-    assert.match(out, new RegExp(`\\(${SLUG}\\)`), "the folder is still listed (the user must see what waits)");
-    assert.match(out, /\[오류\]/, "as an error row");
-    assert.match(out, /이전하세요/, "with the way out");
-    assert.doesNotMatch(out, new RegExp(TOPIC), "the staging project's topic is not shown");
-    assert.doesNotMatch(out, /\[(Claude|내 차례)\]/, "it has no turn (it is not a served project)");
-    assert.doesNotMatch(out, /조사 R\d|기획 R\d|받은 답/, "no stage summary line");
+    assert.match(out, new RegExp(`${TOPIC}\\s+\\(${SLUG}\\)`), "the folder is listed with its topic");
+    assert.equal(out.split(`(${SLUG})`).length - 1, 1, `the slug appears in ONE list row (no duplicate): ${out}`);
 
+    // reads: project.json answers, exit 0
     const status = pes_ts(ctx, ["status", SLUG]);
-    assert.notEqual(status.status, 0, "status of a staging project is refused");
-    assert.equal(status.stdout, "", "no state is printed");
-    assert_one_line_error(status, "status of a staging project");
-    assert.match(status.stderr, new RegExp(SLUG), "names the project");
+    assert.equal(status.status, 0, status.stderr);
+    assert.match(status.stdout, new RegExp(`주제: ${TOPIC}`), "status reads project.json");
+    for (const args of [["show", SLUG, "plan"], ["pending", SLUG], ["digest", SLUG, "plan"]]) {
+      const run = pes_ts(ctx, args);
+      assert.equal(run.status, 0, `${args[0]}: ${run.stderr}`);
+    }
 
+    // writes: the D14 refusal, one line, nothing written
+    for (const args of WRITE_ARGS) {
+      const run = pes_ts(ctx, args);
+      assert.equal(run.status, 1, `${args[0]}: exit 1 (${run.stderr})`);
+      assert.equal(run.stdout, "", `${args[0]}: nothing on stdout`);
+      assert_one_line_error(run, args[0] as string);
+      assert.match(run.stderr, /먼저 이전하세요 — pes migrate /, `${args[0]}: the way out is named`);
+    }
+
+    // doctor: one 이전 필요 row (guidance, not fixable); a "지난 이전 실패" note in detail is wanted but not required
+    const doc = pes_ts(ctx, ["doctor", "--json"], { narrow_path: true, allow_child_process: true, extra_read: [ctx.narrow_bin] });
+    assert.ok(doc.status === 0 || doc.status === 1, doc.stderr);
+    const found = (JSON.parse(doc.stdout) as Array<{ group: string; title: string; detail: string; fixable: boolean }>).filter((r) => /이전 필요/.test(r.title) && r.group === SLUG);
+    assert.equal(found.length, 1, "one 이전 필요 row for the staging folder");
+    assert.equal(found[0]?.fixable, false);
+
+    assert.equal(bytes_digest(dir), bytes, "no read or refused write changed the folder");
+    assert.deepEqual(mtime_map(dir), times, "not even an mtime");
+
+    // the home page: one row for the slug, with the topic (it is an ordinary not-migrated folder)
     const hub = await hub_data(ctx);
-    const rows = (hub.projects ?? []) as Array<{ slug: string; topic?: string; turn?: string; current?: string }>;
-    const mine = rows.filter((p) => p.slug === SLUG);
-    assert.ok(mine.every((p) => p.topic !== TOPIC && (p.turn === undefined || p.turn === "" || p.turn === "오류")), `the home page shows no normal row for the staging project: ${JSON.stringify(mine)}`);
+    const mine = ((hub.projects ?? []) as Array<{ slug: string }>).filter((p) => p.slug === SLUG);
+    assert.equal(mine.length, 1, `the home page lists the slug once: ${JSON.stringify(mine)}`);
   });
 });
 
