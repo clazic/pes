@@ -265,3 +265,48 @@ jobs:
           node (Join-Path $env:USERPROFILE ".pes\src\scripts\setup.ts") needed
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Content (Join-Path $env:USERPROFILE ".pes\setup.json") -Raw) -match "2026-01-01") { throw "the completion mark was not rewritten" }
+
+  # 3단계 웹 앱(app/, SEL-81 U1a) — 루트와 따로 설치·검사한다. 브라우저를 못 받으면 건너뛰지 않고 잡을 실패시킨다.
+  app:
+    name: ${{ matrix.os }} / app (Vitest · Playwright)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install chromium
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (Vitest)
+        run: npm test
+
+      - name: Browser tests (Playwright)
+        run: npm run test:e2e

@@ -1,0 +1,124 @@
+/*
+ * tweakcn 테마 “Clean Slate” (registry:style `clean-slate`)
+ * 받은 곳: tweakcn.com/r/themes/clean-slate.json — `npx shadcn@4.23.0 view <주소>`로 받음(2026-11-05)
+ * 출처·라이선스: tweakcn(github.com/jnsahaj/tweakcn) · Apache License 2.0
+ * 그대로 옮긴 것: cssVars.light → `.theme-clean-slate`, cssVars.dark → `.theme-clean-slate.dark` (색 · radius · shadow-2xs~2xl)
+ * 받지 않은 것: font-mono, font-sans, font-serif, letter-spacing, shadow-blur, shadow-color, shadow-offset-x, shadow-offset-y, shadow-opacity, shadow-spread, spacing, tracking-normal, tracking-tight, tracking-tighter, tracking-wide, tracking-wider, tracking-widest
+ *   — 글꼴은 Pretendard 고정(테마 글꼴 무시), 한글 자간 0 유지, 간격은 Tailwind 기본, 그림자 재료 변수는 합쳐진 shadow-* 로 대신함
+ *   — 테마의 css(`body { letter-spacing }`)도 받지 않음
+ * 맨 아래 “PES 보정”: 대비 AA(글자 4.5:1 · 테두리 3:1)를 넘기려고 바꾼 값만 따로 적고 받은 값을 주석으로 남긴다.
+ * 이 파일은 시안 폴더 밖 스크립트가 받은 JSON에서 만들었다. 손으로 바꿀 때는 “PES 보정”에만 더한다.
+ */
+
+.theme-clean-slate {
+  --background: oklch(0.9842 0.0034 247.8575);
+  --foreground: oklch(0.2795 0.0368 260.0310);
+  --card: oklch(1.0000 0 0);
+  --card-foreground: oklch(0.2795 0.0368 260.0310);
+  --popover: oklch(1.0000 0 0);
+  --popover-foreground: oklch(0.2795 0.0368 260.0310);
+  --primary: oklch(0.5854 0.2041 277.1173);
+  --primary-foreground: oklch(1.0000 0 0);
+  --secondary: oklch(0.9276 0.0058 264.5313);
+  --secondary-foreground: oklch(0.3729 0.0306 259.7328);
+  --muted: oklch(0.9670 0.0029 264.5419);
+  --muted-foreground: oklch(0.5510 0.0234 264.3637);
+  --accent: oklch(0.9299 0.0334 272.7879);
+  --accent-foreground: oklch(0.3729 0.0306 259.7328);
+  --destructive: oklch(0.6368 0.2078 25.3313);
+  --destructive-foreground: oklch(1.0000 0 0);
+  --border: oklch(0.8717 0.0093 258.3382);
+  --input: oklch(0.8717 0.0093 258.3382);
+  --ring: oklch(0.5854 0.2041 277.1173);
+  --chart-1: oklch(0.5854 0.2041 277.1173);
+  --chart-2: oklch(0.5106 0.2301 276.9656);
+  --chart-3: oklch(0.4568 0.2146 277.0229);
+  --chart-4: oklch(0.3984 0.1773 277.3662);
+  --chart-5: oklch(0.3588 0.1354 278.6973);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.9670 0.0029 264.5419);
+  --sidebar-foreground: oklch(0.2795 0.0368 260.0310);
+  --sidebar-primary: oklch(0.5854 0.2041 277.1173);
+  --sidebar-primary-foreground: oklch(1.0000 0 0);
+  --sidebar-accent: oklch(0.9299 0.0334 272.7879);
+  --sidebar-accent-foreground: oklch(0.3729 0.0306 259.7328);
+  --sidebar-border: oklch(0.8717 0.0093 258.3382);
+  --sidebar-ring: oklch(0.5854 0.2041 277.1173);
+  --shadow-2xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+  --shadow: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+  --shadow-md: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 2px 4px -2px hsl(0 0% 0% / 0.10);
+  --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
+  --shadow-xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 8px 10px -2px hsl(0 0% 0% / 0.10);
+  --shadow-2xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.25);
+}
+
+.theme-clean-slate.dark {
+  --background: oklch(0.2077 0.0398 265.7549);
+  --foreground: oklch(0.9288 0.0126 255.5078);
+  --card: oklch(0.2795 0.0368 260.0310);
+  --card-foreground: oklch(0.9288 0.0126 255.5078);
+  --popover: oklch(0.2795 0.0368 260.0310);
+  --popover-foreground: oklch(0.9288 0.0126 255.5078);
+  --primary: oklch(0.6801 0.1583 276.9349);
+  --primary-foreground: oklch(0.2077 0.0398 265.7549);
+  --secondary: oklch(0.3351 0.0331 260.9120);
+  --secondary-foreground: oklch(0.8717 0.0093 258.3382);
+  --muted: oklch(0.2427 0.0381 259.9437);
+  --muted-foreground: oklch(0.7137 0.0192 261.3246);
+  --accent: oklch(0.3729 0.0306 259.7328);
+  --accent-foreground: oklch(0.8717 0.0093 258.3382);
+  --destructive: oklch(0.6368 0.2078 25.3313);
+  --destructive-foreground: oklch(0.2077 0.0398 265.7549);
+  --border: oklch(0.4461 0.0263 256.8018);
+  --input: oklch(0.4461 0.0263 256.8018);
+  --ring: oklch(0.6801 0.1583 276.9349);
+  --chart-1: oklch(0.6801 0.1583 276.9349);
+  --chart-2: oklch(0.5854 0.2041 277.1173);
+  --chart-3: oklch(0.5106 0.2301 276.9656);
+  --chart-4: oklch(0.4568 0.2146 277.0229);
+  --chart-5: oklch(0.3984 0.1773 277.3662);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.2795 0.0368 260.0310);
+  --sidebar-foreground: oklch(0.9288 0.0126 255.5078);
+  --sidebar-primary: oklch(0.6801 0.1583 276.9349);
+  --sidebar-primary-foreground: oklch(0.2077 0.0398 265.7549);
+  --sidebar-accent: oklch(0.3729 0.0306 259.7328);
+  --sidebar-accent-foreground: oklch(0.8717 0.0093 258.3382);
+  --sidebar-border: oklch(0.4461 0.0263 256.8018);
+  --sidebar-ring: oklch(0.6801 0.1583 276.9349);
+  --shadow-2xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+  --shadow: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+  --shadow-md: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 2px 4px -2px hsl(0 0% 0% / 0.10);
+  --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
+  --shadow-xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 8px 10px -2px hsl(0 0% 0% / 0.10);
+  --shadow-2xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.25);
+}
+
+/* ── PES 보정 ── */
+.theme-clean-slate {
+  /* 받은 값 oklch(0.6368 0.2078 25.3313) · 위험 글자 대비 — 받은 값은 카드 바탕에서 3.8~4.0:1(4.5 미만). PES 상태 색 bad와 같게 */
+  --destructive: var(--bad);
+  /* 받은 값 oklch(0.8717 0.0093 258.3382) · 입력·체크 상자·라디오 테두리 — 받은 값은 1.2~1.9:1. 1.4.11(3:1)을 넘게 PES control로 */
+  --input: var(--control);
+  /* 받은 값 oklch(0.5854 0.2041 277.1173) · 흰 글자 4.47:1 → 6.3:1. 같은 테마의 chart-2 색 */
+  --primary: oklch(0.5106 0.2301 276.9656);
+  /* 받은 값 oklch(0.5854 0.2041 277.1173) · 위와 같음 */
+  --sidebar-primary: oklch(0.5106 0.2301 276.9656);
+  /* 받은 값 oklch(0.5854 0.2041 277.1173) · 초점 테두리를 강조색과 맞춤 */
+  --ring: oklch(0.5106 0.2301 276.9656);
+  /* 받은 값 oklch(0.5510 0.0234 264.3637) · 옅은 바탕·사이드바 위 보조 글자 4.39 → 5.2:1 */
+  --muted-foreground: oklch(0.5100 0.0234 264.3637);
+}
+
+.theme-clean-slate.dark {
+  /* 받은 값 oklch(0.6368 0.2078 25.3313) · 위험 글자 대비 — 받은 값은 카드 바탕에서 3.8~4.0:1(4.5 미만). PES 상태 색 bad와 같게 */
+  --destructive: var(--bad);
+  /* 받은 값 oklch(0.4461 0.0263 256.8018) · 입력·체크 상자·라디오 테두리 — 받은 값은 1.2~1.9:1. 1.4.11(3:1)을 넘게 PES control로 */
+  --input: var(--control);
+  /* 강조 바탕(primary-soft) 위 강조 글자 4.03 → 4.5:1 이상. primary를 밝힌 값 */
+  --primary-ink: oklch(0.7857 0.1153 274.7100);
+}
