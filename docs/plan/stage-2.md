@@ -226,7 +226,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/runs/{r}/heartbeat`·`/release`·`/interrupt`·`/cancel`·`/handoffs` | E/H | PR14 | PR5 | 인계·중단·취소·반납, 단수 `/handoff` 없음 |
 | `GET P/operations/{id}`·`GET P/requests/{key}` | E/H | PR14 | PR4 | 202 영속 접수·operation 조회, 재시작 뒤 조회 |
 | `GET P/runs/{r}/inputs?cursor=&wait_ms=`, `POST P/runs/{r}/input-receipts` | E | PR14 | PR5 | long-poll·영수증, tx를 잡지 않음 |
-| `POST P/submissions` | H | PR14 | PR8 | 묶음 답·의견, 당시 폼/질문 버전 |
+| `POST P/submissions` | H | PR14 | PR8 | 묶음 답·의견, 당시 폼/질문 버전. 3단계 U2a(SEL-90): 선택 필드 `mode`(`bundle`·`single`)와 응답 `form_complete`·`missing_required` |
 | `GET P/changes` | E/H | PR14 | PR4 | 커서 epoch·tx 묶음 |
 | `GET P/workspace` | E/H | 3단계 U1b(SEL-82) | U1b 읽기 모델 | 앱 작업 공간 읽기(현재 단계·라운드·차례·권한별 가능 동작·기록 개수). 읽기 전용·새 표 없음, `context:read` |
 | `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | E/H | PR13 | PR9 | 예약·업로드 완료·ready·hash·Go OFF 정책 검사 읽기 |
@@ -234,7 +234,9 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/stages/{s}/approve`·`/reopen` | H | PR14 | PR6 | 사람만, 에이전트 거부 |
 | `POST P/policies/opencode-go/revisions` | H | PR14 | PR10 | 사람만, 정책 이력·재생 전 검사 |
 | `POST P/questions`·`/revisions` | E/H | PR14 | PR8 | 질문 게시·수정, 답과 분리 |
-| 스레드·가정·결정·반영·export | 미래 | — | — | **capabilities 미지원**, 가짜 성공 없음 |
+| `POST P/questions/{q}/withdraw`·`/defer`·`/merge` | H/허가된 E | 3단계 U2a(SEL-90) | `question.withdraw`·`question.defer`·`question.merge` | 질문의 새 버전(state `withdrawn`·`deferred`·`merged`), 옛 버전·옛 답 보존, 폼의 최신 세트에서 같은 tx 로 빠짐, 전이표 밖은 409, 지우지 않음 |
+| `POST P/threads`(질문 의견 `question_comment`)·`POST P/threads/{t}/messages` | H/허가된 E | 3단계 U2a(SEL-90) | `question.comment_add` | 질문 의견은 답이 아니다(답·제출 0). 앵커 문맥 `annotation` 은 U4a 까지 501 |
+| 해결·가정·결정·반영·export | 미래 | — | — | **capabilities 미지원**, 가짜 성공 없음 |
 
 - **2단계 필수 경로는 위 표가 닫힌 목록**이다. run 시작·wait·정확한 버전 읽기·라운드/정책 읽기와 **파일 HTTP(예약·업로드 완료·정책 검사 읽기)는 PR13**이 맡고, 파일 저장 코어는 PR9다. release·202 operation 조회도 PR14에 포함한다.
 - **project.create/register**: A의 웹/로컬 생성은 `project.create`가 owner·초기 정책·첫 판을 한 tx로 만들고, 중복 slug·멱등 키·재생을 검사한다. B의 최초 등록은 project token이 없으므로 **사람의 기기 승인/제한 등록 자격**을 쓰며, 일반 에이전트 토큰에 owner 생성·정책 변경 권한을 주지 않는다. **PR14는 `project-registrations` API를 만들고, PR20a는 빈 계정/새 프로젝트에서 그 API를 쓰는 B 최초 등록 종단 시험을 맡는다.** 빈 계정/새 프로젝트에서 A·B 모두 시험한다.

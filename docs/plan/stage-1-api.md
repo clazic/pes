@@ -70,14 +70,15 @@ H = 사람(소유자), E = 프로젝트 토큰의 에이전트(내부 A·외부 
 | 인계 | `POST P/runs/{r}/handoffs` | 현재 담당 E 또는 H(강제 인계는 H만) | 불가 |
 | 결과 제출 | `POST P/runs/{r}/results` | 담당 E | 불가 |
 | 질문 게시 / 수정 | `POST P/questions` / `P/questions/{q}/revisions` | 게시: E(담당 run)·H·**W(제한, 사람→AI 질문만)** / 수정: H·허가된 E | 게시만 가능(중간 위험), 수정 불가 |
-| 답·의견 제출 | `POST P/submissions` | **H만**(에이전트는 403 `human_required`, 2026-11-10 SEL-47 결정. 에이전트는 답을 `inputs`로 읽기만 한다) | 불가(초안은 브라우저 폼) |
+| 질문 철회·보류·합치기 | `POST P/questions/{q}/withdraw`·`P/questions/{q}/defer`·`P/questions/{q}/merge` | H·허가된 E(수정과 같음: 에이전트는 리스를 쥔 동안만) | 불가 — 3단계 U2a(SEL-90). 질문의 **새 버전**(state `withdrawn`·`deferred`·`merged`)을 쓴다: 옛 버전·옛 답은 그대로, 지우지 않는다. 폼의 최신 세트에 있으면 같은 tx 에서 그 질문만 뺀 새 세트가 발행된다. 전이: `open`→셋 다, `deferred`→`withdrawn`·`merged`, 나머지 409 `conflict`. 낡은 `base_version_id` 는 409 `rev_conflict`. merge 대상은 같은 프로젝트의 열린(`open`) 다른 질문(자기 자신 422, 없음·다른 프로젝트 404, 열려 있지 않음 409). 응답 201 `{question:{id,version_id,version_no,state[,merged_into_question_id]}, previous_answers_preserved:true}`. 멱등 키 필수 |
+| 답·의견 제출 | `POST P/submissions` | **H만**(에이전트는 403 `human_required`, 2026-11-10 SEL-47 결정. 에이전트는 답을 `inputs`로 읽기만 한다). 3단계 U2a(SEL-90): 닫힌 선택 필드 `mode`(`bundle`·`single`, 없으면 이전 동작=부분 제출 허용). `bundle`=적용되는 필수 질문이 모두 차야 접수(아니면 422 `validation_failed` `details.reason=required_missing`·`question_ids`, 조건 `show_if` 가 거짓인 질문에 답을 보내면 `not_applicable`), `single`=항목 정확히 1개. 응답에 `form_complete`·`missing_required`(질문 id 배열) 가 더해진다 | 불가(초안은 브라우저 폼) |
 | 입력 기다리기 / 영수증 | `GET P/runs/{r}/inputs?cursor=&wait_ms=` / `POST P/runs/{r}/input-receipts` | E | 불가 |
 | 변경분 | `GET P/changes?cursor=` | H/E/W | 선택 범위 읽기 |
 | 작업 공간 읽기 | `GET P/workspace` | H/E/W | 읽기 가능 — 3단계 U1b(SEL-82)에서 등록. 현재 단계·라운드·단계별 보기·차례·**권한별 가능 동작(+비활성 이유, 서버 검사 대체 아님)**·기록 개수(가정·결정·의견, 없으면 `empty`). 기계 값만(화면 글자는 앱이 만든다), 읽기 전용·새 표 없음, `context:read` |
 | 변경 머리 커서 | `GET P/changes?cursor=head` | H/E/W | 사건을 읽지 않고 지금 머리 커서만 — `{events:[], next_cursor, has_more:false, epoch}`. 앱 `getChanges(null)` 의 기준 받기(SEL-82). 보통 changes 와 같은 인증·자격 묶음, 읽기 전용 |
 | 앱 세션 넘기기 | CLI `pes open <slug> --app` (API 아님) | E | 서버는 앱 페이지에 세션을 심지 않는다(SEL-82 R1). CLI 가 `http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드>#pes=<base64url JSON {session, projects}>` 를 연다 — 조각은 서버·Referer 로 가지 않는다. 앱은 렌더 전에 조각을 같은 탭 sessionStorage 로 옮기고 주소에서 지운다. 앱 빌드 자산은 `/_app/`(프로젝트 이름은 `_` 로 시작할 수 없다). **알려진 한계(SEL-82 최종 리뷰):** 조각 있는 주소가 브라우저 기록에 남을 수 있고 `PES_NO_BROWSER=1` 이면 stdout 에 찍힌다 — 회전은 `local_session_secret` 파일 삭제. **에이전트·스킬은 `pes open --app` 을 부르지 않는다**(1회용 코드 교환은 SEL-85). 같은 출처 보고서·산출물 HTML 의 sessionStorage 접근은 SEL-86(CSP sandbox)에서 막는다 — 앱이 보고서로 같은 탭 이동을 갖기 전에 병합 |
 | 파일 | `POST P/uploads` → `PUT` → `POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | H/E | 불가 |
-| 첨언·답글 | `POST P/threads`, `P/threads/{t}/messages` | H/E/W | 가능 |
+| 첨언·답글 | `POST P/threads`, `P/threads/{t}/messages` | H/E/W | 가능 — 3단계 U2a(SEL-90)는 **질문 의견**(`context_kind=question_comment`, 대상은 질문)만 켠다: `P/threads` 201 `{thread:{id,state:"open"}, message:{id,version_no:"1",thread_id}}`, `P/threads/{t}/messages` 201 `{message:{id,version_no:"1",thread_id}}`. 의견은 답이 아니다(답·제출을 만들지 않고 필수를 채우지 않는다). 쓰는 쪽은 사람 소유자 또는 리스를 쥔 에이전트(`run:submit`). 앵커 문맥 `annotation` 은 U4a 까지 501 `not_supported` |
 | 해결·후속 적용 | `POST P/threads/{t}/resolutions`, `P/followups/{f}/apply` | H/허가된 E(reopen 적용은 H) | 불가 |
 | 가정·결정·반영 | `POST P/assumptions`·`/decisions`·`/reflections` | H/E(역할별) | 불가 |
 | 라운드 시작·봉인 | `POST P/stages/{s}/rounds`, `P/rounds/{r}/seal` | H/허가된 E | 불가 |

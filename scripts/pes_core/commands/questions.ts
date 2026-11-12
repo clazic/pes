@@ -2,7 +2,8 @@
 // (stage 2 PR8).
 //
 // This file holds the only business-table SQL for question.publish_set,
-// question.revise, and answer.submit. The public functions in
+// question.revise, question.withdraw/defer/merge, question.comment_add and
+// answer.submit. The public functions in
 // scripts/pes_core/questions.ts call CommandService.execute once each, so
 // every write passes the registry, project/actor check, policy, receipt
 // replay, lease guard, change, and events + receipt in one transaction.
@@ -56,6 +57,7 @@ const PUBLISH_FIELDS = [
   "purpose",
   "form_key",
   "questions",
+  "extend_latest",
   "run_id",
   "lease_id",
   "fence",
@@ -92,7 +94,52 @@ const REVISE_FIELDS = [
   "fence",
 ] as const;
 
-const SUBMIT_FIELDS = ["set_id", "answers"] as const;
+const SUBMIT_FIELDS = ["set_id", "answers", "mode"] as const;
+const SUBMIT_MODES = new Set(["bundle", "single"]);
+
+// SEL-90 U2a: a question leaves a form by a new version (state withdrawn,
+// deferred or merged); the old versions and the old answers stay.
+type StateKind = "withdraw" | "defer" | "merge";
+const STATE_COMMON_FIELDS = [
+  "question_id",
+  "base_version_id",
+  "reason",
+  "run_id",
+  "lease_id",
+  "fence",
+] as const;
+const STATE_FIELDS: Record<StateKind, readonly string[]> = {
+  withdraw: STATE_COMMON_FIELDS,
+  defer: [...STATE_COMMON_FIELDS, "defer_until"],
+  merge: [...STATE_COMMON_FIELDS, "merged_into_question_id"],
+};
+const TARGET_STATE: Record<StateKind, string> = {
+  withdraw: "withdrawn",
+  defer: "deferred",
+  merge: "merged",
+};
+/** Transition table: open -> withdrawn|deferred|merged, deferred -> withdrawn|merged, the rest is conflict. */
+const STATE_FROM: Record<StateKind, ReadonlySet<string>> = {
+  withdraw: new Set(["open", "deferred"]),
+  defer: new Set(["open"]),
+  merge: new Set(["open", "deferred"]),
+};
+const STATE_ACTION: Record<StateKind, string> = {
+  withdraw: "question.retracted",
+  defer: "question.deferred",
+  merge: "question.merged",
+};
+
+const COMMENT_FIELDS = [
+  "question_id",
+  "body_md",
+  "question_version_id",
+  "thread_id",
+  "reply_to",
+  "run_id",
+  "lease_id",
+  "fence",
+] as const;
 const ANSWER_ITEM_FIELDS = new Set([
   "question_id",
   "question_version_id",
@@ -386,13 +433,16 @@ function write_question_version(
     options: string;
     show_if: string;
     help: string | null;
+    defer_until?: number | null;
+    merged_into_question_id?: string | null;
   },
 ): void {
   const written = runtime.db.run(
     `INSERT INTO question_versions
        (project_id, version_id, object_id, text, type, state, importance, required,
-        allow_comment_as_answer, default_value, options, show_if, help)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        allow_comment_as_answer, default_value, options, show_if, help,
+        defer_until, merged_into_question_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.project_id,
     input.version_id,
     input.object_id,
@@ -406,6 +456,8 @@ function write_question_version(
     input.options,
     input.show_if,
     input.help,
+    input.defer_until ?? null,
+    input.merged_into_question_id ?? null,
   );
   if (written.changes !== 1n) {
     throw new Error("the question version was not written");
@@ -423,8 +475,18 @@ function question_version_digest(input: {
   options: string;
   show_if: string;
   help: string | null;
+  defer_until?: number | null;
+  merged_into_question_id?: string | null;
 }): string {
+  // defer_until / merged_into_question_id enter the digest only when set, so
+  // the hash of a version that has neither is what it always was.
+  const extra: Record<string, unknown> = {};
+  if (input.defer_until !== undefined && input.defer_until !== null) extra.defer_until = input.defer_until;
+  if (input.merged_into_question_id !== undefined && input.merged_into_question_id !== null) {
+    extra.merged_into_question_id = input.merged_into_question_id;
+  }
   return content_digest("question", {
+    ...extra,
     text: input.text,
     type: input.type,
     state: input.state,
@@ -609,9 +671,51 @@ function run_publish_set(runtime: CommandRuntime): CommandResult {
     require_publish_round(runtime, project.id, stage_id, round_id);
   }
 
+  // SEL-90: extend_latest keeps the form's earlier open questions (latest set, same order) in front of the given
+  // ones, so adding a question is a new version of the whole form. It lives here, inside the transaction, so the
+  // request hash covers only what the caller sent and a replay stays a replay.
+  let extend = false;
+  if (payload.extend_latest !== undefined) {
+    if (typeof payload.extend_latest !== "boolean") {
+      return invalid_payload("extend_latest must be a boolean");
+    }
+    extend = payload.extend_latest;
+  }
+  const kept: { question_id: string; question_version_id: string }[] = [];
+  if (extend) {
+    const prior = runtime.db.all<{ question_id: string; question_version_id: string; state: string }>(
+      `SELECT m.question_id AS question_id, o.current_version_id AS question_version_id, qv.state AS state
+         FROM question_sets s
+         JOIN question_set_members m ON m.project_id = s.project_id AND m.set_id = s.id
+         JOIN objects o ON o.project_id = m.project_id AND o.id = m.question_id AND o.kind = 'question'
+         JOIN question_versions qv ON qv.project_id = o.project_id AND qv.version_id = o.current_version_id
+        WHERE s.project_id = ? AND s.stage_id = ? AND s.form_key = ?
+          AND s.version_no = (SELECT MAX(s2.version_no) FROM question_sets s2
+                               WHERE s2.project_id = s.project_id AND s2.stage_id = s.stage_id
+                                 AND s2.form_key = s.form_key)
+        ORDER BY m.position`,
+      project.id,
+      stage_id,
+      form_key,
+    );
+    for (const row of prior) {
+      if (row.state === "open") kept.push(row);
+    }
+  }
+
   const plans: MemberPlan[] = [];
   const seen = new Set<string>();
-  for (const [position, raw] of raw_questions.entries()) {
+  for (const row of kept) {
+    seen.add(row.question_id);
+    plans.push({
+      question_id: row.question_id,
+      question_version_id: row.question_version_id,
+      position: plans.length,
+      new_question: null,
+    });
+  }
+  for (const [index, raw] of raw_questions.entries()) {
+    const position = kept.length + index;
     if (!is_record(raw)) {
       return invalid_payload("each question must be an object");
     }
@@ -792,6 +896,8 @@ interface CurrentQuestionRow {
   options: string;
   show_if: string;
   help: string | null;
+  defer_until: bigint | null;
+  merged_into_question_id: string | null;
 }
 
 function run_revise(runtime: CommandRuntime): CommandResult {
@@ -808,7 +914,8 @@ function run_revise(runtime: CommandRuntime): CommandResult {
 
   const row = runtime.db.get<CurrentQuestionRow>(
     `SELECT qv.text, qv.type, qv.state, qv.importance, qv.required,
-            qv.allow_comment_as_answer, qv.default_value, qv.options, qv.show_if, qv.help
+            qv.allow_comment_as_answer, qv.default_value, qv.options, qv.show_if, qv.help,
+            qv.defer_until, qv.merged_into_question_id
        FROM questions q
        JOIN objects o
          ON o.project_id = q.project_id AND o.id = q.object_id AND o.kind = 'question'
@@ -916,6 +1023,8 @@ function run_revise(runtime: CommandRuntime): CommandResult {
       options,
       show_if,
       help,
+      defer_until: row.defer_until === null ? null : Number(row.defer_until),
+      merged_into_question_id: row.merged_into_question_id,
     }),
   });
   write_question_version(runtime, {
@@ -932,6 +1041,8 @@ function run_revise(runtime: CommandRuntime): CommandResult {
     options,
     show_if,
     help,
+    defer_until: row.defer_until === null ? null : Number(row.defer_until),
+    merged_into_question_id: row.merged_into_question_id,
   });
   move_current_version(
     runtime,
@@ -952,6 +1063,517 @@ function run_revise(runtime: CommandRuntime): CommandResult {
           question_version_id: version_id,
           version_no,
         },
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// question.withdraw / question.defer / question.merge (SEL-90 U2a)
+
+interface StateQuestionRow {
+  current_version_id: string;
+  text: string;
+  type: string;
+  state: string;
+  importance: string;
+  required: bigint;
+  allow_comment_as_answer: bigint;
+  default_value: string;
+  options: string;
+  show_if: string;
+  help: string | null;
+}
+
+interface LatestSetRow {
+  id: string;
+  stage_id: string;
+  round_id: string | null;
+  purpose: string;
+  form_key: string;
+  version_no: bigint;
+}
+
+interface SetMemberRow {
+  question_id: string;
+  question_version_id: string;
+}
+
+interface SetWithoutPlan {
+  id: string;
+  stage_id: string;
+  round_id: string | null;
+  purpose: string;
+  form_key: string;
+  version_no: number;
+  previous_set_id: string;
+  members: { question_id: string; question_version_id: string; position: number }[];
+}
+
+/**
+ * The new sets that take a question out of every form it is still in. Only the
+ * latest set of a (stage, form_key) is a form the human sees, so only those
+ * are republished (without the question, in the same order, each remaining
+ * member keeping the version the form pinned). A form of a stage outside the
+ * active edition, or of a round that is no longer open, takes no new set: it
+ * cannot be answered any more and a closed round must not gain a form version.
+ */
+function plan_sets_without(
+  runtime: CommandRuntime,
+  project_id: string,
+  question_id: string,
+): SetWithoutPlan[] {
+  const sets = runtime.db.all<LatestSetRow>(
+    `SELECT s.id, s.stage_id, s.round_id, s.purpose, s.form_key, s.version_no
+       FROM question_set_members m
+       JOIN question_sets s ON s.project_id = m.project_id AND s.id = m.set_id
+      WHERE m.project_id = ? AND m.question_id = ?
+        AND s.version_no = (SELECT MAX(s2.version_no) FROM question_sets s2
+                             WHERE s2.project_id = s.project_id
+                               AND s2.stage_id = s.stage_id AND s2.form_key = s.form_key)
+      ORDER BY s.stage_id, s.form_key`,
+    project_id,
+    question_id,
+  );
+  const active = runtime.db.get<{ active_edition_id: string | null }>(
+    "SELECT active_edition_id FROM projects WHERE id = ?",
+    project_id,
+  );
+  const plans: SetWithoutPlan[] = [];
+  for (const set of sets) {
+    const stage = runtime.db.get<{ edition_id: string }>(
+      "SELECT edition_id FROM stages WHERE project_id = ? AND id = ?",
+      project_id,
+      set.stage_id,
+    );
+    if (stage === undefined || active?.active_edition_id !== stage.edition_id) continue;
+    if (set.round_id !== null) {
+      const round = runtime.db.get<{ state: string }>(
+        "SELECT state FROM rounds WHERE project_id = ? AND id = ?",
+        project_id,
+        set.round_id,
+      );
+      if (round === undefined || round.state !== "open") continue;
+    }
+    const members = runtime.db
+      .all<SetMemberRow>(
+        `SELECT question_id, question_version_id FROM question_set_members
+          WHERE project_id = ? AND set_id = ? ORDER BY position`,
+        project_id,
+        set.id,
+      )
+      .filter((member) => member.question_id !== question_id)
+      .map((member, position) => ({ ...member, position }));
+    const version_no = Number(set.version_no) + 1;
+    if (!Number.isSafeInteger(version_no) || version_no < 1) {
+      throw new Error("the question set version number is out of range");
+    }
+    plans.push({
+      id: runtime.new_id(),
+      stage_id: set.stage_id,
+      round_id: set.round_id,
+      purpose: set.purpose,
+      form_key: set.form_key,
+      version_no,
+      previous_set_id: set.id,
+      members,
+    });
+  }
+  return plans;
+}
+
+function run_state_change(runtime: CommandRuntime, kind: StateKind): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, STATE_FIELDS[kind]);
+
+  const question_id = require_non_empty_string(payload, "question_id");
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new Error(`question.${kind} must resolve a project and actor first`);
+  }
+  const reason = optional_text_or_null(payload, "reason");
+  let defer_until: number | null = null;
+  if (kind === "defer" && payload.defer_until !== undefined && payload.defer_until !== null) {
+    const value = payload.defer_until;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+      return invalid_payload("defer_until must be a non-negative integer (ms)");
+    }
+    defer_until = value;
+  }
+  let merged_into: string | null = null;
+  if (kind === "merge") {
+    merged_into = require_non_empty_string(payload, "merged_into_question_id");
+    if (merged_into === question_id) {
+      throw new ApiError("invalid_payload", "a question cannot be merged into itself", {
+        reason: "self_merge",
+        field: "merged_into_question_id",
+        question_id,
+      });
+    }
+  }
+  const { guard } = member_actor_with_guard(runtime, payload);
+
+  const row = runtime.db.get<StateQuestionRow>(
+    `SELECT o.current_version_id AS current_version_id, qv.text, qv.type, qv.state, qv.importance,
+            qv.required, qv.allow_comment_as_answer, qv.default_value, qv.options, qv.show_if, qv.help
+       FROM questions q
+       JOIN objects o
+         ON o.project_id = q.project_id AND o.id = q.object_id AND o.kind = 'question'
+       JOIN question_versions qv
+         ON qv.project_id = o.project_id AND qv.object_id = o.id
+        AND qv.version_id = o.current_version_id
+      WHERE q.project_id = ? AND q.object_id = ?`,
+    project.id,
+    question_id,
+  );
+  if (row === undefined) {
+    throw new ApiError("not_found", "question not found");
+  }
+  if (has_own(payload, "base_version_id")) {
+    const base = require_non_empty_string(payload, "base_version_id");
+    if (base !== row.current_version_id) {
+      throw new ApiError("rev_conflict", "the question version is stale", {
+        expected: base,
+        current: row.current_version_id,
+      });
+    }
+  }
+  const to_state = TARGET_STATE[kind];
+  if (!STATE_FROM[kind].has(row.state)) {
+    throw new ApiError("conflict", `a ${row.state} question cannot become ${to_state}`, {
+      reason: "invalid_transition",
+      from: row.state,
+      to: to_state,
+    });
+  }
+  if (merged_into !== null) {
+    // not_found for a missing or foreign question, conflict for one that is not open
+    current_question_version(runtime, project.id, merged_into);
+  }
+
+  const latest = runtime.db.get<{ n: bigint | null }>(
+    "SELECT MAX(version_no) AS n FROM object_versions WHERE project_id = ? AND object_id = ?",
+    project.id,
+    question_id,
+  );
+  const version_no = Number(latest?.n ?? 0n) + 1;
+  if (!Number.isSafeInteger(version_no) || version_no < 1) {
+    throw new Error("the question version number is out of range");
+  }
+  const version_id = runtime.new_id();
+  const new_sets = plan_sets_without(runtime, project.id, question_id);
+  const result: Record<string, unknown> = {
+    project_id: project.id,
+    question_id,
+    question_version_id: version_id,
+    version_no,
+    state: to_state,
+  };
+  if (kind === "defer") result.defer_until = defer_until;
+  if (kind === "merge") result.merged_into_question_id = merged_into;
+  result.question_set_ids = new_sets.map((set) => set.id);
+
+  insert_receipt(runtime, {
+    project_id: project.id,
+    actor_id,
+    action: STATE_ACTION[kind],
+    base_control_rev: null,
+    result,
+    ...guard_fields(guard),
+  });
+
+  const version_fields = {
+    text: row.text,
+    type: row.type,
+    state: to_state,
+    importance: row.importance,
+    required: Number(row.required),
+    allow_comment_as_answer: Number(row.allow_comment_as_answer),
+    default_value: row.default_value,
+    options: row.options,
+    show_if: row.show_if,
+    help: row.help,
+    defer_until,
+    merged_into_question_id: merged_into,
+  };
+  write_object_version(runtime, {
+    project_id: project.id,
+    object_id: question_id,
+    kind: "question",
+    version_id,
+    version_no,
+    based_on_version_id: row.current_version_id,
+    actor_id,
+    run_id: guard === null ? null : guard.run_id,
+    content_hash: question_version_digest(version_fields),
+  });
+  write_question_version(runtime, {
+    project_id: project.id,
+    object_id: question_id,
+    version_id,
+    ...version_fields,
+  });
+  move_current_version(runtime, project.id, question_id, row.current_version_id, version_id);
+
+  for (const set of new_sets) {
+    const written_set = runtime.db.run(
+      `INSERT INTO question_sets
+         (id, project_id, stage_id, round_id, purpose, form_key, version_no,
+          previous_set_id, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      set.id,
+      project.id,
+      set.stage_id,
+      set.round_id,
+      set.purpose,
+      set.form_key,
+      set.version_no,
+      set.previous_set_id,
+      runtime.now_ms,
+    );
+    if (written_set.changes !== 1n) {
+      throw new Error("the question set was not written");
+    }
+    for (const member of set.members) {
+      const written = runtime.db.run(
+        `INSERT INTO question_set_members
+           (project_id, set_id, question_id, question_version_id, position)
+         VALUES (?, ?, ?, ?, ?)`,
+        project.id,
+        set.id,
+        member.question_id,
+        member.question_version_id,
+        member.position,
+      );
+      if (written.changes !== 1n) {
+        throw new Error("the question set member was not written");
+      }
+    }
+  }
+
+  const run_id = guard === null ? null : guard.run_id;
+  return {
+    result,
+    events: [
+      {
+        type: STATE_ACTION[kind],
+        run_id,
+        payload: {
+          question_id,
+          question_version_id: version_id,
+          version_no,
+          state: to_state,
+          reason,
+          ...(kind === "defer" ? { defer_until } : {}),
+          ...(kind === "merge" ? { merged_into_question_id: merged_into } : {}),
+        },
+      },
+      ...new_sets.map((set) => ({
+        type: "question.set_published",
+        run_id,
+        payload: {
+          set_id: set.id,
+          stage_id: set.stage_id,
+          round_id: set.round_id,
+          purpose: set.purpose,
+          form_key: set.form_key,
+          version_no: set.version_no,
+          members: set.members,
+        },
+      })),
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// question.comment_add (SEL-90 U2a): a comment on a question, outside any answer
+
+function run_comment_add(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, COMMENT_FIELDS);
+
+  const question_id = require_non_empty_string(payload, "question_id");
+  const body_md = require_non_empty_string(payload, "body_md");
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new Error("question.comment_add must resolve a project and actor first");
+  }
+  const thread_given = payload.thread_id !== undefined && payload.thread_id !== null;
+  const version_given = payload.question_version_id !== undefined && payload.question_version_id !== null;
+  const reply_given = payload.reply_to !== undefined && payload.reply_to !== null;
+  const given_thread_id = thread_given ? require_non_empty_string(payload, "thread_id") : null;
+  const given_version_id = version_given ? require_non_empty_string(payload, "question_version_id") : null;
+  const reply_to = reply_given ? require_non_empty_string(payload, "reply_to") : null;
+  if (thread_given && version_given) {
+    return invalid_payload("question_version_id belongs to a new thread; do not give it with thread_id");
+  }
+  if (reply_given && !thread_given) {
+    return invalid_payload("reply_to needs the thread_id of the thread it answers in");
+  }
+  const { guard } = member_actor_with_guard(runtime, payload);
+
+  const question = runtime.db.get<{ current_version_id: string | null }>(
+    `SELECT o.current_version_id AS current_version_id
+       FROM questions q
+       JOIN objects o
+         ON o.project_id = q.project_id AND o.id = q.object_id AND o.kind = 'question'
+      WHERE q.project_id = ? AND q.object_id = ?`,
+    project.id,
+    question_id,
+  );
+  if (question === undefined || question.current_version_id === null) {
+    throw new ApiError("not_found", "question not found");
+  }
+
+  let thread_id: string;
+  let target_version_id: string | null = null;
+  const thread_created = given_thread_id === null;
+  if (given_thread_id !== null) {
+    const thread = runtime.db.get<{ object_id: string }>(
+      `SELECT object_id FROM threads
+        WHERE project_id = ? AND object_id = ? AND target_object_id = ?
+          AND context_kind = 'question_comment'`,
+      project.id,
+      given_thread_id,
+      question_id,
+    );
+    if (thread === undefined) {
+      throw new ApiError("not_found", "comment thread not found");
+    }
+    thread_id = thread.object_id;
+    if (reply_to !== null) {
+      const parent = runtime.db.get<{ object_id: string }>(
+        "SELECT object_id FROM messages WHERE project_id = ? AND thread_id = ? AND object_id = ?",
+        project.id,
+        thread_id,
+        reply_to,
+      );
+      if (parent === undefined) {
+        throw new ApiError("not_found", "reply_to message not found in this thread");
+      }
+    }
+  } else {
+    thread_id = runtime.new_id();
+    target_version_id = given_version_id ?? question.current_version_id;
+    const known = runtime.db.get<{ id: string }>(
+      "SELECT id FROM object_versions WHERE project_id = ? AND object_id = ? AND id = ?",
+      project.id,
+      question_id,
+      target_version_id,
+    );
+    if (known === undefined) {
+      throw new ApiError("not_found", "question version not found");
+    }
+  }
+
+  const thread_version_id = thread_created ? runtime.new_id() : null;
+  const message_id = runtime.new_id();
+  const message_version_id = runtime.new_id();
+  const result = {
+    project_id: project.id,
+    question_id,
+    thread_id,
+    message_id,
+    message_version_id,
+    thread_created,
+  };
+
+  insert_receipt(runtime, {
+    project_id: project.id,
+    actor_id,
+    action: "question.commented",
+    base_control_rev: null,
+    result,
+    ...guard_fields(guard),
+  });
+  const run_id = guard === null ? null : guard.run_id;
+
+  if (thread_created && thread_version_id !== null && target_version_id !== null) {
+    write_object(runtime, project.id, thread_id, "thread");
+    write_object_version(runtime, {
+      project_id: project.id,
+      object_id: thread_id,
+      kind: "thread",
+      version_id: thread_version_id,
+      version_no: 1,
+      based_on_version_id: null,
+      actor_id,
+      run_id,
+      content_hash: content_digest("thread", { state: "open", summary: "" }),
+    });
+    const thread = runtime.db.run(
+      `INSERT INTO threads
+         (project_id, object_id, target_object_id, target_version_id, context_kind)
+       VALUES (?, ?, ?, ?, 'question_comment')`,
+      project.id,
+      thread_id,
+      question_id,
+      target_version_id,
+    );
+    if (thread.changes !== 1n) {
+      throw new Error("the thread was not written");
+    }
+    const written_thread = runtime.db.run(
+      `INSERT INTO thread_versions
+         (project_id, version_id, object_id, state, summary)
+       VALUES (?, ?, ?, 'open', '')`,
+      project.id,
+      thread_version_id,
+      thread_id,
+    );
+    if (written_thread.changes !== 1n) {
+      throw new Error("the thread version was not written");
+    }
+    set_first_current_version(runtime, project.id, thread_id, thread_version_id);
+  }
+
+  write_object(runtime, project.id, message_id, "message");
+  write_object_version(runtime, {
+    project_id: project.id,
+    object_id: message_id,
+    kind: "message",
+    version_id: message_version_id,
+    version_no: 1,
+    based_on_version_id: null,
+    actor_id,
+    run_id,
+    content_hash: content_digest("message", { body_md, state: "published" }),
+  });
+  const written_message = runtime.db.run(
+    `INSERT INTO messages (project_id, object_id, thread_id, reply_to, submission_id)
+     VALUES (?, ?, ?, ?, NULL)`,
+    project.id,
+    message_id,
+    thread_id,
+    reply_to,
+  );
+  if (written_message.changes !== 1n) {
+    throw new Error("the message was not written");
+  }
+  const written_message_version = runtime.db.run(
+    `INSERT INTO message_versions
+       (project_id, version_id, object_id, thread_id, body_md, state)
+     VALUES (?, ?, ?, ?, ?, 'published')`,
+    project.id,
+    message_version_id,
+    message_id,
+    thread_id,
+    body_md,
+  );
+  if (written_message_version.changes !== 1n) {
+    throw new Error("the message version was not written");
+  }
+  set_first_current_version(runtime, project.id, message_id, message_version_id);
+
+  return {
+    result,
+    events: [
+      {
+        type: "question.commented",
+        run_id,
+        payload: { question_id, thread_id, message_id, message_version_id, thread_created },
       },
     ],
   };
@@ -984,6 +1606,10 @@ export interface SubmissionPlan {
   project_id: string;
   set_id: string;
   items: PlannedAnswer[];
+  /** After this submission every applicable required question of the form has a current answer. */
+  form_complete: boolean;
+  /** The applicable required questions that still have none (form order). */
+  missing_required: string[];
 }
 
 export type SubmissionPreparation =
@@ -1100,8 +1726,19 @@ export function prepare_submission(
   }
   if (!set_id_value.isWellFormed()) return problem(null, "invalid_payload");
   const set_id = set_id_value;
+  let mode: string | null = null;
+  if (input.mode !== undefined) {
+    if (typeof input.mode !== "string" || !SUBMIT_MODES.has(input.mode)) {
+      return problem(null, "invalid_payload");
+    }
+    mode = input.mode;
+  }
   const raw_answers = input.answers;
-  if (!Array.isArray(raw_answers) || raw_answers.length === 0) {
+  if (!Array.isArray(raw_answers)) return problem(null, "invalid_payload");
+  if (mode === "single" && raw_answers.length !== 1) {
+    return problem(null, "invalid_payload", { reason: "single_requires_one_item" });
+  }
+  if (raw_answers.length === 0) {
     return problem(null, "invalid_payload");
   }
 
@@ -1301,7 +1938,159 @@ export function prepare_submission(
     });
   }
 
-  return { ok: true, plan: { project_id, set_id, items } };
+  const status = form_status(db, project_id, set_id, items);
+  if (mode === "bundle") {
+    for (const item of items) {
+      if (status.hidden.has(item.question_id)) {
+        return problem(item.question_id, "invalid_payload", {
+          reason: "not_applicable",
+          question_id: item.question_id,
+        });
+      }
+    }
+    if (status.missing.length > 0) {
+      return problem(null, "invalid_payload", {
+        reason: "required_missing",
+        question_ids: status.missing,
+      });
+    }
+  }
+  return {
+    ok: true,
+    plan: {
+      project_id,
+      set_id,
+      items,
+      form_complete: status.missing.length === 0,
+      missing_required: status.missing,
+    },
+  };
+}
+
+interface FormStatus {
+  missing: string[];
+  /** Members whose show_if is false: not required, and no answer may be sent for them in a bundle. */
+  hidden: Set<string>;
+}
+
+/**
+ * Judge the form of `set_id` as it would stand after `items` are written.
+ * A question counts as answered by an item of this submission (a value, or a
+ * comment alone on a question that lets a comment stand as the answer) or by
+ * its current submitted answer pinned to the question's current version.
+ * A thread comment written elsewhere is never an answer. Read-only.
+ */
+function form_status(
+  db: Db,
+  project_id: string,
+  set_id: string,
+  items: PlannedAnswer[],
+): FormStatus {
+  const by_item = new Map(items.map((item) => [item.question_id, item]));
+  const info_cache = new Map<
+    string,
+    { current_version_id: string; allow: boolean; required: boolean; open: boolean; show_if: string } | null
+  >();
+  const info = (question_id: string) => {
+    const cached = info_cache.get(question_id);
+    if (cached !== undefined) return cached;
+    const row = db.get<{
+      current_version_id: string;
+      allow_comment_as_answer: bigint;
+      required: bigint;
+      state: string;
+      show_if: string;
+    }>(
+      `SELECT o.current_version_id AS current_version_id, qv.allow_comment_as_answer,
+              qv.required, qv.state, qv.show_if
+         FROM objects o
+         JOIN question_versions qv
+           ON qv.project_id = o.project_id AND qv.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.id = ? AND o.kind = 'question'`,
+      project_id,
+      question_id,
+    );
+    const value =
+      row === undefined
+        ? null
+        : {
+            current_version_id: row.current_version_id,
+            allow: Number(row.allow_comment_as_answer) === 1,
+            required: Number(row.required) === 1,
+            open: row.state === "open",
+            show_if: row.show_if,
+          };
+    info_cache.set(question_id, value);
+    return value;
+  };
+  const answer_of = (question_id: string): { value: unknown } | null => {
+    const known = info(question_id);
+    if (known === null) return null;
+    const item = by_item.get(question_id);
+    if (item !== undefined) {
+      if (item.has_value) return { value: item.value };
+      if (item.other !== null && known.allow) return { value: null };
+    }
+    const current = db.get<{ value: string; state: string; question_version_id: string }>(
+      `SELECT av.value, av.state, av.question_version_id
+         FROM answers a
+         JOIN objects ao ON ao.project_id = a.project_id AND ao.id = a.object_id
+         JOIN answer_versions av
+           ON av.project_id = a.project_id AND av.object_id = a.object_id
+          AND av.version_id = ao.current_version_id
+        WHERE a.project_id = ? AND a.question_id = ?`,
+      project_id,
+      question_id,
+    );
+    if (
+      current === undefined ||
+      current.state !== "submitted" ||
+      current.question_version_id !== known.current_version_id
+    ) {
+      return null;
+    }
+    try {
+      return { value: JSON.parse(current.value) as unknown };
+    } catch {
+      return { value: null };
+    }
+  };
+  const applicable = (show_if_text: string): boolean => {
+    let condition: unknown;
+    try {
+      condition = JSON.parse(show_if_text);
+    } catch {
+      return true;
+    }
+    if (!is_record(condition) || typeof condition.id !== "string" || !Array.isArray(condition.in)) {
+      return true;
+    }
+    const parent = answer_of(condition.id);
+    if (parent === null || parent.value === null) return false;
+    const chosen = Array.isArray(parent.value) ? parent.value : [parent.value];
+    const allowed = (condition.in as unknown[]).map((entry) => JSON.stringify(entry));
+    return chosen.some((entry) => allowed.includes(JSON.stringify(entry)));
+  };
+
+  const members = db.all<{ question_id: string }>(
+    "SELECT question_id FROM question_set_members WHERE project_id = ? AND set_id = ? ORDER BY position",
+    project_id,
+    set_id,
+  );
+  const missing: string[] = [];
+  const hidden = new Set<string>();
+  for (const member of members) {
+    const known = info(member.question_id);
+    if (known === null) continue;
+    if (!applicable(known.show_if)) {
+      hidden.add(member.question_id);
+      continue;
+    }
+    if (known.open && known.required && answer_of(member.question_id) === null) {
+      missing.push(member.question_id);
+    }
+  }
+  return { missing, hidden };
 }
 
 // ---------------------------------------------------------------------------
@@ -1402,6 +2191,8 @@ function run_submit_answers(runtime: CommandRuntime): CommandResult {
     submission_id,
     set_id: plan.set_id,
     answers: answer_entries,
+    form_complete: plan.form_complete,
+    missing_required: plan.missing_required,
   };
 
   insert_receipt(runtime, {
@@ -1675,6 +2466,10 @@ const QUESTION_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition
   ["question.publish_set", definition("question.set_published", run_publish_set)],
   ["question.prepare_draft", definition("question.draft_prepared", run_prepare_draft)],
   ["question.revise", definition("question.revised", run_revise)],
+  ["question.withdraw", definition(STATE_ACTION.withdraw, (runtime) => run_state_change(runtime, "withdraw"))],
+  ["question.defer", definition(STATE_ACTION.defer, (runtime) => run_state_change(runtime, "defer"))],
+  ["question.merge", definition(STATE_ACTION.merge, (runtime) => run_state_change(runtime, "merge"))],
+  ["question.comment_add", definition("question.commented", run_comment_add)],
   ["answer.submit", definition("answer.submitted", run_submit_answers)],
 ];
 

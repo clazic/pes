@@ -137,7 +137,7 @@ export function retryable_for(code: string): boolean {
   return code === "rate_limited" || code === "schema_not_ready";
 }
 
-/** Details from a core ApiError, kept only when they are plain strings/numbers/booleans. */
+/** Details from a core ApiError, kept only when they are plain strings/numbers/booleans (or a list of strings, e.g. question ids). */
 function plain_details(details: unknown): Record<string, unknown> | null {
   if (details === null || typeof details !== "object" || Array.isArray(details)) return null;
   const out: Record<string, unknown> = {};
@@ -145,9 +145,22 @@ function plain_details(details: unknown): Record<string, unknown> | null {
     if (typeof value === "bigint") out[key] = value.toString();
     else if (typeof value === "number") out[key] = String(value);
     else if (typeof value === "string" || typeof value === "boolean" || value === null) out[key] = value;
+    else if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) out[key] = [...value];
   }
   return out;
 }
+
+/**
+ * invalid_payload reasons that are 422 validation_failed over HTTP: the body is well formed, the content is
+ * not acceptable (a value outside the options, a bundle with a required question missing, ...).
+ */
+const VALIDATION_REASONS: ReadonlySet<string> = new Set([
+  "value_not_allowed",
+  "required_missing",
+  "not_applicable",
+  "single_requires_one_item",
+  "self_merge",
+]);
 
 /** Map a core ApiError (or anything else) to a Fail. Route code may refine it afterwards. */
 export function fail_from(error: unknown): Fail {
@@ -164,7 +177,7 @@ export function fail_from(error: unknown): Fail {
     }
   }
   if (!(code in ERROR_STATUS)) return new Fail("internal_error");
-  if (code === "invalid_payload" && details !== null && details.reason === "value_not_allowed") {
+  if (code === "invalid_payload" && details !== null && VALIDATION_REASONS.has(details.reason as string)) {
     return new Fail("validation_failed", { details });
   }
   return new Fail(code, { details: code === "rev_conflict" ? details : null });
