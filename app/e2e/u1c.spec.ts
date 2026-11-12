@@ -125,7 +125,7 @@ test("deep_link: 순서 넘김이 지난 라운드에서도 주소만 바꾼다"
 
 // 한계(R1): 가짜 클라이언트는 변경을 내지 않아 재그림이 없다 — 박자가 지나는 동안 글·초점이 유지되고 화면 밖 요청이 없다는 것만 본다(재그림 중 보존은 live-update.test.tsx).
 // 네트워크 0 은 명령 메뉴를 열고 거르고 AI 모드로 바꿔 글을 써 보는 길까지 포함한다(새 글리프·글꼴 요청이 같은 출처 밖으로 나가지 않는다).
-test("갱신이 도는 동안(3초 이상) 입력 중인 글과 초점이 유지되고 화면 밖 요청이 없다", async ({ page }) => {
+test("갱신이 도는 동안(3초 이상) 입력 중인 글과 초점이 유지되고 화면 밖 요청이 없다", async ({ page, baseURL }) => {
   await open(page, CURRENT);
   const requests: string[] = [];
   page.on("request", (r) => requests.push(r.url()));
@@ -135,10 +135,10 @@ test("갱신이 도는 동안(3초 이상) 입력 중인 글과 초점이 유지
   await page.waitForTimeout(U1C.active.every * 2 + 500);
   await expect(box).toBeFocused();
   await expect(box).toHaveValue("계속 쓰는 중");
-  expect(requests.filter((u) => !u.startsWith("http://127.0.0.1:4173"))).toEqual([]);
+  expect(requests.filter((u) => !u.startsWith(`${new URL(baseURL!).origin}/`))).toEqual([]);
 });
 
-test("명령 메뉴를 열고 거르고 AI 모드로 바꿔 써 보고 닫아도 같은 출처 밖 요청 0 (네트워크 0)", async ({ page }) => {
+test("명령 메뉴를 열고 거르고 AI 모드로 바꿔 써 보고 닫아도 같은 출처 밖 요청 0 (네트워크 0)", async ({ page, baseURL }) => {
   await open(page, CURRENT);
   const requests: string[] = [];
   const posts: string[] = [];
@@ -158,7 +158,7 @@ test("명령 메뉴를 열고 거르고 AI 모드로 바꿔 써 보고 닫아도
   await page.keyboard.press("Escape");
   await expect(menu(page)).toBeHidden();
   await page.waitForTimeout(500);
-  expect(requests.filter((u) => !u.startsWith("http://127.0.0.1:4173"))).toEqual([]);
+  expect(requests.filter((u) => !u.startsWith(`${new URL(baseURL!).origin}/`))).toEqual([]);
   // AI 연결이 없다 — GET 이 아닌 요청(보내기)은 하나도 없다(글꼴 subset 같은 같은 출처 GET 은 허용)
   expect(posts).toEqual([]);
 });

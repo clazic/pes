@@ -28,6 +28,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), appAddress()],
   resolve: { alias: { "@": path.resolve(here, "./src") } },
   server: { host: "127.0.0.1", port: 5173, strictPort: true },
-  preview: { host: "127.0.0.1", port: 4173, strictPort: true },
+  // PES_E2E_PORT: 앱 e2e(playwright.config.ts)가 고른 빈 포트. 없으면 4173(손으로 `npm run preview` 할 때)
+  preview: { host: "127.0.0.1", port: Number(process.env.PES_E2E_PORT) || 4173, strictPort: true },
   build: { sourcemap: false, chunkSizeWarningLimit: 900 },
 });
