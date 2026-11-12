@@ -319,3 +319,21 @@ test("[신규] OpenAPI 에 새 읽기 경로 둘이 GET 으로 적혀 있다", a
   assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/stages\/\{s\}\/rounds\/\{rd\}:\n\s+get:/);
   assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/stages\/\{s\}\/rounds\/\{rd\}\/threads:\n\s+get:/);
 });
+
+// ---------------------------------------------------------------------------
+// 판 번호 — 1차 리뷰 필수 1: 라운드·의견 읽기는 활성 판의 자료라서, 응답에 그 판 번호(작업 공간 읽기의 edition 과 같은 수)를 싣는다.
+
+test("[신규] 판 번호: 라운드 읽기와 의견 읽기 응답이 작업 공간의 edition 과 같은 활성 판 번호를 싣는다", async () => {
+  await with_api(async (env) => {
+    await make_form(env, [single_spec("질문")]);
+    const ws = assert_ok(await owner_get(env, "/workspace"));
+    assert.ok(Number.isInteger(ws.edition) && ws.edition >= 1);
+    const round = assert_ok(await owner_get(env, round_path("1")));
+    assert.equal(round.edition, ws.edition, "라운드 읽기 data.edition");
+    const threads = assert_ok(await owner_get(env, round_path("1", "/threads")));
+    assert.equal(threads.edition, ws.edition, "의견 읽기 data.edition");
+    // start 자리도 같다
+    const start = await owner_get(env, round_path("start"));
+    if (start.status === 200) assert.equal(start.json.data.edition, ws.edition);
+  });
+});

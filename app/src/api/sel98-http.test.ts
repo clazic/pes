@@ -290,3 +290,45 @@ describe("쓰기 응답의 영수증 — 추가 조회 없음", () => {
     expect(s.gets("/requests/")).toHaveLength(0);
   });
 });
+
+describe("판(edition) 확인 — 라운드 경로는 서버의 활성 판을 읽으므로, 앱이 보는 판과 다르면 그 자료를 쓰지 않는다 (SEL-98 1차 리뷰 필수 1)", () => {
+  const NEXT = ED + 1;
+  const sameEdition = { "GET /stages/research/rounds/2": { status: 200, body: ok(roundData({ edition: ED })) } };
+  const newerEdition = { "GET /stages/research/rounds/2": { status: 200, body: ok(roundData({ edition: NEXT })) } };
+
+  it("getRound: 판 번호가 같으면 그대로, 다르면 null (활성 판 자료를 옛 판 화면에 얹지 않는다)", async () => {
+    const same = await (await make(server(sameEdition))).getRound(SLUG, ED, "research", "2");
+    expect(same).toMatchObject({ round_id: 2, set_id: "qset-9" });
+    expect(await (await make(server(newerEdition))).getRound(SLUG, ED, "research", "2")).toBeNull();
+  });
+
+  it("getComments: 응답 판이 다르면 빈 목록, 같으면 그대로", async () => {
+    const threads = [{ thread_id: "th-1", question_id: "qst-1", question_version_id: "qvr-1b", question_version: 2, messages: [] }];
+    const route = (edition: number) => ({ "GET /stages/research/rounds/2/threads": { status: 200, body: ok({ edition, threads }) } });
+    expect(await (await make(server(route(ED)))).getComments(SLUG, ED, "research", "2")).toHaveLength(1);
+    expect(await (await make(server(route(NEXT)))).getComments(SLUG, ED, "research", "2")).toEqual([]);
+  });
+
+  it("reorderQuestions: 판이 다르면 쓰기 0 으로 거절(그 세트 id 로 새 판에 쓰지 않는다), 같으면 보낸다", async () => {
+    const order = { "POST /question-sets/qset-9/order": { status: 201, body: ok({ set: { id: "qset-10", version_no: 5, form_key: "main" }, members: [] }, { receipt: RECEIPT }) } };
+    const ok1 = server({ ...sameEdition, ...order });
+    await (await make(ok1)).reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-ed1");
+    expect(ok1.writes()).toHaveLength(1);
+    const bad = server({ ...newerEdition, ...order });
+    const e = await (await make(bad)).reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-ed2").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect(bad.writes()).toHaveLength(0);
+  });
+
+  it("addQuestion(번호 라운드): 판이 다르면 쓰기 0 으로 거절(새 판의 server_round_id 를 쓰지 않는다)", async () => {
+    const spec = { text: "새 질문", kind: "free_text", options: [], importance: "normal", required: false, default_value: null, show_if: null, direction: "ask_human" };
+    const add = { "GET /context": { status: 200, body: CONTEXT }, "POST /questions": { status: 201, body: ok({ question_set_id: "qset-11", question: { id: "qst-9", version_id: "qvr-9", version_no: "1", state: "open" } }, { receipt: RECEIPT }) } };
+    const same = server({ ...sameEdition, ...add });
+    await (await make(same)).addQuestion(SLUG, ED, "research", "2", spec, "k-ed3");
+    expect(same.writes()).toHaveLength(1);
+    const bad = server({ ...newerEdition, ...add });
+    const e = await (await make(bad)).addQuestion(SLUG, ED, "research", "2", spec, "k-ed4").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect(bad.writes()).toHaveLength(0);
+  });
+});

@@ -628,6 +628,8 @@ function json_or_null(text: string | null): unknown {
 
 /** The rounds place a request names: "start" (the stage-start questions, round null) or a round number. null = not a place. */
 export interface RoundPlace {
+  /** the number of the edition the place belongs to (the active edition) — the same number the work space read reports as `edition` */
+  edition_no: number;
   stage_id: string;
   stage_key: string;
   /** rounds.id for a numbered round, null for the stage-start place */
@@ -644,6 +646,9 @@ export function round_place(db: Db, project_id: string, edition_id: string, stag
     stage_key,
   );
   if (stage === undefined) return null;
+  const edition = db.get<{ edition_no: bigint }>("SELECT edition_no FROM editions WHERE project_id = ? AND id = ?", project_id, edition_id);
+  if (edition === undefined) return null;
+  const edition_no = Number(edition.edition_no);
   if (place === "start") {
     const rounds = db.all<{ state: string }>("SELECT state FROM rounds WHERE project_id = ? AND stage_id = ?", project_id, stage.id);
     // the same rule as the work space: a stage not started yet (pending, no round) has no stage-start place — unless a form was
@@ -657,7 +662,7 @@ export function round_place(db: Db, project_id: string, edition_id: string, stag
       if (published === undefined) return null;
     }
     const open = rounds.some((round) => round.state === "open");
-    return { stage_id: stage.id, stage_key: stage.key, server_round_id: null, round_no: null, state: stage.status === "asking" && !open ? "current" : "closed" };
+    return { edition_no, stage_id: stage.id, stage_key: stage.key, server_round_id: null, round_no: null, state: stage.status === "asking" && !open ? "current" : "closed" };
   }
   if (!/^[1-9][0-9]{0,14}$/.test(place)) return null;
   const round = db.get<{ id: string; state: string }>(
@@ -667,7 +672,7 @@ export function round_place(db: Db, project_id: string, edition_id: string, stag
     Number(place),
   );
   if (round === undefined) return null;
-  return { stage_id: stage.id, stage_key: stage.key, server_round_id: round.id, round_no: Number(place), state: round.state === "open" ? "current" : "closed" };
+  return { edition_no, stage_id: stage.id, stage_key: stage.key, server_round_id: round.id, round_no: Number(place), state: round.state === "open" ? "current" : "closed" };
 }
 
 /** The newest set of the place's form (form_key "main"), or undefined when no form was published there yet. */
@@ -770,6 +775,8 @@ export function round_form_data(db: Db, project_id: string, place: RoundPlace): 
     };
   });
   return {
+    // the round paths read the ACTIVE edition: the number lets a client that shows another edition see that and not use this data
+    edition: place.edition_no,
     stage: place.stage_key,
     round_id: place.round_no,
     server_round_id: place.server_round_id,
@@ -852,5 +859,5 @@ export function round_threads_data(db: Db, project_id: string, place: RoundPlace
       messages,
     };
   });
-  return { threads: out };
+  return { edition: place.edition_no, threads: out };
 }

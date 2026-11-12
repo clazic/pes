@@ -233,8 +233,14 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   }
   const roundPath = (stage: string, round: string): string => `/stages/${encodeURIComponent(stage)}/rounds/${encodeURIComponent(round)}`;
 
-  /** GET P/stages/{stage}/rounds/{round} → data. 서버 404 는 null, 그 밖의 거절은 PesApiError */
-  async function readRound(id: string, stage: string, round: string, signal?: AbortSignal): Promise<Json | null> {
+  /**
+   * 라운드·의견 읽기는 서버의 활성 판 자료다. 응답이 판 번호(`data.edition`)를 싣고 그것이 앱이 보는 판(`edition`)과 다르면 그 자료를 쓰지 않는다(null) —
+   * 옛 판 화면에 새 판의 질문을 얹거나, 그 세트·라운드 id 로 새 판에 쓰는 일을 막는다. 판 번호를 싣지 않은 응답은 확인할 수 없어 그대로 둔다.
+   */
+  const sameEdition = (data: Json, edition: number): boolean => typeof data.edition !== "number" || data.edition === edition;
+
+  /** GET P/stages/{stage}/rounds/{round} → data. 서버 404 와 다른 판의 자료는 null, 그 밖의 거절은 PesApiError */
+  async function readRound(id: string, stage: string, round: string, edition: number, signal?: AbortSignal): Promise<Json | null> {
     const res = await send(projectUrl(id, roundPath(stage, round)), { method: "GET", headers: headers(), credentials: "omit", ...(signal ? { signal } : {}) });
     if (!res.ok) {
       const error = await toApiError(res);
@@ -243,7 +249,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     }
     const body: unknown = await res.json();
     if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
-    return body.data;
+    return sameEdition(body.data, edition) ? body.data : null;
   }
 
   /** 순서 바꾸기를 같은 멱등 키로 다시 보낼 때 같은 폼 세트 id 로 보내려고 처음 알아낸 값을 둔다(이 클라이언트의 수명 동안) */
@@ -330,7 +336,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     getQuestionVersions: notConnected("질문 버전 기록 읽기"),
 
     /** GET P/stages/{stage}/rounds/{round}/threads — 의견 목록. 라운드를 못 찾으면(404) 빈 목록, 그 밖의 거절은 PesApiError */
-    async getComments(slug, _edition, stage, round) {
+    async getComments(slug, edition, stage, round) {
       const id = idOf(slug);
       if (id === undefined || !placeOf(round)) return [];
       const res = await send(projectUrl(id, `${roundPath(stage, round)}/threads`), { method: "GET", headers: headers(), credentials: "omit" });
@@ -340,8 +346,10 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         throw error;
       }
       const body: unknown = await res.json();
-      const threads = isRecord(body) && isRecord(body.data) && Array.isArray(body.data.threads) ? body.data.threads : null;
-      if (threads === null) throw new PesApiError(fallbackBody(500));
+      const data = isRecord(body) && isRecord(body.data) ? body.data : null;
+      const threads = data !== null && Array.isArray(data.threads) ? data.threads : null;
+      if (data === null || threads === null) throw new PesApiError(fallbackBody(500));
+      if (!sameEdition(data, edition)) return [];
       return threads.flatMap((t): CommentThreadView[] => {
         if (!isRecord(t) || typeof t.thread_id !== "string" || typeof t.question_id !== "string") return [];
         const messages = (Array.isArray(t.messages) ? t.messages : []).flatMap((m): CommentMessageView[] =>
@@ -357,14 +365,14 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
      * 순서 바꾸기: 라운드 읽기로 폼 세트 id 를 알고 POST P/question-sets/{set_id}/order. 같은 멱등 키의 다시 보내기는 처음 알아낸 세트 id 를 그대로 쓴다 —
      * 그 사이 서버 폼이 새 세트로 바뀌었어도(첫 요청이 닿았는데 답을 못 받은 경우) 요청 내용이 같아야 서버가 재생한다(내용이 다르면 409 idempotency_key_reuse).
      */
-    async reorderQuestions(slug, _edition, stage, round, orderedIds, key) {
+    async reorderQuestions(slug, edition, stage, round, orderedIds, key) {
       if (!key) throw invalid("$.headers.idempotency-key");
       const id = idOf(slug);
       if (id === undefined) throw new PesApiError(fallbackBody(404));
       const memo = `${slug}\u0000${stage}\u0000${round}\u0000${key}`;
       let setId = orderSets.get(memo);
       if (setId === undefined) {
-        const data = await timed((signal) => readRound(id, stage, round, signal));
+        const data = await timed((signal) => readRound(id, stage, round, edition, signal));
         if (data === null) throw new PesApiError(fallbackBody(404));
         if (typeof data.set_id !== "string" || !data.set_id) throw invalid("$.set_id", "서버 폼 세트를 알 수 없어 순서를 바꿀 수 없습니다.");
         setId = data.set_id;
@@ -375,7 +383,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       return result(w, { form_version: Number(set.version_no) });
     },
 
-    async addQuestion(slug, _edition, stage, round, body, key) {
+    async addQuestion(slug, edition, stage, round, body, key) {
       if (!key) throw invalid("$.headers.idempotency-key");
       if (idOf(slug) === undefined) throw new PesApiError(fallbackBody(404));
       if (body.direction === "ask_ai") throw new NotConnectedError("사람이 AI에게 묻는 질문 더하기");
@@ -384,7 +392,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         // 번호 라운드는 라운드 읽기의 server_round_id 를 round_id 로 보낸다(없으면 쓰기 0 으로 거절 — 지어내지 않는다). start 는 단계 시작 자리(round_id null)
         let round_id: string | null = null;
         if (round !== "start") {
-          const data = await timed((signal) => readRound(id, stage, round, signal));
+          const data = await timed((signal) => readRound(id, stage, round, edition, signal));
           if (data === null || typeof data.server_round_id !== "string" || !data.server_round_id) throw new PesApiError(fallbackBody(404));
           round_id = data.server_round_id;
         }
@@ -482,13 +490,13 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     /**
      * GET P/stages/{stage}/rounds/{start|번호} (SEL-98) — 폼 세트 id · 질문(서버 버전 id 포함) · 현재 답까지 한 번에 읽는다.
      * 그 경로가 404 이면(라운드 읽기가 없는 옛 서버, 또는 그 자리가 없음) 작업 공간 읽기로 폴백한다: 작업 공간에 자리가 있을 때만 질문 없는 빈 뷰, 없으면 null(지어내지 않음).
-     * 라운드 경로는 서버의 활성 판을 읽는다 — 판 번호(edition)는 폴백에서만 맞춰 본다.
+     * 라운드 경로는 서버의 활성 판을 읽는다 — 응답의 판 번호가 앱이 보는 판과 다르면 그 자료를 쓰지 않고 null 이다(작업 공간 폴백도 판이 다르면 null).
      */
     async getRound(slug, edition, stage, round) {
       const id = idOf(slug);
       const place = placeOf(round);
       if (id === undefined || !place) return null;
-      const data = await readRound(id, stage, round);
+      const data = await readRound(id, stage, round, edition);
       if (data !== null) return roundViewOf(data, stage);
       const w = await getWorkspace(slug, edition);
       if (!w) return null;
