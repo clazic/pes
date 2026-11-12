@@ -142,7 +142,7 @@ test("SEL-79 billing safety: the server read the body and then dropped the conne
   });
 });
 
-test("SEL-79 billing safety: same on a REUSED keep-alive socket (second call, body read, then dropped) -> lost, sent once", async () => {
+test("SEL-79 billing safety: same on the second call (fresh connection; body read, then dropped) -> lost, sent once", async () => {
   await with_server(async (server) => {
     expect_reply(await post(server.url, 1), "first call");
     server.mode = "destroy_after_body";
