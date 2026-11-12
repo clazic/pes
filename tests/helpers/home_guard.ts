@@ -25,8 +25,14 @@
 //                                  folder (layer 2 and the child guard's realpath own that), wildcards that expand into a protected folder from an
 //                                  ancestor (`globSync("*/x", { cwd: home })` — only the cwd and the pattern's own spelling are looked at), other
 //                                  channels (child processes, node:sqlite, native addons, `process.binding`).
+// 0. (SEL-103) a run that STARTS in the real account home is refused before any layer lists anything: require_temp_home.ts (`--import`) and the first import
+//    of this file compare HOME / USERPROFILE with the account home as strings (temp_home_check.ts) — no fs call on the real home.
 // Layer 2 reuses the Playwright globalSetup listing (tests/e2e/helpers/home_guard.ts). All of it works with a *fake* "real home"
 // too, so the guard itself is tested without touching anything real (tests/test_home_guard.test.ts).
+
+// SEL-103: FIRST import, on purpose — a run that starts in the real account home must fail here, before anything below (the snapshot helper, the guard) can list or
+// stat a path of it. ESM evaluates imports in order, so this side-effect module runs before the next ones. Strings only (temp_home_check.ts).
+import "./require_temp_home.ts";
 
 import assert from "node:assert/strict";
 import { createRequire, syncBuiltinESMExports } from "node:module";
@@ -36,10 +42,11 @@ import { fileURLToPath } from "node:url";
 import { after, before } from "node:test";
 
 import { snapshot_of } from "../e2e/helpers/home_guard.ts";
+import { PROTECTED_NAMES } from "./temp_home_check.ts";
 
 /** Folders of a real home no test may look at. `.pes` and `pes-projects` are also compared before / after (layer 2); `.claude` is denied only —
  * other Claude sessions write there all the time, so a before / after comparison of it is a flaky test, not a guard (SEL-95, D13). */
-export const PROTECTED_NAMES = [".pes", "pes-projects", ".claude"] as const;
+export { PROTECTED_NAMES }; // defined in temp_home_check.ts (the start check needs it and may not import this module)
 
 /** The account's real home, whatever $HOME / %USERPROFILE% say (the home a Python child must never open anything below). */
 export function account_home(): string {

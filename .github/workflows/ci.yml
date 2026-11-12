@@ -53,8 +53,15 @@ jobs:
         if: matrix.shard == 1
         run: npm run check:ddl
 
+      # SEL-103: 시험은 임시 HOME 에서 시작해야 한다 — 실제 계정 홈(러너의 홈 포함)에서 시작하면 홈 가드가 아무것도 훑기 전에 --import 진입점이 바로 실패시킨다.
       - name: Run tests (shard ${{ matrix.shard }}/8)
-        run: node --test --test-shard=${{ matrix.shard }}/8 "tests/**/*.test.ts"
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
+        run: |
+          mkdir -p "$HOME"
+          node --test --import ./tests/helpers/require_temp_home.ts --test-shard=${{ matrix.shard }}/8 "tests/**/*.test.ts"
 
   browser:
     name: ${{ matrix.os }} / Playwright (Chromium)
