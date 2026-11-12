@@ -8,6 +8,8 @@
  *  F1-2  인자 없는 context.get 의 references 목록이 기존 4000자 문자열 clip 을 타서 JSON 이 깨진 채 성공으로 가던 것 —
  *        목록도 객체 단위 JSON 예산(objects·questions 와 합친 전체 응답)으로 만들고, 넘치면 truncated·omitted·다음 쪽
  *        읽는 법(references_offset)을 밝힌다. 성공 JSON 은 어디서도 중간에서 잘리지 않는다.
+ *  M-99  origin/main(SEL-99 U4a) 합치기 뒤 새 출구 점검: thread.reply·followup.propose(A)의 인자도 철회 뒤 다시 실리지 않고,
+ *        참고자료 원본의 글(다른 프로젝트 객체)은 첨언 대상이 될 수 없다(스레드·후속 읽기는 현재 프로젝트 객체만 본다).
  */
 
 import assert from "node:assert/strict";
@@ -15,6 +17,7 @@ import { test } from "node:test";
 
 import { add_artifact, create_object } from "../scripts/pes_core/content.ts";
 import { FINISH, context_turn, open_stage, ready_project, start_run, with_a_env, type AEnv, type ScriptedTurn } from "./helpers/a_builtin_env.ts";
+import { rejects_api } from "./helpers/blob_env.ts";
 import { attached, revoke_access, source_go, type Source } from "./helpers/sel113_env.ts";
 
 /** the whole outbound request as text */
@@ -229,5 +232,57 @@ test("F1-2: references_offset with reference_id is refused; a bad offset is refu
     const tools = tool_messages(env, base + 1).map((t) => JSON.parse(t));
     assert.equal(tools.length, 2);
     for (const t of tools) assert.equal(t.ok, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-99 — SEL-99 exits after the merge
+
+test("M-99: thread.reply and followup.propose written after a withdrawn reference read are not sent again (their arguments are cleared)", async () => {
+  await with_a_env("openai_compatible", async (env) => {
+    await ready_project(env);
+    const o = await open_stage(env, "plan");
+    const { src, ref } = await attached(env, "m99a");
+    const base = script_fn(env, (n) =>
+      n === 1
+        ? reference_turn(ref.reference_id)
+        : n === 2
+          ? {
+              tools: [
+                { name: "thread.reply", args: { thread_id: "thr-none", text: `답글: ${src.report_marker}` } },
+                { name: "followup.propose", args: { text: `후속: ${src.report_marker}` } },
+              ],
+            }
+          : FINISH,
+    );
+    env.fake.on_call = async (n) => {
+      if (n - base === 2) await source_go(env, src, false, "m99a-revoke");
+    };
+    const result = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
+    assert.equal(env.fake.calls.length - base, 3, JSON.stringify(result));
+    const third = request_text(env, base + 2);
+    assert.equal(third.includes(src.report_marker), false, "neither the read nor the reply/follow-up arguments derived from it go out again");
+    for (const t of tool_messages(env, base + 2)) assert.equal(t.includes(src.report_marker), false, "no tool result echoes the text");
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+  });
+});
+
+test("M-99: a text of the referenced project cannot be annotated from this project; the refusal carries none of its content", async () => {
+  await with_a_env("openai_compatible", async (env) => {
+    await ready_project(env);
+    const { src } = await attached(env, "m99b");
+    const error = await rejects_api(
+      env.service.execute(env.ctx("m99b-ann"), "annotation.create", {
+        target_object_id: src.report.object_id,
+        target_version_id: src.report.version_id,
+        anchor: { exact_quote: src.report_marker },
+        body_md: "원본 글에 첨언",
+      }),
+      "not_found",
+      "validation_failed",
+    );
+    assert.equal(JSON.stringify({ message: error.message, details: (error as any).details }).includes(`${src.report_marker} 본문`), false);
+    const threads = env.db.all<{ n: bigint }>("SELECT count(*) AS n FROM anchors WHERE target_object_id = ?", src.report.object_id);
+    assert.equal(Number(threads[0]!.n), 0, "no anchor points at the other project's text");
   });
 });

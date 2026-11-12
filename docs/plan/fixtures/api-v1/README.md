@@ -98,7 +98,7 @@
    - `retryable`은 **같은 요청을 자동 재시도할 수 있는지**다. 충돌·정책 차단·사람 전용 위반은 `false`다.
    - `target`은 문제 필드의 JSON 경로다. `details`를 대체하지 않는다.
    - `target`·`details` 키는 늘 있다. 한 필드를 가리킬 수 없으면 `target`은 `null`, 기계가 읽을 값이 없으면 `details`는 `null`이다.
-   - `details`는 `expected`/`current`(rev_conflict), 상태 이름(`stage_not_active`·`already_sealed`·`stale_stage`), 410의 `next_cursor`·`snapshot` 같은 기계가 읽을 값만 담는다. 다른 실행의 lease 보유자(`holder_run_id`)처럼 남의 정보는 알리지 않는다.
+   - `details`는 `expected`/`current`(rev_conflict), 상태 이름(`stage_not_active`·`already_sealed`·`stale_stage`), 첨언·후속의 `thread_closed`(`thread_id`·`state`)·`already_resolved`(`thread_id`·`state`·`resolution_id`)·`basis_changed`(`expected`·`current`·`current_rev`), 410의 `next_cursor`·`snapshot` 같은 기계가 읽을 값만 담는다. 다른 실행의 lease 보유자(`holder_run_id`)처럼 남의 정보는 알리지 않는다.
    - `next_action`은 stage-1-api 3절의 오류 봉투를 따른다.
 5. 쓰기 요청은 `Idempotency-Key`를 필수로 둔다. 같은 키·같은 요청은 원래 결과를 재생하고, 같은 키·다른 요청은 `idempotency_key_reuse`로 거부한다.
 6. 인증은 자리표시자만 쓴다. `${PES_AGENT_TOKEN}`, `${PES_SESSION}`, `${PES_CSRF}`는 실제 값이 아니다.
@@ -119,7 +119,7 @@
 11. 받기만 하고 저장하지 않는 필드: `submissions`의 `submitted_via`·`client_request_id`(멱등 키는 헤더가 진짜). 저장하지 않으면 결과가 달라지는 값 — `questions`의 `direction: "human_to_agent"`, `rounds`의 `purpose`·`question_set_id` — 은 400으로 거부한다. `heartbeat`의 `progress`(`{phase, observed_at?}`)는 영수증·`run.heartbeat` 사건에 저장하고, 응답에는 저장된 값이 `data.progress`로 실린다(재전송이면 처음 값, 2026-11-11 PR20a). `GET /requests/{key}` 응답에는 영수증의 `run_id`가 실린다. `runs`는 소유자 세션 전용 본문 `{import:{results, request_id, stage_id?, round_id?, claimed_tool?, claimed_model?, expected_control_rev?, expected_heads?, app?}}`도 받는다(명시적 전달 가져오기, `via=import`; 멱등 키는 `import-<request_id>`여야 하고, 승인된 단계·봉인된 라운드는 409 `conflict`, 같은 자료를 둘 이상 말하면 400 `invalid_payload`; `app`은 닫힌 목록 `claude_app`·`codex_app`·`opencode_app`이고 없으면 `claude_app`, 목록 밖은 400 `invalid_payload`이며 서버가 그 값으로 전달용 실행의 runtime·provider를 정한다 — PR20c). `results` 경로는 에이전트 토큰 전용이라 소유자 세션은 403이다.
 12. 인계(`handoffs.json`)는 같은 run을 `queued`로 되돌린다. `target_actor_id`·`target_mode`는 생략하거나 그 run의 actor·mode와 같아야 하며(정상 사례의 `act_…`는 그 run의 actor 자리표시자), 다르면 400 `invalid_payload`다. 입력(`inputs.json`) 항목의 `object_id`는 답 object이고 답 본문은 `versions.json` 경로(`/objects/{object_id}/versions/{input_version_id}`)의 `content`(`question_version_id`·`value`·`state`·`comment`)로 읽는다.
 13. `normal`·`error` 밖의 장면은 최상위 `scenes: {"<이름>": {request, response}}`에 둔다(모양은 `normal`과 같다). `versions.json`의 `scenes.answer`·`scenes.question`은 답·질문 버전의 실제 `content` 예이고, `handoffs.json`의 `scenes.target_mismatch`는 다른 actor로 인계 → 400 `invalid_payload`(`target: $.body.target_actor_id`, 쓰기 0)다. 계약 시험이 각 장면을 실제 앱에 보내 같은 응답인지 본다.
-14. (SEL-90 U2a) 질문 철회·보류·합치기는 파일 하나씩이다(`question-withdraw.json`·`question-defer.json`·`question-merge.json`, 정상 201 `data.question.state` + `previous_answers_preserved:true`, 대표 오류 409 `conflict`=잘못된 전이). `threads.json` 의 `normal`·`error` 는 `annotation`(앵커) 장면이라 U4a 전까지 501 `not_supported` 이고, 질문 의견 장면(`context_kind: question_comment`, 201)은 같은 파일의 최상위 `extra: [{name, request, response}]` 에 둔다.
+14. (SEL-90 U2a) 질문 철회·보류·합치기는 파일 하나씩이다(`question-withdraw.json`·`question-defer.json`·`question-merge.json`, 정상 201 `data.question.state` + `previous_answers_preserved:true`, 대표 오류 409 `conflict`=잘못된 전이). `threads.json` 의 `normal`·`error` 는 `annotation`(앵커) 장면이다(3단계 U4a SEL-99 부터 실제로 201/422 — `start_cp`/`end_cp` 는 code point, `end_cp` 배타라 `end_cp - start_cp` 가 인용문 길이). 에이전트 요청은 리스를 쥔 때만 되므로 실제 호출은 본문에 `run_id`·`lease_id`·`fence` 를 더한다(예제 본문에는 자리표시자를 넣지 않는다: 계약 시험이 진짜 리스 값을 더해 보낸다). 질문 의견 장면(`context_kind: question_comment`, 201)은 같은 파일의 최상위 `extra: [{name, request, response}]` 에 둔다.
 15. (SEL-98 U2d) 질문 순서 바꾸기는 파일 하나(`question-set-order.json`, `POST P/question-sets/{set}/order`)다. 정상 201 `data.set`·`data.members`(새 세트 하나) + `receipt`, 대표 오류 409 `conflict`(details.reason `stale_set`, target `$.path.set`) — 오류 장면은 같은 세트를 한 번 먼저 바꿔 옛 세트로 만든다. 같은 순서(`no_change`)·순열 아님(`not_a_permutation`)은 422 `validation_failed`로 시험 파일(`test_sel98_order_rules`)이 고정한다.
 
 ## 3. 6절 동작별 파일
@@ -138,7 +138,7 @@
 | 변경분 | `changes.json` | `cursor_expired` |
 | 파일 | `uploads.json`, `uploads-put.json`, `uploads-complete.json`, `files-content.json` | `invalid_payload`(`sha256:` 접두), `invalid_payload`(해시 불일치), `conflict`(아직 안 올림), `policy_blocked` |
 | 첨언·답글 | `threads.json`, `thread-messages.json` | `validation_failed`, `thread_closed` |
-| 해결·후속 적용 | `thread-resolutions.json`, `followup-apply.json` | `already_resolved`, `basis_changed` |
+| 해결·후속 적용 | `thread-resolutions.json`, `followup-apply.json` | `already_resolved`, `basis_changed` (3단계 U4a: 해결·적용은 사람만 — 파일의 `auth` 칸의 '허가된 에이전트'는 이번에 열지 않는다) |
 | 가정·결정·반영 | `assumptions.json`, `decisions.json`, `reflections.json` | `validation_failed`, `supersedes_conflict`, `evidence_required` |
 | 라운드 시작·봉인 | `rounds.json`, `round-seal.json` | `stage_not_active`, `already_sealed` |
 | 단계 승인·reopen·판 시작·Go 정책·토큰·삭제 | `stage-approve.json`, `stage-reopen.json`, `editions.json`, `policy-revisions.json`, `agent-tokens.json`, `project-deletion.json` | `stale_stage`, `human_required`, `active_edition_exists`, `owner_required`, `confirmation_mismatch` |

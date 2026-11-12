@@ -47,6 +47,9 @@ export const TOOLS = [
   "pes_assumption_propose",
   "pes_decision_propose",
   "pes_reflection_write",
+  // SEL-99 U4a: 스레드 답글과 후속 제안(해결·채택·다시 붙이기 도구는 없다) — 도구 16개 (leader 승인)
+  "pes_thread_reply",
+  "pes_followup_propose",
 ] as const;
 
 export type ToolName = (typeof TOOLS)[number];

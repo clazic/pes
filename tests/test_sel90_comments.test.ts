@@ -254,7 +254,8 @@ test("POST P/threads: 잘못된 요청은 거부하고 쓰지 않는다 (키 없
     assert_final_error(await call(env, { method: "POST", path: P(env, "/threads"), auth: "owner", body: ok_body, key: null }), 400, "invalid_payload", { target: /idempotency-key/i });
     assert_final_error(await owner_post(env, "/threads", { ...ok_body, initial_message: { body_md: "  " } }), 422, "validation_failed", { target: "$.body.initial_message.body_md" });
     assert_final_error(await owner_post(env, "/threads", { ...ok_body, context_kind: "bogus" }), 422, "validation_failed", { target: "$.body.context_kind" });
-    assert_final_error(await owner_post(env, "/threads", { ...ok_body, context_kind: "annotation" }), 501, "not_supported");
+    // SEL-99 U4a (leader 승인: 미지원→지원): annotation 은 이제 앵커가 필요하다 — 앵커 없이는 400, 질문 의견에 앵커를 붙여도 400
+    assert_final_error(await owner_post(env, "/threads", { ...ok_body, context_kind: "annotation" }), 400, "invalid_payload", { target: "$.body.anchor" });
     assert_final_error(await owner_post(env, "/threads", { ...ok_body, target_object_id: "no-such-question" }), 404, "not_found");
     assert_final_error(await owner_post(env, "/threads", { ...ok_body, surprise: 1 }), 400, "invalid_payload");
     assert_final_error(await owner_post(env, "/threads", { target_object_id: q, context_kind: "question_comment" }), 400, "invalid_payload", { target: "$.body.initial_message" });
@@ -306,16 +307,18 @@ test("API: 리스를 쥔 에이전트는 의견을 쓸 수 있고 행위자는 �
   });
 });
 
-test("capabilities: P/threads 와 P/threads/{t}/messages 는 지원 목록으로 옮겨가고, resolutions 는 계속 미지원이다", async () => {
+test("capabilities: P/threads 와 P/threads/{t}/messages 는 지원 목록으로 옮겨가고, resolutions 도 U4a 에서 지원이 된다", async () => {
   await with_api(async (env) => {
     const caps = assert_ok(await call(env, { method: "GET", path: "/api/v1/capabilities", auth: "owner" }));
     for (const route of ["POST /api/v1/projects/{id}/threads", "POST /api/v1/projects/{id}/threads/{t}/messages"]) {
       assert.ok(caps.routes.includes(route), `routes 에 ${route}`);
       assert.ok(!caps.unsupported.includes(route), `${route} 는 더 이상 미지원이 아니다`);
     }
-    assert.ok(caps.unsupported.includes("POST /api/v1/projects/{id}/threads/{t}/resolutions"), "해결은 U4 몫이라 미지원 그대로");
+    // SEL-99 U4a (leader 승인: 미지원→지원)
+    assert.ok(!caps.unsupported.includes("POST /api/v1/projects/{id}/threads/{t}/resolutions"), "해결은 U4a 가 켠다");
+    assert.ok(caps.routes.includes("POST /api/v1/projects/{id}/threads/{t}/resolutions"));
     const res = await owner_post(env, "/threads/no-such-thread/resolutions", {});
-    assert.equal(res.status, 501);
+    assert.equal(res.status, 400, "본문이 비어 있으면 400(지원되는 길이므로 501 이 아니다)");
   });
 });
 

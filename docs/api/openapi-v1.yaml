@@ -80,6 +80,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    FollowupId:
+      name: f
+      in: path
+      required: true
+      schema: { type: string }
     StageId:
       name: s
       in: path
@@ -568,15 +573,37 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    AnchorBody:
+      type: object
+      required: [exact_quote]
+      additionalProperties: false
+      description: |
+        A quoted stretch of one version of a text. Positions are CODE POINTS (an emoji is 1, a ZWJ family emoji is 3, a Hangul
+        syllable is 1) of the version's body_md exactly as stored (text_format_version 1: no normalization), end_cp is exclusive,
+        so end_cp - start_cp is the quote's length in code points. Without a position the quote must stand in one place (prefix and
+        suffix may tell the places apart); with a wrong position the place the context picks is used (anchor_status "moved");
+        the server never picks one of several places on its own (422 ambiguous_quote).
+      properties:
+        exact_quote: { type: string, minLength: 1 }
+        prefix: { type: string }
+        suffix: { type: string }
+        start_cp: { type: integer, minimum: 0 }
+        end_cp: { type: integer, minimum: 0 }
     ThreadCreateBody:
       type: object
       required: [target_object_id, context_kind, initial_message]
       additionalProperties: false
+      description: |
+        context_kind "question_comment": a comment on a question (target_object_id is a question; `anchor` is not allowed, 400).
+        context_kind "annotation" (SEL-99, stage 3 U4a): a comment on a quoted stretch of a text (target_object_id is a text
+        (artifact), target_version_id its version or the current one; `anchor` is required). A token needs the lease (run_id, lease_id, fence).
+        201 data = {thread:{id, state:"open", anchor_id, anchor_status:"exact"|"moved"}, message:{id, version_no:"1"}} for an annotation.
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
-        target_object_id: { type: string, minLength: 1, description: "The question the comment is about" }
-        target_version_id: { type: string, description: "A version of that question; the current one when absent" }
-        context_kind: { type: string, enum: [question_comment, annotation], description: "annotation is 501 not_supported until U4a" }
+        target_object_id: { type: string, minLength: 1, description: "The question the comment is about, or the text the annotation is on" }
+        target_version_id: { type: string, description: "A version of that object; the current one when absent" }
+        context_kind: { type: string, enum: [question_comment, annotation] }
+        anchor: { $ref: "#/components/schemas/AnchorBody" }
         initial_message:
           type: object
           required: [body_md]
@@ -586,6 +613,77 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    ThreadResolutionBody:
+      type: object
+      required: [resolution, reason]
+      additionalProperties: false
+      description: |
+        The owner session closes a thread (a token is 403 human_required). RESOLVED IS NOT APPLIED: the text and the reflection
+        entries do not change; a change to be made becomes a follow-up in state "proposed" (followup.kind must be the resolution;
+        "none" takes no follow-up; the others need one). reason is stored as the closing message.
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        resolution: { type: string, enum: [edit_text, next_round_task, reopen_stage, none] }
+        reason: { type: string, minLength: 1 }
+        followup:
+          type: object
+          additionalProperties: false
+          properties:
+            kind: { type: string, enum: [edit_text, next_round_task, reopen_stage] }
+            description: { type: string }
+            proposed_body_md: { type: string, description: "edit_text: the new text (stored as a version that is not the current one)" }
+            target_version_id: { type: string, description: "edit_text: the version the change is based on (the current one when absent)" }
+            target_stage_id: { type: string, description: "next_round_task and reopen_stage: required" }
+            target_round_id: { type: string }
+    ThreadReanchorBody:
+      type: object
+      additionalProperties: false
+      description: |
+        Without start_cp/end_cp: judge the anchor again against a version (default the current one) - exact, moved, ambiguous (candidates
+        only, nothing is chosen) or lost (nothing is deleted); a judgement is a new row, never an update. With start_cp and end_cp
+        (both): the owner session pins the anchor to that stretch (a token is 403 human_required).
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        version_id: { type: string }
+        start_cp: { type: integer, minimum: 0 }
+        end_cp: { type: integer, minimum: 0 }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    FollowupCreateBody:
+      type: object
+      required: [origin_thread_id, kind, description]
+      additionalProperties: false
+      description: |
+        Propose a follow-up of a thread (the owner session, or a token holding the lease). A proposal is never an adoption.
+        edit_text needs proposed_body_md (stored as a new version that is NOT the current one; base_version_id defaults to the current
+        version); next_round_task and reopen_stage need target_stage_id.
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        origin_thread_id: { type: string, minLength: 1 }
+        kind: { type: string, enum: [edit_text, next_round_task, reopen_stage, none] }
+        description: { type: string, minLength: 1 }
+        proposed_body_md: { type: string }
+        base_version_id: { type: string }
+        target_stage_id: { type: string }
+        target_round_id: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    FollowupApplyBody:
+      type: object
+      required: [base_version_id, expected_rev]
+      additionalProperties: false
+      description: |
+        The owner session adopts a follow-up (3단계 U4a: people only; an agent token is 403 human_required - an agent applying a
+        follow-up is left for later). edit_text: the proposed text becomes a NEW version of the text and the current version moves to
+        it (the old version stays). base_version_id must be the version the follow-up was proposed for AND still the current one
+        (else 409 basis_changed, nothing changes); expected_rev is the follow-up's current version number (else 409 rev_conflict).
+        Applying neither resolves the thread nor writes a reflection entry.
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        expected_rev: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
     ThreadMessageBody:
       type: object
       required: [body_md]
@@ -1524,7 +1622,7 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/threads:
     post:
-      summary: Start a comment thread on a question (never an answer)
+      summary: Start a comment thread on a question (never an answer), or on a quoted stretch of a text (annotation)
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1547,12 +1645,212 @@ paths:
         "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: A question or answer breaks the rules }
-        "501": { description: "context_kind annotation is not supported yet (U4a)" }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: Read threads (current row each), filtered by ?target_object_id= ?context_kind= ?state=
+      description: |
+        data = {threads:[{id, context_kind, state, target_object_id, target_version_id, message_count (number), anchor_status|null, summary}]}.
+        anchor_status is where the anchor stands in the current version of its text (exact, moved, ambiguous or lost).
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: target_object_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: context_kind
+          in: query
+          required: false
+          schema: { type: string, enum: [annotation, question_comment, general] }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [open, resolved, archived] }
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Unknown context_kind or state }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads/{t}:
+    get:
+      summary: Read a thread with its anchor (as made, and where it stands in the current version), messages and follow-ups
+      description: |
+        data = {thread:{id, context_kind, state, target_object_id, target_version_id, summary, resolution|null{resolution, reason, followup_id|null,
+        message_version_id}}, anchor|null{id, exact_quote, prefix, suffix, text_format_version, start_cp, end_cp, target_version_id, status,
+        current{evaluated_version_id, status, start_cp|null, end_cp|null, text|null, candidates, confirmed_by_actor_id|null}},
+        messages:[{id, version_id, body_md, state, reply_to|null, actor_id, created_at}], followups:[{id, kind, state}]}.
+        anchor.status is the first judgement; anchor.current is judged against the current version without writing: exact, moved, ambiguous
+        (candidates only) or lost (the quote and the thread stay) are shown as they are.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ThreadId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The thread
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project or thread }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads/{t}/resolutions:
+    post:
+      summary: Close a thread with a reason and, for a change to be made, a proposed follow-up (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ThreadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ThreadResolutionBody" }
+      responses:
+        "201":
+          description: "data = {thread:{id, state:\"resolved\"}, followup:{id, state:\"proposed\"}|null, applied:false, note}. Resolved is not applied."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "A token tried it (human_required)" }
+        "404": { description: Unknown project or thread }
+        "409": { description: "already_resolved (details {thread_id, state, resolution_id}, next_action reread_thread) or idempotency key reuse" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A field breaks the rules (resolution, reason, followup) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads/{t}/reanchor:
+    post:
+      summary: Judge an annotation's anchor again (adds a judgement row), or pin it to a stretch (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ThreadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ThreadReanchorBody" }
+      responses:
+        "201":
+          description: "data = {thread_id, anchor:{id, status, start_cp, end_cp, candidates, evaluated_version_id, resolution_id, confirmed_by_actor_id}}. lost and ambiguous are answers, not errors."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "A token without the lease (forbidden), or a token pinning a stretch (human_required)" }
+        "404": { description: Unknown project, thread or version }
+        "409": { description: Idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: The stretch is empty or outside the text, or the version has no text }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/followups:
+    post:
+      summary: Propose a follow-up of a thread (owner session or a token holding the lease; never an adoption)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FollowupCreateBody" }
+      responses:
+        "201":
+          description: "data = {followup:{id, kind, state:\"proposed\", version_no:\"1\", base_version_id|null}}"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or missing lease }
+        "404": { description: Unknown project, thread or stage }
+        "409": { description: Idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A field breaks the rules (kind, description) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: Read follow-ups (current row each), filtered by ?thread_id= ?state= ?kind=
+      description: |
+        data = {followups:[{id, kind, state, description, version_no (decimal string), origin_thread_id, origin_version_id, base_version_id|null,
+        proposed_version_id|null, proposed_body_md|null, result_version_id|null, applied_tx_id|null, confirmed_by_actor_id|null,
+        target_stage_id|null, target_round_id|null}]}. A value outside the known states or kinds is 400 invalid_payload.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: thread_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [proposed, accepted, running, applied, deferred, rejected, cancelled] }
+        - name: kind
+          in: query
+          required: false
+          schema: { type: string, enum: [edit_text, next_round_task, reopen_stage, none] }
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Unknown state or kind }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/followups/{f}/apply:
+    post:
+      summary: Adopt a follow-up (owner session only); an edit becomes a new version of the text
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/FollowupId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FollowupApplyBody" }
+      responses:
+        "200":
+          description: "data = {followup:{id, state:\"applied\", applied_tx_id, result_version_id|null}, thread:{id, state}|null}. The thread is not resolved by it."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "A token tried it (human_required)" }
+        "404": { description: Unknown project or follow-up }
+        "409": { description: "basis_changed (details {expected, current, current_rev}, next_action reread_followup), rev_conflict, a follow-up that cannot be applied, or idempotency key reuse" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: The follow-up has no proposed text yet }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/threads/{t}/messages:
     post:
-      summary: Add a message to a question comment thread
+      summary: Add a message to a thread (a question comment thread or an annotation thread)
+      description: |
+        A thread that is resolved or archived takes no message: 409 thread_closed (details {thread_id, state}, next_action open_new_thread).
+        Annotation thread: 201 data = {thread_id, message:{id, version_no, author_actor_id}}.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/ThreadId"
