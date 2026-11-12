@@ -220,7 +220,7 @@ test("A: context.get lists allowed materials only; a denied file's name, ids, ha
     // 2) deny: 이후 호출에는 흔적이 없다.
     await env.service.execute(env.ctx("a-deny"), "file.ai_access_set", { file_policy_id: secret.data.file_policy_id, ai_access: "deny" });
     const mark = env.fake.bodies().length;
-    const opened2 = await open_stage(env, "research");
+    const opened2 = opened;
     set_script(env, [context_turn(), FINISH]);
     await start_run(env, { stage_id: opened2.stage_id, round_id: opened2.round_id });
     const after = env.fake.bodies().slice(mark);
@@ -234,7 +234,7 @@ test("A: context.get lists allowed materials only; a denied file's name, ids, ha
     // 3) allow 로 되돌리면 다시 나간다.
     await env.service.execute(env.ctx("a-allow"), "file.ai_access_set", { file_policy_id: secret.data.file_policy_id, ai_access: "allow" });
     const mark2 = env.fake.bodies().length;
-    const opened3 = await open_stage(env, "analyze");
+    const opened3 = opened;
     set_script(env, [context_turn(), FINISH]);
     await start_run(env, { stage_id: opened3.stage_id, round_id: opened3.round_id });
     const again = env.fake.bodies().slice(mark2).map((b: any) => request_text(b)).join("\n");
