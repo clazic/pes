@@ -100,6 +100,9 @@ export function extract_text_isolated(original_name: string | null, bytes: Uint8
       transferList: [input, port2],
       resourceLimits: { maxOldGenerationSizeMb: 64 },
     });
+    // A supervisor that throws while starting (e.g. no resources for its Worker) emits "error" on the event loop later; with no listener
+    // that would end the whole server. The failure is already answered here by the time limit, so the event is only heard.
+    supervisor.on("error", () => undefined);
     supervisor.once("exit", () => {
       exited = true;
       if (counted) {

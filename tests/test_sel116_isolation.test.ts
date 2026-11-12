@@ -145,3 +145,15 @@ test("isolation: where the process may not start workers (node --permission with
   assert.deepEqual(read(false), { status: "failed", reason: "worker_unavailable" });
   assert.deepEqual(read(true), { status: "extracted", reason: null });
 });
+
+test("isolation: a supervisor thread that throws while starting does not kill the process (its error event is heard)", async () => {
+  // worker_url is not a URL: the supervisor throws at its very first line. The caller still gets a failed outcome (the main thread
+  // cannot be woken by an error event while it waits, so this ends by its own time limit) and the process lives on.
+  const out = extract_text_isolated("a.txt", BYTES, { worker_url: "not a url", timeout_ms: 300, end_grace_ms: 100 });
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "extract_timeout");
+  // let the event loop run: the supervisor's error event is delivered here
+  await new Promise((done) => setTimeout(done, 300));
+  assert.equal(unfinished_extraction_threads(), 0);
+  assert.equal(extract_text_isolated("a.txt", BYTES).status, "extracted");
+});
