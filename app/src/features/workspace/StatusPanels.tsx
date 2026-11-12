@@ -27,7 +27,8 @@ function RunRow({ run }: { run: RunView }) {
     <li data-run={run.id} data-status={run.status} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t py-1.5 first:border-t-0 first:pt-0">
       <StatusText of="run" value={run.status} />
       <span className="text-caption text-muted-foreground">
-        방식 {run.mode} · {STAGE_LABEL[run.stage]}
+        방식 {run.mode}
+        {run.stage ? ` · ${STAGE_LABEL[run.stage]}` : ""}
       </span>
       {run.external_stop ? <span className="text-caption text-ink-2">{STOP_LABEL[run.external_stop] ?? "알 수 없음"}</span> : null}
     </li>

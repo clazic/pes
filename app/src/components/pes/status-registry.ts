@@ -47,6 +47,7 @@ export const STATUS = {
     running: d("실행 중", "ring", "run", "runs.status = running"),
     queued: d("대기", "dash", "off", "runs.status = queued"),
     waiting_human: d("사람 답 기다림", "pause", "warn", "runs.status = waiting_human"),
+    blocked_usage: d("사용량 멈춤", "square", "warn", "runs.status = blocked_usage"),
     interrupted: d("중단됨", "square", "bad", "runs.status = interrupted"),
     cancelled: d("취소됨", "hsquare", "off", "runs.status = cancelled"),
     handed_off: d("인계됨", "tri", "unk", "runs.status = handed_off"),
@@ -55,10 +56,17 @@ export const STATUS = {
   },
   // 나간 전송(outbound_dispatches) — 취소 시도와 결과를 모르는 것은 같은 말로 뭉개지 않는다
   dispatch: {
+    prepared: d("준비됨", "dash", "off", "outbound_dispatches.state = prepared"),
+    authorized: d("허가됨", "hsquare", "run", "outbound_dispatches.state = authorized"),
     sent: d("보냄", "circle", "ok", "outbound_dispatches.state = sent"),
+    response: d("응답 받음", "ring", "run", "outbound_dispatches.state = response"),
+    adopted: d("반영됨", "circle", "ok", "outbound_dispatches.state = adopted"),
+    blocked: d("막힘", "square", "warn", "outbound_dispatches.state = blocked"),
+    failed: d("실패", "square", "bad", "outbound_dispatches.state = failed"),
+    unknown: d("알 수 없음", "dotring", "unk", "outbound_dispatches.state = unknown — 결과를 모름"),
+    // 아래 둘은 서버가 보내지 않는 옛 값 — 사전이 계속 읽는다(취소 시도는 별도 칸 cancel_state 로 온다)
     cancel_requested: d("취소 시도", "tri", "warn", "취소를 요청했지만 끝난 것은 아님"),
     cancelled: d("취소됨", "hsquare", "off", "취소가 끝남 — 이미 읽힌 자료의 회수를 뜻하지 않는다"),
-    unknown: d("알 수 없음", "dotring", "unk", "결과를 모름"),
   },
 } as const satisfies Record<string, Record<string, StatusDef>>;
 

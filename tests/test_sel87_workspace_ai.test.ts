@@ -404,3 +404,22 @@ test("the existing fields are untouched and the new ones add to them; no Korean 
     assert.equal(state_signature(env.db), before, "GET workspace stays read-only");
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// 6. 목록 상한 (leader 결정: dispatches · runs 는 각각 최근 50건만, 응답 안에서는 생성 순서 유지)
+
+test("list cap: 60 runs and 60 dispatches → the newest 50 of each, still oldest-first; the oldest 10 are left out", async () => {
+  await with_api(async (env) => {
+    const pad = (i: number) => String(i).padStart(3, "0");
+    for (let i = 1; i <= 60; i += 1) add_run(env, `run-${pad(i)}`, { mode: "A" });
+    for (let i = 1; i <= 60; i += 1) add_dispatch(env, `disp-${pad(i)}`, `run-${pad(i)}`, "sent");
+    const data = await read(env);
+    const run_ids = (data.runs as any[]).map((r) => r.id);
+    const dispatch_ids = (data.ai_connection.dispatches as any[]).map((d) => d.id);
+    assert.equal(run_ids.length, 50);
+    assert.equal(dispatch_ids.length, 50);
+    assert.deepEqual(run_ids, Array.from({ length: 50 }, (_, i) => `run-${pad(i + 11)}`), "runs 011..060, oldest first");
+    assert.deepEqual(dispatch_ids, Array.from({ length: 50 }, (_, i) => `disp-${pad(i + 11)}`), "dispatches 011..060, oldest first");
+    assert.ok(!run_ids.includes("run-001") && !dispatch_ids.includes("disp-010"), "the oldest 10 are not sent");
+  });
+});
