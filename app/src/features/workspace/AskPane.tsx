@@ -68,11 +68,14 @@ interface SubmitRequest {
   numbers: number[];
 }
 
+/** 보던 질문 버전이 바뀐 거절 — 서버(U2a)는 question_version_changed(next_action=reread_question), 그 밖의 충돌은 conflict */
+const isVersionConflict = (e: unknown): boolean => e instanceof PesApiError && (e.body.error.code === "conflict" || e.body.error.code === "question_version_changed");
+
 const isTimeout = (e: unknown) => e instanceof Error && e.name === "TimeoutError";
 
 /** 제출 실패 문장 — 서버가 거절한 것은 아무것도 접수되지 않았다고 말하고, 연결 문제는 보냈는지 모른다고 말한다(두 번 접수되지 않는다는 말과 함께) */
 function submitErrorText(e: unknown): string {
-  if (e instanceof PesApiError) return `${e.body.error.message} 아무것도 접수되지 않았어요.${e.body.error.code === "conflict" ? " 질문을 새로 읽었어요 — 바뀐 문구를 확인해 주세요." : ""}`;
+  if (e instanceof PesApiError) return `${e.body.error.message} 아무것도 접수되지 않았어요.${isVersionConflict(e) ? " 질문을 새로 읽었어요 — 바뀐 문구를 확인해 주세요." : ""}`;
   if (e instanceof NotConnectedError) return `${e.message} 아무것도 접수되지 않았어요.`;
   return "보내지 못했어요. 연결을 확인하고 다시 눌러 주세요. 같은 요청이라 다시 눌러도 두 번 접수되지 않아요.";
 }
@@ -217,7 +220,7 @@ export function AskPane({
         clearDraft(key);
         if (key.endsWith("|answer")) writeDefaultUsed(key, null);
       }
-    } else if (r.error instanceof PesApiError && r.error.body.error.code === "conflict") {
+    } else if (isVersionConflict(r.error)) {
       // 보던 질문이 그 사이 바뀌었다 — 새로 읽는다(쓰던 초안은 옛 버전 칸에 그대로 남는다)
       await refresh();
     }

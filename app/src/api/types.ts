@@ -18,7 +18,7 @@ export type IsoTime = string;
 /* ───────────── 봉투 · 오류 · 영수증 (API 결정 4 · 3절 오류 봉투) ───────────── */
 
 /** 2단계 코어(api_support.ts)의 닫힌 오류 코드 중 U1a 가짜 클라이언트가 쓰는 것 */
-export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "cursor_expired" | "cursor_invalid";
+export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "question_version_changed" | "cursor_expired" | "cursor_invalid";
 
 export interface ApiError {
   format_version: typeof FORMAT_VERSION;

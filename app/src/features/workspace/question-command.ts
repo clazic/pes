@@ -15,17 +15,19 @@ export function describeError(e: unknown): string {
  * sessionStorage 에 두고(새로 고침에도 남는다), 쓸 수 없으면 모듈 메모리에 둔다. 성공(영수증)을 받으면 지운다.
  */
 const PENDING_PREFIX = "pes-cmd:";
-const pendingMemory = new Map<string, { sig: string; key: string }>();
+/** 저장소에 쓰지 못한 최신 기록(null = 지웠는데 저장소에서는 못 지운 상태). 있으면 저장소의 옛 기록보다 먼저 읽는다 */
+const pendingMemory = new Map<string, { sig: string; key: string } | null>();
 
 function loadPending(scope: string): { sig: string; key: string } | null {
+  if (pendingMemory.has(scope)) return pendingMemory.get(scope) ?? null;
   try {
     const raw = window.sessionStorage.getItem(PENDING_PREFIX + scope);
-    if (raw === null) return pendingMemory.get(scope) ?? null;
+    if (raw === null) return null;
     const v: unknown = JSON.parse(raw);
     if (v && typeof v === "object" && typeof (v as { sig?: unknown }).sig === "string" && typeof (v as { key?: unknown }).key === "string") return v as { sig: string; key: string };
     return null;
   } catch {
-    return pendingMemory.get(scope) ?? null;
+    return null;
   }
 }
 
@@ -35,8 +37,8 @@ function savePending(scope: string, value: { sig: string; key: string } | null) 
     else window.sessionStorage.removeItem(PENDING_PREFIX + scope);
     pendingMemory.delete(scope);
   } catch {
-    if (value) pendingMemory.set(scope, value);
-    else pendingMemory.delete(scope);
+    // 저장소를 못 썼다 — 메모리의 이 기록이 저장소에 남은 옛 기록을 가린다(지울 때도 ‘지움’을 기억해 옛 기록이 되살아나지 않게)
+    pendingMemory.set(scope, value);
   }
 }
 

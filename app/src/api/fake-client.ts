@@ -15,6 +15,7 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   invalid_payload: { message: "요청 내용이 올바르지 않습니다.", next_action: "fix_request" },
   idempotency_key_reuse: { message: "같은 Idempotency-Key로 다른 요청을 보냈습니다.", next_action: "use_new_key" },
   conflict: { message: "현재 상태에서는 처리할 수 없는 요청입니다.", next_action: "reread_context" },
+  question_version_changed: { message: "답변 대상 질문 버전이 바뀌었습니다. 새 버전을 확인해 주세요.", next_action: "reread_question" },
   cursor_expired: { message: "변경 기록이 너무 오래되어 이어 받을 수 없습니다.", next_action: "reread_context" },
   cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
 };
