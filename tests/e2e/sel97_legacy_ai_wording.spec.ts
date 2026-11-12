@@ -91,7 +91,7 @@ test("S7 인쇄 회귀: 인쇄 화면에서도 본문(h1)이 남고 가로로 �
   await page.goto(url("/"));
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("h1").first()).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  const overflow = Number(await page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"));
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
