@@ -14,7 +14,11 @@
 //   - the total of unpacked bytes over ALL parts is capped (MAX_UNPACKED_BYTES). Each inflate is stopped by the
 //     remaining budget (maxOutputLength), so the size written in the zip header is never trusted;
 //   - the source is capped (MAX_SOURCE_BYTES) by the caller before the bytes are read; the entry count, the
-//     central directory span and the XML nesting depth are capped too.
+//     central directory span and the XML nesting depth are capped too;
+//   - the budget is spent by the bytes that really came out of inflate (never by the size a header claims), and a part
+//     whose header lies, whose stream is broken or whose CRC fails makes the WHOLE container invalid;
+//   - the OUTPUT is capped too (MAX_TEXT_CHARS, counted while the text is built, not at the end): a sparse sheet, a shared
+//     string used by thousands of cells or nested tables cannot multiply a tiny file into gigabytes of text.
 
 import { crc32, inflateRawSync } from "node:zlib";
 import { posix } from "node:path";
@@ -23,9 +27,18 @@ export const EXTRACTOR = "pes-builtin";
 export const EXTRACTOR_VERSION = "1";
 export const MAX_SOURCE_BYTES = 32 * 1024 * 1024;
 export const MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
+/** The most characters one extraction may produce (counted while it is built, not at the end). Same scale as the source limit. */
+export const MAX_TEXT_CHARS = 32 * 1024 * 1024;
 const MAX_ENTRIES = 10_000;
 const MAX_XML_DEPTH = 512;
 const MAX_COLUMN = 16_384;
+/** One tag: the attribute text, the number of attributes and a name stay small in any real document. */
+const MAX_ATTR_TEXT = 64 * 1024;
+const MAX_ATTRS = 256;
+const MAX_NAME = 1024;
+/** Tables inside table cells (a real document nests a few levels), and the cells a workbook may hold in all. */
+const MAX_TABLE_DEPTH = 16;
+const MAX_CELLS = 2_000_000;
 
 export type ExtractStatus = "extracted" | "partial" | "unsupported" | "failed";
 
@@ -92,6 +105,20 @@ interface ZipEntry {
   offset: number;
 }
 
+/** Counts the characters of the output (and the workbook cells) while they are built. Going over stops the whole extraction. */
+class Quota {
+  private chars = 0;
+  private cells = 0;
+  charge(n: number): void {
+    this.chars += n;
+    if (this.chars > MAX_TEXT_CHARS) throw text_too_large();
+  }
+  cell(): void {
+    this.cells += 1;
+    if (this.cells > MAX_CELLS) throw text_too_large();
+  }
+}
+
 class Budget {
   remaining: number;
   constructor(total: number) {
@@ -105,6 +132,10 @@ function container_error(message: string): ExtractFailure {
 
 function too_large(): ExtractFailure {
   return new ExtractFailure("too_large", "파일이 너무 커서 글자를 뽑지 않았습니다(펼친 크기가 상한을 넘었습니다).");
+}
+
+function text_too_large(): ExtractFailure {
+  return new ExtractFailure("too_large", "추출한 글자가 상한을 넘어 멈췄습니다. 일부만 돌려주거나 글자를 지어내지 않았습니다.");
 }
 
 function unsafe_name(name: string): boolean {
@@ -181,7 +212,11 @@ class ZipArchive {
     }
   }
 
-  /** The unpacked bytes of one part. Counts against the shared budget before and while unpacking. */
+  /**
+   * The unpacked bytes of one part. The budget is spent by what inflate really produced, before any check on the header
+   * (a part that lies about its size cannot be unpacked for free), and inflate stops as soon as it passes the size the
+   * header claims. A header that lies, a broken stream or a bad CRC means the zip cannot be trusted: the whole container fails.
+   */
   read(name: string): Buffer {
     const entry = this.entries.get(name);
     if (entry === undefined) throw container_error(`부품 ${name} 이(가) 없습니다.`);
@@ -194,18 +229,18 @@ class ZipArchive {
       out = Buffer.from(packed);
     } else if (entry.method === 8) {
       try {
-        out = inflateRawSync(packed, { maxOutputLength: Math.max(1, this.budget.remaining) });
-      } catch (error) {
-        if ((error as { code?: string }).code === "ERR_BUFFER_TOO_LARGE") throw too_large();
+        out = inflateRawSync(packed, { maxOutputLength: Math.max(1, Math.min(this.budget.remaining, entry.usize)) });
+      } catch {
+        // past the claimed size (or past the budget, which the claimed size already fits in) or not a deflate stream at all
         throw container_error(`부품 ${name} 이(가) 손상되었습니다.`);
       }
     } else {
       throw container_error(`부품 ${name} 의 압축 방식을 지원하지 않습니다.`);
     }
-    if (out.length > this.budget.remaining) throw too_large();
+    this.budget.remaining -= out.length;
+    if (this.budget.remaining < 0) throw too_large();
     if (out.length !== entry.usize) throw container_error(`부품 ${name} 이(가) 손상되었습니다.`);
     if (crc32(out) !== entry.crc) throw container_error(`부품 ${name} 이(가) 손상되었습니다.`);
-    this.budget.remaining -= out.length;
     return out;
   }
 }
@@ -220,7 +255,43 @@ type XmlEvent =
 
 class XmlError extends Error {}
 
-const ATTR_RE = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+/**
+ * name="value" pairs, read one character at a time (no regular expression: a name of 200,000 letters without "=" made the
+ * old pattern quadratic). Every character of the text must belong to a pair; sizes are capped.
+ */
+function read_attrs(text: string): Record<string, string> {
+  if (text.length > MAX_ATTR_TEXT) throw new XmlError("attributes too long");
+  const attrs: Record<string, string> = {};
+  let count = 0;
+  let at = 0;
+  const skip_space = (): void => {
+    while (at < text.length && /\s/.test(text[at] as string)) at += 1;
+  };
+  for (;;) {
+    skip_space();
+    if (at >= text.length) return attrs;
+    const name_start = at;
+    while (at < text.length) {
+      const ch = text[at] as string;
+      if (ch === "=" || ch === "/" || ch === ">" || /\s/.test(ch)) break;
+      at += 1;
+    }
+    if (at === name_start || at - name_start > MAX_NAME) throw new XmlError("bad attribute");
+    const name = text.slice(name_start, at);
+    skip_space();
+    if (text[at] !== "=") throw new XmlError("bad attribute");
+    at += 1;
+    skip_space();
+    const quote = text[at];
+    if (quote !== '"' && quote !== "'") throw new XmlError("bad attribute");
+    const close = text.indexOf(quote, at + 1);
+    if (close < 0) throw new XmlError("bad attribute");
+    count += 1;
+    if (count > MAX_ATTRS) throw new XmlError("too many attributes");
+    attrs[name] = xml_decode(text.slice(at + 1, close));
+    at = close + 1;
+  }
+}
 
 /** The index of the ">" that ends the tag starting at `lt`, skipping ">" inside quoted attribute values; -1 when unterminated. */
 function tag_end(src: string, lt: number): number {
@@ -255,6 +326,8 @@ export function xml_decode(text: string): string {
     if (body === "apos") return "'";
     const code = body[1] === "x" ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
     if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return whole;
+    // XML 1.0 does not allow most control characters (a NUL made out of "&#0;" is not text)
+    if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0xfffe || code === 0xffff) return whole;
     return String.fromCodePoint(code);
   });
 }
@@ -311,17 +384,13 @@ function* xml_events(src: string): Generator<XmlEvent> {
     const name_hit = inner.match(/^[^\s/>]+/);
     if (name_hit === null) throw new XmlError("bad tag");
     const raw = name_hit[0];
+    if (raw.length > MAX_NAME) throw new XmlError("name too long");
     const attr_text = inner.slice(raw.length);
     if (stack.length === 0) {
       if (saw_root) throw new XmlError("more than one root");
       saw_root = true;
     }
-    const attrs: Record<string, string> = {};
-    if (attr_text.trim() !== "") {
-      // every character of the attribute text must belong to a name="value" pair
-      if (attr_text.replace(ATTR_RE, "").trim() !== "") throw new XmlError("bad attribute");
-      for (const found of attr_text.matchAll(ATTR_RE)) attrs[found[1] as string] = xml_decode(found[2] ?? found[3] ?? "");
-    }
+    const attrs = attr_text.trim() === "" ? {} : read_attrs(attr_text);
     yield { k: "open", name: local_name(raw), attrs, self };
     if (self) {
       yield { k: "close", name: local_name(raw) };
@@ -352,12 +421,47 @@ function pipe_row(cells: string[]): string {
   return `| ${cells.join(" | ")} |`;
 }
 
-/** rows -> pipe-table lines: header row, a separator of the same width, then the rest. */
-function pipe_table(rows: string[][]): string[] {
+/**
+ * rows -> pipe-table lines: header row, a separator of the same width, then the rest. Every row is padded to the widest row so
+ * the table stays a table. Each line is charged to the quota BEFORE it is built.
+ */
+function pipe_table(rows: string[][], quota: Quota): string[] {
+  const width = rows.reduce((most, row) => Math.max(most, row.length), 0);
   const lines: string[] = [];
   rows.forEach((row, index) => {
-    lines.push(pipe_row(row.map(cell_text)));
-    if (index === 0) lines.push(pipe_row(row.map(() => "---")));
+    const cells = row.map(cell_text);
+    quota.charge(cells.reduce((sum, cell) => sum + cell.length, 0) + 3 * width + 6);
+    while (cells.length < width) cells.push("");
+    lines.push(pipe_row(cells));
+    if (index === 0) {
+      quota.charge(5 * width + 6);
+      lines.push(pipe_row(Array.from({ length: width }, () => "---")));
+    }
+  });
+  return lines;
+}
+
+/** A workbook row keeps only the cells that hold something (column numbers ascending as read; a later cell wins a column). */
+interface SparseRow {
+  cols: number[];
+  vals: string[];
+}
+
+/** Sparse rows -> the same pipe table, padded to the widest row. A row is only widened to the page width when it is printed. */
+function sparse_pipe_table(rows: SparseRow[], width: number, quota: Quota): string[] {
+  const lines: string[] = [];
+  rows.forEach((row, index) => {
+    const escaped = row.vals.map(cell_text);
+    quota.charge(escaped.reduce((sum, cell) => sum + cell.length, 0) + 3 * width + 6);
+    const dense = new Array<string>(width).fill("");
+    row.cols.forEach((col, i) => {
+      dense[col] = escaped[i] as string;
+    });
+    lines.push(pipe_row(dense));
+    if (index === 0) {
+      quota.charge(5 * width + 6);
+      lines.push(pipe_row(Array.from({ length: width }, () => "---")));
+    }
   });
   return lines;
 }
@@ -384,7 +488,7 @@ interface TableFrame {
 }
 
 /** Walks one body part. Throws XmlError when the XML is not well formed. */
-function read_body(xml: string): BodyResult {
+function read_body(xml: string, quota: Quota): BodyResult {
   const lines: string[] = [];
   let tables = 0;
   const paras: ParaFrame[] = [];
@@ -408,6 +512,7 @@ function read_body(xml: string): BodyResult {
           if (paras.length > 0 && text_depth === 0) (paras[paras.length - 1] as ParaFrame).text += "\t";
           break;
         case "tbl":
+          if (table_stack.length >= MAX_TABLE_DEPTH) throw new ExtractFailure("too_large", "표 안의 표가 너무 깊어 글자를 뽑지 않았습니다.");
           tables += 1;
           table_stack.push({ rows: [], row: null, parent_cell: cells.length > 0 ? (cells[cells.length - 1] as CellFrame) : null });
           break;
@@ -436,8 +541,12 @@ function read_body(xml: string): BodyResult {
           if (para === undefined) break;
           const text = para.text.trim();
           if (text === "") break;
-          if (para.cell) para.cell.parts.push(text);
-          else lines.push(text);
+          if (para.cell) {
+            para.cell.parts.push(text);
+          } else {
+            quota.charge(text.length + 1);
+            lines.push(text);
+          }
           break;
         }
         case "tc":
@@ -455,7 +564,7 @@ function read_body(xml: string): BodyResult {
           const table = table_stack.pop();
           if (table === undefined || table.rows.length === 0) break;
           const grid = table.rows.map((row) => row.map((cell) => cell.parts.join(" ")));
-          const rendered = pipe_table(grid);
+          const rendered = pipe_table(grid, quota);
           if (table.parent_cell) table.parent_cell.parts.push(rendered.join(" "));
           else lines.push(...rendered);
           break;
@@ -472,8 +581,13 @@ function body_text(lines: string[]): string {
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 }
 
+/** A zip part must be valid UTF-8: nothing is guessed (a bad byte is not turned into U+FFFD). */
 function utf8(buf: Buffer): string {
-  return buf.toString("utf8");
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    throw new XmlError("not valid UTF-8");
+  }
 }
 
 function part_warning(name: string): ExtractWarning {
@@ -485,10 +599,10 @@ function invalid_document(message: string): ExtractFailure {
 }
 
 /** Reads a part that must exist: missing or unreadable XML -> invalid_document. */
-function read_main(zip: ZipArchive, name: string): BodyResult {
+function read_main(zip: ZipArchive, name: string, quota: Quota): BodyResult {
   if (!zip.has(name)) throw invalid_document(`본문 부품 ${name} 이(가) 없습니다.`);
   try {
-    return read_body(utf8(zip.read(name)));
+    return read_body(utf8(zip.read(name)), quota);
   } catch (error) {
     if (error instanceof XmlError) throw invalid_document(`본문 부품 ${name} 을(를) 읽을 수 없습니다.`);
     throw error;
@@ -505,7 +619,7 @@ function numbered_parts(zip: ZipArchive, pattern: RegExp): Array<{ name: string;
   return found.sort((a, b) => a.n - b.n || (a.name < b.name ? -1 : 1));
 }
 
-function guard_part<T>(zip: ZipArchive, name: string, warnings: ExtractWarning[], read: () => T): T | null {
+function guard_part<T>(name: string, warnings: ExtractWarning[], read: () => T): T | null {
   try {
     return read();
   } catch (error) {
@@ -513,7 +627,9 @@ function guard_part<T>(zip: ZipArchive, name: string, warnings: ExtractWarning[]
       warnings.push(part_warning(name));
       return null;
     }
-    if (error instanceof ExtractFailure && error.code === "invalid_container") {
+    // a part the list names but the package does not hold is a warning; anything wrong INSIDE the zip (a lying header,
+    // a broken stream, a bad CRC, the budget) is not: the container is not trusted
+    if (error instanceof ExtractFailure && error.code === "part_missing") {
       warnings.push(part_warning(name));
       return null;
     }
@@ -521,20 +637,20 @@ function guard_part<T>(zip: ZipArchive, name: string, warnings: ExtractWarning[]
   }
 }
 
-function extract_docx(zip: ZipArchive): ExtractOutcome {
-  const body = read_main(zip, "word/document.xml");
+function extract_docx(zip: ZipArchive, quota: Quota): ExtractOutcome {
+  const body = read_main(zip, "word/document.xml", quota);
   return { status: "extracted", reason: null, text: body_text(body.lines), page_count: null, table_count: body.tables, warnings: [] };
 }
 
-function extract_hwpx(zip: ZipArchive): ExtractOutcome {
-  const sections = numbered_parts(zip, /^Contents\/section(\d+)\.xml$/);
+function extract_hwpx(zip: ZipArchive, quota: Quota): ExtractOutcome {
+  const sections = numbered_parts(zip, /^Contents\/section(\d{1,9})\.xml$/);
   if (sections.length === 0) throw invalid_document("본문 구역(Contents/section*.xml)이 없습니다.");
   const warnings: ExtractWarning[] = [];
   const lines: string[] = [];
   let tables = 0;
   let read = 0;
   for (const section of sections) {
-    const body = guard_part(zip, section.name, warnings, () => read_body(utf8(zip.read(section.name))));
+    const body = guard_part(section.name, warnings, () => read_body(utf8(zip.read(section.name)), quota));
     if (body === null) continue;
     read += 1;
     lines.push(...body.lines);
@@ -544,17 +660,18 @@ function extract_hwpx(zip: ZipArchive): ExtractOutcome {
   return finish(lines, tables, null, warnings);
 }
 
-function extract_pptx(zip: ZipArchive): ExtractOutcome {
-  const slides = numbered_parts(zip, /^ppt\/slides\/slide(\d+)\.xml$/);
+function extract_pptx(zip: ZipArchive, quota: Quota): ExtractOutcome {
+  const slides = numbered_parts(zip, /^ppt\/slides\/slide(\d{1,9})\.xml$/);
   if (slides.length === 0) throw invalid_document("슬라이드(ppt/slides/slide*.xml)가 없습니다.");
   const warnings: ExtractWarning[] = [];
   const lines: string[] = [];
   let tables = 0;
   let read = 0;
   for (const slide of slides) {
-    const body = guard_part(zip, slide.name, warnings, () => read_body(utf8(zip.read(slide.name))));
+    const body = guard_part(slide.name, warnings, () => read_body(utf8(zip.read(slide.name)), quota));
     if (body === null) continue;
     read += 1;
+    quota.charge(24);
     lines.push(`## 슬라이드 ${slide.n}`, ...body.lines);
     tables += body.tables;
   }
@@ -608,9 +725,10 @@ function read_shared_strings(xml: string): string[] {
   return strings;
 }
 
-function read_sheet(xml: string, shared: string[]): string[][] {
-  const rows: string[][] = [];
-  let row: string[] | null = null;
+function read_sheet(xml: string, shared: string[], quota: Quota): { rows: SparseRow[]; width: number } {
+  const rows: SparseRow[] = [];
+  let width = 0;
+  let row: SparseRow | null = null;
   let cell: { col: number; type: string; v: string; is: string } | null = null;
   let cap: "v" | "is" | null = null;
   let in_is = false;
@@ -619,7 +737,7 @@ function read_sheet(xml: string, shared: string[]): string[][] {
   for (const ev of xml_events(xml)) {
     if (ev.k === "open") {
       if (ev.name === "row") {
-        row = [];
+        row = { cols: [], vals: [] };
         next_col = 0;
       } else if (ev.name === "c" && row !== null) {
         const col = column_index(attr_of(ev.attrs, "r") ?? "") ?? next_col;
@@ -649,18 +767,24 @@ function read_sheet(xml: string, shared: string[]): string[][] {
       else if (cell.type === "inlineStr") value = cell.is;
       else if (cell.type === "b") value = cell.v.trim() === "1" ? "TRUE" : "FALSE";
       else value = cell.v.trim();
-      while (row.length < cell.col) row.push("");
-      row[cell.col] = value;
+      // An empty cell is not kept, and a row is never widened with empty cells here (a "XFD1" cell would otherwise cost
+      // 16,384 cells for the one value): the row is widened only when it is printed, against the output quota.
+      if (value !== "") {
+        quota.cell();
+        row.cols.push(cell.col);
+        row.vals.push(value);
+        if (cell.col + 1 > width) width = cell.col + 1;
+      }
       cell = null;
     } else if (ev.name === "row" && row !== null) {
-      if (row.some((value) => value !== "")) rows.push(row);
+      if (row.cols.length > 0) rows.push(row);
       row = null;
     }
   }
-  return rows;
+  return { rows, width };
 }
 
-function extract_xlsx(zip: ZipArchive): ExtractOutcome {
+function extract_xlsx(zip: ZipArchive, quota: Quota): ExtractOutcome {
   if (!zip.has("xl/workbook.xml")) throw invalid_document("통합 문서(xl/workbook.xml)가 없습니다.");
   const sheets: Array<{ name: string; rid: string | undefined }> = [];
   try {
@@ -705,15 +829,16 @@ function extract_xlsx(zip: ZipArchive): ExtractOutcome {
       const resolved = target.startsWith("/") ? target.slice(1) : posix.normalize(`xl/${target}`);
       if (resolved.split("/")[0] !== "..") path = resolved;
     }
-    const rows = guard_part(zip, path, warnings, () => {
-      if (!zip.has(path)) throw container_error("missing");
-      return read_sheet(utf8(zip.read(path)), shared);
+    const found = guard_part(path, warnings, () => {
+      if (!zip.has(path)) throw new ExtractFailure("part_missing", `부품 ${path} 이(가) 없습니다.`);
+      return read_sheet(utf8(zip.read(path)), shared, quota);
     });
-    if (rows === null) continue;
+    if (found === null) continue;
     read += 1;
-    if (rows.length === 0) continue;
+    if (found.rows.length === 0) continue;
     non_empty += 1;
-    lines.push(`## ${sheet.name}`, ...pipe_table(rows));
+    quota.charge(sheet.name.length + 5);
+    lines.push(`## ${sheet.name}`, ...sparse_pipe_table(found.rows, found.width, quota));
   }
   if (read === 0) throw invalid_document("읽을 수 있는 시트가 없습니다.");
   return finish(lines, non_empty, sheets.length, warnings);
@@ -751,6 +876,7 @@ function extract_plain(format: "txt" | "md" | "csv", bytes: Uint8Array): Extract
 export function extract_text(original_name: string | null, bytes: Uint8Array): ExtractOutcome {
   if (bytes.byteLength > MAX_SOURCE_BYTES) return too_large_outcome();
   const format = format_of(original_name);
+  const quota = new Quota();
   try {
     switch (format) {
       case "txt":
@@ -758,13 +884,13 @@ export function extract_text(original_name: string | null, bytes: Uint8Array): E
       case "csv":
         return extract_plain(format, bytes);
       case "docx":
-        return extract_docx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)));
+        return extract_docx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
       case "xlsx":
-        return extract_xlsx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)));
+        return extract_xlsx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
       case "pptx":
-        return extract_pptx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)));
+        return extract_pptx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
       case "hwpx":
-        return extract_hwpx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)));
+        return extract_hwpx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
       default: {
         const label = format === "unknown" ? (extension_of(original_name) === "" ? "(확장자 없음)" : `.${extension_of(original_name)}`) : `.${format}`;
         return {
@@ -779,7 +905,8 @@ export function extract_text(original_name: string | null, bytes: Uint8Array): E
     }
   } catch (error) {
     if (error instanceof ExtractFailure) return failed(error.code, error.message);
-    throw error;
+    // Anything else (an engine limit such as "Invalid string length", a bug) must still leave a record, not a 500 and a rollback.
+    return failed("extract_error", "글자를 뽑는 중 예기치 않은 오류가 나서 멈췄습니다. 글자를 지어내지 않았습니다.");
   }
 }
 

@@ -4232,7 +4232,7 @@ export class ApiApp {
       if (target === undefined) return null;
       if (auth.kind !== "human" && closed_to_ai(this.#db, project.id, payload.blob_id, target.object_id)) return null;
       const row = existing_extraction(this.#db, project.id, payload.version_id, payload.blob_id);
-      return row === undefined ? null : extraction_result(row, false);
+      return row === undefined ? null : extraction_result(this.#db, project.id, row, false, auth.kind === "human");
     });
     if (known !== null) return { status: 201, data: known, replayed: false };
     const out = await this.#exec(() => this.#service.execute(ctx, "file.extract", payload));

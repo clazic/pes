@@ -16,7 +16,7 @@
 import { ApiError } from "../errors.ts";
 import { require_safe_id } from "../files.ts";
 import { EXTRACTOR, EXTRACTOR_VERSION, type ExtractWarning } from "../file_extract.ts";
-import { access_state_of_blob, material_object_denied } from "./file_access.ts";
+import { access_state_of_blob, file_ai_denied, material_object_denied } from "./file_access.ts";
 import type { CommandRuntime } from "./shared.ts";
 
 export type ExtractionApiStatus = "extracted" | "partial" | "unsupported" | "failed";
@@ -65,11 +65,35 @@ export function reason_of(status: ExtractionApiStatus, warnings: ExtractWarning[
   return status === "extracted" ? null : (warnings[0]?.code ?? null);
 }
 
-/** The command result for a stored extraction. */
-export function extraction_result(row: ExtractionRow, changed: boolean): Record<string, unknown> {
+/**
+ * THE rule for what an extraction answer tells a caller who is not human: when the text blob is closed to AI (file_ai_denied —
+ * its own policy, or the policy of any file it was extracted from), the ids and the hash of that blob are not given out. The text
+ * can be the bytes of a file the caller may not know about (the project stores identical bytes once), so its id, its policy id
+ * and its hash would let a caller test guesses against a closed file. Reads (file_access.ts extraction_of) follow the same rule;
+ * every answer of file.extract goes through here — the command's new and known branches and the HTTP shortcut alike.
+ */
+export function hide_closed_text<T extends { text_blob_id: unknown; text_file_policy_id: unknown; text_hash: unknown }>(
+  db: CommandRuntime["db"],
+  project_id: string,
+  result: T,
+  human: boolean,
+): T {
+  if (human || typeof result.text_blob_id !== "string") return result;
+  if (!file_ai_denied(db, project_id, result.text_blob_id)) return result;
+  return { ...result, text_blob_id: null, text_file_policy_id: null, text_hash: null };
+}
+
+/** The command result for a stored extraction, as the caller may see it (see hide_closed_text). */
+export function extraction_result(
+  db: CommandRuntime["db"],
+  project_id: string,
+  row: ExtractionRow,
+  changed: boolean,
+  human: boolean,
+): Record<string, unknown> {
   const status = api_status(row.status);
   const warnings = parse_warnings(row.warnings_json);
-  return {
+  return hide_closed_text(db, project_id, {
     extraction_id: row.id,
     version_id: row.version_id,
     blob_id: row.blob_id,
@@ -86,7 +110,7 @@ export function extraction_result(row: ExtractionRow, changed: boolean): Record<
     table_count: Number(row.table_count ?? 0n),
     warnings,
     changed,
-  };
+  }, human);
 }
 
 function invalid(message: string): never {

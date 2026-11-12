@@ -56,6 +56,7 @@ import {
   event_payload,
   existing_extraction,
   extraction_result,
+  hide_closed_text,
   find_target,
   require_id_field,
   text_name_of,
@@ -885,7 +886,7 @@ function run_extract(runtime: CommandRuntime): CommandResult {
   // Asked again for the same version file and extractor: no new row, blob, policy or text — the same answer, said so.
   const known = existing_extraction(runtime.db, project_id, version_id, blob_id);
   if (known !== undefined) {
-    const result = extraction_result(known, false);
+    const result = extraction_result(runtime.db, project_id, known, false, is_human_actor(runtime));
     insert_receipt(runtime, { project_id, actor_id, action: "file.extracted", base_control_rev: null, result });
     return { result, events: [{ type: "file.extract_confirmed", payload: event_payload(known, target.file_policy_id, false) }] };
   }
@@ -957,7 +958,7 @@ function run_extract(runtime: CommandRuntime): CommandResult {
       if (objects_dir === null) throw new ApiError("conflict", "no object store is configured for file.extract");
       if (same !== undefined && same.state !== "ready") throw new ApiError("conflict", "the text blob is not ready");
       if (same === undefined) {
-        const media_type = is_safe_media_type("text/plain; charset=utf-8") ? "text/plain; charset=utf-8" : "text/plain";
+        const media_type = "text/plain; charset=utf-8";
         const storage_key = `${project_id}/${text_hash}`;
         write_storage_bytes(objects_dir, project_id, storage_key, text_bytes);
         const written = runtime.db.run(
@@ -989,7 +990,14 @@ function run_extract(runtime: CommandRuntime): CommandResult {
     }
   }
 
-  const result = { ...draft, text_blob_id, text_file_policy_id: text_policy_id };
+  // What the caller is told (and what its receipt keeps) follows the one rule for non-human callers: a text that is, byte for byte,
+  // a closed file's text is not named (hide_closed_text). The stored file_extractions row below keeps the real ids.
+  const result = hide_closed_text(
+    runtime.db,
+    project_id,
+    { ...draft, text_blob_id, text_file_policy_id: text_policy_id },
+    is_human_actor(runtime),
+  );
   insert_receipt(runtime, { project_id, actor_id, action: "file.extracted", base_control_rev: null, result: { ...result, reason: outcome.reason ?? null } });
 
   if (text_blob_id !== null && text_policy_id !== null) {
