@@ -63,6 +63,7 @@ export function AskPane({
   editBlocked,
   peekId,
   onPeek,
+  onGoTo,
 }: {
   round: RoundView;
   project: string;
@@ -73,6 +74,8 @@ export function AskPane({
   editBlocked?: string;
   peekId: string | null;
   onPeek: (id: string) => void;
+  /** J/K · 이전/다음으로 질문 항목에 초점을 둘 때 — 질문 영역이 숨은 좁은 본문 보기면 보기를 먼저 바꾸고 그려진 뒤 초점을 둔다(WorkspaceScreen). 없으면 바로 초점 */
+  onGoTo?: (id: string) => void;
 }) {
   const client = useClient();
   const qc = useQueryClient();
@@ -189,10 +192,15 @@ export function AskPane({
   const at = cur ? visible.findIndex((q) => q.id === cur) : -1;
   const index = at; // -1 = 아직 어느 질문에도 초점이 없었다
   const pos = visible.length === 0 ? 0 : (index < 0 ? 0 : index) + 1;
+  const onGoToRef = React.useRef(onGoTo);
+  React.useEffect(() => {
+    onGoToRef.current = onGoTo;
+  });
   const goTo = React.useCallback((id: string) => {
     curRef.current = id;
     setCur(id);
-    itemEl(id)?.focus();
+    if (onGoToRef.current) onGoToRef.current(id);
+    else itemEl(id)?.focus();
   }, []);
   /** step: 한 칸. fromKey 이고 초점이 질문에 한 번도 없었으면 첫 질문으로(단추는 1/m 에서 한 칸) */
   const step = React.useCallback(

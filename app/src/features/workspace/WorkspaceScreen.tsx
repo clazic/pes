@@ -143,6 +143,16 @@ export function WorkspaceScreen() {
   const onPagePeek = (id: string) => setParams({ peek: id }, true);
   const onPrint = () => setParams({ print: "1" }, false, () => document.getElementById("print-title"));
   const onClosePrint = () => setParams({ print: null }, true, () => document.getElementById("tool-print"));
+  /** J/K · 이전/다음 — 질문 영역이 CSS 로 숨은 좁은 본문 보기(<1280 이고 view≠ask)면 질문 보기로 바꾼 뒤 그려지면 초점(display:none 인 동안 focus() 는 듣지 않는다) */
+  const goToQuestion = React.useCallback(
+    (id: string) => {
+      const item = () => document.querySelector<HTMLElement>(`[data-question="${CSS.escape(id)}"]`);
+      const wide = window.matchMedia("(min-width: 1280px)").matches;
+      if (wide || latest.current.get("view") === "ask") item()?.focus();
+      else setParams({ view: "ask", focus: id }, true, item);
+    },
+    [setParams],
+  );
   const onGoToQuestions = firstOpen && !past ? () => setParams({ view: "ask", focus: firstOpen.id }, true, () => document.getElementById(firstOpen.id)) : undefined;
   // 동작 목록 하나(명령 메뉴 · 질문 맥락 메뉴가 같이 쓴다). 동작은 실행할 때만 ref(latest)를 읽는다 — 그리는 동안 읽지 않음
   const actions = round
@@ -200,7 +210,7 @@ export function WorkspaceScreen() {
         </main>
         <aside ref={askRef} aria-label="질문" data-area="ask">
           {peekQ ? <PeekDialog q={peekQ} questions={openQs} focusToken={peekFocus} onPage={onPagePeek} onClose={closePeek} /> : null}
-          <AskPane round={round} project={w.slug} edition={w.edition} actions={actions} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} />
+          <AskPane round={round} project={w.slug} edition={w.edition} actions={actions} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} onGoTo={goToQuestion} />
         </aside>
       </div>
     </div>
