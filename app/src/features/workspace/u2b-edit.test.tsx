@@ -30,7 +30,7 @@ describe("인라인 고치기 열기", () => {
   it("지금 값이 칸에 채워져 있다: 문장 · 유형 · 선택지 · 중요도 · 필수 · 기본값 · 도움말 · 방향", async () => {
     const { user } = await boot();
     const form = await openEditor(user, 21);
-    expect(field(form, "질문 문장")).toHaveValue(expect.stringContaining("대출 수 자료의 정의가 2021년에 바뀌었어요"));
+    expect((field(form, "질문 문장") as HTMLInputElement | HTMLTextAreaElement).value).toContain("대출 수 자료의 정의가 2021년에 바뀌었어요");
     expect(field(form, "유형")).toHaveDisplayValue("하나 고르기");
     expect(field(form, "선택지 1")).toHaveValue("이어 보기");
     expect(field(form, "선택지 2")).toHaveValue("따로 보기");
@@ -38,7 +38,7 @@ describe("인라인 고치기 열기", () => {
     expect(field(form, "중요도")).toHaveDisplayValue("높음");
     expect(field(form, "필수")).toBeChecked();
     expect(field(form, "기본값")).toHaveDisplayValue("따로 보기");
-    expect(field(form, "도움말")).toHaveValue(expect.stringContaining("정의 차이를 각주로"));
+    expect((field(form, "도움말") as HTMLInputElement | HTMLTextAreaElement).value).toContain("정의 차이를 각주로");
     expect(field(form, "방향")).toHaveDisplayValue("AI가 사람에게 묻기");
   });
 
@@ -296,7 +296,7 @@ describe("저장이 거절·실패해도", () => {
     const alert = await within(editor(22)).findByRole("alert");
     expect(alert.textContent).toMatch(/먼저 바뀌|처리할 수 없|바뀌/);
     expect(calls("reviseQuestion")).toHaveLength(1);
-    expect(field(editor(22), "질문 문장")).toHaveValue(expect.stringContaining("내가 쓴 글"));
+    expect((field(editor(22), "질문 문장") as HTMLInputElement | HTMLTextAreaElement).value).toContain("내가 쓴 글");
     expect(within(aside()).queryByText(/새 버전으로 저장했/)).toBeNull();
     expect(leaks(aside())).toEqual([]);
   });
@@ -309,7 +309,7 @@ describe("저장이 거절·실패해도", () => {
     await user.click(save(form));
     await waitFor(() => expect(calls("reviseQuestion")).toHaveLength(1));
     expect(await within(editor(22)).findByRole("alert")).toBeInTheDocument();
-    expect(field(editor(22), "도움말")).toHaveValue(expect.stringContaining("도움말 보탬"));
+    expect((field(editor(22), "도움말") as HTMLInputElement | HTMLTextAreaElement).value).toContain("도움말 보탬");
     await user.click(save(editor(22)));
     await waitFor(() => expect(calls("reviseQuestion")).toHaveLength(2));
     const keys = calls("reviseQuestion").map((c) => c.args[4]);
@@ -391,7 +391,7 @@ describe("초안(F04): 갱신이 와도 입력을 지우지 않는다", () => {
     s.queueChanges(touchRound());
     await advance(8_000);
     await waitFor(() => expect(chip("q-22", "version")?.textContent).toBe("버전 2"));
-    expect(field(editor(22), "질문 문장")).toHaveValue(expect.stringContaining("내 글"));
+    expect((field(editor(22), "질문 문장") as HTMLInputElement | HTMLTextAreaElement).value).toContain("내 글");
     expect(calls("reviseQuestion")).toHaveLength(0);
   });
 
