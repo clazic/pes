@@ -314,6 +314,9 @@
               "references.list": {
                 "supported": true
               },
+              "references.candidates": {
+                "supported": true
+              },
               "references.get": {
                 "supported": true
               },

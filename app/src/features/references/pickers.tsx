@@ -57,7 +57,7 @@ export function SnapshotPick({ snapshots, value, onChange, current, locked = fal
           <label key={s.id} className={cn(optionClass, value === s.id ? "border-primary bg-primary-soft" : "border-line")}>
             <input type="radio" name={`${ids}-snapshot`} className={inputClass} checked={value === s.id} disabled={locked && value !== s.id} onChange={() => onChange(s.id)} />
             <span className="min-w-0 font-medium break-words text-ink">
-              {s.label}
+              {s.label ?? s.key}
               {s.recommended ? <> <span className="ml-2 text-caption font-medium text-primary-ink">추천</span></> : null}
               {current === s.id ? <> <span className="ml-2 text-caption font-medium text-ink">지금 고정됨</span></> : null}
               {!s.approved ? <> <span className="ml-2 rounded-full border border-warn-line bg-warn-soft px-2 py-px text-caption font-medium whitespace-nowrap text-warn">승인 안 됨</span></> : null}

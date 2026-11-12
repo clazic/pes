@@ -90,7 +90,7 @@ export function NewReferencesSection() {
                 <div className="min-w-0 flex-1 basis-56">
                   <p className="text-body font-medium break-words text-ink">{s.project.label}</p>
                   <p className={noteClass}>
-                    {snap?.label ?? "고정할 버전 정보 없음"}
+                    {snap ? (snap.label ?? snap.key) : "고정할 버전 정보 없음"}
                     {snap && !snap.approved ? " · 승인 안 됨" : ""} · {scopeWords(s.scope)} · 아직 붙이지 않았어요
                   </p>
                 </div>

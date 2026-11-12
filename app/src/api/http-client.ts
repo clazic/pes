@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ResultView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ResultView, type ReferenceCandidate, type ReferenceSnapshot } from "./types";
 import { markAfterSend } from "./send-outcome";
 
 /**
@@ -245,13 +245,13 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   /* ───────────── 가정 · 결정 · 반영 (U3c · SEL-100) — 서버 계약은 SEL-93(U3a)·SEL-100 읽기 칸 보강. 서버가 안 주는 값은 null · "" 로 두고 지어내지 않는다 ───────────── */
 
   /** GET P/<rest> → data. 모르는 slug 는 요청 없이 null, 서버 404(없는 판 · 라운드)는 null, 그 밖의 거절은 PesApiError */
-  async function readData(slug: string, rest: string): Promise<Json | null> {
+  async function readData(slug: string, rest: string, keepNotFound = false): Promise<Json | null> {
     const id = idOf(slug);
     if (id === undefined) return null;
     const res = await send(projectUrl(id, rest), { method: "GET", headers: headers(), credentials: "omit" });
     if (!res.ok) {
       const error = await toApiError(res);
-      if (isNotFound(error)) return null;
+      if (isNotFound(error) && !keepNotFound) return null;
       throw error;
     }
     const body: unknown = await res.json();
@@ -646,6 +646,23 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     ];
   }
 
+  function snapshotRow(r: Json): ReferenceSnapshot[] {
+    if (typeof r.id !== "string" || !r.id) return [];
+    return [{ id: r.id, key: text(r.key) || r.id, label: nullable(r.label), approved: r.approved === true, recommended: r.recommended === true }];
+  }
+  function candidateRow(r: Json): ReferenceCandidate[] {
+    if (typeof r.project_id !== "string" || !r.project_id) return [];
+    return [
+      {
+        project_id: r.project_id,
+        key: text(r.key) || r.project_id,
+        label: text(r.label) || r.project_id,
+        attached: r.attached === true,
+        snapshots: (Array.isArray(r.snapshots) ? r.snapshots : []).flatMap((x) => (isRecord(x) ? snapshotRow(x) : [])),
+      },
+    ];
+  }
+
   const refPath = (ref: string, tail = ""): string => `/references/${q(ref)}${tail}`;
   const referenceOf = (data: Json): ReferenceRow => {
     if (!isRecord(data.reference)) throw new PesApiError(fallbackBody(500));
@@ -664,8 +681,18 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const content: ReferenceContent | null = isRecord(data.content) ? { items: (Array.isArray(data.content.items) ? data.content.items : []).flatMap((i) => (isRecord(i) ? referenceItem(i) : [])) } : null;
       return { reference: referenceOf(data), content };
     },
-    /** 서버에 후보 프로젝트 · 스냅숏을 읽는 길이 없다(후속 SEL-120) — 후보를 지어내지 않고 요청 없이 거절한다. 생성 화면(null)도 작업 중도 같다 */
-    getReferenceCandidates: notConnected("참고 프로젝트 후보 읽기"),
+    /**
+     * GET P/reference-candidates(소유자 세션만) — 작업 중 화면. 서버가 안 주는 칸(스냅숏 이름)은 null 그대로, 알 수 없는 모양은 버린다.
+     * 생성 화면(scope=null)은 프로젝트가 아직 없어 서버에 길이 없다 — 후보를 지어내지 않고 요청 없이 NotConnectedError.
+     * 빈 목록은 200 candidates=[] 뿐이다. 모르는 slug(프로젝트 id 를 모름)는 요청 없이 not_found, 서버 404 도 not_found PesApiError 로 둔다 — 후보 없음으로 바꾸지 않는다.
+     */
+    async getReferenceCandidates(scope) {
+      if (scope === null) throw new NotConnectedError("참고 프로젝트 후보 읽기(생성 화면)");
+      if (idOf(scope.slug) === undefined) throw new PesApiError(fallbackBody(404));
+      const data = await readData(scope.slug, "/reference-candidates", true);
+      if (data === null) throw new PesApiError(fallbackBody(404));
+      return listOf(data, "candidates").flatMap(candidateRow);
+    },
     async attachReference(slug, _edition, input, key) {
       const body: Json = {
         referenced_project_id: input.referenced_project_id,
