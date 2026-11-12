@@ -10,7 +10,7 @@ import * as React from "react";
  */
 const PREFIX = "pes-draft:";
 
-export type DraftField = "answer" | "opinion";
+export type DraftField = "answer" | "opinion" | "comment";
 export interface DraftParts {
   project: string;
   user: string;
@@ -75,21 +75,53 @@ function writeStored(storageKey: string, value: string) {
   }
 }
 
+/**
+ * 저장하지 않은 화면 값(한글 조합 중) — 저장소는 조합이 끝나야 갱신되므로, 보내는 동안 조합 중인 글이 있는지 비교할 길이 따로 필요하다.
+ * 조합 중(store:false)에만 두고, 저장하는 쓰기 · 지우기 · 이 키를 쓰는 칸이 모두 사라질 때 지운다. 저장소에 확정으로 쓰지는 않는다.
+ */
+const live = new Map<string, string>();
+
 function notify(storageKey: string) {
   listeners.get(storageKey)?.forEach((fn) => fn());
 }
+
+/**
+ * 초안이 하나라도 바뀌었음을 알리는 전체 구독(U2c) — 묶음 제출이 모든 질문의 초안을 한꺼번에 읽어야 해서 쓴다.
+ * 저장하는 쓰기(useDraft.set · clearDraft)만 올린다. 폼 버전 기억(originForm) 같은 내부 기록은 올리지 않는다.
+ */
+let draftVersion = 0;
+const anyListeners = new Set<() => void>();
+function bumpAll() {
+  draftVersion += 1;
+  anyListeners.forEach((fn) => fn());
+}
+export const subscribeDrafts = (fn: () => void) => {
+  anyListeners.add(fn);
+  return () => void anyListeners.delete(fn);
+};
+export const draftsVersion = () => draftVersion;
 
 /** 논리 키의 저장된 초안(없으면 빈 글) — 화면 밖에서 옛 버전 초안을 들여다볼 때 */
 export function readDraft(key: string): string {
   return readStored(`${PREFIX}${key}`);
 }
 
+/**
+ * 지금 화면에 있는 값 — 조합 중이면 아직 저장되지 않은 글까지 포함한다. 보낸 값과 비교해 “보내는 사이에 더 쓴 글”을 가릴 때 쓴다(저장값만 보면 조합 중 글을 놓친다).
+ */
+export function readLiveDraft(key: string): string {
+  const storageKey = `${PREFIX}${key}`;
+  return live.get(storageKey) ?? readStored(storageKey);
+}
+
 /** 확정(영수증) 성공 뒤 그 초안만 지운다 — 저장소 항목과 메모리 대체 값 모두. 없는 키도 조용히 */
 export function clearDraft(key: string): void {
   const storageKey = `${PREFIX}${key}`;
   memory.delete(storageKey);
+  live.delete(storageKey);
   writeStored(storageKey, "");
   notify(storageKey);
+  bumpAll();
 }
 
 export interface DraftSetOptions {
@@ -112,14 +144,23 @@ export function useDraft(key: string): [string, (v: string, options?: DraftSetOp
     set.add(fn);
     return () => {
       set.delete(fn);
-      if (!set.size) listeners.delete(storageKey);
+      if (!set.size) {
+        listeners.delete(storageKey);
+        live.delete(storageKey); // 칸이 모두 사라졌다 — 저장되지 않은 조합 글은 더 이상 화면에 없다
+      }
     };
   }, [storageKey]);
 
   const set = React.useCallback(
     (v: string, options?: DraftSetOptions) => {
       setState({ key: storageKey, value: v });
-      if (options?.store !== false) writeStored(storageKey, v);
+      if (options?.store !== false) {
+        live.delete(storageKey);
+        writeStored(storageKey, v);
+        bumpAll();
+      } else {
+        live.set(storageKey, v);
+      }
     },
     [storageKey],
   );

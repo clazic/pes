@@ -11,34 +11,76 @@ export function describeError(e: unknown): string {
 }
 
 /**
+ * 확인 중인 요청의 멱등 키(U2c) — 칸(scope)별로 컴포넌트 밖에 둔다. 스레드를 접었다 펴서 컴포넌트가 사라져도 같은 요청은 같은 키로 다시 확인한다.
+ * sessionStorage 에 두고(새로 고침에도 남는다), 쓸 수 없으면 모듈 메모리에 둔다. 성공(영수증)을 받으면 지운다.
+ */
+const PENDING_PREFIX = "pes-cmd:";
+/** 저장소에 쓰지 못한 최신 기록(null = 지웠는데 저장소에서는 못 지운 상태). 있으면 저장소의 옛 기록보다 먼저 읽는다 */
+const pendingMemory = new Map<string, { sig: string; key: string } | null>();
+
+function loadPending(scope: string): { sig: string; key: string } | null {
+  if (pendingMemory.has(scope)) return pendingMemory.get(scope) ?? null;
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_PREFIX + scope);
+    if (raw === null) return null;
+    const v: unknown = JSON.parse(raw);
+    if (v && typeof v === "object" && typeof (v as { sig?: unknown }).sig === "string" && typeof (v as { key?: unknown }).key === "string") return v as { sig: string; key: string };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function savePending(scope: string, value: { sig: string; key: string } | null) {
+  try {
+    if (value) window.sessionStorage.setItem(PENDING_PREFIX + scope, JSON.stringify(value));
+    else window.sessionStorage.removeItem(PENDING_PREFIX + scope);
+    pendingMemory.delete(scope);
+  } catch {
+    // 저장소를 못 썼다 — 메모리의 이 기록이 저장소에 남은 옛 기록을 가린다(지울 때도 ‘지움’을 기억해 옛 기록이 되살아나지 않게)
+    pendingMemory.set(scope, value);
+  }
+}
+
+/**
  * 쓰기 명령 하나(U2b) — 한 번 누름에 멱등 키 하나. 실패한 뒤 같은 요청을 다시 보내면 같은 키(두 번 처리되지 않음),
  * 요청 내용(sig)이 바뀌었거나 성공한 뒤에는 새 키. 보내는 동안 다시 눌러도 한 번만 보낸다(ref 로 동기 차단 — 상태는 늦다).
  */
-export function useKeyedCommand() {
+export function useKeyedCommand(scope?: string) {
   const keyRef = React.useRef<{ sig: string; key: string } | null>(null);
   const busy = React.useRef(false);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  /** 마지막 실패의 원래 오류(U2c) — 거절 사유 details · 시간 초과를 화면이 구분해서 쓴다 */
+  const [failure, setFailure] = React.useState<unknown>(null);
 
-  const run = React.useCallback(async <T,>(sig: string, call: (key: string) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => {
+  const run = React.useCallback(async <T,>(sig: string, call: (key: string) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error?: unknown }> => {
     if (busy.current) return { ok: false };
     busy.current = true;
     setPending(true);
     setError(null);
-    const key = keyRef.current?.sig === sig ? keyRef.current.key : newIdempotencyKey();
-    keyRef.current = { sig, key };
+    setFailure(null);
+    const prev = scope ? loadPending(scope) : keyRef.current;
+    const key = prev?.sig === sig ? prev.key : newIdempotencyKey();
+    if (scope) savePending(scope, { sig, key });
+    else keyRef.current = { sig, key };
     try {
       const value = await call(key);
-      keyRef.current = null;
+      // 내 시도의 기록일 때만 지운다 — 접었다 편 뒤 새로 보낸 다른 시도(sig · key 가 다름)의 재시도 정보를 늦게 온 옛 응답이 지우지 않게
+      if (scope) {
+        const now = loadPending(scope);
+        if (now && now.sig === sig && now.key === key) savePending(scope, null);
+      } else if (keyRef.current?.sig === sig && keyRef.current.key === key) keyRef.current = null;
       return { ok: true, value };
     } catch (e) {
       setError(describeError(e));
-      return { ok: false };
+      setFailure(e);
+      return { ok: false, error: e };
     } finally {
       busy.current = false;
       setPending(false);
     }
-  }, []);
+  }, [scope]);
 
-  return { run, pending, error };
+  return { run, pending, error, failure };
 }
