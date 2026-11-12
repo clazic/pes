@@ -8,6 +8,7 @@
  *    the documented answer shapes are the real ones, the claims in the app note are true
  */
 
+import { text_artifact } from "./helpers/sel99_env.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -316,7 +317,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     if (m === null) continue;
     documented.set(m[1]!, new Set([...(m[2] ?? "").matchAll(/`((?:GET|POST) [^`]+)`/g)].map((r) => r[1]!)));
   }
-  assert.equal(documented.size, TOOLS.length, "all tools (14, with pes_read and the SEL-93 three) are in the table");
+  assert.equal(documented.size, TOOLS.length, "all tools (16, with pes_read, the SEL-93 three and the SEL-99 two) are in the table");
 
   await with_cleanup(async (env, open) => {
     const sent: string[] = [];
@@ -324,7 +325,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     const spy = {
       handle: async (request: { method: string; path: string; headers: Record<string, string>; body: string | Uint8Array | null }) => {
         const rest = request.path.replace(/^\/api\/v1\/projects\/[^/]+/, "").replace(/\?.*$/, "");
-        sent.push(`${request.method} ${rest.replace(/^\/runs\/[^/]+/, "/runs/{r}").replace(/^\/objects\/[^/]+\/versions\/[^/]+$/, "/objects/{o}/versions/{v}")}`);
+        sent.push(`${request.method} ${rest.replace(/^\/runs\/[^/]+/, "/runs/{r}").replace(/^\/threads\/[^/]+/, "/threads/{t}").replace(/^\/objects\/[^/]+\/versions\/[^/]+$/, "/objects/{o}/versions/{v}")}`);
         return env.app.handle(request);
       },
     };
@@ -358,6 +359,11 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     await used("pes_decision_propose", { statement: "표 시험 결정", scope: "edition", idempotency_key: "t-decide" });
     await used("pes_reflection_write", { target_round_id: env.round_id, entries: [], idempotency_key: "t-reflect" });
     await claim_fresh(client);
+    // SEL-99 U4a (leader 승인: 도구 16개): the two thread tools send exactly the documented routes (they need the lease claimed above)
+    const text = await text_artifact(env, "t-thread", "표 시험 글. 정책 대안은 두 가지다.");
+    const note = (await env.service.execute(env.ctx("t-thread-note"), "annotation.create", { target_object_id: text.object_id, anchor: { exact_quote: "정책 대안은 두 가지다." }, body_md: "표 시험 첨언" })).result as { thread_id: string };
+    await used("pes_thread_reply", { thread_id: note.thread_id, body_md: "표 시험 답글", idempotency_key: "t-reply" });
+    await used("pes_followup_propose", { thread_id: note.thread_id, kind: "none", description: "표 시험 후속", idempotency_key: "t-followup" });
     await used("pes_cancel", { confirm: true, idempotency_key: "t-cancel" });
     for (const [tool, routes] of documented) {
       for (const route of routes) {
