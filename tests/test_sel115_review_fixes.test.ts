@@ -215,3 +215,81 @@ test("출구 4: 전달 묶음(export_bundle)의 base_versions 에 deny 자료가
     assert.ok(back.bundle.base_versions.some((v: any) => v.object_id === secret.data.object_id), "allow → in the bundle again");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 2회차 필수 N1 — 쓰기 출구: AI 가 같은 바이트로 upload 예약(중복) → blob_id 를 얻은 뒤 POST /materials 하면
+// 응답이 original_name·file_policy_id·ai_access:"deny" 를 줬다(file_ai_denied 를 안 지났다).
+
+const row_counts = (env: ApiEnv) => ({
+  objects: Number(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM objects")?.n ?? 0n),
+  versions: Number(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM object_versions")?.n ?? 0n),
+  files: Number(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM version_files")?.n ?? 0n),
+  receipts: Number(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM mutation_commits")?.n ?? 0n),
+  events: Number(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM events")?.n ?? 0n),
+});
+
+for (const kind of ["external_agent", "internal_ai"] as const) {
+  test(`N1 (${kind}): file:write AI 가 같은 바이트의 예약(중복)으로 deny blob_id 를 얻어도 POST /materials 는 404 — 이름·정책 id·deny 상태가 안 나가고 아무 행도 안 늘어난다; 사람은 같은 호출이 201`, async () => {
+    await with_api(async (env) => {
+      const secret = await untitled_material(env, `n1-${kind}`, `SECRET-N1-${kind}`, `비공개-n1-${kind}.txt`);
+      assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+      const agent = await make_agent(env, "writer", ["context:read", "file:read", "file:write"], kind);
+
+      // 같은 바이트를 가진 호출자는 예약 중복으로 blob_id 를 받는다(알려진 한계 — 문서에 적음).
+      const same = await http_blob(env, secret.bytes, { auth: { token: agent.token } });
+      assert.equal(same.blob_id, secret.blob.blob_id);
+
+      const before = row_counts(env);
+      const res = await upload_material(env, { blob_id: same.blob_id }, { token: agent.token });
+      assert.equal(res.status, 404, JSON.stringify(res.json));
+      assert_clean(wire_of(res), secret, "agent POST /materials (deny blob)");
+      assert.ok(!wire_of(res).includes("deny"), "not even the word deny");
+      assert.deepEqual(row_counts(env), before, "nothing was written: no receipt, no event, no object, no version, no file");
+
+      // 모르는 blob 과 같은 답이다.
+      const unknown = await upload_material(env, { blob_id: "no-such-blob-0000" }, { token: agent.token });
+      assert.equal(unknown.status, 404);
+      assert.equal(res.json.error.code, unknown.json.error.code);
+
+      // 사람은 같은 호출이 그대로 된다(deny 표시와 함께).
+      const human = await upload_material(env, { blob_id: secret.blob.blob_id });
+      assert.equal(human.status, 201, JSON.stringify(human.json));
+      assert.equal(human.json.data.ai_access, "deny");
+      assert.equal(human.json.data.original_name, secret.name);
+    });
+  });
+
+  test(`N1 (${kind}): AI 는 닫힌 자료 객체에 새 버전을 못 붙인다 (허용 blob 이어도 404, 옛 제목 상속 없음); 열린 자료·새 자료는 되고 응답에 ai_access 키가 없다`, async () => {
+    await with_api(async (env) => {
+      const secret = await untitled_material(env, `n1o-${kind}`, `SECRET-N1O-${kind}`, `비공개-n1o-${kind}.txt`);
+      assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+      const agent = await make_agent(env, "writer2", ["context:read", "file:read", "file:write"], kind);
+      const fresh = await http_blob(env, text_bytes("fresh", `FRESH-${kind}`), { name: `새파일-${kind}.txt`, auth: { token: agent.token } });
+
+      const before = row_counts(env);
+      const into_closed = await upload_material(env, { blob_id: fresh.blob_id, object_id: secret.data.object_id }, { token: agent.token });
+      assert.equal(into_closed.status, 404, JSON.stringify(into_closed.json));
+      assert_clean(wire_of(into_closed), secret, "agent POST /materials into a closed object");
+      assert.deepEqual(row_counts(env), before);
+
+      // 새 자료는 된다. 응답에 ai_access 키가 없다(AI 는 이 키를 못 받는다).
+      const made = await upload_material(env, { blob_id: fresh.blob_id }, { token: agent.token });
+      assert.equal(made.status, 201, JSON.stringify(made.json));
+      assert.ok(!("ai_access" in made.json.data), "an AI caller never gets the ai_access key");
+      assert.equal(made.json.data.original_name, `새파일-${kind}.txt`);
+      assert_clean(wire_of(made), secret, "agent POST /materials (new material)");
+
+      // 열린 자료의 새 버전도 된다.
+      const second = await http_blob(env, text_bytes("fresh2", `FRESH2-${kind}`), { name: `새파일2-${kind}.txt`, auth: { token: agent.token } });
+      const again = await upload_material(env, { blob_id: second.blob_id, object_id: made.json.data.object_id }, { token: agent.token });
+      assert.equal(again.status, 201, JSON.stringify(again.json));
+      assert.ok(!("ai_access" in again.json.data));
+
+      // 사람의 응답에는 ai_access 가 그대로 있다.
+      const third = await http_blob(env, text_bytes("fresh3", `FRESH3-${kind}`), { name: `새파일3-${kind}.txt` });
+      const human = await upload_material(env, { blob_id: third.blob_id });
+      assert.equal(human.status, 201);
+      assert.equal(human.json.data.ai_access, "allow");
+    });
+  });
+}

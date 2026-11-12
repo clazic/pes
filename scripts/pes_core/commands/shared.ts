@@ -476,6 +476,15 @@ export function require_internal_ai_for_go_run(
   }
 }
 
+/**
+ * True when the command's actor is a human (no throw). Same split the HTTP layer uses for what a caller may see
+ * (human = everything, anyone else = what the AI-access rule lets through); it does not check membership or role.
+ */
+export function is_human_actor(runtime: CommandRuntime): boolean {
+  if (runtime.actor_id === null) return false;
+  return read_credential_actor(runtime.db, runtime.actor_id)?.kind === "human";
+}
+
 /** True when the command's actor is the project's human owner (no throw). */
 export function is_human_owner_actor(runtime: CommandRuntime): boolean {
   try {

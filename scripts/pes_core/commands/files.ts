@@ -40,7 +40,7 @@ import {
   write_source_version,
   type SourceFacts,
 } from "./content.ts";
-import { access_state_of_blob, access_state_of_policy } from "./file_access.ts";
+import { access_state_of_blob, access_state_of_policy, material_object_denied } from "./file_access.ts";
 import {
   insert_receipt,
   reject_unknown_fields,
@@ -50,6 +50,7 @@ import {
   type CommandDefinition,
   type CommandResult,
   type CommandRuntime,
+  is_human_actor,
 } from "./shared.ts";
 
 const ROLES = new Set(["attachment", "image", "source", "rendered", "manifest"]);
@@ -543,6 +544,14 @@ function upload_title(payload: Record<string, unknown>): string | null {
   return text;
 }
 
+/** Cut to at most `max` UTF-16 units without splitting a surrogate pair (an emoji at the boundary is dropped whole). */
+function truncate_code_points(text: string, max: number): string {
+  let end = max;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return text.slice(0, end);
+}
+
 function run_upload(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   reject_unknown_fields(payload, UPLOAD_FIELDS);
@@ -555,6 +564,17 @@ function run_upload(runtime: CommandRuntime): CommandResult {
 
   const blob = read_blob(runtime, scope.project_id, blob_id);
   if (blob === undefined) throw new ApiError("not_found", "blob not found");
+  // SEL-115 review 2 N1: a caller that is not human goes through the same decision as every read exit (file_ai_denied).
+  // A closed blob (or a material object that carries one) answers exactly like an unknown one — before any receipt or write —
+  // so a reserved duplicate (same bytes → blob_id) cannot be turned into the file's name, policy id or deny state.
+  const human = is_human_actor(runtime);
+  if (!human) {
+    const closed = access_state_of_blob(runtime.db, scope.project_id, blob_id)?.effective === "deny";
+    if (closed) throw new ApiError("not_found", "blob not found");
+    if (target_object_id !== null && material_object_denied(runtime.db, scope.project_id, target_object_id)) {
+      throw new ApiError("not_found", "object not found");
+    }
+  }
   if (blob.state !== "ready") throw new ApiError("conflict", "only a ready blob can become a material");
 
   let object: MaterialObjectRow | null = null;
@@ -601,13 +621,15 @@ function run_upload(runtime: CommandRuntime): CommandResult {
     }
     object = found;
   }
-  if (title.length > MAX_TITLE_CHARS) title = title.slice(0, MAX_TITLE_CHARS);
+  if (title.length > MAX_TITLE_CHARS) title = truncate_code_points(title, MAX_TITLE_CHARS);
 
   const known_policy = access_state_of_blob(runtime.db, scope.project_id, blob_id);
   const file_policy_id = known_policy?.policy_id ?? runtime.new_id();
   const ai_access = known_policy?.effective ?? "allow";
   const object_id = object?.id ?? runtime.new_id();
   const version_id = runtime.new_id();
+  // `ai_access` is the human's view of the switch; an AI caller never gets the key (MaterialDto). The receipt stores what this
+  // caller was given, and a replay is the same caller's.
   const result = {
     object_id,
     version_id,
@@ -615,7 +637,7 @@ function run_upload(runtime: CommandRuntime): CommandResult {
     blob_id,
     file_policy_id,
     role,
-    ai_access,
+    ...(human ? { ai_access } : {}),
     original_name: blob.original_name,
     media_type: blob.media_type,
     size: Number(blob.size),
