@@ -44,8 +44,8 @@
 //                     key_storage, key_set_at, key_set_by, stop_percent | null, subscription_limits | null,
 //                     cost_cap | null, prices: [{model, currency, input_per_mtok_micros, output_per_mtok_micros,
 //                     entered_by, entered_at}] }
-//   ExecResult = { run_id, status, block_reason: string | null, reset_at: number | null,
-//                  question_set_id: string | null }
+//   ExecResult = { run_id, status, block_reason: string | null, interrupt_reason: string | null,
+//                  reset_at: number | null, question_set_id: string | null }
 //
 // Rules the tests pin (from the leader's decision and 0019/0013):
 //   * request formats: kind openai_compatible | subscription_api | custom -> openai_compatible; anthropic ->
@@ -107,6 +107,8 @@ export interface ExecResult {
   run_id: string;
   status: "succeeded" | "waiting_human" | "blocked_usage" | "failed" | "interrupted";
   block_reason: string | null;
+  /** interrupted only: the reason on the run.interrupted event (SEL-113 F2: reference_withdrawn), else null */
+  interrupt_reason: string | null;
   reset_at: number | null;
   question_set_id: string | null;
 }
