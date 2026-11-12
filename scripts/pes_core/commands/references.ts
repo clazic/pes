@@ -17,7 +17,7 @@
 
 import { read_credential_actor } from "../actors.ts";
 import { ApiError } from "../errors.ts";
-import { DEFAULT_REFERENCE_SCOPE, REFERENCE_SCOPE_ITEMS, is_member, newest_snapshot_id, reference_row } from "../references.ts";
+import { DEFAULT_REFERENCE_SCOPE, REFERENCE_SCOPE_ITEMS, is_member, newest_snapshot_id, pinnable_snapshot_id, reference_row } from "../references.ts";
 import {
   insert_receipt,
   optional_rev,
@@ -99,9 +99,9 @@ function run_attach(runtime: CommandRuntime): CommandResult {
 
   let snapshot_id: string;
   if (wanted_snapshot !== undefined) {
-    const found = runtime.db.get<{ id: string }>("SELECT id FROM snapshots WHERE project_id = ? AND id = ?", source.id, wanted_snapshot);
+    const found = pinnable_snapshot_id(runtime.db, source.id, wanted_snapshot);
     if (found === undefined) throw new ApiError("not_found", "snapshot not found");
-    snapshot_id = found.id;
+    snapshot_id = found;
   } else {
     const newest = newest_snapshot_id(runtime.db, source.id);
     if (newest === null) throw new ApiError("conflict", "the source has no snapshot to pin");
@@ -192,9 +192,9 @@ function run_refresh(runtime: CommandRuntime): CommandResult {
 
   let snapshot_id: string;
   if (wanted_snapshot !== undefined) {
-    const found = runtime.db.get<{ id: string }>("SELECT id FROM snapshots WHERE project_id = ? AND id = ?", row.referenced_project_id, wanted_snapshot);
+    const found = pinnable_snapshot_id(runtime.db, row.referenced_project_id, wanted_snapshot);
     if (found === undefined) throw new ApiError("not_found", "snapshot not found");
-    snapshot_id = found.id;
+    snapshot_id = found;
   } else {
     const newest = newest_snapshot_id(runtime.db, row.referenced_project_id);
     if (newest === null) throw new ApiError("conflict", "the source has no snapshot to pin");

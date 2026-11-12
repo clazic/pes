@@ -125,6 +125,10 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/decisions",
   "GET /api/v1/projects/{id}/reflections",
   "POST /api/v1/projects/{id}/reflections",
+  // SEL-119 U6a: range print (GET reads a stored print; the two POSTs prepare and commit one)
+  "GET /api/v1/projects/{id}/print",
+  "POST /api/v1/projects/{id}/print/prepare",
+  "POST /api/v1/projects/{id}/print/commit",
   // SEL-113 REF1a: reference material from earlier projects
   "GET /api/v1/projects/{id}/references",
   "POST /api/v1/projects/{id}/references",
@@ -184,6 +188,9 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/uploads",
   "POST /api/v1/projects/{id}/uploads/{b}/complete",
   "PUT /api/v1/projects/{id}/uploads/{b}",
+  // SEL-118 U5a: prompt assembly (a read, POST because unsubmitted drafts only exist in the client) + human->AI question statuses
+  "POST /api/v1/projects/{id}/prompt-builds",
+  "GET /api/v1/projects/{id}/question-statuses",
 ].sort();
 
 /** Routes the closed 2단계 list does NOT have and capabilities must say are unsupported (no fake success). */

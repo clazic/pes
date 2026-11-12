@@ -50,7 +50,7 @@ const P = `/api/v1/projects/${ID}`;
 const ok = (data: unknown, extra: Record<string, unknown> = {}) => ({ format_version: FORMAT_VERSION, request_id: "req-1", data, ...extra });
 const fail = (code: string) => ({ format_version: FORMAT_VERSION, request_id: "req-e", error: { code, message: "합성 거절", retryable: false, target: null, details: null, next_action: "reread_context" } });
 const RECEIPT = { receipt_no: "0123", tx_id: "tx-98", committed_at: "2026-11-12T09:30:00+09:00" };
-const CONTEXT = ok({ project_id: ID, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
+const CONTEXT = ok({ project_id: ID, edition: { edition_no: String(ED) }, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
 
 interface Seen {
   url: URL;
@@ -76,7 +76,7 @@ const make = async (s: ReturnType<typeof server>) => (await load())({ session: S
 const Q1 = {
   id: "qst-1", version_id: "qvr-1b", version_no: "2", display_no: 21, state: "open", type: "single", text: "정의 변경 앞뒤를 이어 볼까요?", required: true, allow_comment_as_answer: false,
   importance: "high", help: "각주가 필요해요", default_value: "split", options: [{ value: "join", label: "이어 보기", recommended: true }, { value: "split", label: "따로 보기" }], show_if: null, merged_into_question_id: null,
-  answer: { version_id: "ans-1", value: "join", question_version_id: "qvr-1b", used_default: false, state: "submitted", ...{ tx_id: "tx-50", receipt_no: "0050", committed_at: "2026-11-12T08:00:00+09:00" } },
+  answer: { version_id: "ans-1", value: "join", question_version_id: "qvr-1b", used_default: false, state: "submitted", tx_id: "tx-50", receipt_no: "0050", committed_at: "2026-11-12T08:00:00+09:00" },
 };
 const Q2 = {
   id: "qst-2", version_id: "qvr-2a", version_no: "1", display_no: 22, state: "open", type: "text", text: "더 볼 출처가 있나요?", required: false, allow_comment_as_answer: true,
@@ -341,7 +341,7 @@ describe("1차 리뷰 권장 — 질문 더하기 purpose · 순서 바꾸기 �
     const numbered = server({ "GET /stages/research/rounds/2": { status: 200, body: ok(roundData()) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
     await (await make(numbered)).addQuestion(SLUG, ED, "research", "2", spec, "k-p1");
     expect(numbered.writes()[0]!.json).toMatchObject({ purpose: "review", round_id: "rnd-2" });
-    const start = server({ "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
+    const start = server({ "GET /workspace": { status: 200, body: ok({ edition: ED }) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
     await (await make(start)).addQuestion(SLUG, ED, "research", "start", spec, "k-p2");
     expect(start.writes()[0]!.json).toMatchObject({ purpose: "stage_start", round_id: null });
   });
