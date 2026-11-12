@@ -79,7 +79,8 @@ test("W0 Playwright: devDependency 정확한 버전 고정, config 는 e2e *.spe
   const text = readFileSync(config, "utf8");
   assert.match(text, /tests\/e2e|testDir/, "e2e 폴더만 본다");
   assert.ok(existsSync(join(REPO, "tests", "e2e", "workspace_smoke.spec.ts")), "스모크 파일");
-  assert.equal(pkg.scripts.test, 'node --test "tests/**/*.test.ts"', "npm test 는 *.test.ts 만 (e2e 는 *.spec.ts)");
+  // SEL-103: npm test 는 실제 계정 홈에서 시작하면 바로 실패하는 진입점(--import)을 거친다 — 그 앞부분만 다르고, 시험 대상은 여전히 *.test.ts 뿐이다
+  assert.equal(pkg.scripts.test, 'node --import ./tests/helpers/require_temp_home.ts --test "tests/**/*.test.ts"', "npm test 는 *.test.ts 만 (e2e 는 *.spec.ts)");
 });
 
 // W1a·W1b (플래그 없음: render·ask·hub 파일과 serve.py 의 정적 서빙·/version·/ping·POST feedback 이 36bc6a2 와 같다) — 지웠다:
