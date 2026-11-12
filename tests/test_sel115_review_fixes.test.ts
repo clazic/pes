@@ -3,7 +3,7 @@
  * 이 파일의 시험은 고치기 전에 실패했다(기존 enforce 시험은 title 을 따로 줘서, 그리고 object_id/version_id 를 안 봐서 이 구멍을 못 잡았다).
  *
  *   1. GET /context 의 manifest·digest 가 deny 자료 객체(object_id·version_id·kind=source·개수)를 싣는다.
- *   2. GET /objects/{o}/versions/{v} 의 content.title(기본값 = 파일 이름)·content_hash(파일 sha256 포함) 가 그대로 나간다.
+ *   2. GET /objects/{o}/versions/{v} 의 content.title(기본값 = 파일 이름)·content_hash(파일 sha256 포함) 가 그대로 나간다. (2회차 R2: 내용 비우기 대신 403)
  *   3. GET /changes 가 file.material_uploaded·file.ai_access_changed 와 그 자료의 object_id·version_id 를 그대로 싣는다.
  *   4. 전달 묶음(ClaudeAppAdapter.export_bundle)의 base_versions 가 deny 자료의 object_id·version_id 를 외부 AI 앱으로 보낸다.
  *
@@ -86,15 +86,18 @@ for (const kind of ["external_agent", "internal_ai"] as const) {
       const real_hash: string = before.content_hash;
 
       assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+      // 2회차 R2: 내용 비우기(200, content:null) 대신 content 라우트와 같은 403 forbidden — kind·version_no·is_current 지문도 없다.
       const res = await agent_get(env, agent.token, path(secret));
-      const out = assert_ok(res);
+      assert.equal(res.status, 403, JSON.stringify(res.json));
+      assert.equal(res.json.error.code, "forbidden");
+      assert.equal(res.json.error.target, "$.path.version_id");
       for (const needle of [secret.name, secret.marker, secret.blob.blob_id, secret.blob.sha256, secret.data.file_policy_id, real_hash]) {
         assert.ok(!wire_of(res).includes(needle), `version read after deny: "${needle}" must not appear`);
       }
-      assert.deepEqual(out.files, []);
-      assert.equal(out.content, null, "the file's own title/quote are withheld");
-      assert.match(out.content_hash, /^[0-9a-f]{64}$/, "still a valid 64-hex value");
-      assert.notEqual(out.content_hash, real_hash);
+      assert.ok(!("data" in res.json), "no envelope at all");
+      const content = await agent_get(env, agent.token, `/files/${secret.blob.blob_id}/content`);
+      assert.equal(content.status, res.status, "same status as the file content route");
+      assert.equal(content.json.error.code, res.json.error.code);
 
       // 허용 자료는 그대로.
       const ok = assert_ok(await agent_get(env, agent.token, path(open)));
@@ -124,7 +127,7 @@ test("누출 2: 제목을 직접 준 deny 자료의 제목도 안 나간다 (제
     assert_ok(await set_access(env, made.file_policy_id, "deny"));
     const agent = await make_agent(env, "titled", ["context:read", "file:read"]);
     const res = await agent_get(env, agent.token, `/objects/${made.object_id}/versions/${made.version_id}`);
-    assert_ok(res);
+    assert.equal(res.status, 403);
     assert.ok(!wire_of(res).includes("비공개 제목 가나다"));
   });
 });

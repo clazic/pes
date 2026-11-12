@@ -93,9 +93,11 @@ for (const kind of ["external_agent", "internal_ai"] as const) {
       assert.equal(sweep.statuses["other-content"], 200, "the other (allowed) file is unaffected");
       assert.ok(sweep.text.includes(open.name), "allowed material still listed");
       assert.ok(sweep.text.includes(open.marker), "allowed content still served");
-      for (const label of ["context", "materials", "workspace", "changes", "version"]) {
+      for (const label of ["context", "materials", "workspace", "changes"]) {
         assert.equal(sweep.statuses[label], 200, `${label} stays readable (without the denied file)`);
       }
+      // SEL-115 review 2 R2: the closed material's version read answers forbidden, like files/{b}/content (it was a 200 with content null).
+      assert.equal(sweep.statuses["version"], 403, "a closed material's version read is forbidden");
       const listed = assert_ok(await call(env, { method: "GET", path: P(env, "/materials"), auth: { token: agent.token } }));
       assert.deepEqual(listed.materials.map((x: any) => x.file_policy_id), [open.data.file_policy_id], "not even a count of the hidden file");
 
@@ -158,7 +160,8 @@ test("MCP: pes_context materials and pes_read files leave out a denied file (no 
     assert_no_trace(wire(ctx), secret, "pes_context after deny");
     assert.deepEqual(ctx.materials.map((x: any) => x.file_policy_id), [allowed.data.file_policy_id]);
 
-    const read = await client.ok("pes_read", { object_id: secret.data.object_id, version_id: secret.data.version_id });
+    // SEL-115 review 2 R2: the same refusal as the API's version read (403 forbidden) — it was an ok read with content null.
+    const read = await client.fails("pes_read", { object_id: secret.data.object_id, version_id: secret.data.version_id }, "forbidden");
     assert_no_trace(wire(read), secret, "pes_read after deny");
     const read_ok = await client.ok("pes_read", { object_id: allowed.data.object_id, version_id: allowed.data.version_id });
     assert.deepEqual(read_ok.files.map((f: any) => f.blob_id), [allowed.blob.blob_id]);

@@ -213,15 +213,17 @@ test("one policy per blob: the same bytes as two materials / roles — a single 
     const d2 = assert_ok(await upload_material(env, { blob_id: blob2.blob_id, role: "rendered" }), 201);
     assert.equal(d2.file_policy_id, m1.data.file_policy_id);
     const reader = await make_agent(env, "reader", ["context:read", "file:read"]);
-    const versions = (): Promise<any[]> =>
+    const version_reads = (): Promise<any[]> =>
       Promise.all(
-        [m1.data, d2].map(async (d) =>
-          assert_ok(await call(env, { method: "GET", path: P(env, `/objects/${d.object_id}/versions/${d.version_id}`), auth: { token: reader.token } })),
+        [m1.data, d2].map((d) =>
+          call(env, { method: "GET", path: P(env, `/objects/${d.object_id}/versions/${d.version_id}`), auth: { token: reader.token } }),
         ),
       );
+    const versions = async (): Promise<any[]> => (await version_reads()).map((res) => assert_ok(res));
     assert.deepEqual((await versions()).map((v) => v.files.length), [1, 1]);
     assert_ok(await set_access(env, m1.data.file_policy_id, "deny"));
-    assert.deepEqual((await versions()).map((v) => v.files.length), [0, 0], "no role or version can be more permissive than the blob's deny");
+    // SEL-115 review 2 R2: a closed material's version read is forbidden (it used to be 200 with files: []).
+    assert.deepEqual((await version_reads()).map((res) => res.status), [403, 403], "no role or version can be more permissive than the blob's deny");
     assert_ok(await set_access(env, m1.data.file_policy_id, "allow"));
     assert.deepEqual((await versions()).map((v) => v.files.length), [1, 1]);
   });

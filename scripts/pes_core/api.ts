@@ -1592,8 +1592,10 @@ export class ApiApp {
       );
       const visible = auth.kind === "human" ? files : files.filter((f) => !this.#blob_denied(project.id, f.blob_id));
       // A closed file material's own text (title defaults to the file name) and content_hash (it hashes the file's sha256) name the file:
-      // a non-human caller gets the envelope with no content and a hash of the version id only.
-      const withheld = auth.kind !== "human" && row.kind === "source" && material_version_denied(this.#db, project.id, version_id);
+      // a non-human caller who knows the ids is told "forbidden", the same answer as files/{b}/content for a closed blob.
+      if (auth.kind !== "human" && row.kind === "source" && material_version_denied(this.#db, project.id, version_id)) {
+        throw new Fail("forbidden", { target: "$.path.version_id" });
+      }
       return {
         project_id: project.id,
         object_id: row.object_id,
@@ -1601,8 +1603,8 @@ export class ApiApp {
         version_id: row.version_id,
         version_no: Number(row.version_no),
         is_current: Number(row.is_current) === 1,
-        content_hash: withheld ? createHash("sha256").update(`withheld:${row.version_id}`, "utf8").digest("hex") : row.content_hash,
-        content: withheld ? null : this.#version_content(project.id, row.kind, version_id),
+        content_hash: row.content_hash,
+        content: this.#version_content(project.id, row.kind, version_id),
         files: visible.map((file) => ({ blob_id: file.blob_id, role: file.role })),
       };
     });
