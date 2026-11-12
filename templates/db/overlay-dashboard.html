@@ -1,8 +1,12 @@
-<!-- PES_DB_CORE=1 대시보드 보강: 초안 보존(sessionStorage) · 서버 영수증 뒤에만 성공 표시 · 충돌 안내 · 실행 중 run / Go 전송 상태 글자 표시.
+<!-- PES_DB_CORE=1 대시보드 보강: 초안 보존(sessionStorage) · 서버 영수증 뒤에만 성공 표시 · 충돌 안내 · AI 연결 상태 · 실행 중 run / 외부 전송 상태 글자 표시.
      템플릿(dashboard.html)은 v0.15 그대로다. -->
 <style>
   #runbox ul { margin: 8px 0 0; padding-left: 20px; }
   #runbox li { margin: 4px 0; }
+  /* AI 연결 상태: 글자가 뜻을 나르고, 점 색은 거드는 것뿐이다 */
+  [data-ai-connection]::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  [data-ai-connection][data-state="on"]::before { background: var(--ok); }
+  [data-ai-connection][data-state="blocked"]::before { background: var(--warn); }
 </style>
 <script>
 (() => {
@@ -79,11 +83,27 @@
   document.addEventListener('input', saveDraft, true);
   document.addEventListener('change', saveDraft, true);
 
-  // ---- 실행 중인 run · Go 전송 상태 (읽기 전용 글자 표시) ----
+  // ---- AI 연결 상태 (읽기 전용 글자 표시) ----
+  // 서버가 보낸 정책 기계 값(D.ai_connection.policy)을 새 앱(status-registry.ts)과 같은 낱말로 옮긴다.
+  // 모르는 값·칸 없음은 '알 수 없음'이다 — 켜짐으로 읽지 않는다. '변경 중'은 서버가 안 보내므로 여기서도 만들지 않는다.
+  const AI = { on: '켜짐', blocked: '차단 중', unknown: '알 수 없음' };
+  function aiState() {
+    const p = D.ai_connection && D.ai_connection.policy;
+    return p === 'allowed' ? 'on' : (p === 'denied' || p === 'missing' || p === 'corrupt') ? 'blocked' : 'unknown';
+  }
+  function aiBox() {
+    document.querySelector('[data-ai-connection]')?.remove();
+    const meta = document.querySelector('.page-heading .meta');
+    if (!meta) return;
+    const st = aiState();
+    meta.insertAdjacentHTML('beforeend', `<span class="chip" data-ai-connection data-state="${st}">AI 연결 ${AI[st]}</span>`);
+  }
+
+  // ---- 실행 중인 run · 외부 전송 상태 (읽기 전용 글자 표시) ----
   const RUN = { running: '실행 중', queued: '시작을 기다리는 중', waiting_human: '사람의 답을 기다리는 중', blocked_usage: '사용량 한도로 멈춰 기다리는 중' };
   const SEND = {
     prepared: '전송 준비 중', authorized: '전송 중 — 보내는 중입니다', sent: '전송 중 — 응답을 기다리는 중입니다',
-    unknown: '결과 확인 불가 — 보냈지만 응답을 확인하지 못했습니다. 같은 요청을 다시 보내기 전에 결과를 확인하세요',
+    unknown: '알 수 없음 — 보냈지만 응답을 확인하지 못했습니다. 같은 요청을 다시 보내기 전에 결과를 확인하세요',
     blocked: '전송이 막혔습니다 — 정책에 따라 보내지 않았습니다',
   };
   function runBox() {
@@ -101,7 +121,7 @@
   }
 
   const baseRender = render;
-  render = () => { baseRender(); runBox(); restoreDraft(); };
+  render = () => { baseRender(); aiBox(); runBox(); restoreDraft(); };
   render();
 })();
 </script>

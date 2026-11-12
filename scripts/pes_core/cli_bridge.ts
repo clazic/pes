@@ -51,7 +51,7 @@ import { import_project } from "./legacy.ts";
 import { activate_import, assert_backup_location, serving_path, validate_import } from "./migration.ts";
 import { IMPLICIT_MANIFEST, build_project_view, build_snapshots, not_a_report_sql, output_names, rendered_files } from "./legacy_view.ts";
 import { db_path, objects_dir, pes_dir, type Environment } from "./paths.ts";
-import { DbPolicyChecker } from "./policy.ts";
+import { ai_policy_state, DbPolicyChecker } from "./policy.ts";
 import { publish_set } from "./questions.ts";
 import {
   add_note,
@@ -2254,6 +2254,8 @@ const screen: Handler = async (s, req) => {
         project.id,
       )
       .map((row) => ({ id: row.id, status: row.status, mode: row.mode, runtime: row.runtime, model: row.model, started: row.started_at === null ? "" : local_stamp(Number(row.started_at)) })),
+    // U1 follow-up (SEL-97): the same machine value the workspace read sends; the screen words it (켜짐 / 차단 중 / 알 수 없음).
+    ai_connection: { policy: ai_policy_state(s.db, project.id) },
     dispatches: s.db
       .all<{ id: string; state: string; provider: string; unknown_reason: string | null }>(
         `SELECT id, state, provider, unknown_reason FROM outbound_dispatches
