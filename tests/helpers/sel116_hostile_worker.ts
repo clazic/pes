@@ -2,8 +2,10 @@
 // supervisor, time limit) holds even when the extractor's own Budget is out of the picture. Chosen by the file name it is "given":
 //   oom.txt   keeps allocating small strings in a JavaScript loop until the heap limit ends the thread
 //   spin.txt  loops forever
-//   native.txt  sorts a 2,000,000 element array: ONE native V8 step (about 2-3 s) that worker.terminate() cannot cut, so the thread
-//               stays alive after the time limit (the case the unfinished-thread counter is for)
+//   native.txt  sorts a 3,000,000 element array: ONE native V8 step (about 3-4 s) that worker.terminate() cannot cut, so the thread
+//               stays alive after the time limit (the case the unfinished-thread counter is for). Tests give it a time limit of 1200 ms,
+//               so even a slow, loaded computer (CI) has started the thread and reached the sort long before the limit; the sort must
+//               outlast limit + grace (1.3 s), which a slower computer only makes safer
 //   throw.txt throws
 //   exit.txt  ends the thread without answering
 //   ok.txt    answers like a normal extraction
@@ -21,7 +23,7 @@ if (name === "oom.txt") {
     /* never returns */
   }
 } else if (name === "native.txt") {
-  const numbers = new Array<number>(2_000_000);
+  const numbers = new Array<number>(3_000_000);
   for (let i = 0; i < numbers.length; i += 1) numbers[i] = ((i * 7919) % 100003) + 0.5;
   numbers.sort(); // default comparator: one long native step
   port.postMessage({ status: "extracted", reason: null, text: "late", page_count: null, table_count: 0, warnings: [] });

@@ -104,7 +104,7 @@ async function until_no_unfinished_threads(limit_ms: number): Promise<void> {
 
 test("isolation: a thread that terminate() cannot cut is counted — the next extraction is extract_busy, and after the thread ends all works again", async () => {
   assert.equal(unfinished_extraction_threads(), 0);
-  const first = hostile("native.txt", { timeout_ms: 400, end_grace_ms: 100 });
+  const first = hostile("native.txt", { timeout_ms: 1200, end_grace_ms: 100 });
   assert.equal(first.out.status, "failed");
   assert.equal(first.out.reason, "extract_timeout");
   assert.equal(unfinished_extraction_threads(), 1, "the stuck thread is counted");

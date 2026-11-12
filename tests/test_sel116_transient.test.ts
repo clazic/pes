@@ -38,7 +38,7 @@ test("extract_busy is refused (409 conflict, retryable) and writes nothing; afte
     const before = { rows: count(env.db, "file_extractions"), receipts: count(env.db, "mutation_commits"), events: count(env.db, "events") };
 
     // a thread that terminate() cannot cut keeps this process busy: file.extract refuses at once and records nothing
-    const stuck = extract_text_isolated("native.txt", bytes("x"), { worker_url: HOSTILE, timeout_ms: 400, end_grace_ms: 100 });
+    const stuck = extract_text_isolated("native.txt", bytes("x"), { worker_url: HOSTILE, timeout_ms: 1200, end_grace_ms: 100 });
     assert.equal(stuck.reason, "extract_timeout");
     assert.equal(unfinished_extraction_threads(), 1);
     // many requests with different keys: still no row, receipt or event
