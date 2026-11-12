@@ -1,5 +1,5 @@
-import { DEMO_HUMAN, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView } from "./types";
+import { DEMO_HUMAN, demoMaterials, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
@@ -37,6 +37,10 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
   let nextDecision = 1 + Math.max(0, ...u3.decisions.map((x) => Number(/^dec-(\d+)$/.exec(x.object_id)?.[1] ?? 0)));
   /** 멱등 기록: 키 → (요청 지문, 처음 결과) */
   const commits = new Map<string, { request: string; result: CommandResult<unknown> }>();
+  /** 내 자료(MAT1c) — 메모리 안 합성 자료 · 멱등 기록 */
+  const materials: MaterialRow[] = demoMaterials();
+  const materialCommits = new Map<string, { request: string; result: CommandResult<unknown> }>();
+  let materialSeq = 10;
   /** 질문 버전 기록(U2b) — 질문 id → 최신이 먼저 */
   const history = new Map<string, QuestionVersionView[]>();
   let seq = 900;
@@ -75,6 +79,31 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
     txLog.push({ tx_id: receipt.tx_id, touched: ["workspace"] });
     const result: JudgeResult = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: { object_id: outId, version_id: out?.version_id ?? `${outId}-v${seq}` } };
     judged.set(idempotencyKey, { request, result });
+    return copy(result);
+  }
+
+  /** 내 자료 쓰기 공통 — 순서(API 결정 4): 멱등 키 검사 → 완료 영수증 재생 → 대상 검사 · 변경 */
+  function materialCommand<T>(method: string, slug: string, edition: number, key: string | undefined, parts: unknown[], apply: () => T): Promise<CommandResult<T>> {
+    if (!key) return reject("invalid_payload", "$.headers.idempotency-key");
+    const request = JSON.stringify([method, slug, edition, parts]);
+    const done = materialCommits.get(key);
+    if (done) {
+      if (done.request !== request) return reject("idempotency_key_reuse", "$.headers.idempotency-key");
+      return copy({ ...(done.result as CommandResult<T>), request_id: requestId(), receipt: { ...done.result.receipt, replayed: true } });
+    }
+    if (!find(slug, edition)) return reject("not_found", "$.project");
+    let data: T;
+    try {
+      data = apply();
+    } catch (e) {
+      if (e instanceof PesApiError) return Promise.reject(e);
+      throw e;
+    }
+    const n = String(++seq).padStart(4, "0");
+    const receipt: Receipt = { receipt_no: n, numbered: true, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: key, replayed: false };
+    txLog.push({ tx_id: receipt.tx_id, touched: ["workspace"] });
+    const result: CommandResult<T> = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data };
+    materialCommits.set(key, { request, result });
     return copy(result);
   }
 
@@ -404,6 +433,54 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
         t.messages.push({ message_id, body_md: input.body_md, at: new Date().toISOString(), by: "human" });
         return { round: r, data: { thread_id: t.thread_id, message_id, thread_created: created } };
       });
+    },
+    /* ───────────── 내 자료(MAT1c) — 서버(SEL-115)처럼: 같은 값이면 changed:false · 같은 멱등 키는 처음 영수증을 replayed 로 ───────────── */
+    async getMaterials(slug, edition) {
+      return find(slug, edition) ? structuredClone(materials) : [];
+    },
+    uploadMaterial(slug, edition, input, key) {
+      return materialCommand("uploadMaterial", slug, edition, key, [input.file.name, input.file.size, input.title ?? null, input.object_id ?? null], (): MaterialUploadResult => {
+        const existing = input.object_id ? materials.find((x) => x.object_id === input.object_id) : undefined;
+        if (input.object_id && !existing) return rejectNow("not_found", "$.object_id");
+        const n = ++materialSeq;
+        const version = existing ? existing.version + 1 : 1;
+        const row: MaterialRow = {
+          object_id: existing?.object_id ?? `mat-${n}`,
+          version_id: `mat-${n}-v${version}`,
+          version,
+          blob_id: `blob-${n}`,
+          file_policy_id: existing?.file_policy_id ?? `fp-${n}`,
+          role: "attachment",
+          title: existing?.title ?? input.title ?? input.file.name,
+          original_name: input.file.name,
+          media_type: input.file.type || "application/octet-stream",
+          size: input.file.size,
+          sha256: String(n % 10).repeat(64),
+          ai_access: existing?.ai_access ?? "allow",
+          extraction: null,
+        };
+        if (existing) materials.splice(materials.indexOf(existing), 1, row);
+        else materials.push(row);
+        const { extraction: _x, ...rest } = row;
+        return { ...rest, ai_access: rest.ai_access ?? "allow" };
+      });
+    },
+    setMaterialAiAccess(slug, edition, filePolicyId, input, key) {
+      return materialCommand("setMaterialAiAccess", slug, edition, key, [filePolicyId, input], (): MaterialAiAccessResult => {
+        const row = materials.find((x) => x.file_policy_id === filePolicyId);
+        if (!row) return rejectNow("not_found", "$.file_policy_id");
+        const changed = row.ai_access !== input.ai_access;
+        row.ai_access = input.ai_access;
+        return { file_policy_id: filePolicyId, blob_id: row.blob_id, ai_access: input.ai_access, rev: changed ? 2 : 1, changed };
+      });
+    },
+    async getMaterialPreview(slug, edition, blobId) {
+      const row = find(slug, edition) ? materials.find((x) => x.blob_id === blobId) : undefined;
+      if (!row) return rejectNow("not_found", "$.blob_id");
+      // 서버처럼: 안전한 형식(글 · png)만 inline, 그 밖은 내려받기 전용 + sandbox
+      const text = row.media_type === "text/plain" || row.media_type === "text/csv";
+      const bytes = new TextEncoder().encode(text ? `합성 본문 — ${row.title}\n(실제 자료가 아닌 시험용 글입니다.)\n` : "합성 바이트");
+      return structuredClone({ blob_id: blobId, content_type: text ? "text/plain" : "application/octet-stream", inline: text, sandbox: text ? null : "sandbox", bytes });
     },
     getChanges(slug, edition, cursor) {
       if (!find(slug, edition)) return reject("not_found", "$.project");

@@ -12,6 +12,9 @@
 // transaction has ended, so a held response never keeps a transaction open.
 
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname } from "node:path";
 
 import { AGENT_SCOPE_NAMES, read_credential_actor, resolve_actor, verify_agent_token, type ResolvedActor } from "./actors.ts";
 import { register_project } from "./bootstrap.ts";
@@ -53,6 +56,7 @@ import {
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
+import { find_print_snapshot, is_print_scope, print_output_of, prints_using_blob } from "./commands/print.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
@@ -71,6 +75,7 @@ import {
   set_policy,
   type PolicySnapshot,
 } from "./policy.ts";
+import { build_prompt, question_statuses, type PromptTarget, type RedactLiterals } from "./prompt_reads.ts";
 import { publish_set, revise_question, submit_answers } from "./questions.ts";
 import {
   REFERENCE_SCOPE_ITEMS,
@@ -296,6 +301,11 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SCOPES = AGENT_SCOPE_NAMES;
 const QUESTION_TYPES = ["single", "multi", "text", "textarea", "number", "scale", "file"];
 const QUESTION_PURPOSES = ["stage_start", "review", "resume"];
+/** SEL-118: the form a human_to_agent question lives in (its own, so the human's "main" form never carries a question for an AI). */
+const ASK_AI_FORM_KEY = "ask_ai";
+/** SEL-118: limits of one prompt build (the body limit is 256 KiB anyway). */
+const PROMPT_MAX_CHARS = 20_000;
+const PROMPT_MAX_DRAFTS = 20;
 const QUESTION_FIELDS = [
   "text",
   "type",
@@ -349,6 +359,7 @@ const CREATED_ACTIONS = new Set([
   "decision.superseded",
   "decision.revoked",
   "reflection.created",
+  "print.committed",
   "reference.attached",
   "file.material_uploaded",
   "annotation.create",
@@ -657,6 +668,20 @@ export class ApiApp {
         who: "any", scope: "context:read", go: true,
         act: async (_r, project, auth) => this.#workspace(project, auth),
       }),
+      // SEL-119 U6a: range print. A print is a human's document: all three routes are the owner session's (an agent token is 403 forbidden,
+      // nothing told about the print). GET reads a stored print only.
+      route("GET", `${P}/print`, "print.get", {
+        who: "session",
+        act: async (r, project) => this.#print_read(r, project),
+      }),
+      route("POST", `${P}/print/prepare`, "print.prepare", {
+        who: "session",
+        act: async (r, project, auth) => this.#print_write(r, project, auth, "print.prepare", 200),
+      }),
+      route("POST", `${P}/print/commit`, "print.commit", {
+        who: "session",
+        act: async (r, project, auth) => this.#print_write(r, project, auth, "print.commit", 201),
+      }),
       route("POST", `${P}/runs`, "runs.create", {
         who: "session",
         act: async (r, project, auth) => this.#runs_create(r, project, auth),
@@ -745,6 +770,16 @@ export class ApiApp {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#question_state(r, project, auth, "merge"),
       }),
+      // SEL-118 U5a: the prompt a human copies (a read — POST only because an unsubmitted draft exists in the client alone)
+      // and the state of the human -> AI questions. Neither writes; A starts "ask the AI" with the runs + claims above.
+      route("POST", `${P}/prompt-builds`, "prompts.build", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project, auth) => this.#prompt_build(r, project, auth),
+      }),
+      route("GET", `${P}/question-statuses`, "question_statuses.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#question_statuses(r, project),
+      }),
       route("POST", `${P}/threads`, "threads.create", {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#thread_create(r, project, auth),
@@ -761,7 +796,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/threads/{t}`, "threads.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#thread_read(r, project),
+        act: async (r, project, auth) => this.#thread_read(r, project, auth),
       }),
       route("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create", {
         who: "human",
@@ -2900,20 +2935,120 @@ export class ApiApp {
   // -------------------------------------------------------------------------
   // questions and answers
 
+  /** POST P/prompt-builds — the prompt of one question about one exact version. A read: nothing is written, no key is needed. */
+  async #prompt_build(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const body = this.#json_body(request);
+    reject_unknown(body, ["question", "selection", "drafts", "target"]);
+    const piece = (value: unknown, target: string): string => {
+      if (typeof value !== "string" || !value.isWellFormed() || value.length > PROMPT_MAX_CHARS) invalid(target);
+      return value;
+    };
+    const question = require_text(body, "question");
+    if (!question.isWellFormed() || question.length > PROMPT_MAX_CHARS) invalid("$.body.question");
+    const selection = body.selection;
+    if (!is_record(selection)) invalid_field("selection");
+    for (const key of Object.keys(selection)) {
+      if (key !== "version_id" && key !== "quote") invalid(`$.body.selection.${key}`);
+    }
+    const version_id = require_text(selection, "version_id", "$.body.selection");
+    const quote =
+      selection.quote === undefined || selection.quote === null || selection.quote === ""
+        ? null
+        : piece(selection.quote, "$.body.selection.quote");
+    const drafts: string[] = [];
+    if (body.drafts !== undefined && body.drafts !== null) {
+      const list = body.drafts;
+      if (!Array.isArray(list) || list.length > PROMPT_MAX_DRAFTS) invalid_field("drafts");
+      list.forEach((entry, i) => {
+        const at = `$.body.drafts[${i}]`;
+        if (!is_record(entry)) invalid(at);
+        for (const key of Object.keys(entry)) if (key !== "text") invalid(`${at}.${key}`);
+        const text = piece(entry.text, `${at}.text`);
+        if (text.trim().length > 0) drafts.push(text); // a blank draft says nothing: it is not listed or warned about
+      });
+    }
+    let target: PromptTarget = "B";
+    if (body.target !== undefined) {
+      if (body.target !== "A" && body.target !== "B") invalid_field("target");
+      target = body.target;
+    }
+    const literals = this.#redact_literals();
+    const built = read_tx(this.#db, () =>
+      build_prompt(
+        this.#db,
+        {
+          slug: this.#project(project.id).slug,
+          project_id: project.id,
+          literals,
+          // like the version read: a caller that is not the human never learns that a file is closed to AI
+          audience: auth.kind === "human" ? "human" : "ai",
+          content_of: (kind, id) => this.#version_content(project.id, kind, id),
+        },
+        { question, version_id, quote, drafts, target },
+      ),
+    );
+    if (built === null) throw new Fail("not_found", { target: "$.body.selection.version_id" });
+    // same answer as the version read for a closed file material (SEL-115)
+    if (built === "forbidden") throw new Fail("forbidden", { target: "$.body.selection.version_id" });
+    return { status: 200, data: built };
+  }
+
+  /** What the prompt and the status text erase: this server's session secret and this machine's own folders. */
+  #redact_literals(): RedactLiterals {
+    const literals: RedactLiterals = {
+      secrets: [this.#secret],
+      paths: [
+        homedir(),
+        tmpdir(),
+        process.env.HOME ?? "",
+        process.env.USERPROFILE ?? "",
+        process.env.PES_HOME ?? "",
+        this.#objects_dir,
+        dirname(this.#objects_dir),
+      ],
+    };
+    try {
+      literals.paths = [...literals.paths, realpathSync(tmpdir())];
+    } catch {
+      // the folder name stays as the plain one
+    }
+    return literals;
+  }
+
+  /** GET P/question-statuses[?question_id=] — what is known of each human -> AI question (accepted / received / read / answered). */
+  async #question_statuses(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const only = request.query.get("question_id");
+    if (only !== null && only.length === 0) invalid("$.query.question_id");
+    const literals = this.#redact_literals();
+    const items = read_tx(this.#db, () => question_statuses(this.#db, project.id, this.#now(), only, literals));
+    if (items === null) throw new Fail("not_found", { target: "$.query.question_id" });
+    return { status: 200, data: { items } };
+  }
+
   async #question_publish(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
     reject_unknown(
       body,
-      ["stage_id", "round_id", "purpose", "question", "direction", "form_key", "run_id", "lease_id", "fence"]);
+      ["stage_id", "round_id", "purpose", "question", "direction", "intended_actor_id", "form_key", "run_id", "lease_id", "fence"]);
     const stage_id = require_text(body, "stage_id");
     const round_id = optional_text(body, "round_id") ?? null;
     if (typeof body.purpose !== "string" || !QUESTION_PURPOSES.includes(body.purpose)) invalid_field("purpose");
-    // The core stores every published question as agent_to_human (asked by
-    // the caller, no intended actor). Anything else would be dropped, so it
-    // is refused instead of answered with a false success.
-    if (body.direction !== undefined && body.direction !== "agent_to_human") invalid_field("direction");
-    const form_key = body.form_key === undefined ? "main" : require_text(body, "form_key");
+    // A question is agent_to_human (asked by the caller, no intended actor) unless the owner session files it for an
+    // AI (SEL-118 U5a: human_to_agent + intended_actor_id). A token never files one; filing only records the question
+    // (no run, no waiting_human), and it stays out of the human's form: its own form_key unless the caller names one.
+    if (body.direction !== undefined && body.direction !== "agent_to_human" && body.direction !== "human_to_agent") invalid_field("direction");
+    const human_to_agent = body.direction === "human_to_agent";
+    if (human_to_agent && !auth.session) throw new Fail("human_required");
+    if (human_to_agent) {
+      // a human_to_agent question without the AI it is for is refused as a whole (the direction is what cannot stand alone)
+      if (typeof body.intended_actor_id !== "string" || body.intended_actor_id.length === 0) invalid_field("direction");
+    } else if (body.intended_actor_id !== undefined && body.intended_actor_id !== null) {
+      invalid_field("intended_actor_id");
+    }
+    const form_key = body.form_key === undefined ? (human_to_agent ? ASK_AI_FORM_KEY : "main") : require_text(body, "form_key");
+    // "main" is the human's input form: a question for an AI never goes into it
+    if (human_to_agent && form_key === "main") invalid_field("form_key");
     const guard = this.#guard_fields(body);
     const question = check_question(body.question, false);
     // SEL-90: adding a question to a form keeps the form's earlier open questions, in order, and puts the new one
@@ -2927,6 +3062,10 @@ export class ApiApp {
       questions: [question],
       extend_latest: true,
     };
+    if (human_to_agent) {
+      payload.direction = "human_to_agent";
+      payload.intended_actor_id = body.intended_actor_id;
+    }
     if (guard !== null && !auth.session) Object.assign(payload, guard);
     const out = await this.#exec(() => publish_set(this.#service, this.#ctx(project, auth, key), payload));
     const result = result_record(out.result);
@@ -2942,7 +3081,7 @@ export class ApiApp {
           version_no: "1",
           state: "open",
           asked_by_actor_id: auth.actor_id,
-          intended_actor_id: null,
+          intended_actor_id: human_to_agent ? (body.intended_actor_id as string) : null,
         },
       },
       replayed: out.replayed,
@@ -3585,6 +3724,63 @@ export class ApiApp {
     return { status: 200, data: round };
   }
 
+  // -------------------------------------------------------------------------
+  // SEL-119 U6a: range print
+
+  /** POST P/print/prepare (200) and P/print/commit (201): the body is the command's input; the command checks every field. */
+  async #print_write(request: RouteRequest, project: ProjectRow, auth: AuthInfo, command: string, status: number): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), command, body));
+    return { status, data: result_record(out.result), replayed: out.replayed };
+  }
+
+  /**
+   * GET P/print?scope=&snapshot= — a pure read of a print that was already committed: the snapshot row, its manifest blob and its
+   * output blob. Nothing is built or written here. Without `snapshot` it is the newest print of the current round / stage / edition.
+   * A print is a human's fixed document: the route is the owner session's (the route table refuses every other caller before this
+   * runs), and the print is given exactly as it was fixed.
+   */
+  async #print_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const scope = request.query.get("scope");
+    if (!is_print_scope(scope)) invalid("$.query.scope");
+    const snapshot = request.query.get("snapshot");
+    if (snapshot !== null && (snapshot.length === 0 || !snapshot.isWellFormed())) invalid("$.query.snapshot");
+    const row = read_tx(this.#db, () => find_print_snapshot(this.#db, project.id, scope, snapshot));
+    if (row === undefined) throw new Fail("not_found", { target: snapshot === null ? "$.query.scope" : "$.query.snapshot" });
+    const store = { db: this.#db, objects_dir: this.#objects_dir };
+    const read = async (blob_id: string) => this.#exec(async () => ({ result: await get_blob(store, project.id, blob_id), replayed: false }));
+    const stored = (await read(row.manifest_blob_id)).result;
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.bytes));
+    } catch {
+      throw new Fail("conflict", { details: { reason: "print_manifest_unreadable" } });
+    }
+    const output = print_output_of(manifest);
+    if (output === null) throw new Fail("not_found", { target: "$.query.snapshot" });
+    const document = (await read(output.blob_id)).result;
+    if (document.sha256 !== output.sha256 || document.size !== output.size) {
+      throw new Fail("conflict", { details: { reason: "print_output_mismatch" } });
+    }
+    return {
+      status: 200,
+      data: {
+        snapshot: {
+          id: row.id,
+          scope: row.scope,
+          edition_id: row.edition_id,
+          stage_id: row.stage_id,
+          round_id: row.round_id,
+          content_hash: row.content_hash,
+        },
+        manifest,
+        output,
+        document: new TextDecoder("utf-8").decode(document.bytes),
+      },
+    };
+  }
+
   /** The text of a comment body: a string; blank is a content problem (422), not a shape problem. */
   #comment_body(value: unknown, target: string): string {
     if (typeof value !== "string" || !value.isWellFormed()) invalid(target);
@@ -3946,9 +4142,10 @@ export class ApiApp {
   }
 
   /** GET P/threads/{t} */
-  async #thread_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #thread_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const thread_id = request.params[1] as string;
-    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id));
+    const audience = this.#audience(auth);
+    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id, audience));
     if (detail === undefined) throw new Fail("not_found", { target: "$.path.thread_id" });
     return { status: 200, data: detail };
   }
@@ -4223,8 +4420,10 @@ export class ApiApp {
 
   /** `preview` = the same bytes and the same safety headers as content, plus a content-disposition: inline only for the few types a browser shows safely. */
   async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo, preview: boolean): Promise<HandlerResult> {
+    // SEL-119: a print is a human's document, so the output and manifest blobs a print made are closed to a non-human caller
+    // (403 forbidden, the answer of a closed file) whatever the file policies say now; a closed file is 403 as before.
     read_tx(this.#db, () => {
-      if (auth.kind !== "human" && this.#blob_denied(project.id, request.params[1] as string)) {
+      if (auth.kind !== "human" && (this.#blob_denied(project.id, request.params[1] as string) || prints_using_blob(this.#db, project.id, request.params[1] as string).length > 0)) {
         throw new Fail("forbidden", { target: "$.path.blob_id" });
       }
     });

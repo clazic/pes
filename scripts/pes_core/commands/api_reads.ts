@@ -264,7 +264,10 @@ export function inputs_page(
   return { items, has_more: rows.length > limit };
 }
 
-/** True when the answer version answers a question the actor asked. */
+/**
+ * True when the version is an input of this actor: an answer to a question the actor asked, or (SEL-118 U5a) a version
+ * of a human -> AI question that names the actor as the AI it is for (the receipt that says "I have the question").
+ */
 export function input_visible(
   db: Db,
   project_id: string,
@@ -279,7 +282,17 @@ export function input_visible(
     input_version_id,
     actor_id,
   );
-  return row !== undefined;
+  if (row !== undefined) return true;
+  const ask = db.get<{ ok: bigint }>(
+    `SELECT 1 AS ok FROM question_versions qv
+       JOIN questions q ON q.project_id = qv.project_id AND q.object_id = qv.object_id
+      WHERE qv.project_id = ? AND qv.version_id = ?
+        AND q.direction = 'human_to_agent' AND q.intended_actor_id = ?`,
+    project_id,
+    input_version_id,
+    actor_id,
+  );
+  return ask !== undefined;
 }
 
 /** Inputs of the run's actor that have no applied/ignored receipt yet. */

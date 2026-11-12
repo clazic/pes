@@ -1,4 +1,4 @@
-import type { Actor, AssumptionRow, DecisionRow, ReflectionEntry, ReflectionView, RoundView, WorkspaceView } from "./types";
+import type { Actor, AssumptionRow, DecisionRow, MaterialRow, ReflectionEntry, ReflectionView, RoundView, WorkspaceView } from "./types";
 
 /**
  * 합성 자료(U1a) — 실제 연구·기관·사람·경로·키가 없다. 시험 계약(src/test/contract.ts)의 최소 fixture:
@@ -315,3 +315,52 @@ export const demoU3 = (): U3Data => ({
     },
   },
 });
+
+/** 내 자료 합성 자료(MAT1c) — 허용 · 금지 · 상태 모름이 섞여 있다. 실제 파일 이름 · 내용 없음 */
+export const demoMaterials = (): MaterialRow[] => [
+  {
+    object_id: "mat-1",
+    version_id: "mat-1-v1",
+    version: 1,
+    blob_id: "blob-1",
+    file_policy_id: "fp-1",
+    role: "attachment",
+    title: "합성 면담 메모",
+    original_name: "interview-notes-synthetic.txt",
+    media_type: "text/plain",
+    size: 1280,
+    sha256: "1".repeat(64),
+    ai_access: "allow",
+    extraction: null,
+  },
+  {
+    object_id: "mat-2",
+    version_id: "mat-2-v3",
+    version: 3,
+    blob_id: "blob-2",
+    file_policy_id: "fp-2",
+    role: "attachment",
+    title: "합성 선행연구 요약",
+    original_name: "prior-work-synthetic.pdf",
+    media_type: "application/pdf",
+    size: 2_097_152,
+    sha256: "2".repeat(64),
+    ai_access: "deny",
+    extraction: null,
+  },
+  {
+    object_id: "mat-3",
+    version_id: "mat-3-v1",
+    version: 1,
+    blob_id: "blob-3",
+    file_policy_id: "fp-3",
+    role: "attachment",
+    title: "합성 통계표",
+    original_name: "stats-synthetic.csv",
+    media_type: "text/csv",
+    size: 4096,
+    sha256: "3".repeat(64),
+    ai_access: "allow",
+    extraction: null,
+  },
+];
