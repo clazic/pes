@@ -4,6 +4,7 @@
 // and question-statuses).
 
 import { assumption_rows, decision_rows } from "./commands/api_reads.ts";
+import { file_ai_denied, material_object_denied } from "./commands/file_access.ts";
 import type { Db } from "./db.ts";
 import { check_go_allowed } from "./policy.ts";
 
@@ -125,26 +126,11 @@ export function redact_text(input: string, literals: RedactLiterals): Redacted {
 // ---------------------------------------------------------------------------
 // files
 
-/**
- * THE decision hook: is this blob closed to AI? A deny in the current policy or in the latest history row blocks AI access
- * (one rule for the version read, the file read and the prompt).
- * SEL-115 owns the real decision under the same name (`file_ai_denied` in commands/file_access.ts): when that lands on main,
- * delete this body and import that function — callers (api.ts, build_prompt) already use the final name.
+/*
+ * Whether a file or a file material is closed to AI is decided in ONE place: commands/file_access.ts (SEL-115).
+ * A file attached to the version is judged per blob (file_ai_denied), the selected version itself per material object
+ * (material_object_denied), the same units as the version read.
  */
-export function file_ai_denied(db: Db, project_id: string, blob_id: string): boolean {
-  const row = db.get<{ current: string; latest: string | null }>(
-    `SELECT p.ai_access AS current,
-            (SELECT a.ai_access FROM file_ai_access_versions a
-              WHERE a.project_id = p.project_id AND a.file_policy_id = p.id
-              ORDER BY a.rev DESC LIMIT 1) AS latest
-       FROM file_policies p WHERE p.project_id = ? AND p.blob_id = ?`,
-    project_id,
-    blob_id,
-  );
-  // No policy row means no deny was ever recorded (an unattached blob).
-  if (row === undefined) return false;
-  return row.current === "deny" || row.latest === "deny";
-}
 
 // ---------------------------------------------------------------------------
 // the prompt
@@ -216,8 +202,11 @@ function fixed_constraints(version_id: string): Array<{ code: string; text: stri
   ];
 }
 
-/** Assemble the prompt of one question about one exact version. Returns null when the version is not in this project. */
-export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): PromptBuild | null {
+/**
+ * Assemble the prompt of one question about one exact version. Returns null when the version is not in this project, and
+ * "forbidden" when a caller that is not the human asks about a file material closed to AI (the version read answers the same).
+ */
+export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): PromptBuild | null | "forbidden" {
   const version = db.get<{
     object_id: string;
     version_no: bigint;
@@ -235,6 +224,9 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
     input.version_id,
   );
   if (version === undefined) return null;
+  // A closed file material's own text names the file (its title defaults to the file name, later versions inherit it).
+  const material_closed = version.kind === "source" && material_object_denied(db, ctx.project_id, version.object_id);
+  if (material_closed && ctx.audience !== "human") return "forbidden";
 
   let redactions = 0;
   let truncated = false;
@@ -263,20 +255,23 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
   const excluded: ExcludedItem[] = [];
   const warnings: Array<{ code: string; message: string }> = [];
 
+  // The selected text leaves the prompt when Go would carry it (send_off, A) or when the material is closed to AI (any target,
+  // like a closed file): only the human reads the build then, and is told why.
+  const withhold_reason: string | null = hold_back ? "send_off" : material_closed ? "ai_access_denied" : null;
   included.push({
     kind: "selection",
     id: version.object_id,
     version_id: input.version_id,
-    label: hold_back ? `선택한 버전 ${version_no} (글은 뺌)` : quote === null ? `선택한 버전 ${version_no}` : `선택한 글 (버전 ${version_no})`,
+    label: withhold_reason !== null ? `선택한 버전 ${version_no} (글은 뺌)` : quote === null ? `선택한 버전 ${version_no}` : `선택한 글 (버전 ${version_no})`,
   });
   const sections: string[] = [];
   sections.push(`## 질문\n${question}`);
   const selection_lines = [`개체: ${version.object_id}`, `버전: ${input.version_id} (버전 ${version_no})`];
-  if (quote !== null && !hold_back) selection_lines.push(`선택한 글:\n${quote}`);
+  if (quote !== null && withhold_reason === null) selection_lines.push(`선택한 글:\n${quote}`);
   sections.push(`## 선택 범위\n${selection_lines.join("\n")}`);
-  if (hold_back) {
-    if (quote !== null) excluded.push({ kind: "selection", id: version.object_id, version_id: input.version_id, reason: "send_off" });
-    excluded.push({ kind: "version", id: version.object_id, version_id: input.version_id, reason: "send_off" });
+  if (withhold_reason !== null) {
+    if (quote !== null) excluded.push({ kind: "selection", id: version.object_id, version_id: input.version_id, reason: withhold_reason });
+    excluded.push({ kind: "version", id: version.object_id, version_id: input.version_id, reason: withhold_reason });
   } else {
     const lines = content_lines(ctx.content_of(version.kind, input.version_id));
     included.push({ kind: "version", id: version.object_id, version_id: input.version_id, label: `버전 ${version_no} 내용` });

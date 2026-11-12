@@ -74,7 +74,12 @@
             "POST /api/v1/projects/{id}/reflections",
             "GET /api/v1/projects/{id}/reflections",
             "POST /api/v1/projects/{id}/prompt-builds",
-            "GET /api/v1/projects/{id}/question-statuses"
+            "GET /api/v1/projects/{id}/question-statuses",
+            "POST /api/v1/projects/{id}/references",
+            "GET /api/v1/projects/{id}/references",
+            "GET /api/v1/projects/{id}/references/{ref}",
+            "POST /api/v1/projects/{id}/references/{ref}/refresh",
+            "POST /api/v1/projects/{id}/references/{ref}/detach"
           ],
           "unsupported": [
             "POST /api/v1/projects/{id}/exports",
@@ -228,6 +233,18 @@
               "files.content": {
                 "supported": true
               },
+              "files.preview": {
+                "supported": true
+              },
+              "materials.create": {
+                "supported": true
+              },
+              "materials.list": {
+                "supported": true
+              },
+              "file_policies.ai_access.set": {
+                "supported": true
+              },
               "exports.create": {
                 "supported": false
               },
@@ -277,6 +294,21 @@
                 "supported": true
               },
               "question_statuses.list": {
+                "supported": true
+              },
+              "references.create": {
+                "supported": true
+              },
+              "references.list": {
+                "supported": true
+              },
+              "references.get": {
+                "supported": true
+              },
+              "references.refresh": {
+                "supported": true
+              },
+              "references.detach": {
                 "supported": true
               },
               "editions.create": {

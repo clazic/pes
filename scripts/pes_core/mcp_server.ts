@@ -154,10 +154,11 @@ const TOOLS: readonly ToolSpec[] = [
   {
     name: "pes_context",
     description:
-      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 한 번에 한 쪽(최대 50개) 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다.",
+      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 이전 프로젝트 참고자료 목록 references, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 한 번에 한 쪽(최대 50개) 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다. reference_id를 주면 그 참고자료 하나(reference)와 고정한 버전의 본문(content, 인용 표시 포함)만 읽는다(run_id·inputs_cursor와 같이 주면 거절). content.items_status가 항목마다 ok·none(원본에 없음)·not_supported(아직 지원 안 함)·snapshot_content_unavailable(스냅숏 내용을 읽을 수 없음)을 알려 준다. 원본이 없거나 전송이 꺼져 있으면 content는 null이다. 이 읽기는 길이를 자르지 않는다.",
     properties: {
       run_id: { type: "string", description: "답(inputs)을 읽을 실행. 생략하면 마지막으로 아는 실행" },
       inputs_cursor: { type: "string", description: "앞선 pes_context가 준 inputs_next_cursor. 생략하면 처음부터" },
+      reference_id: { type: "string", description: "읽을 참고자료의 id(references[].id). 주면 상태 대신 그 참고자료만 읽는다" },
     },
     required: [],
     keyed: false,
@@ -701,8 +702,15 @@ export class McpServer {
   async #context(spec: ToolSpec, args: Record<string, unknown>): Promise<Outcome> {
     const unknown_arg = this.#unknown_arguments(spec, args);
     if (unknown_arg !== null) return unknown_arg;
-    const bad = this.#strings(args, ["run_id", "inputs_cursor"]);
+    const bad = this.#strings(args, ["run_id", "inputs_cursor", "reference_id"]);
     if (bad !== null) return bad;
+    if (typeof args.reference_id === "string") {
+      // a reference read takes no run: run_id / inputs_cursor given with it would be ignored silently, so refuse them
+      if (args.run_id !== undefined) return invalid("$.arguments.run_id", "reference_id 는 run_id 와 같이 쓸 수 없습니다. 참고자료 하나만 읽거나, run_id 로 상태와 답을 읽으세요.");
+      if (args.inputs_cursor !== undefined) return invalid("$.arguments.inputs_cursor", "reference_id 는 inputs_cursor 와 같이 쓸 수 없습니다. 참고자료 하나만 읽거나, inputs_cursor 로 답을 이어 읽으세요.");
+      // one reference, through the API read: it decides permission, the Go switches and a vanished original
+      return this.#from_api(await this.#send("GET", `/references/${encodeURIComponent(args.reference_id)}`, undefined, null));
+    }
     const context = this.#from_api(await this.#send("GET", "/context", undefined, null));
     if (!context.ok) return context;
     const run = typeof args.run_id === "string" ? args.run_id : (this.#guard?.run_id ?? this.#last_run_id);
