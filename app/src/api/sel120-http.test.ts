@@ -110,13 +110,25 @@ describe("getReferenceCandidates", () => {
     expect((err as PesApiError).body.error.code).toBe(code);
   });
 
-  it("서버 404 · 모르는 slug 는 [] (모르는 slug 는 요청 0)", async () => {
+  it("정상 빈 목록: 200 candidates=[] → []", async () => {
+    const s = server(200, ok({ candidates: [] }));
+    expect(await (await make(s)).getReferenceCandidates({ slug: SLUG, edition: ED })).toEqual([]);
+  });
+
+  // 이유: 404 not_found 는 '대상 프로젝트 없음'이다. 후보가 없다는 사실이 아니므로 빈 목록으로 바꾸면 읽기 실패가 '붙일 수 있는 프로젝트가 없어요'로 둔갑한다(SEL-120 F2 필수 1).
+  it("서버 404 not_found → 빈 배열이 아니라 PesApiError(code not_found 보존)", async () => {
     const s = server(404, fail("not_found"));
-    const c = await make(s);
-    expect(await c.getReferenceCandidates({ slug: SLUG, edition: ED })).toEqual([]);
-    const before = s.seen.length;
-    expect(await c.getReferenceCandidates({ slug: "no-such-slug", edition: ED })).toEqual([]);
-    expect(s.seen).toHaveLength(before);
+    const err = await (await make(s)).getReferenceCandidates({ slug: SLUG, edition: ED }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PesApiError);
+    expect((err as PesApiError).body.error.code).toBe("not_found");
+  });
+
+  it("모르는 slug(프로젝트 id 를 모름) → 요청 0 으로 not_found PesApiError", async () => {
+    const s = server(200, ok({ candidates: [] }));
+    const err = await (await make(s)).getReferenceCandidates({ slug: "no-such-slug", edition: ED }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PesApiError);
+    expect((err as PesApiError).body.error.code).toBe("not_found");
+    expect(s.seen).toHaveLength(0);
   });
 
   it("scope=null(생성 화면): NotConnectedError, 요청 0", async () => {

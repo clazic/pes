@@ -53,4 +53,21 @@ describe("붙이기 대화 상자 — 서버 후보", () => {
     expect(within(group).getByRole("radio", { name: /sn-xa/ }).closest("label")?.textContent).toContain("승인 안 됨");
     expect(group.textContent).not.toContain("null");
   });
+
+  // 이유: 서버 404 는 '대상 프로젝트 없음'이라 후보 0건으로 그리면 안 된다(SEL-120 F2 필수 1). 읽기 실패 경고만 보여야 한다.
+  it("후보 읽기 404 → 읽기 실패 경고, '붙일 수 있는 프로젝트가 없어요' 가 아니다", async () => {
+    const notFound = { format_version: FORMAT_VERSION, request_id: "req-e", error: { code: "not_found", message: "합성 거절 문장", retryable: false, target: "$.project", details: null, next_action: "reread_context" } };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(notFound), { status: 404 })) as unknown as typeof fetch;
+    const http = createHttpClient({ session: "synthetic-session-ref1c", projects: { [WORKSPACE.slug]: ID }, fetch: fetchImpl });
+    const rc = createReferencesClient();
+    const client = Object.assign(Object.create(rc.client), rc.client, { getReferenceCandidates: http.getReferenceCandidates.bind(http) });
+    const user = userEvent.setup();
+    await boot({ ...rc, client });
+    await waitRows();
+    await user.click(screen.getByRole("button", { name: "참고 프로젝트 붙이기" }));
+    const dlg = await screen.findByRole("dialog", { name: "참고 프로젝트 붙이기" });
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert.textContent).toContain("프로젝트 목록을 읽지 못했어요");
+    expect(dlg.textContent).not.toContain("붙일 수 있는 프로젝트가 없어요");
+  });
 });

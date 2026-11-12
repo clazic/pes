@@ -245,13 +245,13 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   /* ───────────── 가정 · 결정 · 반영 (U3c · SEL-100) — 서버 계약은 SEL-93(U3a)·SEL-100 읽기 칸 보강. 서버가 안 주는 값은 null · "" 로 두고 지어내지 않는다 ───────────── */
 
   /** GET P/<rest> → data. 모르는 slug 는 요청 없이 null, 서버 404(없는 판 · 라운드)는 null, 그 밖의 거절은 PesApiError */
-  async function readData(slug: string, rest: string): Promise<Json | null> {
+  async function readData(slug: string, rest: string, keepNotFound = false): Promise<Json | null> {
     const id = idOf(slug);
     if (id === undefined) return null;
     const res = await send(projectUrl(id, rest), { method: "GET", headers: headers(), credentials: "omit" });
     if (!res.ok) {
       const error = await toApiError(res);
-      if (isNotFound(error)) return null;
+      if (isNotFound(error) && !keepNotFound) return null;
       throw error;
     }
     const body: unknown = await res.json();
@@ -661,11 +661,15 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     },
     /**
      * GET P/reference-candidates(소유자 세션만) — 작업 중 화면. 서버가 안 주는 칸(스냅숏 이름)은 null 그대로, 알 수 없는 모양은 버린다.
-     * 생성 화면(scope=null)은 프로젝트가 아직 없어 서버에 길이 없다 — 후보를 지어내지 않고 요청 없이 NotConnectedError. 모르는 slug · 서버 404 는 [].
+     * 생성 화면(scope=null)은 프로젝트가 아직 없어 서버에 길이 없다 — 후보를 지어내지 않고 요청 없이 NotConnectedError.
+     * 빈 목록은 200 candidates=[] 뿐이다. 모르는 slug(프로젝트 id 를 모름)는 요청 없이 not_found, 서버 404 도 not_found PesApiError 로 둔다 — 후보 없음으로 바꾸지 않는다.
      */
     async getReferenceCandidates(scope) {
       if (scope === null) throw new NotConnectedError("참고 프로젝트 후보 읽기(생성 화면)");
-      return listOf(await readData(scope.slug, "/reference-candidates"), "candidates").flatMap(candidateRow);
+      if (idOf(scope.slug) === undefined) throw new PesApiError(fallbackBody(404));
+      const data = await readData(scope.slug, "/reference-candidates", true);
+      if (data === null) throw new PesApiError(fallbackBody(404));
+      return listOf(data, "candidates").flatMap(candidateRow);
     },
     async attachReference(slug, _edition, input, key) {
       const body: Json = {
