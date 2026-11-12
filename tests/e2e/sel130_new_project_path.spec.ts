@@ -240,14 +240,29 @@ test("7 세션은 어디에도 새지 않는다 — 버튼 → /new → 만들�
     expect(documents.join("\n"), "문서·자원·응답 머리에 세션 없음").not.toContain(secret);
     expect(consoles.join("\n")).not.toContain(secret);
   }
-  // 세션이 주소로 가는 요청은 교환(코드)과 만들기 헤더뿐 — 세션 헤더는 같은 출처 만들기 요청에만
-  for (const r of all) if (r.headers["x-pes-session"] !== undefined) expect([r.url.pathname, r.url.origin]).toEqual([CREATE, ws.base]);
-  // 모든 앱 이동 주소가 조각·질의 없이 깨끗하다(/new 에 주제도 없다)
-  for (const u of frame_urls) {
-    const x = new URL(u);
-    expect(x.hash, u).toBe("");
-    expect(x.search, u).toBe("");
+  // 세션 헤더는 같은 출처(origin=base)의 만들기 요청(POST /api/v1/projects)과, 방금 만든 그 프로젝트의 /api/v1/projects/<그 id>/ 아래 읽기·쓰기에만 실린다
+  // (만든 뒤 기획 시작 화면을 그리려면 앱이 그 프로젝트의 workspace 를 읽는다). 다른 출처·/api/v1 밖 경로·다른 프로젝트 id·첫 페이지 요청에는 없다.
+  const made_id = Object.values(JSON.parse(await page.evaluate((k) => sessionStorage.getItem(k) as string, STORE_KEY)).projects as Record<string, string>)[0];
+  expect(typeof made_id === "string" && made_id !== "", "만든 프로젝트 id").toBe(true);
+  const own_tree = `/api/v1/projects/${encodeURIComponent(made_id as string)}/`;
+  const with_session = all.filter((r) => r.headers["x-pes-session"] !== undefined);
+  expect(with_session.length, "세션 헤더가 실린 요청이 있다(만들기 + 읽기)").toBeGreaterThan(0);
+  for (const r of with_session) {
+    expect(r.url.origin, `세션 헤더는 다른 출처로 가지 않는다: ${r.url.href}`).toBe(ws.base);
+    expect(r.url.pathname.startsWith("/api/v1/"), `세션 헤더는 /api/v1 밖으로 가지 않는다: ${r.url.pathname}`).toBe(true);
+    expect(r.url.pathname === CREATE || r.url.pathname.startsWith(own_tree), `세션 헤더는 만들기 또는 그 프로젝트 경로뿐: ${r.url.pathname}`).toBe(true);
+    if (r.url.pathname === CREATE) expect(r.method).toBe("POST");
   }
+  // 첫 페이지(/)·교환 요청에는 세션 헤더가 없다
+  for (const r of all.filter((x) => x.url.pathname === "/" || x.url.pathname === EXCHANGE)) expect(r.headers["x-pes-session"], r.url.pathname).toBeUndefined();
+  // 모든 앱 이동 주소가 조각·질의 없이 깨끗하다(/new 에 주제도 없다)
+  // 단 첫 이동은 터미널이 준 열기 주소(1회용 코드 #code=… — 세션이 아니다)다. 코드는 그 문서가 요청 전에 지우고, 그 뒤 모든 이동 주소는 깨끗하다
+  frame_urls.forEach((u, i) => {
+    const x = new URL(u);
+    if (i === 0) expect(x.hash, u).toMatch(/^#code=[A-Za-z0-9_-]{20,}$/);
+    else expect(x.hash, u).toBe("");
+    expect(x.search, u).toBe("");
+  });
   expect(await context.cookies()).toEqual([]);
   expect(String(await page.evaluate("JSON.stringify({ ...localStorage })"))).not.toContain(ws.session);
   expect(String(await page.evaluate("JSON.stringify({ href: location.href, state: history.state, name: window.name, cookie: document.cookie, referrer: document.referrer })"))).not.toContain(ws.session);
