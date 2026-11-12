@@ -24,6 +24,8 @@ export const keys = {
   referenceDetail: (slug: string, edition: number, refId: string) => ["records", slug, edition, "references", "detail", refId] as const,
   /** 붙일 후보 — 열 때마다 새로 읽는다(gcTime 0). scope null = 생성 화면 */
   referenceCandidates: (scope: { slug: string; edition: number } | null) => ["reference-candidates", scope?.slug ?? "", scope?.edition ?? 0] as const,
+  /** 내 자료(MAT1c) — 기록 읽기와 같은 앞부분이라 판의 변경분(workspace)을 받으면 같이 다시 읽힌다 */
+  materials: (slug: string, edition: number) => ["records", slug, edition, "materials"] as const,
   reflections: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, stage, round, "reflections"] as const,
   /** 라운드 읽기와 같은 앞부분(["round", slug, edition]) — 라운드를 다시 읽을 때 같이 다시 읽힌다 */
   comments: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, "comments", stage, round] as const,
@@ -125,4 +127,10 @@ export function useReferenceDetail(slug: string, edition: number, refId: string)
 export function useReferenceCandidates(scope: { slug: string; edition: number } | null) {
   const client = useClient();
   return useQuery({ queryKey: keys.referenceCandidates(scope), queryFn: () => client.getReferenceCandidates(scope), gcTime: 0, staleTime: 0, refetchOnMount: "always" });
+}
+
+/** 내 자료 목록(MAT1c) — 사람 화면이라 금지(deny) 파일도 온다. 읽기 실패는 오류로 남는다(빈 목록으로 위장하지 않음) */
+export function useMaterials(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.materials(slug, edition), queryFn: () => client.getMaterials(slug, edition), enabled: !!slug && edition > 0 });
 }

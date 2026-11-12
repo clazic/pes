@@ -587,9 +587,17 @@ test("OpenAPI: the upload PUT is a raw-bytes operation that needs no Idempotency
   assert.ok(!params.some((p: any) => p.name === "Idempotency-Key" && p.required === true), "PUT needs no Idempotency-Key");
   const content = resolve_ref(OPENAPI, put.requestBody)?.content ?? {};
   assert.ok(!("application/json" in content), "the PUT body is raw bytes, not JSON");
+  // SEL-118 (leader approved): a POST that is only a read (the body carries input that exists in the client alone) is named here
+  // and must say so: it writes nothing, so it does not take an Idempotency-Key.
+  const READ_ONLY_POSTS = ["/api/v1/projects/{id}/prompt-builds"];
   for (const [path, item] of Object.entries<any>(OPENAPI.paths)) {
     if (item.post === undefined) continue;
     const posts = (item.post.parameters ?? []).map((p: any) => resolve_ref(OPENAPI, p));
+    if (READ_ONLY_POSTS.includes(path)) {
+      assert.equal(item.post["x-pes-read-only"], true, `POST ${path} is documented as read-only`);
+      assert.ok(!posts.some((p: any) => p.name === "Idempotency-Key"), `read-only POST ${path} does not take an Idempotency-Key`);
+      continue;
+    }
     assert.ok(posts.some((p: any) => p.name === "Idempotency-Key" && p.required === true), `POST ${path} requires Idempotency-Key`);
   }
 });

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useMatch } from "react-router";
-import { ArrowLeftIcon, BookMarkedIcon, ScrollTextIcon } from "lucide-react";
+import { ArrowLeftIcon, BookMarkedIcon, FolderOpenIcon, ScrollTextIcon } from "lucide-react";
 import { useWorkspace } from "@/api/queries";
 import type { WorkspaceView } from "@/api/types";
 import { StatusMark, TONE_TEXT, turnLabel } from "@/components/pes/status";
@@ -151,6 +151,29 @@ function RecordsLink({ ws }: { ws: WorkspaceView }) {
   );
 }
 
+/** 자료 — 내 자료 화면으로 가는 입구(MAT1c). 연구 흐름 나무와 따로 둔다 */
+function MaterialsLink({ ws }: { ws: WorkspaceView }) {
+  const { setOpenMobile } = useSidebar();
+  const here = !!useMatch("/p/:slug/e/:edition/files");
+  return (
+    <nav aria-label="프로젝트 자료">
+      <SidebarGroup>
+        <SidebarGroupLabel>자료</SidebarGroupLabel>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={here} tooltip="내 자료">
+              <Link to={`/p/${ws.slug}/e/${ws.edition}/files`} aria-current={here ? "page" : undefined} onClick={() => setOpenMobile(false)} className="no-underline">
+                <FolderOpenIcon aria-hidden="true" />
+                <span className="min-w-0 truncate font-medium">내 자료</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    </nav>
+  );
+}
+
 /** 참고 — 이전 프로젝트 참고자료 화면으로 가는 입구(REF1b). 연구 흐름 나무와 따로 둔다 */
 function ReferencesLink({ ws }: { ws: WorkspaceView }) {
   const { setOpenMobile } = useSidebar();
@@ -204,6 +227,7 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         {ws ? <ResearchFlow ws={ws} /> : null}
+        {ws ? <MaterialsLink ws={ws} /> : null}
         {ws ? <ReferencesLink ws={ws} /> : null}
         {ws ? <RecordsLink ws={ws} /> : null}
       </SidebarContent>

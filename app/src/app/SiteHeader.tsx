@@ -41,6 +41,7 @@ function useCrumbs(): Crumb[] {
   const pm = useMatch("/p/:slug/e/:edition/*");
   const rec = useMatch("/p/:slug/e/:edition/records");
   const refs = useMatch("/p/:slug/e/:edition/references");
+  const files = useMatch("/p/:slug/e/:edition/files");
   const edition = Number(pm?.params.edition ?? 0);
   const ws = useWorkspace(pm?.params.slug, edition).data;
   if (!pm) return [{ label: "PES" }];
@@ -48,6 +49,7 @@ function useCrumbs(): Crumb[] {
   const home = { label: ws.title, to: roundHref(ws.slug, ws.edition, ws.current.stage, ws.current.round_id) };
   if (rec) return [home, { label: "가정·결정·반영" }];
   if (refs) return [home, { label: "참고 프로젝트" }];
+  if (files) return [home, { label: "내 자료" }];
   const stage = ws.stages.find((s) => s.key === m?.params.stage);
   const round = m?.params.round === "start" ? null : Number(m?.params.round);
   if (!stage || (round !== null && !stage.rounds.some((r) => r.round_id === round))) return [home, { label: "없는 주소" }];

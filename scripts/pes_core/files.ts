@@ -35,7 +35,7 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import type { CommandOutcome, CommandService, MutationContext } from "./commands.ts";
 import { canonical_object_store_dir } from "./commands/shared.ts";
-import type { Db } from "./db.ts";
+import { tx, type Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 
 /** The object store a command wrapper works with: the database plus its objects folder. */
@@ -639,6 +639,18 @@ function storage_key_is_claimed(db: Db, storage_key: string): boolean {
   );
 }
 
+/**
+ * Undo of a file a failed command wrote (SEL-119): remove it only when no blobs row names its storage_key, checked and
+ * removed under the write lock (BEGIN IMMEDIATE). After the failed command's ROLLBACK another connection may already have
+ * committed a blob row for the same bytes (same storage_key) and reused this very file; that file then stays.
+ * Best effort: a failure here (busy, nested tx) keeps the file, and the next gc reconciles the disk.
+ */
+export function delete_unclaimed_storage_file(db: Db, objects_dir: string, project_id: string, storage_key: string): void {
+  tx(db, () => {
+    if (!storage_key_is_claimed(db, storage_key)) delete_storage_file(objects_dir, project_id, storage_key);
+  });
+}
+
 function context_project(ctx: MutationContext): string {
   if (ctx.project_id === null) not_found("project not found");
   return require_safe_id(ctx.project_id, "project_id");
@@ -799,9 +811,18 @@ export async function get_blob(
   blob_id: string,
 ): Promise<StoredBlob> {
   const objects_dir = require_canonical_store(store);
+  return read_ready_blob(store.db, objects_dir, project_id, blob_id);
+}
+
+/**
+ * The bytes of a ready blob, synchronously, with the same integrity rule as get_blob (which uses it): the row must exist
+ * and be ready, the file must be a regular file below the project's folder, and its length and sha256 must match the row.
+ * Any failure throws (not_found / conflict); it never returns partial or empty bytes. For a caller inside a transaction.
+ */
+export function read_ready_blob(db: Db, objects_dir: string, project_id: string, blob_id: string): StoredBlob {
   const project = require_safe_id(project_id, "project_id");
   const id = require_safe_id(blob_id, "blob_id");
-  const row = store.db.get<BlobRow>(
+  const row = db.get<BlobRow>(
     `SELECT id, project_id, storage_key, sha256, size, media_type, state
        FROM blobs WHERE project_id = ? AND id = ?`,
     project,
