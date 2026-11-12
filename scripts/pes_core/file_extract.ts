@@ -19,6 +19,12 @@
 //     whose header lies, whose stream is broken or whose CRC fails makes the WHOLE container invalid;
 //   - the OUTPUT is capped too (MAX_TEXT_CHARS, counted while the text is built, not at the end): a sparse sheet, a shared
 //     string used by thousands of cells or nested tables cannot multiply a tiny file into gigabytes of text.
+//
+// ONE budget per extraction (class Budget). Every step pays BEFORE it copies, unpacks, joins or keeps something:
+//   unpacked bytes (MAX_UNPACKED_BYTES), output characters (MAX_TEXT_CHARS), kept elements — cells, rows, paragraphs,
+//   text pieces, sheets, relationships, shared strings (MAX_ITEMS) — and time (MAX_EXTRACT_MS, checked while XML is read).
+//   Going over any of them stops the extraction right there as failed/too_large; no partial text is handed back.
+//   Sheets (MAX_SHEETS) and warnings (MAX_WARNINGS, then one "n more" line) have their own small caps.
 
 import { crc32, inflateRawSync } from "node:zlib";
 import { posix } from "node:path";
@@ -38,7 +44,16 @@ const MAX_ATTRS = 256;
 const MAX_NAME = 1024;
 /** Tables inside table cells (a real document nests a few levels), and the cells a workbook may hold in all. */
 const MAX_TABLE_DEPTH = 16;
-const MAX_CELLS = 2_000_000;
+/** Elements one extraction may keep in memory (cells, rows, paragraphs, text pieces, sheets, ...). A real 32 MiB workbook stays well below. */
+export const MAX_ITEMS = 3_000_000;
+/** Sheets one workbook may list. */
+export const MAX_SHEETS = 1_000;
+/** Warnings kept as they are; the rest become one "n more" line. */
+export const MAX_WARNINGS = 50;
+/** Wall time one extraction may take (it runs inside a write transaction). */
+export const MAX_EXTRACT_MS = 10_000;
+/** How many XML events go by between two looks at the clock. */
+const TICK_EVERY = 4096;
 
 export type ExtractStatus = "extracted" | "partial" | "unsupported" | "failed";
 
@@ -105,24 +120,33 @@ interface ZipEntry {
   offset: number;
 }
 
-/** Counts the characters of the output (and the workbook cells) while they are built. Going over stops the whole extraction. */
-class Quota {
+/**
+ * The one budget of an extraction. Each step pays here BEFORE it builds: `unpack` before a part is kept, `charge` before
+ * output characters are copied or joined, `item` before an element is kept, `tick` while XML is read. Going over stops
+ * the whole extraction (failed/too_large).
+ */
+class Budget {
+  /** unpacked bytes still allowed */
+  remaining: number;
   private chars = 0;
-  private cells = 0;
+  private items = 0;
+  private readonly deadline: number;
+  constructor(unpacked: number, ms: number = MAX_EXTRACT_MS) {
+    this.remaining = unpacked;
+    this.deadline = performance.now() + ms;
+  }
+  /** output characters about to be built */
   charge(n: number): void {
     this.chars += n;
     if (this.chars > MAX_TEXT_CHARS) throw text_too_large();
   }
-  cell(): void {
-    this.cells += 1;
-    if (this.cells > MAX_CELLS) throw text_too_large();
+  /** elements about to be kept */
+  item(n = 1): void {
+    this.items += n;
+    if (this.items > MAX_ITEMS) throw new ExtractFailure("too_large", "문서 안의 칸·행·문단 같은 요소가 너무 많아 멈췄습니다. 일부만 돌려주거나 글자를 지어내지 않았습니다.");
   }
-}
-
-class Budget {
-  remaining: number;
-  constructor(total: number) {
-    this.remaining = total;
+  tick(): void {
+    if (performance.now() > this.deadline) throw new ExtractFailure("too_large", "글자를 뽑는 데 시간 상한을 넘어 멈췄습니다. 일부만 돌려주거나 글자를 지어내지 않았습니다.");
   }
 }
 
@@ -316,27 +340,83 @@ function local_name(raw: string): string {
   return colon < 0 ? raw : raw.slice(colon + 1);
 }
 
-export function xml_decode(text: string): string {
-  if (!text.includes("&")) return text;
-  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);/g, (whole, body: string) => {
-    if (body === "amp") return "&";
-    if (body === "lt") return "<";
-    if (body === "gt") return ">";
-    if (body === "quot") return '"';
-    if (body === "apos") return "'";
-    const code = body[1] === "x" ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
-    if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return whole;
-    // XML 1.0 does not allow most control characters (a NUL made out of "&#0;" is not text)
-    if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0xfffe || code === 0xffff) return whole;
-    return String.fromCodePoint(code);
-  });
+/** The character a numeric reference names, or null when it must stay as written (out of range, a surrogate, a control character). */
+function char_ref(digits: string, hex: boolean): string | null {
+  const code = hex ? Number.parseInt(digits, 16) : Number.parseInt(digits, 10);
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return null;
+  // XML 1.0 does not allow most control characters (a NUL made out of "&#0;" is not text)
+  if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0xfffe || code === 0xffff) return null;
+  return String.fromCodePoint(code);
 }
 
-function* xml_events(src: string): Generator<XmlEvent> {
+const NAMED: ReadonlyArray<readonly [string, string]> = [["amp;", "&"], ["lt;", "<"], ["gt;", ">"], ["quot;", '"'], ["apos;", "'"]];
+
+function is_digit(code: number, hex: boolean): boolean {
+  return (code >= 48 && code <= 57) || (hex && ((code >= 65 && code <= 70) || (code >= 97 && code <= 102)));
+}
+
+/**
+ * The five named entities and numeric references, decoded by jumping from "&" to "&" (no callback per match: millions of
+ * entities in a few kilobytes of zip once cost gigabytes). Pieces are joined in small groups, so memory stays near the size
+ * of the result. Anything that is not one of these references stays exactly as written.
+ */
+export function xml_decode(text: string): string {
+  let amp = text.indexOf("&");
+  if (amp < 0) return text;
+  const chunks: string[] = [];
+  let pieces: string[] = [];
+  let last = 0;
+  const put = (piece: string): void => {
+    if (piece === "") return;
+    pieces.push(piece);
+    if (pieces.length >= 4096) {
+      chunks.push(pieces.join(""));
+      pieces = [];
+    }
+  };
+  while (amp >= 0) {
+    let decoded: string | null = null;
+    let after = amp + 1;
+    if (text.charCodeAt(amp + 1) === 35 /* # */) {
+      const hex = text.charCodeAt(amp + 2) === 120; /* x */
+      const from = amp + (hex ? 3 : 2);
+      let at = from;
+      while (at < text.length && is_digit(text.charCodeAt(at), hex)) at += 1;
+      if (at > from && text.charCodeAt(at) === 59 /* ; */) {
+        decoded = char_ref(text.slice(from, at), hex);
+        after = at + 1;
+      }
+    } else {
+      for (const [name, value] of NAMED) {
+        if (text.startsWith(name, amp + 1)) {
+          decoded = value;
+          after = amp + 1 + name.length;
+          break;
+        }
+      }
+    }
+    if (decoded === null) {
+      amp = text.indexOf("&", amp + 1);
+      continue;
+    }
+    put(text.slice(last, amp));
+    put(decoded);
+    last = after;
+    amp = text.indexOf("&", after);
+  }
+  put(text.slice(last));
+  chunks.push(pieces.join(""));
+  return chunks.length === 1 ? (chunks[0] as string) : chunks.join("");
+}
+
+function* xml_events(src: string, budget: Budget): Generator<XmlEvent> {
   const stack: string[] = [];
   let at = 0;
   let saw_root = false;
+  let steps = 0;
   while (at < src.length) {
+    steps += 1;
+    if (steps % TICK_EVERY === 0) budget.tick();
     const lt = src.indexOf("<", at);
     if (lt < 0) {
       if (stack.length > 0 || src.slice(at).trim() !== "") throw new XmlError("text outside the root");
@@ -417,53 +497,110 @@ function cell_text(text: string): string {
   return text.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
 }
 
+/** The characters that /\s/ matches (ECMAScript WhiteSpace + LineTerminator), by code unit. */
+function is_space(code: number): boolean {
+  return (
+    (code >= 9 && code <= 13) || code === 32 || code === 160 || code === 5760 || (code >= 8192 && code <= 8202) ||
+    code === 8232 || code === 8233 || code === 8239 || code === 8287 || code === 12288 || code === 65279
+  );
+}
+
+/**
+ * cell_text(parts.join(" ")).length, counted without building anything (so the budget is paid before any copy is made).
+ * Parts are read as if joined with one space.
+ */
+function cell_text_length(parts: readonly string[]): number {
+  let length = 0;
+  let pending_space = false;
+  parts.forEach((text, index) => {
+    if (index > 0 && length > 0) pending_space = true;
+    for (let i = 0; i < text.length; i += 1) {
+      const code = text.charCodeAt(i);
+      if (is_space(code)) {
+        if (length > 0) pending_space = true;
+        continue;
+      }
+      if (pending_space) length += 1;
+      pending_space = false;
+      length += code === 124 /* | */ ? 2 : 1;
+    }
+  });
+  return length;
+}
+
+/** One table cell for the output: the budget pays for the escaped text (and its " | ") first; only then is it joined and built. */
+function cell_out(parts: readonly string[], budget: Budget): string {
+  const length = cell_text_length(parts);
+  budget.charge(length + 3);
+  if (length === 0) return "";
+  return cell_text(parts.length === 1 ? (parts[0] as string) : parts.join(" "));
+}
+
 function pipe_row(cells: string[]): string {
   return `| ${cells.join(" | ")} |`;
 }
 
 /**
- * rows -> pipe-table lines: header row, a separator of the same width, then the rest. Every row is padded to the widest row so
- * the table stays a table. Each line is charged to the quota BEFORE it is built.
+ * Cells already escaped and paid for, laid out row by row (`row_ends[r]` = index after the last cell of row r) -> pipe-table
+ * lines: header row, a separator of the same width, then the rest. Every row is padded to the widest row so the table stays
+ * a table; the padding and the frame of each line are paid for before the line is built.
  */
-function pipe_table(rows: string[][], quota: Quota): string[] {
-  const width = rows.reduce((most, row) => Math.max(most, row.length), 0);
+function pipe_table(cells: string[], row_ends: number[], budget: Budget): string[] {
+  let width = 0;
+  let begin = 0;
+  for (const end of row_ends) {
+    width = Math.max(width, end - begin);
+    begin = end;
+  }
   const lines: string[] = [];
-  rows.forEach((row, index) => {
-    const cells = row.map(cell_text);
-    quota.charge(cells.reduce((sum, cell) => sum + cell.length, 0) + 3 * width + 6);
-    while (cells.length < width) cells.push("");
-    lines.push(pipe_row(cells));
+  begin = 0;
+  row_ends.forEach((end, index) => {
+    budget.charge(3 * (width - (end - begin)) + 6);
+    const row = cells.slice(begin, end);
+    while (row.length < width) row.push("");
+    lines.push(pipe_row(row));
+    begin = end;
     if (index === 0) {
-      quota.charge(5 * width + 6);
+      budget.charge(5 * width + 6);
       lines.push(pipe_row(Array.from({ length: width }, () => "---")));
     }
   });
   return lines;
 }
 
-/** A workbook row keeps only the cells that hold something (column numbers ascending as read; a later cell wins a column). */
-interface SparseRow {
+/**
+ * One sheet, kept flat (a row object per row once cost hundreds of bytes): only the cells that hold something, as
+ * (column, escaped value) pairs in reading order; row r is cells row_starts[r] .. row_starts[r + 1].
+ */
+interface SheetData {
+  row_starts: number[];
   cols: number[];
   vals: string[];
+  width: number;
 }
 
-/** Sparse rows -> the same pipe table, padded to the widest row. A row is only widened to the page width when it is printed. */
-function sparse_pipe_table(rows: SparseRow[], width: number, quota: Quota): string[] {
+/** A sheet -> the same pipe table, padded to the widest row. A row is only widened to the page width when it is printed. */
+function sparse_pipe_table(sheet: SheetData, budget: Budget): string[] {
+  const { row_starts, cols, vals, width } = sheet;
   const lines: string[] = [];
-  rows.forEach((row, index) => {
-    const escaped = row.vals.map(cell_text);
-    quota.charge(escaped.reduce((sum, cell) => sum + cell.length, 0) + 3 * width + 6);
+  row_starts.forEach((begin, index) => {
+    const end = index + 1 < row_starts.length ? (row_starts[index + 1] as number) : cols.length;
+    // the values were paid for when they were read; here the empty columns and the frame
+    budget.charge(3 * Math.max(0, width - (end - begin)) + 6);
     const dense = new Array<string>(width).fill("");
-    row.cols.forEach((col, i) => {
-      dense[col] = escaped[i] as string;
-    });
+    for (let i = begin; i < end; i += 1) dense[cols[i] as number] = vals[i] as string; // a later cell wins a column
     lines.push(pipe_row(dense));
     if (index === 0) {
-      quota.charge(5 * width + 6);
+      budget.charge(5 * width + 6);
       lines.push(pipe_row(Array.from({ length: width }, () => "---")));
     }
   });
   return lines;
+}
+
+function push_all(into: string[], from: readonly string[]): void {
+  // not into.push(...from): spreading ~120,000 arguments overflows the call stack
+  for (const line of from) into.push(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -480,25 +617,37 @@ interface ParaFrame {
 }
 interface CellFrame {
   parts: string[];
+  /** the table whose open row this cell belongs to, or null (a cell outside a row is read but not kept) */
+  table: TableFrame | null;
 }
+/** A table, kept flat: escaped cells in order, and where each row ends. */
 interface TableFrame {
-  rows: CellFrame[][];
-  row: CellFrame[] | null;
+  cells: string[];
+  row_ends: number[];
+  /** index in `cells` where the open row starts, or -1 when no row is open */
+  row_start: number;
   parent_cell: CellFrame | null;
 }
 
 /** Walks one body part. Throws XmlError when the XML is not well formed. */
-function read_body(xml: string, quota: Quota): BodyResult {
+function read_body(xml: string, budget: Budget): BodyResult {
   const lines: string[] = [];
   let tables = 0;
   const paras: ParaFrame[] = [];
   const cells: CellFrame[] = [];
   const table_stack: TableFrame[] = [];
   let text_depth = 0;
-  for (const ev of xml_events(xml)) {
+  const append = (para: ParaFrame, piece: string): void => {
+    if (piece === "") return;
+    // joining onto text already there keeps one more piece alive until the paragraph ends
+    if (para.text !== "") budget.item();
+    para.text += piece;
+  };
+  for (const ev of xml_events(xml, budget)) {
     if (ev.k === "open") {
       switch (ev.name) {
         case "p":
+          budget.item();
           paras.push({ text: "", cell: cells.length > 0 ? (cells[cells.length - 1] as CellFrame) : null });
           break;
         case "t":
@@ -506,31 +655,37 @@ function read_body(xml: string, quota: Quota): BodyResult {
           break;
         case "br":
         case "lineBreak":
-          if (paras.length > 0) (paras[paras.length - 1] as ParaFrame).text += "\n";
+          if (paras.length > 0) append(paras[paras.length - 1] as ParaFrame, "\n");
           break;
         case "tab":
-          if (paras.length > 0 && text_depth === 0) (paras[paras.length - 1] as ParaFrame).text += "\t";
+          if (paras.length > 0 && text_depth === 0) append(paras[paras.length - 1] as ParaFrame, "\t");
           break;
         case "tbl":
           if (table_stack.length >= MAX_TABLE_DEPTH) throw new ExtractFailure("too_large", "표 안의 표가 너무 깊어 글자를 뽑지 않았습니다.");
+          budget.item();
           tables += 1;
-          table_stack.push({ rows: [], row: null, parent_cell: cells.length > 0 ? (cells[cells.length - 1] as CellFrame) : null });
+          table_stack.push({ cells: [], row_ends: [], row_start: -1, parent_cell: cells.length > 0 ? (cells[cells.length - 1] as CellFrame) : null });
           break;
-        case "tr":
-          if (table_stack.length > 0) (table_stack[table_stack.length - 1] as TableFrame).row = [];
-          break;
-        case "tc": {
-          const cell: CellFrame = { parts: [] };
-          cells.push(cell);
+        case "tr": {
           const table = table_stack[table_stack.length - 1];
-          if (table?.row) table.row.push(cell);
+          if (table === undefined) break;
+          budget.item();
+          // a row opened inside an open row starts over (the cells read so far in it are dropped)
+          if (table.row_start >= 0) table.cells.length = table.row_start;
+          table.row_start = table.cells.length;
+          break;
+        }
+        case "tc": {
+          budget.item();
+          const table = table_stack[table_stack.length - 1];
+          cells.push({ parts: [], table: table !== undefined && table.row_start >= 0 ? table : null });
           break;
         }
         default:
           break;
       }
     } else if (ev.k === "text") {
-      if (text_depth > 0 && paras.length > 0) (paras[paras.length - 1] as ParaFrame).text += xml_decode(ev.text);
+      if (text_depth > 0 && paras.length > 0) append(paras[paras.length - 1] as ParaFrame, xml_decode(ev.text));
     } else {
       switch (ev.name) {
         case "t":
@@ -544,29 +699,32 @@ function read_body(xml: string, quota: Quota): BodyResult {
           if (para.cell) {
             para.cell.parts.push(text);
           } else {
-            quota.charge(text.length + 1);
+            budget.charge(text.length + 1);
             lines.push(text);
           }
           break;
         }
-        case "tc":
-          cells.pop();
+        case "tc": {
+          const cell = cells.pop();
+          if (cell?.table) cell.table.cells.push(cell_out(cell.parts, budget));
           break;
+        }
         case "tr": {
           const table = table_stack[table_stack.length - 1];
-          if (table?.row) {
-            table.rows.push(table.row);
-            table.row = null;
+          if (table !== undefined && table.row_start >= 0) {
+            table.row_ends.push(table.cells.length);
+            table.row_start = -1;
           }
           break;
         }
         case "tbl": {
           const table = table_stack.pop();
-          if (table === undefined || table.rows.length === 0) break;
-          const grid = table.rows.map((row) => row.map((cell) => cell.parts.join(" ")));
-          const rendered = pipe_table(grid, quota);
-          if (table.parent_cell) table.parent_cell.parts.push(rendered.join(" "));
-          else lines.push(...rendered);
+          if (table === undefined || table.row_ends.length === 0) break;
+          const rendered = pipe_table(table.cells, table.row_ends, budget);
+          if (table.parent_cell) {
+            budget.item();
+            table.parent_cell.parts.push(rendered.join(" "));
+          } else push_all(lines, rendered);
           break;
         }
         default:
@@ -594,15 +752,29 @@ function part_warning(name: string): ExtractWarning {
   return { code: "part_unreadable", message: `부품 ${name} 을(를) 읽지 못해 그 부분은 빠졌습니다.` };
 }
 
+/** At most MAX_WARNINGS warnings are kept as they are; the rest are counted and become one last line. */
+class Warnings {
+  private readonly kept: ExtractWarning[] = [];
+  private more = 0;
+  add(warning: ExtractWarning): void {
+    if (this.kept.length < MAX_WARNINGS) this.kept.push(warning);
+    else this.more += 1;
+  }
+  list(): ExtractWarning[] {
+    if (this.more === 0) return this.kept;
+    return [...this.kept, { code: "more_warnings", message: `같은 종류의 경고 ${this.more}개는 더 적지 않았습니다.` }];
+  }
+}
+
 function invalid_document(message: string): ExtractFailure {
   return new ExtractFailure("invalid_document", message);
 }
 
 /** Reads a part that must exist: missing or unreadable XML -> invalid_document. */
-function read_main(zip: ZipArchive, name: string, quota: Quota): BodyResult {
+function read_main(zip: ZipArchive, name: string, budget: Budget): BodyResult {
   if (!zip.has(name)) throw invalid_document(`본문 부품 ${name} 이(가) 없습니다.`);
   try {
-    return read_body(utf8(zip.read(name)), quota);
+    return read_body(utf8(zip.read(name)), budget);
   } catch (error) {
     if (error instanceof XmlError) throw invalid_document(`본문 부품 ${name} 을(를) 읽을 수 없습니다.`);
     throw error;
@@ -619,74 +791,78 @@ function numbered_parts(zip: ZipArchive, pattern: RegExp): Array<{ name: string;
   return found.sort((a, b) => a.n - b.n || (a.name < b.name ? -1 : 1));
 }
 
-function guard_part<T>(name: string, warnings: ExtractWarning[], read: () => T): T | null {
+function guard_part<T>(name: string, warnings: Warnings, read: () => T): T | null {
   try {
     return read();
   } catch (error) {
     if (error instanceof XmlError) {
-      warnings.push(part_warning(name));
+      warnings.add(part_warning(name));
       return null;
     }
     // a part the list names but the package does not hold is a warning; anything wrong INSIDE the zip (a lying header,
     // a broken stream, a bad CRC, the budget) is not: the container is not trusted
     if (error instanceof ExtractFailure && error.code === "part_missing") {
-      warnings.push(part_warning(name));
+      warnings.add(part_warning(name));
       return null;
     }
     throw error;
   }
 }
 
-function extract_docx(zip: ZipArchive, quota: Quota): ExtractOutcome {
-  const body = read_main(zip, "word/document.xml", quota);
+function extract_docx(zip: ZipArchive, budget: Budget): ExtractOutcome {
+  const body = read_main(zip, "word/document.xml", budget);
   return { status: "extracted", reason: null, text: body_text(body.lines), page_count: null, table_count: body.tables, warnings: [] };
 }
 
-function extract_hwpx(zip: ZipArchive, quota: Quota): ExtractOutcome {
+function extract_hwpx(zip: ZipArchive, budget: Budget): ExtractOutcome {
   const sections = numbered_parts(zip, /^Contents\/section(\d{1,9})\.xml$/);
   if (sections.length === 0) throw invalid_document("본문 구역(Contents/section*.xml)이 없습니다.");
-  const warnings: ExtractWarning[] = [];
+  const warnings = new Warnings();
   const lines: string[] = [];
   let tables = 0;
   let read = 0;
   for (const section of sections) {
-    const body = guard_part(section.name, warnings, () => read_body(utf8(zip.read(section.name)), quota));
+    budget.tick();
+    const body = guard_part(section.name, warnings, () => read_body(utf8(zip.read(section.name)), budget));
     if (body === null) continue;
     read += 1;
-    lines.push(...body.lines);
+    push_all(lines, body.lines);
     tables += body.tables;
   }
   if (read === 0) throw invalid_document("읽을 수 있는 본문 구역이 없습니다.");
   return finish(lines, tables, null, warnings);
 }
 
-function extract_pptx(zip: ZipArchive, quota: Quota): ExtractOutcome {
+function extract_pptx(zip: ZipArchive, budget: Budget): ExtractOutcome {
   const slides = numbered_parts(zip, /^ppt\/slides\/slide(\d{1,9})\.xml$/);
   if (slides.length === 0) throw invalid_document("슬라이드(ppt/slides/slide*.xml)가 없습니다.");
-  const warnings: ExtractWarning[] = [];
+  const warnings = new Warnings();
   const lines: string[] = [];
   let tables = 0;
   let read = 0;
   for (const slide of slides) {
-    const body = guard_part(slide.name, warnings, () => read_body(utf8(zip.read(slide.name)), quota));
+    budget.tick();
+    const body = guard_part(slide.name, warnings, () => read_body(utf8(zip.read(slide.name)), budget));
     if (body === null) continue;
     read += 1;
-    quota.charge(24);
-    lines.push(`## 슬라이드 ${slide.n}`, ...body.lines);
+    budget.charge(24);
+    lines.push(`## 슬라이드 ${slide.n}`);
+    push_all(lines, body.lines);
     tables += body.tables;
   }
   if (read === 0) throw invalid_document("읽을 수 있는 슬라이드가 없습니다.");
   return finish(lines, tables, slides.length, warnings);
 }
 
-function finish(lines: string[], tables: number, pages: number | null, warnings: ExtractWarning[]): ExtractOutcome {
+function finish(lines: string[], tables: number, pages: number | null, warnings: Warnings): ExtractOutcome {
+  const list = warnings.list();
   return {
-    status: warnings.length > 0 ? "partial" : "extracted",
-    reason: warnings[0]?.code ?? null,
+    status: list.length > 0 ? "partial" : "extracted",
+    reason: list[0]?.code ?? null,
     text: body_text(lines),
     page_count: pages,
     table_count: tables,
-    warnings,
+    warnings: list,
   };
 }
 
@@ -701,18 +877,24 @@ function column_index(ref: string): number | null {
   return n - 1;
 }
 
-function read_shared_strings(xml: string): string[] {
+function read_shared_strings(xml: string, budget: Budget): string[] {
   const strings: string[] = [];
   let current: string | null = null;
   let in_t = false;
   let phonetic = 0;
-  for (const ev of xml_events(xml)) {
+  for (const ev of xml_events(xml, budget)) {
     if (ev.k === "open") {
-      if (ev.name === "si") current = "";
-      else if (ev.name === "rPh") phonetic += 1;
+      if (ev.name === "si") {
+        budget.item();
+        current = "";
+      } else if (ev.name === "rPh") phonetic += 1;
       else if (ev.name === "t" && current !== null && phonetic === 0) in_t = true;
     } else if (ev.k === "text") {
-      if (in_t && current !== null) current += xml_decode(ev.text);
+      if (in_t && current !== null) {
+        const piece = xml_decode(ev.text);
+        if (current !== "" && piece !== "") budget.item();
+        current += piece;
+      }
     } else if (ev.name === "t") {
       in_t = false;
     } else if (ev.name === "rPh") {
@@ -725,21 +907,48 @@ function read_shared_strings(xml: string): string[] {
   return strings;
 }
 
-function read_sheet(xml: string, shared: string[], quota: Quota): { rows: SparseRow[]; width: number } {
-  const rows: SparseRow[] = [];
-  let width = 0;
-  let row: SparseRow | null = null;
+/**
+ * Shared strings, escaped for a table cell at most once each (a string used by 200,000 cells is escaped once and the
+ * cells share it). The budget still pays for every cell that prints it.
+ */
+class SharedCells {
+  private readonly escaped = new Map<number, string>();
+  private readonly raw: string[];
+  constructor(raw: string[]) {
+    this.raw = raw;
+  }
+  /** the raw text (to know whether the cell is empty) and the escaped text, or null for an unknown index */
+  get(index: number): { raw: string; escaped: string } | null {
+    const raw = this.raw[index];
+    if (raw === undefined) return null;
+    let escaped = this.escaped.get(index);
+    if (escaped === undefined) {
+      escaped = cell_text(raw);
+      this.escaped.set(index, escaped);
+    }
+    return { raw, escaped };
+  }
+}
+
+function read_sheet(xml: string, shared: SharedCells, budget: Budget): SheetData {
+  const sheet: SheetData = { row_starts: [], cols: [], vals: [], width: 0 };
+  let row_start = -1;
   let cell: { col: number; type: string; v: string; is: string } | null = null;
   let cap: "v" | "is" | null = null;
   let in_is = false;
   let phonetic = 0;
   let next_col = 0;
-  for (const ev of xml_events(xml)) {
+  for (const ev of xml_events(xml, budget)) {
     if (ev.k === "open") {
       if (ev.name === "row") {
-        row = { cols: [], vals: [] };
+        // a row opened inside an open row starts over
+        if (row_start >= 0) {
+          sheet.cols.length = row_start;
+          sheet.vals.length = row_start;
+        }
+        row_start = sheet.cols.length;
         next_col = 0;
-      } else if (ev.name === "c" && row !== null) {
+      } else if (ev.name === "c" && row_start >= 0) {
         const col = column_index(attr_of(ev.attrs, "r") ?? "") ?? next_col;
         if (col >= MAX_COLUMN) throw new XmlError("column out of range");
         cell = { col, type: attr_of(ev.attrs, "t") ?? "n", v: "", is: "" };
@@ -754,42 +963,63 @@ function read_sheet(xml: string, shared: string[], quota: Quota): { rows: Sparse
         cap = "is";
       }
     } else if (ev.k === "text") {
-      if (cell !== null && cap !== null) cell[cap] += xml_decode(ev.text);
+      if (cell !== null && cap !== null) {
+        const piece = xml_decode(ev.text);
+        if (cell[cap] !== "" && piece !== "") budget.item();
+        cell[cap] += piece;
+      }
     } else if (ev.name === "v" || ev.name === "t") {
       cap = null;
     } else if (ev.name === "rPh") {
       phonetic = Math.max(0, phonetic - 1);
     } else if (ev.name === "is") {
       in_is = false;
-    } else if (ev.name === "c" && cell !== null && row !== null) {
-      let value: string;
-      if (cell.type === "s") value = shared[Number.parseInt(cell.v.trim(), 10)] ?? "";
-      else if (cell.type === "inlineStr") value = cell.is;
-      else if (cell.type === "b") value = cell.v.trim() === "1" ? "TRUE" : "FALSE";
-      else value = cell.v.trim();
+    } else if (ev.name === "c" && cell !== null && row_start >= 0) {
+      let raw: string;
+      let escaped: string | null = null;
+      if (cell.type === "s") {
+        const hit = shared.get(Number.parseInt(cell.v.trim(), 10));
+        raw = hit?.raw ?? "";
+        escaped = hit?.escaped ?? "";
+      } else if (cell.type === "inlineStr") raw = cell.is;
+      else if (cell.type === "b") raw = cell.v.trim() === "1" ? "TRUE" : "FALSE";
+      else raw = cell.v.trim();
       // An empty cell is not kept, and a row is never widened with empty cells here (a "XFD1" cell would otherwise cost
-      // 16,384 cells for the one value): the row is widened only when it is printed, against the output quota.
-      if (value !== "") {
-        quota.cell();
-        row.cols.push(cell.col);
-        row.vals.push(value);
-        if (cell.col + 1 > width) width = cell.col + 1;
+      // 16,384 cells for the one value): the row is widened only when it is printed, against the output budget.
+      if (raw !== "") {
+        budget.item();
+        // the value is paid for BEFORE it is copied (a shared string is escaped once and only referenced here)
+        let value: string;
+        if (escaped !== null) {
+          budget.charge(escaped.length + 3);
+          value = escaped;
+        } else value = cell_out([raw], budget);
+        sheet.cols.push(cell.col);
+        sheet.vals.push(value);
+        if (cell.col + 1 > sheet.width) sheet.width = cell.col + 1;
       }
       cell = null;
-    } else if (ev.name === "row" && row !== null) {
-      if (row.cols.length > 0) rows.push(row);
-      row = null;
+    } else if (ev.name === "row" && row_start >= 0) {
+      if (sheet.cols.length > row_start) {
+        budget.item();
+        sheet.row_starts.push(row_start);
+      }
+      row_start = -1;
     }
   }
-  return { rows, width };
+  return sheet;
 }
 
-function extract_xlsx(zip: ZipArchive, quota: Quota): ExtractOutcome {
+function extract_xlsx(zip: ZipArchive, budget: Budget): ExtractOutcome {
   if (!zip.has("xl/workbook.xml")) throw invalid_document("통합 문서(xl/workbook.xml)가 없습니다.");
   const sheets: Array<{ name: string; rid: string | undefined }> = [];
   try {
-    for (const ev of xml_events(utf8(zip.read("xl/workbook.xml")))) {
-      if (ev.k === "open" && ev.name === "sheet") sheets.push({ name: ev.attrs.name ?? "", rid: attr_of(ev.attrs, "id") });
+    for (const ev of xml_events(utf8(zip.read("xl/workbook.xml")), budget)) {
+      if (ev.k === "open" && ev.name === "sheet") {
+        if (sheets.length >= MAX_SHEETS) throw new ExtractFailure("too_large", `시트가 ${MAX_SHEETS}개를 넘어 글자를 뽑지 않았습니다.`);
+        budget.item();
+        sheets.push({ name: ev.attrs.name ?? "", rid: attr_of(ev.attrs, "id") });
+      }
     }
   } catch (error) {
     if (error instanceof XmlError) throw invalid_document("통합 문서(xl/workbook.xml)를 읽을 수 없습니다.");
@@ -800,45 +1030,59 @@ function extract_xlsx(zip: ZipArchive, quota: Quota): ExtractOutcome {
   const targets = new Map<string, string>();
   if (zip.has("xl/_rels/workbook.xml.rels")) {
     try {
-      for (const ev of xml_events(utf8(zip.read("xl/_rels/workbook.xml.rels")))) {
-        if (ev.k === "open" && ev.name === "Relationship" && ev.attrs.Id !== undefined && ev.attrs.Target !== undefined) targets.set(ev.attrs.Id, ev.attrs.Target);
+      for (const ev of xml_events(utf8(zip.read("xl/_rels/workbook.xml.rels")), budget)) {
+        if (ev.k === "open" && ev.name === "Relationship" && ev.attrs.Id !== undefined && ev.attrs.Target !== undefined) {
+          budget.item();
+          targets.set(ev.attrs.Id, ev.attrs.Target);
+        }
       }
     } catch (error) {
       if (!(error instanceof XmlError)) throw error;
     }
   }
 
-  let shared: string[] = [];
+  let shared = new SharedCells([]);
   if (zip.has("xl/sharedStrings.xml")) {
     try {
-      shared = read_shared_strings(utf8(zip.read("xl/sharedStrings.xml")));
+      shared = new SharedCells(read_shared_strings(utf8(zip.read("xl/sharedStrings.xml")), budget));
     } catch (error) {
       if (error instanceof XmlError) throw invalid_document("공유 문자열(xl/sharedStrings.xml)을 읽을 수 없습니다.");
       throw error;
     }
   }
 
-  const warnings: ExtractWarning[] = [];
+  const warnings = new Warnings();
   const lines: string[] = [];
+  // a part is unpacked and read once, however many sheets point at it (null: it could not be read)
+  const done = new Map<string, SheetData | null>();
   let non_empty = 0;
   let read = 0;
   for (const [index, sheet] of sheets.entries()) {
+    budget.tick();
     const target = sheet.rid === undefined ? undefined : targets.get(sheet.rid);
     let path = `xl/worksheets/sheet${index + 1}.xml`;
     if (target !== undefined) {
       const resolved = target.startsWith("/") ? target.slice(1) : posix.normalize(`xl/${target}`);
       if (resolved.split("/")[0] !== "..") path = resolved;
     }
-    const found = guard_part(path, warnings, () => {
-      if (!zip.has(path)) throw new ExtractFailure("part_missing", `부품 ${path} 이(가) 없습니다.`);
-      return read_sheet(utf8(zip.read(path)), shared, quota);
-    });
+    let found: SheetData | null;
+    if (done.has(path)) {
+      found = done.get(path) ?? null;
+      if (found === null) warnings.add(part_warning(path));
+    } else {
+      found = guard_part(path, warnings, () => {
+        if (!zip.has(path)) throw new ExtractFailure("part_missing", `부품 ${path} 이(가) 없습니다.`);
+        return read_sheet(utf8(zip.read(path)), shared, budget);
+      });
+      done.set(path, found);
+    }
     if (found === null) continue;
     read += 1;
-    if (found.rows.length === 0) continue;
+    if (found.row_starts.length === 0) continue;
     non_empty += 1;
-    quota.charge(sheet.name.length + 5);
-    lines.push(`## ${sheet.name}`, ...sparse_pipe_table(found.rows, found.width, quota));
+    budget.charge(sheet.name.length + 5);
+    lines.push(`## ${sheet.name}`);
+    push_all(lines, sparse_pipe_table(found, budget));
   }
   if (read === 0) throw invalid_document("읽을 수 있는 시트가 없습니다.");
   return finish(lines, non_empty, sheets.length, warnings);
@@ -876,7 +1120,6 @@ function extract_plain(format: "txt" | "md" | "csv", bytes: Uint8Array): Extract
 export function extract_text(original_name: string | null, bytes: Uint8Array): ExtractOutcome {
   if (bytes.byteLength > MAX_SOURCE_BYTES) return too_large_outcome();
   const format = format_of(original_name);
-  const quota = new Quota();
   try {
     switch (format) {
       case "txt":
@@ -884,13 +1127,13 @@ export function extract_text(original_name: string | null, bytes: Uint8Array): E
       case "csv":
         return extract_plain(format, bytes);
       case "docx":
-        return extract_docx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
+        return extract_docx(...open_zip(bytes));
       case "xlsx":
-        return extract_xlsx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
+        return extract_xlsx(...open_zip(bytes));
       case "pptx":
-        return extract_pptx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
+        return extract_pptx(...open_zip(bytes));
       case "hwpx":
-        return extract_hwpx(new ZipArchive(bytes, new Budget(MAX_UNPACKED_BYTES)), quota);
+        return extract_hwpx(...open_zip(bytes));
       default: {
         const label = format === "unknown" ? (extension_of(original_name) === "" ? "(확장자 없음)" : `.${extension_of(original_name)}`) : `.${format}`;
         return {
@@ -908,6 +1151,11 @@ export function extract_text(original_name: string | null, bytes: Uint8Array): E
     // Anything else (an engine limit such as "Invalid string length", a bug) must still leave a record, not a 500 and a rollback.
     return failed("extract_error", "글자를 뽑는 중 예기치 않은 오류가 나서 멈췄습니다. 글자를 지어내지 않았습니다.");
   }
+}
+
+function open_zip(bytes: Uint8Array): [ZipArchive, Budget] {
+  const budget = new Budget(MAX_UNPACKED_BYTES);
+  return [new ZipArchive(bytes, budget), budget];
 }
 
 export function too_large_outcome(): ExtractOutcome {

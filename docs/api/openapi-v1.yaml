@@ -1304,7 +1304,9 @@ paths:
         tables as Markdown pipe tables), and `hwp` `doc` `xls` `ppt` `pdf` or an unknown extension = `unsupported` (no text, no blob, no policy; nothing is made up).
         A damaged file is `failed` (`invalid_container`, `invalid_document`); a file over 32 MiB, or a zip whose parts unpack past 64 MiB in total, is `failed / too_large`
         (the cap is on the real unpacked bytes, never the size in the zip header; no part of the text is returned). One unreadable slide, sheet or section is `partial`
-        with a `part_unreadable` warning; the readable parts are kept.
+        with a `part_unreadable` warning; the readable parts are kept. One extraction has ONE budget, paid before anything is built: 32 Mi output characters,
+        3,000,000 kept elements (cells, rows, paragraphs, text pieces, sheets), 1,000 sheets and 10 s; going over any of them is `failed / too_large`.
+        At most 50 warnings are listed; the rest become one `more_warnings` line.
         Data `{extraction_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status: extracted|partial|unsupported|failed,
         reason, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings:[{code,message}], changed}`.
         The text blob has its OWN policy, created `allow` rev 1 (never inherited from the source). AI reads it only when the source policy AND the text policy both allow

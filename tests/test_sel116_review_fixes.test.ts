@@ -9,6 +9,10 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
@@ -372,4 +376,191 @@ test("R12: a slide whose file-name number has hundreds of digits is not a slide 
   assert.ok(!out.text?.includes("Infinity"));
   assert.ok(!out.text?.includes("괴물"));
   assert.equal(out.text, "## 슬라이드 1\n하나\n## 슬라이드 2\n둘\n");
+});
+
+// ---------------------------------------------------------------------------
+// 1차 리뷰 2회차(R1-2) 필수 N1·N2·N3 + 권장 R1·R2 — 한 추출에 하나의 예산(글자·원소 개수·시간)
+//
+// 메모리 폭증 사례는 이 시험 프로세스 안에서 돌리지 않는다: 퇴보하면 `npm test` 전체가 힙 부족으로 죽기 때문이다(R2).
+// 작은 힙(`--max-old-space-size=256`)을 건 자식 프로세스에서 추출 한 번을 돌려, 죽지 않고 끝나는지(종료 코드 0),
+// 결과 status/reason, 걸린 시간만 단언한다.
+
+const CHILD = join(import.meta.dirname, "helpers", "sel116_extract_child.ts");
+const CHILD_HEAP_MB = 256;
+
+interface ChildResult {
+  status: string;
+  reason: string | null;
+  text_length: number | null;
+  text_head: string | null;
+  warnings: number;
+  warning_codes: string[];
+  ms: number;
+}
+
+/** zip 을 임시 폴더에 쓰고, 작은 힙 자식 프로세스에서 추출한다. 자식이 죽으면(힙 부족 등) 시험이 실패한다. */
+function extract_in_child(name: string, zip: Uint8Array, wall_ms = 60_000): ChildResult {
+  const dir = mkdtempSync(join(tmpdir(), "sel116-bomb-"));
+  try {
+    const file = join(dir, "input.bin");
+    writeFileSync(file, zip);
+    const run = spawnSync(process.execPath, [`--max-old-space-size=${CHILD_HEAP_MB}`, CHILD, file, name], {
+      encoding: "utf8",
+      timeout: wall_ms,
+      maxBuffer: 1024 * 1024,
+    });
+    assert.equal(run.error, undefined, `child did not finish: ${String(run.error)}`);
+    assert.equal(run.status, 0, `child died (signal ${run.signal}): ${run.stderr.slice(-600)}`);
+    return JSON.parse(run.stdout.trim()) as ChildResult;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function column_name(index: number): string {
+  let n = index;
+  let out = "";
+  do {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
+}
+
+/** 리뷰 재현 스크립트와 같은 모양: 공유 문자열을 xml:space="preserve" 로 그대로 넣고, 여러 시트가 rId1 하나를 가리킬 수 있다. */
+function raw_xlsx_preserve(sheet_xml: string, shared: string[], sheets = 1): Uint8Array {
+  const wb = Array.from({ length: sheets }, (_v, i) => `<sheet name="s${i}" sheetId="${i + 1}" r:id="rId1"/>`).join("");
+  return make_zip([
+    { name: "xl/workbook.xml", data: `${XML}<workbook xmlns:r="r"><sheets>${wb}</sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", data: `${XML}<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>` },
+    { name: "xl/worksheets/sheet1.xml", data: `${XML}<worksheet><sheetData>${sheet_xml}</sheetData></worksheet>` },
+    { name: "xl/sharedStrings.xml", data: `${XML}<sst>${shared.map((s) => `<si><t xml:space="preserve">${s}</t></si>`).join("")}</sst>` },
+  ]);
+}
+
+const docx_body = (body: string): Uint8Array => make_zip([{ name: "word/document.xml", data: `<w:document><w:body>${body}</w:body></w:document>` }]);
+
+test("R1-2 N1: a shared string WITH spaces (1M chars) referenced by all 16,384 columns of one row — too_large, the process survives a 256 MB heap", () => {
+  const cells = Array.from({ length: 16_384 }, (_v, c) => `<c r="${column_name(c)}1" t="s"><v>0</v></c>`).join("");
+  const zip = raw_xlsx_preserve(`<row r="1">${cells}</row>`, ["가 ".repeat(500_000)]);
+  assert.ok(zip.byteLength < 60_000, `zip ${zip.byteLength} bytes`);
+  const out = extract_in_child("공백공유.xlsx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+  assert.equal(out.text_length, null);
+  assert.ok(out.ms < 10_000, `took ${out.ms} ms`);
+});
+
+test("R1-2 N1: a shared string of 'x|' (8M chars) referenced by 200,000 cells of the same column — too_large, the process survives", () => {
+  const zip = raw_xlsx_preserve(`<row r="1">${'<c r="A1" t="s"><v>0</v></c>'.repeat(200_000)}</row>`, ["x|".repeat(4_000_000)]);
+  assert.ok(zip.byteLength < 60_000, `zip ${zip.byteLength} bytes`);
+  const out = extract_in_child("파이프공유.xlsx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+  assert.ok(out.ms < 10_000, `took ${out.ms} ms`);
+});
+
+test("R1-2 N1: a docx table cell full of spaces and pipes is charged before it is copied — too_large, the process survives", () => {
+  const cell = `<w:tc><w:p><w:t xml:space="preserve">${"a | ".repeat(250_000)}</w:t></w:p></w:tc>`;
+  const zip = docx_body(`<w:tbl>${`<w:tr>${cell.repeat(4)}</w:tr>`.repeat(40)}</w:tbl>`);
+  const out = extract_in_child("파이프칸.docx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+});
+
+test("R1-2 N2: 7,000,000 <sheet/> entries in an 80 KB workbook stop at the sheet limit — quickly, in a 256 MB heap", () => {
+  const zip = make_zip([{ name: "xl/workbook.xml", data: `${XML}<workbook><sheets>${"<sheet/>".repeat(7_000_000)}</sheets></workbook>` }]);
+  assert.ok(zip.byteLength < 120_000, `zip ${zip.byteLength} bytes`);
+  const out = extract_in_child("시트폭탄.xlsx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+  assert.ok(out.ms < 3_000, `took ${out.ms} ms`);
+});
+
+test("R1-2 N2: 1,400,000 sheets that point at a missing part do not become 1.4M warnings — too_large, quickly", () => {
+  const sheets = '<sheet name="s" sheetId="1" r:id="rIdX"/>'.repeat(1_400_000);
+  const zip = make_zip([
+    { name: "xl/workbook.xml", data: `${XML}<workbook xmlns:r="r"><sheets>${sheets}</sheets></workbook>` },
+    { name: "xl/worksheets/sheet1.xml", data: `${XML}<worksheet><sheetData><row><c r="A1"><v>1</v></c></row></sheetData></worksheet>` },
+  ]);
+  const out = extract_in_child("빈시트폭탄.xlsx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+  assert.ok(out.warnings <= 1);
+  assert.ok(out.ms < 3_000, `took ${out.ms} ms`);
+});
+
+test("R1-2 N2: 500,000 sheets that all point at the same small part are not unpacked 500,000 times — too_large, quickly", () => {
+  const zip = raw_xlsx_preserve('<row><c r="A1"><v>1</v></c></row>', [], 500_000);
+  const out = extract_in_child("같은부품.xlsx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+  assert.ok(out.ms < 3_000, `took ${out.ms} ms`);
+});
+
+test("R1-2 N2: many unreadable sheets keep at most a bounded list of warnings plus one 'and n more' line; the good sheet is still read", () => {
+  const sheets = [
+    '<sheet name="좋음" sheetId="1" r:id="rId1"/>',
+    ...Array.from({ length: 300 }, (_v, i) => `<sheet name="없음${i}" sheetId="${i + 2}" r:id="rIdX${i}"/>`),
+  ].join("");
+  const zip = make_zip([
+    { name: "xl/workbook.xml", data: `${XML}<workbook xmlns:r="r"><sheets>${sheets}</sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", data: `${XML}<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>` },
+    { name: "xl/worksheets/sheet1.xml", data: `${XML}<worksheet><sheetData><row><c r="A1"><v>7</v></c></row></sheetData></worksheet>` },
+  ]);
+  const out = extract_text("경고많음.xlsx", zip);
+  assert.equal(out.status, "partial");
+  assert.ok(out.warnings.length <= 51, `warnings ${out.warnings.length}`);
+  assert.ok(out.warnings.some((w) => w.code === "part_unreadable"));
+  const last = out.warnings[out.warnings.length - 1];
+  assert.match(last?.message ?? "", /250/, "the last line says how many more were left out");
+  assert.ok(out.text?.includes("| 7 |"));
+});
+
+test("R1-2 N3: 12,000,000 '&amp;' entities in one text node (87 KB zip) are decoded without blowing a 256 MB heap", () => {
+  const zip = docx_body(`<w:p><w:t>${"&amp;".repeat(12_000_000)}</w:t></w:p>`);
+  assert.ok(zip.byteLength < 120_000, `zip ${zip.byteLength} bytes`);
+  const out = extract_in_child("엔티티.docx", zip);
+  assert.equal(out.status, "extracted", JSON.stringify(out));
+  assert.equal(out.text_length, 12_000_001);
+  assert.ok(out.text_head?.startsWith("&&&&"));
+});
+
+test("R1-2 N3: 2,800,000 one-cell table rows (136 KB zip) stop at the element limit — too_large in a 256 MB heap", () => {
+  const zip = docx_body(`<w:tbl>${"<w:tr><w:tc/></w:tr>".repeat(2_800_000)}</w:tbl>`);
+  const out = extract_in_child("행폭탄.docx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+});
+
+test("R1-2 N3: 7,000,000 empty cells in one table row (71 KB zip) stop at the element limit — too_large in a 256 MB heap", () => {
+  const zip = docx_body(`<w:tbl><w:tr>${"<w:tc/>".repeat(7_000_000)}</w:tr></w:tbl>`);
+  const out = extract_in_child("칸폭탄.docx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+});
+
+test("R1-2 N3: 6,000,000 one-letter text runs in ONE paragraph do not pile up string pieces — bounded in a 256 MB heap", () => {
+  const zip = docx_body(`<w:p>${"<w:t>x</w:t>".repeat(6_000_000)}</w:p>`);
+  const out = extract_in_child("조각폭탄.docx", zip);
+  assert.ok(["extracted", "failed"].includes(out.status), JSON.stringify(out));
+  if (out.status === "failed") assert.equal(out.reason, "too_large");
+  else assert.equal(out.text_length, 6_000_001);
+});
+
+test("R1-2 R1: an ordinary 120,000-row xlsx is extracted (no spread RangeError), within a 256 MB heap", () => {
+  const rows = Array.from({ length: 120_000 }, (_v, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c><c r="B${i + 1}" t="inlineStr"><is><t>행 ${i}</t></is></c></row>`).join("");
+  const out = extract_in_child("십이만행.xlsx", raw_xlsx(rows));
+  assert.equal(out.status, "extracted", JSON.stringify(out));
+  assert.equal(out.reason, null);
+  assert.ok(out.text_head?.startsWith("## 시트\n| 0 | 행 0 |\n| --- | --- |\n| 1 | 행 1 |"), out.text_head ?? "");
+});
+
+test("R1-2 R1: an ordinary 200,000-row one-column xlsx and a 150,000-row docx table are extracted", () => {
+  const rows = Array.from({ length: 200_000 }, (_v, i) => `<row><c r="A${i + 1}"><v>${i}</v></c></row>`).join("");
+  const sheet = extract_in_child("이십만행.xlsx", raw_xlsx(rows));
+  assert.equal(sheet.status, "extracted", JSON.stringify(sheet));
+  const table = extract_in_child("표십오만행.docx", docx_body(`<w:tbl>${"<w:tr><w:tc><w:p><w:t>x</w:t></w:p></w:tc></w:tr>".repeat(150_000)}</w:tbl>`));
+  assert.equal(table.status, "extracted", JSON.stringify(table));
+  assert.equal(table.text_length, 150_000 * 6 + "| --- |\n".length);
 });
