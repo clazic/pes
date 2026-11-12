@@ -340,3 +340,131 @@ describe("서버에 길이 없는 것은 정직하게 거절하고, 길이 생�
     expect(s.writes()).toHaveLength(0);
   });
 });
+
+describe("답 제출 매핑", () => {
+  const body = (extra: Record<string, unknown> = {}) => ({
+    mode: "bundle",
+    form_version: 4,
+    set_id: "qset-4",
+    answers: [
+      { question_id: "qst-1", question_version: 2, question_version_id: "qvr-2", value: "join", comment: "의견 하나", used_default: false },
+      { question_id: "qst-2", question_version: 1, value: ["foot", "chart"], used_default: true },
+      { question_id: "qst-3", question_version: 1, value: null, comment: "의견만" },
+    ],
+    ...extra,
+  });
+  const submitted = {
+    submission: { id: "sub-1", received_at: 1762312000000, state: "accepted" },
+    answers: [{ question_id: "qst-1", answer_version_id: "av-1", state: "submitted" }],
+    form_complete: false,
+    missing_required: ["qst-5"],
+  };
+
+  it("묶음: POST P/submissions, set_id · mode · 항목(value 없는 의견만 항목은 value 키 없이)이 U2a 모양으로 간다", async () => {
+    // 새 계약(SEL-98): 쓰기 201 본문의 receipt 를 그대로 쓰므로 GET P/requests/{key} 는 부르지 않는다(길을 적지 않았다)
+    const s = server({ "POST /submissions": { status: 201, body: ok(submitted, { receipt: { receipt_no: "0090", tx_id: "tx-90", committed_at: "2026-11-12T09:40:00+09:00" } }) } });
+    const out = await (await make(s)).submitAnswers(SLUG, ED, "research", "start", body(), "k-sub");
+    const w = s.writes();
+    expect(w).toHaveLength(1);
+    expect(w[0]!.url.pathname).toBe(`${P}/submissions`);
+    const sent = w[0]!.json as { set_id: string; mode: string; answers: Record<string, unknown>[] };
+    expect(sent).toMatchObject({ format_version: "1.0", set_id: "qset-4", mode: "bundle" });
+    expect(sent.answers).toHaveLength(3);
+    expect(sent.answers[0]).toEqual({ question_id: "qst-1", question_version_id: "qvr-2", value: "join", comment: "의견 하나", used_default: false });
+    expect(sent.answers[1]).toEqual({ question_id: "qst-2", value: ["foot", "chart"], used_default: true });
+    expect(sent.answers[2]).toEqual({ question_id: "qst-3", comment: "의견만" });
+    // 앱 쪽 전용 값(question_version 숫자 · form_version)은 서버에 보내지 않는다
+    expect(JSON.stringify(sent)).not.toContain("question_version\"");
+    expect(sent).not.toHaveProperty("form_version");
+    expect(out.data).toEqual({ submission_id: "sub-1", answers: [{ question_id: "qst-1", state: "submitted" }], form_complete: false, missing_required: ["qst-5"] });
+    expect(out.receipt).toMatchObject({ receipt_no: "0090", tx_id: "tx-90", committed_at: "2026-11-12T09:40:00+09:00", idempotency_key: "k-sub", replayed: false });
+    expect(s.seen.filter((x) => x.method === "GET")).toHaveLength(0);
+  });
+
+  it("개별: mode single 로 항목 하나, form_complete=false 를 그대로 돌려준다", async () => {
+    const s = server({ "POST /submissions": { status: 201, body: ok(submitted) }, "GET /requests/k-one": { status: 200, body: requestsRead("k-one") } });
+    const out = await (await make(s)).submitAnswers(SLUG, ED, "research", "start", body({ mode: "single", answers: [{ question_id: "qst-1", question_version: 2, value: "join" }] }), "k-one");
+    expect((s.writes()[0]!.json as { mode: string; answers: unknown[] }).mode).toBe("single");
+    expect((s.writes()[0]!.json as { answers: unknown[] }).answers).toHaveLength(1);
+    expect(out.data.form_complete).toBe(false);
+  });
+
+  it("set_id 가 없으면 서버 폼 세트를 지어내지 않고 요청 없이 invalid_payload", async () => {
+    const s = server({});
+    const input = body();
+    delete (input as Record<string, unknown>).set_id;
+    const e = await (await make(s)).submitAnswers(SLUG, ED, "research", "start", input, "k").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("invalid_payload");
+    expect(s.seen).toHaveLength(0);
+  });
+
+  it("같은 키로 다시 보내면 같은 본문이 가고 서버가 replayed 로 답하면 영수증도 replayed", async () => {
+    let n = 0;
+    const s = server({
+      "POST /submissions": () => ({ status: 201, body: ok(submitted, n++ ? { replayed: true } : {}) }),
+      "GET /requests/k-r": { status: 200, body: requestsRead("k-r") },
+    });
+    const c = await make(s);
+    const first = await c.submitAnswers(SLUG, ED, "research", "start", body(), "k-r");
+    const again = await c.submitAnswers(SLUG, ED, "research", "start", body(), "k-r");
+    const w = s.writes();
+    expect(w[1]!.json).toEqual(w[0]!.json);
+    expect(w[1]!.headers.get("idempotency-key")).toBe("k-r");
+    expect(first.receipt.replayed).toBe(false);
+    expect(again.receipt.replayed).toBe(true);
+  });
+});
+
+describe("의견(스레드) 매핑", () => {
+  it("새 스레드: POST P/threads, context_kind question_comment, 첫 메시지 본문 · thread_created true", async () => {
+    const s = server({
+      "POST /threads": { status: 201, body: ok({ thread: { id: "thr-1", state: "open" }, message: { id: "msg-1", version_no: "1" } }) },
+      "GET /requests/k-th": { status: 200, body: requestsRead("k-th") },
+    });
+    const out = await (await make(s)).addComment(SLUG, ED, "qst-1", { body_md: "범위가 모호해요", question_version_id: "qvr-2" }, "k-th");
+    const w = s.writes()[0]!;
+    expect(w.url.pathname).toBe(`${P}/threads`);
+    expect(w.json).toEqual({ format_version: "1.0", target_object_id: "qst-1", target_version_id: "qvr-2", context_kind: "question_comment", initial_message: { body_md: "범위가 모호해요" } });
+    expect(out.data).toEqual({ thread_id: "thr-1", message_id: "msg-1", thread_created: true });
+  });
+
+  it("버전 id 를 모르면 target_version_id 를 보내지 않는다(서버가 현재 버전)", async () => {
+    const s = server({
+      "POST /threads": { status: 201, body: ok({ thread: { id: "thr-1", state: "open" }, message: { id: "msg-1", version_no: "1" } }) },
+      "GET /requests/k-th2": { status: 200, body: requestsRead("k-th2") },
+    });
+    await (await make(s)).addComment(SLUG, ED, "qst-1", { body_md: "글" }, "k-th2");
+    expect(s.writes()[0]!.json).not.toHaveProperty("target_version_id");
+    expect(s.writes()[0]!.json).not.toHaveProperty("anchor");
+  });
+
+  it("기존 스레드: POST P/threads/{t}/messages, 본문은 body_md 만 · thread_created false", async () => {
+    const s = server({
+      "POST /threads/thr-1/messages": { status: 201, body: ok({ message: { id: "msg-2", version_no: "1", thread_id: "thr-1" } }) },
+      "GET /requests/k-msg": { status: 200, body: requestsRead("k-msg") },
+    });
+    const out = await (await make(s)).addComment(SLUG, ED, "qst-1", { body_md: "알겠습니다", thread_id: "thr-1" }, "k-msg");
+    const w = s.writes()[0]!;
+    expect(w.url.pathname).toBe(`${P}/threads/thr-1/messages`);
+    expect(w.json).toEqual({ format_version: "1.0", body_md: "알겠습니다" });
+    expect(out.data).toEqual({ thread_id: "thr-1", message_id: "msg-2", thread_created: false });
+  });
+
+  it("빈 글(공백만)은 요청 없이 invalid_payload — 의견은 답을 만들지 않는다(submissions 로도 가지 않는다)", async () => {
+    const s = server({});
+    const e = await (await make(s)).addComment(SLUG, ED, "qst-1", { body_md: "   " }, "k").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("invalid_payload");
+    expect(s.seen).toHaveLength(0);
+  });
+
+  it("annotation 은 보내지 않는다: 어떤 의견 요청이든 context_kind 는 question_comment", async () => {
+    const s = server({
+      "POST /threads": { status: 201, body: ok({ thread: { id: "thr-1", state: "open" }, message: { id: "msg-1", version_no: "1" } }) },
+      "GET /requests/k-q": { status: 200, body: requestsRead("k-q") },
+    });
+    await (await make(s)).addComment(SLUG, ED, "qst-1", { body_md: "글", context_kind: "annotation" }, "k-q");
+    expect((s.writes()[0]!.json as { context_kind: string }).context_kind).toBe("question_comment");
+  });
+});
