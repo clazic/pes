@@ -47,6 +47,21 @@ function damaged_policy(): never {
 }
 
 /**
+ * The machine value of the AI connection policy that screens show (the workspace read and the dashboard's page data share
+ * this one function): the allow_opencode_go bit alone. A NULL pointer is "missing"; any other damage current_policy
+ * refuses is "corrupt". "pending" (a policy not yet confirmed) is never returned: the DB has no evidence for it.
+ */
+export function ai_policy_state(db: ReadDb, project_id: string): "allowed" | "denied" | "missing" | "corrupt" {
+  const row = db.get<{ current_policy_id: string | null }>("SELECT current_policy_id FROM projects WHERE id = ?", project_id);
+  if (row === undefined || row.current_policy_id === null) return "missing";
+  try {
+    return current_policy(db, project_id).allow_opencode_go ? "allowed" : "denied";
+  } catch {
+    return "corrupt";
+  }
+}
+
+/**
  * The project's current policy row. Unknown project -> not_found. Any damage
  * (NULL pointer, missing/other-project row, rewound pointer, out-of-range or
  * non-integer values, a non-human author) -> policy_denied, fail closed.
