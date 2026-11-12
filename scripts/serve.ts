@@ -41,6 +41,7 @@ import type { ApiApp } from "./pes_core/api.ts";
 import { AppCodes, CODE_SHAPE, code_ttl_ms, valid_projects } from "./pes_core/app_session.ts";
 import type { BridgeReply } from "./pes_core/cli_bridge.ts";
 import type { Db } from "./pes_core/db.ts";
+import { needs_document_sandbox } from "./pes_core/document_sandbox.ts";
 
 const MAX_BODY = 256 * 1024;
 const MAX_API_BODY = 2 * MAX_BODY;
@@ -61,8 +62,8 @@ const APP_SCRIPT_PATH = "/_app/";
 const app_index_csp = (origin: string): string => `script-src ${origin}${APP_SCRIPT_PATH}; base-uri 'none'; object-src 'none'`;
 /** SEL-102: every static answer says "do not guess the type" — a text file must not turn into a page, nor a page's type be changed by sniffing. */
 const NOSNIFF = "nosniff";
-/** SEL-86: SVG opened as a page runs its scripts like HTML does, so it gets the same sandbox (an <img> of it is not a page — it still shows). Raster images and PDF never do. */
-const needs_report_csp = (content_type: string): boolean => /^(text\/html|image\/svg\+xml|(?:text|application)\/(?:xml|xhtml\+xml))\b/i.test(content_type);
+/** SEL-86: SVG opened as a page runs its scripts like HTML does, so it gets the same sandbox (an <img> of it is not a page — it still shows). SEL-102: every type outside the short safe list does. */
+const needs_report_csp = needs_document_sandbox;
 const REPORT_TYPES: Record<string, string> = { ".svg": "image/svg+xml; charset=utf-8", ".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8" };
 /** The API error texts the server itself gives (the envelope of ApiApp: Korean message, retryable only for 429/503, next_action a string). */
 const API_ERROR_TEXT: Record<string, [string, string]> = {
@@ -365,19 +366,22 @@ async function start(config: Config): Promise<void> {
 
   /**
    * SEL-102: is `file` one of the old screens that need the same origin (they fetch from it)? Only these are served without the sandbox: the dashboard `index.html` and the question forms
-   * `ask-*.html` DIRECTLY under a project folder (the first word under the home is a slug), the hub `index.html` directly under the home, and — when the home itself is one project
+   * `ask-*.html` DIRECTLY under a project folder (the first word under the home is a slug — and the home does not itself hold project.json: then the project folder IS the home root), the hub `index.html` directly under the home, and — when the home itself is one project
    * (project.json at the root) — its `ask-*.html`. Any other HTML / SVG / XML, wherever it lies (notes/x.html, reports/…, notes/index.html), is a document of the AI and gets the sandbox.
    * Judged on the translated path AND on the real path (a link whose real place is not such a screen does not become one, and a screen that is a link elsewhere does not stay one);
    * names compared exactly (`INDEX.HTML` is not the dashboard — it gets the sandbox, the safe side). A path that cannot be resolved counts as not exempt.
    */
   const is_legacy_screen = (file: string): boolean => {
+    const single_project_home = existsSync(join(root, "project.json"));
     const screen = (absolute: string, base: string): boolean => {
       const rel = relative(base, absolute);
       if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
       const words = rel.split(sep).filter((word) => word !== "");
       const ask = (name: string | undefined): boolean => name !== undefined && /^ask-.*\.html$/.test(name);
-      if (words.length === 1) return words[0] === "index.html" || (ask(words[0]) && existsSync(join(root, "project.json")));
-      if (words.length === 2) return SLUG.test(words[0] as string) && (words[1] === "index.html" || ask(words[1]));
+      if (words.length === 1) return words[0] === "index.html" || (ask(words[0]) && single_project_home);
+      // two words: "<project folder>/<screen>" — only when the home HOLDS projects. When the home is itself one project, the project folder is the home root and
+      // the first word is a folder INSIDE it (reports/, out/, notes/ …), so nothing at depth two is a project's screen.
+      if (words.length === 2) return !single_project_home && SLUG.test(words[0] as string) && (words[1] === "index.html" || ask(words[1]));
       return false;
     };
     if (!screen(file, root)) return false;
