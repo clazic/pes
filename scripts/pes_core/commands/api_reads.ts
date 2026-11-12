@@ -71,8 +71,8 @@ export function changes_page(
   let cursor = after;
   let has_more = false;
   let closed: ClosedMaterials | undefined;
-  // Events are read in chunks, not one transaction (or one event) per query: the number of queries depends on the chunk size,
-  // never on how many events are hidden or shown. A chunk that is full may end inside a transaction — that last group is left to the next chunk.
+  // Events are read in chunks, not one transaction (or one event) per query: the number of queries is proportional to the events
+  // scanned / the chunk size (there is no query per event). A chunk that is full may end inside a transaction — that last group is left to the next chunk.
   const chunk_size = Math.min(CHANGES_CHUNK_MAX, Math.max(CHANGES_CHUNK_MIN, limit * 4));
   const event_columns = "event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at, payload";
   scan: for (;;) {
