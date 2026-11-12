@@ -187,7 +187,7 @@ test("[신규] 순서 바꾸기: 닫힌(봉인된) 라운드의 세트는 바꿀
 
 test("[신규] OpenAPI·문서에 순서 바꾸기 라우트가 적혀 있다", async () => {
   const yaml = readFileSync(new URL("../docs/api/openapi-v1.yaml", import.meta.url), "utf8");
-  assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/question-sets\/\{[a-z]+\}\/order:\n\s+post:/);
+  assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/question-sets\/\{[a-z]+\}\/order:\r?\n\s+post:/);
 });
 
 // ---------------------------------------------------------------------------
