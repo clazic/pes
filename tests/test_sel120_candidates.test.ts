@@ -411,7 +411,7 @@ test("a source that went away (reference.source_gone) is not offered again as a 
     await ok(env, { project_id: a.p.project_id, actor_id: a.p.actor_id, via: "cli", client_request_id: "tb-gone" }, "reference.source_gone", { referenced_project_id: a.p.project_id });
     // the tombstone keeps the pointer-free row; candidates are built from live projects and snapshots only
     const res = await get(env);
-    const list = assert_ok(res).candidates;
+    const list: any[] = assert_ok(res).candidates;
     for (const c of list) {
       assert.ok(typeof c.project_id === "string" && c.project_id.length > 0, "no candidate without a project id");
       for (const s of c.snapshots) assert.ok(typeof s.id === "string" && s.id.length > 0, "no snapshot without an id");

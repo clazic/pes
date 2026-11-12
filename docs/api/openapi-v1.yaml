@@ -2437,6 +2437,35 @@ paths:
         "403": { description: Missing context:read scope or Go policy denied }
         "404": { description: Unknown project }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/reference-candidates:
+    get:
+      summary: List the other projects the person could attach as reference material, with their snapshots (owner session only)
+      description: |
+        A read for the attach screen. data = {candidates:[{project_id, key, label, attached, snapshots:[{id, key, label,
+        approved, recommended}]}]}. A candidate has exactly these five keys: project_id, key (= project_id, the same value as
+        a reference's referenced_project_key), label (the project's topic, else its slug: the default source_label of
+        POST /references), attached (this project already holds a reference line for it) and snapshots. Candidates come in
+        the order the projects were made. A snapshot has exactly five keys: id, key (= id), label (always null: the server
+        keeps no snapshot name), approved (some stage approval points at it) and recommended. Snapshots are newest first, a
+        print is left out (a reference cannot pin one), and exactly one snapshot per project is recommended: the newest
+        approved one, else the newest. A project with no snapshot stays with snapshots: [].
+        Who is offered: the projects the person is a member of (any role) other than this one, archived ones left out. A project
+        the person is not a member of is absent and leaves no trace anywhere in the answer. This is the same membership rule
+        as POST /references; OpenCode Go does not hide a project from a person. A token is 403 human_required whatever its
+        scopes: no other project's name or snapshot id goes to an AI. A read: no receipt, no event, nothing written.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ localSession: [] }]
+      responses:
+        "200":
+          description: The candidates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: A token (human_required) }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/references/{ref}:
     get:
       summary: Read one reference with the pinned content and citations
