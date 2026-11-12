@@ -47,6 +47,11 @@
             "expires_at": 1764903600000,
             "shown_once": true
           }
+        },
+        "receipt": {
+          "receipt_no": "41",
+          "tx_id": "txn_01J9Z3K7R01",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }
