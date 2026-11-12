@@ -1,5 +1,5 @@
 // SEL-74 F — the real home is protected in every new test: temporary HOME / USERPROFILE / PES_HOME, the TS child guard (real-home reads +
-// hub ports), and a before/after snapshot of the real ~/.pes · ~/pes-projects (home_guard) — the install-script tests add ~/.claude.
+// hub ports), and a before/after snapshot of the real ~/.pes · ~/pes-projects (home_guard) — the process fs guard also denies a look at the real ~/.claude (SEL-95).
 // This file looks at the SEL-74 test files themselves, so a later test cannot forget the guard.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -27,12 +27,12 @@ test("F2: every SEL-74 test that starts a process calls use_home_guard() (before
   assert.deepEqual(missing, []);
 });
 
-test("F3: no SEL-74 test names the real home: no os.homedir() / userInfo() / process.env.HOME reads of its own, no literal ~/.pes or ~/pes-projects path", () => {
+test("F3: no SEL-74 test names the real home: no os.homedir() / userInfo() / account_home() / process.env.HOME reads of its own, no literal ~/.pes or ~/pes-projects path", () => {
   const bad: string[] = [];
   for (const f of FILES) {
     if (f.endsWith("test_sel74_f_real_home.test.ts")) continue;
     read_rel(f).split("\n").forEach((line, i) => {
-      if (/\bhomedir\(\)|\buserInfo\(\)|process\.env\.(?:HOME|USERPROFILE)\b|["'`]~[\\/]\.(?:pes|claude)|["'`]~[\\/]pes-projects/.test(line)) bad.push(`${f}:${i + 1}: ${line.trim().slice(0, 100)}`);
+      if (/\bhomedir\(\)|\buserInfo\(\)|\baccount_home\(\)|process\.env\.(?:HOME|USERPROFILE)\b|["'`]~[\\/]\.(?:pes|claude)|["'`]~[\\/]pes-projects/.test(line)) bad.push(`${f}:${i + 1}: ${line.trim().slice(0, 100)}`);
     });
   }
   assert.deepEqual(bad, []);
@@ -40,7 +40,7 @@ test("F3: no SEL-74 test names the real home: no os.homedir() / userInfo() / pro
 
 test("F4: every child of the install-script tests runs with a temporary HOME / USERPROFILE / PES_HOME / TMPDIR, the guard module and a private hub range", () => {
   const text = read_rel("tests/test_sel74_d_install_run.test.ts");
-  for (const needle of ["HOME: ctx.home_dir", "USERPROFILE: ctx.home_dir", "PES_HOME: ctx.pes_home", "TMPDIR: ctx.tmp", "ts_child_guard.ts", "PES_HUB_PORTS", "PES_TEST_REAL_HOME", "claude_snapshot()"]) {
+  for (const needle of ["HOME: ctx.home_dir", "USERPROFILE: ctx.home_dir", "PES_HOME: ctx.pes_home", "TMPDIR: ctx.tmp", "ts_child_guard.ts", "PES_HUB_PORTS", "PES_TEST_REAL_HOME", "seed_claude(s)"]) {
     assert.ok(text.includes(needle), `d_install_run: ${needle}`);
   }
 });
