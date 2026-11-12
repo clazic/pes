@@ -1657,6 +1657,7 @@ export class ApiApp {
 
     const materials = material_rows(this.#db, project.id, audience);
     // The digest follows what AI may see, so switching a file to deny (or back) is a visible change; a project without materials hashes as before.
+    // The digest is per audience: `manifest` is the caller's own list (an AI caller's leaves out closed materials), so with a closed material the human digest and the AI digest differ.
     const ai_materials = audience === "ai" ? materials : material_rows(this.#db, project.id, "ai");
     const digest_source = JSON.stringify({
       ...(ai_materials.length === 0 ? {} : { materials: ai_materials.map((m) => [m.version_id, m.blob_id, m.role]) }),
@@ -1985,6 +1986,7 @@ export class ApiApp {
       const meta = db_meta(this.#db);
       if (given !== null && (given.d !== meta.database_instance_id || given.e !== meta.cursor_epoch)) {
         const fresh = this.#project(project.id);
+        // Default audience "ai": this snapshot.digest is the AI-audience digest even when the caller is a human (digest is per audience).
         const context = this.#context_data(fresh) as {
           control_rev: string;
           digest: string;
