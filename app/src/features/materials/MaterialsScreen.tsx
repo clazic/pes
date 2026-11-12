@@ -139,11 +139,14 @@ export function MaterialsScreen() {
   }, [w]);
 
   const onAccessDone = React.useCallback((d: AccessDone) => {
-    const { row, next, result } = d;
+    const { row, result } = d;
+    // 화면 말은 서버가 준 값만 쓴다 — 값이 없으면 요청한 값으로 지어내지 않고 “정보 없음”
+    const served = result.data.ai_access;
+    const servedWord = served ? ACCESS_WORD[served] : "정보 없음";
     setNotice(
       result.data.changed
-        ? `${result.receipt.numbered === false ? "접수됨" : `접수 ${result.receipt.receipt_no}`} · ‘${row.title}’의 ${ACCESS_WORD[next]}(으)로 기록했어요.${result.receipt.replayed ? " (이미 처리된 요청이라 처음 접수를 다시 보여요.)" : ""}`
-        : `바뀐 것 없음 — ‘${row.title}’은(는) 서버에 이미 ${ACCESS_WORD[result.data.ai_access]} 상태로 있어요.`,
+        ? `${result.receipt.numbered === false ? "접수됨" : `접수 ${result.receipt.receipt_no}`} · ‘${row.title}’의 AI 참조: ${served ? `${servedWord}(으)로 기록했어요.` : "바뀐 값은 서버가 알려 주지 않았어요(정보 없음)."}${result.receipt.replayed ? " (이미 처리된 요청이라 처음 접수를 다시 보여요.)" : ""}`
+        : `바뀐 것 없음 — ‘${row.title}’은(는) 서버에 이미 ${servedWord} 상태로 있어요.`,
     );
     setAccess(null);
   }, []);

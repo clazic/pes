@@ -17,16 +17,16 @@ const FOCUSABLE = 'a[href], button, input, textarea, select, [tabindex]:not([tab
  * 대화 상자가 열려 있는 동안 나머지 화면을 inert 로 둔다 — 초점 · 클릭 · 화면 읽기가 못 닿는다(진짜 모달과 같은 효과).
  * aria-hidden 은 쓰지 않는다: 영수증 전에도 목록의 스위치는 “그대로” 읽혀야 한다(낙관적 갱신 없음)는 것을 화면 읽기가 확인할 수 있게, 값은 보이되 조작은 막는다.
  */
-function useInertOutside(ref: React.RefObject<HTMLElement | null>) {
+function useInertOutside(own: HTMLElement | null) {
   React.useEffect(() => {
-    const own = ref.current;
+    // own 은 Portal 이 붙은 뒤(콜백 ref → state)에만 채워진다 — 열린 대화 상자 기준으로 뒤 화면을 막는다
     if (!own) return;
     const held = [...document.body.children].filter((el) => !el.contains(own) && !el.hasAttribute("inert"));
     for (const el of held) el.setAttribute("inert", "");
     return () => {
       for (const el of held) el.removeAttribute("inert");
     };
-  }, [ref]);
+  }, [own]);
 }
 
 /** Tab 이 대화 상자 밖으로 나가지 않게 한 바퀴 돈다 */
@@ -68,16 +68,16 @@ export function AccessDialog({ row, slug, edition, onClose, onDone }: { row: Mat
   const [received, setReceived] = React.useState<string | null>(null);
   const attempt = React.useRef<{ key: string; fingerprint: string } | null>(null);
   const ids = React.useId();
-  const box = React.useRef<HTMLDivElement>(null);
+  const [box, setBox] = React.useState<HTMLDivElement | null>(null);
   useInertOutside(box);
 
   const send = useMutation({
     mutationFn: ({ key, why }: { key: string; why: string }) => client.setMaterialAiAccess(slug, edition, row.file_policy_id, { ai_access: next, ...(why ? { reason: why } : {}) }, key),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       attempt.current = null;
       setReceived(result.receipt.numbered === false ? "접수됨" : `접수 ${result.receipt.receipt_no}`);
-      // 영수증을 받은 뒤 다시 읽는다 — 스위치는 읽은 값을 따른다
-      await qc.invalidateQueries({ queryKey: keys.materials(slug, edition) });
+      // 영수증을 받은 뒤 다시 읽는다 — 읽기를 기다리지 않는다(느린 읽기가 닫기를 막지 않게). 스위치는 읽은 값을 따른다
+      void qc.invalidateQueries({ queryKey: keys.materials(slug, edition) });
       onDone({ row, next, result });
     },
     onError: (e) => {
@@ -111,7 +111,7 @@ export function AccessDialog({ row, slug, edition, onClose, onDone }: { row: Mat
       <DialogPrimitive.Portal>
         <div aria-hidden="true" data-print="hide" className="fixed inset-0 z-50 bg-black/30" />
         <DialogPrimitive.Content
-          ref={box}
+          ref={setBox}
           data-print="hide"
           onKeyDown={trapTab}
           aria-describedby={hint}

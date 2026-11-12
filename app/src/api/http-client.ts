@@ -332,6 +332,8 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   /* ───────────── 내 자료 (MAT1c · SEL-117) — 서버 계약은 SEL-115(MAT1a). 서버가 안 주는 값(ai_access · 추출 상태)은 null 로 두고 지어내지 않는다 ───────────── */
 
   const aiAccessOf = (v: unknown): AiAccess | null => (v === "allow" || v === "deny" ? v : null);
+  /** 서버가 숫자를 주지 않으면 null — NaN 을 지어내지 않는다 */
+  const numOf = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
   const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
   function materialRow(r: Json): MaterialRow {
@@ -531,14 +533,14 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       return result(w, {
         object_id: text(d.object_id),
         version_id: text(d.version_id),
-        version: Number(d.version_no),
+        version: numOf(d.version_no),
         blob_id: text(d.blob_id),
         file_policy_id: text(d.file_policy_id),
         role: text(d.role),
-        ai_access: aiAccessOf(d.ai_access) ?? "allow",
+        ai_access: aiAccessOf(d.ai_access),
         original_name: text(d.original_name),
         media_type: text(d.media_type),
-        size: Number(d.size),
+        size: numOf(d.size),
         sha256: text(d.sha256),
       });
     },
@@ -546,7 +548,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     async setMaterialAiAccess(slug, _edition, filePolicyId, input, key) {
       const w = await write(slug, key, `/file-policies/${q(filePolicyId)}/ai-access`, { ai_access: input.ai_access, ...(input.reason ? { reason: input.reason } : {}) });
       const d = w.data;
-      return result(w, { file_policy_id: text(d.file_policy_id), blob_id: text(d.blob_id), ai_access: aiAccessOf(d.ai_access) ?? input.ai_access, rev: Number(d.rev), changed: d.changed === true });
+      return result(w, { file_policy_id: text(d.file_policy_id), blob_id: text(d.blob_id), ai_access: aiAccessOf(d.ai_access), rev: numOf(d.rev), changed: d.changed === true });
     },
 
     /** GET P/files/{blob}/preview — 세션 헤더가 필요해 주소 링크로는 열 수 없다. 바이트를 그대로 읽어(글로 바꾸지 않음) 화면이 형식에 맞게 그린다. 모르면 inline 으로 간주하지 않는다 */

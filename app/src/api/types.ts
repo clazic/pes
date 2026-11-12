@@ -542,22 +542,25 @@ export interface MaterialRow {
 export interface MaterialUploadResult {
   object_id: string;
   version_id: string;
-  version: number;
+  /** 서버가 주지 않으면 null */
+  version: number | null;
   blob_id: string;
   file_policy_id: string;
   role: string;
-  ai_access: AiAccess;
+  /** 서버가 주지 않으면 null — 허용으로 지어내지 않는다 */
+  ai_access: AiAccess | null;
   original_name: string;
   media_type: string;
-  size: number;
+  size: number | null;
   sha256: string;
 }
 
 export interface MaterialAiAccessResult {
   file_policy_id: string;
   blob_id: string;
-  ai_access: AiAccess;
-  rev: number;
+  /** 서버가 주지 않으면 null (화면: 정보 없음) */
+  ai_access: AiAccess | null;
+  rev: number | null;
   /** false = 이미 그 값이었다(서버가 기록·rev 를 바꾸지 않음) */
   changed: boolean;
 }

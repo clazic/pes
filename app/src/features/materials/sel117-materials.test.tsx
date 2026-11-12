@@ -455,7 +455,7 @@ describe("미리보기 — 같은 출처 문서로 열지 않는다 (SEL-102)", 
     expect(pane.querySelector("pre")?.textContent).toContain("둘째 줄");
   });
 
-  it("문서 요소(iframe · object · embed · frame)를 만든다면 iframe 이고 sandbox 가 있으며 allow-same-origin · allow-scripts 가 없다 — 안전하지 않은 형식은 아예 열지 않는다", async () => {
+  it("iframe·object·embed 가 없다 — 안전하지 않은 형식은 문서 요소로 열지 않고 내려받기만 준다", async () => {
     const mc = createMaterialsClient(MATERIALS, {
       "blob-2": previewOf({ blob_id: "blob-2", content_type: "application/octet-stream", inline: false, sandbox: "sandbox", bytes: new TextEncoder().encode("<html><script>alert(1)</script></html>") }),
     });
@@ -464,12 +464,7 @@ describe("미리보기 — 같은 출처 문서로 열지 않는다 (SEL-102)", 
     const pane = await open("mat-2", "합성 보고서");
     await waitFor(() => expect(pane.textContent).toMatch(/내려받기/));
     expect(pane.textContent).toMatch(/미리볼 수 없|미리보기.*(안 됩니다|되지 않)/);
-    expect(document.querySelectorAll("object, embed, frame, frameset")).toHaveLength(0);
-    for (const f of document.querySelectorAll("iframe")) {
-      const sb = f.getAttribute("sandbox");
-      expect(sb).not.toBeNull();
-      expect(sb).not.toMatch(/allow-same-origin|allow-scripts/);
-    }
+    expect(document.querySelectorAll("iframe, object, embed, frame, frameset")).toHaveLength(0);
     expect(document.body.innerHTML).not.toContain("alert(1)</script>"); // 본문이 문서에 박히지 않는다
   });
 

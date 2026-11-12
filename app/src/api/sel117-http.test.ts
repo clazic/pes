@@ -384,3 +384,32 @@ describe("미리보기 — getMaterialPreview (GET P/files/{blob}/preview)", () 
     expect(s.seen).toHaveLength(0);
   });
 });
+
+/* SEL-117 리뷰 권장 4 — 서버가 값을 안 주면 요청 값 · "allow" · NaN 을 지어내지 않고 null */
+describe("리뷰 4 — 서버가 안 준 값은 null (지어내지 않음)", () => {
+  it("setMaterialAiAccess: ai_access · rev 가 없으면 요청한 값 · NaN 이 아니라 null", async () => {
+    const s = server({
+      "POST /file-policies/fp-1/ai-access": { status: 200, body: ok({ file_policy_id: "fp-1", blob_id: "blob-1", changed: true }, { replayed: false }) },
+      "GET /requests/key-ac": { status: 200, body: requestsRead("key-ac", "file.ai_access_changed", "tx-88") },
+    });
+    const r = await (await make(s)).setMaterialAiAccess(SLUG, ED, "fp-1", { ai_access: "deny" }, "key-ac");
+    expect(r.data.ai_access).toBeNull();
+    expect(r.data.rev).toBeNull();
+    expect(r.data.ai_access).not.toBe("deny");
+  });
+
+  it("uploadMaterial: ai_access · version · size 가 없으면 “allow” · NaN 이 아니라 null", async () => {
+    const { ai_access: _a, version_no: _v, size: _s, ...partial } = UPLOAD_RESULT as Record<string, unknown>;
+    const s = server({
+      "POST /uploads": { status: 201, body: ok({ blob_id: "blob-7", state: "staging" }) },
+      "PUT /uploads/blob-7": { status: 200, body: ok({ blob_id: "blob-7" }) },
+      "POST /uploads/blob-7/complete": { status: 200, body: ok({ blob_id: "blob-7", state: "ready" }) },
+      "POST /materials": { status: 201, body: ok(partial, { replayed: false }) },
+      "GET /requests/key-up": { status: 200, body: requestsRead("key-up", "file.material_uploaded") },
+    });
+    const r = await (await make(s)).uploadMaterial(SLUG, ED, { file: theFile() }, "key-up");
+    expect(r.data.ai_access).toBeNull();
+    expect(r.data.version).toBeNull();
+    expect(r.data.size).toBeNull();
+  });
+});
