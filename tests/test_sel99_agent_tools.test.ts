@@ -193,14 +193,14 @@ test("A: reopen_stage 제안은 제안으로만 남는다(AI 가 단계를 다�
     await ready_project(env);
     const o = await open_stage(env, "plan");
     const s = await seeded_thread(env);
-    const before = env.db.get<{ state: string }>("SELECT state FROM stages WHERE id = ?", o.stage_id)!.state;
+    const before = env.db.get<{ status: string }>("SELECT status FROM stages WHERE id = ?", o.stage_id)!.status;
     script_fn(env, (n) => (n === 1 ? { tools: [{ name: "followup.propose", args: { thread_id: s.thread_id, kind: "reopen_stage", text: "계획 단계를 다시 연다.", target_stage_id: o.stage_id } }] } : FINISH));
     const res = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
     assert.equal(res.status, "succeeded");
     const f = env.db.get<{ object_id: string }>("SELECT object_id FROM followups LIMIT 1")!;
     assert.equal(followup_row(env.db, f.object_id).kind, "reopen_stage");
     assert.equal(followup_row(env.db, f.object_id).state, "proposed");
-    assert.equal(env.db.get<{ state: string }>("SELECT state FROM stages WHERE id = ?", o.stage_id)!.state, before);
+    assert.equal(env.db.get<{ status: string }>("SELECT status FROM stages WHERE id = ?", o.stage_id)!.status, before);
   });
 });
 
