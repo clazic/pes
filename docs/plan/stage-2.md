@@ -234,7 +234,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/stages/{s}/rounds`·`POST P/rounds/{r}/seal` | H/E | PR14 | PR6 | 라운드 시작·봉인, 승인과 분리 |
 | `POST P/stages/{s}/approve`·`/reopen` | H | PR14 | PR6 | 사람만, 에이전트 거부 |
 | `POST P/policies/opencode-go/revisions` | H | PR14 | PR10 | 사람만, 정책 이력·재생 전 검사 |
-| `POST P/questions`·`/revisions` | E/H | PR14 | PR8 | 질문 게시·수정, 답과 분리 |
+| `POST P/questions`·`/revisions` | E/H | PR14 | PR8 | 질문 게시·수정, 답과 분리. 3단계 U5a(SEL-118): `direction:"human_to_agent"`+`intended_actor_id` 는 소유자 세션만(토큰 403 `human_required`), 접수만으로 run·`waiting_human` 0 |
 | `POST P/questions/{q}/withdraw`·`/defer`·`/merge` | H/허가된 E | 3단계 U2a(SEL-90) | `question.withdraw`·`question.defer`·`question.merge` | 질문의 새 버전(state `withdrawn`·`deferred`·`merged`), 옛 버전·옛 답 보존, 폼의 최신 세트에서 같은 tx 로 빠짐, 전이표 밖은 409, 지우지 않음 |
 | `GET P/stages/{s}/rounds/{rd}`·`GET P/stages/{s}/rounds/{rd}/threads` | H/E(`context:read`) | 3단계 U2d(SEL-98) | (읽기, 명령 없음) | 라운드 하나의 폼 세트·질문 현재 버전·현재 답, 질문별 의견 목록. 새 표 없음 |
 | `POST P/question-sets/{set}/order` | H/허가된 E | 3단계 U2d(SEL-98) | `question.reorder` | 새 폼 세트 하나(순서만 다름)를 한 tx 로 발행, 새 질문·질문 버전·답 없음, 낡은 세트 409 `stale_set`, 순열 아니면 422 |
@@ -243,6 +243,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/assumptions`·`GET P/assumptions` | H/E(제안), H(판단) | 3단계 U3a(SEL-93) | `assumption.propose`·`assumption.assess` | 제안(state `proposed`, `needs_review`)은 소유자·토큰, `confirmed`·`rejected`·`revised` 판단은 소유자 세션만(토큰 403 `human_required`). 판단은 새 버전, 원문 보존. 읽기는 객체마다 현재 버전 한 줄 |
 | `POST P/decisions`·`GET P/decisions` | H/E(제안), H(채택·대체·폐기) | 3단계 U3a(SEL-93) | `decision.propose`·`decision.adopt`·`decision.supersede`·`decision.revoke` | 제안은 채택이 아니다. 채택·대체·폐기는 사람만, 전이표 `proposed→adopted→superseded\|revoked`, 대체는 새 결정+옛 결정의 새 버전, 대체 대상이 adopted 가 아니면 409 `supersedes_conflict` |
 | `POST P/reflections`·`GET P/reflections?round_id=` | H/E | 3단계 U3a(SEL-93) | `reflection.create` | applied·partial 은 의미 증거(`evidence_tx_id`가 결과 버전을 만든 tx, 후속은 applied)가 있어야 한다: 없으면 422 `evidence_required`, 안 맞으면 422 `validation_failed`. 빈 `entries` 는 "0건 제출"이고 "미제출"과 다르다 |
+| `POST P/prompt-builds`·`GET P/question-statuses` | H/E(`context:read`) | 3단계 U5a(SEL-118) | 읽기 모델(새 명령·새 표 없음) | 프롬프트 조립(`POST` 이지만 **읽기**: 미제출 초안이 브라우저에만 있어 본문으로 받을 뿐 DB 쓰기·run·`waiting_human`·사건 0, Idempotency-Key 불필요)과 사람→AI 질문 상태(접수·외부 수신·읽음·답 수신 시각, 근거 없는 칸 null). 전송 OFF 는 target A(내장 실행기 글)에서 자료를 빼고 target B(사람이 직접 붙여 넣는 글)는 경고만. A 의 `AI에게 묻기` 는 위 `POST P/runs`+`POST P/claims` 를 그대로 쓰고 새 시작 경로는 없다 |
 | `POST P/references`·`GET P/references`·`GET P/references/{ref}`·`POST P/references/{ref}/refresh`·`POST P/references/{ref}/detach` | H(붙임·갱신·떼기), H/E(읽기) | 3단계 REF1a(SEL-113) | `reference.attach`·`reference.refresh`·`reference.detach`·`reference.source_gone`(원본 소유자, HTTP 경로 없음) | 원본 프로젝트의 스냅숏 하나에 고정한 읽기 전용 참조(새 표 없음, `project_references`). 두 프로젝트 모두 구성원이어야 붙인다. 읽기는 권한·Go(엄격한 쪽 우선)·원본 없음을 한 함수로 판정하고 AI 호출자에게는 막힌 본문을 `null` 로 준다. 자세한 값은 `stage-1-api.md` 6절 |
 | export | 미래 | — | — | **capabilities 미지원**, 가짜 성공 없음 |
 

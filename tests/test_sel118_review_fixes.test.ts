@@ -1,0 +1,574 @@
+/**
+ * SEL-118 U5a — 1차 리뷰(logs/SEL-118-r1.md) 필수 3건 + 권장 일부의 회귀 시험. 합성 자료만(가짜 비밀·가짜 이름 hong/lee).
+ *
+ *  필수 1 — 프롬프트의 비밀 지우기: `access_token=`·`refresh_token=`·`client_secret=`·`id_token=`, `Authorization: Basic …`, URL 안 자격
+ *           (`https://user:pass@host`), `?key=`·`?sig=`, `Cookie:`, PEM 개인 키 블록, 그리고 모양을 모르는 긴 비밀 덩어리까지 지운다.
+ *           정상 글(짧은 값·긴 파일 이름·UUID·앱 링크)은 지우지 않는다(오탐 시험).
+ *  필수 2 — `context:read` 토큰 호출자에게 AI 참조 금지 파일 id 가 나가지 않는다(버전 읽기가 그 파일을 목록에서 빼는 것과 같은 규칙).
+ *           소유자 세션은 그대로 `excluded[ai_access_denied]` 를 본다.
+ *  필수 3 — `applied` 단독 영수증은 "받은 뒤의 일"이라 받음의 근거로 인정한다(leader 결정): state=read, external_received_at=applied 시각.
+ *           `seen` 이 있으면 seen 시각. 문서(stage-1-api·OpenAPI)가 같은 규칙을 적는다.
+ *  권장 — 찌꺼기 없는 지우기(`[지움: 비밀] 비밀]` 금지), 다른 PC 경로 변형, "관련" 문구, human_to_agent 의 form_key main 거절, 공백 초안 건너뜀.
+ */
+
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+
+import { add_artifact, create_object } from "../scripts/pes_core/content.ts";
+import { redact_text } from "../scripts/pes_core/prompt_reads.ts";
+import { assert_error, assert_ok, call, go_off, make_agent, owner_creates_run, agent_claims, OPENAPI_PATH, SESSION_SECRET, with_api, type ApiEnv, type Auth } from "./helpers/api_env.ts";
+import { P } from "./helpers/api_flow.ts";
+import { attach, bytes_of, put_ready } from "./helpers/blob_env.ts";
+import { open_round, text_spec } from "./helpers/questions_env.ts";
+import { tx_of_version } from "./helpers/sel93_env.ts";
+
+const U = ["", "Users", ""].join("/"); // the home root, assembled so the file holds no literal path
+const MARK = "[지움: 비밀]";
+const NONE = { secrets: [], paths: [] };
+
+const post = (env: ApiEnv, rest: string, auth: Auth, body: unknown) => call(env, { method: "POST", path: P(env, rest), auth, body });
+const get = (env: ApiEnv, rest: string, auth: Auth = "owner") => call(env, { method: "GET", path: P(env, rest), auth });
+
+async function artifact_with(env: ApiEnv, key: string, title: string, summary: string): Promise<{ object_id: string; version_id: string }> {
+  const obj = (await create_object(env.service, env.ctx(`${key}-o`), { kind: "artifact", edition_id: env.p.edition_id })).result as { object_id: string };
+  const out = await add_artifact(env.service, env.ctx(`${key}-v`), { object_id: obj.object_id, artifact_kind: "chapter", title, summary });
+  return out.result as { object_id: string; version_id: string };
+}
+
+function deny(env: ApiEnv, blob_id: string): void {
+  const policy = env.db.get<{ id: string; rev: bigint; changed_by_actor_id: string; changed_by_user_id: string; tx_id: string }>(
+    "SELECT id, rev, changed_by_actor_id, changed_by_user_id, tx_id FROM file_policies WHERE project_id = ? AND blob_id = ?",
+    env.p.project_id,
+    blob_id,
+  );
+  assert.ok(policy, "the blob has a file policy");
+  const rev = policy.rev + 1n;
+  env.db.run("UPDATE file_policies SET ai_access = 'deny', rev = ? WHERE id = ?", rev, policy.id);
+  env.db.run(
+    `INSERT INTO file_ai_access_versions
+       (id, project_id, file_policy_id, ai_access, changed_by_actor_id, changed_by_user_id, changed_at, reason, rev, tx_id)
+     VALUES (?, ?, ?, 'deny', ?, ?, 0, NULL, ?, ?)`,
+    `deny-${blob_id}`,
+    env.p.project_id,
+    policy.id,
+    policy.changed_by_actor_id,
+    policy.changed_by_user_id,
+    rev,
+    policy.tx_id,
+  );
+}
+
+// ===========================================================================
+// 필수 1 — 비밀 지우기
+
+const SECRET_CASES: Array<[string, string, string]> = [
+  // [이름, 글, 남으면 안 되는 비밀 조각]
+  ["access_token in a URL", "https://api.x.com/v1?access_token=abcdef123456", "abcdef123456"],
+  ["refresh_token", "refresh_token=rt_9f8e7d6c5b4a", "9f8e7d6c5b4a"],
+  ["client_secret", "client_secret: csec-1a2b3c4d5e6f", "1a2b3c4d5e6f"],
+  ["id_token", "id_token=idt0987654321zz", "idt0987654321zz"],
+  ["password in JSON-ish", 'password="hunter2hunter2"', "hunter2hunter2"],
+  ["Authorization Basic", "Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["Authorization Token scheme", "authorization: Token abcd1234efgh5678", "abcd1234efgh5678"],
+  ["Bearer alone", "Bearer abcdef0123456789", "abcdef0123456789"],
+  ["URL credentials", "git clone https://lee:pa55w0rd@host.example/repo.git", "pa55w0rd"],
+  ["URL token as user", "https://ghx0123456789abcdefABCDEF@host.example/r", "ghx0123456789abcdefABCDEF"],
+  ["?key=", "https://maps.example/api?key=AIzaSyA1234567890abcdefghijklmno&q=a", "AIzaSyA1234567890abcdefghijklmno"],
+  ["?sig=", "https://cdn.example/f?x=1&sig=3f9a7c21b8d04e56", "3f9a7c21b8d04e56"],
+  ["Cookie", "Cookie: sid=abcdef0123456789abcdef; theme=dark", "abcdef0123456789abcdef"],
+  [
+    "PEM private key block",
+    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nZm9vYmFyYmF6\n-----END PRIVATE KEY-----",
+    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+  ],
+  ["unknown long alnum secret", "내 키는 Zx9Kq2Lm7Pw4Rt8Vb3Nc6Hd1Fs5Jg0Yu 입니다", "Zx9Kq2Lm7Pw4Rt8Vb3Nc6Hd1Fs5Jg0Yu"],
+  ["unknown long base64url secret", "값 aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0hJ3lO6rU9x_-AbCdEfGh 끝", "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0hJ3lO6rU9x_-AbCdEfGh"],
+  // 3회차 권장 1 — a JWT that follows a hyphen (the `-` before it is not a word start for the JWT pattern)
+  ["JWT right after a hyphen", "x-eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r", "dBjftJeZ4CVPmB92K27uhbUJU1p1r"],
+];
+
+for (const [name, text, secret] of SECRET_CASES) {
+  test(`필수1 secret erased: ${name}`, () => {
+    const out = redact_text(`앞 ${text} 뒤`, NONE);
+    assert.ok(!out.text.includes(secret), `still there: ${out.text}`);
+    assert.ok(out.hits > 0, "the erasure is counted");
+    assert.ok(out.text.startsWith("앞 "), "the text before the secret stays");
+  });
+}
+
+test("필수1 no leftover of the mark: the session header does not leave '비밀]' behind (권장 5)", () => {
+  const out = redact_text("x-pes-session: synthetic-local-session-secret 와 끝", { secrets: ["synthetic-local-session-secret"], paths: [] });
+  assert.ok(!out.text.includes("synthetic-local-session-secret"));
+  assert.doesNotMatch(out.text, /\]\s*비밀\]/);
+  assert.equal(out.text.split(MARK).length - 1, 1, `exactly one mark: ${out.text}`);
+});
+
+test("필수1 normal text is not erased (false-positive guard)", () => {
+  const same = [
+    "max_tokens: 4096 로 설정했다",
+    "the token budget is 50",
+    "토큰 예산은 충분하다",
+    "password policy 를 검토한다",
+    "secret garden 이라는 책",
+    "key results 는 분기마다 본다",
+    "2024_survey_results_final_v2_revised.csv 를 열었다",
+    "https://example.com/very/long/path/segments/that/go/on/and/on/forever/index.html",
+    "attachment 3f2504e0-4f89-11d3-9a0c-0305e82c3301 는 붙은 파일이다",
+    "/p/proj-1/home 에서 본다",
+    "https://a.b/home/x 참고",
+    "supercalifragilisticexpialidocious 같은 긴 단어",
+    "표 3 에서 2020~2024 비교 (n=1234567)",
+  ];
+  for (const text of same) {
+    const out = redact_text(text, NONE);
+    assert.equal(out.text, text, `changed: ${text}`);
+    assert.equal(out.hits, 0);
+  }
+});
+
+test("필수1 through the API: every shape is gone from the whole response, and a redacted warning is announced", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "rf1", "합성 장", "요약 https://api.x.com/v1?access_token=abcdef123456");
+    const data = assert_ok(
+      await post(env, "/prompt-builds", "owner", {
+        question: "Authorization: Basic dXNlcjpwYXNzd29yZDEyMw== 그리고 https://lee:pa55w0rd@host.example/r",
+        selection: { version_id: v.version_id, quote: "refresh_token=rt_9f8e7d6c5b4a" },
+        drafts: [{ text: "Cookie: sid=abcdef0123456789abcdef" }],
+      }),
+    );
+    const text = JSON.stringify(data);
+    for (const s of ["abcdef123456", "dXNlcjpwYXNzd29yZDEyMw", "pa55w0rd", "9f8e7d6c5b4a", "abcdef0123456789abcdef"]) {
+      assert.ok(!text.includes(s), `response still has ${s}`);
+    }
+    assert.ok(data.warnings.some((w: any) => w.code === "redacted"));
+  });
+});
+
+// 권장 4 — 다른 사용자·다른 PC 경로 변형
+test("권장4 other people's path shapes are erased (file URL, Git Bash, backslash, tilde-backslash, percent-encoded)", () => {
+  const cases: Array<[string, string]> = [
+    [`file://${U}lee/a/b.md`, "lee"],
+    [`/c${U}lee/Documents/x.md`, "lee"],
+    [`/cygdrive/c${U}lee/x`, "lee"],
+    ["\\Users\\lee\\a", "lee"],
+    ["~\\Documents\\x", "Documents"],
+    ["%2FUsers%2Flee%2Fa", "lee"],
+  ];
+  for (const [text, piece] of cases) {
+    const out = redact_text(`앞 ${text} 뒤`, NONE);
+    assert.ok(!out.text.includes(piece), `kept ${piece}: ${out.text}`);
+    assert.ok(out.hits > 0);
+  }
+});
+
+// ===========================================================================
+// 필수 2 — 토큰 호출자에게 AI 참조 금지 파일 id 가 나가지 않는다
+
+test("필수2 a context:read token never sees a denied file's id anywhere in the build; the owner session still sees it excluded", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "rf2", "합성 장", "합성 요약");
+    const ok = await put_ready(env, bytes_of("rf2-ok", 24), "rf2-ok");
+    const no = await put_ready(env, bytes_of("rf2-no", 24), "rf2-no");
+    await attach(env, v.version_id, ok.blob_id, "attachment", "rf2-a1");
+    await attach(env, v.version_id, no.blob_id, "source", "rf2-a2");
+    deny(env, no.blob_id);
+    const reader = await make_agent(env, "rf2r", ["context:read"]);
+    const body = { question: "q", selection: { version_id: v.version_id } };
+
+    const token_build = assert_ok(await post(env, "/prompt-builds", { token: reader.token }, body));
+    assert.ok(!JSON.stringify(token_build).includes(no.blob_id), "no denied blob id in the token's build");
+    assert.ok(token_build.included.some((i: any) => i.id === ok.blob_id), "an allowed file is still listed");
+    assert.ok(!token_build.excluded.some((e: any) => e.reason === "ai_access_denied"), "not even the fact that something was denied");
+
+    // the same token's version read already hides the file: both reads agree
+    const version = assert_ok(await get(env, `/objects/${v.object_id}/versions/${v.version_id}`, { token: reader.token }));
+    assert.ok(!JSON.stringify(version).includes(no.blob_id));
+
+    const owner_build = assert_ok(await post(env, "/prompt-builds", "owner", body));
+    assert.equal(owner_build.excluded.find((e: any) => e.kind === "file" && e.id === no.blob_id)?.reason, "ai_access_denied", "the human still sees what was held back");
+  });
+});
+
+test("필수2 target A with send OFF: a token caller's 'send_off' list does not name a denied file either", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "rf2b", "합성 장", "합성 요약");
+    const ok = await put_ready(env, bytes_of("rf2b-ok", 24), "rf2b-ok");
+    const no = await put_ready(env, bytes_of("rf2b-no", 24), "rf2b-no");
+    await attach(env, v.version_id, ok.blob_id, "attachment", "rf2b-a1");
+    await attach(env, v.version_id, no.blob_id, "source", "rf2b-a2");
+    deny(env, no.blob_id);
+    await go_off(env);
+    const reader = await make_agent(env, "rf2br", ["context:read"]);
+    const data = assert_ok(await post(env, "/prompt-builds", { token: reader.token }, { question: "q", selection: { version_id: v.version_id }, target: "A" }));
+    assert.ok(!JSON.stringify(data).includes(no.blob_id));
+    assert.ok(JSON.stringify(data).includes(ok.blob_id) === true, "the allowed file is named as held back by send OFF");
+  });
+});
+
+// ===========================================================================
+// 필수 3 — applied 단독 = 받음의 근거
+
+async function ask_ai(env: ApiEnv, intended_actor_id: string): Promise<{ question_id: string; version_id: string }> {
+  const open = env.db.get<{ stage_id: string; round_id: string }>(
+    "SELECT stage_id, id AS round_id FROM rounds WHERE project_id = ? AND state = 'open' ORDER BY round_no LIMIT 1",
+    env.p.project_id,
+  );
+  const { stage_id, round_id } = open ?? (await open_round(env, `rf-${env.seq++}`));
+  const data = assert_ok(
+    await post(env, "/questions", "owner", {
+      stage_id,
+      round_id,
+      purpose: "review",
+      direction: "human_to_agent",
+      intended_actor_id,
+      question: text_spec("합성 질문"),
+    }),
+    201,
+  );
+  const question_id = data.question.id as string;
+  const version_id = env.db.get<{ id: string }>("SELECT original_version_id AS id FROM questions WHERE object_id = ?", question_id)!.id;
+  return { question_id, version_id };
+}
+
+async function receipt(env: ApiEnv, agent: { actor_id: string; token: string }, lease: { run_id: string; lease_id: string; fence: unknown }, input_version_id: string, state: "seen" | "applied") {
+  return call(env, {
+    method: "POST",
+    path: P(env, `/runs/${lease.run_id}/input-receipts`),
+    auth: { token: agent.token },
+    body: {
+      lease_id: lease.lease_id,
+      fence: lease.fence,
+      receipts: [{ input_version_id, state, ...(state === "applied" ? { applied_tx_id: tx_of_version(env.db, input_version_id) } : {}) }],
+    },
+  });
+}
+
+test("필수3 an applied receipt alone: state=read and external_received_at = the applied time (applied is something that happens after receiving)", async () => {
+  await with_api(async (env) => {
+    const agent = await make_agent(env, "rf3a");
+    const q = await ask_ai(env, agent.actor_id);
+    const lease = await agent_claims(env, agent as any, await owner_creates_run(env, agent as any));
+    env.clock.advance(4_000);
+    const t = env.clock.now_ms();
+    assert_ok(await receipt(env, agent, lease, q.version_id, "applied"));
+    const row = assert_ok(await get(env, "/question-statuses")).items.find((i: any) => i.question_id === q.question_id);
+    assert.equal(row.state, "read");
+    assert.equal(row.read_at, t);
+    assert.equal(row.external_received_at, t, "applied stands as evidence of receiving: the latest it was received");
+    assert.equal(row.answered_at, null);
+  });
+});
+
+test("필수3 seen then applied: external_received_at is the seen time, read_at the applied time", async () => {
+  await with_api(async (env) => {
+    const agent = await make_agent(env, "rf3b");
+    const q = await ask_ai(env, agent.actor_id);
+    const lease = await agent_claims(env, agent as any, await owner_creates_run(env, agent as any));
+    env.clock.advance(1_000);
+    const t_seen = env.clock.now_ms();
+    assert_ok(await receipt(env, agent, lease, q.version_id, "seen"));
+    env.clock.advance(2_000);
+    const t_applied = env.clock.now_ms();
+    assert_ok(await receipt(env, agent, lease, q.version_id, "applied"));
+    const row = assert_ok(await get(env, "/question-statuses")).items.find((i: any) => i.question_id === q.question_id);
+    assert.equal(row.external_received_at, t_seen);
+    assert.equal(row.read_at, t_applied);
+    assert.equal(row.state, "read");
+  });
+});
+
+test("필수3 the docs state the same rule (stage-1-api and OpenAPI)", () => {
+  const openapi = readFileSync(OPENAPI_PATH, "utf8");
+  const stage = readFileSync(new URL("../docs/plan/stage-1-api.md", import.meta.url), "utf8");
+  assert.match(openapi, /an applied receipt alone also counts as received/);
+  assert.match(stage, /applied 단독도 받음의 근거/);
+});
+
+// ===========================================================================
+// 권장
+
+test("권장6 the section names say what they are: all assumptions/decisions of the edition, not 'related' ones", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "rf6", "합성 장", "합성 요약");
+    assert_ok(await post(env, "/assumptions", "owner", { statement: "합성 가정", state: "proposed", rationale: "r", scope: "edition" }), 201);
+    assert_ok(await post(env, "/decisions", "owner", { scope: "edition", statement: "합성 결정", state: "proposed", supersedes: null, rationale: "r" }), 201);
+    const data = assert_ok(await post(env, "/prompt-builds", "owner", { question: "q", selection: { version_id: v.version_id } }));
+    assert.ok(!data.prompt_text.includes("## 관련 가정") && !data.prompt_text.includes("## 관련 결정"));
+    assert.ok(data.prompt_text.includes("## 이 판의 가정") && data.prompt_text.includes("## 이 판의 결정"));
+  });
+});
+
+test("권장7 a human_to_agent question may not use the human form key 'main'", async () => {
+  await with_api(async (env) => {
+    const agent = await make_agent(env, "rf7");
+    const { stage_id, round_id } = await open_round(env, "rf7");
+    const res = await post(env, "/questions", "owner", {
+      stage_id,
+      round_id,
+      purpose: "review",
+      direction: "human_to_agent",
+      intended_actor_id: agent.actor_id,
+      form_key: "main",
+      question: text_spec("합성 질문"),
+    });
+    assert_error(res, 400, "invalid_payload");
+  });
+});
+
+test("권장10 a blank draft is skipped: no '미제출 초안' line, no unsubmitted_draft warning", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "rf10", "합성 장", "합성 요약");
+    const blank = assert_ok(await post(env, "/prompt-builds", "owner", { question: "q", selection: { version_id: v.version_id }, drafts: [{ text: "   \n " }] }));
+    assert.ok(!blank.prompt_text.includes("미제출 초안"));
+    assert.ok(!blank.warnings.some((w: any) => w.code === "unsubmitted_draft"));
+    assert.ok(!blank.included.some((i: any) => i.kind === "draft"));
+    const real = assert_ok(await post(env, "/prompt-builds", "owner", { question: "q", selection: { version_id: v.version_id }, drafts: [{ text: "   " }, { text: "진짜 초안" }] }));
+    assert.equal(real.included.filter((i: any) => i.kind === "draft").length, 1);
+    assert.ok(real.prompt_text.includes("진짜 초안"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2회차 필수 N1 — 비밀 지우기는 선형 시간이다 (긴 끊김 없는 덩어리를 넣어도 서버가 멈추지 않는다)
+
+const BUDGET_MS = 300;
+
+/** Long unbroken runs that used to make a pattern rescan the same run from every position (each is ~200 KB or less). */
+const SLOW_SHAPES: ReadonlyArray<[string, string]> = [
+  ["letters", "a".repeat(200_000)],
+  ["digits", "1".repeat(200_000)],
+  ["words joined by hyphens", "ab-".repeat(70_000)],
+  ["words joined by underscores", "ab_".repeat(70_000)],
+  ["dots between letters (scheme-like)", "a.".repeat(100_000)],
+  ["hyphens between letters (scheme-like)", "a-".repeat(100_000)],
+  ["mixed case + digits run", "Aa1_".repeat(50_000)],
+  ["repeated 'cookie:' with no '='", "cookie:".repeat(30_000)],
+  ["repeated JWT head joined by hyphens", "eyJaaaaaaaaaa-".repeat(15_000)],
+  ["repeated hyphen-prefixed JWT head (3회차 권장 1)", "x-eyJaaaaaaaaaa-".repeat(12_500)],
+  ["repeated JWT segments with dots (3회차 권장 1)", "x-eyJaaaaaaaa.bbbbbbbb.".repeat(10_000)],
+  ["repeated 'token '", "token ".repeat(35_000)],
+  ["repeated scheme and user", "http://a:".repeat(25_000)],
+  ["repeated unterminated PEM head", "-----BEGIN A ".repeat(15_000)],
+  ["Bearer then many spaces", "Bearer" + " ".repeat(200_000)],
+  ["repeated 'authorization:'", "authorization:".repeat(14_000)],
+  ["repeated home root", U.repeat(28_000)],
+];
+
+for (const [name, text] of SLOW_SHAPES) {
+  test(`2회차 N1 redaction stays linear: ${name} (${text.length} chars) is done within ${BUDGET_MS} ms`, () => {
+    const started = performance.now();
+    redact_text(text, NONE);
+    const spent = performance.now() - started;
+    assert.ok(spent < BUDGET_MS, `${spent.toFixed(0)} ms for ${text.length} chars`);
+  });
+}
+
+test("2회차 N1 the same input through the API: a context:read token build with 20k-letter pieces answers fast", async () => {
+  await with_api(async (env) => {
+    const long = "a".repeat(20_000);
+    const v = await artifact_with(env, "n1", "합성 장", long);
+    const reader = await make_agent(env, "n1r", ["context:read"]);
+    const started = performance.now();
+    const out = await post(env, "/prompt-builds", { token: reader.token }, {
+      question: long,
+      selection: { version_id: v.version_id, quote: long },
+      drafts: [{ text: long }, { text: long }, { text: long }],
+      target: "B",
+    });
+    const spent = performance.now() - started;
+    assert_ok(out);
+    assert.ok(spent < 1500, `${spent.toFixed(0)} ms`);
+  });
+});
+
+// The names that the old `[\w-]*` prefix was written for: still erased, the whole name together with its value.
+const NAMED: ReadonlyArray<[string, string, string]> = [
+  ["access_token", "access_token=abc12345xyz", "access_token"],
+  ["refresh_token", "refresh_token=abc12345xyz", "refresh_token"],
+  ["client_secret", "client_secret: abc12345xyz", "client_secret"],
+  ["id_token", `id_token="abc12345xyz"`, "id_token"],
+  ["x-api-key header", "x-api-key: abc12345xyz", "x-api-key"],
+  ["json field", `{"api_key": "abc12345xyz"}`, "api_key"],
+  ["after a dot", "config.client_secret=abc12345xyz", "client_secret"],
+  ["upper case", "AWS_SESSION_TOKEN=abc12345xyz", "SESSION_TOKEN"],
+  ["django SECRET_KEY", "SECRET_KEY=abc12345xyz", "SECRET_KEY"],
+  ["aws secret access key", "AWS_SECRET_ACCESS_KEY=abc12345xyz", "ACCESS_KEY"],
+  ["private_key", "private_key: abc12345xyz", "private_key"],
+  ["session id", "session_id=abc12345xyz", "session_id"],
+  ["PHPSESSID", "sessid=abc12345xyz", "sessid"],
+  ["Korean label: password", "비밀번호: abc12345xyz", "비밀번호"],
+  ["Korean label: token", "토큰=abc12345xyz", "토큰"],
+  ["a name longer than any limit", `${"x".repeat(300)}_password=abc12345xyz`, "_password"],
+];
+
+for (const [name, text, name_part] of NAMED) {
+  test(`2회차 N1 secret name and value are both erased: ${name}`, () => {
+    const out = redact_text(`앞 ${text} 뒤`, NONE);
+    assert.ok(!out.text.includes("abc12345xyz"), `value left: ${out.text}`);
+    assert.ok(!out.text.includes(name_part), `name left: ${out.text}`);
+    assert.equal(out.hits, 1, "one erasure, no leftover mark");
+  });
+}
+
+test("2회차 권장1 a PGP private key block (ends in 'KEY BLOCK') is erased whole", () => {
+  const out = redact_text("앞\n-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF8abc\n-----END PGP PRIVATE KEY BLOCK-----\n뒤", NONE);
+  assert.ok(!out.text.includes("lQOYBF8abc") && !out.text.includes("PGP"), out.text);
+  assert.ok(out.text.startsWith("앞\n") && out.text.endsWith("\n뒤"));
+});
+
+test("2회차 권장1 plain words that only look close are not erased", () => {
+  const text = "the session ends here; a secret key idea; 암호화 방식 설명; 토큰 방식 설명";
+  assert.equal(redact_text(text, NONE).text, text);
+});
+
+// ===========================================================================
+// 4회차 F1 — 질문 상태 응답의 비밀 지우기 (F1-1) · 인용 JSON 헤더 지우기 (F1-2)
+
+// F1-2: a quoted header name (JSON) and a quoted value are erased whole; the value must not survive
+const QUOTED_HEADERS: Array<[string, string, string]> = [
+  // [이름, 글, 남으면 안 되는 값 조각]
+  ["JSON Authorization Basic", `{"Authorization":"Basic dXNlcjpwYXNz"}`, "dXNlcjpwYXNz"],
+  ["JSON Cookie", `{"Cookie":"connect.sid=s%3Aabc1234.signature"}`, "abc1234.signature"],
+  ["JSON x-pes-session", `{"x-pes-session":"otherSessionValue123"}`, "otherSessionValue123"],
+  ["spaced JSON Authorization", `{ "Authorization" : "Basic dXNlcjpwYXNz" }`, "dXNlcjpwYXNz"],
+  ["spaced JSON Cookie", `{ "Cookie" : "sid=abc1234def" }`, "abc1234def"],
+  ["spaced JSON x-pes-session", `{ "x-pes-session" : "otherSessionValue123" }`, "otherSessionValue123"],
+  ["single-quoted Authorization", `{'Authorization': 'Basic dXNlcjpwYXNz'}`, "dXNlcjpwYXNz"],
+  ["JSON Authorization Token", `"authorization":"Token abcd1234efgh5678"`, "abcd1234efgh5678"],
+];
+
+for (const [name, text, value] of QUOTED_HEADERS) {
+  test(`4회차 F1-2 quoted header value is erased: ${name}`, () => {
+    const out = redact_text(`앞 ${text} 뒤`, NONE);
+    assert.ok(!out.text.includes(value), `value left: ${out.text}`);
+    assert.equal(out.hits, 1, `one erasure: ${out.text}`);
+  });
+}
+
+test("4회차 F1-2 the quoted headers go through the prompt build too (each shape gone from the response)", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "f12", "합성 장", "요약");
+    for (const [, text, value] of QUOTED_HEADERS) {
+      const data = assert_ok(await post(env, "/prompt-builds", "owner", { question: text, selection: { version_id: v.version_id } }));
+      assert.ok(!JSON.stringify(data).includes(value), `response still has ${value}`);
+    }
+  });
+});
+
+// F1-2: the quoted forms stay linear (20만 자 입력이 300ms 안)
+const QUOTED_SLOW: Array<[string, string]> = [
+  ["repeated quoted Authorization name", `"Authorization":`.repeat(14_000)],
+  ["repeated quoted Cookie name", `"Cookie":`.repeat(20_000)],
+  ["repeated quoted x-pes-session name", `"x-pes-session":`.repeat(12_000)],
+  ["quoted name then long spaces", `"Authorization"` + " ".repeat(200_000)],
+  ["quoted name, colon, quote, then long spaces", `"Cookie":"` + " ".repeat(200_000)],
+  ["quoted name, colon, then long quote run", `"x-pes-session":` + `"`.repeat(200_000)],
+  ["quoted Basic then long spaces", `"Authorization":"Basic` + " ".repeat(200_000)],
+];
+
+for (const [name, text] of QUOTED_SLOW) {
+  test(`4회차 F1-2 quoted header stays linear: ${name} (${text.length} chars) is done within ${BUDGET_MS} ms`, () => {
+    const started = performance.now();
+    redact_text(text, NONE);
+    const spent = performance.now() - started;
+    assert.ok(spent < BUDGET_MS, `${spent.toFixed(0)} ms for ${text.length} chars`);
+  });
+}
+
+// F1-1: the question status read model erases the same secrets and paths as the prompt, for every reader
+test("4회차 F1-1 question statuses: owner, AI A and AI B see no session secret, cookie value or home path in the text", async () => {
+  await with_api(async (env) => {
+    const { stage_id, round_id } = await open_round(env, "f11");
+    const ai_a = await make_agent(env, "f11a");
+    const ai_b = await make_agent(env, "f11b", ["context:read"]);
+    const question = `Authorization: Bearer ${SESSION_SECRET} Cookie: probeCookie=shortValue123 ${U}/hong/private/note.txt 세션 값 ${SESSION_SECRET} 끝`;
+    assert_ok(
+      await post(env, "/questions", "owner", {
+        stage_id,
+        round_id,
+        purpose: "review",
+        direction: "human_to_agent",
+        intended_actor_id: ai_a.actor_id,
+        question: text_spec(question),
+      }),
+      201,
+    );
+    const readers: Auth[] = ["owner", { token: ai_a.token }, { token: ai_b.token }];
+    for (const auth of readers) {
+      const res = assert_ok(await get(env, "/question-statuses", auth));
+      const text = JSON.stringify(res);
+      for (const s of [SESSION_SECRET, "shortValue123", `${U}/hong`, "private/note.txt"]) {
+        assert.ok(!text.includes(s), `status response still has ${s}`);
+      }
+      assert.ok(text.includes(MARK), "the erasure mark is shown in the text");
+    }
+  });
+});
+
+// ===========================================================================
+// 5회차 F2-1 — 헤더 이름과 무관한 `Basic <base64 값>` 모양을 지운다 (대소문자·여러 공백·줄바꿈 뒤 값 포함).
+// 정상 글의 `basic` 단어(뒤에 base64 모양 값이 없는 것)는 지우지 않는다.
+
+const BASIC_VALUES: Array<[string, string, string]> = [
+  // [이름, 글, 남으면 안 되는 값]
+  ["HAR value, one space", "값 Basic dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["upper case BASIC", "값 BASIC dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["lower case basic", "값 basic dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["mixed case bAsIc", "값 bAsIc dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["several spaces", "값 Basic    dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["tab and spaces", "값 Basic \t  dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["newline then value", "값 Basic\ndXNlcjpwYXNzd29yZDEyMw== 끝", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["newline and indent then value", "값 Basic\r\n      dXNlcjpwYXNzd29yZDEyMw== 끝", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["upper case BASIC then newline", "값 BASIC\n\ndXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["digits and padding", "값 Basic dXNlcjpwYXNzd29yZDEyMw== 끝", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["lower-case value with a digit", "값 basic abc12345 끝", "abc12345"],
+];
+
+for (const [name, text, value] of BASIC_VALUES) {
+  test(`5회차 F2-1 Basic value is erased: ${name}`, () => {
+    const out = redact_text(text, NONE);
+    assert.ok(!out.text.includes(value), `value left: ${out.text}`);
+    assert.ok(out.hits >= 1, "the erasure is counted");
+    assert.ok(out.text.startsWith("값 ") && out.text.endsWith(" 끝"), `the text around stays: ${out.text}`);
+  });
+}
+
+const BASIC_WORDS: string[] = [
+  // 정상 글: `basic` 뒤에 base64 모양 값이 없으면 한 글자도 지우지 않는다
+  "basic settings",
+  "Basic settings",
+  "BASIC SETTINGS",
+  "Basic Settings",
+  "Basic 개념",
+  "basic 설정은 간단하다",
+  "The basic settings page is here.",
+  "a basic concept of 기본 설정",
+  "Basic Concept",
+  "basic-auth 설명",
+  "basic plan",
+];
+
+for (const text of BASIC_WORDS) {
+  test(`5회차 F2-1 a normal sentence with the word basic is not erased: ${text}`, () => {
+    assert.equal(redact_text(text, NONE).text, text);
+  });
+}
+
+const BASIC_SLOW: Array<[string, string]> = [
+  ["repeated 'Basic '", "Basic ".repeat(40_000)],
+  ["'Basic' then long spaces", "Basic" + " ".repeat(200_000)],
+  ["'Basic ' then a long lower-case run", "Basic " + "a".repeat(200_000)],
+  ["'basic ' then a long mixed-case run", "basic " + "aB".repeat(100_000)],
+  ["'Basic ' then a long digit run", "Basic " + "1".repeat(200_000)],
+  ["repeated 'basic' and newline", "basic\n".repeat(40_000)],
+];
+
+for (const [name, text] of BASIC_SLOW) {
+  test(`5회차 F2-1 Basic stays linear: ${name} (${text.length} chars) is done within ${BUDGET_MS} ms`, () => {
+    const started = performance.now();
+    redact_text(text, NONE);
+    const spent = performance.now() - started;
+    assert.ok(spent < BUDGET_MS, `${spent.toFixed(0)} ms for ${text.length} chars`);
+  });
+}
