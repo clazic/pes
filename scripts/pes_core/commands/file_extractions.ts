@@ -172,9 +172,9 @@ export function closed_to_ai(db: CommandRuntime["db"], project_id: string, blob_
 
 /**
  * The extraction that already answers this (version, blob, extractor, extractor_version), if any. An attempt that failed for a
- * reason about the moment, not the file (TRANSIENT_REASONS: time limit, unexpected error, a thread still running, workers not
- * allowed) does NOT count — it stays in the table as the record of that attempt, and the next request for the file tries again
- * (a new row, receipt and event). Final answers (extracted, partial, unsupported, failed/too_large and the damaged-file reasons)
+ * reason about the moment, not the file (TRANSIENT_REASONS: time limit, unexpected error; a thread still running and workers not
+ * allowed are refused by file.extract and never stored) does NOT count — it stays in the table as the record of that attempt, and
+ * the next request for the file tries again (a new row, receipt and event). Final answers (extracted, partial, unsupported, failed/too_large and the damaged-file reasons)
  * are returned as before. When there are several rows, the newest counted one answers.
  */
 export function existing_extraction(

@@ -1309,9 +1309,11 @@ paths:
         At most 50 warnings are listed; the rest become one `more_warnings` line.
         The whole extraction runs in a worker thread with its own limits (256 MB heap, 15 s): the thread running out of memory is `failed / too_large`, over the time limit
         `failed / extract_timeout`, ending without an answer `failed / extract_error`. A cut-off thread that a native step keeps alive is counted; while one is left a new
-        extraction answers `failed / extract_busy` at once. Where worker threads are not allowed (Node `--permission` without `--allow-worker`) it is `failed / worker_unavailable`.
-        These four reasons say something about the moment, not the file: each attempt is recorded (row, receipt, event) but does not answer the next request for the same
-        file - it is tried again (`changed: true`). `too_large`, the damaged-file reasons, `extracted`, `partial` and `unsupported` are final.
+        extraction starts no thread and is refused at once with 409 `conflict`, `details.reason: extract_busy`, `retryable: true`. Where worker threads are not allowed
+        (Node `--permission` without `--allow-worker`) the same refusal has `details.reason: worker_unavailable`. These two refusals are not answers about the file and
+        write nothing (no row, blob, policy, receipt or event). `extract_timeout` and `extract_error` also say something about the moment, not the file: each such attempt is
+        recorded (row, receipt, event) but does not answer the next request for the same file - it is tried again (`changed: true`). `too_large`, the damaged-file reasons,
+        `extracted`, `partial` and `unsupported` are final.
         While an extraction runs, the same server answers no other request (at most 15 s per extraction).
         Data `{extraction_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status: extracted|partial|unsupported|failed,
         reason, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings:[{code,message}], changed}`.
@@ -1346,7 +1348,7 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing file:write scope, or a caller that is not human names a file closed to AI }
         "404": { description: Unknown version or blob, or a blob not attached to that version }
-        "409": { description: The blob is not ready, or the key was used for another body (idempotency_key_reuse) }
+        "409": { description: "The blob is not ready, or the key was used for another body (idempotency_key_reuse), or the extraction could not start now (conflict with details.reason extract_busy or worker_unavailable, retryable true, nothing written)" }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/project-registrations:

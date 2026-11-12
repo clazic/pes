@@ -39,10 +39,13 @@ export const EXTRACTOR_VERSION = "1";
 /**
  * Failed reasons that say something about this moment, not about the file: the time limit (a slow or busy computer), an unexpected
  * error, a thread that earlier timed out and has not ended yet (extract_busy), a computer that does not allow worker threads
- * (worker_unavailable). Such an attempt is recorded (row, receipt, event) but never answers a later request for the same file —
- * the file is tried again. too_large and the damaged-file reasons are about the file and stay final.
+ * (worker_unavailable). Such an attempt never answers a later request for the same file — the file is tried again. extract_timeout and
+ * extract_error are recorded (row, receipt, event); extract_busy and worker_unavailable are NOT_STARTED_REASONS and are not recorded
+ * at all (the command refuses with 409 conflict). too_large and the damaged-file reasons are about the file and stay final.
  */
 export const TRANSIENT_REASONS: readonly string[] = ["extract_timeout", "extract_error", "extract_busy", "worker_unavailable"];
+/** The transient reasons of an attempt that never started: refused by file.extract, nothing is written. */
+export const NOT_STARTED_REASONS: readonly string[] = ["extract_busy", "worker_unavailable"];
 export const MAX_SOURCE_BYTES = 32 * 1024 * 1024;
 export const MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 /** The most characters one extraction may produce (counted while it is built, not at the end). Same scale as the source limit. */

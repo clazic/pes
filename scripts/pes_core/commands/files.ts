@@ -46,6 +46,7 @@ import {
   EXTRACTOR,
   EXTRACTOR_VERSION,
   MAX_SOURCE_BYTES,
+  NOT_STARTED_REASONS,
   format_of,
   too_large_outcome,
   type ExtractOutcome,
@@ -909,6 +910,11 @@ function run_extract(runtime: CommandRuntime): CommandResult {
     }
     // in a worker thread with a heap and a time limit: a hostile file may end the extraction, never the server
     outcome = extract_text_isolated(target.original_name, bytes);
+    // A try that could not even start (a thread still running, workers not allowed) says nothing about the file: it is refused, not
+    // recorded — no row, receipt or event, so repeated requests cannot pile up writes. The caller retries with a new Idempotency-Key.
+    if (outcome.status === "failed" && outcome.reason !== null && NOT_STARTED_REASONS.includes(outcome.reason)) {
+      throw new ApiError("conflict", outcome.warnings[0]?.message ?? "the extraction could not start now", { reason: outcome.reason });
+    }
   }
 
   const extraction_id = runtime.new_id();

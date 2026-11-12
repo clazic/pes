@@ -991,7 +991,7 @@ export class ApiApp {
       error: {
         code: failure.code,
         message: message_for(failure.code, failure.target),
-        retryable: retryable_for(failure.code),
+        retryable: retryable_for(failure.code, failure.details),
         target: failure.target,
         details: failure.details,
         next_action: failure.next_action ?? NEXT_ACTION[failure.code] ?? "retry_later",
