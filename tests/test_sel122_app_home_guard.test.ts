@@ -108,13 +108,19 @@ test("B3 the CI app job runs its test steps with a temporary HOME and USERPROFIL
   }
 });
 
-test("C1 the app's real Vitest CLI refuses a start in the (fake) account home before it globs or loads any test file — zero fs calls under its pes-projects", () => {
+test("C1 the app's real Vitest CLI refuses a start in the (fake) account home before it globs or loads any test file — zero fs calls under its pes-projects", (t) => {
   // The review (SEL-122 final 1/2) reproduced the gap: the guard ran as globalSetup, after Vitest had already read <home>/pes-projects/src (a readdir).
   // Here the real runner gets HOME · USERPROFILE · PES_TEST_ACCOUNT_HOME = the fake home and --dir = its pes-projects; a probe spec there throws if loaded.
   // The recorder watches only pes-projects: Vitest writes its own token under HOME/Library at start, which is not what this test is about.
   const app = join(REPO, "app");
   const vitest_bin = join(app, "node_modules", "vitest", "vitest.mjs");
-  assert.ok(existsSync(vitest_bin), "app dependencies are needed for this test (cd app && npm ci)");
+  if (!existsSync(vitest_bin)) {
+    // The root CI jobs install only the root deps; the app CI job sets PES_REQUIRE_APP_DEPS=1 and runs this test there.
+    const reason = "app/node_modules/vitest is missing (root-only install) — run with cd app && npm ci, or in the app CI job";
+    if (process.env.PES_REQUIRE_APP_DEPS === "1") assert.fail(`PES_REQUIRE_APP_DEPS=1 but ${reason}`);
+    t.skip(reason);
+    return;
+  }
   const root = mkdtempSync(join(tmpdir(), "pes-sel122-cli-"));
   roots.push(root);
   const acct = join(root, "acct");

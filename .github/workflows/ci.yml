@@ -344,6 +344,20 @@ jobs:
           USERPROFILE: ${{ runner.temp }}/pes-test-home
         run: npm test
 
+      # SEL-122 C1: 실제 Vitest CLI 가드 시험 — 앱 의존성(app/node_modules)이 있는 이 잡에서 반드시 돈다(건너뜀이면 실패).
+      - name: App CLI guard (SEL-122 C1, must run)
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
+          PES_REQUIRE_APP_DEPS: "1"
+        run: |
+          node --test --test-reporter=tap tests/test_sel122_app_home_guard.test.ts > "$RUNNER_TEMP/sel122-c1.tap" 2>&1 || { cat "$RUNNER_TEMP/sel122-c1.tap"; exit 1; }
+          cat "$RUNNER_TEMP/sel122-c1.tap"
+          grep -E '^ok [0-9]+ - C1 ' "$RUNNER_TEMP/sel122-c1.tap" | grep -v '# SKIP' || { echo "C1 did not run as ok (skipped or missing)"; exit 1; }
+          if grep -E '^ok [0-9]+ - C1 .*# SKIP' "$RUNNER_TEMP/sel122-c1.tap"; then echo "C1 was skipped"; exit 1; fi
+
       - name: Browser tests (Playwright)
         env:
           HOME: ${{ runner.temp }}/pes-test-home
