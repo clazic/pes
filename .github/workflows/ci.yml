@@ -309,7 +309,14 @@ jobs:
       run:
         working-directory: app
 
+    # SEL-122: 시험 단계는 임시 HOME 에서 돈다 — 브라우저는 HOME 밖(PLAYWRIGHT_BROWSERS_PATH)에 설치하고 거기서 찾는다(루트 browser 잡과 같다).
+    # job 수준 env 에서는 runner 컨텍스트를 쓸 수 없어(쓰면 워크플로 파일 전체가 무효) 첫 단계에서 GITHUB_ENV 로 넘긴다.
     steps:
+      - name: Browsers outside HOME
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/pw-browsers" >> "$GITHUB_ENV"
+
       - name: Check out repository
         uses: actions/checkout@v4
         with:
@@ -332,8 +339,33 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # SEL-122: 실제 계정 홈(러너의 홈 포함)에서 시작하면 vitest.global-setup.ts · playwright.config.ts 가 시험 전에 거절한다 — 임시 HOME 으로 돈다.
+      - name: Temporary home for the test steps
+        shell: bash
+        run: mkdir -p "${{ runner.temp }}/pes-test-home"
+
       - name: Unit tests (Vitest)
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
         run: npm test
 
+      # SEL-122 C1: 실제 Vitest CLI 가드 시험 — 앱 의존성(app/node_modules)이 있는 이 잡에서 반드시 돈다(건너뜀이면 실패).
+      - name: App CLI guard (SEL-122 C1, must run)
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
+          PES_REQUIRE_APP_DEPS: "1"
+        run: |
+          node --test --test-reporter=tap tests/test_sel122_app_home_guard.test.ts > "$RUNNER_TEMP/sel122-c1.tap" 2>&1 || { cat "$RUNNER_TEMP/sel122-c1.tap"; exit 1; }
+          cat "$RUNNER_TEMP/sel122-c1.tap"
+          grep -E '^ok [0-9]+ - C1 ' "$RUNNER_TEMP/sel122-c1.tap" | grep -v '# SKIP' || { echo "C1 did not run as ok (skipped or missing)"; exit 1; }
+          if grep -E '^ok [0-9]+ - C1 .*# SKIP' "$RUNNER_TEMP/sel122-c1.tap"; then echo "C1 was skipped"; exit 1; fi
+
       - name: Browser tests (Playwright)
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
         run: npm run test:e2e

@@ -230,6 +230,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `GET P/changes` | E/H | PR14 | PR4 | 커서 epoch·tx 묶음 |
 | `GET P/workspace` | E/H | 3단계 U1b(SEL-82) | U1b 읽기 모델 | 앱 작업 공간 읽기(현재 단계·라운드·차례·권한별 가능 동작·기록 개수). 읽기 전용·새 표 없음, `context:read` |
 | `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | E/H | PR13 | PR9 | 예약·업로드 완료·ready·hash·Go OFF 정책 검사 읽기 |
+| `GET P/files/{b}/preview`, `POST P/materials`, `GET P/materials`, `POST P/file-policies/{fp}/ai-access` | E/H (스위치는 H만) | 3단계 SEL-115 | PR9 | 내 자료 올리기(`file.upload`)·목록·파일별 AI 참조 스위치(`file.ai_access_set`)·content 와 같은 규칙의 preview — 자세한 규칙은 stage-1-api.md 6절 「내 자료」 행 |
 | `POST P/stages/{s}/rounds`·`POST P/rounds/{r}/seal` | H/E | PR14 | PR6 | 라운드 시작·봉인, 승인과 분리 |
 | `POST P/stages/{s}/approve`·`/reopen` | H | PR14 | PR6 | 사람만, 에이전트 거부 |
 | `POST P/policies/opencode-go/revisions` | H | PR14 | PR10 | 사람만, 정책 이력·재생 전 검사 |
@@ -237,12 +238,13 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/questions/{q}/withdraw`·`/defer`·`/merge` | H/허가된 E | 3단계 U2a(SEL-90) | `question.withdraw`·`question.defer`·`question.merge` | 질문의 새 버전(state `withdrawn`·`deferred`·`merged`), 옛 버전·옛 답 보존, 폼의 최신 세트에서 같은 tx 로 빠짐, 전이표 밖은 409, 지우지 않음 |
 | `GET P/stages/{s}/rounds/{rd}`·`GET P/stages/{s}/rounds/{rd}/threads` | H/E(`context:read`) | 3단계 U2d(SEL-98) | (읽기, 명령 없음) | 라운드 하나의 폼 세트·질문 현재 버전·현재 답, 질문별 의견 목록. 새 표 없음 |
 | `POST P/question-sets/{set}/order` | H/허가된 E | 3단계 U2d(SEL-98) | `question.reorder` | 새 폼 세트 하나(순서만 다름)를 한 tx 로 발행, 새 질문·질문 버전·답 없음, 낡은 세트 409 `stale_set`, 순열 아니면 422 |
-| `POST P/threads`(질문 의견 `question_comment`)·`POST P/threads/{t}/messages` | H/허가된 E | 3단계 U2a(SEL-90) | `question.comment_add` | 질문 의견은 답이 아니다(답·제출 0). 앵커 문맥 `annotation` 은 U4a 까지 501 |
+| `POST P/threads`(질문 의견 `question_comment`)·`POST P/threads/{t}/messages` | H/허가된 E | 3단계 U2a(SEL-90) | `question.comment_add` | 질문 의견은 답이 아니다(답·제출 0). 앵커 문맥 `annotation` 은 3단계 U4a(SEL-99)에서 `annotation.create`·`thread.reply` 로 켠다 |
+| `GET P/threads`·`GET P/threads/{t}`·`POST P/threads/{t}/reanchor`·`POST P/threads/{t}/resolutions`·`GET P/followups`·`POST P/followups`·`POST P/followups/{f}/apply` | H/허가된 E(제안·답글·재판정), H(해결·채택·다시 붙이기) | 3단계 U4a(SEL-99) | `annotation.create`·`annotation.reanchor`·`thread.reply`·`thread.resolve`·`followup.propose`·`followup.apply` | 구간 첨언의 앵커(인용문·prefix/suffix·code point 위치)와 판정(exact·moved·ambiguous·lost, 판정은 줄만 더함). 해결됨≠반영됨: 해결은 후속을 제안으로 남기고 채택(edit_text)만 새 버전을 만든다. 해결·채택은 사람만(토큰 403 `human_required`, 에이전트 적용은 후속) |
 | `POST P/assumptions`·`GET P/assumptions` | H/E(제안), H(판단) | 3단계 U3a(SEL-93) | `assumption.propose`·`assumption.assess` | 제안(state `proposed`, `needs_review`)은 소유자·토큰, `confirmed`·`rejected`·`revised` 판단은 소유자 세션만(토큰 403 `human_required`). 판단은 새 버전, 원문 보존. 읽기는 객체마다 현재 버전 한 줄 |
 | `POST P/decisions`·`GET P/decisions` | H/E(제안), H(채택·대체·폐기) | 3단계 U3a(SEL-93) | `decision.propose`·`decision.adopt`·`decision.supersede`·`decision.revoke` | 제안은 채택이 아니다. 채택·대체·폐기는 사람만, 전이표 `proposed→adopted→superseded\|revoked`, 대체는 새 결정+옛 결정의 새 버전, 대체 대상이 adopted 가 아니면 409 `supersedes_conflict` |
 | `POST P/reflections`·`GET P/reflections?round_id=` | H/E | 3단계 U3a(SEL-93) | `reflection.create` | applied·partial 은 의미 증거(`evidence_tx_id`가 결과 버전을 만든 tx, 후속은 applied)가 있어야 한다: 없으면 422 `evidence_required`, 안 맞으면 422 `validation_failed`. 빈 `entries` 는 "0건 제출"이고 "미제출"과 다르다 |
 | `GET P/print?scope=&snapshot=`·`POST P/print/prepare`·`POST P/print/commit` | H(GET 은 H/E, `context:read`) | 3단계 U6a(SEL-119) | `print.prepare`·`print.commit` | 범위 인쇄(round·stage·edition, 프로젝트 전체 범위 없음). POST 두 개는 소유자 세션만(에이전트 토큰 403 `forbidden`): prepare 는 manifest 미리보기(200, 영수증·사건 1개만), commit 은 출력물 blob·manifest blob·snapshot 1개를 한 commit 으로 고정(201, 실패하면 행·파일 0, 라운드는 봉인하지 않는다). `all_editions` 는 분량 확인(`confirm_volume`)이 필요하다. GET 은 이미 저장된 인쇄 고정본만 읽는 순수 조회이고, 봉인·승인 snapshot 은 인쇄가 아니라 404. 새 표 없음 |
-| 해결·export | 미래 | — | — | **capabilities 미지원**, 가짜 성공 없음 |
+| export | 미래 | — | — | **capabilities 미지원**, 가짜 성공 없음 |
 
 - **2단계 필수 경로는 위 표가 닫힌 목록**이다. run 시작·wait·정확한 버전 읽기·라운드/정책 읽기와 **파일 HTTP(예약·업로드 완료·정책 검사 읽기)는 PR13**이 맡고, 파일 저장 코어는 PR9다. release·202 operation 조회도 PR14에 포함한다.
 - **project.create/register**: A의 웹/로컬 생성은 `project.create`가 owner·초기 정책·첫 판을 한 tx로 만들고, 중복 slug·멱등 키·재생을 검사한다. B의 최초 등록은 project token이 없으므로 **사람의 기기 승인/제한 등록 자격**을 쓰며, 일반 에이전트 토큰에 owner 생성·정책 변경 권한을 주지 않는다. **PR14는 `project-registrations` API를 만들고, PR20a는 빈 계정/새 프로젝트에서 그 API를 쓰는 B 최초 등록 종단 시험을 맡는다.** 빈 계정/새 프로젝트에서 A·B 모두 시험한다.

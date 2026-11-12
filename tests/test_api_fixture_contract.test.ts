@@ -33,6 +33,7 @@ import {
 import { artifact_version, tx_of_version } from "./helpers/sel93_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { new_artifact } from "./helpers/blob_env.ts";
+import { cp_find, cp_len, text_artifact } from "./helpers/sel99_env.ts";
 import { drive_stage, make_content, manifest_blob, seal, start, stage_ids, type SealResult } from "./helpers/editions_env.ts";
 import { single_spec } from "./helpers/questions_env.ts";
 
@@ -43,15 +44,10 @@ const UNSUPPORTED = new Set([
   "agent_tokens.create",
   "editions.create",
   "exports.create",
-  "followups.apply",
   "projects.delete",
-  // SEL-90: threads.json 의 장면은 annotation(앵커) 문맥이라 U4a 전까지 501 그대로다 (질문 의견 question_comment 는 test_sel90_comments).
-  "threads.create",
-  "threads.resolutions.create",
 ]);
-
-/** thread-messages.json 의 장면은 annotation 스레드(앵커) 위의 답글이라 U4a 가 켠다. 질문 의견 메시지는 test_sel90_comments 가 시험한다. */
-const U4A_ONLY = new Set(["threads.messages.create"]);
+// leader 승인(SEL-99): U4a 가 threads.create · threads.messages.create · threads.resolutions.create · followups.apply 를 미지원에서 지원으로 바꿨다.
+// 네 픽스처의 장면은 아래 SCENES 에 있다(같은 장면을 test_sel99_fixture_contract 도 따로 시험한다).
 
 interface FixtureCase {
   request: { path_params?: Record<string, string>; query?: Record<string, unknown> | null; headers: Record<string, string>; body?: unknown };
@@ -118,6 +114,8 @@ interface Scene {
   raw?: Uint8Array;
   /** use this agent's token instead of the default one (e.g. an internal_ai actor for the Go-OFF cases) */
   agent?: Agent;
+  /** fields added to the request body when the fixture does not state them (e.g. the lease an agent write needs) */
+  extra_body?: Record<string, unknown>;
 }
 
 type Builder = (env: ApiEnv, agent: Agent, c: FixtureCase) => Promise<Scene>;
@@ -140,7 +138,42 @@ const PH = {
   blob_put: "blb_01J9Z3K7QG",
   upload: "upl_01J9Z3K7QG",
   sha: "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+  thread: "thr_01J9Z3K7QH",
+  first_message: "msg_01J9Z3K7Q2",
+  followup: "fup_01J9Z3K7QJ",
 };
+
+// SEL-99 U4a: the annotation scenes. The quote starts at code point 120 of the text (the fixture's start_cp).
+const FX_QUOTE = "정책 대안은 두 가지다.";
+const FX_PREFIX = "2장 합성 정책 분석에서 ";
+const FX_SUFFIX = " 첫 번째는 현행 유지다.";
+const FX_BODY = `${"가".repeat(120 - cp_len(FX_PREFIX))}${FX_PREFIX}${FX_QUOTE}${FX_SUFFIX}\n\n끝.`;
+const FX_NEW_BODY = FX_BODY.replace(FX_QUOTE, "정책 대안은 두 가지이며 근거는 부록 A 에 있다.");
+
+async function thread_scene_art(env: ApiEnv) {
+  const art = await text_artifact(env, "fx99", FX_BODY);
+  const made = assert_ok(
+    await call(env, {
+      method: "POST",
+      path: P(env, "/threads"),
+      auth: "owner",
+      body: {
+        target_object_id: art.object_id,
+        target_version_id: art.version_id,
+        context_kind: "annotation",
+        anchor: { exact_quote: FX_QUOTE, prefix: FX_PREFIX, suffix: FX_SUFFIX, ...cp_find(FX_BODY, FX_QUOTE) },
+        initial_message: { body_md: "이 문장의 근거를 더 설명해 주세요." },
+      },
+    }),
+    201,
+  );
+  return { art, thread_id: made.thread.id as string, message_id: made.message.id as string };
+}
+
+async function lease_body(env: ApiEnv, agent: Agent): Promise<Record<string, unknown>> {
+  const lease = await agent_claims(env, agent);
+  return { run_id: lease.run_id, lease_id: lease.lease_id, fence: lease.fence };
+}
 
 const sha_hex = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const synthetic_bytes = (n: number, salt: number) => new Uint8Array(Array.from({ length: n }, (_, i) => (i * 7 + salt) % 251));
@@ -416,6 +449,57 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
     normal: async (env) => reflection_scene(env),
     error: async (env) => reflection_scene(env),
   },
+  // SEL-99 U4a: selection comments and follow-ups. An agent write carries the lease the fixture leaves out (extra_body).
+  "threads.create": {
+    normal: async (env, agent) => {
+      const art = await text_artifact(env, "fx99", FX_BODY);
+      return { subst: { [PH.object]: art.object_id, [PH.version]: art.version_id }, extra_body: await lease_body(env, agent) };
+    },
+    error: async (env, agent) => {
+      const art = await text_artifact(env, "fx99", FX_BODY);
+      return { subst: { [PH.object]: art.object_id, [PH.version]: art.version_id }, extra_body: await lease_body(env, agent) };
+    },
+  },
+  "threads.messages.create": {
+    normal: async (env, agent) => {
+      const t = await thread_scene_art(env);
+      return { subst: { [PH.thread]: t.thread_id, [PH.first_message]: t.message_id }, extra_body: await lease_body(env, agent) };
+    },
+    error: async (env, agent) => {
+      const t = await thread_scene_art(env);
+      assert_ok(await call(env, { method: "POST", path: P(env, `/threads/${t.thread_id}/resolutions`), auth: "owner", body: { resolution: "none", reason: "닫는다." } }), 201);
+      return { subst: { [PH.thread]: t.thread_id }, extra_body: await lease_body(env, agent) };
+    },
+  },
+  "threads.resolutions.create": {
+    normal: async (env) => {
+      const t = await thread_scene_art(env);
+      return { subst: { [PH.thread]: t.thread_id, [PH.version]: t.art.version_id } };
+    },
+    error: async (env) => {
+      const t = await thread_scene_art(env);
+      assert_ok(await call(env, { method: "POST", path: P(env, `/threads/${t.thread_id}/resolutions`), auth: "owner", body: { resolution: "none", reason: "먼저 닫았다." } }), 201);
+      return { subst: { [PH.thread]: t.thread_id, [PH.version]: t.art.version_id } };
+    },
+  },
+  "followups.apply": {
+    normal: async (env) => {
+      const t = await thread_scene_art(env);
+      const f = assert_ok(
+        await call(env, { method: "POST", path: P(env, "/followups"), auth: "owner", body: { origin_thread_id: t.thread_id, kind: "edit_text", description: "문장을 보강합니다.", proposed_body_md: FX_NEW_BODY } }),
+        201,
+      ).followup;
+      return { subst: { [PH.followup]: f.id, [PH.version]: t.art.version_id }, live_revs: { expected_rev: f.version_no } };
+    },
+    error: async (env) => {
+      const t = await thread_scene_art(env);
+      const f = assert_ok(
+        await call(env, { method: "POST", path: P(env, "/followups"), auth: "owner", body: { origin_thread_id: t.thread_id, kind: "edit_text", description: "문장을 보강합니다.", proposed_body_md: FX_NEW_BODY } }),
+        201,
+      ).followup;
+      return { subst: { [PH.followup]: f.id } };
+    },
+  },
   "questions.revise": {
     normal: async (env) => {
       const round = await open_round(env);
@@ -656,6 +740,9 @@ async function send(env: ApiEnv, fx: Fixture, c: FixtureCase, scene: Scene, auth
     path = path.replace(`{${name}}`, String(substitute(value, subst)));
   }
   let body: unknown = c.request.body === null || c.request.body === undefined ? undefined : substitute(c.request.body, subst);
+  if (body !== undefined && scene.extra_body !== undefined && typeof body === "object" && body !== null && !Array.isArray(body)) {
+    body = { ...scene.extra_body, ...(body as Record<string, unknown>) };
+  }
   const live = normal ? scene.live_revs : scene.live_revs;
   if (body !== undefined && live !== undefined && normal) body = force(body, live);
   const query = Object.entries((substitute(c.request.query ?? {}, subst) as Record<string, unknown>) ?? {})
@@ -725,7 +812,7 @@ for (const [file, fx] of fixtures()) {
   for (const kind of ["normal", "error"] as const) {
     const c = fx[kind];
     if (c === undefined) continue;
-    test(`contract ${file} ${kind}: ${fx.method} ${fx.path} -> ${UNSUPPORTED.has(fx.operation) ? "501 not_supported" : c.response.status}`, { skip: U4A_ONLY.has(fx.operation) ? "annotation 스레드 답글 장면 — U4a" : false }, async () => {
+    test(`contract ${file} ${kind}: ${fx.method} ${fx.path} -> ${UNSUPPORTED.has(fx.operation) ? "501 not_supported" : c.response.status}`, async () => {
       await with_api(async (env) => {
         const agent = await make_agent(env, "contract");
         if (UNSUPPORTED.has(fx.operation)) {

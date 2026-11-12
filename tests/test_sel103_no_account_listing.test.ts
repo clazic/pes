@@ -20,6 +20,7 @@ import { after, test } from "node:test";
 
 import { is_account_home } from "./helpers/temp_home_check.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { import_url } from "./helpers/import_url.ts";
 
 use_home_guard();
 
@@ -104,7 +105,7 @@ function calls_of(fx: Fixture, run: { status: number | null; stdout: string; std
   return { status: run.status, out: `${run.stdout}\n${run.stderr}`, on_account: under(fx.acct), on_home: under(fx.home) };
 }
 
-const PRELOAD = ["--import", FAKE_ACCOUNT, "--import", RECORDER];
+const PRELOAD = ["--import", import_url(FAKE_ACCOUNT), "--import", import_url(RECORDER)];
 
 // ---------------------------------------------------------------------------
 // B · use_home_guard() with the default homes
@@ -112,7 +113,7 @@ const PRELOAD = ["--import", FAKE_ACCOUNT, "--import", RECORDER];
 test("B1 use_home_guard() lists the temp HOME and makes ZERO fs calls on the account home (not a lstat · readdir of .pes · pes-projects, not even a realpath of the home)", () => {
   const fx = make_fixture();
   const env = child_env(fx, fx.home, [fx.acct, fx.home]);
-  const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", ...PRELOAD, "--import", ENTRY, "--test", LISTING_PROBE], { cwd: REPO, env, encoding: "utf8", timeout: 60_000 });
+  const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", ...PRELOAD, "--import", import_url(ENTRY), "--test", LISTING_PROBE], { cwd: REPO, env, encoding: "utf8", timeout: 60_000 });
   assert.equal(run.error, undefined, String(run.error));
   const seen = calls_of(fx, run);
   assert.equal(seen.status, 0, seen.out);
@@ -158,7 +159,7 @@ test("D1 `playwright test --list` with the account home as HOME is refused at co
   const protected_folders = [".pes", "pes-projects", ".claude"].map((name) => join(fx.acct, name));
   const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", ...PRELOAD, PLAYWRIGHT_CLI, "test", "--list"], {
     cwd: REPO,
-    env: { ...child_env(fx, fx.acct, protected_folders), NODE_OPTIONS: `--import ${JSON.stringify(FAKE_ACCOUNT)}` },
+    env: { ...child_env(fx, fx.acct, protected_folders), NODE_OPTIONS: `--import ${JSON.stringify(import_url(FAKE_ACCOUNT))}` },
     encoding: "utf8",
     timeout: 120_000,
   });
@@ -170,7 +171,7 @@ test("D1 `playwright test --list` with the account home as HOME is refused at co
 
   const ok = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", PLAYWRIGHT_CLI, "test", "--list"], {
     cwd: REPO,
-    env: { ...child_env(fx, fx.home, []), NODE_OPTIONS: `--import ${JSON.stringify(FAKE_ACCOUNT)}` },
+    env: { ...child_env(fx, fx.home, []), NODE_OPTIONS: `--import ${JSON.stringify(import_url(FAKE_ACCOUNT))}` },
     encoding: "utf8",
     timeout: 120_000,
   });

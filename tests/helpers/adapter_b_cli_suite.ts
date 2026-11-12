@@ -257,12 +257,12 @@ export function define_cli_suite(spec: CliSpec): void {
     });
   });
 
-  t("the tool list is the closed 14 of the Claude adapter: nothing to approve, reopen, set policy, mint tokens, delete or export", async () => {
+  t("the tool list is the closed 16 of the Claude adapter: nothing to approve, reopen, set policy, mint tokens, delete or export", async () => {
     await with_cli(spec, async (env, open) => {
       const client = open(await env.cli_client());
       const listed = (await client.request("tools/list")).result.tools as Array<{ name: string }>;
       assert.deepEqual(listed.map((x) => x.name).sort(), [...TOOLS].sort());
-      assert.equal(listed.length, 14);
+      assert.equal(listed.length, 16); // SEL-99 U4a: + pes_thread_reply, pes_followup_propose (leader 승인)
       for (const word of ["approve", "approval", "reopen", "seal", "policy", "token", "delete", "remove", "export", "register", "backup", "key", "connection"]) {
         assert.ok(!listed.some((x) => x.name.toLowerCase().includes(word)), `no tool named like ${word}`);
       }
