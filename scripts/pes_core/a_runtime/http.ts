@@ -2,6 +2,19 @@
 // not be re-sent to another address), has a time limit, and tells apart "an answer arrived" from "no answer":
 // a timeout and a lost connection are different outcomes from an HTTP error status, because only the first two
 // leave a model call whose result nobody knows.
+//
+// SEL-79: the default fetch (undici) reuses an idle keep-alive socket. If the server closed that socket just before
+// the new request's bytes arrived, undici does not retry a POST, the fetch rejects and the call would count as
+// "lost" (usage_unknown) although nothing reached the server. So EVERY request on the DEFAULT path, GET included,
+// sends `connection: close`: undici ends the socket after each reply, leaves no idle socket in its pool, and no
+// model call can ride on a reused one. The GET (connection test, model listing) must be covered too: its idle
+// socket would otherwise be picked up by the next model POST to the same origin.
+// Chosen because it is one header on Node's built-in fetch (no new dependency, no custom Agent, same on Windows
+// and macOS) and it never retries anything: a request that was sent and broke is still "lost".
+// The cost is one new connection per request, small next to a model call; revisit if model calls in quick
+// succession become very many.
+// Limits: a failure while opening the new connection (ECONNREFUSED, DNS, TLS) is still "lost" (follow-up), and an
+// injected fetch_fn is used exactly as given (no header added), so it gets none of this.
 
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -55,15 +68,17 @@ async function read_text_limited(response: Response, max_bytes: number, received
 export async function http_json(
   request: HttpRequest,
   timeout_ms: number,
-  fetch_fn: FetchFn = fetch,
+  fetch_fn: FetchFn | undefined = undefined,
   max_bytes: number = MAX_RESPONSE_BYTES,
 ): Promise<HttpOutcome> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout_ms);
   const received: Received = { chunks: [] };
+  const send: FetchFn =
+    fetch_fn ?? ((url, init) => fetch(url, { ...init, headers: { ...request.headers, connection: "close" } }));
   let status: number | undefined;
   try {
-    const response = await fetch_fn(request.url, {
+    const response = await send(request.url, {
       method: request.method,
       headers: request.headers,
       ...(request.body === undefined ? {} : { body: request.body }),
