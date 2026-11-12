@@ -13,6 +13,7 @@ import { test } from "node:test";
 
 import { publish_set, resume_ready, submit_answers } from "../scripts/pes_core/questions.ts";
 import { assert_ok, with_api } from "./helpers/api_env.ts";
+import { ctx_for, second_project } from "./helpers/blob_env.ts";
 import { make_content, seal, start } from "./helpers/editions_env.ts";
 import { add_agent, agent_ctx, events_of, receipt_of, rejects_api } from "./helpers/questions_env.ts";
 import {
@@ -48,6 +49,28 @@ test("[R1-2] 없는 질문은 리스 없는 에이전트에게도 not_found, 있
         "not_found",
       );
       await rejects_api(env.service.execute(agent_ctx(agent, `yes-${name}`), name, body(q1!)), "forbidden");
+    }
+    assert.equal(state_signature(env.db), sig, "거부는 아무것도 쓰지 않는다");
+  });
+});
+
+test("[R1-2b] 다른 프로젝트의 실제 질문 id 로 불러도 not_found 다 — 질문 조회는 호출한 프로젝트로 걸러진다", async () => {
+  await with_api(async (env) => {
+    const mine = await make_form(env, [single_spec("내 질문"), single_spec("내 둘째")]);
+    const other_project = await second_project(env, "synthetic-r1-other");
+    const other_env = { ...env, p: other_project, ctx: (key: string) => ctx_for(other_project, key) } as typeof env;
+    const theirs = await make_form(other_env, [single_spec("남의 질문")]);
+    const foreign = theirs.ids[0]!;
+    assert.ok(!mine.ids.includes(foreign));
+    const agent = add_agent(env, "agent-r1-foreign");
+    const sig = state_signature(env.db);
+    for (const name of ["question.revise", "question.withdraw", "question.defer", "question.merge", "question.comment_add"]) {
+      const body: Record<string, unknown> =
+        name === "question.revise" ? { question_id: foreign, text: "고친 문구" }
+        : name === "question.merge" ? { question_id: foreign, merged_into_question_id: mine.ids[1]! }
+        : name === "question.comment_add" ? { question_id: foreign, body_md: "의견" }
+        : { question_id: foreign };
+      await rejects_api(env.service.execute(agent_ctx(agent, `foreign-${name}`), name, body), "not_found");
     }
     assert.equal(state_signature(env.db), sig, "거부는 아무것도 쓰지 않는다");
   });
@@ -126,7 +149,7 @@ test("[R1-4] 마지막 질문을 철회하면 빈 최신 세트가 생기고, �
       submit_answers(env.service, env.ctx("ed-sub"), { set_id: empty.id, answers: [] }),
       "invalid_payload",
     );
-    // 철회된 질문의 개정 요청은 빈 세트를 다시 쓰지 않는다
+    // 빈 세트는 그대로 최신이다(아무 것도 새 세트를 만들지 않았다)
     assert.equal(latest_set(env.db, env.p.project_id, f.stage_id).id, empty.id);
 
     const res = await owner_post(env, "/questions", {
@@ -165,7 +188,7 @@ test("[R1-5] 영수증 action 과 사건 type 이 question.retracted·deferred·
       assert.equal(receipt.action, action);
       const types = events_of(env.db, receipt.id).map((e) => e.type);
       assert.equal(types[0], action, "첫 사건이 영수증 action 과 같은 이름이다");
-          }
+    }
   });
 });
 

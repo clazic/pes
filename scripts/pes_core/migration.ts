@@ -17,13 +17,14 @@
 // environment or the real home: every path comes from the caller.
 
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { BackupError, prepare_project_restore, type PreparedProjectRestore } from "./backup.ts";
 import type { CommandService } from "./commands.ts";
 import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { read_storage_bytes, sha256_hex } from "./files.ts";
+import { escapes_parent } from "./rel_path.ts";
 import { new_id } from "./ids.ts";
 import { feedback_entries, normalize_project, parse_legacy_json, stage_report, without_report_time, type Dict, type FeedbackEntry } from "./report.ts";
 import {
@@ -451,7 +452,7 @@ function is_inside(parent: string, child: string): boolean {
     right = right.toLowerCase();
   }
   const rel = relative(left, right);
-  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+  return rel === "" || !escapes_parent(rel);
 }
 
 function has_onedrive_segment(path: string): boolean {

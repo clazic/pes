@@ -182,10 +182,19 @@
               "questions.merge": {
                 "supported": true
               },
+              "question_sets.order": {
+                "supported": true
+              },
               "submissions.create": {
                 "supported": true
               },
               "rounds.create": {
+                "supported": true
+              },
+              "rounds.get": {
+                "supported": true
+              },
+              "rounds.threads": {
                 "supported": true
               },
               "rounds.seal": {

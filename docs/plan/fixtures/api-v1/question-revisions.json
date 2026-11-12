@@ -59,6 +59,11 @@
           },
           "recheck_required": true,
           "previous_answers_preserved": true
+        },
+        "receipt": {
+          "receipt_no": "48",
+          "tx_id": "txn_01J9Z3K7R08",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }
