@@ -87,7 +87,8 @@ test("A6 a relative HOME is refused", () => {
 
 test("A7 assert_temp_home_env throws the 임시 HOME message; the default account homes hold os.userInfo().homedir and PES_TEST_ACCOUNT_HOME (additions only)", () => {
   assert.throws(() => assert_temp_home_env({ HOME: "/srv/acct/hong" }, ACCT), /임시 HOME/);
-  assert.doesNotThrow(() => assert_temp_home_env({ HOME: TEMP_HOME }, ACCT));
+  // both keys: on Windows os.homedir() follows USERPROFILE, so an empty USERPROFILE is refused (A2) — CI windows-latest (SEL-125)
+  assert.doesNotThrow(() => assert_temp_home_env({ HOME: TEMP_HOME, USERPROFILE: TEMP_HOME }, ACCT));
   const homes = default_account_homes({ PES_TEST_ACCOUNT_HOME: ["/x/one", "/x/two"].join(delimiter) });
   assert.ok(homes.includes("/x/one") && homes.includes("/x/two"), "injected homes are added");
   assert.deepEqual(default_account_homes({}).filter((home) => home === "/x/one"), [], "nothing is injected by default");
