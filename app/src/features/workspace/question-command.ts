@@ -11,10 +11,40 @@ export function describeError(e: unknown): string {
 }
 
 /**
+ * 확인 중인 요청의 멱등 키(U2c) — 칸(scope)별로 컴포넌트 밖에 둔다. 스레드를 접었다 펴서 컴포넌트가 사라져도 같은 요청은 같은 키로 다시 확인한다.
+ * sessionStorage 에 두고(새로 고침에도 남는다), 쓸 수 없으면 모듈 메모리에 둔다. 성공(영수증)을 받으면 지운다.
+ */
+const PENDING_PREFIX = "pes-cmd:";
+const pendingMemory = new Map<string, { sig: string; key: string }>();
+
+function loadPending(scope: string): { sig: string; key: string } | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_PREFIX + scope);
+    if (raw === null) return pendingMemory.get(scope) ?? null;
+    const v: unknown = JSON.parse(raw);
+    if (v && typeof v === "object" && typeof (v as { sig?: unknown }).sig === "string" && typeof (v as { key?: unknown }).key === "string") return v as { sig: string; key: string };
+    return null;
+  } catch {
+    return pendingMemory.get(scope) ?? null;
+  }
+}
+
+function savePending(scope: string, value: { sig: string; key: string } | null) {
+  try {
+    if (value) window.sessionStorage.setItem(PENDING_PREFIX + scope, JSON.stringify(value));
+    else window.sessionStorage.removeItem(PENDING_PREFIX + scope);
+    pendingMemory.delete(scope);
+  } catch {
+    if (value) pendingMemory.set(scope, value);
+    else pendingMemory.delete(scope);
+  }
+}
+
+/**
  * 쓰기 명령 하나(U2b) — 한 번 누름에 멱등 키 하나. 실패한 뒤 같은 요청을 다시 보내면 같은 키(두 번 처리되지 않음),
  * 요청 내용(sig)이 바뀌었거나 성공한 뒤에는 새 키. 보내는 동안 다시 눌러도 한 번만 보낸다(ref 로 동기 차단 — 상태는 늦다).
  */
-export function useKeyedCommand() {
+export function useKeyedCommand(scope?: string) {
   const keyRef = React.useRef<{ sig: string; key: string } | null>(null);
   const busy = React.useRef(false);
   const [pending, setPending] = React.useState(false);
@@ -28,11 +58,14 @@ export function useKeyedCommand() {
     setPending(true);
     setError(null);
     setFailure(null);
-    const key = keyRef.current?.sig === sig ? keyRef.current.key : newIdempotencyKey();
-    keyRef.current = { sig, key };
+    const prev = scope ? loadPending(scope) : keyRef.current;
+    const key = prev?.sig === sig ? prev.key : newIdempotencyKey();
+    if (scope) savePending(scope, { sig, key });
+    else keyRef.current = { sig, key };
     try {
       const value = await call(key);
-      keyRef.current = null;
+      if (scope) savePending(scope, null);
+      else keyRef.current = null;
       return { ok: true, value };
     } catch (e) {
       setError(describeError(e));
@@ -42,7 +75,7 @@ export function useKeyedCommand() {
       busy.current = false;
       setPending(false);
     }
-  }, []);
+  }, [scope]);
 
   return { run, pending, error, failure };
 }

@@ -175,18 +175,21 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   const objectAt = (data: Json, name: string): Json => (isRecord(data[name]) ? data[name] : {});
   const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
-  /** 질문 입력 → 서버 spec. 못 담는 칸은 키를 보내지 않는다 */
-  function spec(q: QuestionInput): Json {
+  /**
+   * 질문 입력 → 서버 spec. 못 담는 칸은 키를 보내지 않는다.
+   * revise(질문 고치기)는 서버가 부분 수정이라 키가 없으면 옛 값이 남는다 — 비운 기본값 · 조건 · 도움말은 명시적 null 로 보내야 지워진다(U2a QuestionSpec).
+   */
+  function spec(q: QuestionInput, revise = false): Json {
     const choice = q.kind !== "free_text";
     return {
       text: q.text,
       type: q.kind === "single_choice" ? "single" : q.kind === "multi_choice" ? "multi" : "text",
       required: q.required,
       ...(q.importance ? { importance: q.importance } : {}),
-      ...(q.default_value !== null && q.default_value !== undefined ? { default_value: q.default_value } : {}),
+      ...(q.default_value !== null && q.default_value !== undefined ? { default_value: q.default_value } : revise ? { default_value: null } : {}),
       ...(choice ? { options: q.options.map((o) => ({ value: o.id, label: o.label })) } : {}),
-      ...(q.show_if ? { show_if: { id: q.show_if.question_id, in: [q.show_if.equals] } } : {}),
-      ...(q.help ? { help: q.help } : {}),
+      ...(q.show_if ? { show_if: { id: q.show_if.question_id, in: [q.show_if.equals] } } : revise ? { show_if: null } : {}),
+      ...(q.help ? { help: q.help } : revise ? { help: null } : {}),
     };
   }
 
@@ -227,7 +230,10 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     async reviseQuestion(slug, _edition, qid, body, key) {
       if (!key) throw invalid("$.headers.idempotency-key");
       if (!body.base_version_id) throw invalid("$.base_version_id", "질문의 서버 버전을 알 수 없어 고칠 수 없습니다.");
-      const w = await write(slug, key, `/questions/${q(qid)}/revisions`, { base_version_id: body.base_version_id, question: spec(body) });
+      // 서버 수정 본문(U2a QuestionReviseBody)에는 방향도 중요도 지우기도 실을 길이 없다 — 조용히 빼고 성공시키지 않고 요청 없이 거절한다
+      if (body.direction === "ask_ai") throw new NotConnectedError("사람이 AI에게 묻는 질문 고치기");
+      if (body.importance === null) throw new NotConnectedError("질문 중요도 지우기");
+      const w = await write(slug, key, `/questions/${q(qid)}/revisions`, { base_version_id: body.base_version_id, question: spec(body, true) });
       const question = objectAt(w.data, "question");
       return result(w, { question_id: text(question.id), version: Number(question.version_no), needs_recheck: w.data.recheck_required === true });
     },

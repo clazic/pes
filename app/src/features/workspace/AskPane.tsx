@@ -6,7 +6,7 @@ import { NotConnectedError, PesApiError, type CommandResult, type CommentInput, 
 import { type PesAction } from "@/app/actions";
 import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
-import { clearDraft, draftsVersion, readDraft, subscribeDrafts } from "@/lib/draft";
+import { clearDraft, draftsVersion, readDraft, readLiveDraft, subscribeDrafts } from "@/lib/draft";
 import { cn } from "@/lib/utils";
 import { AnswerReview } from "./AnswerReview";
 import { makePlan, toAnswerItem, type Plan, type PlanItem } from "./answer-model";
@@ -213,7 +213,7 @@ export function AskPane({
       await refresh();
       // 보내는 사이에 같은 칸에 더 쓴 글은 지키고, 보낸 그대로인 칸만 비운다
       for (const key of req.drafts) {
-        if (readDraft(key) !== req.snap[key]) continue;
+        if (readLiveDraft(key) !== req.snap[key]) continue;
         clearDraft(key);
         if (key.endsWith("|answer")) writeDefaultUsed(key, null);
       }
