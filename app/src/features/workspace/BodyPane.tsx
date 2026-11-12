@@ -7,6 +7,7 @@ import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
 import { ReflectionSection } from "@/features/records/ReflectionSection";
 import { formatAt, placeLabel } from "@/lib/labels";
+import { AnnotatedResult, isAnnotatable } from "./AnnotatedResult";
 import { roundHref } from "./paths";
 import { RecordsPanel, RunPanel } from "./StatusPanels";
 
@@ -115,6 +116,8 @@ export function BodyPane({
   const currentName = placeLabel(ws.current.stage, ws.current.round_id);
   const copy = useCopy(round.prompt);
   const [annotating, setAnnotating] = React.useState(false);
+  // 서버가 결과 글의 객체 · 버전 · 본문을 모두 줄 때만 선택 도구(첨언)를 켠다 — 위치를 지어내지 않는다
+  const annotatable = isAnnotatable(round.result);
 
   return (
     <div className="mx-auto w-full max-w-[46rem] px-4 pt-5 pb-16 tab:px-6">
@@ -172,19 +175,28 @@ export function BodyPane({
       ) : null}
 
       {!annotateBlocked && annotating ? (
-        <div id="annotate-panel" className="mt-3 rounded-md border bg-surface-soft p-3">
-          <label htmlFor="annotate-text" className="block text-meta font-medium text-ink">
-            첨언
-          </label>
-          <textarea id="annotate-text" rows={3} className="mt-1 block w-full rounded-md border border-control bg-background px-2.5 py-2 text-body text-ink" />
-          <p className="mt-1 text-caption text-muted-foreground">합성 자료 화면이라 첨언을 보내지 않습니다. 결과 글 첨언은 U4에서 연결됩니다.</p>
-        </div>
+        annotatable ? (
+          <div id="annotate-panel" className="mt-3 rounded-md border bg-surface-soft p-3 text-meta text-ink">
+            <p>아래 결과 글에서 첨언할 구간을 고르면 ‘첨언’ 도구가 나와요. 키보드로는 구간을 고른 뒤 Alt+M 을 누르세요.</p>
+          </div>
+        ) : (
+          <div id="annotate-panel" className="mt-3 rounded-md border bg-surface-soft p-3">
+            <label htmlFor="annotate-text" className="block text-meta font-medium text-ink">
+              첨언
+            </label>
+            <textarea id="annotate-text" rows={3} className="mt-1 block w-full rounded-md border border-control bg-background px-2.5 py-2 text-body text-ink" />
+            <p className="mt-1 text-caption text-muted-foreground">이 결과 글은 서버가 본문 위치를 주지 않아 첨언을 보내지 않습니다.</p>
+          </div>
+        )
       ) : null}
 
       {round.alerts.map((a) => (
         <AlertCard key={a.id} alert={a} slug={ws.slug} edition={ws.edition} />
       ))}
 
+      {round.result && isAnnotatable(round.result) ? (
+        <AnnotatedResult ws={ws} round={round} result={round.result} {...(annotateBlocked ? { blockedReason: annotateBlocked } : {})} />
+      ) : (
       <article className="mt-8" aria-labelledby="result-title">
         {round.result ? (
           <>
@@ -211,6 +223,7 @@ export function BodyPane({
           </>
         )}
       </article>
+      )}
 
       <RunPanel ws={ws} />
       <RecordsPanel ws={ws} />

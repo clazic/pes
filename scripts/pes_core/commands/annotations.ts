@@ -433,9 +433,11 @@ function read_anchor(runtime: CommandRuntime, project_id: string, anchor_id: str
 
 function run_annotation_reanchor(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
-  parse_guard_free(payload, ["thread_id", "version_id", "start_cp", "end_cp"]);
+  parse_guard_free(payload, ["thread_id", "version_id", "basis_version_id", "start_cp", "end_cp"]);
   const thread_id = required_id(payload, "thread_id");
   const given_version_id = optional_id(payload, "version_id");
+  // the version the caller read when it chose the stretch: a stretch picked on an older text must not be pinned on the new one
+  const basis_version_id = optional_id(payload, "basis_version_id");
   const start_cp = cp_position(payload, "start_cp");
   const end_cp = cp_position(payload, "end_cp");
   if ((start_cp === null) !== (end_cp === null)) invalid("start_cp and end_cp must be given together");
@@ -459,6 +461,14 @@ function run_annotation_reanchor(runtime: CommandRuntime): CommandResult {
   if (thread.anchor_id === null) invalid("the thread has no anchor", { reason: "no_anchor" });
   const anchor = read_anchor(runtime, project_id, thread.anchor_id);
   const head = read_object_head(runtime, project_id, anchor.target_object_id);
+  // the current judgement is always on the text's current version, so the basis must be that version (and the one judged, when given)
+  if (basis_version_id !== null && (basis_version_id !== head.current_version_id || (given_version_id !== null && given_version_id !== basis_version_id))) {
+    throw new ApiError("conflict", "the text has changed since the stretch was chosen", {
+      reason: "basis_changed",
+      expected: basis_version_id,
+      current: head.current_version_id,
+    });
+  }
   const evaluated_version_id = given_version_id ?? head.current_version_id;
   if (evaluated_version_id === null) throw new ApiError("not_found", "the text has no version");
   const version = read_artifact_body(runtime, project_id, anchor.target_object_id, evaluated_version_id);

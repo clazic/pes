@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
 import { markAfterSend } from "./send-outcome";
 
 /**
@@ -72,7 +72,8 @@ export type HttpClient = PesClient;
 function touchedBy(type: string): string[] {
   const touched = ["workspace"];
   if (/^(project\.|edition\.|policy\.changed$)/.test(type)) touched.push("projects");
-  if (/^(round|question|answer|result|stage|run|input)\./.test(type)) touched.push("round:*");
+  // 첨언 · 답글 · 해결 · 후속(U4a: annotation.created/reanchored · thread.replied/resolved · followup.proposed/applied)도 라운드 읽기 아래(첨언 · 의견 목록)를 다시 읽게 한다
+  if (/^(round|question|answer|result|stage|run|input|annotation|thread|followup)\./.test(type)) touched.push("round:*");
   return touched;
 }
 
@@ -446,6 +447,19 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return sameEdition(body.data, edition) ? body.data : null;
   }
 
+  /** GET P/context 에서 단계 키 → 서버 단계 id. 없으면 not_found */
+  async function contextStageId(id: string, stage: string): Promise<string> {
+    const json = await timed(async (signal) => {
+      const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit", signal });
+      if (!res.ok) throw await toApiError(res);
+      return (await res.json()) as unknown;
+    });
+    const stages = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.stages) ? json.data.stages : [];
+    const found = stages.find((s) => isRecord(s) && s.key === stage);
+    if (!isRecord(found) || typeof found.stage_id !== "string") throw new PesApiError({ ...fallbackBody(404) });
+    return found.stage_id;
+  }
+
   /** 순서 바꾸기를 같은 멱등 키로 다시 보낼 때 같은 폼 세트 id 로 보내려고 처음 알아낸 값을 둔다(이 클라이언트의 수명 동안) */
   const orderSets = new Map<string, string>();
 
@@ -515,6 +529,83 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       result: null,
       alerts: [],
       prompt: "",
+    };
+  }
+
+  /* ───────────── 결과 글 첨언 · 후속(U4b · SEL-112) — 서버 계약은 SEL-99(U4a). 서버가 안 주는 값은 null 로 두고 지어내지 않는다 ───────────── */
+
+  const STATUSES: readonly string[] = ["exact", "moved", "ambiguous", "lost"];
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
+  const cpRanges = (v: unknown): CpRange[] =>
+    (Array.isArray(v) ? v : []).flatMap((c): CpRange[] => {
+      if (!isRecord(c)) return [];
+      const start_cp = num(c.start_cp);
+      const end_cp = num(c.end_cp);
+      return start_cp === null || end_cp === null ? [] : [{ start_cp, end_cp }];
+    });
+
+  /** GET P/followups 한 줄 → FollowupDetail(서버가 주는 칸만 · version_no 는 10진 문자열 그대로) */
+  function followupDetail(r: Json): FollowupDetail {
+    return {
+      id: text(r.id),
+      kind: r.kind as FollowupKind,
+      state: r.state as FollowupState,
+      description: text(r.description),
+      version_no: typeof r.version_no === "number" ? String(r.version_no) : text(r.version_no),
+      origin_thread_id: text(r.origin_thread_id),
+      base_version_id: nullable(r.base_version_id),
+      proposed_body_md: typeof r.proposed_body_md === "string" ? r.proposed_body_md : null,
+      proposed_version_id: nullable(r.proposed_version_id),
+      result_version_id: nullable(r.result_version_id),
+      applied_tx_id: nullable(r.applied_tx_id),
+      confirmed_by_actor_id: nullable(r.confirmed_by_actor_id),
+    };
+  }
+
+  /** GET P/threads/{t} 상세 → AnnotationThreadView. 앵커가 없으면(첨언이 아님) null */
+  function annotationThread(d: Json, followups: FollowupDetail[]): AnnotationThreadView | null {
+    const thread = objectAt(d, "thread");
+    const a = d.anchor;
+    if (!isRecord(a) || typeof thread.id !== "string") return null;
+    const start_cp = num(a.start_cp) ?? 0;
+    const end_cp = num(a.end_cp) ?? start_cp;
+    const target_version_id = text(a.target_version_id) || text(thread.target_version_id);
+    // current 가 없는 서버라면 처음 판정(anchor.status)과 만든 위치를 그대로 쓴다 — 새로 판정하지 않는다
+    const cur = isRecord(a.current) ? a.current : { evaluated_version_id: target_version_id, status: a.status, start_cp, end_cp, text: a.exact_quote, candidates: [], confirmed_by_actor_id: null };
+    const status: AnchorStatus = typeof cur.status === "string" && STATUSES.includes(cur.status) ? (cur.status as AnchorStatus) : "lost";
+    // 서버 메시지 상태(message_versions.state): published · edited 는 지금 본문, withdrawn(거둔 메시지)은 본문을 보이지 않는다
+    const messages = (Array.isArray(d.messages) ? d.messages : []).flatMap((m): AnnotationThreadView["messages"] =>
+      isRecord(m) && typeof m.id === "string" && typeof m.body_md === "string" && (m.state === undefined || m.state === "published" || m.state === "edited")
+        ? [{ message_id: m.id, body_md: m.body_md, at: text(m.created_at), actor_id: text(m.actor_id), by: null }]
+        : [],
+    );
+    const r = thread.resolution;
+    const state = thread.state === "resolved" || thread.state === "archived" ? thread.state : "open";
+    return {
+      thread_id: thread.id,
+      state,
+      target_object_id: text(thread.target_object_id),
+      target_version_id: text(thread.target_version_id),
+      anchor: {
+        exact_quote: text(a.exact_quote),
+        prefix: text(a.prefix),
+        suffix: text(a.suffix),
+        start_cp,
+        end_cp,
+        target_version_id,
+        current: {
+          evaluated_version_id: text(cur.evaluated_version_id),
+          status,
+          start_cp: num(cur.start_cp),
+          end_cp: num(cur.end_cp),
+          text: typeof cur.text === "string" ? cur.text : null,
+          candidates: cpRanges(cur.candidates),
+          confirmed_by_actor_id: nullable(cur.confirmed_by_actor_id),
+        },
+      },
+      messages,
+      resolution: isRecord(r) ? { resolution: r.resolution as FollowupKind, reason: text(r.reason), followup_id: nullable(r.followup_id) } : null,
+      followups,
     };
   }
 
@@ -671,15 +762,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
           if (data === null || typeof data.server_round_id !== "string" || !data.server_round_id) throw new PesApiError(fallbackBody(404));
           round_id = data.server_round_id;
         }
-        const json = await timed(async (signal) => {
-          const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit", signal });
-          if (!res.ok) throw await toApiError(res);
-          return (await res.json()) as unknown;
-        });
-        const stages = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.stages) ? json.data.stages : [];
-        const found = stages.find((s) => isRecord(s) && s.key === stage);
-        if (!isRecord(found) || typeof found.stage_id !== "string") throw new PesApiError({ ...fallbackBody(404) });
-        return { stage_id: found.stage_id, round_id };
+        return { stage_id: await contextStageId(id, stage), round_id };
       });
       const question = objectAt(w.data, "question");
       return result(w, { question_id: text(question.id), version: Number(question.version_no) });
@@ -737,6 +820,86 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         initial_message: { body_md: input.body_md },
       });
       return result(w, { thread_id: text(objectAt(w.data, "thread").id), message_id: text(objectAt(w.data, "message").id), thread_created: true });
+    },
+
+    /**
+     * GET P/threads?target_object_id=&context_kind=annotation → 스레드마다 GET P/threads/{t}(앵커 · 판정 · 메시지) + GET P/followups 한 번(후속 상세, origin_thread_id 로 나눈다).
+     * annotation 이 아닌 스레드는 넣지 않고, 빈 목록이면 더 읽지 않는다. 서버 404 · 모르는 slug 는 [].
+     */
+    async getAnnotations(slug, _edition, objectId) {
+      const rows = listOf(await readData(slug, `/threads?target_object_id=${encodeURIComponent(objectId)}&context_kind=annotation`), "threads").filter((r) => r.context_kind === "annotation" && typeof r.id === "string");
+      if (rows.length === 0) return [];
+      const [details, followups] = await Promise.all([Promise.all(rows.map((r) => readData(slug, `/threads/${q(text(r.id))}`))), readData(slug, "/followups").then((d) => listOf(d, "followups").map(followupDetail))]);
+      return details.flatMap((d) => {
+        const view = d === null ? null : annotationThread(d, followups.filter((f) => f.origin_thread_id === text(objectAt(d, "thread").id)));
+        return view ? [view] : [];
+      });
+    },
+
+    async createAnnotation(slug, _edition, input, key) {
+      const w = await write(slug, key, "/threads", {
+        target_object_id: input.target_object_id,
+        target_version_id: input.target_version_id,
+        context_kind: "annotation",
+        anchor: { exact_quote: input.anchor.exact_quote, prefix: input.anchor.prefix, suffix: input.anchor.suffix, start_cp: input.anchor.start_cp, end_cp: input.anchor.end_cp },
+        initial_message: { body_md: input.body_md },
+      });
+      const thread = objectAt(w.data, "thread");
+      return result(w, { thread_id: text(thread.id), message_id: text(objectAt(w.data, "message").id), anchor_id: text(thread.anchor_id), anchor_status: thread.anchor_status === "moved" ? ("moved" as const) : ("exact" as const) });
+    },
+
+    async replyAnnotation(slug, _edition, threadId, input, key) {
+      const w = await write(slug, key, `/threads/${q(threadId)}/messages`, { body_md: input.body_md });
+      return result(w, { thread_id: text(w.data.thread_id) || threadId, message_id: text(objectAt(w.data, "message").id) });
+    },
+
+    /**
+     * POST P/threads/{t}/resolutions — 서버 규칙(run_thread_resolve): none 은 followup 없이, 그 밖은 followup:{kind(=resolution), description} 필수.
+     * edit_text 는 target_version_id(보던 글 버전, 있을 때만), next_round_task · reopen_stage 는 target_stage_id(GET P/context 로 target_stage 키 → 서버 단계 id) 필수 —
+     * 단계를 모르면 서버가 거절할 요청을 보내지 않고 요청 0 으로 거절한다.
+     */
+    async resolveAnnotation(slug, _edition, threadId, input, key) {
+      const needsStage = input.resolution === "next_round_task" || input.resolution === "reopen_stage";
+      if (needsStage && !input.target_stage) throw invalid("$.target_stage", "후속을 만들 단계를 알 수 없어 해결을 보낼 수 없습니다.");
+      const stage = input.target_stage;
+      const followup = (extra: Json): Json => ({ followup: { kind: input.resolution, description: input.reason, ...extra } });
+      const w = await write(
+        slug,
+        key,
+        `/threads/${q(threadId)}/resolutions`,
+        { resolution: input.resolution, reason: input.reason },
+        input.resolution === "none"
+          ? undefined
+          : async (id) => followup(needsStage && stage ? { target_stage_id: await contextStageId(id, stage) } : input.base_version_id ? { target_version_id: input.base_version_id } : {}),
+      );
+      return result(w, { thread_id: text(objectAt(w.data, "thread").id) || threadId, state: "resolved" as const, followup_id: nullable(objectAt(w.data, "followup").id), applied: false as const });
+    },
+
+    async reanchorAnnotation(slug, _edition, threadId, input, key) {
+      const w = await write(slug, key, `/threads/${q(threadId)}/reanchor`, { ...(input.version_id ? { version_id: input.version_id } : {}), ...(input.basis_version_id ? { basis_version_id: input.basis_version_id } : {}), start_cp: input.start_cp, end_cp: input.end_cp });
+      const status = objectAt(w.data, "anchor").status;
+      return result(w, { thread_id: text(w.data.thread_id) || threadId, anchor_status: (typeof status === "string" && STATUSES.includes(status) ? status : "moved") as AnchorStatus });
+    },
+
+    /** POST P/followups — target_stage(단계 키)가 있으면 GET P/context 로 서버 단계 id 를 알아 target_stage_id 로 싣는다(next_round_task · reopen_stage). 없으면 지어내지 않는다 */
+    async proposeFollowup(slug, _edition, input, key) {
+      const needsStage = input.target_stage !== undefined && (input.kind === "next_round_task" || input.kind === "reopen_stage");
+      const stage: StageKey | undefined = input.target_stage;
+      const w = await write(
+        slug,
+        key,
+        "/followups",
+        { origin_thread_id: input.origin_thread_id, kind: input.kind, description: input.description },
+        needsStage && stage ? async (id) => ({ target_stage_id: await contextStageId(id, stage) }) : undefined,
+      );
+      const followup = objectAt(w.data, "followup");
+      return result(w, { followup_id: text(followup.id), state: "proposed" as const });
+    },
+
+    async applyFollowup(slug, _edition, followupId, input, key) {
+      const w = await write(slug, key, `/followups/${q(followupId)}/apply`, { base_version_id: input.base_version_id, expected_rev: input.expected_rev });
+      const f = objectAt(w.data, "followup");
+      return result(w, { followup_id: text(f.id) || followupId, state: text(f.state) as FollowupState, result_version_id: nullable(f.result_version_id), applied_tx_id: nullable(f.applied_tx_id) });
     },
 
     /** GET P/changes — 한 번만 부른다(has_more 여도 한 쪽). 400 cursor_invalid · 410 cursor_expired 는 PesApiError 로 나온다 */
