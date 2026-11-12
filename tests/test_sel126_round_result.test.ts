@@ -7,6 +7,7 @@
  *
  *   · "그 라운드의 결과 글" = 그 라운드가 봉인될 때 round_contents 에 role 'result' 로 담긴 글 객체(여러 개면 position 이 가장 앞선 것).
  *     봉인 전(열린 라운드) · 단계 시작 자리(start) · 결과가 담기지 않은 라운드는 result: null — 칸은 늘 있고(null), 지어내지 않는다.
+ *   · "현재 버전" = objects.current_version_id — 첨언·다시 붙이기(basis_version_id)가 판정하는 버전과 같다(append_version 은 안 옮기고, content.set_current · edit_text 채택이 옮긴다).
  *   · version_id · body_md 는 그 글 객체의 **현재 버전**(objects.current_version_id)의 값이다. 봉인 뒤 글에 새 버전이 붙으면 새 버전 값이 실린다
  *     (봉인 때 담은 옛 버전이 아니다). body_md 는 artifact_versions.body_md 그대로(정규화 없음).
  *   · 권한은 기존 라운드 읽기와 같다: 소유자 세션 또는 context:read 토큰. 무자격 401 · 범위 없는 토큰 403 (결과 칸이 권한을 넓히지 않는다).
@@ -23,7 +24,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { add_artifact, append_version, create_object } from "../scripts/pes_core/content.ts";
+import { add_artifact, append_version, create_object, set_current } from "../scripts/pes_core/content.ts";
 import { assert_error, assert_ok, call, make_agent, OPENAPI_PATH, with_api, type ApiEnv, type Auth } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { attach, put_ready } from "./helpers/blob_env.ts";
@@ -31,6 +32,7 @@ import { seal, start } from "./helpers/editions_env.ts";
 import { make_form, owner_get, single_spec } from "./helpers/sel90_env.ts";
 import { set_access } from "./helpers/sel115_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
+import { current_version_of } from "./helpers/sel99_env.ts";
 
 const BODY_1 = "# 합성 결과 글\n\n첫 판 본문 MARK-R126-V1 입니다.\r\n둘째 줄  끝";
 const BODY_2 = "# 합성 결과 글\n\n고친 본문 MARK-R126-V2 입니다.";
@@ -49,9 +51,12 @@ async function new_result(env: ApiEnv, key: string, body_md: string): Promise<Ve
   return { object_id: obj.object_id, version_id: (out.result as { version_id: string }).version_id };
 }
 
-async function next_version(env: ApiEnv, key: string, object_id: string, body_md: string): Promise<Ver> {
+/** 다음 버전을 붙인다. make_current 면 현재 버전으로도 올린다(content.set_current — 첨언 판정이 쓰는 objects.current_version_id). */
+async function next_version(env: ApiEnv, key: string, object_id: string, body_md: string, make_current = true): Promise<Ver> {
   const out = await append_version(env.service, env.ctx(key), { object_id, title: `합성 결과 ${key}`, body_md });
-  return { object_id, version_id: (out.result as { version_id: string }).version_id };
+  const version_id = (out.result as { version_id: string }).version_id;
+  if (make_current) await set_current(env.service, env.ctx(`${key}-cur`), { object_id, version_id });
+  return { object_id, version_id };
 }
 
 /** 그 버전에 파일을 붙이고 AI 참조를 닫는다(사람 소유자 요청). 파일 정책 id 를 돌려준다. */
@@ -109,6 +114,34 @@ test("[신규] 결과 글에 새 버전이 붙으면 새 버전의 version_id ·
     const third = assert_ok(await owner_get(env, round_path("1")));
     assert.equal(third.result.version_id, v3.version_id);
     assert.equal(third.result.body_md, BODY_3);
+  });
+});
+
+test("[신규] '현재 버전'은 objects.current_version_id — append_version 만으로는 안 바뀌고, set_current 가 옮긴다 · 첨언이 판정하는 버전과 같다", async () => {
+  await with_api(async (env) => {
+    const s = await sealed_round(env, "a3");
+    await s.seal();
+    const read = async () => assert_ok(await owner_get(env, round_path("1"))).result;
+    assert.equal((await read()).version_id, current_version_of(env.db, s.result.object_id));
+    // 붙이기만 한 버전(현재로 안 올림)은 결과 읽기에 안 나온다
+    const loose = await next_version(env, "a3-loose", s.result.object_id, BODY_2, false);
+    assert.equal((await read()).version_id, s.result.version_id);
+    assert.equal(current_version_of(env.db, s.result.object_id), s.result.version_id);
+    // 첨언 다시 붙이기: 결과가 준 version_id 가 basis 로 통과하고, 붙이기만 한 버전을 basis 로 하면 basis_changed
+    const note = (await env.service.execute(env.ctx("a3-an"), "annotation.create", { target_object_id: s.result.object_id, anchor: { exact_quote: "MARK-R126-V1", prefix: "첫 판 본문 ", suffix: " 입니다.", start_cp: 17, end_cp: 29 }, body_md: "첨언" })).result as { thread_id: string };
+    const pos = { start_cp: 17, end_cp: 29 };
+    const bad = await env.service.execute(env.ctx("a3-bad"), "annotation.reanchor", { thread_id: note.thread_id, basis_version_id: loose.version_id, ...pos }).then(
+      () => null,
+      (error: unknown) => error as { details?: { reason?: string } },
+    );
+    assert.equal(bad?.details?.reason, "basis_changed");
+    const ok = (await env.service.execute(env.ctx("a3-ok"), "annotation.reanchor", { thread_id: note.thread_id, basis_version_id: (await read()).version_id, ...pos })).result as { evaluated_version_id: string };
+    assert.equal(ok.evaluated_version_id, s.result.version_id);
+    // set_current 가 옮기면 결과 읽기도 같이 옮긴다
+    await set_current(env.service, env.ctx("a3-cur"), { object_id: s.result.object_id, version_id: loose.version_id });
+    assert.equal((await read()).version_id, loose.version_id);
+    assert.equal((await read()).version_id, current_version_of(env.db, s.result.object_id));
+    assert.equal((await read()).body_md, BODY_2);
   });
 });
 
