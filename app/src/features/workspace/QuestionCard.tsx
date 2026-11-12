@@ -421,7 +421,11 @@ export function QuestionCard(p: CardProps) {
           ) : null}
           <p className="mt-2 text-body text-ink">{q.text}</p>
           {q.help ? <p className="mt-1 text-meta text-muted-foreground">{q.help}</p> : null}
-          {showIf ? <p className="mt-1 text-caption text-ink-2">{showIf}</p> : null}
+          {showIf ? (
+            <p data-show-if={q.show_if_unsupported ? "unsupported" : undefined} className="mt-1 text-caption text-ink-2">
+              {showIf}
+            </p>
+          ) : null}
           {ans && !ans.applicable ? <p className="mt-1.5 text-meta text-ink-2">지금은 답하지 않아도 돼요. 필수로 세지 않고 보내지도 않아요. 써 둔 초안은 지우지 않아요.</p> : null}
           {q.needs_recheck ? <p className="mt-1.5 text-meta text-ink-2">질문이 바뀌어 답을 다시 확인해야 해요. 옛 답은 남아 있고, 새 답으로 옮겨지지 않아요.</p> : null}
           {canAnswer && q.needs_recheck ? (

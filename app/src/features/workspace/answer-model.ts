@@ -1,4 +1,5 @@
 import type { AnswerItemInput, QuestionView } from "@/api/types";
+import { showIfApplies } from "@/api/show-if";
 import { isChoice, kindOf, optionLabel } from "./question-model";
 
 /**
@@ -93,7 +94,7 @@ export function makePlan({ open, draftOf, confirmed, defaultUsed }: PlanInput): 
   const applicable = new Map<string, boolean>();
   for (const q of open) {
     const s = q.show_if;
-    applicable.set(q.id, !s || (valuesById.get(s.question_id) ?? []).includes(s.equals));
+    applicable.set(q.id, showIfApplies(s, s ? valuesById.get(s.question_id) : undefined));
   }
   const items: PlanItem[] = [];
   const skipped: Plan["skipped"] = [];

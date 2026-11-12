@@ -28,13 +28,20 @@ export function matchesFilter(q: QuestionView, f: QuestionFilter): boolean {
 /** 선택지 id → 글. 선택지에 없으면 값 그대로(글 답 · 모르는 id) */
 export const optionLabel = (options: QuestionOption[] | undefined, value: string) => options?.find((o) => o.id === value)?.label ?? value;
 
-/** “질문 21에서 ‘이어 보기’를 고르면 보임” */
+/** 앱이 다루지 못하는 서버 조건 — 조건 없음처럼 감추지 않고 그렇다고 말한다 */
+export const SHOW_IF_UNSUPPORTED_LINE = "지원하지 않는 조건이라 앱에서 고칠 수 없어요";
+
+/** “질문 21에서 ‘이어 보기’를 고르면 보임” — 값이 여럿이면 “‘가’ 또는 ‘나’”, “‘가’, ‘나’ 또는 ‘다’” */
 export function showIfLine(q: QuestionView, all: QuestionView[]): string | null {
+  if (q.show_if_unsupported) return SHOW_IF_UNSUPPORTED_LINE;
   const s = q.show_if;
   if (!s) return null;
   const from = all.find((x) => x.id === s.question_id);
   const number = from ? from.number : s.question_id.replace(/^q-/, "");
-  return `질문 ${number}에서 ‘${optionLabel(from?.options, s.equals)}’를 고르면 보임`;
+  const labels = s.in.map((v) => `‘${optionLabel(from?.options, v)}’`);
+  const last = labels[labels.length - 1] ?? "";
+  const joined = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} 또는 ${last}` : last;
+  return `질문 ${number}에서 ${joined}를 고르면 보임`;
 }
 
 /* ───────────── 고치기 form 의 값 ───────────── */
@@ -47,7 +54,10 @@ export interface EditorValue {
   required: boolean;
   default_value: string;
   show_question: string;
-  show_equals: string;
+  /** 조건 답 — 고른 선택지 id(조건 질문의 선택지 순서). 하나라도 고르면 보인다 */
+  show_in: string[];
+  /** 서버 조건이 앱이 다루지 못하는 모양 — 조건 칸은 잠기고 보낼 때 show_if 를 싣지 않는다 */
+  show_unsupported: boolean;
   help: string;
   direction: QuestionDirection;
 }
@@ -61,8 +71,10 @@ export function editorValueOf(q: QuestionView): EditorValue {
     importance: q.importance ?? "",
     required: q.required,
     default_value: q.default_value ?? "",
-    show_question: q.show_if?.question_id ?? "",
-    show_equals: q.show_if?.equals ?? "",
+    // 지원 안 하는 조건은 읽은 만큼도 칸에 올리지 않는다 — 고칠 수 없고, 보낼 때도 싣지 않는다
+    show_question: q.show_if_unsupported ? "" : (q.show_if?.question_id ?? ""),
+    show_in: q.show_if && !q.show_if_unsupported ? [...q.show_if.in] : [],
+    show_unsupported: q.show_if_unsupported === true,
     help: q.help ?? "",
     direction: directionOf(q),
   };
@@ -74,7 +86,8 @@ export function toInput(v: EditorValue): QuestionInput {
   const options = choice ? v.options.map((o) => ({ id: o.id, label: o.label.trim() })).filter((o) => o.label) : [];
   let def: string | null = v.default_value.trim() ? v.default_value : null;
   if (choice && def !== null && !options.some((o) => o.id === def)) def = null;
-  const showIf: ShowIf | null = v.show_question && v.show_equals ? { question_id: v.show_question, equals: v.show_equals } : null;
+  const showIn = [...new Set(v.show_in)];
+  const showIf: ShowIf | null = !v.show_unsupported && v.show_question && showIn.length ? { question_id: v.show_question, in: showIn } : null;
   return {
     text: v.text.trim(),
     kind: v.kind,
@@ -83,6 +96,7 @@ export function toInput(v: EditorValue): QuestionInput {
     required: v.required,
     default_value: def,
     show_if: showIf,
+    ...(v.show_unsupported ? { show_if_unsupported: true } : {}),
     help: v.help.trim() ? v.help.trim() : null,
     direction: v.direction,
   };
@@ -108,7 +122,7 @@ export function newOptionId(options: QuestionOption[]): string {
 export function blockReason(input: QuestionInput, value: EditorValue, changed: boolean): string | null {
   if (!input.text) return "질문 문장을 적어 주세요.";
   if (isChoice(input.kind) && input.options.length < 2) return "선택지를 2개 이상 적어 주세요.";
-  if (value.show_question && !value.show_equals) return "조건 답을 골라 주세요.";
+  if (value.show_question && !value.show_in.length) return "조건 답을 골라 주세요.";
   if (!changed) return "바꾼 것이 없어요.";
   return null;
 }

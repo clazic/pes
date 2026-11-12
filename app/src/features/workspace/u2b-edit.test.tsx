@@ -46,7 +46,10 @@ describe("인라인 고치기 열기", () => {
     const { user } = await boot();
     const form = await openEditor(user, 23);
     expect(field(form, "조건 질문")).toHaveDisplayValue("질문 21");
-    expect(field(form, "조건 답")).toHaveDisplayValue("이어 보기");
+    // SEL-129: 조건 답은 select 가 아니라 checkbox 묶음 — 지금 조건의 값(이어 보기)만 켜져 있다
+    const answers = within(form).getByRole("group", { name: "조건 답" });
+    expect(within(answers).getByRole("checkbox", { name: "이어 보기" })).toBeChecked();
+    expect(within(answers).getByRole("checkbox", { name: "따로 보기" })).not.toBeChecked();
   });
 
   it("조건 질문을 '항상 보임'으로 두면 조건 답 칸이 사라진다", async () => {
@@ -237,10 +240,10 @@ describe("저장 = 새 버전 명령", () => {
     const { user, calls } = await boot();
     const form = await openEditor(user, 22);
     await user.selectOptions(field(form, "조건 질문"), "질문 21");
-    await user.selectOptions(field(form, "조건 답"), "따로 보기");
+    await user.click(within(within(form).getByRole("group", { name: "조건 답" })).getByRole("checkbox", { name: "따로 보기" }));
     await user.click(save(form));
     await waitFor(() => expect(calls("reviseQuestion")).toHaveLength(1));
-    expect((calls("reviseQuestion")[0].args[3] as { show_if: unknown }).show_if).toEqual({ question_id: "q-21", equals: "split" });
+    expect((calls("reviseQuestion")[0].args[3] as { show_if: unknown }).show_if).toEqual({ question_id: "q-21", in: ["split"] });
   });
 
   it("문장이 비면 저장할 수 없다: aria-disabled + 이유 글 · 명령 0번", async () => {

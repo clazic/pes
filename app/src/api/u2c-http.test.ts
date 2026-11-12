@@ -14,7 +14,7 @@
 //  addComment(…, qid, {body_md})      POST P/threads                              {target_object_id: qid, target_version_id?: input.question_version_id, context_kind: "question_comment", initial_message: {body_md}}
 //  addComment(…, qid, {body_md, thread_id})  POST P/threads/{thread_id}/messages  {body_md}
 //  spec(q): {text, type: single_choice→"single" · multi_choice→"multi" · free_text→"text", required, importance(null 이면 키 없음), default_value(null 이면 키 없음),
-//            options: [{value: 선택지 id, label}] (선택지 유형만), show_if: {id: 조건 질문 id, in: [equals]} (없으면 키 없음), help}
+//            options: [{value: 선택지 id, label}] (선택지 유형만), show_if: {id: 조건 질문 id, in: [조건 답들]} (없으면 키 없음), help}
 //  spec 이 못 담는 것: direction "ask_ai" → 서버는 agent_to_human 만 받는다 → 요청 없이 NotConnectedError. 번호 라운드(예 "2") → 서버 round_id 를 앱이 아직 모른다 → 요청 없이 NotConnectedError.
 //  이어지지 않은 것(U2a 에 길이 없다): reorderQuestions(순서 바꾸기 라우트 없음) · getQuestionVersions · getComments(목록 라우트 없음) → NotConnectedError, 요청 0.
 //  응답 → 앱 모양: 서버 본문 {format_version, request_id, data, replayed?} 에는 영수증이 없다. 클라이언트가 쓰기 성공(201) 뒤 `GET P/requests/{key}`(data {action, tx_id, …})로 영수증을 만든다:
@@ -87,7 +87,7 @@ function server(routes: Record<string, { status: number; body: unknown } | ((s: 
 const make = async (s: ReturnType<typeof server>) => (await load())({ session: SESSION, projects: { [SLUG]: ID }, fetch: s.impl }) as unknown as U2cClient;
 
 const questionData = (extra: Record<string, unknown> = {}) => ({ question: { id: "qst-1", version_id: "qvr-2", version_no: "2", state: "open", ...extra } });
-const base = { text: "정의 변경 앞뒤를 이어 볼까요?", kind: "single_choice", options: [{ id: "join", label: "이어 보기" }, { id: "split", label: "따로 보기" }], importance: "high", required: true, default_value: "split", show_if: { question_id: "q-9", equals: "yes" }, help: "각주가 필요해요", direction: "ask_human" };
+const base = { text: "정의 변경 앞뒤를 이어 볼까요?", kind: "single_choice", options: [{ id: "join", label: "이어 보기" }, { id: "split", label: "따로 보기" }], importance: "high", required: true, default_value: "split", show_if: { question_id: "q-9", in: ["yes"] }, help: "각주가 필요해요", direction: "ask_human" };
 
 describe("공통: 헤더 · 키 · 오류", () => {
   it("모든 쓰기는 x-pes-session · idempotency-key · JSON 본문(format_version 1.0)이고 쿠키·Authorization·credentials 가 없다", async () => {

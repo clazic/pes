@@ -255,10 +255,10 @@ export interface QuestionOption {
   label: string;
 }
 
-/** equals = 그 질문의 선택지 id (또는 글 답 값) */
+/** in = 그 질문의 선택지 id(또는 글 답 값)들 — 하나라도 고르면 보임. 서버 {id, in:[…]} 와 같은 뜻 */
 export interface ShowIf {
   question_id: string;
-  equals: string;
+  in: string[];
 }
 
 /** 옛 버전의 답 — 보존할 뿐 새 버전으로 승계하지 않는다 */
@@ -290,6 +290,8 @@ export interface QuestionView {
   /** AI 추천 — 기본값과 다르고 답도 아니다 */
   recommendation?: { value: string; reason: string } | null;
   show_if?: ShowIf | null;
+  /** 서버 조건이 앱이 다루지 못하는 모양이다(show_if 는 null 이거나 읽을 수 있는 만큼만) — '조건 없음'처럼 감추지 않고 말한다 */
+  show_if_unsupported?: boolean;
   /** 없으면 ask_human */
   direction?: QuestionDirection;
   /** 없으면 open */
@@ -316,6 +318,8 @@ export interface QuestionInput {
   required: boolean;
   default_value: string | null;
   show_if: ShowIf | null;
+  /** true 면 보내는 쪽은 show_if 키를 아예 싣지 않는다 — 앱이 모르는 서버 조건을 null 로 지우지 않는다 */
+  show_if_unsupported?: boolean;
   help: string | null;
   direction: QuestionDirection;
 }

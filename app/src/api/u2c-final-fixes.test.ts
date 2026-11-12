@@ -68,7 +68,7 @@ describe("질문 고치기 — 지우기는 명시적 null (필수 3)", () => {
 
   it("값이 있으면 그 값을 보낸다", async () => {
     const f = setup();
-    await (await make(f)).reviseQuestion(SLUG, ED, "qst-1", base({ default_value: "yes", show_if: { question_id: "q-21", equals: "split" }, help: "참고" }), "k2");
+    await (await make(f)).reviseQuestion(SLUG, ED, "qst-1", base({ default_value: "yes", show_if: { question_id: "q-21", in: ["split"] }, help: "참고" }), "k2");
     const question = f.posts()[0].body?.question as Record<string, unknown>;
     expect(question.default_value).toBe("yes");
     expect(question.show_if).toEqual({ id: "q-21", in: ["split"] });

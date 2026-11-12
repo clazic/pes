@@ -1,11 +1,11 @@
 import * as React from "react";
 import { Plus, X } from "lucide-react";
-import type { Importance, QuestionDirection, QuestionKind, QuestionView } from "@/api/types";
+import type { Importance, QuestionDirection, QuestionKind, QuestionOption, QuestionView } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DIRECTION_OPTION, IMPORTANCE_LABEL, KIND_LABEL } from "@/lib/labels";
 import { controlClass, Field } from "./fields";
-import { isChoice, kindOf, newOptionId, type EditorValue } from "./question-model";
+import { isChoice, kindOf, newOptionId, SHOW_IF_UNSUPPORTED_LINE, type EditorValue } from "./question-model";
 
 const KINDS: QuestionKind[] = ["single_choice", "multi_choice", "free_text"];
 const IMPORTANCES: Importance[] = ["high", "normal", "low"];
@@ -133,7 +133,7 @@ export function QuestionFields({
           </Field>
           <div className="grid gap-3 min-[26rem]:grid-cols-2">
             <Field id={`${prefix}-cond`} label="조건 질문">
-              <select id={`${prefix}-cond`} className={controlClass} value={value.show_question} onChange={(e) => set({ show_question: e.target.value, show_equals: "" })}>
+              <select id={`${prefix}-cond`} className={controlClass} disabled={value.show_unsupported} value={value.show_question} onChange={(e) => set({ show_question: e.target.value, show_in: [] })}>
                 <option value="">항상 보임</option>
                 {others.map((q) => (
                   <option key={q.id} value={q.id}>
@@ -142,23 +142,15 @@ export function QuestionFields({
                 ))}
               </select>
             </Field>
-            {cond ? (
-              <Field id={`${prefix}-cond-equals`} label="조건 답">
-                {condOptions ? (
-                  <select id={`${prefix}-cond-equals`} className={controlClass} value={value.show_equals} onChange={(e) => set({ show_equals: e.target.value })}>
-                    <option value="">고르기</option>
-                    {condOptions.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input id={`${prefix}-cond-equals`} type="text" className={controlClass} value={value.show_equals} onChange={(e) => set({ show_equals: e.target.value })} />
-                )}
-              </Field>
+            {cond && !value.show_unsupported ? (
+              <CondAnswers prefix={prefix} options={condOptions} picked={value.show_in} onChange={(show_in) => set({ show_in })} />
             ) : null}
           </div>
+          {value.show_unsupported ? (
+            <p role="status" className="text-meta text-ink-2">
+              {SHOW_IF_UNSUPPORTED_LINE}. 다른 칸만 고쳐 저장해도 서버의 조건은 그대로 남아요.
+            </p>
+          ) : null}
         </>
       ) : null}
 
@@ -166,5 +158,65 @@ export function QuestionFields({
         <input id={`${prefix}-help`} type="text" className={controlClass} value={value.help} onChange={(e) => set({ help: e.target.value })} />
       </Field>
     </div>
+  );
+}
+
+/**
+ * 조건 답 — 조건 질문의 선택지마다 checkbox, 하나라도 고르면 이 질문이 보인다.
+ * 선택지에 없는 옛 값(지운 선택지 · 글 답)은 값 그대로 켜진 checkbox 로 남긴다 — 저장해도 조용히 버리지 않는다.
+ * 보내는 순서는 조건 질문의 선택지 순서(없는 값은 그 뒤).
+ */
+function CondAnswers({ prefix, options, picked, onChange }: { prefix: string; options: QuestionOption[] | null; picked: string[]; onChange: (next: string[]) => void }) {
+  const [draft, setDraft] = React.useState("");
+  const known = options ?? [];
+  const order = (ids: string[]) => {
+    const rank = (id: string) => {
+      const i = known.findIndex((o) => o.id === id);
+      return i < 0 ? known.length : i;
+    };
+    return [...new Set(ids)].sort((x, y) => rank(x) - rank(y));
+  };
+  const toggle = (id: string) => onChange(order(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]));
+  const rows = [...known.map((o) => ({ id: o.id, label: o.label })), ...picked.filter((v) => !known.some((o) => o.id === v)).map((v) => ({ id: v, label: v }))];
+  const addDraft = () => {
+    const v = draft.trim();
+    if (v && !picked.includes(v)) onChange(order([...picked, v]));
+    setDraft("");
+  };
+  return (
+    <fieldset className="min-w-0">
+      <legend className="text-meta font-medium text-ink">조건 답</legend>
+      <div className="mt-1 grid gap-1">
+        {rows.map((r) => (
+          <label key={r.id} className="flex min-h-8 cursor-pointer items-center gap-2.5 rounded-md px-1 text-body text-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring coarse:min-h-[44px]">
+            <input type="checkbox" className="size-4 shrink-0 accent-primary" checked={picked.includes(r.id)} onChange={() => toggle(r.id)} />
+            {r.label}
+          </label>
+        ))}
+      </div>
+      {options ? null : (
+        <div className="mt-1 flex items-end gap-2">
+          <Field id={`${prefix}-cond-value`} label="답 값 더하기" className="flex-1">
+            <input
+              id={`${prefix}-cond-value`}
+              type="text"
+              className={controlClass}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addDraft();
+                }
+              }}
+            />
+          </Field>
+          <Button variant="outline" size="sm" onClick={addDraft}>
+            <Plus aria-hidden="true" />
+            더하기
+          </Button>
+        </div>
+      )}
+    </fieldset>
   );
 }

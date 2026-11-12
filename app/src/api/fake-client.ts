@@ -1,4 +1,5 @@
 import { createFakeReferences } from "./fake-references";
+import { showIfApplies } from "./show-if";
 import { DEMO_HUMAN, demoMaterials, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
 import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView, type AnnotationThreadView } from "./types";
 
@@ -399,7 +400,7 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
           if (!q.show_if) return true;
           const cond = open.find((x) => x.id === q.show_if!.question_id);
           const v = cond ? valueOf(cond) : undefined;
-          return Array.isArray(v) ? v.includes(q.show_if.equals) : v === q.show_if.equals;
+          return showIfApplies(q.show_if, v === undefined ? [] : Array.isArray(v) ? v : [v]);
         };
         const notApplicable = [...items.keys()].filter((id) => filled(items.get(id)!.value) && !applicable(open.find((x) => x.id === id)!));
         if (notApplicable.length) rejectDetail("invalid_payload", "지금은 답하지 않는 질문이에요.", { reason: "not_applicable", question_ids: notApplicable });

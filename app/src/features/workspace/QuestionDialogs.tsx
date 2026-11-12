@@ -7,7 +7,7 @@ import { QuestionFields } from "./QuestionFields";
 import { useKeyedCommand } from "./question-command";
 import { isChoice, toInput, type EditorValue } from "./question-model";
 
-const EMPTY: EditorValue = { text: "", kind: "free_text", options: [], importance: "", required: false, default_value: "", show_question: "", show_equals: "", help: "", direction: "ask_human" };
+const EMPTY: EditorValue = { text: "", kind: "free_text", options: [], importance: "", required: false, default_value: "", show_question: "", show_in: [], show_unsupported: false, help: "", direction: "ask_human" };
 
 function ErrorLine({ id, children }: { id: string; children: React.ReactNode }) {
   return (
