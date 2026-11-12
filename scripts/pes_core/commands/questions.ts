@@ -1637,6 +1637,17 @@ function run_comment_add(runtime: CommandRuntime): CommandResult {
       throw new ApiError("not_found", "comment thread not found");
     }
     thread_id = thread.object_id;
+    // SEL-99: a resolved / archived thread takes no more messages (the same rule as thread.reply)
+    const state = runtime.db.get<{ state: string }>(
+      `SELECT tv.state AS state FROM objects o
+         JOIN thread_versions tv ON tv.project_id = o.project_id AND tv.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.id = ?`,
+      project.id,
+      thread_id,
+    )?.state;
+    if (state !== undefined && state !== "open") {
+      throw new ApiError("conflict", "a closed thread takes no more messages; open a new thread", { reason: "thread_closed", thread_id, state });
+    }
     if (reply_to !== null) {
       const parent = runtime.db.get<{ object_id: string }>(
         "SELECT object_id FROM messages WHERE project_id = ? AND thread_id = ? AND object_id = ?",

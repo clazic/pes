@@ -368,7 +368,8 @@ test("cost cap reached: A stops BEFORE the next call (blocked_usage cost_cap), i
     const opened = await open_stage(env, "plan");
     env.opened = opened;
     set_script(env, [context_turn({ input: 1_000, output: 1_000 }), submit_turn(opened.object_id, "합성"), FINISH]);
-    const res = await start_run(env, { stage_id: opened.stage_id, round_id: opened.round_id, max_output_tokens: 3_600 });
+    // 3,000 (leader 승인: SEL-99 U4a 가 도구 둘을 더해 요청이 커졌다 — 3,600 이면 첫 호출의 예약부터 10,000 상한을 넘는다. 준비 숫자만 바꿈)
+    const res = await start_run(env, { stage_id: opened.stage_id, round_id: opened.round_id, max_output_tokens: 3_000 });
     assert.equal(res.status, "blocked_usage");
     assert.equal(res.block_reason, "cost_cap");
     assert.equal(env.fake.calls.length, 1, "the next request was never sent");

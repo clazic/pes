@@ -134,7 +134,7 @@ test("openai_compatible: the request shape — tools, token cap, tool results fe
     assert.equal(res.status, "succeeded");
     assert.equal(env.fake.calls.length, 3);
     const [first, second] = env.fake.bodies() as [any, any];
-    assert.deepEqual(offered_tools(first), (A_TOOLS as readonly string[]).filter((n) => n !== "thread.reply").sort(), "the model is offered the allowlist except thread.reply (no command backs it yet)");
+    assert.deepEqual(offered_tools(first), (A_TOOLS as readonly string[]).slice().sort(), "the model is offered the whole allowlist (leader 승인: SEL-99 U4a 가 thread.reply 를 명령에 이었다)");
     assert.equal(max_tokens_of(first), 321, "the reservation cap is also the request cap");
     assert.equal(first.model, MODEL_A);
     assert.ok(first.messages.some((m: any) => m.role === "user" || m.role === "system"));
@@ -161,7 +161,7 @@ test("anthropic: the same walk in the Messages format (system, tool_use / tool_r
       assert.equal(call.headers["authorization"], undefined, "anthropic is not sent a bearer header");
     }
     const [first, second] = env.fake.bodies() as [any, any];
-    assert.deepEqual(offered_tools(first), (A_TOOLS as readonly string[]).filter((n) => n !== "thread.reply").sort());
+    assert.deepEqual(offered_tools(first), (A_TOOLS as readonly string[]).slice().sort());
     assert.ok(first.tools.every((t: any) => t.input_schema !== undefined), "tools use input_schema");
     assert.equal(first.max_tokens, 222, "anthropic requires max_tokens and gets the run's cap");
     assert.equal(first.model, MODEL_A);
