@@ -50,7 +50,7 @@ const P = `/api/v1/projects/${ID}`;
 const ok = (data: unknown, extra: Record<string, unknown> = {}) => ({ format_version: FORMAT_VERSION, request_id: "req-1", data, ...extra });
 const fail = (code: string) => ({ format_version: FORMAT_VERSION, request_id: "req-e", error: { code, message: "합성 거절", retryable: false, target: null, details: null, next_action: "reread_context" } });
 const RECEIPT = { receipt_no: "0123", tx_id: "tx-98", committed_at: "2026-11-12T09:30:00+09:00" };
-const CONTEXT = ok({ project_id: ID, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
+const CONTEXT = ok({ project_id: ID, edition: { edition_no: String(ED) }, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
 
 interface Seen {
   url: URL;

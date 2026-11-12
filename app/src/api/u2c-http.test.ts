@@ -59,7 +59,7 @@ const P = `/api/v1/projects/${ID}`;
 
 const ok = (data: unknown, extra: Record<string, unknown> = {}) => ({ format_version: FORMAT_VERSION, request_id: "req-1", data, ...extra });
 const fail = (code: string, details: unknown = null) => ({ format_version: FORMAT_VERSION, request_id: "req-e", error: { code, message: "합성 거절 문장", retryable: false, target: "$.body", details, next_action: "reread_context" } });
-const CONTEXT = ok({ project_id: ID, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
+const CONTEXT = ok({ project_id: ID, edition: { edition_no: String(ED) }, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
 const requestsRead = (key: string, tx = "tx-77") => ok({ action: "question.published", tx_id: tx, status: 201, run_id: null, key });
 
 interface Seen {

@@ -455,22 +455,38 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
 
   /**
    * 시작 자리(start) 쓰기 전에 서버 활성 판이 앱이 보는 판(`edition`)과 같은지 확인한다. 같다고 확인되면 true, 다르거나 확인할 수 없으면 false(쓰기 0).
-   * 1) 시작 자리 읽기 응답이 판 번호를 싣고 있으면 그것으로 가린다(판 번호를 싣지 않은 옛 응답은 확인 불가라 그대로 둔다).
-   * 2) 시작 자리 읽기가 404 면 — 새 판의 pending 단계(라운드·게시 폼 없음)도 404 라서 — 판을 가릴 자료가 없다. 작업 공간 읽기(GET P/workspace)의 활성 판 번호로 가린다.
-   *    작업 공간 읽기가 404 이거나 판 번호가 없으면 확인할 수 없는 것이니 쓰지 않는다(번호 라운드의 404 와 같은 거절).
+   * 1) 시작 자리 읽기 응답이 판 번호를 싣고 있으면 그것으로 가린다.
+   * 2) 시작 자리 읽기가 404 면 — 새 판의 pending 단계(라운드·게시 폼 없음)도 404 라서 — 판을 가릴 자료가 없다. 판 번호를 싣지 않은 옛 200 응답도 같은 판이라 볼 근거가 없다.
+   *    둘 다 작업 공간 읽기(GET P/workspace)의 활성 판 번호로 가린다. 작업 공간 읽기가 404 이거나 판 번호가 없으면 확인할 수 없는 것이니 쓰지 않는다(번호 라운드의 404 와 같은 거절).
+   * 이 확인 뒤에도 판이 바뀔 수 있으니, stage_id 는 판 번호를 다시 대조한 /context 응답에서만 쓴다(contextStageId).
    */
   async function startRoundSameEdition(id: string, slug: string, stage: string, edition: number, signal: AbortSignal): Promise<boolean> {
     const res = await send(projectUrl(id, roundPath(stage, "start")), { method: "GET", headers: headers(), credentials: "omit", signal });
     if (!res.ok) {
       const error = await toApiError(res);
       if (!isNotFound(error)) throw error;
-      const w = await readWorkspace(slug, signal);
-      return w !== null && w.edition === edition;
+    } else {
+      const body: unknown = await res.json();
+      if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
+      if (typeof body.data.edition === "number") return body.data.edition === edition;
     }
-    const body: unknown = await res.json();
-    if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
-    return sameEdition(body.data, edition);
+    const w = await readWorkspace(slug, signal);
+    return w !== null && w.edition === edition;
   }
+
+  /**
+   * GET P/context 응답에서 단계의 stage_id 를 꺼낸다 — 같은 응답의 활성 판 번호(data.edition.edition_no, 서버는 문자열로 준다)가 요청 판과 같을 때만.
+   * 판 번호가 다르거나 없으면 null(쓰기 0). 사전 판 확인과 이 읽기 사이에 판이 바뀌어도 새 판 stage_id 로 쓰지 않는다 — 이 읽기 뒤의 판 전환은 서버가 이전 stage_id 를 거절한다.
+   */
+  const contextStageId = (json: unknown, stage: string, edition: number): string | null => {
+    if (!isRecord(json) || !isRecord(json.data)) return null;
+    const ed = json.data.edition;
+    const no = isRecord(ed) ? ed.edition_no : undefined;
+    if (!((typeof no === "string" && no !== "" && Number(no) === edition) || (typeof no === "number" && no === edition))) return null;
+    const stages = Array.isArray(json.data.stages) ? json.data.stages : [];
+    const found = stages.find((s) => isRecord(s) && s.key === stage);
+    return isRecord(found) && typeof found.stage_id === "string" ? found.stage_id : null;
+  };
 
   /** 순서 바꾸기를 같은 멱등 키로 다시 보낼 때 같은 폼 세트 id 로 보내려고 처음 알아낸 값을 둔다(이 클라이언트의 수명 동안) */
   const orderSets = new Map<string, string>();
@@ -705,10 +721,10 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
           if (!res.ok) throw await toApiError(res);
           return (await res.json()) as unknown;
         });
-        const stages = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.stages) ? json.data.stages : [];
-        const found = stages.find((s) => isRecord(s) && s.key === stage);
-        if (!isRecord(found) || typeof found.stage_id !== "string") throw new PesApiError({ ...fallbackBody(404) });
-        return { stage_id: found.stage_id, round_id };
+        // stage_id 는 판 번호를 요청 판과 대조한 이 응답에서만 — 다른 판이거나 확인할 수 없으면 쓰기 0
+        const stage_id = contextStageId(json, stage, edition);
+        if (stage_id === null) throw new PesApiError({ ...fallbackBody(404) });
+        return { stage_id, round_id };
       });
       const question = objectAt(w.data, "question");
       return result(w, { question_id: text(question.id), version: Number(question.version_no) });

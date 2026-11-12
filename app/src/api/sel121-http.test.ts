@@ -1,5 +1,6 @@
 // SEL-121 — SEL-98 리뷰 후속 (Vitest, fetch 는 가짜). 기존 시험 파일의 단언은 바꾸지 않고, 여기서 새 경계만 확인한다.
 //  1. addQuestion 시작 자리(start): 요청한 판과 서버 활성 판이 다르면 PesApiError 404, 쓰기 0 (번호 라운드와 같은 규칙)
+//     시작 자리 읽기 200 이 판 번호를 싣지 않으면(확인 불가) 404 와 같이 작업 공간 판으로 확인한다. stage_id 는 판 번호(data.edition.edition_no)를 요청 판과 대조한 같은 /context 응답에서만 쓴다
 //  2. reorderQuestions 메모: 확정 거절(4xx, 429 제외)만 지우고, 5xx · 429 · 시간 초과 · 끊김은 같은 세트 id 를 보존한다
 
 import { describe, expect, it, vi } from "vitest";
@@ -28,7 +29,10 @@ const P = `/api/v1/projects/${ID}`;
 const ok = (data: unknown, extra: Record<string, unknown> = {}) => ({ format_version: FORMAT_VERSION, request_id: "req-1", data, ...extra });
 const fail = (code: string, retryable = false) => ({ format_version: FORMAT_VERSION, request_id: "req-e", error: { code, message: "합성 거절", retryable, target: null, details: null, next_action: "reread_context" } });
 const RECEIPT = { receipt_no: "0123", tx_id: "tx-121", committed_at: "2026-11-12T09:30:00+09:00" };
-const CONTEXT = ok({ project_id: ID, stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: "stg-research", key: "research" }] });
+const contextOf = (edition: unknown, research = "stg-research") => ok({ project_id: ID, ...(edition === undefined ? {} : { edition }), stages: [{ stage_id: "stg-plan", key: "plan" }, { stage_id: research, key: "research" }] });
+// 서버(GET P/context)는 활성 판 번호를 문자열(edition.edition_no)로 준다
+const CONTEXT = contextOf({ edition_no: String(ED) });
+const CONTEXT_NEXT = contextOf({ edition_no: String(NEXT) }, "stg-research-next");
 const SPEC = { text: "새 질문", kind: "free_text", options: [], importance: "normal", required: false, default_value: null, show_if: null, direction: "ask_human" };
 const ADDED = { status: 201, body: ok({ question_set_id: "qset-11", question: { id: "qst-9", version_id: "qvr-9", version_no: "1", state: "open" } }, { receipt: RECEIPT }) };
 
@@ -98,14 +102,46 @@ describe("[SEL-121 1] addQuestion 시작 자리 — 판(edition) 확인 (번호 
     expect(s.writes()).toHaveLength(0);
   });
 
-  it("시작 자리 읽기가 판 번호를 싣지 않은 옛 서버 응답이면 확인할 수 없어 그대로 쓴다", async () => {
+  // 최종 리뷰 1/2 필수 1 — 판 번호 없는 200 을 “같은 판”으로 보면 지난 판 화면이 새 판에 쓴다. 확인할 수 없으면 작업 공간 판으로 확인하고, 그것도 다르면 쓰기 0
+  it("시작 자리 읽기가 판 번호를 싣지 않은 옛 서버 응답이면 같은 판으로 보지 않는다 — 작업 공간 판이 다르면 쓰기 0", async () => {
     const s = server({
       "GET /stages/research/rounds/start": { status: 200, body: ok(roundData({ round_id: null, server_round_id: null, set_id: null })) },
+      "GET /workspace": { status: 200, body: ok({ edition: NEXT }) },
+      "GET /context": { status: 200, body: CONTEXT_NEXT },
+      "POST /questions": ADDED,
+    });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-old").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("not_found");
+    expect(s.gets("/workspace")).toHaveLength(1);
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it.each([
+    ["작업 공간 읽기도 404", { status: 404, body: fail("not_found") }],
+    ["작업 공간 응답에 판 번호가 없음", { status: 200, body: ok({}) }],
+  ])("시작 자리 읽기 200 이 판 번호를 싣지 않고 %s 이면 판을 확인할 수 없으니 쓰기 0", async (_name, workspace) => {
+    const s = server({
+      "GET /stages/research/rounds/start": { status: 200, body: ok(roundData({ round_id: null, server_round_id: null, set_id: null })) },
+      "GET /workspace": workspace,
       "GET /context": { status: 200, body: CONTEXT },
       "POST /questions": ADDED,
     });
-    await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-old");
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-old-unknown").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it("시작 자리 읽기 200 이 판 번호를 싣지 않아도 작업 공간 판과 /context 판이 같으면 쓴다 (옛 서버 호환)", async () => {
+    const s = server({
+      "GET /stages/research/rounds/start": { status: 200, body: ok(roundData({ round_id: null, server_round_id: null, set_id: null })) },
+      "GET /workspace": { status: 200, body: ok({ edition: ED }) },
+      "GET /context": { status: 200, body: CONTEXT },
+      "POST /questions": ADDED,
+    });
+    await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-old-same");
     expect(s.writes()).toHaveLength(1);
+    expect(s.writes()[0]!.json).toMatchObject({ purpose: "stage_start", round_id: null, stage_id: "stg-research" });
   });
 
   it("시작 자리 읽기가 5xx 면 같은 오류로 끝나고 쓰기 0", async () => {
@@ -124,6 +160,48 @@ describe("[SEL-121 1] addQuestion 시작 자리 — 판(edition) 확인 (번호 
     const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-404-unknown").catch((x: unknown) => x);
     expect(e).toBeInstanceOf(PesApiError);
     expect(s.writes()).toHaveLength(0);
+  });
+});
+
+// 최종 리뷰 1/2 필수 2 — 사전 판 확인(시작 자리 읽기 · 작업 공간 읽기)과 /context 사이에 판이 바뀌면, context 의 새 판 stage_id 로 쓰면 안 된다.
+// stage_id 는 판 번호(data.edition.edition_no, 서버는 문자열)를 요청 판과 대조한 같은 응답에서만 쓴다. 다르거나 없으면 쓰기 0
+describe("[SEL-121 1-2] addQuestion 시작 자리 — stage_id 는 판을 대조한 같은 /context 응답에서만", () => {
+  const START_SAME = { status: 200, body: ok(roundData({ round_id: null, server_round_id: null, set_id: null, edition: ED })) };
+
+  it("시작 자리 읽기 200(같은 판) 뒤 /context 사이에 판이 바뀌면(edition_no 가 다음 판) PesApiError 404, 쓰기 0", async () => {
+    const s = server({ "GET /stages/research/rounds/start": START_SAME, "GET /context": { status: 200, body: CONTEXT_NEXT }, "POST /questions": ADDED });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-ctx-200").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("not_found");
+    expect(s.gets("/context")).toHaveLength(1);
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it("시작 자리 읽기 404 → 작업 공간 판 같음 뒤 /context 사이에 판이 바뀌면 PesApiError 404, 쓰기 0", async () => {
+    const s = server({ "GET /workspace": { status: 200, body: ok({ edition: ED }) }, "GET /context": { status: 200, body: CONTEXT_NEXT }, "POST /questions": ADDED });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-ctx-404").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("not_found");
+    expect(s.gets("/workspace")).toHaveLength(1);
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it.each([
+    ["판 번호가 없음", undefined],
+    ["판 번호가 비어 있음", { edition_no: "" }],
+    ["판 객체가 아님", String(ED)],
+  ])("/context 응답에 %s 이면 판을 확인할 수 없으니 쓰기 0", async (_name, edition) => {
+    const s = server({ "GET /stages/research/rounds/start": START_SAME, "GET /context": { status: 200, body: contextOf(edition) }, "POST /questions": ADDED });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-ctx-unknown").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it("/context 판 번호가 숫자로 와도 같은 판이면 쓴다", async () => {
+    const s = server({ "GET /stages/research/rounds/start": START_SAME, "GET /context": { status: 200, body: contextOf({ edition_no: ED }) }, "POST /questions": ADDED });
+    await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-ctx-num");
+    expect(s.writes()).toHaveLength(1);
+    expect(s.writes()[0]!.json).toMatchObject({ stage_id: "stg-research", round_id: null });
   });
 });
 
