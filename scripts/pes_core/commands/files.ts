@@ -22,8 +22,6 @@
 // construction so the command can report missing ready files and count stale
 // orphan files. The folder is never placed in a result, an event or a receipt.
 
-import { createRequire } from "node:module";
-
 import { ApiError } from "../errors.ts";
 import {
   is_safe_media_type,
@@ -52,6 +50,7 @@ import {
   too_large_outcome,
   type ExtractOutcome,
 } from "../file_extract.ts";
+import { extract_text_isolated } from "../file_extract_isolated.ts";
 import {
   closed_to_ai,
   event_payload,
@@ -866,15 +865,6 @@ const EXTRACT_DB_STATUS: Record<ExtractOutcome["status"], string> = {
   failed: "failed",
 };
 
-// The thread machinery (file_extract_isolated.ts) is loaded the first time an extraction really runs, not when this module is
-// loaded: other code that loads this module (the legacy importer, every command table) never starts a thread and never pays for it.
-const load_module = createRequire(import.meta.url);
-let isolated: typeof import("../file_extract_isolated.ts") | undefined;
-function extract_in_thread(original_name: string | null, bytes: Uint8Array): ExtractOutcome {
-  isolated ??= load_module("../file_extract_isolated.ts") as typeof import("../file_extract_isolated.ts");
-  return isolated.extract_text_isolated(original_name, bytes);
-}
-
 function run_extract(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   reject_unknown_fields(payload, EXTRACT_FIELDS);
@@ -918,7 +908,7 @@ function run_extract(runtime: CommandRuntime): CommandResult {
       throw new ApiError("conflict", "the stored bytes do not match the blob");
     }
     // in a worker thread with a heap and a time limit: a hostile file may end the extraction, never the server
-    outcome = extract_in_thread(target.original_name, bytes);
+    outcome = extract_text_isolated(target.original_name, bytes);
   }
 
   const extraction_id = runtime.new_id();
