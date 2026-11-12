@@ -215,17 +215,90 @@ export interface SentAnswer {
   idempotency_key?: string;
 }
 
+/* ───────────── 질문 칸(U2b · SEL-91) — 서버 계약은 SEL-90(U2a). 이전된 합성 프로젝트는 아래 칸이 하나도 없어도 깨지지 않는다 ───────────── */
+
+export type QuestionKind = "single_choice" | "multi_choice" | "free_text";
+/** ask_human = AI 가 사람에게 묻는다 · ask_ai = 사람이 AI 에게(“내가 AI에게”) */
+export type QuestionDirection = "ask_human" | "ask_ai";
+export type QuestionStatus = "open" | "withdrawn" | "deferred" | "merged";
+
+export interface QuestionOption {
+  id: string;
+  label: string;
+}
+
+/** equals = 그 질문의 선택지 id (또는 글 답 값) */
+export interface ShowIf {
+  question_id: string;
+  equals: string;
+}
+
+/** 옛 버전의 답 — 보존할 뿐 새 버전으로 승계하지 않는다 */
+export interface PreviousAnswer {
+  answer: string;
+  version: number;
+  receipt_no: string;
+  committed_at: IsoTime;
+}
+
 export interface QuestionView {
   /** 화면 요소 id 이기도 하다(`q-21`) — 주소의 focus · peek 가 가리킨다 */
   id: string;
   number: number;
   version: number;
   required: boolean;
-  importance: Importance;
+  /** 없음 = 미정(이전된 프로젝트) — 중요도를 지어내지 않는다 */
+  importance?: Importance;
   source: QuestionSource;
   text: string;
   help?: string;
   sent?: SentAnswer;
+  /** 없으면 free_text */
+  kind?: QuestionKind;
+  options?: QuestionOption[];
+  /** 기본값 — 선택지 id 또는 글. 미리 답으로 채우지 않는다 */
+  default_value?: string | null;
+  /** AI 추천 — 기본값과 다르고 답도 아니다 */
+  recommendation?: { value: string; reason: string } | null;
+  show_if?: ShowIf | null;
+  /** 없으면 ask_human */
+  direction?: QuestionDirection;
+  /** 없으면 open */
+  status?: QuestionStatus;
+  /** status === "merged" 일 때 합쳐진 질문 id */
+  merged_into?: string;
+  /** 질문이 바뀌어 답을 다시 확인해야 함 */
+  needs_recheck?: boolean;
+  previous_answer?: PreviousAnswer | null;
+}
+
+/** 질문 하나를 만들거나 고칠 때 보내는 값 */
+export interface QuestionInput {
+  text: string;
+  kind: QuestionKind;
+  options: QuestionOption[];
+  importance: Importance | null;
+  required: boolean;
+  default_value: string | null;
+  show_if: ShowIf | null;
+  help: string | null;
+  direction: QuestionDirection;
+}
+
+/** base_version = 지금 보는 질문 버전 — 어긋나면 conflict */
+export interface QuestionRevision extends QuestionInput {
+  base_version: number;
+}
+
+/** 질문 버전 기록 한 줄(최신이 먼저) */
+export interface QuestionVersionView {
+  version: number;
+  text: string;
+  importance?: Importance;
+  required: boolean;
+  kind: QuestionKind;
+  created_at: IsoTime;
+  answer?: { answer: string; receipt_no: string; committed_at: IsoTime };
 }
 
 export interface AlertView {
@@ -291,4 +364,30 @@ export interface PesClient {
   acknowledgeAlert(slug: string, edition: number, alertId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ alert_id: string }>>;
   /** 변경분 읽기 — 커서 다음의 공개 tx 묶음. 거절은 PesApiError(cursor_expired · cursor_invalid) */
   getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>;
+
+  /**
+   * 질문 쓰기(U2b) — 서버 계약은 SEL-90(U2a): POST P/questions · P/questions/{q}/revisions · P/questions/{q}/withdraw|defer|merge.
+   * 모두 멱등 키 필수(없으면 invalid_payload) · 같은 키·같은 요청은 영수증 재생 · 거절은 PesApiError. 삭제(hard delete) 명령은 없다.
+   * 추가 · 철회 · 보류 · 합치기 · 순서 바꾸기 · 고치기는 모두 새 폼 버전을 만든다. 성공하면 화면은 getRound 를 다시 읽는다.
+   * HTTP 클라이언트는 아직 이어지지 않았다(capabilities.questionTools === false) — U2a 병합 뒤 U2c 에서 매핑한다.
+   */
+  getQuestionVersions(slug: string, edition: number, questionId: string): Promise<QuestionVersionView[] | null>;
+  reviseQuestion(slug: string, edition: number, questionId: string, body: QuestionRevision, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>>;
+  addQuestion(slug: string, edition: number, stage: string, round: string, body: QuestionInput, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; version: number }>>;
+  withdrawQuestion(slug: string, edition: number, questionId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; status: "withdrawn" }>>;
+  deferQuestion(slug: string, edition: number, questionId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; status: "deferred" }>>;
+  mergeQuestion(slug: string, edition: number, questionId: string, intoQuestionId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; status: "merged"; merged_into: string }>>;
+  /** orderedIds = 상태 open 질문 전부의 새 순서(닫힌 질문은 제외) */
+  reorderQuestions(slug: string, edition: number, stage: string, round: string, orderedIds: string[], idempotencyKey: string | undefined): Promise<CommandResult<{ form_version: number }>>;
+
+  /** 이 클라이언트가 못 하는 일(정직하게 알린다). 없으면 모두 된다 */
+  readonly capabilities?: { questionTools?: boolean };
+}
+
+/** 아직 서버에 이어지지 않은 일 — 지어내서 성공시키지 않는다 */
+export class NotConnectedError extends Error {
+  constructor(what = "이 기능") {
+    super(`${what}은(는) 아직 서버에 이어지지 않았어요.`);
+    this.name = "NotConnectedError";
+  }
 }

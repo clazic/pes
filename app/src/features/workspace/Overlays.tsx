@@ -2,7 +2,7 @@ import * as React from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { QuestionView, RoundView } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import { formatAt, IMPORTANCE_LABEL, SOURCE_LABEL } from "@/lib/labels";
+import { formatAt, importanceLabel, SOURCE_LABEL } from "@/lib/labels";
 import type { View } from "./paths";
 
 /**
@@ -60,7 +60,7 @@ export function PeekDialog({
             미리보기
           </h2>
           <p className="text-caption text-muted-foreground" aria-live="polite">
-            질문 {q.number} · 버전 {q.version} · {SOURCE_LABEL[q.source]} · {q.required ? "필수" : "선택"} · 중요도 {IMPORTANCE_LABEL[q.importance]}
+            질문 {q.number} · 버전 {q.version} · {SOURCE_LABEL[q.source]} · {q.required ? "필수" : "선택"} · 중요도 {importanceLabel(q.importance)}
           </p>
         </div>
         <Button variant="ghost" size="icon-sm" aria-label="미리보기 닫기" onClick={onClose}>

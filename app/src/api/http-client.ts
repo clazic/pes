@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type PesClient, type ProjectRef, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type PesClient, type ProjectRef, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -84,7 +84,19 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return w && w.edition === edition ? w : null;
   }
 
+  /** 질문 쓰기·버전 기록은 서버 계약(SEL-90 U2a) 병합 뒤 U2c 에서 이을 때까지 이어지지 않았다 — 경로를 지어내지 않고 정직하게 거절한다 */
+  const notConnected = () => Promise.reject(new NotConnectedError("질문 바꾸기"));
+
   return {
+    capabilities: { questionTools: false },
+    getQuestionVersions: notConnected,
+    reviseQuestion: notConnected,
+    addQuestion: notConnected,
+    withdrawQuestion: notConnected,
+    deferQuestion: notConnected,
+    mergeQuestion: notConnected,
+    reorderQuestions: notConnected,
+
     /** GET P/changes — 한 번만 부른다(has_more 여도 한 쪽). 400 cursor_invalid · 410 cursor_expired 는 PesApiError 로 나온다 */
     async getChanges(slug, _edition, cursor): Promise<ChangesRead> {
       const id = idOf(slug);
