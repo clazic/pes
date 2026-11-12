@@ -378,7 +378,12 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         setId = data.set_id;
         orderSets.set(memo, setId);
       }
-      const w = await write(slug, key, `/question-sets/${q(setId)}/order`, { question_ids: orderedIds });
+      // 서버가 확정적으로 거절했으면(409 stale_set · 422 · 404 …) 요청이 닿지 않은 것이 분명하다 — 메모를 지워, 같은 키로 다시 눌러도 세트 id 를 새로 읽는다.
+      // 시간 초과·끊김(확인 중)은 요청이 닿았을 수 있으니 메모를 남겨 같은 세트 id 로 재시도한다
+      const w = await write(slug, key, `/question-sets/${q(setId)}/order`, { question_ids: orderedIds }).catch((error: unknown) => {
+        if (error instanceof PesApiError) orderSets.delete(memo);
+        throw error;
+      });
       const set = objectAt(w.data, "set");
       return result(w, { form_version: Number(set.version_no) });
     },
@@ -388,7 +393,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       if (idOf(slug) === undefined) throw new PesApiError(fallbackBody(404));
       if (body.direction === "ask_ai") throw new NotConnectedError("사람이 AI에게 묻는 질문 더하기");
       if (!placeOf(round)) throw new PesApiError(fallbackBody(404));
-      const w = await write(slug, key, "/questions", { purpose: "stage_start", form_key: "main", direction: "agent_to_human", question: spec(body) }, async (id) => {
+      const w = await write(slug, key, "/questions", { purpose: round === "start" ? "stage_start" : "review", form_key: "main", direction: "agent_to_human", question: spec(body) }, async (id) => {
         // 번호 라운드는 라운드 읽기의 server_round_id 를 round_id 로 보낸다(없으면 쓰기 0 으로 거절 — 지어내지 않는다). start 는 단계 시작 자리(round_id null)
         let round_id: string | null = null;
         if (round !== "start") {

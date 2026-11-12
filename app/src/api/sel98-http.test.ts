@@ -332,3 +332,50 @@ describe("판(edition) 확인 — 라운드 경로는 서버의 활성 판을 �
     expect(bad.writes()).toHaveLength(0);
   });
 });
+
+describe("1차 리뷰 권장 — 질문 더하기 purpose · 순서 바꾸기 재시도 메모", () => {
+  const spec = { text: "새 질문", kind: "free_text", options: [], importance: "normal", required: false, default_value: null, show_if: null, direction: "ask_human" };
+  const added = { status: 201, body: ok({ question_set_id: "qset-11", question: { id: "qst-9", version_id: "qvr-9", version_no: "1", state: "open" } }, { receipt: RECEIPT }) };
+
+  it("번호 라운드 질문 더하기는 purpose review, 단계 시작 자리는 stage_start", async () => {
+    const numbered = server({ "GET /stages/research/rounds/2": { status: 200, body: ok(roundData()) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
+    await (await make(numbered)).addQuestion(SLUG, ED, "research", "2", spec, "k-p1");
+    expect(numbered.writes()[0]!.json).toMatchObject({ purpose: "review", round_id: "rnd-2" });
+    const start = server({ "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
+    await (await make(start)).addQuestion(SLUG, ED, "research", "start", spec, "k-p2");
+    expect(start.writes()[0]!.json).toMatchObject({ purpose: "stage_start", round_id: null });
+  });
+
+  it("순서 바꾸기: 서버가 확정적으로 거절(409 stale_set)하면 같은 키로 다시 눌러도 세트 id 를 새로 읽는다 (옛 세트로 영영 거절되지 않는다)", async () => {
+    let round = 0;
+    const s = server({
+      "GET /stages/research/rounds/2": () => ({ status: 200, body: ok(roundData({ set_id: round++ === 0 ? "qset-old" : "qset-new" })) }),
+      "POST /question-sets/qset-old/order": { status: 409, body: fail("conflict") },
+      "POST /question-sets/qset-new/order": { status: 201, body: ok({ set: { id: "qset-n2", version_no: 6, form_key: "main" }, members: [] }, { receipt: RECEIPT }) },
+    });
+    const c = await make(s);
+    const e = await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-same").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    const out = await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-same");
+    expect(out.data).toEqual({ form_version: 6 });
+    expect(s.writes().map((w) => w.url.pathname.replace(P, ""))).toEqual(["/question-sets/qset-old/order", "/question-sets/qset-new/order"]);
+  });
+
+  it("순서 바꾸기: 시간 초과(확인 중)면 같은 키 재시도가 처음 알아낸 세트 id 를 그대로 쓴다", async () => {
+    let posts = 0;
+    let reads = 0;
+    const s = server({
+      "GET /stages/research/rounds/2": () => ({ status: 200, body: ok(roundData({ set_id: reads++ === 0 ? "qset-9" : "qset-moved" })) }),
+      "POST /question-sets/qset-9/order": () => {
+        posts += 1;
+        if (posts === 1) throw new TypeError("network");
+        return { status: 201, body: ok({ set: { id: "qset-10", version_no: 5, form_key: "main" }, members: [] }, { receipt: RECEIPT, replayed: true }) };
+      },
+    });
+    const c = await make(s);
+    await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-net").catch(() => undefined);
+    const out = await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-net");
+    expect(out.receipt.replayed).toBe(true);
+    expect(s.gets("/rounds/2")).toHaveLength(1);
+  });
+});

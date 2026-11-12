@@ -368,3 +368,13 @@ test("[회귀] 영수증 번호: 여러 답·여러 메시지를 한 번에 읽�
     assert.deepEqual(threads.flatMap((t: any) => t.messages.map((m: any) => m.receipt_no)), msgs, "메시지 영수증 번호 = 각 쓰기 응답의 번호");
   });
 });
+
+test("[회귀] 번호 라운드에 질문 더하기를 purpose review 로 보내도 받는다(앱이 보내는 값)", async () => {
+  await with_api(async (env) => {
+    const f = await make_form(env, [single_spec("질문")]);
+    const res = await owner_post(env, "/questions", { stage_id: f.stage_id, round_id: f.round_id, purpose: "review", form_key: "main", question: text_spec("더한 질문") });
+    assert_ok(res, 201);
+    const round = assert_ok(await owner_get(env, round_path("1")));
+    assert.equal(round.questions.length, 2);
+  });
+});
