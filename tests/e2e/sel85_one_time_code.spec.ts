@@ -39,8 +39,18 @@ interface Seen {
 }
 function watch(page: Page) {
   const pending: Promise<Seen>[] = [];
-  page.on("request", (r) => pending.push(r.allHeaders().then((headers) => ({ url: new URL(r.url()), method: r.method(), headers, body: r.postData() }))));
-  return { done: async (): Promise<Seen[]> => Promise.all(pending) };
+  // done() 뒤에 오는 요청(예: page.goBack 의 문서 요청)은 모으지 않는다 — 모으면 테스트가 끝날 때 allHeaders 가 "Test ended" 로 거절돼 시험이 흔들린다(Windows CI). done() 전의 요청은 모두 기다려 단언한다
+  let closed = false;
+  page.on("request", (r) => {
+    if (closed) return;
+    pending.push(r.allHeaders().then((headers) => ({ url: new URL(r.url()), method: r.method(), headers, body: r.postData() })));
+  });
+  return {
+    done: async (): Promise<Seen[]> => {
+      closed = true;
+      return Promise.all(pending);
+    },
+  };
 }
 const exchanges = (all: Seen[]): Seen[] => all.filter((r) => r.url.pathname === EXCHANGE);
 
