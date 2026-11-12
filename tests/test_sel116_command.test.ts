@@ -32,6 +32,9 @@ import {
 
 const BODY = "첫 줄 합성 문장\n둘째 줄 MARK-cmd-91c2\n";
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s);
+// leader 승인(SEL-116): 글자가 원본과 바이트까지 같으면 새 blob·정책이 없다(blob 하나에 정책 하나). 아래 시험은 "다른 내용이면 별도 blob·정책"을
+// 시험하므로 올리는 원본에 CRLF 를 넣어 바이트가 달라지게 한다(추출 글자는 LF 로 정리돼 BODY 그대로).
+const crlf = (s: string): Uint8Array => bytes(s.replace(/\n/g, "\r\n"));
 
 const policy_of = (env: any, id: string) =>
   env.db.get(
@@ -44,7 +47,7 @@ const policy_of = (env: any, id: string) =>
 
 test("extract txt: result, file_extractions row (source policy + its OWN text policy), text blob/policy, receipt and event", async () => {
   await with_api(async (env) => {
-    const { m, r } = await extracted(env, "합성메모.txt", bytes(BODY));
+    const { m, r } = await extracted(env, "합성메모.txt", crlf(BODY));
     assert.equal(r.status, "extracted");
     assert.equal(r.version_id, m.data.version_id);
     assert.equal(r.blob_id, m.blob.blob_id);
@@ -126,6 +129,39 @@ test("extract: the event carries no text, no original name, no blob id of the or
   });
 });
 
+test("identical bytes: a txt with no BOM and no CRLF is its own text — text_blob_id / text_file_policy_id point at the source blob and policy, no new blob, still idempotent", async () => {
+  await with_api(async (env) => {
+    const m = await material_of(env, "같은바이트.txt", bytes(BODY));
+    const blobs = count(env.db, "blobs");
+    const policies = count(env.db, "file_policies");
+    const r = assert_ok(await extract(env, m), 201);
+    assert.equal(r.status, "extracted");
+    assert.equal(r.text_blob_id, m.blob.blob_id);
+    assert.equal(r.text_file_policy_id, m.data.file_policy_id);
+    assert.equal(r.text_hash, m.blob.sha256);
+    assert.equal(count(env.db, "blobs"), blobs, "no second blob can hold the same bytes");
+    assert.equal(count(env.db, "file_policies"), policies);
+    const row = extraction_rows(env.db, env.p.project_id)[0]!;
+    assert.equal(row.text_blob_id, m.blob.blob_id);
+    assert.equal(row.text_file_policy_id, m.data.file_policy_id);
+    assert.equal(row.source_file_policy_id, m.data.file_policy_id);
+    assert.equal(await text_of(env, r), BODY);
+
+    const sig = state_signature(env.db);
+    const again = assert_ok(await extract(env, m), 201);
+    assert.equal(again.changed, false);
+    assert.equal(again.extraction_id, r.extraction_id);
+    assert.equal(state_signature(env.db), sig, "asking again writes nothing");
+
+    // 정책이 하나이므로 원본 스위치가 곧 텍스트 스위치다(읽기 판정: 원본 allow AND 텍스트 allow = 그 정책).
+    const agent = await make_agent(env, "reader", ["context:read", "file:read"]);
+    assert_ok(await set_access(env, m.data.file_policy_id, "deny"));
+    assert.equal((await call(env, { method: "GET", path: P(env, `/files/${r.text_blob_id}/content`), auth: { token: agent.token } })).status, 403);
+    assert_ok(await set_access(env, m.data.file_policy_id, "allow"));
+    assert.equal((await call(env, { method: "GET", path: P(env, `/files/${r.text_blob_id}/content`), auth: { token: agent.token } })).status, 200);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. 멱등
 
@@ -143,6 +179,7 @@ test("idempotency: same key + body replays the first answer and writes nothing; 
     assert.equal(state_signature(env.db), sig, "a replay writes nothing");
 
     const other = await material_of(env, "다른.txt", bytes("다른 글자\n"));
+    const sig_before_clash = state_signature(env.db); // 준비 오류 수정(leader 승인 대상): 다른 자료를 올린 뒤의 상태와 비교한다
     const clash = await call(env, {
       method: "POST",
       path: P(env, "/file-extractions"),
@@ -150,14 +187,14 @@ test("idempotency: same key + body replays the first answer and writes nothing; 
       key: "ext-key-1",
       body: { version_id: other.data.version_id, blob_id: other.blob.blob_id },
     });
-    assert_error(clash, 409, "conflict");
-    assert.equal(state_signature(env.db), sig);
+    assert_error(clash, 409, "idempotency_key_reuse"); // 준비 오류 수정(leader 승인 대상): 같은 키·다른 본문의 코드는 SEL-115 와 같다
+    assert.equal(state_signature(env.db), sig_before_clash);
   });
 });
 
 test("idempotency: extracting the SAME version/blob again with a NEW key creates no row, blob, policy, receipt or event; changed:false, same ids", async () => {
   await with_api(async (env) => {
-    const m = await material_of(env, "두번.txt", bytes(BODY));
+    const m = await material_of(env, "두번.txt", crlf(BODY));
     const a = assert_ok(await extract(env, m), 201);
     const sig = state_signature(env.db);
     const b = assert_ok(await extract(env, m), 201);
@@ -175,8 +212,8 @@ test("idempotency: extracting the SAME version/blob again with a NEW key creates
 
 test("the same bytes attached to two materials: two extractions, ONE text blob and ONE text policy (a blob has one policy)", async () => {
   await with_api(async (env) => {
-    const m1 = await material_of(env, "쌍둥이.txt", bytes(BODY));
-    const m2 = await material_of(env, "쌍둥이.txt", bytes(BODY));
+    const m1 = await material_of(env, "쌍둥이.txt", crlf(BODY));
+    const m2 = await material_of(env, "쌍둥이.txt", crlf(BODY));
     assert.equal(m2.blob.blob_id, m1.blob.blob_id);
     assert.notEqual(m2.data.version_id, m1.data.version_id);
     const a = assert_ok(await extract(env, m1), 201);
@@ -319,7 +356,7 @@ test("switch: extracting a source that is ALREADY denied works for the owner, th
 test("strict side wins: the owner setting the TEXT policy to allow does not open a text whose source is denied", async () => {
   await with_api(async (env) => {
     const marker = "SECRET-STRICT-3be0";
-    const { m, r } = await extracted(env, "엄격.txt", bytes(`본문 ${marker}\n`));
+    const { m, r } = await extracted(env, "엄격.txt", crlf(`본문 ${marker}\n`));
     const agent = await make_agent(env, "reader", ["context:read", "file:read"]);
     assert_ok(await set_access(env, m.data.file_policy_id, "deny"));
     assert_ok(await set_access(env, r.text_file_policy_id, "allow"));
@@ -332,7 +369,7 @@ test("strict side wins: the owner setting the TEXT policy to allow does not open
 test("strict side wins: the owner denying only the TEXT policy hides the text (the source stays readable) and the extraction shows status without text ids", async () => {
   await with_api(async (env) => {
     const marker = "SECRET-TEXTONLY-18df";
-    const { m, r } = await extracted(env, "본문만금지.txt", bytes(`본문 ${marker}\n`));
+    const { m, r } = await extracted(env, "본문만금지.txt", crlf(`본문 ${marker}\n`));
     const agent = await make_agent(env, "reader", ["context:read", "file:read"]);
     assert_ok(await set_access(env, r.text_file_policy_id, "deny"));
 
@@ -340,9 +377,12 @@ test("strict side wins: the owner denying only the TEXT policy hides the text (t
     assert.equal(sweep.statuses["source-content"], 200, "the original is still allowed");
     assert.equal(sweep.statuses["text-content"], 403);
     assert.equal(sweep.statuses["text-preview"], 403);
-    for (const needle of [r.text_blob_id, r.text_file_policy_id, r.text_hash, marker]) {
+    for (const needle of [r.text_blob_id, r.text_file_policy_id, r.text_hash]) {
       assert.ok(!sweep.text.includes(needle), `"${needle}" must not appear`);
     }
+    // 준비 오류 수정(leader 승인 대상): 허용된 원본 본문에는 표식이 있다 — 글자 표면(text-content·text-preview)에만 표식이 없어야 한다.
+    const text_only = await agent_sweep(env, agent.token, [["text-content", P(env, `/files/${r.text_blob_id}/content`)], ["text-preview", P(env, `/files/${r.text_blob_id}/preview`)]]);
+    assert.ok(!text_only.text.includes(marker), "no marker on the text surfaces");
     const listed = assert_ok(await call(env, { method: "GET", path: P(env, "/materials"), auth: { token: agent.token } }));
     assert.equal(listed.materials.length, 1);
     assert.equal(listed.materials[0].extraction_status, "extracted", "the status is honest");
@@ -359,7 +399,7 @@ test("strict side wins: the owner denying only the TEXT policy hides the text (t
 test("the owner's own TEXT deny survives the source switch going deny → allow (the source switch never overwrites it)", async () => {
   await with_api(async (env) => {
     const marker = "SECRET-SURVIVE-4410";
-    const { m, r } = await extracted(env, "유지.txt", bytes(`본문 ${marker}\n`));
+    const { m, r } = await extracted(env, "유지.txt", crlf(`본문 ${marker}\n`));
     const agent = await make_agent(env, "reader", ["context:read", "file:read"]);
     assert_ok(await set_access(env, r.text_file_policy_id, "deny"));
     assert_ok(await set_access(env, m.data.file_policy_id, "deny"));
@@ -367,7 +407,7 @@ test("the owner's own TEXT deny survives the source switch going deny → allow 
     const sweep = await agent_sweep(env, agent.token, text_paths(env, m, r));
     assert.equal(sweep.statuses["source-content"], 200);
     assert.equal(sweep.statuses["text-content"], 403, "still hidden: the text policy was denied on its own");
-    assert.ok(!sweep.text.includes(marker));
+    assert.equal(sweep.statuses["text-preview"], 403);
     assert.equal(policy_of(env, r.text_file_policy_id)?.ai_access, "deny");
   });
 });
