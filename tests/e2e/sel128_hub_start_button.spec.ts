@@ -15,7 +15,7 @@
 // 앞 조건: `cd app && npm ci && npm run build` (app/dist). 없으면 건너뛰지 않고 실패한다. 실제 홈 0 — 전부 임시 HOME 의 합성 홈.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { CREATE, EXCHANGE, REPO, STORE_KEY, open_empty_home, type EmptyHome } from "./helpers/sel128_home.ts";
 
@@ -465,4 +465,53 @@ test("9 이동이 안 된 채 bfcache 복귀(pageshow persisted)여도 키를 �
   await page.evaluate((k) => sessionStorage.setItem(k, JSON.stringify({ session: "synthetic-left-behind-session-00000", projects: {} })), STORE_KEY);
   await page.goto(`${ws.base}/legacy-y/index.html`);
   await expect(page).toHaveTitle("STOLEN:null");
+});
+
+// SEL-128 최종 리뷰 1 F1-1: 앱 이동을 기다리는 중 대화 상자를 닫으면(취소·Esc) 세션을 즉시 지운다 — 곧바로 옛 목록의 '열기' 링크로 가도 읽히지 않는다.
+// 닫은 뒤 늦게 도착한 생성 응답은 세션을 저장하지도, 이동하지도 않는다.
+async function blocked_then_close(page: Page, slug: string, how: "취소" | "Escape"): Promise<void> {
+  await create_with_blocked_move(page, slug);
+  if (how === "취소") await dialog(page).getByRole("button", { name: "취소" }).click();
+  else await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+  // close 이벤트는 숨김 뒤 다음 작업에서 온다 — 값이 지워질 때까지 기다린다(즉시 = 이벤트 한 번 안)
+  await expect
+    .poll(async () => page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), { message: "닫는 즉시 세션을 지운다" })
+    .toBeNull();
+  await page.locator('a[href="legacy-y/index.html"]').click();
+}
+
+test("F1-1 만들기 뒤 앱 이동을 기다리다 취소를 누르고 목록의 열기 링크로 가도 옛 화면은 세션을 읽지 못한다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await blocked_then_close(page, "synthetic-cancel-move", "취소");
+  await expect(page).toHaveTitle("STOLEN:null");
+});
+
+test("F1-1 만들기 뒤 앱 이동을 기다리다 Esc 로 닫고 목록의 열기 링크로 가도 옛 화면은 세션을 읽지 못한다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await blocked_then_close(page, "synthetic-esc-move", "Escape");
+  await expect(page).toHaveTitle("STOLEN:null");
+});
+
+test("F1-1 대화 상자를 닫은 뒤 늦게 온 생성 응답은 세션을 저장하지도 앱으로 이동하지도 않는다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  const slug = "synthetic-late-after-close";
+  let release!: (r: Route) => void;
+  const held = new Promise<Route>((done) => (release = done));
+  await page.route(`**${CREATE}`, (route) => release(route));
+  await open_with_code(page, ws);
+  await start_button(page).click();
+  await topic_input(page).fill("닫은 뒤 늦게 오는 합성 주제");
+  await slug_input(page).fill(slug);
+  await submit(page).click();
+  const route = await held; // 생성 요청을 붙잡아 응답을 늦춘다
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+  await route.fulfill({ response: await route.fetch() }); // 서버가 만든 실제 응답이 닫은 뒤 도착한다
+  await page.waitForTimeout(500);
+  expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), "늦은 응답이 세션을 저장하지 않는다").toBeNull();
+  expect(new URL(page.url()).pathname, "늦은 응답이 이동시키지 않는다").toBe("/");
 });
