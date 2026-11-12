@@ -314,8 +314,11 @@ test("capabilities is open, complete, and says what is not supported", async () 
     for (const op of ["runs.heartbeat", "runs.inputs", "runs.input_receipts", "submissions.create", "questions.create", "questions.withdraw", "questions.defer", "questions.merge", "threads.create", "threads.messages.create", "stages.approve", "changes.list", "rounds.seal", "runs.handoff", "runs.cancel"]) {
       assert.equal(caps.operations[op].supported, true, op);
     }
-    for (const op of ["exports.create", "threads.resolutions.create", "decisions.create", "reflections.create", "assumptions.create", "projects.delete"]) {
+    for (const op of ["exports.create", "threads.resolutions.create", "projects.delete"]) {
       assert.equal(caps.operations[op].supported, false, op);
+    }
+    for (const op of ["decisions.create", "reflections.create", "assumptions.create"]) {
+      assert.equal(caps.operations[op].supported, true, op); // SEL-93 U3a
     }
     for (const code of [
       "unauthenticated", "forbidden", "not_found", "method_not_allowed", "invalid_payload", "validation_failed", "payload_too_large",

@@ -30,6 +30,7 @@ import {
   type ApiEnv,
   type Auth,
 } from "./helpers/api_env.ts";
+import { artifact_version, tx_of_version } from "./helpers/sel93_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { new_artifact } from "./helpers/blob_env.ts";
 import { drive_stage, make_content, manifest_blob, seal, start, stage_ids, type SealResult } from "./helpers/editions_env.ts";
@@ -40,13 +41,10 @@ const FIXTURE_DIR = new URL("../docs/plan/fixtures/api-v1/", import.meta.url);
 /** Operations the closed 2단계 list does not have: every request is 501 not_supported. */
 const UNSUPPORTED = new Set([
   "agent_tokens.create",
-  "assumptions.create",
-  "decisions.create",
   "editions.create",
   "exports.create",
   "followups.apply",
   "projects.delete",
-  "reflections.create",
   // SEL-90: threads.json 의 장면은 annotation(앵커) 문맥이라 U4a 전까지 501 그대로다 (질문 의견 question_comment 는 test_sel90_comments).
   "threads.create",
   "threads.resolutions.create",
@@ -151,6 +149,13 @@ async function open_round(env: ApiEnv): Promise<{ stage_id: string; round_id: st
   const s = stage_ids(env.db, env.p.edition_id);
   const round = assert_ok(await call(env, { method: "POST", path: P(env, `/stages/${s.plan}/rounds`), auth: "owner", body: {} }), 201).round;
   return { stage_id: s.plan, round_id: round.id };
+}
+
+async function reflection_scene(env: ApiEnv): Promise<Scene> {
+  const round = await open_round(env);
+  const source = await artifact_version(env, "fx-src");
+  const result = await artifact_version(env, "fx-res");
+  return { subst: { [PH.round]: round.round_id, [PH.version]: source.version_id, ver_01J9Z3K7QZ: result.version_id, tx_01J9Z3K7Q2: tx_of_version(env.db, result.version_id) } };
 }
 
 async function ask(env: ApiEnv, stage_id: string, round_id: string | null) {
@@ -390,6 +395,26 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
       const round = await open_round(env);
       return { subst: { [PH.stage]: round.stage_id, [PH.round]: round.round_id, ...(await publish_guard(env, agent)) } };
     },
+  },
+  // SEL-93 U3a: the three records routes are supported now; their docs fixtures run as written.
+  "assumptions.create": {
+    normal: async () => ({ subst: {} }),
+    error: async () => ({ subst: {} }),
+  },
+  "decisions.create": {
+    normal: async () => ({ subst: {} }),
+    // the documented conflict: supersedes a decision that is already revoked
+    error: async (env) => {
+      const dec = async (key: string, body: Record<string, unknown>) => assert_ok(await call(env, { method: "POST", path: P(env, "/decisions"), auth: "owner", key, body }), 201).decision;
+      const d = await dec("fx-d1", { scope: "edition", statement: "곧 폐기", state: "proposed", supersedes: null });
+      const adopted = await dec("fx-d2", { scope: "edition", statement: "곧 폐기", state: "adopted", supersedes: null, decision_id: d.id, base_version_id: d.version_id });
+      await dec("fx-d3", { scope: "edition", statement: "곧 폐기", state: "revoked", supersedes: null, decision_id: d.id, base_version_id: adopted.version_id, rationale: "폐기" });
+      return { subst: { dec_revoked_01J9Z3K7Q2: d.id } };
+    },
+  },
+  "reflections.create": {
+    normal: async (env) => reflection_scene(env),
+    error: async (env) => reflection_scene(env),
   },
   "questions.revise": {
     normal: async (env) => {

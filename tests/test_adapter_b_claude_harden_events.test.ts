@@ -316,7 +316,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     if (m === null) continue;
     documented.set(m[1]!, new Set([...(m[2] ?? "").matchAll(/`((?:GET|POST) [^`]+)`/g)].map((r) => r[1]!)));
   }
-  assert.equal(documented.size, TOOLS.length, "all tools (11, with pes_read) are in the table");
+  assert.equal(documented.size, TOOLS.length, "all tools (14, with pes_read and the SEL-93 three) are in the table");
 
   await with_cleanup(async (env, open) => {
     const sent: string[] = [];

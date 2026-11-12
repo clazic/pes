@@ -43,6 +43,10 @@ export const TOOLS = [
   "pes_cancel",
   "pes_receipt",
   "pes_read", // 최종 리뷰 1/2 F1 — 사람 답·자료 본문 읽기(leader 결정, 도구 11개)
+  // SEL-93 U3a: 가정·결정 제안과 반영 내역 쓰기(사람 전용 판단·채택 도구는 없다) — 도구 14개
+  "pes_assumption_propose",
+  "pes_decision_propose",
+  "pes_reflection_write",
 ] as const;
 
 export type ToolName = (typeof TOOLS)[number];
