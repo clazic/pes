@@ -200,6 +200,9 @@ export const CLOSED_VERSION_PAYLOAD_KEYS = [
  * payload) — an allowed later version of a closed material hides with it. The cursor still moves past it (the caller never
  * learns it was there). `closed` comes from closed_materials, built once per page.
  *
+ * Known limit: only top-level string values are compared. An array or nested value (e.g. edition.snapshotted's versions[])
+ * is not compared — such an event is not a material-only event, so only its type reaches a non-human caller.
+ *
  * The event COLUMNS (object_id, before/after_version_id) are NULL in every row write_events writes today (commands/shared.ts),
  * so the payload keys are the only facts this reads in practice. The column check stays for rows that do fill them; filling
  * the columns is not done here.
