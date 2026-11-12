@@ -134,6 +134,18 @@ function require_base(current: CurrentVersion, base_version_id: string): void {
   }
 }
 
+/**
+ * A record of a past edition (completed / archived) is not judged any more. The active edition and a draft one (a new edition being
+ * prepared, holding copied records) are open. Callers pass only edition-bound records: a project-scope decision is judged wherever it was made.
+ */
+function require_open_edition(runtime: CommandRuntime, project_id: string, edition_id: string | null): void {
+  if (edition_id === null) return;
+  const row = runtime.db.get<{ status: string }>("SELECT status FROM editions WHERE project_id = ? AND id = ?", project_id, edition_id);
+  if (row !== undefined && (row.status === "completed" || row.status === "archived")) {
+    throw new ApiError("conflict", `the record belongs to a past edition (${row.status})`, { reason: "edition_closed", edition_status: row.status });
+  }
+}
+
 function move_current_version(runtime: CommandRuntime, project_id: string, object_id: string, from_version_id: string, to_version_id: string): void {
   const moved = runtime.db.run(
     "UPDATE objects SET current_version_id = ?, rev = rev + 1 WHERE project_id = ? AND id = ? AND current_version_id = ?",
@@ -252,6 +264,7 @@ function run_assumption_assess(runtime: CommandRuntime): CommandResult {
   else if (payload.statement !== undefined && payload.statement !== null) invalid("statement is only for a revised assessment");
   const scope = scope_of(runtime);
   const current = read_current(runtime, scope.project_id, assumption_id, "assumption");
+  require_open_edition(runtime, scope.project_id, current.edition_id);
   require_base(current, base_version_id);
   const base = runtime.db.get<{ statement: string }>(
     "SELECT statement FROM assumption_versions WHERE project_id = ? AND version_id = ?",
@@ -435,6 +448,7 @@ function run_decision_adopt(runtime: CommandRuntime): CommandResult {
   const current = read_current(runtime, scope.project_id, decision_id, "decision");
   require_base(current, base_version_id);
   const head = read_decision_head(runtime, scope.project_id, decision_id, base_version_id);
+  if (head.scope === "edition") require_open_edition(runtime, scope.project_id, current.edition_id);
   if (head.state !== "proposed") {
     throw new ApiError("conflict", `only a proposed decision can be adopted (it is ${head.state})`, { reason: "decision_state", state: head.state });
   }
@@ -471,6 +485,7 @@ function run_decision_supersede(runtime: CommandRuntime): CommandResult {
   const current = read_current(runtime, scope.project_id, old_id, "decision");
   require_base(current, base_version_id);
   const head = read_decision_head(runtime, scope.project_id, old_id, base_version_id);
+  if (head.scope === "edition") require_open_edition(runtime, scope.project_id, current.edition_id);
   if (head.state !== "adopted") {
     throw new ApiError("conflict", `only an adopted decision can be superseded (it is ${head.state})`, {
       reason: "supersedes_conflict",
@@ -529,6 +544,7 @@ function run_decision_revoke(runtime: CommandRuntime): CommandResult {
   const current = read_current(runtime, scope.project_id, decision_id, "decision");
   require_base(current, base_version_id);
   const head = read_decision_head(runtime, scope.project_id, decision_id, base_version_id);
+  if (head.scope === "edition") require_open_edition(runtime, scope.project_id, current.edition_id);
   if (head.state !== "adopted") {
     throw new ApiError("conflict", `only an adopted decision can be revoked (it is ${head.state})`, { reason: "decision_state", state: head.state });
   }

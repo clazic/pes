@@ -4,6 +4,7 @@
  * 권장 2 (API): 채택·폐기 요청의 scope 는 결정의 실제 scope 와 같아야 한다(다르면 422 scope_mismatch, 아무것도 안 씀),
  *   토큰이 supersedes 를 보내면 대상 상태를 알려 주기 전에 바로 403 human_required, 대체 요청에
  *   decision_id 를 같이 보내면 400 invalid_payload. (채택·폐기의 statement 거절은 하지 않았다 — 기존 시험이 채택 때 다른 statement 를 보내 201 을 기대한다.)
+ * 권장 4 (코어): 판단 네 명령은 지난 판(completed·archived)에 속한 가정·판 범위 결정이면 409 conflict(edition_closed). 활성 판·draft 판은 가능, 프로젝트 범위 결정은 판과 무관.
  * 권장 7 (A): reflection.write 는 이 run 의 라운드로 고정. 다른 라운드를 target_round_id 로 주면 거절(오류 결과), 같은 값이면 통과. 아무것도 안 쓴다.
  * 권장 8 (코어): 이미 대체된 반영 항목을 다시 대체하면(다른 호출이든 같은 호출이든) 409 conflict, 아무것도 안 쓴다.
  */
@@ -173,5 +174,44 @@ test("reflection: a second entry superseding an entry that is already superseded
     // control: replacing the live entry once is fine
     await ok(env, env.ctx("dup-5"), "reflection.create", { target_round_id: round_id, entries: [entry("한 번만", { supersedes_entry_id: live })] });
     assert.equal(reflection_rows(env.db, round_id).length, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 권장 4
+
+test("judgement commands refuse records of a past edition (completed / archived) with 409 conflict; active and draft editions stay open; project-scope decisions are not bound", async () => {
+  await with_env(async (env) => {
+    const set_status = (status: string) => env.db.run("UPDATE editions SET status = ? WHERE id = ?", status, env.p.edition_id);
+    const mk_decision = async (tag: string, scope: string, adopt: boolean) => {
+      const p = await ok(env, env.ctx(`${tag}-p`), "decision.propose", { statement: `${tag} 결정`, scope });
+      if (!adopt) return { object_id: p.object_id as string, version_id: p.version_id as string };
+      const a = await ok(env, env.ctx(`${tag}-a`), "decision.adopt", { decision_id: p.object_id, base_version_id: p.version_id });
+      return { object_id: p.object_id as string, version_id: a.version_id as string };
+    };
+    const assumption = await ok(env, env.ctx("pe-as"), "assumption.propose", { statement: "지난 판의 가정" });
+    const ed_proposed = await mk_decision("pe-dp", "edition", false);
+    const ed_adopted_a = await mk_decision("pe-da", "edition", true);
+    const ed_adopted_b = await mk_decision("pe-db", "edition", true);
+    const project_adopted = await mk_decision("pe-pr", "project", true);
+
+    set_status("completed");
+    const sig = state_signature(env.db);
+    await refused(env, env.ctx("pe-1"), "assumption.assess", { assumption_id: assumption.object_id, base_version_id: assumption.version_id, state: "confirmed" }, "conflict");
+    await refused(env, env.ctx("pe-2"), "decision.adopt", { decision_id: ed_proposed.object_id, base_version_id: ed_proposed.version_id }, "conflict");
+    await refused(env, env.ctx("pe-3"), "decision.supersede", { decision_id: ed_adopted_a.object_id, base_version_id: ed_adopted_a.version_id, statement: "대체", rationale: "이유" }, "conflict");
+    await refused(env, env.ctx("pe-4"), "decision.revoke", { decision_id: ed_adopted_b.object_id, base_version_id: ed_adopted_b.version_id, rationale: "이유" }, "conflict");
+    assert.equal(state_signature(env.db), sig, "four refusals wrote nothing");
+
+    // a project-scope decision is judged wherever it was made
+    await ok(env, env.ctx("pe-5"), "decision.revoke", { decision_id: project_adopted.object_id, base_version_id: project_adopted.version_id, rationale: "프로젝트 범위는 판과 무관" });
+
+    // archived is closed too; a draft edition (copies being prepared) is open
+    set_status("archived");
+    await refused(env, env.ctx("pe-6"), "assumption.assess", { assumption_id: assumption.object_id, base_version_id: assumption.version_id, state: "confirmed" }, "conflict");
+    set_status("active");
+    await ok(env, env.ctx("pe-7"), "assumption.assess", { assumption_id: assumption.object_id, base_version_id: assumption.version_id, state: "confirmed" });
+    set_status("draft");
+    await ok(env, env.ctx("pe-8"), "decision.adopt", { decision_id: ed_proposed.object_id, base_version_id: ed_proposed.version_id });
   });
 });
