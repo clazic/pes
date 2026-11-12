@@ -301,7 +301,7 @@ test("닫힌 글 버전의 앵커 인용문은 싣지 않는다(스레드 id·�
 
 test("스레드가 많아 4000자를 넘으면 항목 단위로 자르고 잘림을 알린다 — JSON 은 온전하고, threads_offset 으로 이어 읽어 전부 얻은 id 로 답글을 단다", async () => {
   await with_a_env("openai_compatible", async (env) => {
-    await ready_project(env);
+    await ready_project(env, { subscription_limits: { five_hour_tokens: 1_000_000, weekly_tokens: 10_000_000, monthly_tokens: 40_000_000 } });
     const o = await open_stage(env, "plan");
     const sentences = Array.from({ length: 30 }, (_, i) => `${String(i).padStart(2, "0")}번째 검토 문장이다.`);
     const body = sentences.join(" ");
@@ -314,6 +314,7 @@ test("스레드가 많아 4000자를 넘으면 항목 단위로 자르고 잘림
     let replied: string | null = null;
     script_fn(env, (n, body_json) => {
       if (n === 1) return context_turn();
+      if (replied !== null) return FINISH;
       const result = last_result(body_json);
       pages.push(result);
       threads_of(result);
