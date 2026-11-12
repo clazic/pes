@@ -163,7 +163,10 @@ test("policy: a project with no policy pointer → missing; a rewound pointer (a
     const newest = env.db.get<{ id: string }>("SELECT current_policy_id AS id FROM projects WHERE id = ?", env.p.project_id)!;
     env.db.run("UPDATE projects SET current_policy_id = ? WHERE id = ?", first.id, env.p.project_id); // rev 1 allows, but the pointer is rewound
     assert.equal((await read(env)).ai_connection.policy, "corrupt", "a rewound pointer is damage, not an old policy");
+    // an active project cannot hold a NULL pointer (001_initial.sql:38 CHECK) — "missing" is a damaged DB, so the damage is simulated past the CHECK
+    env.db.run("PRAGMA ignore_check_constraints = ON");
     env.db.run("UPDATE projects SET current_policy_id = NULL WHERE id = ?", env.p.project_id);
+    env.db.run("PRAGMA ignore_check_constraints = OFF");
     assert.equal((await read(env)).ai_connection.policy, "missing");
     env.db.run("UPDATE projects SET current_policy_id = ? WHERE id = ?", newest.id, env.p.project_id);
     assert.equal((await read(env)).ai_connection.policy, "denied", "repaired pointer reads normally again");
