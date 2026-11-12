@@ -834,7 +834,10 @@ function resolve_based_on(
     project_id,
     raw,
   );
-  if (version === undefined) {
+  // SEL-127 F2-2: a caller that is not human gets the unknown-version answer for a version of a material closed to AI, so a
+  // known closed version id does not show as "exists, other object" (409). Same code, same message, before any receipt or write.
+  const closed_for_ai = version !== undefined && !is_human_actor(runtime) && material_object_denied(runtime.db, project_id, version.object_id);
+  if (version === undefined || closed_for_ai) {
     throw new ApiError("not_found", "based_on_version_id is not a version of this project");
   }
   if (version.object_id !== object.id) {

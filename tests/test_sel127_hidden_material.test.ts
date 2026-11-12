@@ -198,6 +198,55 @@ test("R-B: 두 건짜리 results 중 하나가 닫힌 자료면 묶음 전체가
   });
 });
 
+/** SEL-127 리뷰 F2-2 — 닫힌 자료 판 id 를 based_on_version_id 로 아는 비사람도 모르는 판 id 와 같은 404·같은 본문을 받는다. */
+test("F2-2: 비사람이 열린 자료에 based_on_version_id 로 닫힌 자료 판을 주면 모르는 판 id 와 같은 404·같은 본문 — 쓰기 0", async () => {
+  await with_api(async (env) => {
+    const agent = await make_agent(env, "f22", undefined, "external_agent");
+    const closed = await material(env, "f22-closed");
+    const open = await material(env, "f22-open");
+    assert_ok(await set_access(env, closed.data.file_policy_id, "deny"));
+    const lease = await agent_claims(env, agent);
+    const post = (based_on_version_id: string) =>
+      call(env, {
+        method: "POST",
+        path: P(env, `/runs/${lease.run_id}/results`),
+        auth: { token: agent.token },
+        body: { lease_id: lease.lease_id, fence: lease.fence, results: [{ ...item(open.data.object_id), based_on_version_id }] },
+      });
+    const unknown = await post("no-such-version-0000");
+    assert.equal(unknown.status, 404, JSON.stringify(unknown.json));
+    const before = counts(env);
+    const res = await post(closed.data.version_id);
+    assert.equal(res.status, unknown.status, `닫힌 판은 모르는 판과 같은 상태여야 한다: ${res.status} ${JSON.stringify(res.json)}`);
+    // request_id 는 요청마다 새로 나오므로 뺀다. 나머지(format_version·error 전체)는 글자까지 같아야 한다.
+    assert.deepEqual({ ...res.json, request_id: undefined }, { ...unknown.json, request_id: undefined }, "닫힌 판과 모르는 판의 응답 본문이 완전히 같아야 한다(request_id 제외)");
+    assert.deepEqual(counts(env), before, "영수증·사건·판 0 개 늘어난다");
+  });
+});
+
+/** SEL-127 리뷰 F2-2 (input-receipts 길) — 닫힌 자료 판 id 를 input_version_id 로 줘도 모르는 id 와 같은 응답이다. */
+test("F2-2: 비사람의 input-receipts 에 닫힌 자료 판 id 를 주면 모르는 id 와 같은 응답 — 영수증 0", async () => {
+  await with_api(async (env) => {
+    const agent = await make_agent(env, "f22r", undefined, "external_agent");
+    const closed = await material(env, "f22r-closed");
+    assert_ok(await set_access(env, closed.data.file_policy_id, "deny"));
+    const lease = await agent_claims(env, agent);
+    const post = (input_version_id: string) =>
+      call(env, {
+        method: "POST",
+        path: P(env, `/runs/${lease.run_id}/input-receipts`),
+        auth: { token: agent.token },
+        body: { lease_id: lease.lease_id, fence: lease.fence, receipts: [{ input_version_id, state: "seen" }] },
+      });
+    const unknown = await post("no-such-version-0000");
+    const before = counts(env);
+    const res = await post(closed.data.version_id);
+    assert.equal(res.status, unknown.status, `닫힌 판 = 모르는 판 상태: ${res.status} ${JSON.stringify(res.json)}`);
+    assert.deepEqual({ ...res.json, request_id: undefined }, { ...unknown.json, request_id: undefined }, "응답 본문 같음(request_id 제외)");
+    assert.deepEqual(counts(env), before, "영수증 0 개 늘어난다");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // R-C — 사람용 GET materials 행에 객체 단위 상태 object_ai_access
 
