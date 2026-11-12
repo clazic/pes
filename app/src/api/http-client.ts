@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey } from "./types";
 import { markAfterSend } from "./send-outcome";
 
 /**
@@ -154,7 +154,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
    * 쓰기 공통: 멱등 키 확인 → 프로젝트 확인 → POST(시간 제한) → 성공 본문의 `receipt`(SEL-98). 본문에 영수증이 없는 옛 서버만 GET P/requests/{key} 로 읽는다.
    * 순서 규칙(API 결정 4)은 서버가 같은 키로 재생한다
    */
-  async function write(slug: string, key: string | undefined, rest: string, body: Json, ready?: (id: string) => Promise<Json | void>) {
+  async function write(slug: string, key: string | undefined, rest: string, body: Json, ready?: (id: string) => Promise<Json | void>, bare = false) {
     if (!key) throw invalid("$.headers.idempotency-key");
     const id = idOf(slug);
     if (id === undefined) throw new PesApiError(fallbackBody(404));
@@ -164,7 +164,8 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         method: "POST",
         headers: headers({ "content-type": "application/json", "idempotency-key": key }),
         credentials: "omit",
-        body: JSON.stringify({ format_version: FORMAT_VERSION, ...extra, ...body }),
+        // bare: 참고 프로젝트(REF1b) 쓰기는 본문에 보낼 값만 싣는다(서버는 format_version 을 선택으로 받는다)
+        body: JSON.stringify(bare ? { ...extra, ...body } : { format_version: FORMAT_VERSION, ...extra, ...body }),
         signal,
       });
       if (!res.ok) throw await toApiError(res);
@@ -574,6 +575,97 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     };
   }
 
+
+  /* ───────────── 이전 프로젝트 참고자료(REF1b · SEL-114) — 서버 계약은 SEL-113(REF1a). 서버가 안 주는 칸은 null 로 두고 지어내지 않는다 ───────────── */
+
+  const boolOrNull = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+  /** rev 는 서버의 10진 문자열 그대로(다시 고정의 base_rev) — 숫자로 와도 글자로만 옮긴다 */
+  const revOf = (v: unknown): string | null => (typeof v === "string" && v ? v : typeof v === "number" && Number.isSafeInteger(v) ? String(v) : null);
+
+  function referenceRow(r: Json): ReferenceRow {
+    const delivery = r.ai_delivery;
+    return {
+      id: text(r.id),
+      access: r.access === "no_permission" ? "no_permission" : "ok",
+      state: text(r.state) as ReferenceRow["state"],
+      referenced_project_id: nullable(r.referenced_project_id),
+      referenced_project_key: nullable(r.referenced_project_key),
+      source_label: nullable(r.source_label),
+      source_snapshot_id: nullable(r.source_snapshot_id),
+      source_snapshot_key: nullable(r.source_snapshot_key),
+      latest_snapshot_id: nullable(r.latest_snapshot_id),
+      new_version_available: boolOrNull(r.new_version_available),
+      scope: Array.isArray(r.scope) ? r.scope.filter((x): x is string => typeof x === "string") : null,
+      // ai_delivery 가 없으면 null — 허용으로 간주하지 않는다
+      ai_delivery: isRecord(delivery) && typeof delivery.allowed === "boolean" ? { allowed: delivery.allowed, withheld_reason: nullable(delivery.withheld_reason) } : null,
+      attached_at: nullable(r.attached_at),
+      refreshed_at: nullable(r.refreshed_at),
+      rev: revOf(r.rev),
+    };
+  }
+
+  function referenceItem(raw: Json): ReferenceContentItem[] {
+    if ((raw.item !== "final_report" && raw.item !== "sources") || typeof raw.title !== "string") return [];
+    const c = isRecord(raw.citation) ? raw.citation : {};
+    const citation: ReferenceCitation = { reference_id: text(c.reference_id), project_id: text(c.project_id), project_label: text(c.project_label), snapshot_id: text(c.snapshot_id), object_id: text(c.object_id), version_id: text(c.version_id) };
+    return [
+      {
+        item: raw.item,
+        object_id: text(raw.object_id),
+        version_id: text(raw.version_id),
+        kind: text(raw.kind),
+        title: raw.title,
+        summary: nullable(raw.summary),
+        body_md: nullable(raw.body_md),
+        url: nullable(raw.url),
+        quote: nullable(raw.quote),
+        citation,
+      },
+    ];
+  }
+
+  const refPath = (ref: string, tail = ""): string => `/references/${q(ref)}${tail}`;
+  const referenceOf = (data: Json): ReferenceRow => {
+    if (!isRecord(data.reference)) throw new PesApiError(fallbackBody(500));
+    return referenceRow(data.reference);
+  };
+
+  const references: ReferencesMethods = {
+    /** GET P/references — 모르는 slug · 서버 404 는 []. 401 · 403 은 PesApiError(빈 목록으로 삼키지 않는다) */
+    async getReferences(slug) {
+      return listOf(await readData(slug, "/references"), "references").map(referenceRow);
+    },
+    /** GET P/references/{ref} — 404 · 모르는 slug 는 null. content 가 null(원본 없음 · 접근 없음)이면 null 그대로 */
+    async getReference(slug, _edition, refId) {
+      const data = await readData(slug, refPath(refId));
+      if (data === null) return null;
+      const content: ReferenceContent | null = isRecord(data.content) ? { items: (Array.isArray(data.content.items) ? data.content.items : []).flatMap((i) => (isRecord(i) ? referenceItem(i) : [])) } : null;
+      return { reference: referenceOf(data), content };
+    },
+    /** 서버에 후보 프로젝트 · 스냅숏을 읽는 길이 없다(후속 SEL-120) — 후보를 지어내지 않고 요청 없이 거절한다. 생성 화면(null)도 작업 중도 같다 */
+    getReferenceCandidates: notConnected("참고 프로젝트 후보 읽기"),
+    async attachReference(slug, _edition, input, key) {
+      const body: Json = {
+        referenced_project_id: input.referenced_project_id,
+        source_snapshot_id: input.source_snapshot_id,
+        // 줄 때만 싣는다 — 안 주면 서버 기본 범위 · 원본 이름을 덮어쓰지 않는다
+        ...(input.scope !== undefined ? { scope: input.scope } : {}),
+        ...(input.source_label ? { source_label: input.source_label } : {}),
+      };
+      const w = await write(slug, key, "/references", body, undefined, true);
+      return result(w, { reference: referenceOf(w.data) });
+    },
+    async refreshReference(slug, _edition, refId, input, key) {
+      const body: Json = { ...(input.source_snapshot_id !== undefined ? { source_snapshot_id: input.source_snapshot_id } : {}), ...(input.base_rev !== undefined ? { base_rev: input.base_rev } : {}) };
+      const w = await write(slug, key, refPath(refId, "/refresh"), body, undefined, true);
+      return result(w, { reference: referenceOf(w.data) });
+    },
+    async detachReference(slug, _edition, refId, key) {
+      const w = await write(slug, key, refPath(refId, "/detach"), {}, undefined, true);
+      return result(w, { reference_id: text(w.data.reference_id), detached: true as const });
+    },
+  };
+
   /* ───────────── 결과 글 첨언 · 후속(U4b · SEL-112) — 서버 계약은 SEL-99(U4a). 서버가 안 주는 값은 null 로 두고 지어내지 않는다 ───────────── */
 
   const STATUSES: readonly string[] = ["exact", "moved", "ambiguous", "lost"];
@@ -652,6 +744,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   }
 
   return {
+    ...references,
     capabilities: { questionTools: true },
     async getAssumptions(slug, edition) {
       return listOf(await readData(slug, `/assumptions?edition=${edition}`), "assumptions").map(assumptionRow);
