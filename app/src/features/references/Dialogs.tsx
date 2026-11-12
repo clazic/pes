@@ -38,12 +38,7 @@ export function AttachDialog({ slug, edition, opener, onClose, onDone }: Common 
   const [scope, setScope] = React.useState<string[]>([...SCOPE_KEYS]);
   const picked = candidates.data?.find((c) => c.project_id === projectId);
   const ready = !!picked && !!snapshotId && scope.length > 0;
-  const { submit, sending, rejected, unknown, done } = useReferenceSend({
-    slug,
-    edition,
-    run: (key) => client.attachReference(slug, edition, { referenced_project_id: projectId ?? "", source_snapshot_id: snapshotId ?? "", scope }, key),
-    onDone,
-  });
+  const { submit, sending, rejected, unknown, done } = useReferenceSend({ slug, edition, onDone });
   const reasonId = React.useId();
   const blocked = !ready || sending;
   return (
@@ -90,7 +85,7 @@ export function AttachDialog({ slug, edition, opener, onClose, onDone }: Common 
         <Button type="button" variant="ghost" onClick={() => !sending && onClose()} aria-disabled={sending || undefined}>
           취소
         </Button>
-        <Button type="button" variant="default" aria-disabled={blocked || undefined} aria-describedby={!ready && !sending ? reasonId : undefined} onClick={() => !blocked && submit(JSON.stringify([projectId, snapshotId, scope]))}>
+        <Button type="button" variant="default" aria-disabled={blocked || undefined} aria-describedby={!ready && !sending ? reasonId : undefined} onClick={() => !blocked && submit(JSON.stringify([projectId, snapshotId, scope]), (key) => client.attachReference(slug, edition, { referenced_project_id: projectId ?? "", source_snapshot_id: snapshotId ?? "", scope }, key))}>
           붙이기
         </Button>
       </Actions>
@@ -100,7 +95,8 @@ export function AttachDialog({ slug, edition, opener, onClose, onDone }: Common 
 
 /**
  * 다른 버전으로 다시 고정 — 그 프로젝트의 스냅숏 중에서 고른다. 새 버전 있음이면 가장 나중 스냅숏이 기본, 아니면 지금 고정된 것.
- * 보낼 때 그 행의 지금 rev 를 base_rev 로 싣는다. 목록은 다시 읽히므로(409 뒤 포함) 다시 누르면 새 rev 로 나간다.
+ * 보낼 때 그 행의 지금 rev 를 base_rev 로 싣는다. 목록은 다시 읽히므로(409 뒤 포함) 끝까지 거절된 뒤 다시 누르면 새 rev 로 나간다.
+ * 답이 오지 않은 요청(접수 확인 중)이 있으면 그 요청의 값으로 고정해 보이고(고른 버전 · 처음 base_rev 는 훅이 들고 있다), 다시 누르면 목록이 그사이 어떻게 바뀌었든 처음 키 · 처음 본문으로 영수증을 확인한다.
  */
 export function RefreshDialog({ slug, edition, refId, opener, onClose, onDone }: Common & { refId: string; onDone: (r: CommandResult<{ reference: ReferenceRow }>) => void }) {
   const client = useClient();
@@ -110,15 +106,11 @@ export function RefreshDialog({ slug, edition, refId, opener, onClose, onDone }:
   const cand = candidates.data?.find((c) => c.project_id === row?.referenced_project_id);
   const [picked, setPicked] = React.useState<string | null>(null);
   const fallback = row ? (row.state === "new_version" && row.latest_snapshot_id ? row.latest_snapshot_id : row.source_snapshot_id) : null;
-  const value = picked ?? fallback;
+  const { submit, sending, rejected, unknown, pending, done } = useReferenceSend({ slug, edition, onDone });
+  /** 영수증을 받지 못한 요청이 있으면 그 요청의 버전이 곧 선택이다(지문 = 고른 스냅숏 id) */
+  const value = pending ?? picked ?? fallback;
   const same = !!row && value === row.source_snapshot_id;
-  const { submit, sending, rejected, unknown, done } = useReferenceSend({
-    slug,
-    edition,
-    run: (key) => client.refreshReference(slug, edition, refId, { source_snapshot_id: value ?? "", ...(row?.rev ? { base_rev: row.rev } : {}) }, key),
-    onDone,
-  });
-  const ready = !!row && !!cand && !!value && !same;
+  const ready = pending !== null || (!!row && !!cand && !!value && !same);
   const blocked = !ready || sending;
   const reasonId = React.useId();
   return (
@@ -147,7 +139,7 @@ export function RefreshDialog({ slug, edition, refId, opener, onClose, onDone }:
         </p>
       ) : (
         <div className="mt-4">
-          <SnapshotPick snapshots={cand.snapshots} value={value} onChange={setPicked} current={row.source_snapshot_id} />
+          <SnapshotPick snapshots={cand.snapshots} value={value} onChange={setPicked} current={row.source_snapshot_id} locked={pending !== null} />
         </div>
       )}
 
@@ -157,7 +149,7 @@ export function RefreshDialog({ slug, edition, refId, opener, onClose, onDone }:
           다시 고정하지 못했어요. {rejected.message}
         </p>
       ) : null}
-      {same && !sending ? (
+      {same && !sending && pending === null ? (
         <p id={reasonId} className="mt-3 text-caption text-ink-2">
           지금 고정된 버전이에요. 다른 버전을 골라 주세요.
         </p>
@@ -166,7 +158,18 @@ export function RefreshDialog({ slug, edition, refId, opener, onClose, onDone }:
         <Button type="button" variant="ghost" onClick={() => !sending && onClose()} aria-disabled={sending || undefined}>
           취소
         </Button>
-        <Button type="button" variant="default" aria-disabled={blocked || undefined} aria-describedby={same && !sending ? reasonId : undefined} onClick={() => !blocked && submit(JSON.stringify([value, row?.rev]))}>
+        <Button
+          type="button"
+          variant="default"
+          aria-disabled={blocked || undefined}
+          aria-describedby={same && !sending && pending === null ? reasonId : undefined}
+          onClick={() => {
+            if (blocked) return;
+            // base_rev 는 처음 보낼 때의 행 rev — 훅이 같은 지문의 처음 요청을 들고 있으면 이 함수 대신 그 요청이 나간다
+            const input = { source_snapshot_id: value ?? "", ...(row?.rev ? { base_rev: row.rev } : {}) };
+            submit(value ?? "", (key) => client.refreshReference(slug, edition, refId, input, key));
+          }}
+        >
           다시 고정
         </Button>
       </Actions>
@@ -174,10 +177,13 @@ export function RefreshDialog({ slug, edition, refId, opener, onClose, onDone }:
   );
 }
 
-/** 참고 프로젝트 떼기 — 원본은 그대로이고, 이미 쓴 인용은 옛 버전 그대로임을 말한다 */
+/**
+ * 참고 프로젝트 떼기 — 원본은 그대로이고, 이미 쓴 인용은 옛 버전 그대로임을 말한다.
+ * row 는 열 때의 행이다(목록이 그사이 그 행을 지워도 — 떼기가 처리됐는데 답이 아직 안 왔을 때 — 대화 상자와 재시도 요청이 영수증 확인 전에는 남는다).
+ */
 export function DetachDialog({ slug, edition, row, opener, onClose, onDone }: Common & { row: ReferenceRow; onDone: (r: CommandResult<{ reference_id: string; detached: true }>) => void }) {
   const client = useClient();
-  const { submit, sending, rejected, unknown, done } = useReferenceSend({ slug, edition, run: (key) => client.detachReference(slug, edition, row.id, key), onDone });
+  const { submit, sending, rejected, unknown, done } = useReferenceSend({ slug, edition, onDone });
   return (
     <DialogShell title="참고 프로젝트 떼기" hint={`${nameOf(row)} — 이 프로젝트에서 떼요. 원본 프로젝트는 그대로 있고, 이미 쓴 인용도 옛 버전 그대로 남아요. 다시 쓰려면 처음부터 붙여야 해요.`} opener={opener} sending={sending} done={done} onClose={onClose}>
       <SendStatus sending={sending} unknown={unknown} />
@@ -190,7 +196,7 @@ export function DetachDialog({ slug, edition, row, opener, onClose, onDone }: Co
         <Button type="button" variant="ghost" onClick={() => !sending && onClose()} aria-disabled={sending || undefined}>
           취소
         </Button>
-        <Button type="button" variant="destructive" aria-disabled={sending || undefined} onClick={() => !sending && submit(JSON.stringify([row.id]))}>
+        <Button type="button" variant="destructive" aria-disabled={sending || undefined} onClick={() => !sending && submit(JSON.stringify([row.id]), (key) => client.detachReference(slug, edition, row.id, key))}>
           떼기
         </Button>
       </Actions>

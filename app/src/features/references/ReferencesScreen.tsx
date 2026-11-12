@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useParams } from "react-router";
 import { useReferences, useWorkspace } from "@/api/queries";
-import type { CommandResult } from "@/api/types";
+import type { CommandResult, ReferenceRow } from "@/api/types";
 import { useArrival } from "@/app/arrival";
 import { NotFound } from "@/app/NotFound";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import { AttachDialog, DetachDialog, RefreshDialog } from "./Dialogs";
 import { receiptWord } from "./logic";
 import { ReferenceTable, type RowAction } from "./ReferenceTable";
 
-type Open = { kind: "attach"; opener: HTMLElement } | { kind: "refresh" | "detach"; refId: string; opener: HTMLElement };
+/** 떼기는 열 때의 행을 함께 든다 — 목록이 그 행을 지워도(떼기는 처리됐고 답이 아직 안 왔을 때) 대화 상자 · 재시도 요청은 영수증 확인 전에 사라지지 않는다 */
+type Open = { kind: "attach"; opener: HTMLElement } | { kind: "refresh"; refId: string; opener: HTMLElement } | { kind: "detach"; refId: string; row: ReferenceRow; opener: HTMLElement };
 
 /**
  * 참고 프로젝트 화면 — `/p/:slug/e/:edition/references`. 이전 프로젝트의 고정한 버전을 읽기 전용으로 가리키는 줄의 목록(REF1b · 설계 4.9 · 5.4).
@@ -43,9 +44,10 @@ export function ReferencesScreen() {
     window.setTimeout(() => receiptRef.current?.focus(), 0);
   };
 
-  const onAction = (action: RowAction, row: { id: string }, opener: HTMLElement) => {
+  const onAction = (action: RowAction, row: ReferenceRow, opener: HTMLElement) => {
     if (action === "view") setViewing({ refId: row.id, opener });
-    else setDialog({ kind: action, refId: row.id, opener });
+    else if (action === "detach") setDialog({ kind: "detach", refId: row.id, row: structuredClone(row), opener });
+    else setDialog({ kind: "refresh", refId: row.id, opener });
   };
 
   if (ws.isPending) {
@@ -58,7 +60,7 @@ export function ReferencesScreen() {
   if (!w) return <NotFound />;
 
   const rows = refs.data;
-  const detach = dialog?.kind === "detach" ? rows?.find((x) => x.id === dialog.refId) : undefined;
+  const detach = dialog?.kind === "detach" ? (rows?.find((x) => x.id === dialog.refId) ?? dialog.row) : undefined;
   const view = viewing ? rows?.find((x) => x.id === viewing.refId) : undefined;
   return (
     <main id="main" tabIndex={-1} className="min-w-0">

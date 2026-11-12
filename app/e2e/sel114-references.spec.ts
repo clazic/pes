@@ -94,14 +94,14 @@ test("휴대폰 폭(390)에서도 붙이기 · 떼기 · 다시 고정이 있고
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("/new: 참고 프로젝트 칸은 담기만 한다 — 담은 목록에 쌓이고 빼면 사라진다", async ({ page }) => {
-  // 개발 · 미리보기 서버와 서버(serve.ts)는 아직 `/new` 를 앱 index.html 로 내주지 않는다(/p/… 만) — 앱이 뜬 뒤 주소만 옮겨 라우터가 읽게 한다
-  await open(page, REFS);
-  await page.evaluate(() => {
-    history.pushState({}, "", "/new");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
+test("/new: 직접 접속하고 새로고침해도 열린다 — 참고 프로젝트 칸은 담기만 한다(담은 목록에 쌓이고 빼면 사라진다)", async ({ page }) => {
+  // 개발 · 미리보기 서버와 서버(serve.ts)가 `/new` 를 앱 index.html 로 내준다 — 주소창에 바로 쳐서(pushState 우회 없이) 연다
+  const res = await page.goto("/new");
+  expect(res?.status()).toBe(200);
   await expect(page.getByRole("heading", { level: 1, name: "새 프로젝트" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: "새 프로젝트" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/new");
   const region = page.getByRole("region", { name: "참고 프로젝트" });
   await region.getByRole("radio", { name: /합성 지역통계/ }).check();
   await region.getByRole("radiogroup", { name: "고정할 버전" }).getByRole("radio", { name: /2판 R1 승인본/ }).check();

@@ -45,8 +45,9 @@ export function ProjectPick({ candidates, value, onChange, taken = [], takenWord
 /**
  * 고정할 버전 고르기 — 승인본은 추천 기본값일 뿐 다른 스냅숏도 고를 수 있다. 승인 안 된 것은 “승인 안 됨” 글(승인본처럼 보이지 않게).
  * current = 지금 고정된 스냅숏 id(다시 고정에서) — “지금 고정됨” 글을 붙인다.
+ * locked = 영수증을 받지 못한 요청의 값이라 바꿀 수 없다(고른 값을 보이기만 한다).
  */
-export function SnapshotPick({ snapshots, value, onChange, current }: { snapshots: ReferenceSnapshot[]; value: string | null; onChange: (id: string) => void; current?: string | null }) {
+export function SnapshotPick({ snapshots, value, onChange, current, locked = false }: { snapshots: ReferenceSnapshot[]; value: string | null; onChange: (id: string) => void; current?: string | null; locked?: boolean }) {
   const ids = React.useId();
   return (
     <div>
@@ -54,7 +55,7 @@ export function SnapshotPick({ snapshots, value, onChange, current }: { snapshot
       <div role="radiogroup" aria-labelledby={`${ids}-label`} className="grid gap-1.5">
         {snapshots.map((s) => (
           <label key={s.id} className={cn(optionClass, value === s.id ? "border-primary bg-primary-soft" : "border-line")}>
-            <input type="radio" name={`${ids}-snapshot`} className={inputClass} checked={value === s.id} onChange={() => onChange(s.id)} />
+            <input type="radio" name={`${ids}-snapshot`} className={inputClass} checked={value === s.id} disabled={locked && value !== s.id} onChange={() => onChange(s.id)} />
             <span className="min-w-0 font-medium break-words text-ink">
               {s.label}
               {s.recommended ? <> <span className="ml-2 text-caption font-medium text-primary-ink">추천</span></> : null}

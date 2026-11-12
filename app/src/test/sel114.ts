@@ -254,6 +254,8 @@ export function createReferencesClient(rows: ReferenceRow[] = REFERENCES, candid
   let release: () => void = () => {};
   let failure: Error | null = null;
   let lose = false;
+  let replyGate: Promise<void> | null = null;
+  let releaseReply: () => void = () => {};
   let broken = false;
   let candidateFailure: Error | null = null;
 
@@ -275,6 +277,7 @@ export function createReferencesClient(rows: ReferenceRow[] = REFERENCES, candid
     const data = apply();
     const r: CommandResult<T> = { format_version: FORMAT_VERSION, request_id: `req-${seq + 1}`, receipt: receipt(key), data };
     if (key) done.set(key, r);
+    if (replyGate) await replyGate;
     if (lose) {
       lose = false;
       throw timeoutError();
@@ -367,6 +370,14 @@ export function createReferencesClient(rows: ReferenceRow[] = REFERENCES, candid
     },
     failNext: (e: Error) => void (failure = e),
     loseReplyNext: () => void (lose = true),
+    /** 서버는 처리했지만 답이 아직 오지 않는다(다음 쓰기 하나) — 풀기 전까지 목록 읽기는 처리된 값을 본다. hold() 는 처리 전에 붙잡는다 */
+    holdReplyNext() {
+      replyGate = new Promise<void>((res) => (releaseReply = res));
+      return () => {
+        replyGate = null;
+        releaseReply();
+      };
+    },
     breakRead: () => void (broken = true),
     breakCandidates: (e: Error = new Error("후보를 읽을 수 없습니다(시험)")) => void (candidateFailure = e),
     /** 다른 곳에서 이 참고 프로젝트가 바뀐 것을 흉내 — rev 가 올라간다 */
