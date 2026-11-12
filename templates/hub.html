@@ -169,7 +169,10 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
   };
   // 첫 페이지를 떠날 때(옛 화면 링크 등) 남아 있는 값은 지운다 — 새 앱으로 넘어가는 경우만 남긴다
   let leaving = false;
-  addEventListener('pagehide', () => { if (!leaving) { try { sessionStorage.removeItem(KEY); } catch (e) {} } });
+  const unstore = () => { try { sessionStorage.removeItem(KEY); } catch (e) {} };
+  addEventListener('pagehide', () => { if (!leaving) unstore(); });
+  // 이동이 일어나지 않았는데(204·취소·실패) 이 문서에 머무르거나 bfcache 로 되돌아오면, '떠나는 중' 가정을 거두고 값을 지운다 — 앱이 이미 이어받아 지웠으면 아무 일도 없다
+  addEventListener('pageshow', e => { if (e.persisted) { leaving = false; unstore(); } });
   // 1회용 코드는 주소 조각으로 온다 — 조각은 서버·Referer 로 가지 않지만, 요청도 그리기도 하기 전에 주소창에서 지운다(쓰였든 깨졌든)
   let code = '';
   const frag = location.hash.slice(1);
@@ -266,6 +269,7 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
         handoff = { session: handoff.session, projects: { ...handoff.projects, [slug]: id } };
         leaving = true;
         store(handoff);
+        setTimeout(() => { leaving = false; unstore(); }, 3000);
         location.assign(`/p/${encodeURIComponent(slug)}/`);
         return;
       }

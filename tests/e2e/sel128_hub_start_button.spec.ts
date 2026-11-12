@@ -405,3 +405,41 @@ test("9 만들기 성공 직전에만 sessionStorage 에 쓴다 — 새 앱 주�
   expect(stored.session).toBe(ws.session);
   expect(Object.keys(stored.projects)).toEqual(["synthetic-late-store"]);
 });
+
+// R2-1: 만들기는 됐는데 앱 이동이 일어나지 않는 길(204·취소·실패) — 세션이 sessionStorage 에 남은 채 굳으면 같은 탭 옛 화면이 읽는다.
+async function create_with_blocked_move(page: Page, slug: string): Promise<void> {
+  await page.route(`**/p/${slug}/`, (route) => route.fulfill({ status: 204 }));
+  await open_with_code(page, ws);
+  await start_button(page).click();
+  await topic_input(page).fill("이동이 막히는 합성 주제");
+  await slug_input(page).fill(slug);
+  const moved = page.waitForRequest((r) => new URL(r.url()).pathname === `/p/${slug}/`);
+  await submit(page).click();
+  await moved;
+  // 204 라 첫 페이지에 그대로 머문다
+  await expect(start_button(page)).toBeVisible();
+}
+
+test("9 만들기 뒤 앱 이동이 안 되면(204) 몇 초 뒤 sessionStorage 를 지운다 — 같은 탭으로 옛 화면에 가도 읽히지 않는다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await create_with_blocked_move(page, "synthetic-blocked-move");
+  await expect
+    .poll(async () => page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), { timeout: 8000, message: "이동이 안 되면 키를 지운다" })
+    .toBeNull();
+  await page.goto(`${ws.base}/legacy-y/index.html`);
+  await expect(page).toHaveTitle("STOLEN:null");
+});
+
+test("9 이동이 안 된 채 bfcache 복귀(pageshow persisted)여도 키를 지우고 pagehide 정리를 되살린다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await create_with_blocked_move(page, "synthetic-bfcache-back");
+  // 타이머보다 먼저 bfcache 복귀를 흉내 낸다
+  await page.evaluate('window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }))');
+  expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), "복귀하면 키가 없다").toBeNull();
+  // 키가 다시 생겨도(앱이 둔 값) pagehide 가 지운다 = leaving 이 되돌려졌다
+  await page.evaluate((k) => sessionStorage.setItem(k, JSON.stringify({ session: "synthetic-left-behind-session-00000", projects: {} })), STORE_KEY);
+  await page.goto(`${ws.base}/legacy-y/index.html`);
+  await expect(page).toHaveTitle("STOLEN:null");
+});
