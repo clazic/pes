@@ -11,7 +11,7 @@
 
 import { Worker, workerData, type MessagePort } from "node:worker_threads";
 
-import { FLAG_DONE, FLAG_ERROR, FLAG_OUT_OF_MEMORY, FLAG_TIMEOUT } from "./file_extract_flags.ts";
+import { FLAG_DONE, FLAG_ERROR, FLAG_OUT_OF_MEMORY, FLAG_TIMEOUT, SLOT_ENDED, SLOT_OUTCOME } from "./file_extract_flags.ts";
 
 interface SupervisorData {
   flag: Int32Array;
@@ -32,12 +32,16 @@ function settle(code: number): void {
   if (settled) return;
   settled = true;
   clearTimeout(timer);
-  Atomics.store(data.flag, 0, code);
-  Atomics.notify(data.flag, 0);
-  worker.terminate().then(
-    () => process.exit(0),
-    () => process.exit(0),
-  );
+  Atomics.store(data.flag, SLOT_OUTCOME, code);
+  Atomics.notify(data.flag, SLOT_OUTCOME);
+  worker.terminate().then(end, end);
+}
+
+/** The extraction thread is gone (terminate() returned): say so to the main thread, then end this thread too. */
+function end(): void {
+  Atomics.store(data.flag, SLOT_ENDED, 1);
+  Atomics.notify(data.flag, SLOT_ENDED);
+  process.exit(0);
 }
 
 const worker = new Worker(new URL(data.worker_url), {

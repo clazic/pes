@@ -5,10 +5,13 @@
  */
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { PARSED_FORMATS, extract_text } from "../scripts/pes_core/file_extract.ts";
-import { extract_text_isolated } from "../scripts/pes_core/file_extract_isolated.ts";
+import { extract_text_isolated, unfinished_extraction_threads } from "../scripts/pes_core/file_extract_isolated.ts";
 import { make_docx } from "./helpers/sel116_env.ts";
 
 const HOSTILE = new URL("./helpers/sel116_hostile_worker.ts", import.meta.url).href;
@@ -89,4 +92,56 @@ test("isolation: every format that extract_text really parses is in PARSED_FORMA
   }
   // and the other way: nothing listed there answers "unsupported"
   for (const ext of PARSED_FORMATS) assert.notEqual(extract_text(`a.${ext}`, bytes).reason, "unsupported_format", ext);
+});
+
+async function until_no_unfinished_threads(limit_ms: number): Promise<void> {
+  const start = performance.now();
+  while (unfinished_extraction_threads() > 0) {
+    assert.ok(performance.now() - start < limit_ms, "the cut-off thread never ended");
+    await new Promise((done) => setTimeout(done, 25));
+  }
+}
+
+test("isolation: a thread that terminate() cannot cut is counted — the next extraction is extract_busy, and after the thread ends all works again", async () => {
+  assert.equal(unfinished_extraction_threads(), 0);
+  const first = hostile("native.txt", { timeout_ms: 400, end_grace_ms: 100 });
+  assert.equal(first.out.status, "failed");
+  assert.equal(first.out.reason, "extract_timeout");
+  assert.equal(unfinished_extraction_threads(), 1, "the stuck thread is counted");
+
+  // no Worker is started while a thread is unfinished: both a hostile and a real extraction answer at once
+  const busy = hostile("ok.txt");
+  assert.equal(busy.out.status, "failed");
+  assert.equal(busy.out.reason, "extract_busy");
+  assert.equal(busy.out.text, null);
+  assert.ok(busy.ms < 200, `extract_busy took ${busy.ms.toFixed(0)} ms`);
+  const real = extract_text_isolated("a.txt", new TextEncoder().encode("a"));
+  assert.equal(real.reason, "extract_busy");
+  // a format that is not parsed needs no thread and is not blocked
+  assert.equal(extract_text_isolated("a.pdf", BYTES).reason, "unsupported_format");
+
+  await until_no_unfinished_threads(30_000);
+  assert.equal(unfinished_extraction_threads(), 0);
+  const after = extract_text_isolated("a.txt", new TextEncoder().encode("a\r\nb"));
+  assert.equal(after.status, "extracted");
+  assert.equal(after.text, "a\nb");
+});
+
+test("isolation: a thread that terminate() CAN cut is not counted (a normal time limit leaves nothing behind)", () => {
+  const { out } = hostile("spin.txt", { timeout_ms: 300 });
+  assert.equal(out.reason, "extract_timeout");
+  assert.equal(unfinished_extraction_threads(), 0);
+  assert.equal(hostile("ok.txt").out.status, "extracted");
+});
+
+test("isolation: where the process may not start workers (node --permission without --allow-worker) the answer is failed/worker_unavailable", () => {
+  const script = fileURLToPath(new URL("./helpers/sel116_permission_child.ts", import.meta.url));
+  const repo = fileURLToPath(new URL("../", import.meta.url));
+  const read = (allow_worker: boolean): { status: string; reason: string | null } => {
+    const args = ["--permission", `--allow-fs-read=${repo}`, `--allow-fs-read=${tmpdir()}`, ...(allow_worker ? ["--allow-worker"] : []), script];
+    const out = execFileSync(process.execPath, args, { encoding: "utf8", env: { ...process.env, NODE_NO_WARNINGS: "1" } });
+    return JSON.parse(out.trim().split("\n").at(-1) as string) as { status: string; reason: string | null };
+  };
+  assert.deepEqual(read(false), { status: "failed", reason: "worker_unavailable" });
+  assert.deepEqual(read(true), { status: "extracted", reason: null });
 });
