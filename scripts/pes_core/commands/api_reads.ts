@@ -738,3 +738,306 @@ export function reflection_round_ids(db: Db, project_id: string): string[] {
     )
     .map((row) => row.round_id);
 }
+
+// ---------------------------------------------------------------------------
+// SEL-98: the receipt a write left, and one round's form (questions, current answers) and its comment threads.
+// Read-only and without a new table: they join the tables the question and answer commands already write.
+
+export interface ReceiptDto {
+  receipt_no: string;
+  tx_id: string;
+  committed_at: string | null;
+}
+
+function iso_of_ms(value: bigint): string | null {
+  const ms = Number(value);
+  return Number.isSafeInteger(ms) && ms >= 0 && ms <= 8.64e15 ? new Date(ms).toISOString() : null;
+}
+
+/**
+ * The receipt of one commit: its number in the project (1 = the first write, in commit order — the rowid order of mutation_commits,
+ * which is append only), the commit id, and the commit time. A commit that is not there has no receipt (null).
+ */
+export function receipt_of_tx(db: Db, project_id: string, tx_id: string): ReceiptDto | null {
+  const row = db.get<{ n: bigint; created_at: bigint }>(
+    `SELECT (SELECT COUNT(*) FROM mutation_commits c2
+              WHERE c2.project_id = c.project_id AND c2.rowid <= c.rowid) AS n,
+            c.created_at AS created_at
+       FROM mutation_commits c WHERE c.project_id = ? AND c.id = ?`,
+    project_id,
+    tx_id,
+  );
+  if (row === undefined) return null;
+  return { receipt_no: row.n.toString(), tx_id, committed_at: iso_of_ms(row.created_at) };
+}
+
+/**
+ * The receipts of many commits with ONE pass over the project's commits (a read that shows many answers or messages would otherwise
+ * count the commits once per receipt). Same numbers as receipt_of_tx: the rank of the commit in rowid order. A tx that is not there
+ * is missing from the map.
+ */
+export function receipts_of_txs(db: Db, project_id: string, tx_ids: ReadonlyArray<string>): Map<string, ReceiptDto> {
+  const out = new Map<string, ReceiptDto>();
+  const wanted = [...new Set(tx_ids)];
+  if (wanted.length === 0) return out;
+  const rows = db.all<{ id: string; n: bigint; created_at: bigint }>(
+    `SELECT id, n, created_at FROM (
+        SELECT id, created_at, ROW_NUMBER() OVER (ORDER BY rowid) AS n FROM mutation_commits WHERE project_id = ?)
+      WHERE id IN (SELECT value FROM json_each(?))`,
+    project_id,
+    JSON.stringify(wanted),
+  );
+  for (const row of rows) out.set(row.id, { receipt_no: row.n.toString(), tx_id: row.id, committed_at: iso_of_ms(row.created_at) });
+  return out;
+}
+
+function json_or_null(text: string | null): unknown {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** The rounds place a request names: "start" (the stage-start questions, round null) or a round number. null = not a place. */
+export interface RoundPlace {
+  /** the number of the edition the place belongs to (the active edition) — the same number the work space read reports as `edition` */
+  edition_no: number;
+  stage_id: string;
+  stage_key: string;
+  /** rounds.id for a numbered round, null for the stage-start place */
+  server_round_id: string | null;
+  round_no: number | null;
+  state: "current" | "closed";
+}
+
+export function round_place(db: Db, project_id: string, edition_id: string, stage_key: string, place: string): RoundPlace | null {
+  const stage = db.get<{ id: string; key: string; status: string }>(
+    "SELECT id, key, status FROM stages WHERE project_id = ? AND edition_id = ? AND key = ?",
+    project_id,
+    edition_id,
+    stage_key,
+  );
+  if (stage === undefined) return null;
+  const edition = db.get<{ edition_no: bigint }>("SELECT edition_no FROM editions WHERE project_id = ? AND id = ?", project_id, edition_id);
+  if (edition === undefined) return null;
+  const edition_no = Number(edition.edition_no);
+  if (place === "start") {
+    const rounds = db.all<{ state: string }>("SELECT state FROM rounds WHERE project_id = ? AND stage_id = ?", project_id, stage.id);
+    // the same rule as the work space: a stage not started yet (pending, no round) has no stage-start place — unless a form was
+    // already published there (the stage-start questions are then the place's content)
+    if (stage.status === "pending" && rounds.length === 0) {
+      const published = db.get<{ one: bigint }>(
+        "SELECT 1 AS one FROM question_sets WHERE project_id = ? AND stage_id = ? AND form_key = 'main' AND round_id IS NULL LIMIT 1",
+        project_id,
+        stage.id,
+      );
+      if (published === undefined) return null;
+    }
+    const open = rounds.some((round) => round.state === "open");
+    return { edition_no, stage_id: stage.id, stage_key: stage.key, server_round_id: null, round_no: null, state: stage.status === "asking" && !open ? "current" : "closed" };
+  }
+  if (!/^[1-9][0-9]{0,14}$/.test(place)) return null;
+  const round = db.get<{ id: string; state: string }>(
+    "SELECT id, state FROM rounds WHERE project_id = ? AND stage_id = ? AND round_no = ?",
+    project_id,
+    stage.id,
+    Number(place),
+  );
+  if (round === undefined) return null;
+  return { edition_no, stage_id: stage.id, stage_key: stage.key, server_round_id: round.id, round_no: Number(place), state: round.state === "open" ? "current" : "closed" };
+}
+
+/** The newest set of the place's form (form_key "main"), or undefined when no form was published there yet. */
+export function place_latest_set(db: Db, project_id: string, place: RoundPlace): { id: string; version_no: bigint } | undefined {
+  return db.get<{ id: string; version_no: bigint }>(
+    `SELECT id, version_no FROM question_sets
+      WHERE project_id = ? AND stage_id = ? AND form_key = 'main' AND round_id IS ?
+      ORDER BY version_no DESC LIMIT 1`,
+    project_id,
+    place.stage_id,
+    place.server_round_id,
+  );
+}
+
+interface RoundQuestionRow {
+  question_id: string;
+  version_id: string;
+  version_no: bigint;
+  display_no: bigint;
+  text: string;
+  type: string;
+  state: string;
+  importance: string;
+  required: bigint;
+  allow_comment_as_answer: bigint;
+  default_value: string;
+  options: string;
+  show_if: string;
+  help: string | null;
+  merged_into_question_id: string | null;
+  answer_version_id: string | null;
+  answer_value: string | null;
+  answer_question_version_id: string | null;
+  answer_question_version_no: bigint | null;
+  answer_used_default: bigint | null;
+  answer_state: string | null;
+  answer_tx_id: string | null;
+}
+
+export function round_form_data(db: Db, project_id: string, place: RoundPlace): Record<string, unknown> {
+  const set = place_latest_set(db, project_id, place);
+  const rows =
+    set === undefined
+      ? []
+      : db.all<RoundQuestionRow>(
+          `SELECT m.question_id AS question_id, qv.version_id AS version_id, ov.version_no AS version_no, o.display_no AS display_no,
+                  qv.text AS text, qv.type AS type, qv.state AS state, qv.importance AS importance, qv.required AS required,
+                  qv.allow_comment_as_answer AS allow_comment_as_answer, qv.default_value AS default_value, qv.options AS options,
+                  qv.show_if AS show_if, qv.help AS help, qv.merged_into_question_id AS merged_into_question_id,
+                  av.version_id AS answer_version_id, av.value AS answer_value, av.question_version_id AS answer_question_version_id,
+                  av.used_default AS answer_used_default, av.state AS answer_state, aov.tx_id AS answer_tx_id, qov.version_no AS answer_question_version_no
+             FROM question_set_members m
+             JOIN objects o ON o.project_id = m.project_id AND o.id = m.question_id AND o.kind = 'question'
+             JOIN question_versions qv ON qv.project_id = o.project_id AND qv.version_id = o.current_version_id
+             JOIN object_versions ov ON ov.project_id = qv.project_id AND ov.id = qv.version_id
+             LEFT JOIN answers a ON a.project_id = m.project_id AND a.object_id = (
+                    SELECT MIN(a2.object_id) FROM answers a2 WHERE a2.project_id = m.project_id AND a2.question_id = m.question_id)
+             LEFT JOIN objects ao ON ao.project_id = a.project_id AND ao.id = a.object_id
+             LEFT JOIN answer_versions av ON av.project_id = ao.project_id AND av.version_id = ao.current_version_id
+             LEFT JOIN object_versions aov ON aov.project_id = av.project_id AND aov.id = av.version_id
+             LEFT JOIN object_versions qov ON qov.project_id = av.project_id AND qov.id = av.question_version_id
+            WHERE m.project_id = ? AND m.set_id = ?
+            ORDER BY m.position`,
+          project_id,
+          set.id,
+        );
+  const receipts = receipts_of_txs(db, project_id, rows.flatMap((row) => (row.answer_tx_id === null ? [] : [row.answer_tx_id])));
+  const questions = rows.map((row) => {
+    let answer: Record<string, unknown> | null = null;
+    if (row.answer_version_id !== null) {
+      const receipt = row.answer_tx_id === null ? null : (receipts.get(row.answer_tx_id) ?? null);
+      answer = {
+        version_id: row.answer_version_id,
+        value: json_or_null(row.answer_value),
+        question_version_id: row.answer_question_version_id,
+        question_version: row.answer_question_version_no === null ? null : Number(row.answer_question_version_no),
+        used_default: row.answer_used_default === null ? false : Number(row.answer_used_default) === 1,
+        state: row.answer_state,
+        tx_id: receipt?.tx_id ?? null,
+        receipt_no: receipt?.receipt_no ?? null,
+        committed_at: receipt?.committed_at ?? null,
+      };
+    }
+    return {
+      id: row.question_id,
+      version_id: row.version_id,
+      version_no: row.version_no.toString(),
+      state: row.state,
+      type: row.type,
+      text: row.text,
+      required: Number(row.required) === 1,
+      allow_comment_as_answer: Number(row.allow_comment_as_answer) === 1,
+      importance: row.importance,
+      help: row.help,
+      default_value: json_or_null(row.default_value),
+      options: json_or_null(row.options) ?? [],
+      show_if: json_or_null(row.show_if),
+      merged_into_question_id: row.merged_into_question_id,
+      display_no: Number(row.display_no),
+      answer,
+    };
+  });
+  return {
+    // the round paths read the ACTIVE edition: the number lets a client that shows another edition see that and not use this data
+    edition: place.edition_no,
+    stage: place.stage_key,
+    round_id: place.round_no,
+    server_round_id: place.server_round_id,
+    state: place.state,
+    set_id: set?.id ?? null,
+    form_version: set === undefined ? null : Number(set.version_no),
+    questions,
+  };
+}
+
+interface ThreadRow {
+  thread_id: string;
+  target_object_id: string;
+  target_version_id: string | null;
+  context_kind: string;
+  target_version_no: bigint | null;
+}
+
+interface ThreadMessageRow {
+  thread_id: string;
+  message_id: string;
+  body_md: string;
+  created_at: bigint;
+  actor_kind: string;
+  tx_id: string;
+}
+
+/**
+ * The comment threads of the questions that ever stood in the place's form (not only those in its newest set), each with its messages in
+ * the order they were written. A thread tied to a question reports that question; a "general" thread (context_kind general) that
+ * is about one of those questions reports "__other". The free-form notes a migrated project kept (legacy "이전 의견/제안": a general thread whose
+ * target is a note, not a question) are NOT in this read — nothing ties such a note to a place of the form.
+ */
+export function round_threads_data(db: Db, project_id: string, place: RoundPlace): Record<string, unknown> {
+  const threads = db.all<ThreadRow>(
+    `SELECT t.object_id AS thread_id, t.target_object_id AS target_object_id, t.target_version_id AS target_version_id,
+            t.context_kind AS context_kind, tov.version_no AS target_version_no
+       FROM threads t
+       LEFT JOIN object_versions tov ON tov.project_id = t.project_id AND tov.id = t.target_version_id
+      WHERE t.project_id = ? AND t.context_kind IN ('question_comment', 'general')
+        AND t.target_object_id IN (
+              SELECT m.question_id FROM question_set_members m
+                JOIN question_sets s ON s.project_id = m.project_id AND s.id = m.set_id
+               WHERE s.project_id = ? AND s.stage_id = ? AND s.form_key = 'main' AND s.round_id IS ?)
+      ORDER BY t.rowid`,
+    project_id,
+    project_id,
+    place.stage_id,
+    place.server_round_id,
+  );
+  const message_rows = threads.map((thread) =>
+    db.all<ThreadMessageRow>(
+      `SELECT m.thread_id AS thread_id, m.object_id AS message_id, mv.body_md AS body_md, first.created_at AS created_at,
+              a.kind AS actor_kind, cur.tx_id AS tx_id
+         FROM messages m
+         JOIN objects mo ON mo.project_id = m.project_id AND mo.id = m.object_id
+         JOIN message_versions mv ON mv.project_id = mo.project_id AND mv.version_id = mo.current_version_id
+         JOIN object_versions cur ON cur.project_id = mv.project_id AND cur.id = mv.version_id
+         JOIN object_versions first ON first.project_id = m.project_id AND first.object_id = m.object_id AND first.version_no = 1
+         JOIN actors a ON a.id = first.actor_id
+        WHERE m.project_id = ? AND m.thread_id = ? AND mv.state <> 'withdrawn'
+        ORDER BY m.rowid`,
+      project_id,
+      thread.thread_id,
+    ),
+  );
+  // one pass over the project's commits for every message of every thread
+  const receipts = receipts_of_txs(db, project_id, message_rows.flatMap((rows) => rows.map((message) => message.tx_id)));
+  const out = threads.map((thread, index) => {
+    const messages = (message_rows[index] ?? []).map((message) => {
+      const first = receipts.get(message.tx_id);
+      return {
+        message_id: message.message_id,
+        body_md: message.body_md,
+        at: iso_of_ms(message.created_at),
+        by: message.actor_kind === "human" ? "human" : "ai",
+        ...(first === undefined ? {} : { receipt_no: first.receipt_no }),
+      };
+    });
+    return {
+      thread_id: thread.thread_id,
+      question_id: thread.context_kind === "question_comment" ? thread.target_object_id : "__other",
+      question_version_id: thread.target_version_id,
+      question_version: thread.target_version_no === null ? null : Number(thread.target_version_no),
+      messages,
+    };
+  });
+  return { edition: place.edition_no, threads: out };
+}
