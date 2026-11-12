@@ -27,6 +27,7 @@ const P = `/api/v1/projects/${ID}`;
 const ok = (data: unknown) => ({ format_version: FORMAT_VERSION, request_id: "req-126", data });
 const BODY = "# 합성 결과 글\n\n첫 문단 MARK-R126.\r\n\r\n둘째 문단 (공백  두 칸)";
 const RESULT = { object_id: "obj-res-1", version_id: "ver-res-3", body_md: BODY };
+const RESULT_FULL = { ...RESULT, version_no: "3", title: "합성 결과 제목", created_at: "2026-11-13T01:02:03.000Z" };
 const roundData = (extra: Record<string, unknown> = {}) => ({ edition: ED, stage: "research", round_id: 2, server_round_id: "rnd-2", state: "closed", set_id: null, form_version: null, questions: [], ...extra });
 
 function server(routes: Record<string, { status: number; body: unknown }>) {
@@ -96,5 +97,21 @@ describe("getRound — 서버 result 를 RoundView.result 로 잇는다", () => 
   it("다른 판의 응답(edition 불일치)은 result 까지 통째로 쓰지 않는다(null)", async () => {
     const { view } = await read(roundData({ edition: ED + 1, result: RESULT }));
     expect(view).toBeNull();
+  });
+
+  it("서버가 준 version_no · title · created_at 을 그대로 쓴다(지어낸 값 없음)", async () => {
+    const { view } = await read(roundData({ result: RESULT_FULL }));
+    expect(view!.result).toMatchObject({ title: "합성 결과 제목", version: 3, updated_at: "2026-11-13T01:02:03.000Z" });
+    expect(view!.result!.status).toBeNull(); // 라운드 읽기는 채택 여부를 주지 않는다 → 초안이라고 지어내지 않는다
+  });
+
+  it("서버가 그 칸을 안 주면 null 로 둔다(version 0 · 초안 · 빈 시각으로 채우지 않는다)", async () => {
+    const { view } = await read(roundData({ result: RESULT }));
+    expect(view!.result).toMatchObject({ object_id: "obj-res-1", version_id: "ver-res-3", body_md: BODY, version: null, status: null, updated_at: null });
+  });
+
+  it("모양이 깨진 version_no · created_at 은 null — 숫자로 읽히지 않는 글 · 시각이 아닌 글", async () => {
+    const { view } = await read(roundData({ result: { ...RESULT, version_no: "x3", created_at: "어제" } }));
+    expect(view!.result).toMatchObject({ version: null, updated_at: null });
   });
 });

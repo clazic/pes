@@ -907,17 +907,28 @@ interface RoundQuestionRow {
 /**
  * SEL-126: the round's result text — the first `result` object the round was sealed with (round_contents, role 'result'), at its CURRENT
  * version = objects.current_version_id, the SAME version the annotation commands judge (basis_version_id) and the one content.set_current /
- * an adopted edit_text moves (append_version alone does not). Not the version the seal held. null = no result: the stage-start place, an
- * open round, a round sealed without one. For a non-human caller a current version that carries a file closed to AI is null with no trace
- * (the same rule as every AI read exit). Read only; one query + the denial check.
+ * an adopted edit_text moves (append_version alone does not). Not the version the seal held. Also its version_no (decimal string, a
+ * Revision), the artifact title and created_at (ISO 8601; null when the stored time is not a time). null = no result: the stage-start
+ * place, an open round, a round sealed without one. For a non-human caller a current version that carries a file closed to AI is null with
+ * no trace (the same rule as every AI read exit). Read only; one query + the denial check.
  */
-export function round_result_data(db: Db, project_id: string, place: RoundPlace, audience: Audience): { object_id: string; version_id: string; body_md: string } | null {
+export interface RoundResultDto {
+  object_id: string;
+  version_id: string;
+  version_no: string;
+  title: string;
+  created_at: string | null;
+  body_md: string;
+}
+
+export function round_result_data(db: Db, project_id: string, place: RoundPlace, audience: Audience): RoundResultDto | null {
   if (place.server_round_id === null) return null;
-  const row = db.get<{ object_id: string; version_id: string; body_md: string | null }>(
-    `SELECT c.object_id AS object_id, o.current_version_id AS version_id, av.body_md AS body_md
+  const row = db.get<{ object_id: string; version_id: string; version_no: bigint; created_at: bigint; title: string; body_md: string | null }>(
+    `SELECT c.object_id AS object_id, ov.id AS version_id, ov.version_no AS version_no, ov.created_at AS created_at, av.title AS title, av.body_md AS body_md
        FROM round_contents c
        JOIN objects o ON o.project_id = c.project_id AND o.id = c.object_id
-       JOIN artifact_versions av ON av.project_id = o.project_id AND av.version_id = o.current_version_id
+       JOIN object_versions ov ON ov.project_id = o.project_id AND ov.id = o.current_version_id
+       JOIN artifact_versions av ON av.project_id = ov.project_id AND av.version_id = ov.id
       WHERE c.project_id = ? AND c.round_id = ? AND c.role = 'result'
       ORDER BY c.position, c.object_id LIMIT 1`,
     project_id,
@@ -925,7 +936,14 @@ export function round_result_data(db: Db, project_id: string, place: RoundPlace,
   );
   if (row === undefined || row.body_md === null) return null;
   if (audience === "ai" && artifact_version_denied(db, project_id, row.version_id)) return null;
-  return { object_id: row.object_id, version_id: row.version_id, body_md: row.body_md };
+  return {
+    object_id: row.object_id,
+    version_id: row.version_id,
+    version_no: row.version_no.toString(),
+    title: row.title,
+    created_at: iso_of_ms(row.created_at),
+    body_md: row.body_md,
+  };
 }
 
 export function round_form_data(db: Db, project_id: string, place: RoundPlace): Record<string, unknown> {

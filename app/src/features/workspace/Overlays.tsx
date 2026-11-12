@@ -2,7 +2,7 @@ import * as React from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { QuestionView, RoundView } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import { formatAt, importanceLabel, SOURCE_LABEL } from "@/lib/labels";
+import { formatAt, importanceLabel, resultMetaText, SOURCE_LABEL } from "@/lib/labels";
 import type { View } from "./paths";
 
 /**
@@ -157,7 +157,8 @@ export function PrintPreview({ round, title, onClose }: { round: RoundView; titl
         {round.result ? (
           <>
             <h3 className="mt-4 text-meta font-semibold text-ink">
-              {round.result.title} <span className="font-normal text-muted-foreground">v{round.result.version} · {round.result.status === "adopted" ? "채택본" : "초안"}</span>
+              {round.result.title}
+              {resultMetaText({ ...round.result, updated_at: null }) !== null ? <span className="font-normal text-muted-foreground"> {resultMetaText({ ...round.result, updated_at: null })}</span> : null}
             </h3>
             {round.result.paragraphs.map((p) => (
               <p key={p} className="mt-1 text-meta text-ink">

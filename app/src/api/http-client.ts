@@ -557,18 +557,20 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   }
 
   /**
-   * SEL-126 — 서버 라운드 읽기의 result{object_id, version_id, body_md}. 세 칸이 모두 문자열일 때만 싣는다(아니면 null — 첨언 도구를 켜지 않는다).
-   * 서버는 제목 · 버전 번호 · 채택 여부 · 시각을 주지 않는다: 제목은 본문 첫 머리글(없으면 "결과 글"), 나머지는 비워 둔 값(version 0 · draft · 시각 "")이고 지어낸 값을 보이지 않는다.
+   * SEL-126 — 서버 라운드 읽기의 result{object_id, version_id, body_md, version_no?, title?, created_at?}. 세 칸(object_id·version_id·body_md)이 모두
+   * 문자열일 때만 싣는다(아니면 null — 첨언 도구를 켜지 않는다). version_no(10진 글) · created_at(ISO) 은 서버가 준 모양일 때만 쓰고, 아니면 null 로 둔다:
+   * 지어낸 버전 번호 · 채택 여부 · 시각을 보이지 않는다(채택 여부는 라운드 읽기에 없으므로 늘 null). 제목은 서버가 안 주면 화면의 고정 이름 "결과 글".
    */
   function resultViewOf(raw: unknown): ResultView | null {
     if (!isRecord(raw) || typeof raw.object_id !== "string" || typeof raw.version_id !== "string" || typeof raw.body_md !== "string") return null;
     const body = raw.body_md;
-    const heading = /^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m.exec(body)?.[1]?.trim();
+    const versionNo = typeof raw.version_no === "string" && /^[1-9][0-9]{0,14}$/.test(raw.version_no) ? Number(raw.version_no) : null;
+    const createdAt = typeof raw.created_at === "string" && !Number.isNaN(new Date(raw.created_at).getTime()) ? raw.created_at : null;
     return {
-      title: heading || "결과 글",
-      version: 0,
-      status: "draft",
-      updated_at: "",
+      title: typeof raw.title === "string" && raw.title.trim() !== "" ? raw.title : "결과 글",
+      version: versionNo,
+      status: null,
+      updated_at: createdAt,
       paragraphs: body.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter((p) => p !== ""),
       object_id: raw.object_id,
       version_id: raw.version_id,

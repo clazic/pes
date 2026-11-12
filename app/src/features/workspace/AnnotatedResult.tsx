@@ -7,7 +7,7 @@ import { Kbd } from "@/components/pes/kbd";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cpLength, sliceCp, snapUtf16Range, utf16ToCp } from "@/lib/anchor-text";
-import { formatAt } from "@/lib/labels";
+import { ResultMeta } from "./ResultMeta";
 import { AnnotationRegion } from "./AnnotationRegion";
 import { AnnotationContext, ErrorLine, Quote, annotationScope, loadTaskProgress, pendingKeep, saveTaskProgress, useAnnotationWrite, useAnnotationCtx, type AnnotationCtx, type Note } from "./annotation-kit";
 import { controlClass, Field } from "./fields";
@@ -655,9 +655,7 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
         <h2 id="result-title" className="text-title text-ink">
           {result.title}
         </h2>
-        <p className="mt-0.5 text-caption text-muted-foreground">
-          v{result.version} · {result.status === "adopted" ? "채택본" : "초안"} · <time dateTime={result.updated_at}>{formatAt(result.updated_at, false)}</time>
-        </p>
+        <ResultMeta result={result} />
         <div className="mt-3 space-y-4">
           {blocks.map((b) => (
             <BlockView key={b.kind === "p" ? `p${b.start_cp}` : `t${b.rows[0]?.[0]?.start_cp ?? 0}`} block={b} marks={marks} />

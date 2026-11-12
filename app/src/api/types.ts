@@ -351,9 +351,12 @@ export interface AlertView {
 export interface ResultView {
   /** 결과물 제목(사람·AI 가 쓴 글) */
   title: string;
-  version: number;
-  status: "adopted" | "draft";
-  updated_at: IsoTime;
+  /** 글 버전 번호 — 서버가 안 주면 null(SEL-126: 지어내지 않는다, 화면은 "v…" 표시를 숨긴다) */
+  version: number | null;
+  /** 채택 여부 — 라운드 읽기는 주지 않으므로 서버에서 온 결과 글은 null(화면은 채택본/초안 표시를 숨긴다) */
+  status: "adopted" | "draft" | null;
+  /** 이 버전이 쓰인 시각 — 서버가 안 주면 null(화면은 날짜를 숨긴다) */
+  updated_at: IsoTime | null;
   paragraphs: string[];
   /**
    * U4b(SEL-112) — 결과 글 선택 도구(첨언)의 기준. 셋이 모두 있어야 선택 도구가 켜진다(서버가 안 주면 없다 — 지어내지 않는다).

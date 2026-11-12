@@ -7,6 +7,7 @@
  *
  *   · "그 라운드의 결과 글" = 그 라운드가 봉인될 때 round_contents 에 role 'result' 로 담긴 글 객체(여러 개면 position 이 가장 앞선 것).
  *     봉인 전(열린 라운드) · 단계 시작 자리(start) · 결과가 담기지 않은 라운드는 result: null — 칸은 늘 있고(null), 지어내지 않는다.
+ *   · (SEL-126 후속) result 는 version_no(10진 글) · title · created_at(ISO) 도 싣는다 — 같은 현재 버전의 값. 앱은 서버가 준 값만 쓴다.
  *   · "현재 버전" = objects.current_version_id — 첨언·다시 붙이기(basis_version_id)가 판정하는 버전과 같다(append_version 은 안 옮기고, content.set_current · edit_text 채택이 옮긴다).
  *   · version_id · body_md 는 그 글 객체의 **현재 버전**(objects.current_version_id)의 값이다. 봉인 뒤 글에 새 버전이 붙으면 새 버전 값이 실린다
  *     (봉인 때 담은 옛 버전이 아니다). body_md 는 artifact_versions.body_md 그대로(정규화 없음).
@@ -142,6 +143,28 @@ test("[신규] '현재 버전'은 objects.current_version_id — append_version 
     assert.equal((await read()).version_id, loose.version_id);
     assert.equal((await read()).version_id, current_version_of(env.db, s.result.object_id));
     assert.equal((await read()).body_md, BODY_2);
+  });
+});
+
+test("[신규] result 는 version_no(10진 글) · title · created_at(ISO) 도 같은 현재 버전의 값으로 싣는다", async () => {
+  await with_api(async (env) => {
+    const s = await sealed_round(env, "a4");
+    await s.seal();
+    const first = assert_ok(await owner_get(env, round_path("1"))).result;
+    assert.equal(first.version_no, "1");
+    assert.equal(first.title, "합성 결과 a4-res");
+    assert.equal(typeof first.created_at, "string");
+    assert.ok(!Number.isNaN(new Date(first.created_at).getTime()) && new Date(first.created_at).toISOString() === first.created_at, "ISO 8601");
+    await next_version(env, "a4-v2", s.result.object_id, BODY_2);
+    const second = assert_ok(await owner_get(env, round_path("1"))).result;
+    assert.equal(second.version_no, "2");
+    assert.equal(second.title, "합성 결과 a4-v2", "제목도 현재 버전의 것");
+    // 비사람에게 가려진 경우 이 값들도 흔적이 없다
+    await close_version(env, second.version_id, "a4-close");
+    const reader = await make_agent(env, "reader", ["context:read"]);
+    const res = await get_as(env, "1", { token: reader.token });
+    assert.equal(assert_ok(res).result, null);
+    assert.ok(!JSON.stringify(res.json).includes("합성 결과 a4-v2"));
   });
 });
 
