@@ -305,7 +305,7 @@ export const maybeItem = (id: string) => document.querySelector<HTMLElement>(`[d
 export const openOrder = () => [...aside().querySelectorAll<HTMLElement>("ol [data-question]")].filter((e) => !e.closest("[aria-label='정리된 질문'],[data-region='closed']")).map((e) => e.dataset.question as string);
 export const closedPanel = () => screen.getByRole("region", { name: "정리된 질문" });
 export const filterGroup = () => within(aside()).getByRole("radiogroup", { name: "질문 거르기" });
-export const filterRadio = (label: string) => within(filterGroup()).getByRole("radio", { name: new RegExp(`^${label}\\b`) });
+export const filterRadio = (label: string) => within(filterGroup()).getByRole("radio", { name: new RegExp(`^${label}(?:\\s|$)`) });
 export const position = () => aside().querySelector<HTMLElement>("[data-position]");
 export const editor = (n: number) => within(aside()).getByRole("form", { name: `질문 ${n} 고치기` });
 export const chip = (id: string, kind: string) => item(id).querySelector<HTMLElement>(`[data-chip="${kind}"]`);
