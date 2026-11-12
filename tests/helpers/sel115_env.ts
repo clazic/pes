@@ -163,7 +163,7 @@ export function count(db: Db, table: string): number {
 }
 
 export function events_of(db: Db, type: string): Array<{ payload: string }> {
-  return db.all<{ payload: string }>("SELECT payload FROM events WHERE type = ? ORDER BY seq", type);
+  return db.all<{ payload: string }>("SELECT payload FROM events WHERE type = ? ORDER BY event_seq", type);
 }
 
 /** 응답 한 건이 담은 모든 글자(JSON + 원문 바이트) — 새어 나감 검사용. */

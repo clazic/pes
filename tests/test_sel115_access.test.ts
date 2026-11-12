@@ -120,7 +120,7 @@ test("replay: the same key + body replays the first answer and writes nothing; t
     assert.deepEqual(assert_ok(again), a);
     assert.equal(again.json.replayed, true);
     assert.equal(state_signature(env.db), sig);
-    assert_error(await set_access(env, fp, "allow", "owner", {}, "acc-key-1"), 409, "conflict");
+    assert_error(await set_access(env, fp, "allow", "owner", {}, "acc-key-1"), 409, "idempotency_key_reuse");
     assert.equal(state_signature(env.db), sig);
     assert.equal(policy_rows(env.db, env.p.project_id)[0]!.ai_access, "deny", "the conflicting reuse did not flip it");
   });

@@ -54,7 +54,7 @@ test("upload: the material is a file-source object, the blob gets ONE allow poli
       "SELECT version_id, blob_id, role, file_policy_id FROM version_files WHERE blob_id = ?",
       m.blob.blob_id,
     );
-    assert.deepEqual(vf, [{ version_id: d.version_id, blob_id: m.blob.blob_id, role: "attachment", file_policy_id: d.file_policy_id }]);
+    assert.deepEqual(vf.map((r) => ({ ...r })), [{ version_id: d.version_id, blob_id: m.blob.blob_id, role: "attachment", file_policy_id: d.file_policy_id }]);
 
     const obj = env.db.get<{ kind: string }>("SELECT kind FROM objects WHERE id = ?", d.object_id);
     assert.equal(obj?.kind, "source");
@@ -104,7 +104,7 @@ test("upload: receipt + event are written once per upload, and the same key + bo
     assert.equal(receipts(), 1);
     assert.equal(state_signature(env.db), sig, "a replay writes nothing");
 
-    assert_error(await upload_material(env, { ...body, title: "다른 제목" }, "owner", "mat-key-1"), 409, "conflict");
+    assert_error(await upload_material(env, { ...body, title: "다른 제목" }, "owner", "mat-key-1"), 409, "idempotency_key_reuse");
     assert.equal(state_signature(env.db), sig, "a conflicting reuse of the key writes nothing");
   });
 });
