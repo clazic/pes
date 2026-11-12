@@ -12,8 +12,10 @@
 import { createHash } from "node:crypto";
 
 import { ApiError } from "../errors.ts";
+import { material_object_denied } from "./file_access.ts";
 import {
   insert_receipt,
+  is_human_actor,
   is_record,
   optional_lease_guard,
   reject_unknown_fields,
@@ -887,6 +889,11 @@ function plan_append_version(
   const object = read_object(runtime, scope.project_id, object_id);
   if (object.kind !== "artifact" && object.kind !== "source") {
     throw new ApiError("conflict", "only artifacts and sources take versions");
+  }
+  // SEL-127 R-B: a caller that is not human cannot put a version on a material closed to AI (a closed file in any version). It answers
+  // exactly like an unknown object — same code, same message — before any receipt or write; the whole batch is refused.
+  if (object.kind === "source" && !is_human_actor(runtime) && material_object_denied(runtime.db, scope.project_id, object_id)) {
+    throw new ApiError("not_found", "object not found");
   }
 
   const prior = previous.get(object_id);

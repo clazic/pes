@@ -4,7 +4,7 @@
 // business rule lives here. Callers wrap multi-read use in read_tx.
 
 import type { Db } from "../db.ts";
-import { event_denied } from "./file_access.ts";
+import { closed_materials, event_denied, type ClosedMaterials } from "./file_access.ts";
 
 export interface DbMeta {
   database_instance_id: string;
@@ -57,8 +57,8 @@ export function max_event_seq(db: Db, project_id: string): bigint {
  * Events after `after`, whole transactions only. Events the caller may not see
  * are scanned (the cursor moves past them) but not returned. A page ends after
  * the transaction that reaches `limit` visible events.
- * `hide_tokens` is true for every non-human caller: it also hides token events and every event about a file closed to AI
- * (commands/file_access.ts event_denied).
+ * `hide_tokens` is true for every non-human caller: it also hides token events and every event about a material object closed to
+ * AI (commands/file_access.ts event_denied). The closed set is read once per page (two queries), not once per event.
  */
 export function changes_page(
   db: Db,
@@ -70,40 +70,72 @@ export function changes_page(
   const events: EventDto[] = [];
   let cursor = after;
   let has_more = false;
-  for (;;) {
-    const head = db.get<{ event_seq: bigint; tx_id: string }>(
-      "SELECT event_seq, tx_id FROM events WHERE project_id = ? AND event_seq > ? ORDER BY event_seq LIMIT 1",
+  let closed: ClosedMaterials | undefined;
+  // Events are read in chunks, not one transaction (or one event) per query: the number of queries depends on the chunk size,
+  // never on how many events are hidden or shown. A chunk that is full may end inside a transaction — that last group is left to the next chunk.
+  const chunk_size = Math.min(CHANGES_CHUNK_MAX, Math.max(CHANGES_CHUNK_MIN, limit * 4));
+  const event_columns = "event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at, payload";
+  scan: for (;;) {
+    let rows = db.all<EventRow>(
+      `SELECT ${event_columns} FROM events WHERE project_id = ? AND event_seq > ? ORDER BY event_seq LIMIT ?`,
       project_id,
       cursor,
+      chunk_size,
     );
-    if (head === undefined) break;
+    if (rows.length === 0) break;
     if (events.length >= limit) {
       has_more = true;
       break;
     }
-    const group = db.all<EventRow>(
-      `SELECT event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at, payload
-         FROM events WHERE project_id = ? AND tx_id = ? AND event_seq > ? ORDER BY event_seq`,
-      project_id,
-      head.tx_id,
-      cursor,
-    );
-    for (const row of group) {
-      cursor = row.event_seq;
-      if (hide_tokens && row.type.startsWith("token.")) continue;
-      if (hide_tokens && event_denied(db, project_id, row)) continue;
-      events.push({
-        event_seq: row.event_seq.toString(),
-        type: row.type,
-        object_id: row.object_id,
-        before_version_id: row.before_version_id,
-        after_version_id: row.after_version_id,
-        at: Number(row.created_at),
-      });
+    const full = rows.length === chunk_size;
+    let end = rows.length;
+    if (full) {
+      const last_tx = rows[end - 1].tx_id;
+      while (end > 0 && rows[end - 1].tx_id === last_tx) end -= 1;
+      if (end === 0) {
+        // one transaction fills the whole chunk: read it whole
+        rows = db.all<EventRow>(
+          `SELECT ${event_columns} FROM events WHERE project_id = ? AND tx_id = ? AND event_seq > ? ORDER BY event_seq`,
+          project_id,
+          last_tx,
+          cursor,
+        );
+        end = rows.length;
+      }
     }
+    let at = 0;
+    while (at < end) {
+      if (events.length >= limit) {
+        has_more = true;
+        break scan;
+      }
+      let group_end = at;
+      while (group_end < end && rows[group_end].tx_id === rows[at].tx_id) group_end += 1;
+      for (const row of rows.slice(at, group_end)) {
+        cursor = row.event_seq;
+        if (hide_tokens && row.type.startsWith("token.")) continue;
+        if (hide_tokens) {
+          closed ??= closed_materials(db, project_id);
+          if (event_denied(closed, row)) continue;
+        }
+        events.push({
+          event_seq: row.event_seq.toString(),
+          type: row.type,
+          object_id: row.object_id,
+          before_version_id: row.before_version_id,
+          after_version_id: row.after_version_id,
+          at: Number(row.created_at),
+        });
+      }
+      at = group_end;
+    }
+    if (!full) break;
   }
   return { events, last_seq: cursor, has_more };
 }
+
+const CHANGES_CHUNK_MIN = 50;
+const CHANGES_CHUNK_MAX = 500;
 
 // ---------------------------------------------------------------------------
 // the current place of an edition (SEL-82): the one rule behind GET P/workspace `current` and the address `pes open <slug> --app` prints
