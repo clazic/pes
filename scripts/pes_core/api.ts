@@ -251,6 +251,10 @@ function parse_json_or_null(text: string): unknown {
 }
 
 const FORMAT_VERSION = "1.0";
+/** SEL-102: media types that a browser shows as a page (HTML, SVG, XML, XHTML) — the same set serve.ts sandboxes in its static answers. */
+const FILE_DOCUMENT_TYPE = /^(?:text\/html|image\/svg\+xml|(?:text|application)\/(?:xml|xhtml\+xml))\s*(?:;|$)/i;
+const FILE_DOCUMENT_CSP = "sandbox allow-scripts allow-popups allow-modals allow-downloads";
+
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_WAIT_MS = 25_000;
 const MIN_POLL_INTERVAL_MS = 1000;
@@ -3501,14 +3505,18 @@ export class ApiApp {
       replayed: false,
     }));
     const found = blob.result;
-    return {
-      status: 200,
-      bytes: found.bytes,
-      headers: {
-        "content-type": is_safe_media_type(found.media_type)
-          ? found.media_type
-          : "application/octet-stream",
-      },
+    const media_type = is_safe_media_type(found.media_type)
+      ? found.media_type
+      : "application/octet-stream";
+    // SEL-102: a stored page / SVG / XML opened from this address runs its scripts on the app's origin — same sandbox as the static answer
+    // (opaque origin, no allow-same-origin); every type says nosniff so a file cannot turn into a page by guessing.
+    const headers: Record<string, string> = {
+      "content-type": media_type,
+      "x-content-type-options": "nosniff",
     };
+    if (FILE_DOCUMENT_TYPE.test(media_type.trim())) {
+      headers["content-security-policy"] = FILE_DOCUMENT_CSP;
+    }
+    return { status: 200, bytes: found.bytes, headers };
   }
 }

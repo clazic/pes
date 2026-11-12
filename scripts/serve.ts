@@ -52,8 +52,15 @@ const MAX_API_QUERY = 2048;
  * dialogs, pop-ups and downloads keep working. No allow-same-origin / allow-top-navigation / allow-forms. Never on PDF / images (Chromium's PDF viewer is blocked by it).
  */
 const REPORT_HTML_CSP = "sandbox allow-scripts allow-popups allow-modals allow-downloads";
-/** SEL-86: the app's index.html runs only scripts of its own origin (the build has no inline script). No sandbox — the app needs its same-origin sessionStorage. */
-const APP_INDEX_CSP = "script-src 'self'";
+/**
+ * SEL-86 / SEL-102: the app's index.html runs only scripts under the build's own path (/_app/…) — not every script of the origin, so a .js a project folder holds cannot be loaded
+ * by an HTML page the AI wrote there. The build has no inline script. No sandbox — the app needs its same-origin sessionStorage. A CSP host-source needs the host, so this is the tail
+ * the server puts after the request's own origin ("http://127.0.0.1:<port>" + this).
+ */
+const APP_SCRIPT_PATH = "/_app/";
+const app_index_csp = (origin: string): string => `script-src ${origin}${APP_SCRIPT_PATH}; base-uri 'none'; object-src 'none'`;
+/** SEL-102: every static answer says "do not guess the type" — a text file must not turn into a page, nor a page's type be changed by sniffing. */
+const NOSNIFF = "nosniff";
 /** SEL-86: SVG opened as a page runs its scripts like HTML does, so it gets the same sandbox (an <img> of it is not a page — it still shows). Raster images and PDF never do. */
 const needs_report_csp = (content_type: string): boolean => /^(text\/html|image\/svg\+xml|(?:text|application)\/(?:xml|xhtml\+xml))\b/i.test(content_type);
 const REPORT_TYPES: Record<string, string> = { ".svg": "image/svg+xml; charset=utf-8", ".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8" };
@@ -285,6 +292,12 @@ async function start(config: Config): Promise<void> {
   // Load the database code BEFORE listening: otherwise the first answer waits for it. A failure here is not fatal: the first answer meets it again and is refused with 503.
   await import("./pes_core/cli_bridge.ts").catch(() => undefined);
   const allowed = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+  /** The origin this request came to (127.0.0.1 or localhost, this port) — the app's script source is under it; anything else (odd Host) falls back to 127.0.0.1. */
+  const request_origin = (req: IncomingMessage): string => {
+    const host = req.headers.host;
+    const origin = typeof host === "string" ? `http://${host.toLowerCase()}` : "";
+    return allowed.has(origin) ? origin : `http://127.0.0.1:${port}`;
+  };
   const db = make_db(root);
   // one-time app codes (SEL-85): server memory only, gone with this process; PES_APP_CODE_TTL_MS (ms) shortens or lengthens the 60 s life
   const app_codes = new AppCodes({ ttl_ms: code_ttl_ms(process.env.PES_APP_CODE_TTL_MS) });
@@ -297,7 +310,7 @@ async function start(config: Config): Promise<void> {
 
   const send = (req: IncomingMessage, res: ServerResponse, status: number, headers: Record<string, string | number>, body: Buffer | string = ""): void => {
     const bytes = typeof body === "string" ? Buffer.from(body, "utf8") : body;
-    res.writeHead(status, { "Cache-Control": "no-store", ...headers, "Content-Length": bytes.length });
+    res.writeHead(status, { "Cache-Control": "no-store", "X-Content-Type-Options": NOSNIFF, ...headers, "Content-Length": bytes.length });
     res.end(req.method === "HEAD" ? undefined : bytes);
   };
 
@@ -351,22 +364,25 @@ async function start(config: Config): Promise<void> {
   };
 
   /**
-   * SEL-86: is `file` inside a project's reports/ or out/ folder (the first word under the slug — any project folder, DB or legacy, with or without project.json; or under the home itself when the home is one project)?
-   * The AI's HTML lives there, so its text/html gets the sandbox. Judged on the translated path AND on the real path (a link whose real place is reports/ or
-   * out/ counts), words compared lower-case (a case-insensitive disk opens `Reports/`).
+   * SEL-102: is `file` one of the old screens that need the same origin (they fetch from it)? Only these are served without the sandbox: the dashboard `index.html` and the question forms
+   * `ask-*.html` DIRECTLY under a project folder (the first word under the home is a slug), the hub `index.html` directly under the home, and — when the home itself is one project
+   * (project.json at the root) — its `ask-*.html`. Any other HTML / SVG / XML, wherever it lies (notes/x.html, reports/…, notes/index.html), is a document of the AI and gets the sandbox.
+   * Judged on the translated path AND on the real path (a link whose real place is not such a screen does not become one, and a screen that is a link elsewhere does not stay one);
+   * names compared exactly (`INDEX.HTML` is not the dashboard — it gets the sandbox, the safe side). A path that cannot be resolved counts as not exempt.
    */
-  const in_report_zone = (file: string): boolean => {
-    const zone = (absolute: string, base: string): boolean => {
+  const is_legacy_screen = (file: string): boolean => {
+    const screen = (absolute: string, base: string): boolean => {
       const rel = relative(base, absolute);
       if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
       const words = rel.split(sep).filter((word) => word !== "");
-      const first_under = (name: string | undefined): boolean => name !== undefined && (name.toLowerCase() === "reports" || name.toLowerCase() === "out");
-      if (existsSync(join(root, "project.json")) && first_under(words[0])) return true;
-      return words[0] !== undefined && SLUG.test(words[0]) && first_under(words[1]);
+      const ask = (name: string | undefined): boolean => name !== undefined && /^ask-.*\.html$/.test(name);
+      if (words.length === 1) return words[0] === "index.html" || (ask(words[0]) && existsSync(join(root, "project.json")));
+      if (words.length === 2) return SLUG.test(words[0] as string) && (words[1] === "index.html" || ask(words[1]));
+      return false;
     };
-    if (zone(file, root)) return true;
+    if (!screen(file, root)) return false;
     try {
-      return zone(realpathSync.native(file), real_root);
+      return screen(realpathSync.native(file), real_root);
     } catch {
       return false;
     }
@@ -409,8 +425,9 @@ async function start(config: Config): Promise<void> {
       "Content-Length": stat.size,
       "Last-Modified": new Date(stat.mtimeMs).toUTCString(),
       "Cache-Control": "no-store",
+      "X-Content-Type-Options": NOSNIFF,
     };
-    if (needs_report_csp(content_type) && in_report_zone(target)) headers["Content-Security-Policy"] = REPORT_HTML_CSP;
+    if (needs_report_csp(content_type) && !is_legacy_screen(target)) headers["Content-Security-Policy"] = REPORT_HTML_CSP;
     if (req.method === "HEAD") {
       res.writeHead(200, headers);
       res.end();
@@ -451,8 +468,8 @@ async function start(config: Config): Promise<void> {
       return not_found(req, res);
     }
     const content_type = guess_type(target);
-    const headers: Record<string, string | number> = { "Content-Type": content_type, "Content-Length": stat.size, "Last-Modified": new Date(stat.mtimeMs).toUTCString(), "Cache-Control": "no-store" };
-    if (/^text\/html/i.test(content_type)) headers["Content-Security-Policy"] = APP_INDEX_CSP;
+    const headers: Record<string, string | number> = { "Content-Type": content_type, "Content-Length": stat.size, "Last-Modified": new Date(stat.mtimeMs).toUTCString(), "Cache-Control": "no-store", "X-Content-Type-Options": NOSNIFF };
+    if (/^text\/html/i.test(content_type)) headers["Content-Security-Policy"] = app_index_csp(request_origin(req));
     if (req.method === "HEAD") {
       res.writeHead(200, headers);
       res.end();
