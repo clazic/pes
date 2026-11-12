@@ -8,12 +8,14 @@
 // The three layers (for every child, Python or not):
 //   1. assert_isolated_env(env)  — a child process may only start with HOME / USERPROFILE / PES_HOME inside one temp folder that
 //                                  is not (and does not contain, and is not inside) the protected folders of either real home.
-//   2. use_home_guard()          — names / sizes / mtimes (never contents) of the real <home>/.pes and <home>/pes-projects are
-//                                  taken before the file's tests and compared after them; any change fails the file. An absent
-//                                  folder must stay absent. This catches creations / deletions / edits, never a pure read.
+//   2. use_home_guard()          — names / sizes / mtimes (never contents) of <home>/.pes and <home>/pes-projects are taken before the file's
+//                                  tests and compared after them; any change fails the file. An absent folder must stay absent. This catches
+//                                  creations / deletions / edits, never a pure read. (SEL-103) Only the TEMPORARY home (os.homedir()) and the
+//                                  fake homes a test passes in are listed — the real account home is NEVER listed: a lstat / readdir of ~/.pes
+//                                  is itself a look at it. The real account home is protected by layers 0 and 4, decided from spellings.
 //   3. assert_no_real_path(text) — a child's stdout / stderr / a produced file must not mention a protected real path.
-// "Real home" means BOTH os.homedir() (follows $HOME, i.e. the temp folder when the whole run is isolated) and
-// os.userInfo().homedir (the account's home, whatever $HOME says); a duplicate is looked at once.
+// "Real home" (what is PROTECTED: layers 1, 3, 4, touches_protected) means BOTH os.homedir() (follows $HOME, i.e. the temp folder when the whole run is isolated)
+// and os.userInfo().homedir (the account's home, whatever $HOME says); a duplicate is looked at once. What is LISTED (layer 2) is less: listed_homes().
 // 4. guard_process_fs()        — (SEL-95, SEL-103) the test process itself: every path-taking fs call (stat · read · readdir · exists · open · write ·
 //                                  realpath · statfs · glob · mkdtemp · chown · lutimes · watch · openAsBlob …, sync, callback and promises)
 //                                  on a path inside the real <home>/.pes, <home>/pes-projects or <home>/.claude is recorded as a
@@ -26,8 +28,10 @@
 //                                  ancestor (`globSync("*/x", { cwd: home })` — only the cwd and the pattern's own spelling are looked at), other
 //                                  channels (child processes, node:sqlite, native addons, `process.binding`).
 // 0. (SEL-103) a run that STARTS in the real account home is refused before any layer lists anything: require_temp_home.ts (`--import`) and the first import
-//    of this file compare HOME / USERPROFILE with the account home as strings (temp_home_check.ts) — no fs call on the real home.
-// Layer 2 reuses the Playwright globalSetup listing (tests/e2e/helpers/home_guard.ts). All of it works with a *fake* "real home"
+//    of this file compare HOME / USERPROFILE with the account home as strings (temp_home_check.ts) — no fs call on the real home. The Playwright run
+//    is refused the same way (playwright.config.ts · the globalSetup).
+// Layer 2 reuses the Playwright globalSetup listing (tests/e2e/helpers/home_guard.ts). No default look at the account home anywhere — the guard does not even
+// realpath it (base_spellings): tests/test_sel103_no_account_listing proves it with a recorder (zero fs calls) on a fake account home. All of it works with a *fake* "real home"
 // too, so the guard itself is tested without touching anything real (tests/test_home_guard.test.ts).
 
 // SEL-103: FIRST import, on purpose — a run that starts in the real account home must fail here, before anything below (the snapshot helper, the guard) can list or
@@ -42,7 +46,7 @@ import { fileURLToPath } from "node:url";
 import { after, before } from "node:test";
 
 import { snapshot_of } from "../e2e/helpers/home_guard.ts";
-import { PROTECTED_NAMES } from "./temp_home_check.ts";
+import { PROTECTED_NAMES, default_account_homes, is_account_home } from "./temp_home_check.ts";
 
 /** Folders of a real home no test may look at. `.pes` and `pes-projects` are also compared before / after (layer 2); `.claude` is denied only —
  * other Claude sessions write there all the time, so a before / after comparison of it is a flaky test, not a guard (SEL-95, D13). */
@@ -68,6 +72,22 @@ type Homes = string | readonly string[];
 function homes_of(real_home: Homes | undefined): readonly string[] {
   if (real_home === undefined) return real_homes();
   return typeof real_home === "string" ? [real_home] : real_home;
+}
+
+/**
+ * The homes whose `.pes` / `pes-projects` the before / after listing (layer 2) may LOOK at (SEL-103): the temporary HOME (os.homedir(); layer 0 has refused
+ * the run if it were the real one) and the fake homes a test passes in — never an account home. The real account home is protected by layer 0 and layer 4
+ * (decided from spellings); listing it would itself be a lstat / readdir of ~/.pes, which nothing may do. Decided by comparing strings, no fs call.
+ */
+export function listed_homes(real_home?: Homes): readonly string[] {
+  const accounts = default_account_homes();
+  return (real_home === undefined ? [homedir()] : homes_of(real_home)).filter((home) => !is_account_home(home, accounts));
+}
+
+/** Every spelling of the homes' own folders: as given, and (a temporary or fake home) with symlinks / 8.3 names resolved. An account home is NOT resolved — realpath of it would be an fs call on the real home; its spelling (os.userInfo().homedir) is already the canonical one. */
+function base_spellings(homes: readonly string[]): string[] {
+  const accounts = default_account_homes();
+  return [...new Set(homes.flatMap((home) => (is_account_home(home, accounts) ? [resolve(home)] : [resolve(home), native(home)])))];
 }
 
 const cjs_fs = createRequire(import.meta.url)("node:fs") as Record<string, any>;
@@ -99,7 +119,7 @@ function norm(path: string): string {
 
 /** Every spelling of the protected folders of one home: as given, resolved (symlinks / 8.3 names), forward and doubled backslashes. */
 export function protected_paths(real_home?: Homes): string[] {
-  const bases = new Set(homes_of(real_home).flatMap((home) => [resolve(home), native(home)]));
+  const bases = new Set(base_spellings(homes_of(real_home)));
   const out = new Set<string>();
   for (const base of bases) {
     for (const name of PROTECTED_NAMES) {
@@ -128,7 +148,7 @@ function inside(path: string, folder: string): boolean {
  * see through a symlink / junction alias.
  */
 export function touches_protected(path: string, real_home?: Homes): boolean {
-  const bases = new Set(homes_of(real_home).flatMap((home) => [resolve(home), native(home)]));
+  const bases = new Set(base_spellings(homes_of(real_home)));
   for (const base of bases) {
     for (const name of PROTECTED_NAMES) if (inside(path, join(base, name))) return true;
   }
@@ -147,7 +167,7 @@ export function assert_isolated_env(env: Record<string, string | undefined>, rea
     assert.ok(!touches_protected(value, real_home), `home guard: ${key} points into the real PES home (${value})`);
   }
   assert.equal(env.HOME, env.USERPROFILE, "home guard: HOME and USERPROFILE must be the same folder");
-  const real = new Set(homes_of(real_home).flatMap((home) => [resolve(home), native(home)]).map(norm));
+  const real = new Set(base_spellings(homes_of(real_home)).map(norm));
   assert.ok(!real.has(norm(env.HOME as string)), "home guard: HOME is the real home");
   assert.ok(!real.has(norm(env.PES_HOME as string)), "home guard: PES_HOME is the real home");
   for (const key of ["PES_OWNER", "PES_TOKEN", "PES_DB_CORE"] as const) {
@@ -163,14 +183,14 @@ export function assert_no_real_path(text: string, what: string, real_home?: Home
 }
 
 export interface HomeSnapshot {
-  /** the homes that were listed (os.homedir() and the account home unless given) */
+  /** the homes that were listed: os.homedir() (the temporary HOME) unless given — never the account home (listed_homes) */
   readonly homes: readonly string[];
   readonly before: string;
   check(): void;
 }
 
 export function take_home_snapshot(real_home?: Homes): HomeSnapshot {
-  const homes = homes_of(real_home);
+  const homes = listed_homes(real_home);
   const list = (): string => unguarded(() => JSON.stringify(homes.map((home) => snapshot_of(home))));
   const first = list();
   return {
@@ -246,7 +266,7 @@ export interface ProcessFsGuard {
  * Sync and callback forms throw at once; promise forms reject; the iterator forms (`promises.glob` · `promises.watch`) fail on the first iteration.
  */
 export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
-  const bases = [...new Set(homes_of(real_home).flatMap((home) => [resolve(home), native(home)]))];
+  const bases = base_spellings(homes_of(real_home));
   const folders = bases.flatMap((base) => PROTECTED_NAMES.map((name) => join(base, name)));
   const violations: string[] = [];
   const hit = (fn: string, value: unknown): void => {

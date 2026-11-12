@@ -143,6 +143,17 @@ export function default_account_homes(env: Record<string, string | undefined> = 
   return out;
 }
 
+/**
+ * SEL-103: is `path` (the spelling alone — no fs call) one of the account's real homes? Used to leave the real account home out of every listing: the
+ * default listing holds only the temporary HOME and the fake homes a test injects. Same spelling rules as the start check (canon()).
+ */
+export function is_account_home(path: string, account_homes: readonly string[] = default_account_homes(), platform: string = process.platform): boolean {
+  const fold = folds_case(platform);
+  const home = canon(path, fold);
+  if (home === undefined) return false;
+  return account_homes.some((account) => canon(account, fold) === home);
+}
+
 /** Throws before anything is listed or opened when the run starts in the real account home. */
 export function assert_temp_home_env(env: Record<string, string | undefined> = process.env, account_homes: readonly string[] = default_account_homes(env)): void {
   const problem = real_home_problem(env, account_homes);
