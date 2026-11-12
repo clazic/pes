@@ -98,7 +98,8 @@ test("B2 the app's Playwright config: the helper is its first import and the fir
 });
 
 test("B3 the CI app job runs its test steps with a temporary HOME and USERPROFILE, and keeps the browsers outside HOME", () => {
-  const ci = readFileSync(join(REPO, ".github", "workflows", "ci.yml"), "utf8");
+  // a Windows checkout has CRLF line ends — fold them so the "\n  app:\n" job boundaries are found on every OS
+  const ci = readFileSync(join(REPO, ".github", "workflows", "ci.yml"), "utf8").replace(/\r\n/g, "\n");
   const start = ci.indexOf("\n  app:\n");
   assert.ok(start > 0, "the app job");
   const job = ci.slice(start, ci.indexOf("\n  install-", start) > 0 ? ci.indexOf("\n  install-", start) : undefined);
