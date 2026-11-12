@@ -876,7 +876,7 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/context:
     get:
-      summary: Read the project's consistency boundary, policy, stages, manifest, and lease
+      summary: Read the project's consistency boundary, policy, stages, manifest, materials, and lease
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:
@@ -1148,6 +1148,143 @@ paths:
         "404": { description: Unknown blob in this project }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
         "409": { description: Blob is not ready or stored bytes do not match }
+  /api/v1/projects/{id}/files/{b}/preview:
+    get:
+      summary: Preview a ready blob (SEL-115) - the same bytes, safety headers and AI-access rule as content, plus a content-disposition
+      description: |
+        Same checks as `files/{b}/content` (file:read, Go gate, a denied file is 403 for every non-human caller; the owner session always reads).
+        Always `X-Content-Type-Options: nosniff`; a type outside the short safe list also gets the document sandbox (`Content-Security-Policy: sandbox ...`,
+        never `allow-same-origin`) - the one judgement of `document_sandbox.ts`. `Content-Disposition` is `inline` only for `text/plain`, `image/png`
+        and `application/pdf`; every other type is `attachment`. The content type is the stored one when it is a plain MIME type, else `application/octet-stream`.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/BlobId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Raw bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:read scope, Go policy denied, or the file is closed to AI (ai_access deny) }
+        "404": { description: Unknown blob in this project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "409": { description: Blob is not ready or stored bytes do not match }
+  /api/v1/projects/{id}/materials:
+    post:
+      summary: Add a user's own material (SEL-115) - a ready blob becomes a file source object, or a new version of one
+      description: |
+        Body `{blob_id, title?, object_id?, role?}` (role defaults to `attachment`). Without `object_id` a new material (a `source` object of kind `file`) and
+        its first version are made; with `object_id` the blob becomes the next version of that material and the current pointer moves to it.
+        The blob has ONE file policy shared by every use: the first attach creates it as `allow` (rev 1); the same bytes uploaded again reuse it, so a
+        re-upload never resets a `deny`. Data: `{object_id, version_id, version_no, blob_id, file_policy_id, role, ai_access, original_name, media_type, size, sha256}`;
+        `ai_access` is given to a human caller only (an AI caller never gets the key). A caller that is not human who names a blob closed to AI, or a material
+        object that carries a closed file, gets the same 404 as for an unknown blob or object, before anything is written. Known limit: `POST uploads` returns
+        `blob_id` and `deduplicated: true` for bytes the project already holds, so whoever has the same bytes can learn that the file exists and whether it is
+        closed to AI (`GET files/{b}/content` is 403 for a closed file; `POST materials` is 404); no name, policy id or text goes with it. The unit of every
+        AI-facing read is the material object: a closed file in any version closes every version of it (a later version inherits the earlier title, the file name).
+        Writes through the command `file.upload` (receipt and event `file.material_uploaded`). The same key and body replay the first answer;
+        the same key with another body is 409 `idempotency_key_reuse`.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [blob_id]
+              properties:
+                blob_id: { type: string }
+                title: { type: string, maxLength: 300 }
+                object_id: { type: string }
+                role: { type: string, enum: [attachment, image, source, rendered, manifest] }
+      responses:
+        "201":
+          description: Material added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Unknown field, bad role or title }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope }
+        "404": { description: Unknown blob (or a blob of another project) or unknown object; for a caller that is not human also a blob closed to AI or an object that carries one }
+        "409": { description: The blob is not ready, the object is not a material, the object already has this blob in this role, or the key was used for another body (idempotency_key_reuse) }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: List the user's own materials (SEL-115) - the file of each material's current version
+      description: |
+        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?}]}`.
+        The owner session sees every material and each one's `ai_access` (the value in force: `deny` when the policy row or its newest history row says deny).
+        Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` key and with no trace of a closed file - not its name,
+        ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
+        material objects (the human manifest lists them with `ai_access: deny`); `digest` is computed from the manifest the caller gets, so it differs by audience.
+        `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` and the
+        hand-off bundle's `base_versions` leave out closed files and materials.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Materials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/file-policies/{fp}/ai-access:
+    post:
+      summary: Switch whether AI may reference one file (SEL-115) - the owner session only
+      description: |
+        Body `{ai_access: "allow"|"deny", reason?}`. A change appends one row to the file's history (rev = newest rev + 1) and puts the same value and
+        rev on the policy row; nothing is overwritten. Setting the value already in force writes nothing and answers `changed:false`.
+        A deny in the policy row or in the newest history row is a deny (the strict side wins). The same blob is one policy, so every material,
+        version and role of the same bytes is closed together. Data `{file_policy_id, blob_id, ai_access, rev, changed}`.
+        Writes through the command `file.ai_access_set` (receipt and event `file.ai_access_changed`; a no-op leaves the event `file.ai_access_confirmed`).
+        This closes the PES API, the MCP tools and the built-in runner; it does not control a local folder a user's own tool reads directly.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: fp
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ai_access]
+              properties:
+                ai_access: { type: string, enum: [allow, deny] }
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: Done (or unchanged)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Bad value, unknown field or bad reason }
+        "401": { description: Missing or invalid credential }
+        "403": { description: An agent token (whatever its scopes) - the switch is the owner's }
+        "404": { description: Unknown file policy in this project }
+        "409": { description: The key was used for another body (idempotency_key_reuse) }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/project-registrations:
     post:
       summary: First registration of a project by device approval (owner session only); returns the first token once (a replay has no token and says token_issued_before true)
