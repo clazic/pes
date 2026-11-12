@@ -238,6 +238,9 @@
               "file_policies.ai_access.set": {
                 "supported": true
               },
+              "file_extractions.create": {
+                "supported": true
+              },
               "exports.create": {
                 "supported": false
               },

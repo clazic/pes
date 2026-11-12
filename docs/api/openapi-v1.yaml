@@ -1221,7 +1221,8 @@ paths:
     get:
       summary: List the user's own materials (SEL-115) - the file of each material's current version
       description: |
-        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?}]}`.
+        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?, extraction_status, extraction}]}`.
+        `extraction_status` is `extracted|partial|unsupported|failed|not_extracted` for the current version's file; `extraction` is `null` or `{extraction_id, status, source_format, extractor, extractor_version, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings, reason, text_ai_access?}` (SEL-116). An AI caller gets `text_*` as `null` when the text is closed (its own policy or its source's); `text_ai_access` is the owner's only.
         The owner session sees every material and each one's `ai_access` (the value in force: `deny` when the policy row or its newest history row says deny).
         Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` key and with no trace of a closed file - not its name,
         ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
@@ -1283,6 +1284,53 @@ paths:
         "403": { description: An agent token (whatever its scopes) - the switch is the owner's }
         "404": { description: Unknown file policy in this project }
         "409": { description: The key was used for another body (idempotency_key_reuse) }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/file-extractions:
+    post:
+      summary: Pull the text and tables out of one material file (SEL-116) - owner session or a file:write token
+      description: |
+        Body `{version_id, blob_id}` (the blob must be attached to that version). Reads the stored bytes, extracts, stores the text as a blob of its own and
+        records one `file_extractions` row, whatever the outcome. Formats by the original name's extension: `txt` `md` `csv` (UTF-8 only; BOM removed, CRLF/CR become LF;
+        another encoding is `failed / invalid_encoding`, the text is never guessed), `docx` `xlsx` `pptx` `hwpx` (zip + XML read with Node built-ins only; paragraphs one per line,
+        tables as Markdown pipe tables), and `hwp` `doc` `xls` `ppt` `pdf` or an unknown extension = `unsupported` (no text, no blob, no policy; nothing is made up).
+        A damaged file is `failed` (`invalid_container`, `invalid_document`); a file over 32 MiB, or a zip whose parts unpack past 64 MiB in total, is `failed / too_large`
+        (the cap is on the real unpacked bytes, never the size in the zip header; no part of the text is returned). One unreadable slide, sheet or section is `partial`
+        with a `part_unreadable` warning; the readable parts are kept.
+        Data `{extraction_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status: extracted|partial|unsupported|failed,
+        reason, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings:[{code,message}], changed}`.
+        The text blob has its OWN policy, created `allow` rev 1 (never inherited from the source). AI reads it only when the source policy AND the text policy both allow
+        (strict side wins; `GET files/{text_blob_id}/content|preview` is 403 otherwise, and the list hides the text ids). One blob has one policy, so when the extracted text is
+        byte-for-byte the source (a plain UTF-8 txt/md/csv without BOM or CRLF) no second blob exists: `text_blob_id` and `text_file_policy_id` are the source's own.
+        Asking again for the same version file and extractor writes nothing (no row, blob, policy, receipt or event) and answers the stored result with `changed:false`.
+        A caller that is not human who names a closed file gets 403 `forbidden`, before anything is written. Writes through the command `file.extract` (receipt and event `file.extracted`;
+        the event carries no text and no file name).
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version_id, blob_id]
+              properties:
+                version_id: { type: string }
+                blob_id: { type: string }
+      responses:
+        "201":
+          description: Extraction recorded (or the stored one, changed:false)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Missing or mistyped field, or an unknown field }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope, or a caller that is not human names a file closed to AI }
+        "404": { description: Unknown version or blob, or a blob not attached to that version }
+        "409": { description: The blob is not ready, or the key was used for another body (idempotency_key_reuse) }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/project-registrations:
