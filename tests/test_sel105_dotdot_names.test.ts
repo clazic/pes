@@ -74,7 +74,7 @@ test("S1 scripts/ 어디에도 `rel.startsWith(\"..\")` 같은 느슨한 부모 
   const hits: string[] = [];
   for (const file of ts_files(join(REPO, "scripts"))) {
     readFileSync(file, "utf8")
-      .split("\n")
+      .split(/\r?\n/) // Windows 체크아웃은 CRLF — '\r' 이 남으면 `//.*$` 가 주석을 못 지운다(`.` 은 '\r' 에 안 맞음)
       .forEach((line, i) => {
         if (bad.test(line.replace(/\/\/.*$/, ""))) hits.push(`${file.slice(REPO.length + 1)}:${i + 1}: ${line.trim()}`);
       });
