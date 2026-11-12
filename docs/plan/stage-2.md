@@ -235,6 +235,8 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/policies/opencode-go/revisions` | H | PR14 | PR10 | 사람만, 정책 이력·재생 전 검사 |
 | `POST P/questions`·`/revisions` | E/H | PR14 | PR8 | 질문 게시·수정, 답과 분리 |
 | `POST P/questions/{q}/withdraw`·`/defer`·`/merge` | H/허가된 E | 3단계 U2a(SEL-90) | `question.withdraw`·`question.defer`·`question.merge` | 질문의 새 버전(state `withdrawn`·`deferred`·`merged`), 옛 버전·옛 답 보존, 폼의 최신 세트에서 같은 tx 로 빠짐, 전이표 밖은 409, 지우지 않음 |
+| `GET P/stages/{s}/rounds/{rd}`·`GET P/stages/{s}/rounds/{rd}/threads` | H/E(`context:read`) | 3단계 U2d(SEL-98) | (읽기, 명령 없음) | 라운드 하나의 폼 세트·질문 현재 버전·현재 답, 질문별 의견 목록. 새 표 없음 |
+| `POST P/question-sets/{set}/order` | H/허가된 E | 3단계 U2d(SEL-98) | `question.reorder` | 새 폼 세트 하나(순서만 다름)를 한 tx 로 발행, 새 질문·질문 버전·답 없음, 낡은 세트 409 `stale_set`, 순열 아니면 422 |
 | `POST P/threads`(질문 의견 `question_comment`)·`POST P/threads/{t}/messages` | H/허가된 E | 3단계 U2a(SEL-90) | `question.comment_add` | 질문 의견은 답이 아니다(답·제출 0). 앵커 문맥 `annotation` 은 U4a 까지 501 |
 | `POST P/assumptions`·`GET P/assumptions` | H/E(제안), H(판단) | 3단계 U3a(SEL-93) | `assumption.propose`·`assumption.assess` | 제안(state `proposed`, `needs_review`)은 소유자·토큰, `confirmed`·`rejected`·`revised` 판단은 소유자 세션만(토큰 403 `human_required`). 판단은 새 버전, 원문 보존. 읽기는 객체마다 현재 버전 한 줄 |
 | `POST P/decisions`·`GET P/decisions` | H/E(제안), H(채택·대체·폐기) | 3단계 U3a(SEL-93) | `decision.propose`·`decision.adopt`·`decision.supersede`·`decision.revoke` | 제안은 채택이 아니다. 채택·대체·폐기는 사람만, 전이표 `proposed→adopted→superseded\|revoked`, 대체는 새 결정+옛 결정의 새 버전, 대체 대상이 adopted 가 아니면 409 `supersedes_conflict` |

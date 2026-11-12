@@ -59,6 +59,11 @@
             "asked_by_actor_id": "id_01J9Z3K7QZ",
             "intended_actor_id": null
           }
+        },
+        "receipt": {
+          "receipt_no": "50",
+          "tx_id": "txn_01J9Z3K7R10",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

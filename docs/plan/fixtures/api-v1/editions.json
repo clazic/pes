@@ -39,6 +39,11 @@
             "parent_edition_id": "edt_01J9Z3K7Q3"
           },
           "active_edition_id": "edt_01J9Z3K7Q3"
+        },
+        "receipt": {
+          "receipt_no": "44",
+          "tx_id": "txn_01J9Z3K7R04",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }
