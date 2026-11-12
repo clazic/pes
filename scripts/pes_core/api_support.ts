@@ -167,6 +167,7 @@ const VALIDATION_REASONS: ReadonlySet<string> = new Set([
   "single_requires_one_item",
   "self_merge",
   "not_a_permutation",
+  "no_change",
 ]);
 
 /** Map a core ApiError (or anything else) to a Fail. Route code may refine it afterwards. */

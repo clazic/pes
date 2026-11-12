@@ -1406,7 +1406,8 @@ function not_a_permutation(message: string, details: Record<string, unknown>): n
  * old set's questions in the given order. No new question, no new question version, no answer; each member stands at its
  * question's current version (the one rule of every new set). Only the form's NEWEST set can be reordered (an older one is
  * `conflict`, reason `stale_set`), only while its round is open and its edition active. `question_ids` must be a permutation
- * of the set's members: a missing, repeated or unknown id is `invalid_payload` (reason `not_a_permutation`) and writes nothing.
+ * of the set's members: a missing, repeated or unknown id is `invalid_payload` (reason `not_a_permutation`) and writes nothing;
+ * the set's own current order is `invalid_payload` (reason `no_change`) and writes nothing either.
  */
 function run_reorder(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
@@ -1485,6 +1486,11 @@ function run_reorder(runtime: CommandRuntime): CommandResult {
       expected: old_members.length,
       given: question_ids.length,
     });
+  }
+
+  // the same order as now is not a change: no new set, no event (a write that only bumps the form version)
+  if (question_ids.every((id, index) => id === old_members[index]?.question_id)) {
+    throw new ApiError("invalid_payload", "the order is the set's current order", { reason: "no_change" });
   }
 
   const set_version_no = Number(set.version_no) + 1;

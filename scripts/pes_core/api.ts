@@ -2959,7 +2959,7 @@ export class ApiApp {
       () => this.#service.execute(this.#ctx(project, auth, key), "question.reorder", payload),
       (error) => {
         const failure = fail_from(error);
-        if (failure.code === "validation_failed" && failure.details?.reason === "not_a_permutation") {
+        if (failure.code === "validation_failed" && (failure.details?.reason === "not_a_permutation" || failure.details?.reason === "no_change")) {
           return new Fail("validation_failed", { target: "$.body.question_ids", details: failure.details });
         }
         if (error instanceof ApiError && error.code === "conflict" && is_record(error.details) && error.details.reason === "stale_set") {

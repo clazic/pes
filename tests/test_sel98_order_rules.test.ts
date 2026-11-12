@@ -324,3 +324,22 @@ test("[신규] 문서: 8.8 이 '보류는 되돌릴 수 없다'를 적고, 빠�
   assert.match(line!, /현재 버전/);
   assert.match(doc, /순서 바꾸기/);
 });
+
+// 1차 리뷰 권장 7(a): 새 순서가 현재 순서와 같으면 헛 쓰기(새 세트·사건) 대신 422 no_change 로 거절한다 — 아무것도 쓰지 않는다.
+test("[신규] 순서 바꾸기: 현재 순서와 같은 순서는 422 validation_failed(reason no_change, target $.body.question_ids) — 새 세트·사건 0", async () => {
+  await with_api(async (env) => {
+    const f = await make_form(env, [single_spec("가"), single_spec("나"), single_spec("다")]);
+    const [a, b, c] = f.ids as [string, string, string];
+    const sig = state_signature(env.db);
+    const sets = set_count(env.db, f.stage_id);
+    const error = assert_error(await order(env, f.set.set_id, [a, b, c], "ord-noop"), 422, "validation_failed");
+    assert.equal(error.target, "$.body.question_ids");
+    assert.equal(error.details?.reason, "no_change");
+    assert.equal(set_count(env.db, f.stage_id), sets);
+    assert.deepEqual(state_signature(env.db), sig, "거절은 아무것도 쓰지 않는다");
+    // 한 번 바꾼 뒤에는 그 순서가 '현재' 순서다
+    assert_ok(await order(env, f.set.set_id, [b, c, a], "ord-real"), 201);
+    const now = latest_set(env.db, env.p.project_id, f.stage_id);
+    assert_error(await order(env, now.id, [b, c, a], "ord-noop2"), 422, "validation_failed");
+  });
+});
