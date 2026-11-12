@@ -2,6 +2,14 @@
 // not be re-sent to another address), has a time limit, and tells apart "an answer arrived" from "no answer":
 // a timeout and a lost connection are different outcomes from an HTTP error status, because only the first two
 // leave a model call whose result nobody knows.
+//
+// SEL-79: the default fetch (undici) reuses an idle keep-alive socket. If the server closed that socket just before
+// the new request's bytes arrived, undici does not retry a POST, the fetch rejects and the call would count as
+// "lost" (usage_unknown) although nothing reached the server. So the DEFAULT POST path (model calls; the GET model listing is left as it was) sends `connection: close`: undici
+// then ends the socket after every reply, no call ever rides on a reused socket, and that race cannot happen. Chosen
+// because it is one header on Node's built-in fetch (no new dependency, no custom Agent, same on Windows and macOS)
+// and it never retries anything: a request that was sent and broke is still "lost". The cost is one new connection
+// per model call, small next to a model call. An injected fetch_fn is used exactly as given (no header added).
 
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -55,15 +63,18 @@ async function read_text_limited(response: Response, max_bytes: number, received
 export async function http_json(
   request: HttpRequest,
   timeout_ms: number,
-  fetch_fn: FetchFn = fetch,
+  fetch_fn: FetchFn | undefined = undefined,
   max_bytes: number = MAX_RESPONSE_BYTES,
 ): Promise<HttpOutcome> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout_ms);
   const received: Received = { chunks: [] };
+  const send: FetchFn =
+    fetch_fn ??
+    ((url, init) => (request.method === "POST" ? fetch(url, { ...init, headers: { ...request.headers, connection: "close" } }) : fetch(url, init)));
   let status: number | undefined;
   try {
-    const response = await fetch_fn(request.url, {
+    const response = await send(request.url, {
       method: request.method,
       headers: request.headers,
       ...(request.body === undefined ? {} : { body: request.body }),
