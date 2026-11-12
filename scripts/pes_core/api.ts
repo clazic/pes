@@ -53,7 +53,7 @@ import {
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
-import { find_print_snapshot, is_print_scope, print_ai_view, print_output_of, prints_using_blob } from "./commands/print.ts";
+import { find_print_snapshot, is_print_scope, print_output_of, prints_using_blob } from "./commands/print.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
@@ -659,10 +659,11 @@ export class ApiApp {
         who: "any", scope: "context:read", go: true,
         act: async (_r, project, auth) => this.#workspace(project, auth),
       }),
-      // SEL-119 U6a: range print. The two POSTs are the owner session's (an agent token is 403 forbidden); GET reads a stored print only.
+      // SEL-119 U6a: range print. A print is a human's document: all three routes are the owner session's (an agent token is 403 forbidden,
+      // nothing told about the print). GET reads a stored print only.
       route("GET", `${P}/print`, "print.get", {
-        who: "any", scope: "context:read", go: true,
-        act: async (r, project, auth) => this.#print_read(r, project, auth),
+        who: "session",
+        act: async (r, project) => this.#print_read(r, project),
       }),
       route("POST", `${P}/print/prepare`, "print.prepare", {
         who: "session",
@@ -776,7 +777,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/threads/{t}`, "threads.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#thread_read(r, project),
+        act: async (r, project, auth) => this.#thread_read(r, project, auth),
       }),
       route("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create", {
         who: "human",
@@ -3614,11 +3615,10 @@ export class ApiApp {
   /**
    * GET P/print?scope=&snapshot= — a pure read of a print that was already committed: the snapshot row, its manifest blob and its
    * output blob. Nothing is built or written here. Without `snapshot` it is the newest print of the current round / stage / edition.
-   * A human gets the print as it was fixed. Any other caller goes through the AI-reference decision (SEL-115, print_ai_view): when the
-   * print carries anything closed to AI, the fixed bytes are not given at all (`output`, `document` and `content_hash` are null,
-   * `withheld.reason` says why) and the manifest comes back without the closed items.
+   * A print is a human's fixed document: the route is the owner session's (the route table refuses every other caller before this
+   * runs), and the print is given exactly as it was fixed.
    */
-  async #print_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+  async #print_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
     const scope = request.query.get("scope");
     if (!is_print_scope(scope)) invalid("$.query.scope");
     const snapshot = request.query.get("snapshot");
@@ -3636,19 +3636,6 @@ export class ApiApp {
     }
     const output = print_output_of(manifest);
     if (output === null) throw new Fail("not_found", { target: "$.query.snapshot" });
-    const view = auth.kind === "human" ? { manifest, withheld: false } : read_tx(this.#db, () => print_ai_view(this.#db, project.id, manifest));
-    if (view.withheld) {
-      return {
-        status: 200,
-        data: {
-          snapshot: { id: row.id, scope: row.scope, edition_id: row.edition_id, stage_id: row.stage_id, round_id: row.round_id, content_hash: null },
-          manifest: view.manifest,
-          output: null,
-          document: null,
-          withheld: { reason: "ai_reference_denied" },
-        },
-      };
-    }
     const document = (await read(output.blob_id)).result;
     if (document.sha256 !== output.sha256 || document.size !== output.size) {
       throw new Fail("conflict", { details: { reason: "print_output_mismatch" } });
@@ -3664,8 +3651,7 @@ export class ApiApp {
           round_id: row.round_id,
           content_hash: row.content_hash,
         },
-        // a human: the manifest as fixed; any other caller: the AI view (closed excluded entries left out, nothing printed is)
-        manifest: view.manifest,
+        manifest,
         output,
         document: new TextDecoder("utf-8").decode(document.bytes),
       },
@@ -4033,9 +4019,10 @@ export class ApiApp {
   }
 
   /** GET P/threads/{t} */
-  async #thread_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #thread_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const thread_id = request.params[1] as string;
-    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id));
+    const audience = this.#audience(auth);
+    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id, audience));
     if (detail === undefined) throw new Fail("not_found", { target: "$.path.thread_id" });
     return { status: 200, data: detail };
   }
@@ -4308,34 +4295,15 @@ export class ApiApp {
     return { status: 200, data: out.result, replayed: out.replayed };
   }
 
-  /**
-   * SEL-119: a print's output and manifest blobs carry the cited sources and bodies of the print, but their own policy is not
-   * the sources'. A non-human caller reading one directly gets the same decision as GET P/print, now (print_ai_view): the output
-   * of a print that is withheld, or a manifest the AI view would change, is forbidden. An unreadable manifest fails closed.
-   */
-  async #print_blob_guard(project_id: string, blob_id: string): Promise<void> {
-    const prints = read_tx(this.#db, () => prints_using_blob(this.#db, project_id, blob_id));
-    const store = { db: this.#db, objects_dir: this.#objects_dir };
-    for (const print of prints) {
-      let manifest: unknown;
-      try {
-        manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode((await get_blob(store, project_id, print.manifest_blob_id)).bytes));
-      } catch {
-        throw new Fail("forbidden", { target: "$.path.blob_id" });
-      }
-      const view = read_tx(this.#db, () => print_ai_view(this.#db, project_id, manifest));
-      if (view.withheld || (print.role === "manifest" && view.manifest !== manifest)) throw new Fail("forbidden", { target: "$.path.blob_id" });
-    }
-  }
-
   /** `preview` = the same bytes and the same safety headers as content, plus a content-disposition: inline only for the few types a browser shows safely. */
   async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo, preview: boolean): Promise<HandlerResult> {
+    // SEL-119: a print is a human's document, so the output and manifest blobs a print made are closed to a non-human caller
+    // (403 forbidden, the answer of a closed file) whatever the file policies say now; a closed file is 403 as before.
     read_tx(this.#db, () => {
-      if (auth.kind !== "human" && this.#blob_denied(project.id, request.params[1] as string)) {
+      if (auth.kind !== "human" && (this.#blob_denied(project.id, request.params[1] as string) || prints_using_blob(this.#db, project.id, request.params[1] as string).length > 0)) {
         throw new Fail("forbidden", { target: "$.path.blob_id" });
       }
     });
-    if (auth.kind !== "human") await this.#print_blob_guard(project.id, request.params[1] as string);
     const blob = await this.#exec(async () => ({
       result: await get_blob(
         { db: this.#db, objects_dir: this.#objects_dir },

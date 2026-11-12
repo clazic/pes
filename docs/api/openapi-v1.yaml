@@ -1392,14 +1392,12 @@ paths:
         not a print: 404 not_found, as are an unknown id, a print of another scope and a scope nothing was printed for yet. Nothing is
         built or written; a print is made by POST print/commit.
 
-        Who reads: a human (owner session) gets the print exactly as it was fixed. Any other caller (an agent token) goes through the
-        same AI-reference decision as every other AI exit (SEL-115: material_object_denied for a cited material, file_ai_denied for a
-        body file). When the print carries nothing closed to AI, an agent gets the same response as a human. When it carries something
-        closed, the fixed bytes are not given at all: output and document are null, snapshot.content_hash is null, manifest.output is
-        null, the manifest is returned without the closed items (a footnote whose source is a closed material, a body or table whose
-        file is closed, and the footnotes that body carried; position and citation_no are renumbered so no gap counts them), and the
-        response has withheld {reason "ai_reference_denied"}. withheld is present only then. No title, quote, name, id or count of
-        a closed material is in the response. Allowing the material again gives the agent the whole print again.
+        Who reads: only the owner session (a human). A print is a human's document: any other caller (an agent token, whatever its scopes,
+        or a built-in runner) is 403 forbidden with nothing told about the print (no id, hash, title, count; a snapshot that exists and
+        one that does not give the same answer), and the refused read writes no event and no receipt. There is no partial answer for a
+        non-human caller. The blobs a print made (its output and its manifest) are closed the same way on GET files/{b}/content and
+        GET files/{b}/preview: a non-human caller is 403 forbidden for them whatever the file policies say, and allowing a file again does not
+        reopen them. The owner session reads all of it as it was fixed.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - name: scope
@@ -1410,7 +1408,7 @@ paths:
           in: query
           required: false
           schema: { type: string, minLength: 1 }
-      security: [{ agentToken: [] }, { localSession: [] }]
+      security: [{ localSession: [] }]
       responses:
         "200":
           description: The stored print
@@ -1419,7 +1417,7 @@ paths:
               schema: { $ref: "#/components/schemas/Success" }
         "400": { description: "scope missing or not round|stage|edition, or snapshot empty" }
         "401": { description: Missing or invalid credential }
-        "403": { description: Missing context:read scope or Go policy denied }
+        "403": { description: "Not the owner session (an agent token is forbidden, whatever its scopes)" }
         "404": { description: Unknown project, no such stored print }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/print/prepare:
@@ -1953,6 +1951,11 @@ paths:
         messages:[{id, version_id, body_md, state, reply_to|null, actor_id, created_at}], followups:[{id, kind, state}]}.
         anchor.status is the first judgement; anchor.current is judged against the current version without writing: exact, moved, ambiguous
         (candidates only) or lost (the quote and the thread stay) are shown as they are.
+        An anchor keeps the quote of the version it was made on for good. For a caller that is not the owner session that quote follows the
+        AI-reference decision of that version (SEL-115): when the version is a file material closed to AI, or an artifact version that
+        carries a file closed to AI, exact_quote, prefix and suffix are left out of the anchor (no key, no trace) and anchor.current.text is
+        null; the anchor's id, status, start_cp, end_cp, target_version_id and current state stay. The text where the anchor stands now
+        is judged the same way for that version. Allowing the file again gives the whole anchor back. The owner session always gets all of it.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/ThreadId"

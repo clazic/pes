@@ -23,6 +23,9 @@ import { connect, type Db } from "../scripts/pes_core/db.ts";
 import { get_blob } from "../scripts/pes_core/files.ts";
 import { reference_caller, reference_content, reference_row, reference_view } from "../scripts/pes_core/references.ts";
 import { assert_ok, call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
+import { wire } from "./helpers/adapter_b_env.ts";
+import { with_cleanup } from "./helpers/adapter_b_flow.ts";
+import { FINISH, context_turn, open_stage, ready_project, request_text, set_script, start_run, with_a_env } from "./helpers/a_builtin_env.ts";
 import { blob_row, ctx_for, disk_path, list_files, put_ready, rejects_any, rejects_api, with_env, type Env } from "./helpers/blob_env.ts";
 import { start } from "./helpers/editions_env.ts";
 import { P, new_material, set_access, wire_of } from "./helpers/sel115_env.ts";
@@ -308,5 +311,213 @@ test("F1-7 a print snapshot is never the 'newest snapshot' a reference pins, and
 
     await ok(env, env.ctx("f7-det-2"), "reference.detach", { reference_id: second.reference_id });
     await rejects_api(attach("f7-att-3", { source_snapshot_id: printed.snapshot_id }), "not_found");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 (최종 2회차 · 사용자 결정): 인쇄물은 사람용이다 — 비사람의 GET P/print 와 인쇄 blob 읽기는 모두 막힌다.
+
+const count_rows = (env: ApiEnv, table: string): number => Number(env.db.get<{ n: bigint }>(`SELECT count(*) AS n FROM ${table}`)?.n ?? 0n);
+
+test("F2-1 a non-human caller never reads GET P/print: 403 forbidden with no fact about the print, no event, no receipt", async () => {
+  await with_api(async (env) => {
+    const s = await scene(env, "f21");
+    const done = await owner_commit(env, { scope: "round", round_id: s.round.round_id }, "f21-commit");
+    const agent = await make_agent(env, "f21-reader", ["context:read", "file:read"]);
+    const events = count_rows(env, "events");
+    const receipts = count_rows(env, "run_input_receipts");
+    for (const query of [`scope=round&snapshot=${done.snapshot_id}`, "scope=round", "scope=stage", "scope=edition", "scope=round&snapshot=no-such", "scope=project", ""]) {
+      const res = await call(env, { method: "GET", path: P(env, `/print?${query}`), auth: { token: agent.token } });
+      assert.equal(res.status, 403, `agent GET /print?${query}`);
+      assert.equal(res.json.error.code, "forbidden");
+      const wire = wire_of(res);
+      for (const needle of [done.snapshot_id, done.output_blob_id, done.manifest_blob_id, "공개본문-f21", s.body.object_id, s.body.version_id]) {
+        assert.ok(!wire.includes(needle as string), `"${needle}" must not appear in the 403 (${query})`);
+      }
+    }
+    // the same answer for a snapshot that exists and one that does not: nothing is told about the print
+    const a = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
+    const b = await call(env, { method: "GET", path: P(env, "/print?scope=round&snapshot=no-such"), auth: { token: agent.token } });
+    assert.deepEqual(a.json.error, b.json.error);
+    assert.equal(count_rows(env, "events"), events, "a refused read writes no event");
+    assert.equal(count_rows(env, "run_input_receipts"), receipts, "a refused read writes no receipt");
+    // no credential is still 401; the owner session still reads the print as it was fixed
+    assert.equal((await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: "none" })).status, 401);
+    const human = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: "owner" });
+    assert.equal(human.status, 200);
+    assert.equal(human.json.data.snapshot.content_hash, done.content_hash);
+    assert.match(human.json.data.document as string, /공개본문-f21/);
+  });
+});
+
+test("F2-2 the blobs a print made (output, manifest) are closed to a non-human caller even when nothing is denied; the owner still reads them", async () => {
+  await with_api(async (env) => {
+    const s = await scene(env, "f22");
+    const done = await owner_commit(env, { scope: "round", round_id: s.round.round_id }, "f22-commit");
+    const agent = await make_agent(env, "f22-reader", ["context:read", "file:read"]);
+    for (const blob_id of [done.output_blob_id, done.manifest_blob_id] as string[]) {
+      for (const route of ["content", "preview"]) {
+        const raw = await call(env, { method: "GET", path: P(env, `/files/${blob_id}/${route}`), auth: { token: agent.token } });
+        assert.equal(raw.status, 403, `${blob_id} ${route}`);
+        assert.ok(!wire_of(raw).includes("공개본문-f22"));
+        const human = await call(env, { method: "GET", path: P(env, `/files/${blob_id}/${route}`), auth: "owner" });
+        assert.equal(human.status, 200, `owner ${route}`);
+      }
+    }
+    // a file that is not a print's stays readable by the agent
+    const plain = await new_material(env, "f22", { name: "공개파일-f22.txt" });
+    const read = await call(env, { method: "GET", path: P(env, `/files/${plain.blob.blob_id}/content`), auth: { token: agent.token } });
+    assert.equal(read.status, 200);
+  });
+});
+
+test("F2-3 review repro 1: a print blob registered as a material and denied is 403 on both the print and the raw route (and stays closed after allow)", async () => {
+  await with_api(async (env) => {
+    const s = await scene(env, "f23");
+    const done = await owner_commit(env, { scope: "round", round_id: s.round.round_id }, "f23-commit");
+    const agent = await make_agent(env, "f23-reader", ["context:read", "file:read"]);
+    for (const blob_id of [done.output_blob_id, done.manifest_blob_id] as string[]) {
+      const reg = await call(env, { method: "POST", path: P(env, "/materials"), auth: "owner", body: { blob_id, title: `인쇄자료-${blob_id}` } });
+      assert.equal(reg.status, 201, JSON.stringify(reg.json));
+      assert_ok(await set_access(env, reg.json.data.file_policy_id, "deny"));
+      const print = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
+      assert.equal(print.status, 403);
+      assert.ok(!wire_of(print).includes(blob_id));
+      const raw = await call(env, { method: "GET", path: P(env, `/files/${blob_id}/content`), auth: { token: agent.token } });
+      assert.equal(raw.status, 403);
+      assert_ok(await set_access(env, reg.json.data.file_policy_id, "allow"));
+      assert.equal((await call(env, { method: "GET", path: P(env, `/files/${blob_id}/content`), auth: { token: agent.token } })).status, 403, "allow does not reopen a print blob");
+    }
+  });
+});
+
+// A lost anchor keeps its quote forever. V1 carried a file closed to AI; V2 (current) does not. The quote must not leave through
+// any non-human exit of a print or a thread (the print is closed now; the thread read follows the version the anchor was made on).
+const LOST_PHRASE = "비밀문장-앵커-3c8d";
+
+async function lost_scene(env: ApiEnv, tag: string, with_round = true) {
+  const s = with_round ? await scene(env, tag) : { plan: stage_of(env, "plan"), round: null as never, body: null as never };
+  const BODY1 = `앞글 ${LOST_PHRASE} 뒷글 ${tag}`;
+  const doc = await art(env, `${tag}-doc`, { stage_id: s.plan, body_md: BODY1, title: `문서-${tag}` });
+  const secret = await new_material(env, tag, { name: `비공개파일-${tag}.txt` });
+  await ok(env, env.ctx(`${tag}-attach`), "file.attach_version", { version_id: doc.version_id, blob_id: secret.blob.blob_id, role: "attachment" });
+  const note = await ok(env, env.ctx(`${tag}-note`), "annotation.create", {
+    target_object_id: doc.object_id,
+    anchor: { exact_quote: LOST_PHRASE, ...cp_find(BODY1, LOST_PHRASE) },
+    body_md: `첨언본문-${tag}`,
+  });
+  const v2 = await more(env, `${tag}-v2`, doc.object_id, { title: `문서-${tag}`, body_md: "전혀 다른 공개 글이다.", current: true });
+  assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+  return { s, doc, secret, note, v2 };
+}
+
+test("F2-4 review repro 2: the lost-anchor quote of a closed version does not reach a non-human caller by any print route", async () => {
+  await with_api(async (env) => {
+    const l = await lost_scene(env, "f24");
+    const done = await owner_commit(env, { scope: "round", round_id: l.s.round.round_id }, "f24-commit");
+    const agent = await make_agent(env, "f24-reader", ["context:read", "file:read"]);
+    for (const path of [`/print?scope=round&snapshot=${done.snapshot_id}`, "/print?scope=round", `/files/${done.output_blob_id}/content`, `/files/${done.output_blob_id}/preview`, `/files/${done.manifest_blob_id}/content`]) {
+      const res = await call(env, { method: "GET", path: P(env, path), auth: { token: agent.token } });
+      assert.equal(res.status, 403, path);
+      assert.ok(!wire_of(res).includes(LOST_PHRASE), path);
+    }
+    // the human keeps the lost mark and the fixed print
+    const human = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: "owner" });
+    assert.equal(human.status, 200);
+    assert.ok((human.json.data.document as string).includes(LOST_PHRASE));
+    assert.ok(human.json.data.manifest.items.some((i: any) => i.category === "comment" && i.anchor_status === "lost"));
+  });
+});
+
+test("F2-5 the lost-anchor quote follows the decision of the version the anchor was made on: GET threads/{t} leaves quote, prefix and suffix out, keeps the anchor state", async () => {
+  await with_api(async (env) => {
+    const l = await lost_scene(env, "f25");
+    const agent = await make_agent(env, "f25-reader", ["context:read", "file:read"]);
+    const thread = (auth: any) => call(env, { method: "GET", path: P(env, `/threads/${l.note.thread_id}`), auth });
+
+    const closed = await thread({ token: agent.token });
+    assert.equal(closed.status, 200);
+    assert.ok(!wire_of(closed).includes(LOST_PHRASE), "no quote, prefix, suffix or current text of the closed version");
+    assert.equal(closed.json.data.anchor.id, l.note.anchor_id, "the anchor is still named");
+    assert.equal(closed.json.data.anchor.current.status, "lost", "its state stays");
+    for (const key of ["exact_quote", "prefix", "suffix"]) assert.equal(key in closed.json.data.anchor, false, `${key} is left out`);
+    assert.equal(closed.json.data.anchor.current.text, null);
+    const list = await call(env, { method: "GET", path: P(env, `/threads?target_object_id=${l.doc.object_id}`), auth: { token: agent.token } });
+    assert.ok(!wire_of(list).includes(LOST_PHRASE));
+    assert.equal(list.json.data.threads[0].anchor_status, "lost");
+
+    // the owner still reads the quote
+    const human = await thread("owner");
+    assert.equal(human.json.data.anchor.exact_quote, LOST_PHRASE);
+
+    // the decision is the version's: allow the file again and the agent reads the quote again
+    assert_ok(await set_access(env, l.secret.data.file_policy_id, "allow"));
+    const open = await thread({ token: agent.token });
+    assert.equal(open.json.data.anchor.exact_quote, LOST_PHRASE);
+  });
+});
+
+test("F2-6 no other non-human exit carries the closed lost-anchor quote: context, changes, version reads, the round's threads", async () => {
+  await with_api(async (env) => {
+    const l = await lost_scene(env, "f26");
+    const agent = await make_agent(env, "f26-reader", ["context:read", "file:read"]);
+    const paths = [
+      "/context",
+      "/changes",
+      // (V1's own text is the artifact's, read as before by the version read; what is closed here is the quote an anchor kept)
+      `/objects/${l.doc.object_id}/versions/${l.v2}`,
+      `/stages/${l.s.plan}/rounds/${l.s.round.round_id}/threads`,
+      "/materials",
+      "/followups",
+    ];
+    for (const path of paths) {
+      const res = await call(env, { method: "GET", path: P(env, path), auth: { token: agent.token } });
+      assert.ok(res.status < 500, `${path} ${res.status}`);
+      assert.ok(!wire_of(res).includes(LOST_PHRASE), `${path}: the closed quote must not appear`);
+    }
+  });
+});
+
+// The same lost-anchor scene through the other two non-human exits that have their own code: B (the MCP tools over the API) and A (the
+// built-in runner's context.get). Neither carries a thread's anchor at all; the closed quote must still be in no byte they send.
+test("F2-7 B MCP: pes_context and pes_read carry no closed lost-anchor quote; the thread read through the API is the only exit that has one", async () => {
+  await with_cleanup(async (env, open) => {
+    const client = open(await env.client());
+    const l = await lost_scene(env as unknown as ApiEnv, "f27", false);
+    const context = await client.ok("pes_context", {});
+    assert.ok(!wire(context).includes(LOST_PHRASE), "pes_context");
+    for (const [object_id, version_id] of [
+      [l.doc.object_id, l.v2],
+      [l.note.thread_id, env.db.get<{ v: string }>("SELECT current_version_id AS v FROM objects WHERE id = ?", l.note.thread_id)!.v],
+    ] as const) {
+      const out = await client.tool("pes_read", { object_id, version_id });
+      assert.ok(!wire(out.data).includes(LOST_PHRASE), `pes_read ${object_id}`);
+    }
+    assert.ok(!client.lines.join("\n").includes(LOST_PHRASE), "no raw MCP line carries the closed quote");
+  });
+});
+
+test("F2-8 A context.get: the closed lost-anchor quote reaches no request sent to the model", async () => {
+  await with_a_env("openai_compatible", async (env) => {
+    await ready_project(env);
+    const opened = await open_stage(env, "plan");
+    const BODY1 = `앞글 ${LOST_PHRASE} 뒷글 f28`;
+    const doc = await art(env, "f28-doc", { stage_id: opened.stage_id, body_md: BODY1, title: "문서-f28" });
+    const blob = await put_ready(env, new TextEncoder().encode("비공개 파일 본문-f28"), "f28-file");
+    const material = (await env.service.execute(env.ctx("f28-up"), "file.upload", { blob_id: blob.blob_id, title: "비공개파일-f28" })).result as Record<string, any>;
+    await ok(env, env.ctx("f28-attach"), "file.attach_version", { version_id: doc.version_id, blob_id: blob.blob_id, role: "attachment" });
+    await ok(env, env.ctx("f28-note"), "annotation.create", {
+      target_object_id: doc.object_id,
+      anchor: { exact_quote: LOST_PHRASE, ...cp_find(BODY1, LOST_PHRASE) },
+      body_md: "첨언본문-f28",
+    });
+    await more(env, "f28-v2", doc.object_id, { title: "문서-f28", body_md: "전혀 다른 공개 글이다.", current: true });
+    await env.service.execute(env.ctx("f28-deny"), "file.ai_access_set", { file_policy_id: material.file_policy_id, ai_access: "deny" });
+    set_script(env, [context_turn(), FINISH]);
+    const mark = env.fake.bodies().length;
+    await start_run(env, { stage_id: opened.stage_id, round_id: opened.round_id });
+    const sent = env.fake.bodies().slice(mark);
+    assert.ok(sent.length >= 2, "the run read the context");
+    assert.ok(!sent.map((b: any) => request_text(b)).join("\n").includes(LOST_PHRASE) && !JSON.stringify(sent).includes(LOST_PHRASE));
   });
 });
