@@ -291,11 +291,11 @@ test("E2 serve: 진짜 부모 이동(`/../x`·`%2e%2e`·`..%5c`·`..%2f`·`..cac
   }
 });
 
-test("E3 serve: reports/ 아래 `..cache/p.html` 은 sandbox, reports 밖 `..cache/p.html` 은 sandbox 아님 (zone 판정이 이름에 흔들리지 않는다)", { timeout: 180_000 }, async () => {
+test("E3 serve: `..cache` 아래 html 은 어디서나 sandbox, 옛 화면 예외(프로젝트 폴더 바로 아래 index.html)는 `..cache` 이름에 흔들리지 않는다 (SEL-102 계약)", { timeout: 180_000 }, async () => {
   const fx = await serve_fixture("pes-sel105-e3-", {
     no_db: true,
     legacy_only: [LEG],
-    files: { [`${LEG}/reports/..cache/p.html`]: HTML, [`${LEG}/reports/p.html`]: HTML, [`${LEG}/..cache/p.html`]: HTML },
+    files: { [`${LEG}/reports/..cache/p.html`]: HTML, [`${LEG}/reports/p.html`]: HTML, [`${LEG}/..cache/p.html`]: HTML, [`${LEG}/..cache/index.html`]: HTML },
   });
   try {
     const csp = async (path: string): Promise<string | undefined> => {
@@ -306,7 +306,9 @@ test("E3 serve: reports/ 아래 `..cache/p.html` 은 sandbox, reports 밖 `..cac
     };
     assert.match((await csp(`/${LEG}/reports/p.html`)) ?? "", /sandbox/, "대조: reports/ 의 html 은 sandbox");
     assert.match((await csp(`/${LEG}/reports/..cache/p.html`)) ?? "", /sandbox/, "reports/..cache/ 의 html 도 sandbox");
-    assert.doesNotMatch((await csp(`/${LEG}/..cache/p.html`)) ?? "", /sandbox/, "reports 밖 `..cache` 의 html 은 sandbox 아님");
+    // SEL-102: 정적 폴백의 html 은 옛 화면(프로젝트 폴더 바로 아래 index.html·ask-*.html)만 빼고 모두 sandbox — reports 밖도 마찬가지.
+    assert.match((await csp(`/${LEG}/..cache/p.html`)) ?? "", /sandbox/, "reports 밖 `..cache` 의 html 도 sandbox(SEL-102)");
+    assert.match((await csp(`/${LEG}/..cache/index.html`)) ?? "", /sandbox/, "`..cache/index.html` 은 프로젝트 폴더 바로 아래가 아니라 옛 화면 예외 아님");
   } finally {
     await fx.cleanup();
   }

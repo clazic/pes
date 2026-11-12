@@ -83,8 +83,12 @@ test("D1 DB 프로젝트(project.json 없음) 폴더의 reports/·out/ HTML·SVG
         assert_sandbox(csp_of(res.headers), path);
       }
 
-      // 밖은 CSP 없음
-      for (const path of [`/${SLUG}/./notes/free.html`, `/${SLUG}/./reports/plan/x.pdf`, `/${SLUG}/./reports/plan/x.png`]) {
+      // SEL-102: reports/·out/ 밖의 HTML 도 sandbox (보고서의 자기 탭 이동 우회 막기)
+      const free = await raw(s, { method: "GET", path: `/${SLUG}/./notes/free.html` });
+      assert.equal(free.status, 200);
+      assert_sandbox(csp_of(free.headers), "notes/free.html");
+      // PDF·PNG 는 CSP 없음
+      for (const path of [`/${SLUG}/./reports/plan/x.pdf`, `/${SLUG}/./reports/plan/x.png`]) {
         const res = await raw(s, { method: "GET", path });
         assert.equal(res.status, 200, path);
         assert.equal(csp_of(res.headers), undefined, `${path}: CSP 헤더가 없다`);
@@ -97,7 +101,7 @@ test("D1 DB 프로젝트(project.json 없음) 폴더의 reports/·out/ HTML·SVG
   }
 });
 
-test("D2 reports/·out/ 의 .xml(text/xml, XHTML 네임스페이스면 스크립트가 돈다)도 정적 폴백에서 sandbox, 밖의 .xml 은 CSP 없음", { timeout: 180_000 }, async () => {
+test("D2 reports/·out/ 의 .xml(text/xml, XHTML 네임스페이스면 스크립트가 돈다)도 정적 폴백에서 sandbox, 밖의 .xml 도 sandbox (SEL-102)", { timeout: 180_000 }, async () => {
   const c = await make_cli_env();
   try {
     unlinkSync(c.project_json);
@@ -114,7 +118,7 @@ test("D2 reports/·out/ 의 .xml(text/xml, XHTML 네임스페이스면 스크립
       assert_sandbox(csp_of(inside.headers), "reports/ 의 .xml");
       const outside = await raw(s, { method: "GET", path: `/${SLUG}/notes/a.xml` });
       assert.equal(outside.status, 200);
-      assert.equal(csp_of(outside.headers), undefined);
+      assert_sandbox(csp_of(outside.headers), "SEL-102: reports/ 밖의 .xml 도 sandbox");
     } finally {
       await s.stop();
     }
