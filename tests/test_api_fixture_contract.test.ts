@@ -47,10 +47,13 @@ const UNSUPPORTED = new Set([
   "followups.apply",
   "projects.delete",
   "reflections.create",
+  // SEL-90: threads.json 의 장면은 annotation(앵커) 문맥이라 U4a 전까지 501 그대로다 (질문 의견 question_comment 는 test_sel90_comments).
   "threads.create",
-  "threads.messages.create",
   "threads.resolutions.create",
 ]);
+
+/** thread-messages.json 의 장면은 annotation 스레드(앵커) 위의 답글이라 U4a 가 켠다. 질문 의견 메시지는 test_sel90_comments 가 시험한다. */
+const U4A_ONLY = new Set(["threads.messages.create"]);
 
 interface FixtureCase {
   request: { path_params?: Record<string, string>; query?: Record<string, unknown> | null; headers: Record<string, string>; body?: unknown };
@@ -626,7 +629,7 @@ for (const [file, fx] of fixtures()) {
   for (const kind of ["normal", "error"] as const) {
     const c = fx[kind];
     if (c === undefined) continue;
-    test(`contract ${file} ${kind}: ${fx.method} ${fx.path} -> ${UNSUPPORTED.has(fx.operation) ? "501 not_supported" : c.response.status}`, async () => {
+    test(`contract ${file} ${kind}: ${fx.method} ${fx.path} -> ${UNSUPPORTED.has(fx.operation) ? "501 not_supported" : c.response.status}`, { skip: U4A_ONLY.has(fx.operation) ? "annotation 스레드 답글 장면 — U4a" : false }, async () => {
       await with_api(async (env) => {
         const agent = await make_agent(env, "contract");
         if (UNSUPPORTED.has(fx.operation)) {
