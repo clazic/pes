@@ -22,6 +22,9 @@ const SAFE_TYPE = new RegExp(
 
 /** `media_type` is a Content-Type value; parameters (`; charset=…`), case and surrounding blanks do not matter. */
 export const needs_document_sandbox = (media_type: string): boolean => {
+  // A comma list ("text/plain; x=y, text/html") is read by browsers as its LAST type (fetch "extract a MIME type"),
+  // so judging only the part before the first ";" would let html through — any comma means sandbox (SEL-102 최종 권장 1).
+  if (media_type.includes(",")) return true;
   const bare = (media_type.split(";", 1)[0] ?? "").trim();
   return !SAFE_TYPE.test(bare);
 };
