@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { keys, newIdempotencyKey, useClient } from "@/api/queries";
+import { isAfterSend } from "@/api/send-outcome";
 import { PesApiError } from "@/api/types";
 
 /**
@@ -21,8 +22,8 @@ export const REREAD_MS = 250;
 
 const isFinalRejection = (e: unknown): e is PesApiError => e instanceof PesApiError && !e.body.error.retryable;
 
-/** 결과를 모르는 오류 — 시간 초과, 또는 서버가 다시 보내도 된다고 한 거절. 서버가 이미 받았을 수 있다 */
-const isUnknownOutcome = (e: unknown): boolean => (e instanceof Error && e.name === "TimeoutError") || (e instanceof PesApiError && e.body.error.retryable);
+/** 결과를 모르는 오류 — 시간 초과, 요청을 보낸 뒤 연결이 끊김(isAfterSend), 또는 서버가 다시 보내도 된다고 한 거절. 서버가 이미 받았을 수 있다 */
+const isUnknownOutcome = (e: unknown): boolean => (e instanceof Error && e.name === "TimeoutError") || isAfterSend(e) || (e instanceof PesApiError && e.body.error.retryable);
 
 /** 같은 파일(이름 · 크기 · 수정 시각 · 형식 · 새 버전 대상)이면 같은 시도 — 시간 초과 뒤 다시 올릴 때 같은 키를 쓰는 근거 */
 const fingerprint = (f: File, objectId?: string) => JSON.stringify([f.name, f.size, f.lastModified, f.type, objectId ?? null]);

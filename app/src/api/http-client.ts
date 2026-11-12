@@ -1,4 +1,5 @@
 import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
+import { markAfterSend } from "./send-outcome";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -68,6 +69,15 @@ function touchedBy(type: string): string[] {
 export function createHttpClient(options: HttpClientOptions): HttpClient {
   const base = options.baseUrl ?? "";
   const send = (url: string, init: RequestInit): Promise<Response> => (options.fetch ?? ((u, i) => globalThis.fetch(u, i)))(url, init);
+  /** 쓰기 길의 fetch — 연결이 끊겨 던진 오류는 “요청을 보낸 뒤”로 표시한다(서버가 받았을 수 있다). 오류 객체는 그대로 던진다 */
+  const sendWrite = async (url: string, init: RequestInit): Promise<Response> => {
+    try {
+      return await send(url, init);
+    } catch (e) {
+      if (!(e instanceof Error && e.name === "TimeoutError")) markAfterSend(e);
+      throw e;
+    }
+  };
   const limit = options.timeoutMs ?? WRITE_TIMEOUT_MS;
   /**
    * 쓰기 길의 요청 하나(응답 본문을 읽기까지)에 시간 제한을 둔다. 넘으면 요청을 중단하고 TimeoutError 로 끝난다 —
@@ -132,7 +142,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     if (id === undefined) throw new PesApiError(fallbackBody(404));
     const extra = (await ready?.(id)) ?? {};
     const { json, requestId } = await timed(async (signal) => {
-      const res = await send(projectUrl(id, rest), {
+      const res = await sendWrite(projectUrl(id, rest), {
         method: "POST",
         headers: headers({ "content-type": "application/json", "idempotency-key": key }),
         credentials: "omit",
@@ -357,7 +367,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   /** 쓰기 길의 한 단계(예약 · 올리기 · 완료) — 시간 제한 안에서 보내고, 거절은 서버 봉투 그대로 던진다. 멱등 키는 마지막 POST P/materials 에만 의미가 있다 */
   async function uploadStep(id: string, method: "POST" | "PUT", rest: string, init: { json?: Json; body?: Uint8Array; contentType?: string }): Promise<Json> {
     return timed(async (signal) => {
-      const res = await send(projectUrl(id, rest), {
+      const res = await sendWrite(projectUrl(id, rest), {
         method,
         headers: headers({ "content-type": init.contentType ?? "application/json" }),
         credentials: "omit",
