@@ -12,7 +12,8 @@
 //   * the long synchronous child is kept (BLOCK_S) as the scenario of SEL-95; it is checked to have really run (status · signal · elapsed).
 // Paths covered: http() (web_env), TsServeProcess.request / .post (compat_ts_srv), and TsServeProcess.start()'s readiness probe (the synthetic
 // script is started through the `script` option, so the real wait_ready() code runs against it).
-// A control (S0) shows the server's counters are sensitive: a bare fetch() without `connection: close` DOES register a reuse in the same scenario.
+// A control (S0) shows the server's counters are sensitive: a bare fetch() without `connection: close` DOES register a reuse in the same scenario
+// (S0 waits for that server-side event over up to 10 short rounds instead of relying on undici's 4 s window; S1~S4 can only miss a bug under load, never fail without one).
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -90,13 +91,18 @@ async function started_proc(): Promise<TsServeProcess> {
 async function bare_server(): Promise<{ server: Server; stop(): Promise<void> }> {
   const port = await free_port();
   const child: ChildProcess = spawn(process.execPath, [SERVER_FIXTURE, work.pes_home, String(port)], { env: { ...process.env, HOME: work.home_dir, USERPROFILE: work.home_dir }, stdio: "ignore" });
-  for (let i = 0; i < 100; i += 1) {
+  let ready = false;
+  for (let i = 0; i < 100 && !ready; i += 1) {
     try {
       const probe = await fetch(`http://127.0.0.1:${port}/whoami`, { headers: { connection: "close" } });
-      if (probe.status === 200) break;
+      ready = probe.status === 200;
     } catch {
       await new Promise((r) => setTimeout(r, 50));
     }
+  }
+  if (!ready) {
+    child.kill();
+    assert.fail(`the synthetic server did not answer /whoami on port ${port} (100 tries, ~5 s) — the tests below would fail for the wrong reason`);
   }
   const origin = `http://127.0.0.1:${port}`;
   return {
@@ -111,16 +117,22 @@ async function bare_server(): Promise<{ server: Server; stop(): Promise<void> }>
 test("S0 control: a bare fetch() (keep-alive pool) reuses an idle socket in the S2 / S3 scenario — the server's counters do register it", async () => {
   const { server, stop } = await bare_server();
   try {
-    // undici hands the second request of a fresh pool to a new connection; from the third on it reuses an idle one — hence three requests, like S2 / S3
+    // No clock is trusted here: a pooled socket is only reused while undici still keeps it (4 s by default), and a loaded machine can stretch the gap
+    // between two requests past that. So the requests are repeated, each pair only a short block apart, and the test waits for the SERVER-SIDE event
+    // (`reused` in /_stats) instead of reading a fixed window. It fails — with the counters in the message — only if no round at all gets a reuse.
+    // undici hands the second request of a fresh pool to a new connection; from the third on it reuses an idle one — hence three requests per round.
     const plain = async (path: string, method = "GET"): Promise<string | undefined> =>
       fetch(`${server.url}${path}`, method === "GET" ? {} : { method, body: "{}", headers: { "content-type": "application/json" } }).then((r) => r.text(), () => undefined);
-    assert.equal(await plain("/a"), "ok");
-    block_loop(BLOCK_S);
-    await plain("/b", "POST");
-    block_loop(BLOCK_S);
-    await plain("/c"); // may be refused (reset socket) or quietly retried by undici; either way the server saw a reuse
-    const stats = await stats_of(server.port);
-    assert.ok(stats.reused >= 1, `a pooled connection was reused: ${JSON.stringify(stats)}`);
+    let stats = await stats_of(server.port);
+    for (let round = 0; round < 10 && stats.reused < 1; round += 1) {
+      await plain(`/a${round}`);
+      block_loop(0.2);
+      await plain(`/b${round}`, "POST");
+      block_loop(0.2);
+      await plain(`/c${round}`); // may be refused (reset socket) or quietly retried by undici; either way the server saw a reuse
+      stats = await stats_of(server.port);
+    }
+    assert.ok(stats.reused >= 1, `a pooled connection was reused (10 rounds): ${JSON.stringify(stats)}`);
     assert.ok(stats.connections < stats.requests, JSON.stringify(stats));
   } finally {
     await stop();

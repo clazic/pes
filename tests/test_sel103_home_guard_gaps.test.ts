@@ -428,3 +428,44 @@ test("A7 documented limit: file-descriptor calls are not path calls (fstatSync o
     fake.cleanup();
   }
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// 3. the child guard (tests/helpers/ts_child_guard.ts, loaded with `--import` in a TS child) uses the same `..` rule (SEL-103 review, recommendation)
+
+const CHILD_GUARD = join(import.meta.dirname, "helpers", "ts_child_guard.ts");
+
+/** Runs `node --import ts_child_guard.ts -e <probe>` against a FAKE real home (PES_TEST_REAL_HOME); the probe reads `target` and prints ALLOWED / DENIED. */
+function child_reads(fake_dir: string, work: string, target: string): { verdict: string; stderr: string } {
+  const probe = `
+    const fs = require("node:fs");
+    try { fs.readFileSync(${JSON.stringify(target)}); console.log("ALLOWED"); } catch (e) { console.log(String(e.code) === "EACCES" ? "DENIED" : "ERROR " + e.code); }
+  `;
+  const env: Record<string, string | undefined> = { ...process.env, HOME: work, USERPROFILE: work, PES_TEST_GUARD: "1", PES_TEST_REAL_HOME: fake_dir };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_OPTIONS;
+  const run = spawnSync(process.execPath, ["--import", CHILD_GUARD, "-e", probe], { encoding: "utf8", env: env as NodeJS.ProcessEnv, cwd: work, timeout: 60_000 });
+  assert.equal(run.error, undefined, `the child started (${String(run.error)})`);
+  assert.equal(run.status, 0, `the child ended cleanly: ${run.stderr}`);
+  return { verdict: run.stdout.trim(), stderr: run.stderr };
+}
+
+test("C1 child guard: `..cache` inside .pes · pes-projects is a protected child (DENIED), a real `..` out of the folder is not", () => {
+  const fake = fake_real_home();
+  const work = mkdtempSync(join(tmpdir(), "pes-sel103-child-"));
+  try {
+    writeFileSync(join(fake.dir, "other.txt"), "outside", "utf8");
+    for (const folder of [".pes", "pes-projects"]) {
+      const inside = child_reads(fake.dir, work, join(fake.dir, folder, "..cache", "synthetic.txt"));
+      assert.equal(inside.verdict, "DENIED", `${folder}/..cache/synthetic.txt: ${inside.stderr}`);
+      assert.match(inside.stderr, /PESHomeAccessViolation/);
+      // a plain child of the same folder is denied too (control: the probe really reaches the guard)
+      assert.equal(child_reads(fake.dir, work, join(fake.dir, folder, "..cache")).verdict, "DENIED", `${folder}/..cache`);
+      // `<folder>/../other.txt` is the fake home's own file: outside the folder
+      const outside = child_reads(fake.dir, work, `${join(fake.dir, folder)}/../other.txt`);
+      assert.equal(outside.verdict, "ALLOWED", `${folder}/../other.txt: ${outside.stderr}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+    fake.cleanup();
+  }
+});
