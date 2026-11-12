@@ -60,6 +60,13 @@
             "GET /api/v1/projects/{id}/files/{b}/content",
             "POST /api/v1/projects/{id}/threads",
             "POST /api/v1/projects/{id}/threads/{t}/messages",
+            "GET /api/v1/projects/{id}/threads",
+            "GET /api/v1/projects/{id}/threads/{t}",
+            "POST /api/v1/projects/{id}/threads/{t}/resolutions",
+            "POST /api/v1/projects/{id}/threads/{t}/reanchor",
+            "GET /api/v1/projects/{id}/followups",
+            "POST /api/v1/projects/{id}/followups",
+            "POST /api/v1/projects/{id}/followups/{f}/apply",
             "POST /api/v1/projects/{id}/assumptions",
             "GET /api/v1/projects/{id}/assumptions",
             "POST /api/v1/projects/{id}/decisions",
@@ -69,10 +76,8 @@
           ],
           "unsupported": [
             "POST /api/v1/projects/{id}/exports",
-            "POST /api/v1/projects/{id}/threads/{t}/resolutions",
             "POST /api/v1/projects/{id}/editions",
             "POST /api/v1/projects/{id}/agent-tokens",
-            "POST /api/v1/projects/{id}/followups/{f}/apply",
             "DELETE /api/v1/projects/{id}"
           ],
           "scopes": [
@@ -89,6 +94,8 @@
             "POST /api/v1/projects/{id}/submissions",
             "POST /api/v1/projects/{id}/stages/{s}/approve",
             "POST /api/v1/projects/{id}/stages/{s}/reopen",
+            "POST /api/v1/projects/{id}/threads/{t}/resolutions",
+            "POST /api/v1/projects/{id}/followups/{f}/apply",
             "POST /api/v1/projects/{id}/policies/opencode-go/revisions"
           ],
           "limits": {
@@ -219,8 +226,23 @@
               "threads.messages.create": {
                 "supported": true
               },
+              "threads.list": {
+                "supported": true
+              },
+              "threads.get": {
+                "supported": true
+              },
               "threads.resolutions.create": {
-                "supported": false
+                "supported": true
+              },
+              "threads.reanchor": {
+                "supported": true
+              },
+              "followups.list": {
+                "supported": true
+              },
+              "followups.create": {
+                "supported": true
               },
               "assumptions.create": {
                 "supported": true
@@ -247,7 +269,7 @@
                 "supported": false
               },
               "followups.apply": {
-                "supported": false
+                "supported": true
               },
               "projects.delete": {
                 "supported": false
@@ -285,6 +307,9 @@
               "stale_stage",
               "stage_not_active",
               "already_sealed",
+              "thread_closed",
+              "already_resolved",
+              "basis_changed",
               "cursor_expired",
               "rate_limited",
               "not_supported",
