@@ -25,15 +25,16 @@ const MAX_RECORDS_PER_KIND = 50;
 // (`[지움: 비밀]`) is never eaten again and leaves no leftover.
 const VALUE_CHARS = String.raw`[^\s"'\x60,;\[]`;
 const SECRET_PATTERNS: readonly RegExp[] = [
-  /x-pes-session\s*[:=]\s*[^\s"'`,;\[]+/gi,
+  // a JSON-quoted name ("x-pes-session":"…") has a closing quote after the name and an opening quote before the value
+  /x-pes-session["']?\s*[:=]\s*["']?[^\s"'`,;\[]+/gi,
   // PEM private keys: the whole block (an unterminated block is erased to the end of the text)
   /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|$)/g,
   // Authorization headers with their scheme (Basic / Bearer / Token …), then a bare Bearer
-  new RegExp(String.raw`\bauthorization\s*[:=]\s*(?:(?:basic|bearer|token|digest|negotiate)\s+${VALUE_CHARS}+|${VALUE_CHARS}{6,})`, "gi"),
+  new RegExp(String.raw`\bauthorization["']?\s*[:=]\s*["']?(?:(?:basic|bearer|token|digest|negotiate)\s+${VALUE_CHARS}+|${VALUE_CHARS}{6,})`, "gi"),
   /\bBearer\s+[^\s"'`,;\[]+/gi,
   // Cookie headers that carry name=value pairs: the rest of the line. The name before the first `=` is short, so the
   // look-ahead is bounded (an unbounded `[^\r\n]*=` rescans the whole line for every `cookie:` on it).
-  /\b(?:set-)?cookie\s*:[^\r\n=]{0,200}=[^\r\n]*/gi,
+  /\b(?:set-)?cookie["']?\s*:[^\r\n=]{0,200}=[^\r\n]*/gi,
   // credentials inside a URL: user:pass@host, or a token used as the user name
   // (every pattern below that scans a run of name characters starts only at the start of a run — a `\b` or an unanchored
   // start inside the run would rescan the same run from every position, which is quadratic on long unbroken text)
@@ -404,9 +405,16 @@ export interface QuestionStatus {
  *   read               — a run reported that version as applied;
  *   answered           — a submitted answer version exists for that version.
  * A stamp without its evidence is null. The state is the furthest stage that has evidence; time passing never moves it.
+ * The text goes through the prompt's erasure (`literals`: the session secret and this machine's folders).
  * Returns null when `only_question_id` names no human -> AI question of this project.
  */
-export function question_statuses(db: Db, project_id: string, now_ms: number, only_question_id: string | null): QuestionStatus[] | null {
+export function question_statuses(
+  db: Db,
+  project_id: string,
+  now_ms: number,
+  only_question_id: string | null,
+  literals: RedactLiterals,
+): QuestionStatus[] | null {
   const rows = db.all<{
     question_id: string;
     version_id: string;
@@ -468,7 +476,8 @@ export function question_statuses(db: Db, project_id: string, now_ms: number, on
     return {
       question_id: row.question_id,
       version_id: row.version_id,
-      text: row.text,
+      // the same erasure as the prompt: the text is read for every reader, so a secret or a local path never leaves in it
+      text: redact_text(row.text, literals).text,
       intended_actor_id: row.intended_actor_id,
       state,
       accepted_at,

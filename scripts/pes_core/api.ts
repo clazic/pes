@@ -2775,23 +2775,7 @@ export class ApiApp {
       if (body.target !== "A" && body.target !== "B") invalid_field("target");
       target = body.target;
     }
-    const literals: RedactLiterals = {
-      secrets: [this.#secret],
-      paths: [
-        homedir(),
-        tmpdir(),
-        process.env.HOME ?? "",
-        process.env.USERPROFILE ?? "",
-        process.env.PES_HOME ?? "",
-        this.#objects_dir,
-        dirname(this.#objects_dir),
-      ],
-    };
-    try {
-      literals.paths = [...literals.paths, realpathSync(tmpdir())];
-    } catch {
-      // the folder name stays as the plain one
-    }
+    const literals = this.#redact_literals();
     const built = read_tx(this.#db, () =>
       build_prompt(
         this.#db,
@@ -2810,11 +2794,34 @@ export class ApiApp {
     return { status: 200, data: built };
   }
 
+  /** What the prompt and the status text erase: this server's session secret and this machine's own folders. */
+  #redact_literals(): RedactLiterals {
+    const literals: RedactLiterals = {
+      secrets: [this.#secret],
+      paths: [
+        homedir(),
+        tmpdir(),
+        process.env.HOME ?? "",
+        process.env.USERPROFILE ?? "",
+        process.env.PES_HOME ?? "",
+        this.#objects_dir,
+        dirname(this.#objects_dir),
+      ],
+    };
+    try {
+      literals.paths = [...literals.paths, realpathSync(tmpdir())];
+    } catch {
+      // the folder name stays as the plain one
+    }
+    return literals;
+  }
+
   /** GET P/question-statuses[?question_id=] — what is known of each human -> AI question (accepted / received / read / answered). */
   async #question_statuses(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
     const only = request.query.get("question_id");
     if (only !== null && only.length === 0) invalid("$.query.question_id");
-    const items = read_tx(this.#db, () => question_statuses(this.#db, project.id, this.#now(), only));
+    const literals = this.#redact_literals();
+    const items = read_tx(this.#db, () => question_statuses(this.#db, project.id, this.#now(), only, literals));
     if (items === null) throw new Fail("not_found", { target: "$.query.question_id" });
     return { status: 200, data: { items } };
   }

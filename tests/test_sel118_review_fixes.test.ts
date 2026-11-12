@@ -17,7 +17,7 @@ import { test } from "node:test";
 
 import { add_artifact, create_object } from "../scripts/pes_core/content.ts";
 import { redact_text } from "../scripts/pes_core/prompt_reads.ts";
-import { assert_error, assert_ok, call, go_off, make_agent, owner_creates_run, agent_claims, OPENAPI_PATH, with_api, type ApiEnv, type Auth } from "./helpers/api_env.ts";
+import { assert_error, assert_ok, call, go_off, make_agent, owner_creates_run, agent_claims, OPENAPI_PATH, SESSION_SECRET, with_api, type ApiEnv, type Auth } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
 import { attach, bytes_of, put_ready } from "./helpers/blob_env.ts";
 import { open_round, text_spec } from "./helpers/questions_env.ts";
@@ -420,4 +420,88 @@ test("2회차 권장1 a PGP private key block (ends in 'KEY BLOCK') is erased wh
 test("2회차 권장1 plain words that only look close are not erased", () => {
   const text = "the session ends here; a secret key idea; 암호화 방식 설명; 토큰 방식 설명";
   assert.equal(redact_text(text, NONE).text, text);
+});
+
+// ===========================================================================
+// 4회차 F1 — 질문 상태 응답의 비밀 지우기 (F1-1) · 인용 JSON 헤더 지우기 (F1-2)
+
+// F1-2: a quoted header name (JSON) and a quoted value are erased whole; the value must not survive
+const QUOTED_HEADERS: Array<[string, string, string]> = [
+  // [이름, 글, 남으면 안 되는 값 조각]
+  ["JSON Authorization Basic", `{"Authorization":"Basic dXNlcjpwYXNz"}`, "dXNlcjpwYXNz"],
+  ["JSON Cookie", `{"Cookie":"connect.sid=s%3Aabc1234.signature"}`, "abc1234.signature"],
+  ["JSON x-pes-session", `{"x-pes-session":"otherSessionValue123"}`, "otherSessionValue123"],
+  ["spaced JSON Authorization", `{ "Authorization" : "Basic dXNlcjpwYXNz" }`, "dXNlcjpwYXNz"],
+  ["spaced JSON Cookie", `{ "Cookie" : "sid=abc1234def" }`, "abc1234def"],
+  ["spaced JSON x-pes-session", `{ "x-pes-session" : "otherSessionValue123" }`, "otherSessionValue123"],
+  ["single-quoted Authorization", `{'Authorization': 'Basic dXNlcjpwYXNz'}`, "dXNlcjpwYXNz"],
+  ["JSON Authorization Token", `"authorization":"Token abcd1234efgh5678"`, "abcd1234efgh5678"],
+];
+
+for (const [name, text, value] of QUOTED_HEADERS) {
+  test(`4회차 F1-2 quoted header value is erased: ${name}`, () => {
+    const out = redact_text(`앞 ${text} 뒤`, NONE);
+    assert.ok(!out.text.includes(value), `value left: ${out.text}`);
+    assert.equal(out.hits, 1, `one erasure: ${out.text}`);
+  });
+}
+
+test("4회차 F1-2 the quoted headers go through the prompt build too (each shape gone from the response)", async () => {
+  await with_api(async (env) => {
+    const v = await artifact_with(env, "f12", "합성 장", "요약");
+    for (const [, text, value] of QUOTED_HEADERS) {
+      const data = assert_ok(await post(env, "/prompt-builds", "owner", { question: text, selection: { version_id: v.version_id } }));
+      assert.ok(!JSON.stringify(data).includes(value), `response still has ${value}`);
+    }
+  });
+});
+
+// F1-2: the quoted forms stay linear (20만 자 입력이 300ms 안)
+const QUOTED_SLOW: Array<[string, string]> = [
+  ["repeated quoted Authorization name", `"Authorization":`.repeat(14_000)],
+  ["repeated quoted Cookie name", `"Cookie":`.repeat(20_000)],
+  ["repeated quoted x-pes-session name", `"x-pes-session":`.repeat(12_000)],
+  ["quoted name then long spaces", `"Authorization"` + " ".repeat(200_000)],
+  ["quoted name, colon, quote, then long spaces", `"Cookie":"` + " ".repeat(200_000)],
+  ["quoted name, colon, then long quote run", `"x-pes-session":` + `"`.repeat(200_000)],
+  ["quoted Basic then long spaces", `"Authorization":"Basic` + " ".repeat(200_000)],
+];
+
+for (const [name, text] of QUOTED_SLOW) {
+  test(`4회차 F1-2 quoted header stays linear: ${name} (${text.length} chars) is done within ${BUDGET_MS} ms`, () => {
+    const started = performance.now();
+    redact_text(text, NONE);
+    const spent = performance.now() - started;
+    assert.ok(spent < BUDGET_MS, `${spent.toFixed(0)} ms for ${text.length} chars`);
+  });
+}
+
+// F1-1: the question status read model erases the same secrets and paths as the prompt, for every reader
+test("4회차 F1-1 question statuses: owner, AI A and AI B see no session secret, cookie value or home path in the text", async () => {
+  await with_api(async (env) => {
+    const { stage_id, round_id } = await open_round(env, "f11");
+    const ai_a = await make_agent(env, "f11a");
+    const ai_b = await make_agent(env, "f11b", ["context:read"]);
+    const question = `Authorization: Bearer ${SESSION_SECRET} Cookie: probeCookie=shortValue123 ${U}/hong/private/note.txt 세션 값 ${SESSION_SECRET} 끝`;
+    assert_ok(
+      await post(env, "/questions", "owner", {
+        stage_id,
+        round_id,
+        purpose: "review",
+        direction: "human_to_agent",
+        intended_actor_id: ai_a.actor_id,
+        question: text_spec(question),
+      }),
+      201,
+    );
+    const readers: Auth[] = ["owner", { token: ai_a.token }, { token: ai_b.token }];
+    for (const auth of readers) {
+      const res = assert_ok(await get(env, "/question-statuses", auth));
+      const text = JSON.stringify(res);
+      for (const s of [SESSION_SECRET, "shortValue123", `${U}/hong`, "private/note.txt"]) {
+        assert.ok(!text.includes(s), `status response still has ${s}`);
+      }
+      assert.ok(text.includes(MARK), "the erasure mark is shown in the text");
+    }
+  });
 });
