@@ -39,7 +39,7 @@ test_home="$(mktemp -d)"
 HOME="$test_home" USERPROFILE="$test_home" npm test && npm run typecheck
 ```
 
-`npm test`는 `node --import ./tests/helpers/require_temp_home.ts --test "tests/**/*.test.ts"`로 돈다(진입점 설명: 아래 「실제 홈에서 시작 거절」). `tests/helpers/isolated_home.ts`가 임시 `HOME`·`USERPROFILE`·`PES_HOME`을 만들고, 시험은 그 env 객체를 경로 함수와 자식 프로세스에만 넘긴다. `process.env`는 바꾸지 않으며 실제 `~/.pes`·`~/pes-projects`를 열거나 stat 하지 않는다. 임시 폴더와 그 안의 DB 파일은 각 시험의 `cleanup()`이 지운다.
+`npm test`는 `node scripts/run_tests.ts`(SEL-106)로 돌고, 이 실행기가 `node --import ./tests/helpers/require_temp_home.ts --test --test-concurrency=<N> "tests/**/*.test.ts"`를 부른다(진입점 설명: 아래 「실제 홈에서 시작 거절」). 동시 실행 수 `<N>`은 환경변수 `PES_TEST_CONCURRENCY`(1 이상 정수, 예: `PES_TEST_CONCURRENCY=3 npm test`)이고, 없으면 코어 수의 절반(최소 2)이다. 잘못된 값은 종료 코드 2 로 거절하며, `npm test -- <파일>` 같은 추가 인자는 glob 앞에 그대로 전달된다. CI 는 실행기를 쓰지 않고 `node --test --test-shard=N/8`을 직접 부른다. `tests/helpers/isolated_home.ts`가 임시 `HOME`·`USERPROFILE`·`PES_HOME`을 만들고, 시험은 그 env 객체를 경로 함수와 자식 프로세스에만 넘긴다. `process.env`는 바꾸지 않으며 실제 `~/.pes`·`~/pes-projects`를 열거나 stat 하지 않는다. 임시 폴더와 그 안의 DB 파일은 각 시험의 `cleanup()`이 지운다.
 
 ## 화면 시험 (PR18)
 
