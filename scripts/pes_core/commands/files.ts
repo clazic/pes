@@ -90,9 +90,19 @@ const BLOB_REFERENCES: ReadonlyArray<readonly [table: string, column: string]> =
   ["import_batches", "report_blob_id"],
 ];
 
-const BLOB_LINKED_SQL = `SELECT (${BLOB_REFERENCES.map(
-  ([table, column]) => `EXISTS (SELECT 1 FROM ${table} WHERE project_id = ? AND ${column} = ?)`,
-).join(" OR ")}) AS linked`;
+/**
+ * A stored print (SEL-119) keeps its manifest blob by snapshots.manifest_blob_id (above) and its output blob by the
+ * output_blob_id of its print.committed event (no new table). That output is linked too, for every print that names it
+ * (the same selection printed twice shares one output).
+ */
+const PRINT_OUTPUT_LINK = `EXISTS (SELECT 1 FROM events WHERE project_id = ? AND type = 'print.committed' AND json_extract(payload, '$.output_blob_id') = ?)`;
+
+const BLOB_LINK_CONDITIONS: readonly string[] = [
+  ...BLOB_REFERENCES.map(([table, column]) => `EXISTS (SELECT 1 FROM ${table} WHERE project_id = ? AND ${column} = ?)`),
+  PRINT_OUTPUT_LINK,
+];
+
+const BLOB_LINKED_SQL = `SELECT (${BLOB_LINK_CONDITIONS.join(" OR ")}) AS linked`;
 
 interface FileScope {
   project_id: string;
@@ -185,7 +195,7 @@ function read_blob(
 /** True when any table that references blobs points at this blob. */
 function blob_is_linked(runtime: CommandRuntime, project_id: string, blob_id: string): boolean {
   const params: string[] = [];
-  for (let index = 0; index < BLOB_REFERENCES.length; index += 1) {
+  for (let index = 0; index < BLOB_LINK_CONDITIONS.length; index += 1) {
     params.push(project_id, blob_id);
   }
   const row = runtime.db.get<{ linked: bigint }>(BLOB_LINKED_SQL, ...params);

@@ -73,6 +73,11 @@
             "GET /api/v1/projects/{id}/decisions",
             "POST /api/v1/projects/{id}/reflections",
             "GET /api/v1/projects/{id}/reflections",
+            "GET /api/v1/projects/{id}/print",
+            "POST /api/v1/projects/{id}/print/prepare",
+            "POST /api/v1/projects/{id}/print/commit",
+            "POST /api/v1/projects/{id}/prompt-builds",
+            "GET /api/v1/projects/{id}/question-statuses",
             "POST /api/v1/projects/{id}/references",
             "GET /api/v1/projects/{id}/references",
             "GET /api/v1/projects/{id}/references/{ref}",
@@ -286,6 +291,21 @@
                 "supported": true
               },
               "reflections.list": {
+                "supported": true
+              },
+              "print.get": {
+                "supported": true
+              },
+              "print.prepare": {
+                "supported": true
+              },
+              "print.commit": {
+                "supported": true
+              },
+              "prompts.build": {
+                "supported": true
+              },
+              "question_statuses.list": {
                 "supported": true
               },
               "references.create": {

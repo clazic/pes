@@ -57,6 +57,8 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "legacy.rollback_before_write",
   "legacy.validate_import",
   "policy.set",
+  "print.commit",
+  "print.prepare",
   "project.add_note",
   "project.bootstrap",
   "project.register",
