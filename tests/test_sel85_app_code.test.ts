@@ -168,13 +168,13 @@ test("2 교환: POST /api/v1/app-session {code} → 소유자 세션과 projects
   }
 });
 
-test("2 코드는 한 번만: 두 번째 교환은 401/410, 응답에 세션 없음, no-store", { timeout: 120_000 }, async () => {
+test("2 코드는 한 번만: 두 번째 교환은 401(쓴·모르는·만료 코드는 같은 모양), 응답에 세션 없음, no-store", { timeout: 120_000 }, async () => {
   const f = await start("pes-sel85-once-");
   try {
     const { code } = f.open();
     assert.equal((await f.exchange(code)).status, 200);
     const again = await f.exchange(code);
-    assert.ok([401, 410].includes(again.status), `reuse refused, got ${again.status}`);
+    assert.equal(again.status, 401, `reuse refused, got ${again.status}`);
     assert.deepEqual(leaks(again.text()), []);
     assert.match(again.headers["cache-control"] ?? "", /no-store/);
     assert.ok(again.json().data === undefined);
@@ -189,13 +189,13 @@ test("2 동시에 두 번 보내도 세션을 받는 쪽은 하나뿐이다", { 
     const { code } = f.open();
     const results = await Promise.all([f.exchange(code), f.exchange(code), f.exchange(code)]);
     assert.equal(results.filter((r) => r.status === 200).length, 1, results.map((r) => r.status).join(","));
-    for (const r of results.filter((x) => x.status !== 200)) assert.ok([401, 410].includes(r.status));
+    for (const r of results.filter((x) => x.status !== 200)) assert.equal(r.status, 401);
   } finally {
     await f.cleanup();
   }
 });
 
-test("2 만료: 수명(PES_APP_CODE_TTL_MS)이 지난 코드는 401/410", { timeout: 120_000 }, async () => {
+test("2 만료: 수명(PES_APP_CODE_TTL_MS)이 지난 코드는 401", { timeout: 120_000 }, async () => {
   // 수명은 CLI 두 번(각 1초 남짓)보다 넉넉해야 '수명 안' 단언이 박자에 흔들리지 않는다 — 기다림은 stale 발급이 끝난 시각부터 잰다
   const TTL = 8000;
   const f = await start("pes-sel85-ttl-", { PES_APP_CODE_TTL_MS: String(TTL) });
@@ -206,7 +206,7 @@ test("2 만료: 수명(PES_APP_CODE_TTL_MS)이 지난 코드는 401/410", { time
     assert.equal((await f.exchange(fresh)).status, 200, "수명 안의 코드는 통한다");
     await new Promise((r) => setTimeout(r, Math.max(0, after_stale + TTL + 700 - Date.now())));
     const res = await f.exchange(stale);
-    assert.ok([401, 410].includes(res.status), `expired code refused, got ${res.status}`);
+    assert.equal(res.status, 401, `expired code refused, got ${res.status}`);
     assert.deepEqual(leaks(res.text()), []);
     assert.match(res.headers["cache-control"] ?? "", /no-store/);
   } finally {

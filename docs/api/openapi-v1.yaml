@@ -1410,4 +1410,4 @@ x-app-session:
       - "401 unauthenticated (unknown, used and expired codes look the same)"
       - "403 forbidden"
       - "413 payload_too_large"
-      - "429 rate_limited (only FAILED attempts count, 120 per minute; a good code is traded even when the budget is spent and a good exchange is not counted)"
+      - "429 rate_limited (only FAILED attempts count, 120 per minute; a good code is traded even when the budget is spent and a good exchange is not counted; a body that is not a JSON object (400) or too large (413) is refused before the budget and not counted either)"
