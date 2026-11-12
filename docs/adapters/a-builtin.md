@@ -100,6 +100,7 @@ run 하나는 시작 때 고른 모델 하나로만 간다. 실패해도 다른 
 | 답에 현재 키(전체·조각)가 있음 | `blocked_usage` | `usage_unknown` | 사람이 정리한 뒤 재개(키를 바꾸는 것이 좋다) |
 | 구독 연결에 유효한 추가 요금 꺼짐 확인·기준점이 없음, 확인 만료, 확인 뒤 과금 신호가 보임 | `blocked_usage`(시작 전이면 `conflict`) | `extra_usage_off` | 사람이 다시 확인(`confirm_extra_charge_off`)한 뒤 재개 |
 | 정책 스위치 끔 | `interrupted` | 사건에 `policy_off` | 스위치를 켜고 재개 |
+| 이 run 이 읽은 참고자료의 원본 권한·원본 Go·현재 Go·떼기가 막힘(요청 직전 또는 HTTP 전송 직전 경계에서 다시 판정) | `interrupted`(그 요청은 보내지 않음, authorize 한 dispatch 는 `blocked`) | 사건에 `reference_withdrawn` | 재개하면 새 기록으로 시작(옛 본문을 싣지 않음) |
 
 `blocked_usage`·`waiting_human`은 **lease를 놓는다.** 재개는 `BuiltinExecutor.resume`이고, 사람(소유자)만 낼 수 있으며 새 claim(더 큰 fence)과 함께 정책·사용량·키를 다시 확인한다. 답이 아직 없으면(`resume_ready`) 모델을 부르지 않고 `conflict`다. 결과를 모르는 호출이 정리되지 않았으면 재개는 `conflict`다.
 

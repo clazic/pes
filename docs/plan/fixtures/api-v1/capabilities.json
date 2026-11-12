@@ -75,7 +75,12 @@
             "GET /api/v1/projects/{id}/reflections",
             "GET /api/v1/projects/{id}/print",
             "POST /api/v1/projects/{id}/print/prepare",
-            "POST /api/v1/projects/{id}/print/commit"
+            "POST /api/v1/projects/{id}/print/commit",
+            "POST /api/v1/projects/{id}/references",
+            "GET /api/v1/projects/{id}/references",
+            "GET /api/v1/projects/{id}/references/{ref}",
+            "POST /api/v1/projects/{id}/references/{ref}/refresh",
+            "POST /api/v1/projects/{id}/references/{ref}/detach"
           ],
           "unsupported": [
             "POST /api/v1/projects/{id}/exports",
@@ -293,6 +298,21 @@
                 "supported": true
               },
               "print.commit": {
+                "supported": true
+              },
+              "references.create": {
+                "supported": true
+              },
+              "references.list": {
+                "supported": true
+              },
+              "references.get": {
+                "supported": true
+              },
+              "references.refresh": {
+                "supported": true
+              },
+              "references.detach": {
                 "supported": true
               },
               "editions.create": {

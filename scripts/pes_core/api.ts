@@ -74,6 +74,15 @@ import {
 } from "./policy.ts";
 import { publish_set, revise_question, submit_answers } from "./questions.ts";
 import {
+  REFERENCE_SCOPE_ITEMS,
+  list_references,
+  read_reference,
+  reference_caller,
+  reference_row,
+  reference_view,
+  type ReferenceCaller,
+} from "./references.ts";
+import {
   cancel as run_cancel,
   claim as run_claim,
   complete as run_complete,
@@ -342,6 +351,7 @@ const CREATED_ACTIONS = new Set([
   "decision.revoked",
   "reflection.created",
   "print.committed",
+  "reference.attached",
   "file.material_uploaded",
   "annotation.create",
   "annotation.reanchor",
@@ -613,6 +623,29 @@ export class ApiApp {
       route("GET", `${P}/context`, "context.get", {
         who: "any", scope: "context:read", go: true,
         act: async (_r, project, auth) => this.#context(project, auth),
+      }),
+      // SEL-113 REF1a: reference material from earlier projects. Attaching, refreshing and detaching are the owner session's
+      // (403 human_required for a token); reading is a person's or a context:read token's, and every read goes through
+      // references.ts decide() — permission to the source, the stricter Go switch, original gone.
+      route("GET", `${P}/references`, "references.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (_r, project, auth) => this.#references_list(project, auth),
+      }),
+      route("POST", `${P}/references`, "references.create", {
+        who: "human",
+        act: async (r, project, auth) => this.#reference_attach(r, project, auth),
+      }),
+      route("GET", `${P}/references/{ref}`, "references.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project, auth) => this.#reference_get(r, project, auth),
+      }),
+      route("POST", `${P}/references/{ref}/refresh`, "references.refresh", {
+        who: "human",
+        act: async (r, project, auth) => this.#reference_refresh(r, project, auth),
+      }),
+      route("POST", `${P}/references/{ref}/detach`, "references.detach", {
+        who: "human",
+        act: async (r, project, auth) => this.#reference_detach(r, project, auth),
       }),
       route("GET", `${P}/objects/{o}/versions/{v}`, "object.version.get", {
         who: "any", scope: "context:read", go: true,
@@ -1443,8 +1476,109 @@ export class ApiApp {
   // context, versions, changes
 
   async #context(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
-    const data = read_tx(this.#db, () => this.#context_data(this.#project(project.id), this.#audience(auth)));
+    const data = read_tx(this.#db, () => ({
+      ...(this.#context_data(this.#project(project.id), this.#audience(auth)) as Record<string, unknown>),
+      references: list_references(this.#db, project.id, this.#reference_caller(auth)),
+    }));
     return { status: 200, data };
+  }
+
+  // -------------------------------------------------------------------------
+  // reference material (SEL-113 REF1a)
+
+  #reference_caller(auth: AuthInfo): ReferenceCaller {
+    return reference_caller(this.#db, auth.actor_id, !auth.session);
+  }
+
+  async #references_list(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const references = read_tx(this.#db, () => list_references(this.#db, project.id, this.#reference_caller(auth)));
+    return { status: 200, data: { references } };
+  }
+
+  async #reference_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const reference_id = request.params[1] as string;
+    try {
+      const data = read_tx(this.#db, () => read_reference(this.#db, project.id, reference_id, this.#reference_caller(auth)));
+      return { status: 200, data };
+    } catch (error) {
+      throw fail_from(error);
+    }
+  }
+
+  /** The row as the owner's session reads it, after a write; a replay whose row is gone since is a conflict. */
+  #reference_after_write(project: ProjectRow, auth: AuthInfo, reference_id: unknown): Record<string, unknown> {
+    const view = read_tx(this.#db, () => {
+      const row = typeof reference_id === "string" ? reference_row(this.#db, project.id, reference_id) : undefined;
+      return row === undefined ? undefined : reference_view(this.#db, row, this.#reference_caller(auth));
+    });
+    if (view === undefined) throw new Fail("conflict");
+    return view;
+  }
+
+  /** POST P/references — the owner session pins a snapshot of another project as reference material. */
+  async #reference_attach(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["referenced_project_id", "source_snapshot_id", "scope", "source_label"]);
+    const referenced = body.referenced_project_id;
+    if (typeof referenced !== "string" || referenced.length === 0 || !referenced.isWellFormed()) validation("$.body.referenced_project_id");
+    if (referenced === project.id) validation("$.body.referenced_project_id", { reason: "self_reference" });
+    const payload: Record<string, unknown> = { referenced_project_id: referenced };
+    if (body.source_snapshot_id !== undefined) {
+      const snapshot = body.source_snapshot_id;
+      if (typeof snapshot !== "string" || snapshot.length === 0 || !snapshot.isWellFormed()) validation("$.body.source_snapshot_id");
+      payload.source_snapshot_id = snapshot;
+    }
+    if (body.scope !== undefined) {
+      const scope = body.scope;
+      if (!Array.isArray(scope) || scope.length === 0) validation("$.body.scope");
+      const seen = new Set<string>();
+      for (const entry of scope) {
+        if (typeof entry !== "string" || !REFERENCE_SCOPE_ITEMS.includes(entry) || seen.has(entry)) validation("$.body.scope");
+        seen.add(entry);
+      }
+      payload.scope = scope;
+    }
+    if (body.source_label !== undefined) {
+      const label = body.source_label;
+      if (typeof label !== "string" || label.trim().length === 0 || label.length > 200 || !label.isWellFormed()) validation("$.body.source_label");
+      payload.source_label = label;
+    }
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "reference.attach", payload));
+    const result = result_record(out.result);
+    return { status: 201, data: { reference: this.#reference_after_write(project, auth, result.reference_id) }, replayed: out.replayed };
+  }
+
+  /** POST P/references/{ref}/refresh — the owner session moves the pin to another snapshot (default: the newest). */
+  async #reference_refresh(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["source_snapshot_id", "base_rev"]);
+    const payload: Record<string, unknown> = { reference_id: request.params[1] as string };
+    if (body.source_snapshot_id !== undefined) {
+      const snapshot = body.source_snapshot_id;
+      if (typeof snapshot !== "string" || snapshot.length === 0 || !snapshot.isWellFormed()) validation("$.body.source_snapshot_id");
+      payload.source_snapshot_id = snapshot;
+    }
+    const base_rev = optional_decimal(body, "base_rev");
+    if (base_rev !== undefined) payload.base_rev = base_rev;
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "reference.refresh", payload),
+      (error) => targeted(error, { rev_conflict: "$.body.base_rev" }),
+    );
+    const result = result_record(out.result);
+    return { status: 200, data: { reference: this.#reference_after_write(project, auth, result.reference_id) }, replayed: out.replayed };
+  }
+
+  /** POST P/references/{ref}/detach — the owner session removes the reference. */
+  async #reference_detach(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, []);
+    const out = await this.#exec(() =>
+      this.#service.execute(this.#ctx(project, auth, key), "reference.detach", { reference_id: request.params[1] as string }),
+    );
+    return { status: 200, data: out.result, replayed: out.replayed };
   }
 
   /** Who is reading: the human owner sees every file, anyone else only what the AI-access rule lets through (commands/file_access.ts). */
