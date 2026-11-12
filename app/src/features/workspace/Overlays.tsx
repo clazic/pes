@@ -2,7 +2,7 @@ import * as React from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { QuestionView, RoundView } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import { formatAt, importanceLabel, SOURCE_LABEL } from "@/lib/labels";
+import { formatAt, importanceLabel, resultMetaText, SOURCE_LABEL } from "@/lib/labels";
 import type { View } from "./paths";
 
 /**
@@ -123,6 +123,7 @@ function PageButton({ label, target, onPage, children }: { label: string; target
  */
 export function PrintPreview({ round, title, onClose }: { round: RoundView; title: string; onClose: () => void }) {
   const sent = round.questions.filter((q) => q.sent);
+  const resultMeta = round.result ? resultMetaText({ ...round.result, updated_at: null }) : null;
   return (
     <section aria-label="인쇄 미리보기" data-print-preview="" className="border-b bg-surface-soft px-4 py-4 tab:px-6">
       <div className="flex flex-wrap items-center gap-2" data-print="hide">
@@ -157,7 +158,8 @@ export function PrintPreview({ round, title, onClose }: { round: RoundView; titl
         {round.result ? (
           <>
             <h3 className="mt-4 text-meta font-semibold text-ink">
-              {round.result.title} <span className="font-normal text-muted-foreground">v{round.result.version} · {round.result.status === "adopted" ? "채택본" : "초안"}</span>
+              {round.result.title}
+              {resultMeta !== null ? <span className="font-normal text-muted-foreground"> {resultMeta}</span> : null}
             </h3>
             {round.result.paragraphs.map((p) => (
               <p key={p} className="mt-1 text-meta text-ink">
