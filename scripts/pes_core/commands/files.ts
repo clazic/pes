@@ -32,8 +32,19 @@ import {
   storage_file_is_regular,
 } from "../files.ts";
 import {
+  content_digest,
+  set_first_current_version,
+  source_digest_fields,
+  write_object,
+  write_object_version,
+  write_source_version,
+  type SourceFacts,
+} from "./content.ts";
+import { access_state_of_blob, access_state_of_policy } from "./file_access.ts";
+import {
   insert_receipt,
   reject_unknown_fields,
+  require_human_owner_actor,
   require_non_empty_string,
   require_record,
   type CommandDefinition,
@@ -48,6 +59,11 @@ const COMPLETE_FIELDS = ["blob_id", "sha256", "size"] as const;
 const ATTACH_FIELDS = ["version_id", "blob_id", "role"] as const;
 const QUARANTINE_FIELDS = ["blob_id", "reason"] as const;
 const GC_FIELDS = ["grace_ms"] as const;
+const UPLOAD_FIELDS = ["blob_id", "title", "object_id", "role"] as const;
+const ACCESS_FIELDS = ["file_policy_id", "ai_access", "reason"] as const;
+const AI_ACCESS_VALUES = new Set(["allow", "deny"]);
+const MAX_TITLE_CHARS = 300;
+const MAX_REASON_CHARS = 1000;
 
 const RESERVED_EVENT = "file.upload_reserved";
 
@@ -499,6 +515,299 @@ function run_attach_version(runtime: CommandRuntime): CommandResult {
 }
 
 // ---------------------------------------------------------------------------
+// file.upload — a user's own material (SEL-115 MAT1a)
+//
+// A "material" is a source object of kind file. Its current version carries one ready blob through version_files.
+// The blob has ONE policy row shared by every use: the first attach creates it as allow (rev 1), a later upload of
+// the same bytes reuses it, so a re-upload can never reset a deny. No new table: objects, sources, object_versions,
+// source_versions, version_files and file_policies already exist.
+
+interface MaterialObjectRow {
+  id: string;
+  kind: string;
+  source_kind: string | null;
+  current_version_id: string | null;
+  rev: bigint;
+}
+
+function upload_role(value: unknown): string {
+  if (value === undefined || value === null) return "attachment";
+  if (typeof value !== "string" || !ROLES.has(value)) invalid("role is not an allowed file role");
+  return value;
+}
+
+function upload_title(payload: Record<string, unknown>): string | null {
+  const text = optional_text(payload, "title");
+  if (text === null || text.trim().length === 0) return null;
+  if (text.length > MAX_TITLE_CHARS) invalid(`title must be at most ${MAX_TITLE_CHARS} characters`);
+  return text;
+}
+
+function run_upload(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, UPLOAD_FIELDS);
+  const blob_id = require_blob_id(payload);
+  const role = upload_role(payload.role);
+  const given_title = upload_title(payload);
+  const target_object_id =
+    payload.object_id === undefined || payload.object_id === null ? null : require_safe_id(payload.object_id, "object_id");
+  const scope = scope_of(runtime);
+
+  const blob = read_blob(runtime, scope.project_id, blob_id);
+  if (blob === undefined) throw new ApiError("not_found", "blob not found");
+  if (blob.state !== "ready") throw new ApiError("conflict", "only a ready blob can become a material");
+
+  let object: MaterialObjectRow | null = null;
+  let version_no = 1;
+  let title = given_title ?? blob.original_name ?? "자료";
+  if (target_object_id !== null) {
+    const found = runtime.db.get<MaterialObjectRow>(
+      `SELECT o.id AS id, o.kind AS kind, s.kind AS source_kind, o.current_version_id AS current_version_id, o.rev AS rev
+         FROM objects o
+         LEFT JOIN sources s ON s.project_id = o.project_id AND s.object_id = o.id
+        WHERE o.project_id = ? AND o.id = ?`,
+      scope.project_id,
+      target_object_id,
+    );
+    if (found === undefined) throw new ApiError("not_found", "object not found");
+    if (found.kind !== "source" || found.source_kind !== "file" || found.current_version_id === null) {
+      throw new ApiError("conflict", "the object is not a material");
+    }
+    const duplicate = runtime.db.get<{ ok: bigint }>(
+      `SELECT 1 AS ok FROM version_files vf
+         JOIN object_versions ov ON ov.project_id = vf.project_id AND ov.id = vf.version_id
+        WHERE ov.project_id = ? AND ov.object_id = ? AND vf.blob_id = ? AND vf.role = ?`,
+      scope.project_id,
+      target_object_id,
+      blob_id,
+      role,
+    );
+    if (duplicate !== undefined) {
+      throw new ApiError("conflict", "the material already has this file in this role");
+    }
+    const latest = runtime.db.get<{ max_no: bigint | null }>(
+      "SELECT MAX(version_no) AS max_no FROM object_versions WHERE project_id = ? AND object_id = ?",
+      scope.project_id,
+      target_object_id,
+    );
+    version_no = Number(latest?.max_no ?? 0n) + 1;
+    if (given_title === null) {
+      const current = runtime.db.get<{ title: string }>(
+        "SELECT title FROM source_versions WHERE project_id = ? AND version_id = ?",
+        scope.project_id,
+        found.current_version_id,
+      );
+      title = current?.title ?? title;
+    }
+    object = found;
+  }
+  if (title.length > MAX_TITLE_CHARS) title = title.slice(0, MAX_TITLE_CHARS);
+
+  const known_policy = access_state_of_blob(runtime.db, scope.project_id, blob_id);
+  const file_policy_id = known_policy?.policy_id ?? runtime.new_id();
+  const ai_access = known_policy?.effective ?? "allow";
+  const object_id = object?.id ?? runtime.new_id();
+  const version_id = runtime.new_id();
+  const result = {
+    object_id,
+    version_id,
+    version_no,
+    blob_id,
+    file_policy_id,
+    role,
+    ai_access,
+    original_name: blob.original_name,
+    media_type: blob.media_type,
+    size: Number(blob.size),
+    sha256: blob.sha256,
+  };
+
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id: scope.actor_id,
+    action: "file.material_uploaded",
+    base_control_rev: null,
+    result,
+  });
+
+  if (object === null) {
+    write_object(runtime, scope.project_id, object_id, "source", null, null);
+  }
+  const facts: SourceFacts = {
+    title,
+    url: null,
+    locator: {},
+    retrieved_at: runtime.now_ms,
+    method: "import",
+    verification_state: "unverified",
+    quote: null,
+    verified_by_actor_id: null,
+  };
+  write_object_version(runtime, {
+    project_id: scope.project_id,
+    object_id,
+    kind: "source",
+    version_id,
+    version_no,
+    based_on_version_id: object?.current_version_id ?? null,
+    actor_id: scope.actor_id,
+    content_hash: content_digest("source", {
+      ...source_digest_fields(facts),
+      file: { sha256: blob.sha256, size: Number(blob.size), role },
+    }),
+  });
+  if (object === null) {
+    const side = runtime.db.run(
+      "INSERT INTO sources (project_id, object_id, kind, canonical_locator) VALUES (?, ?, 'file', NULL)",
+      scope.project_id,
+      object_id,
+    );
+    if (side.changes !== 1n) throw new Error("the material source was not written");
+  }
+  write_source_version(runtime, { project_id: scope.project_id, object_id, version_id, facts });
+
+  if (known_policy === undefined) {
+    const actor = runtime.db.get<{ user_id: string }>("SELECT user_id FROM actors WHERE id = ?", scope.actor_id);
+    if (actor === undefined) throw new Error("the actor user was not found");
+    const policy = runtime.db.run(
+      `INSERT INTO file_policies
+         (id, project_id, blob_id, ai_access, rev, changed_by_actor_id, changed_by_user_id,
+          changed_at, reason, tx_id)
+       VALUES (?, ?, ?, 'allow', 1, ?, ?, ?, NULL, ?)`,
+      file_policy_id,
+      scope.project_id,
+      blob_id,
+      scope.actor_id,
+      actor.user_id,
+      runtime.now_ms,
+      runtime.tx_id,
+    );
+    if (policy.changes !== 1n) throw new Error("the file policy was not written");
+  }
+  const linked = runtime.db.run(
+    `INSERT INTO version_files (project_id, version_id, blob_id, role, file_policy_id)
+     VALUES (?, ?, ?, ?, ?)`,
+    scope.project_id,
+    version_id,
+    blob_id,
+    role,
+    file_policy_id,
+  );
+  if (linked.changes !== 1n) throw new Error("the version file was not written");
+
+  if (object === null) {
+    set_first_current_version(runtime, scope.project_id, object_id, version_id);
+  } else {
+    const moved = runtime.db.run(
+      "UPDATE objects SET current_version_id = ?, rev = rev + 1 WHERE project_id = ? AND id = ? AND rev = ?",
+      version_id,
+      scope.project_id,
+      object_id,
+      object.rev,
+    );
+    if (moved.changes !== 1n) throw new ApiError("conflict", "the material moved concurrently");
+  }
+
+  return {
+    result,
+    events: [
+      {
+        type: "file.material_uploaded",
+        payload: { object_id, version_id, version_no, blob_id, file_policy_id, role, new_material: object === null },
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// file.ai_access_set — the AI-reference switch of one file (human owner only)
+//
+// The history (file_ai_access_versions) only grows: a change adds one row with rev = (newest rev) + 1 and puts the
+// same value and rev on the policy row. Setting the value already in force writes no history row and changes no rev.
+// "In force" is the strict side: a deny in the policy row or the newest history row counts as deny (file_access.ts).
+
+function run_ai_access_set(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, ACCESS_FIELDS);
+  const file_policy_id = require_safe_id(payload.file_policy_id, "file_policy_id");
+  const wanted = payload.ai_access;
+  if (typeof wanted !== "string" || !AI_ACCESS_VALUES.has(wanted)) invalid('ai_access must be "allow" or "deny"');
+  const reason = optional_text(payload, "reason");
+  if (reason !== null && reason.length > MAX_REASON_CHARS) invalid(`reason must be at most ${MAX_REASON_CHARS} characters`);
+  const scope = scope_of(runtime);
+  const actor_id = require_human_owner_actor(runtime);
+
+  const state = access_state_of_policy(runtime.db, scope.project_id, file_policy_id);
+  if (state === undefined) throw new ApiError("not_found", "file policy not found");
+
+  const changed = state.effective !== wanted;
+  const next_rev = Math.max(state.rev, state.latest_rev) + 1;
+  const result = {
+    file_policy_id,
+    blob_id: state.blob_id,
+    ai_access: wanted,
+    rev: changed ? next_rev : state.rev,
+    changed,
+  };
+  insert_receipt(runtime, {
+    project_id: scope.project_id,
+    actor_id,
+    action: "file.ai_access_changed",
+    base_control_rev: null,
+    result,
+  });
+
+  if (changed) {
+    const actor = runtime.db.get<{ user_id: string }>("SELECT user_id FROM actors WHERE id = ?", actor_id);
+    if (actor === undefined) throw new Error("the actor user was not found");
+    const history = runtime.db.run(
+      `INSERT INTO file_ai_access_versions
+         (id, project_id, file_policy_id, ai_access, changed_by_actor_id, changed_by_user_id,
+          changed_at, reason, rev, tx_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      runtime.new_id(),
+      scope.project_id,
+      file_policy_id,
+      wanted,
+      actor_id,
+      actor.user_id,
+      runtime.now_ms,
+      reason,
+      next_rev,
+      runtime.tx_id,
+    );
+    if (history.changes !== 1n) throw new Error("the access history row was not written");
+    const policy = runtime.db.run(
+      `UPDATE file_policies
+          SET ai_access = ?, rev = ?, changed_by_actor_id = ?, changed_by_user_id = ?,
+              changed_at = ?, reason = ?, tx_id = ?
+        WHERE project_id = ? AND id = ? AND rev = ?`,
+      wanted,
+      next_rev,
+      actor_id,
+      actor.user_id,
+      runtime.now_ms,
+      reason,
+      runtime.tx_id,
+      scope.project_id,
+      file_policy_id,
+      state.rev,
+    );
+    if (policy.changes !== 1n) throw new ApiError("conflict", "the file policy moved concurrently");
+  }
+
+  return {
+    result,
+    events: [
+      {
+        type: changed ? "file.ai_access_changed" : "file.ai_access_confirmed",
+        payload: { file_policy_id, blob_id: state.blob_id, ai_access: wanted, rev: result.rev, changed },
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // file.quarantine
 
 function run_quarantine(runtime: CommandRuntime): CommandResult {
@@ -676,6 +985,8 @@ const FILE_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> =
   ["file.reserve_upload", definition("file.upload_reserved", run_reserve_upload)],
   ["file.complete_upload", definition("file.upload_completed", run_complete_upload)],
   ["file.attach_version", definition("file.version_attached", run_attach_version)],
+  ["file.upload", definition("file.material_uploaded", run_upload)],
+  ["file.ai_access_set", definition("file.ai_access_changed", run_ai_access_set)],
   ["file.quarantine", definition("file.blob_quarantined", run_quarantine)],
   ["file.gc_orphans", definition("file.orphans_collected", run_gc_orphans)],
 ];

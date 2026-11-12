@@ -5,9 +5,13 @@
 // runner adds them, so a model cannot write under someone else's lease.
 
 import type { CommandService, MutationContext } from "../commands.ts";
+import { ai_material_rows } from "../commands/file_access.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
+
+/** At most this many allowed materials are handed to the model by context.get. */
+const MATERIALS_MAX = 50;
 
 export const A_TOOL_ALLOWLIST: readonly string[] = Object.freeze([
   "context.get",
@@ -27,7 +31,7 @@ const TEXT_ARG = {
 };
 
 export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
-  { name: "context.get", description: "Read the project, stage, round, current objects and questions.", parameters: { type: "object", properties: {} } },
+  { name: "context.get", description: "Read the project, stage, round, current objects, the user's allowed materials and questions.", parameters: { type: "object", properties: {} } },
   {
     name: "result.submit",
     description: "Append new versions to existing artifact objects. Each item: op=append_version, object_id, title, summary, body_md.",
@@ -167,6 +171,8 @@ export function build_context(db: Pick<Db, "get" | "all">, run: RunHandle): Reco
     stage: stage?.key ?? null,
     round_no: round === undefined ? null : Number(round.round_no),
     objects: objects.map((row) => ({ object_id: row.object_id, version_id: row.version_id, title: row.title, summary: row.summary })),
+    // SEL-115: the user's own materials, allowed files only — the same rule (commands/file_access.ts) the HTTP API and MCP use.
+    materials: ai_material_rows(db, run.project_id, MATERIALS_MAX),
     questions: question_context(db, run),
   };
 }

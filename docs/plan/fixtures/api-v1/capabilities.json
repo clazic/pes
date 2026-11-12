@@ -210,6 +210,18 @@
               "files.content": {
                 "supported": true
               },
+              "files.preview": {
+                "supported": true
+              },
+              "materials.create": {
+                "supported": true
+              },
+              "materials.list": {
+                "supported": true
+              },
+              "file_policies.ai_access.set": {
+                "supported": true
+              },
               "exports.create": {
                 "supported": false
               },
