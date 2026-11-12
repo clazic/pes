@@ -42,6 +42,13 @@ export const STATUS = {
     changing: d("변경 중", "tri", "warn", "정책 확정 전 — 새 전송 없음"),
     unknown: d("알 수 없음", "dotring", "unk", "서버가 AI 연결 칸을 보내지 않음 — 허용으로 해석하지 않음"),
   },
+  // 질문(U2b): 닫힌 질문은 지우지 않고 이름으로 남는다 — 철회 · 보류 · 합침은 서로 다른 말(시안 question 영역, 화면 글자는 “~됨”으로 통일)
+  question: {
+    recheck: d("재확인 필요", "tri", "warn", "새 질문 버전 · 옛 답 자동 승계 없음"),
+    deferred: d("보류됨", "pause", "off", "status = deferred"),
+    merged: d("합쳐짐", "hsquare", "off", "status = merged"),
+    withdrawn: d("철회됨", "hsquare", "off", "status = withdrawn"),
+  },
   // 실행(U1d): 중단 · 취소 · 인계는 서로 다른 사실이다(UI 44·49·104)
   run: {
     running: d("실행 중", "ring", "run", "runs.status = running"),
