@@ -12,12 +12,13 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
+
+import { import_url } from "./helpers/import_url.ts";
 
 const REPO = join(import.meta.dirname, "..");
 // --import takes a URL: a bare Windows path (D:\\…) is read as a "d:" URL scheme (ERR_UNSUPPORTED_ESM_URL_SCHEME, SEL-125).
-const RECORDER = pathToFileURL(join(REPO, "tests", "helpers", "fs_path_recorder.ts")).href;
+const RECORDER_PATH = join(REPO, "tests", "helpers", "fs_path_recorder.ts");
 const PROBE = join(REPO, "tests", "helpers", "app_guard_probe.ts");
 const VITEST_GUARD = join(REPO, "app", "vitest.global-setup.ts");
 const E2E_GUARD = join(REPO, "app", "e2e", "global-setup.ts");
@@ -49,7 +50,7 @@ function run_guard(guard: string, home: string, log: string, inject: boolean): {
   };
   for (const key of ["SystemRoot", "TMPDIR", "TEMP", "TMP"]) if (process.env[key] !== undefined) env[key] = process.env[key] as string;
   if (inject) env.PES_TEST_ACCOUNT_HOME = home;
-  const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", RECORDER, PROBE], { cwd: REPO, env, encoding: "utf8", timeout: 60_000 });
+  const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", import_url(RECORDER_PATH), PROBE], { cwd: REPO, env, encoding: "utf8", timeout: 60_000 });
   assert.equal(run.error, undefined, `the child started (${String(run.error)})`);
   const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line !== "") : [];
   return { status: run.status, out: `${run.stdout}\n${run.stderr}`, calls };
@@ -142,7 +143,7 @@ test("C1 the app's real Vitest CLI refuses a start in the (fake) account home be
     PES_FS_WATCH: projects,
   };
   for (const key of ["SystemRoot", "TMPDIR", "TEMP", "TMP"]) if (process.env[key] !== undefined) env[key] = process.env[key] as string;
-  const run = spawnSync(process.execPath, ["--import", RECORDER, vitest_bin, "run", "--dir", projects], {
+  const run = spawnSync(process.execPath, ["--import", import_url(RECORDER_PATH), vitest_bin, "run", "--dir", projects], {
     cwd: app,
     env,
     encoding: "utf8",
