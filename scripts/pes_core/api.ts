@@ -46,6 +46,7 @@ import {
   request_receipt,
   receipt_of_tx,
   round_form_data,
+  round_result_data,
   round_place,
   round_threads_data,
   run_info,
@@ -751,7 +752,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/stages/{s}/rounds/{rd}`, "rounds.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#round_get(r, project),
+        act: async (r, project, auth) => this.#round_get(r, project, auth),
       }),
       route("GET", `${P}/stages/{s}/rounds/{rd}/threads`, "rounds.threads", {
         who: "any", scope: "context:read", go: true,
@@ -3284,10 +3285,11 @@ export class ApiApp {
   }
 
   /** SEL-98: GET P/stages/{s}/rounds/{rd} — one place's form: set id, form version, each question's current version and current answer. */
-  async #round_get(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #round_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const data = read_tx(this.#db, () => {
       const place = this.#round_place(request, project);
-      return round_form_data(this.#db, project.id, place);
+      // SEL-126: + the round's result text (current version; null when none, or closed to a non-human caller)
+      return { ...round_form_data(this.#db, project.id, place), result: round_result_data(this.#db, project.id, place, this.#audience(auth)) };
     });
     return { status: 200, data };
   }

@@ -42,9 +42,9 @@ function free_port(): Promise<number> {
   });
 }
 
-/** `extra_env`: more variables for the server child only (SEL-82: PES_APP_DIR). */
-export async function open_workspace(extra_env: Record<string, string> = {}): Promise<Workspace> {
-  const seeded = spawnSync(process.execPath, [join(REPO, "tests", "e2e", "helpers", "seed_workspace.ts")], { encoding: "utf8", cwd: REPO, timeout: 120_000 });
+/** `extra_env`: more variables for the server child only (SEL-82: PES_APP_DIR). `seed_script`: 시드 스크립트 파일명(tests/e2e/helpers 안, 기본 seed_workspace.ts). */
+export async function open_workspace(extra_env: Record<string, string> = {}, seed_script = "seed_workspace.ts"): Promise<Workspace> {
+  const seeded = spawnSync(process.execPath, [join(REPO, "tests", "e2e", "helpers", seed_script)], { encoding: "utf8", cwd: REPO, timeout: 120_000 });
   if (seeded.status !== 0) throw new Error(`seed_workspace failed (${seeded.status}): ${seeded.stderr}`);
   const info = JSON.parse(seeded.stdout.trim().split("\n").pop() as string) as { root: string; home: string; pes_home: string; slug: string; project_id: string };
   const env: Record<string, string> = {};

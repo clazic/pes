@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ArrowRight } from "lucide-react";
-import { useRound, useWorkspace } from "@/api/queries";
+import { useProjects, useRound, useWorkspace } from "@/api/queries";
 import type { RoundView, WorkspaceView } from "@/api/types";
 import { workspaceActions } from "@/app/actions";
 import { useArrival } from "@/app/arrival";
@@ -23,8 +23,9 @@ const PHONE_REASON = {
 };
 const PAST_REASON = {
   edit: "지난 라운드는 읽기 전용이라 질문을 고칠 수 없어요.",
-  annotate: "지난 라운드는 읽기 전용이라 첨언을 쓸 수 없어요.",
 };
+/** 첨언은 라운드가 아니라 판 기준이다 — 활성 판의 봉인(closed) 라운드 결과 글에는 쓸 수 있고, 지난 판만 읽기 전용 */
+const PAST_EDITION_REASON = { annotate: "지난 판은 읽기 전용이라 첨언을 쓸 수 없어요." };
 
 /** 초점이 사라진 요소와 함께 빠졌는가(닫힌 대화 상자 · 미리보기 안에 있던 초점) */
 const focusLost = () => !document.activeElement || document.activeElement === document.body;
@@ -47,6 +48,7 @@ export function WorkspaceScreen() {
   const roundParam = params.round ?? "";
   const [sp, setSp] = useSearchParams();
   const ws = useWorkspace(slug, edition);
+  const projects = useProjects();
   const rq = useRound(slug, edition, stage, roundParam);
   // 질문별 의견은 부차 읽기다 — 첫 표시를 기다리지 않는다(AskPane 이 읽고, 스레드 칸만 “불러오는 중”을 보인다)
   const phone = useIsPhone();
@@ -195,7 +197,10 @@ export function WorkspaceScreen() {
   }
 
   const editBlocked = past ? PAST_REASON.edit : phone ? PHONE_REASON.edit : undefined;
-  const annotateBlocked = past ? PAST_REASON.annotate : phone ? PHONE_REASON.annotate : undefined;
+  // 첨언 차단: 서버의 활성 판이 아닌 판(지난 판)만. 봉인된 라운드(round.state "closed")여도 활성 판이면 쓸 수 있다. 활성 판을 모르면(목록 없음) 판 기준으로 막지 않는다 — 서버가 지난 판 쓰기를 거절한다
+  const activeEdition = projects.data?.find((p) => p.slug === w.slug)?.edition;
+  const pastEdition = activeEdition !== undefined && activeEdition !== w.edition;
+  const annotateBlocked = pastEdition ? PAST_EDITION_REASON.annotate : phone ? PHONE_REASON.annotate : undefined;
   const peekQ = peekParam ? openQs.find((q) => q.id === peekParam) : undefined;
 
   return (

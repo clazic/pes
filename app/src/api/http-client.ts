@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCandidate, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferenceSnapshot, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ResultView, type ReferenceCandidate, type ReferenceSnapshot } from "./types";
 import { markAfterSend } from "./send-outcome";
 
 /**
@@ -557,6 +557,28 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return view;
   }
 
+  /**
+   * SEL-126 — 서버 라운드 읽기의 result{object_id, version_id, body_md, version_no?, title?, created_at?}. 세 칸(object_id·version_id·body_md)이 모두
+   * 문자열일 때만 싣는다(아니면 null — 첨언 도구를 켜지 않는다). version_no(10진 글) · created_at(ISO) 은 서버가 준 모양일 때만 쓰고, 아니면 null 로 둔다:
+   * 지어낸 버전 번호 · 채택 여부 · 시각을 보이지 않는다(채택 여부는 라운드 읽기에 없으므로 늘 null). 제목은 서버가 안 주면 화면의 고정 이름 "결과 글".
+   */
+  function resultViewOf(raw: unknown): ResultView | null {
+    if (!isRecord(raw) || typeof raw.object_id !== "string" || typeof raw.version_id !== "string" || typeof raw.body_md !== "string") return null;
+    const body = raw.body_md;
+    const versionNo = typeof raw.version_no === "string" && /^[1-9][0-9]{0,14}$/.test(raw.version_no) ? Number(raw.version_no) : null;
+    const createdAt = typeof raw.created_at === "string" && !Number.isNaN(new Date(raw.created_at).getTime()) ? raw.created_at : null;
+    return {
+      title: typeof raw.title === "string" && raw.title.trim() !== "" ? raw.title : "결과 글",
+      version: versionNo,
+      status: null,
+      updated_at: createdAt,
+      paragraphs: body.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter((p) => p !== ""),
+      object_id: raw.object_id,
+      version_id: raw.version_id,
+      body_md: body,
+    };
+  }
+
   function roundViewOf(data: Json, stage: string): RoundView {
     const questions = (Array.isArray(data.questions) ? data.questions : []).flatMap((raw) => {
       const view = isRecord(raw) ? questionViewOf(raw) : null;
@@ -569,7 +591,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       form_version: typeof data.form_version === "number" ? data.form_version : 0,
       ...(typeof data.set_id === "string" && data.set_id ? { set_id: data.set_id } : {}),
       questions,
-      result: null,
+      result: resultViewOf(data.result),
       alerts: [],
       prompt: "",
     };
