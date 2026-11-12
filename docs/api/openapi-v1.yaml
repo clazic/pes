@@ -40,6 +40,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ReferenceId:
+      name: ref
+      in: path
+      required: true
+      schema: { type: string }
     VersionId:
       name: v
       in: path
@@ -876,7 +881,10 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/context:
     get:
-      summary: Read the project's consistency boundary, policy, stages, manifest, materials, and lease
+      summary: Read the project's consistency boundary, policy, stages, manifest, materials, lease and reference-material list
+      description: |
+        data also carries `references`: the list of the project's reference material from earlier projects, rows only
+        (never a body) in the same shape as GET /references. Read a body with GET /references/{ref}.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:
@@ -2117,6 +2125,187 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
         "404": { description: Unknown project or edition number }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references:
+    post:
+      summary: Pin a snapshot of an earlier project as reference material (owner session only)
+      description: |
+        Body {referenced_project_id, source_snapshot_id?, scope?, source_label?}. source_snapshot_id omitted = the source's
+        newest snapshot; scope = a non-empty list without duplicates of final_report|stage_report|sources|decisions|
+        questions_answers|files (omitted = ["final_report","sources"]); source_label omitted = the source's topic. The person
+        must be a member of BOTH projects (no membership in the source reads as 404 and tells nothing about it). The same
+        source cannot be attached twice (409 conflict; a different version is a refresh); a detached one can be attached
+        again. The source project is never written. 201 data = {reference: <row>}; the row has the sixteen keys of GET
+        /references. A token is 403 human_required. Errors: 400 invalid_payload (unknown field, no Idempotency-Key),
+        422 validation_failed (target $.body.referenced_project_id when missing or the project itself, $.body.scope,
+        $.body.source_snapshot_id, $.body.source_label), 404 not_found (unknown source or snapshot, or another project's
+        snapshot), 409 conflict / idempotency_key_reuse.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201":
+          description: Attached
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "human_required (a token tried it)" }
+        "404": { description: Unknown project, source or snapshot }
+        "409": { description: Already attached, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A field breaks the rules (validation_failed) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: List the project's reference material (rows only, no body)
+      description: |
+        data = {references:[row]} in the order they were attached. A row has sixteen keys: access ("ok"), ai_delivery
+        {allowed, withheld_reason: source_missing|source_go_off|project_go_off|null}, attached_at (ISO 8601),
+        attached_by_actor_id, id, latest_snapshot_id (the source's newest snapshot now, null when the original is gone),
+        new_version_available (bool; computed on the read, nothing is written), referenced_project_id|null,
+        referenced_project_key, refreshed_at (ISO 8601|null), rev (decimal string), scope [string], source_label,
+        source_snapshot_id|null, source_snapshot_key|null, state (pinned|new_version|source_missing|source_archived).
+        A row the caller has no permission for (not a member of the source project) has exactly three keys
+        {id, access: "no_permission", state: "no_permission"}: no name, key, label or version id.
+        ai_delivery says whether the text may go to an AI: false when the original is gone or when the source project OR this
+        project has OpenCode Go turned off (the stricter side wins).
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references/{ref}:
+    get:
+      summary: Read one reference with the pinned content and citations
+      description: |
+        data = {reference: <row>, content}. content = {items:[...], items_status:{<scope item>: ok|none|not_supported|
+        snapshot_content_unavailable}} or null. items_status has one entry per item in `scope` and is the same object for the
+        owner, a token, A `context.get` and B `pes_context`: ok = the snapshot holds such items; none = the item is supported
+        and the snapshot was read, but holds none ("not in the original"); not_supported = this item is not delivered yet (REF1a
+        delivers final_report and sources; stage_report, decisions, questions_answers and files can be attached for later and
+        read as not_supported); snapshot_content_unavailable = the snapshot's contents cannot be read (for example a
+        stage-scope snapshot of a legacy import, which keeps no contents), so "none" cannot be claimed. A and B give the same
+        content except that A bounds it: A keeps the whole tool reply within 60000 JSON characters by adding items one at a
+        time, cutting any text field at 12000 characters (the item then lists it in `truncated_fields`) and leaving out the
+        items that do not fit (content.truncated = true, content.omitted_items = their number). B and HTTP do not cut. A's
+        `context.get` without reference_id (the list) is bounded the same way, never by cutting text: the whole reply (topic,
+        stage, round, questions, objects and the reference rows) is built entry by entry within 4000 JSON characters; when the
+        project has a reference it carries context.references, context.references_page = {offset, returned, total,
+        next_offset} and context.references_help (how to read one; the tool spec stays short because it goes with every
+        request), with no reference all three are left out, and when anything is left out
+        context.truncated = true, context.omitted = {questions, objects, references} and context.next names the next call
+        (`context.get {references_offset: next_offset}`, which returns the next page of reference rows only; giving it with
+        reference_id is an error). A label longer than 300 characters is cut in the list and the row lists it in
+        `truncated_fields`. A also decides again, with the same function, for every reference whose content the run has read
+        (source access, both Go switches, detach): before EVERY model request (after the key read) and once more at the last
+        boundary right before the HTTP call (after the heartbeat and dispatch.prepare/authorize; dispatch.mark_sent and the
+        call then follow with no await in between). If any one may no longer go, that request is NOT sent and the run stops:
+        status interrupted, the run.interrupted event carries reason reference_withdrawn; a dispatch already authorized for
+        it becomes blocked (never sent; its reservation no longer counts), and no dispatch is written when the stop comes
+        before the request is built. Nothing is scrubbed or invented, and the stop covers every copy of the text (tool
+        results, tool errors that echo it, the model's later messages and arguments). A resumed run starts from a fresh
+        history. What was already sent to the provider before the withdrawal cannot be called back. Each item is
+        {item (final_report|sources), object_id, version_id, kind, title, ... , citation: {reference_id, project_id,
+        project_label, snapshot_id, object_id, version_id}}: final_report carries title, summary, body_md of the report;
+        sources carries title, url, quote. Only the items in `scope` appear. The content is the version the pinned snapshot
+        holds: a newer version in the source does not change it until a person refreshes. content is null when the original
+        is gone (state source_missing), and, for a token, when ai_delivery.allowed is false (Go off on either side). The
+        owner session still reads it. No permission to the source is 403 forbidden with no content. An unknown id, or an id
+        of another project, is 404. A GET writes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReferenceId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The reference
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope, Go policy denied, or no permission to the source project }
+        "404": { description: Unknown project or reference }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references/{ref}/refresh:
+    post:
+      summary: Move the pin to another snapshot of the same source (owner session only)
+      description: |
+        Body {source_snapshot_id?, base_rev?} (decimal string). source_snapshot_id omitted = the source's newest snapshot;
+        a person may also go back to an older one. rev + 1, refreshed_at = now; scope, attach time and person are kept; the
+        source is not written. 200 data = {reference: <row>}. Errors: 404 (unknown reference, or a snapshot that is not the
+        source's), 403/404 (the person lost access to the source), 409 conflict (already pinned there, or the original is
+        gone), 409 rev_conflict (stale base_rev), 403 human_required for a token.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReferenceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Refreshed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "human_required (a token tried it), or no access to the source" }
+        "404": { description: Unknown project, reference or snapshot }
+        "409": { description: Already pinned there, original gone, stale base_rev (rev_conflict), or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A field breaks the rules (validation_failed) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references/{ref}/detach:
+    post:
+      summary: Remove a reference (owner session only)
+      description: |
+        Body {}. The row is deleted (the history stays in the receipt and the event); the source and its snapshots are not
+        touched. A tombstone (original gone) can be detached too. 200 data = {reference_id, detached: true}. 404 for an
+        unknown id or another project's reference; 403 human_required for a token.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReferenceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Detached
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "human_required (a token tried it)" }
+        "404": { description: Unknown project or reference }
+        "409": { description: Idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/reflections:
     post:
