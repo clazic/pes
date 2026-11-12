@@ -427,6 +427,9 @@ test("9 만들기 뒤 앱 이동이 안 되면(204) 몇 초 뒤 sessionStorage �
   await expect
     .poll(async () => page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), { timeout: 8000, message: "이동이 안 되면 키를 지운다" })
     .toBeNull();
+  // R3-1: 3초 뒤 버튼이 다시 눌리고, 다시 눌러 달라는 한 줄이 보인다(같은 키·이름이라 두 번 만들어지지 않는다)
+  await expect(submit(page)).toBeEnabled({ timeout: 8000 });
+  await expect(dialog(page).getByRole("alert")).toContainText("앱으로 이동하지 못했습니다 — 다시 눌러 주세요");
   await page.goto(`${ws.base}/legacy-y/index.html`);
   await expect(page).toHaveTitle("STOLEN:null");
 });

@@ -276,7 +276,10 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
         }
         handoff = next;
         leaving = true;
-        setTimeout(() => { leaving = false; unstore(); }, 3000);
+        setTimeout(() => {
+          leaving = false; unstore(); flight = false; go.disabled = false;
+          setErr('앱으로 이동하지 못했습니다 — 다시 눌러 주세요 (같은 내용은 두 번 만들어지지 않습니다)');
+        }, 3000);
         location.assign(`/p/${encodeURIComponent(slug)}/`);
         return;
       }
