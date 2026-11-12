@@ -52,6 +52,31 @@ function edition_of(env: ApiEnv, project_id = env.p.project_id): string {
   return env.db.get<{ id: string }>("SELECT active_edition_id AS id FROM projects WHERE id = ?", project_id)!.id;
 }
 
+/** The receipt + run.created event a real hand-off import writes for its run (via = "import", same payload shape). */
+function add_import_event(env: ApiEnv, run_id: string): void {
+  const tx_id = `tx-import-${run_id}`;
+  env.db.run(
+    `INSERT INTO mutation_commits
+       (id, project_id, actor_id, via, client_request_id, request_hash, action, base_control_rev, run_id, result_json, created_at)
+     VALUES (?, ?, ?, 'import', ?, ?, 'run.created', 0, ?, '{}', 1)`,
+    tx_id,
+    env.p.project_id,
+    env.p.actor_id,
+    `import-${run_id}`,
+    "a".repeat(64),
+    run_id,
+  );
+  env.db.run(
+    `INSERT INTO events (id, project_id, run_id, tx_id, tx_index, tx_size, type, payload, created_at)
+     VALUES (?, ?, ?, ?, 0, 1, 'run.created', ?, 1)`,
+    `ev-import-${run_id}`,
+    env.p.project_id,
+    run_id,
+    tx_id,
+    JSON.stringify({ run_id, actor_id: env.p.actor_id, mode: "B", via: "import", request_id: run_id }),
+  );
+}
+
 function add_run(
   env: ApiEnv,
   id: string,
@@ -336,6 +361,8 @@ test("runs: handed_off only for a hand-off import run (runtime *_app_handoff); a
     add_run(env, "run-hc", { runtime: "claude_app_handoff" });
     add_run(env, "run-hx", { runtime: "codex_app_handoff" });
     add_run(env, "run-ho", { runtime: "opencode_app_handoff" });
+    // The real hand-off import also leaves its run.created event with via = "import" (commands/handoff_import.ts); mimic it.
+    for (const id of ["run-hc", "run-hx", "run-ho"]) add_import_event(env, id);
     add_run(env, "run-plain", {});
     add_run(env, "run-child", {});
     env.db.run("UPDATE runs SET parent_run_id = 'run-plain' WHERE id = 'run-child'");

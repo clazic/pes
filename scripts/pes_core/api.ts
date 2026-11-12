@@ -63,6 +63,7 @@ import { complete_upload, get_blob, is_safe_media_type, reserve_upload, store_bl
 import { new_id as default_new_id } from "./ids.ts";
 import {
   check_go_allowed,
+  ai_policy_state,
   current_policy,
   DbPolicyChecker,
   set_policy,
@@ -1842,14 +1843,7 @@ export class ApiApp {
 
     // U1d AI connection: the policy is the allow_opencode_go bit alone (null pointer = missing, any other damage = corrupt).
     // "pending", cancel_state, external_stop and run_permissions are not sent: the DB has no evidence for them.
-    const policy_state = ((): "allowed" | "denied" | "missing" | "corrupt" => {
-      if (project.current_policy_id === null) return "missing";
-      try {
-        return current_policy(this.#db, project.id).allow_opencode_go ? "allowed" : "denied";
-      } catch {
-        return "corrupt";
-      }
-    })();
+    const policy_state = ai_policy_state(this.#db, project.id);
     // The newest WORKSPACE_LIST_MAX of each list (largest rowid first), then shown oldest-first.
     // runs are narrowed to the ACTIVE edition (a run is work of one edition). Dispatches are NOT: what was sent out and
     // what must be settled (billing, recall) are facts of the whole project and stay true after a new edition, so the
@@ -1868,8 +1862,11 @@ export class ApiApp {
       .map((row) => (row.resolution === null ? { id: row.id, run_id: row.run_id, state: row.state } : { id: row.id, run_id: row.run_id, state: row.state, resolution: row.resolution }));
     const handoff_runtimes: string[] = Object.values(HANDOFF_APPS).map((app) => app.runtime);
     const runs = this.#db
-      .all<{ id: string; stage: string | null; mode: string; status: string; runtime: string; actor_kind: string | null }>(
-        `SELECT n.id AS id, s.key AS stage, n.mode AS mode, n.status AS status, n.runtime AS runtime, a.kind AS actor_kind
+      .all<{ id: string; stage: string | null; mode: string; status: string; runtime: string; actor_kind: string | null; imported: bigint | number }>(
+        `SELECT n.id AS id, s.key AS stage, n.mode AS mode, n.status AS status, n.runtime AS runtime, a.kind AS actor_kind,
+                EXISTS (SELECT 1 FROM events e
+                         WHERE e.project_id = n.project_id AND e.run_id = n.id AND e.type = 'run.created'
+                           AND json_extract(e.payload, '$.via') = 'import') AS imported
            FROM (
              SELECT r.rowid AS rid, r.id AS id, r.project_id AS project_id, r.stage_id AS stage_id, r.mode AS mode, r.status AS status, r.runtime AS runtime, r.actor_id AS actor_id
                FROM runs r WHERE r.project_id = ? AND r.edition_id = ? ORDER BY r.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
@@ -1884,8 +1881,12 @@ export class ApiApp {
         stage: row.stage,
         mode: row.mode,
         // handed_off is only the hand-off import run's shape (commands/handoff_import.ts): runtime *_app_handoff, a human
-        // owner actor, status succeeded. runtime is a free string an agent may send on claim, so the name alone proves nothing.
-        status: handoff_runtimes.includes(row.runtime) && row.status === "succeeded" && row.actor_kind === "human" ? "handed_off" : row.status,
+        // owner actor, status succeeded, and the import's own run.created event (payload via = "import"). runtime is a free
+        // string a claim may send (the owner session too), so the name alone proves nothing; the import event is the proof.
+        status:
+          handoff_runtimes.includes(row.runtime) && row.status === "succeeded" && row.actor_kind === "human" && Number(row.imported) === 1
+            ? "handed_off"
+            : row.status,
       }));
     return {
       slug: project.slug,
