@@ -1391,6 +1391,15 @@ paths:
         always one line), comments {included, items []} (a reserved place; U4 fills it), output}. A seal, approval or edition snapshot is
         not a print: 404 not_found, as are an unknown id, a print of another scope and a scope nothing was printed for yet. Nothing is
         built or written; a print is made by POST print/commit.
+
+        Who reads: a human (owner session) gets the print exactly as it was fixed. Any other caller (an agent token) goes through the
+        same AI-reference decision as every other AI exit (SEL-115: material_object_denied for a cited material, file_ai_denied for a
+        body file). When the print carries nothing closed to AI, an agent gets the same response as a human. When it carries something
+        closed, the fixed bytes are not given at all: output and document are null, snapshot.content_hash is null, manifest.output is
+        null, the manifest is returned without the closed items (a footnote whose source is a closed material, a body or table whose
+        file is closed, and the footnotes that body carried; position and citation_no are renumbered so no gap counts them), and the
+        response has withheld {reason "ai_reference_denied"}. withheld is present only then. No title, quote, name, id or count of
+        a closed material is in the response. Allowing the material again gives the agent the whole print again.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - name: scope

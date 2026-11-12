@@ -21,6 +21,7 @@ import { read_credential_actor } from "../actors.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { delete_storage_file, read_storage_bytes, sha256_hex, storage_file_is_regular, write_storage_bytes } from "../files.ts";
+import { file_ai_denied, material_object_denied } from "./file_access.ts";
 import { insert_ready_blob } from "./files.ts";
 import {
   insert_receipt,
@@ -852,4 +853,77 @@ export function print_output_of(manifest: unknown): { blob_id: string; sha256: s
   const output = manifest.output;
   if (typeof output.blob_id !== "string" || typeof output.sha256 !== "string" || typeof output.size !== "number" || typeof output.media_type !== "string") return null;
   return { blob_id: output.blob_id, sha256: output.sha256, size: output.size, media_type: output.media_type };
+}
+
+// ---------------------------------------------------------------------------
+// the AI view of a stored print (GET P/print by a caller that is not human)
+//
+// A stored print is a human's fixed document: it names every cited source (title, quote) and every body. SEL-115 closes a
+// material to AI at every exit with ONE decision (material_object_denied / file_ai_denied), and GET P/print is such an exit.
+// The fixed bytes cannot be edited, so a non-human caller never gets them when the decision closes anything the print carries:
+// no output, no document, and a manifest without the closed items. A print that carries nothing closed is returned whole.
+
+export interface PrintAiView {
+  /** The manifest the caller may see. The very same object when nothing in the print is closed. */
+  manifest: unknown;
+  /** True when the print carries something closed to AI: the caller must not be given `output` or the document. */
+  withheld: boolean;
+}
+
+/** True when this artifact version carries a file closed to AI (its body file, or a file attached to the version). */
+function artifact_version_denied(db: Pick<Db, "all" | "get">, project_id: string, version_id: string): boolean {
+  const body = db.get<{ body_blob_id: string | null }>("SELECT body_blob_id FROM artifact_versions WHERE project_id = ? AND version_id = ?", project_id, version_id);
+  if (body?.body_blob_id != null && file_ai_denied(db, project_id, body.body_blob_id)) return true;
+  return db
+    .all<{ blob_id: string }>("SELECT blob_id FROM version_files WHERE project_id = ? AND version_id = ?", project_id, version_id)
+    .some((row) => file_ai_denied(db, project_id, row.blob_id));
+}
+
+/**
+ * Drop from a stored print manifest what a non-human caller may not see, with the same decision as every other AI exit:
+ * a footnote whose source is a closed material (object unit), a body / table whose file is closed (and the footnotes it carries).
+ * What stays is renumbered so that no gap in `position` / `citation_no` counts what was dropped.
+ */
+export function print_ai_view(db: Pick<Db, "all" | "get">, project_id: string, manifest: unknown): PrintAiView {
+  if (!is_record(manifest) || !Array.isArray(manifest.items)) return { manifest, withheld: true };
+  const items = manifest.items as Array<Record<string, unknown>>;
+  const closed_versions = new Set<string>();
+  for (const item of items) {
+    if ((item.category === "body" || item.category === "table") && typeof item.version_id === "string" && artifact_version_denied(db, project_id, item.version_id)) {
+      closed_versions.add(item.version_id);
+    }
+  }
+  const kept = items.filter((item) => {
+    if (item.category === "footnote") {
+      if (typeof item.cited_by_version_id === "string" && closed_versions.has(item.cited_by_version_id)) return false;
+      return !(typeof item.object_id === "string" && material_object_denied(db, project_id, item.object_id));
+    }
+    if (item.category === "body" || item.category === "table") return !(typeof item.version_id === "string" && closed_versions.has(item.version_id));
+    return true;
+  });
+  if (kept.length === items.length) return { manifest, withheld: false };
+
+  const per_stage = new Map<string, number>();
+  const per_citing = new Map<string, number>();
+  let note_position = 0;
+  const out = kept.map((item) => ({ ...item }));
+  const articles = out
+    .filter((item) => item.category === "body" || item.category === "table")
+    .sort((a, b) => Number(a.position) - Number(b.position));
+  for (const item of articles) {
+    const stage = String(item.stage_id);
+    const at = per_stage.get(stage) ?? 0;
+    per_stage.set(stage, at + 1);
+    item.position = at;
+  }
+  for (const item of out) {
+    if (item.category !== "footnote") continue;
+    item.position = note_position;
+    note_position += 1;
+    const citing = String(item.cited_by_version_id);
+    const no = (per_citing.get(citing) ?? 0) + 1;
+    per_citing.set(citing, no);
+    item.citation_no = no;
+  }
+  return { manifest: { ...manifest, items: out, output: null }, withheld: true };
 }

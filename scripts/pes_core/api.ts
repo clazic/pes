@@ -53,7 +53,7 @@ import {
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
-import { find_print_snapshot, is_print_scope, print_output_of } from "./commands/print.ts";
+import { find_print_snapshot, is_print_scope, print_ai_view, print_output_of } from "./commands/print.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
@@ -662,7 +662,7 @@ export class ApiApp {
       // SEL-119 U6a: range print. The two POSTs are the owner session's (an agent token is 403 forbidden); GET reads a stored print only.
       route("GET", `${P}/print`, "print.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#print_read(r, project),
+        act: async (r, project, auth) => this.#print_read(r, project, auth),
       }),
       route("POST", `${P}/print/prepare`, "print.prepare", {
         who: "session",
@@ -3614,8 +3614,11 @@ export class ApiApp {
   /**
    * GET P/print?scope=&snapshot= — a pure read of a print that was already committed: the snapshot row, its manifest blob and its
    * output blob. Nothing is built or written here. Without `snapshot` it is the newest print of the current round / stage / edition.
+   * A human gets the print as it was fixed. Any other caller goes through the AI-reference decision (SEL-115, print_ai_view): when the
+   * print carries anything closed to AI, the fixed bytes are not given at all (`output`, `document` and `content_hash` are null,
+   * `withheld.reason` says why) and the manifest comes back without the closed items.
    */
-  async #print_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #print_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const scope = request.query.get("scope");
     if (!is_print_scope(scope)) invalid("$.query.scope");
     const snapshot = request.query.get("snapshot");
@@ -3633,6 +3636,19 @@ export class ApiApp {
     }
     const output = print_output_of(manifest);
     if (output === null) throw new Fail("not_found", { target: "$.query.snapshot" });
+    const view = auth.kind === "human" ? { manifest, withheld: false } : read_tx(this.#db, () => print_ai_view(this.#db, project.id, manifest));
+    if (view.withheld) {
+      return {
+        status: 200,
+        data: {
+          snapshot: { id: row.id, scope: row.scope, edition_id: row.edition_id, stage_id: row.stage_id, round_id: row.round_id, content_hash: null },
+          manifest: view.manifest,
+          output: null,
+          document: null,
+          withheld: { reason: "ai_reference_denied" },
+        },
+      };
+    }
     const document = (await read(output.blob_id)).result;
     if (document.sha256 !== output.sha256 || document.size !== output.size) {
       throw new Fail("conflict", { details: { reason: "print_output_mismatch" } });

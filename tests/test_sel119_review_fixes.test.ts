@@ -113,3 +113,126 @@ test("footnote without body or table: no footnote item is kept, because no print
     assert.doesNotMatch(stored_html(env, m), /합성 출처 rf-fn/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 리뷰 2회차 필수 1 — GET P/print 는 AI 출구다: AI 참조 금지(SEL-115) 자료의 제목·발췌·id·개수가 에이전트(비사람) 응답에 없어야 한다.
+// 고정본은 사람이 만든 것이고 사람(소유자 세션)에게는 그대로 보인다. 비사람은 금지 자료가 걸린 고정본의 output·document 를 받지 않고(고정본 바이트는
+// 못 고친다) manifest 의 허용 부분만 받는다(fail-closed, withheld.reason 으로 이유 표시). 금지가 없으면 비사람도 전과 같이 전부 받는다.
+
+import { add_citation } from "../scripts/pes_core/content.ts";
+import { assert_ok, call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
+import { P, new_material, set_access, wire_of } from "./helpers/sel115_env.ts";
+
+const SECRET_QUOTE = "비공개발췌-QQ-9d41";
+
+async function print_scene(env: ApiEnv) {
+  const plan = stage_of(env, "plan");
+  const round = await start(env, plan, "ai-start");
+  const body = await art(env, "ai-body", { stage_id: plan, body_md: "공개본문-알파", title: "공개제목-알파" });
+  return { plan, round, body };
+}
+
+async function material_cited_by(env: ApiEnv, body_version_id: string, label: string) {
+  const secret = await new_material(env, label, { name: `비공개파일-${label}.txt`, marker: `SECRET-MARK-${label}`, extra: { title: `비공개제목-${label}` } });
+  await add_citation(env.service, env.ctx(`${label}-cite`), { artifact_version_id: body_version_id, source_version_id: secret.data.version_id, quote: SECRET_QUOTE });
+  return secret;
+}
+
+const owner_commit = async (env: ApiEnv, round_id: string, key: string) =>
+  assert_ok(await call(env, { method: "POST", path: P(env, "/print/commit"), auth: "owner", body: { scope: "round", round_id }, key }), 201);
+const print_get = (env: ApiEnv, auth: Parameters<typeof call>[1]["auth"], snapshot: string) =>
+  call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${snapshot}`), auth });
+
+function leak_needles(secret: Awaited<ReturnType<typeof new_material>>, label: string): string[] {
+  return [
+    `비공개파일-${label}.txt`,
+    `비공개제목-${label}`,
+    SECRET_QUOTE,
+    secret.data.object_id,
+    secret.data.version_id,
+    secret.blob.blob_id,
+    secret.blob.sha256,
+    secret.data.file_policy_id,
+    `SECRET-MARK-${label}`,
+  ];
+}
+
+test("GET print: an agent never gets a closed material's title, quote or id from a stored print; a human does; allow brings it back", async () => {
+  await with_api(async (env) => {
+    const s = await print_scene(env);
+    // order matters: the closed citation first, so the allowed web citation is number 2 in the stored print and must come out as 1.
+    const secret = await material_cited_by(env, s.body.version_id, "ai-a");
+    await cite(env, "ai-open", s.body.version_id, "공개발췌-허용");
+    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+    const done = await owner_commit(env, s.round.round_id, "ai-commit-1");
+    const agent = await make_agent(env, "ai-reader", ["context:read"]);
+    const needles = leak_needles(secret, "ai-a");
+
+    // the human sees the stored print as it is
+    const human = await print_get(env, "owner", done.snapshot_id);
+    assert.equal(human.status, 200);
+    assert.ok(wire_of(human).includes(SECRET_QUOTE) && wire_of(human).includes("비공개제목-ai-a"), "the owner session still sees the whole print");
+    assert.equal(typeof human.json.data.document, "string");
+    assert.notEqual(human.json.data.output, null);
+    assert.equal("withheld" in human.json.data, false, "the human response keeps its old shape");
+
+    // the agent: closed material is not in any part of the response, the document and its descriptor are withheld, the rest of the manifest is there
+    const res = await print_get(env, { token: agent.token }, done.snapshot_id);
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    for (const needle of needles) assert.ok(!wire_of(res).includes(needle), `agent GET print: "${needle}" must not appear`);
+    const data = res.json.data;
+    assert.equal(data.document, null);
+    assert.equal(data.output, null);
+    assert.equal(data.manifest.output, null);
+    assert.deepEqual(data.withheld, { reason: "ai_reference_denied" });
+    assert.equal(data.snapshot.content_hash, null, "a hash over the item ids would still tell that something is hidden");
+    const notes = data.manifest.items.filter((i: any) => i.category === "footnote");
+    assert.equal(notes.length, 1, "the allowed citation stays, the closed one leaves without a gap");
+    assert.equal(notes[0].position, 0);
+    assert.equal(notes[0].citation_no, 1);
+    assert.equal(data.manifest.items.filter((i: any) => i.category === "body").length, 1, "the allowed body stays in the manifest");
+
+    // allow again → the agent gets the stored print whole
+    assert_ok(await set_access(env, secret.data.file_policy_id, "allow"));
+    const back = await print_get(env, { token: agent.token }, done.snapshot_id);
+    assert.equal(back.status, 200);
+    assert.equal(typeof back.json.data.document, "string");
+    assert.ok(wire_of(back).includes(SECRET_QUOTE));
+    assert.equal("withheld" in back.json.data, false);
+  });
+});
+
+test("GET print: the latest-print form (no snapshot) is withheld the same way for an agent", async () => {
+  await with_api(async (env) => {
+    const s = await print_scene(env);
+    const secret = await material_cited_by(env, s.body.version_id, "ai-b");
+    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+    await owner_commit(env, s.round.round_id, "ai-commit-2");
+    const agent = await make_agent(env, "ai-reader2", ["context:read"]);
+    const res = await call(env, { method: "GET", path: P(env, "/print?scope=round"), auth: { token: agent.token } });
+    assert.equal(res.status, 200);
+    for (const needle of leak_needles(secret, "ai-b")) assert.ok(!wire_of(res).includes(needle), `latest print: "${needle}" must not appear`);
+    assert.equal(res.json.data.document, null);
+  });
+});
+
+test("GET print: a body whose text file is closed to AI is withheld from an agent too (no title, no id, no document)", async () => {
+  await with_api(async (env) => {
+    const s = await print_scene(env);
+    const marker = "SECRET-BODY-MARK-ai-c";
+    const secret = await new_material(env, "ai-c", { name: "비공개본문-ai-c.txt", marker });
+    const done = await owner_commit(env, s.round.round_id, "ai-commit-3");
+    // a body kept as a file (legacy import shape): the version points at the material's blob
+    env.db.run("UPDATE artifact_versions SET body_md = NULL, body_blob_id = ? WHERE version_id = ?", secret.blob.blob_id, s.body.version_id);
+    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+    const agent = await make_agent(env, "ai-reader3", ["context:read"]);
+    const res = await print_get(env, { token: agent.token }, done.snapshot_id);
+    assert.equal(res.status, 200);
+    assert.ok(!wire_of(res).includes(s.body.version_id), "the body version id of a closed body is not named");
+    assert.ok(!wire_of(res).includes("공개제목-알파"));
+    assert.equal(res.json.data.document, null);
+    assert.equal(res.json.data.manifest.items.filter((i: any) => i.category === "body").length, 0);
+    assert.equal(print_get_human_has_body(await print_get(env, "owner", done.snapshot_id)), true);
+  });
+});
+const print_get_human_has_body = (res: { json: any }): boolean => res.json.data.manifest.items.some((i: any) => i.category === "body");
