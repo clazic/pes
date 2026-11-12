@@ -142,6 +142,7 @@ const FILE_COMMANDS = [
   "file.ai_access_set",
   "file.attach_version",
   "file.complete_upload",
+  "file.extract",
   "file.gc_orphans",
   "file.quarantine",
   "file.reserve_upload",

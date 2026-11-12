@@ -52,7 +52,7 @@ import {
   type ReceiptRow,
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
-import { closed_to_ai, existing_extraction, extraction_result, find_target } from "./commands/file_extract.ts";
+import { closed_to_ai, existing_extraction, extraction_result, find_target } from "./commands/file_extractions.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";

@@ -220,8 +220,25 @@ type XmlEvent =
 
 class XmlError extends Error {}
 
-const TAG_RE = /<([^\s/>!?][^\s/>]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/y;
 const ATTR_RE = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+/** The index of the ">" that ends the tag starting at `lt`, skipping ">" inside quoted attribute values; -1 when unterminated. */
+function tag_end(src: string, lt: number): number {
+  let quote = "";
+  for (let i = lt + 1; i < src.length; i += 1) {
+    const ch = src[i] as string;
+    if (quote !== "") {
+      if (ch === quote) quote = "";
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ">") {
+      return i;
+    } else if (ch === "<") {
+      return -1;
+    }
+  }
+  return -1;
+}
 
 function local_name(raw: string): string {
   const colon = raw.indexOf(":");
@@ -286,21 +303,24 @@ function* xml_events(src: string): Generator<XmlEvent> {
       at = end + 1;
       continue;
     }
-    TAG_RE.lastIndex = lt;
-    const match = TAG_RE.exec(src);
-    if (match === null) throw new XmlError("bad tag");
-    const raw = match[1] as string;
-    const self = match[3] === "/";
+    const end = tag_end(src, lt);
+    if (end < 0) throw new XmlError("bad tag");
+    let inner = src.slice(lt + 1, end);
+    const self = inner.endsWith("/");
+    if (self) inner = inner.slice(0, -1);
+    const name_hit = inner.match(/^[^\s/>]+/);
+    if (name_hit === null) throw new XmlError("bad tag");
+    const raw = name_hit[0];
+    const attr_text = inner.slice(raw.length);
     if (stack.length === 0) {
       if (saw_root) throw new XmlError("more than one root");
       saw_root = true;
     }
     const attrs: Record<string, string> = {};
-    const attr_text = match[2] as string;
-    if (attr_text !== "") {
-      ATTR_RE.lastIndex = 0;
-      let found: RegExpExecArray | null;
-      while ((found = ATTR_RE.exec(attr_text)) !== null) attrs[found[1] as string] = xml_decode(found[2] ?? found[3] ?? "");
+    if (attr_text.trim() !== "") {
+      // every character of the attribute text must belong to a name="value" pair
+      if (attr_text.replace(ATTR_RE, "").trim() !== "") throw new XmlError("bad attribute");
+      for (const found of attr_text.matchAll(ATTR_RE)) attrs[found[1] as string] = xml_decode(found[2] ?? found[3] ?? "");
     }
     yield { k: "open", name: local_name(raw), attrs, self };
     if (self) {
@@ -309,7 +329,7 @@ function* xml_events(src: string): Generator<XmlEvent> {
       stack.push(raw);
       if (stack.length > MAX_XML_DEPTH) throw new XmlError("nested too deep");
     }
-    at = lt + match[0].length;
+    at = end + 1;
   }
   if (stack.length > 0 || !saw_root) throw new XmlError("unclosed tag");
 }
@@ -479,7 +499,7 @@ function read_main(zip: ZipArchive, name: string): BodyResult {
 function numbered_parts(zip: ZipArchive, pattern: RegExp): Array<{ name: string; n: number }> {
   const found: Array<{ name: string; n: number }> = [];
   for (const name of zip.names()) {
-    const hit = pattern.exec(name);
+    const hit = name.match(pattern);
     if (hit) found.push({ name, n: Number.parseInt(hit[1] as string, 10) });
   }
   return found.sort((a, b) => a.n - b.n || (a.name < b.name ? -1 : 1));
@@ -557,7 +577,7 @@ function finish(lines: string[], tables: number, pages: number | null, warnings:
 // xlsx
 
 function column_index(ref: string): number | null {
-  const hit = /^([A-Za-z]+)/.exec(ref);
+  const hit = ref.match(/^([A-Za-z]+)/);
   if (!hit) return null;
   let n = 0;
   for (const ch of (hit[1] as string).toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
@@ -683,7 +703,7 @@ function extract_xlsx(zip: ZipArchive): ExtractOutcome {
     let path = `xl/worksheets/sheet${index + 1}.xml`;
     if (target !== undefined) {
       const resolved = target.startsWith("/") ? target.slice(1) : posix.normalize(`xl/${target}`);
-      if (!resolved.startsWith("..")) path = resolved;
+      if (resolved.split("/")[0] !== "..") path = resolved;
     }
     const rows = guard_part(zip, path, warnings, () => {
       if (!zip.has(path)) throw container_error("missing");
