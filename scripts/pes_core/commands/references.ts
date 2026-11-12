@@ -7,7 +7,9 @@
 //   reference.source_gone  the SOURCE project's human owner says a snapshot (or the whole project) is going away: every
 //                          reference to it is emptied EXPLICITLY in the same transaction (source_snapshot_id / latest_snapshot_id
 //                          = NULL, and referenced_project_id = NULL when the project goes) and left as a tombstone
-//                          (status 'source_missing'); key, label and scope stay, so the reader can still say what was lost
+//                          (status 'source_missing'); key, label and scope stay, so the reader can still say what was lost.
+//                          A named snapshot must belong to the source and be deletable (not sealed, not approved); the result is
+//                          {released_count} — the source's receipt and events never carry the id of the referencing project (SEL-123)
 //
 // The source is never written: attach, refresh and detach only touch this project's own rows. Attaching needs the human to
 // be a member of BOTH projects. One source can be attached once (a different version is a refresh); a tombstone can be
@@ -237,21 +239,29 @@ function run_source_gone(runtime: CommandRuntime): CommandResult {
   // only the source's own owner may say the source is going away: this project is the one named
   if (referenced_project_id !== me.project_id) throw new ApiError("forbidden", "only the owner of the source project can release references to it");
 
+  // A named snapshot must be one of THIS (source) project's, and one that may go away: a sealed round snapshot (scope other than
+  // 'edition') or an approved one is permanent (stage-1-db.md "승인·봉인 스냅숏은 영구 보존"). Releasing the whole project has no such condition.
+  if (snapshot_id !== undefined) {
+    const snapshot = runtime.db.get<{ scope: string }>("SELECT scope FROM snapshots WHERE project_id = ? AND id = ?", me.project_id, snapshot_id);
+    if (snapshot === undefined) throw new ApiError("not_found", "snapshot not found");
+    const approved = runtime.db.get("SELECT 1 AS ok FROM approvals WHERE project_id = ? AND snapshot_id = ?", me.project_id, snapshot_id) !== undefined;
+    if (snapshot.scope !== "edition" || approved) throw new ApiError("conflict", "a sealed or approved snapshot is permanent and cannot be released");
+  }
+
   const rows =
     snapshot_id === undefined
-      ? runtime.db.all<{ id: string; project_id: string }>(
-          "SELECT id, project_id FROM project_references WHERE referenced_project_id = ? AND status <> 'source_missing' ORDER BY rowid",
-          me.project_id,
-        )
-      : runtime.db.all<{ id: string; project_id: string }>(
-          `SELECT id, project_id FROM project_references
+      ? runtime.db.all<{ id: string }>("SELECT id FROM project_references WHERE referenced_project_id = ? AND status <> 'source_missing' ORDER BY rowid", me.project_id)
+      : runtime.db.all<{ id: string }>(
+          `SELECT id FROM project_references
             WHERE referenced_project_id = ? AND status <> 'source_missing' AND (source_snapshot_id = ? OR latest_snapshot_id = ?) ORDER BY rowid`,
           me.project_id,
           snapshot_id,
           snapshot_id,
         );
-  const released = rows.map((row) => ({ reference_id: row.id, project_id: row.project_id }));
-  const result = { released };
+  // The receipt and the events live on the SOURCE project: they carry a count and this project's own ids, never the id of the
+  // project that holds the reference (that project's own history is its business).
+  const released_ids = rows.map((row) => row.id);
+  const result = { released_count: released_ids.length };
   insert_receipt(runtime, { project_id: me.project_id, actor_id: me.actor_id, action: "reference.source_released", base_control_rev: null, result });
   // the pointers are emptied here, by the service — never left to a foreign-key action
   for (const row of rows) {
@@ -268,11 +278,11 @@ function run_source_gone(runtime: CommandRuntime): CommandResult {
   return {
     result,
     events:
-      released.length === 0
+      released_ids.length === 0
         ? [{ type: "reference.source_gone", payload: { referenced_project_id: me.project_id, snapshot_id: snapshot_id ?? null, released: 0 } }]
-        : released.map((entry) => ({
+        : released_ids.map((reference_id) => ({
             type: "reference.source_missing",
-            payload: { reference_id: entry.reference_id, project_id: entry.project_id, referenced_project_id: me.project_id, snapshot_id: snapshot_id ?? null },
+            payload: { reference_id, referenced_project_id: me.project_id, snapshot_id: snapshot_id ?? null },
           })),
   };
 }
