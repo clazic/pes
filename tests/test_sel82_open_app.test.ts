@@ -122,18 +122,23 @@ test("the address names the project's real current position (the same edition / 
   }
 });
 
-test("the session the exchange gives is one the owner has (PES_LOCAL_SESSION_SECRET here) — never a made-up value", { timeout: 120_000 }, async () => {
+test("the session the exchange gives is the one the owner has (the server's own) — never a made-up value; a CLI holding a session the server does not accept gets no code", { timeout: 120_000 }, async () => {
   const f = await start("pes-sel82-open-src-");
   try {
-    // the CLI reads the session the way api_secret.ts does; a value it is given is the value it hands over (a wrong one shows up as wrong — nothing replaces it)
-    const out = f.run(["open", "synthetic", "--app"], { PES_LOCAL_SESSION_SECRET: "synthetic-other-session-value-9876543210" });
-    assert.equal(out.status, 0, out.stderr);
-    // the exchange is answered by the server, which holds SECRET: the CLI's value would only reach the server through what the CLI hands over.
-    // The fragment must still carry no session (neither value), and the exchange must not give a made-up session.
-    const hash = new URL(out.stdout.trim()).hash;
-    assert.ok(!hash.includes("synthetic-other-session-value-9876543210") && !hash.includes(SECRET));
-    const data = await exchange(f, hash);
-    assert.ok(data.session === SECRET || data.session === "synthetic-other-session-value-9876543210", "a session the owner has, never a made-up one");
+    // SEL-85: codes are issued only to a caller that proves the server's own owner session, and a code always points at that session.
+    // So the exchange can only ever give SECRET (the owner's), never a value the CLI made up or was handed.
+    const ok = f.run(["open", "synthetic", "--app"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    const ok_hash = new URL(ok.stdout.trim()).hash;
+    assert.ok(!ok_hash.includes(SECRET));
+    assert.equal((await exchange(f, ok_hash)).session, SECRET, "the owner's session, never a made-up one");
+    // a CLI with another session value cannot get a code: non-zero exit, no fragment, neither value printed
+    const other = "synthetic-other-session-value-9876543210";
+    const out = f.run(["open", "synthetic", "--app"], { PES_LOCAL_SESSION_SECRET: other });
+    assert.notEqual(out.status, 0, "a session the server does not accept issues no code");
+    const all = `${out.stdout}\n${out.stderr}`;
+    assert.ok(!all.includes("#code=") && !all.includes("#pes="), "no fragment printed");
+    assert.ok(!all.includes(other) && !all.includes(SECRET), "neither session value printed");
   } finally {
     await f.cleanup();
   }
