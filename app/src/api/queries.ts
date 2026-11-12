@@ -19,6 +19,8 @@ export const keys = {
   records: (slug: string, edition: number) => ["records", slug, edition] as const,
   assumptions: (slug: string, edition: number) => ["records", slug, edition, "assumptions"] as const,
   decisions: (slug: string, edition: number) => ["records", slug, edition, "decisions"] as const,
+  /** 내 자료(MAT1c) — 기록 읽기와 같은 앞부분이라 판의 변경분(workspace)을 받으면 같이 다시 읽힌다 */
+  materials: (slug: string, edition: number) => ["records", slug, edition, "materials"] as const,
   reflections: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, stage, round, "reflections"] as const,
   /** 라운드 읽기와 같은 앞부분(["round", slug, edition]) — 라운드를 다시 읽을 때 같이 다시 읽힌다 */
   comments: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, "comments", stage, round] as const,
@@ -127,4 +129,10 @@ export function useAnnotations(slug: string, edition: number, objectId: string |
     enabled: !!objectId,
     placeholderData: keepPreviousData,
   });
+}
+
+/** 내 자료 목록(MAT1c) — 사람 화면이라 금지(deny) 파일도 온다. 읽기 실패는 오류로 남는다(빈 목록으로 위장하지 않음) */
+export function useMaterials(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.materials(slug, edition), queryFn: () => client.getMaterials(slug, edition), enabled: !!slug && edition > 0 });
 }
