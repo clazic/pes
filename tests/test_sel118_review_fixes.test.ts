@@ -84,6 +84,8 @@ const SECRET_CASES: Array<[string, string, string]> = [
   ],
   ["unknown long alnum secret", "내 키는 Zx9Kq2Lm7Pw4Rt8Vb3Nc6Hd1Fs5Jg0Yu 입니다", "Zx9Kq2Lm7Pw4Rt8Vb3Nc6Hd1Fs5Jg0Yu"],
   ["unknown long base64url secret", "값 aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0hJ3lO6rU9x_-AbCdEfGh 끝", "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0hJ3lO6rU9x_-AbCdEfGh"],
+  // 3회차 권장 1 — a JWT that follows a hyphen (the `-` before it is not a word start for the JWT pattern)
+  ["JWT right after a hyphen", "x-eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r", "dBjftJeZ4CVPmB92K27uhbUJU1p1r"],
 ];
 
 for (const [name, text, secret] of SECRET_CASES) {
@@ -343,6 +345,8 @@ const SLOW_SHAPES: ReadonlyArray<[string, string]> = [
   ["mixed case + digits run", "Aa1_".repeat(50_000)],
   ["repeated 'cookie:' with no '='", "cookie:".repeat(30_000)],
   ["repeated JWT head joined by hyphens", "eyJaaaaaaaaaa-".repeat(15_000)],
+  ["repeated hyphen-prefixed JWT head (3회차 권장 1)", "x-eyJaaaaaaaaaa-".repeat(12_500)],
+  ["repeated JWT segments with dots (3회차 권장 1)", "x-eyJaaaaaaaa.bbbbbbbb.".repeat(10_000)],
   ["repeated 'token '", "token ".repeat(35_000)],
   ["repeated scheme and user", "http://a:".repeat(25_000)],
   ["repeated unterminated PEM head", "-----BEGIN A ".repeat(15_000)],

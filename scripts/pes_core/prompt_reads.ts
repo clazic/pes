@@ -42,7 +42,8 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\bpes_[A-Za-z0-9_-]{16,}/g,
   /\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{12,}/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
-  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  // a JWT may follow a hyphen (`x-eyJ…`); the first segment is bounded so that a long run of `eyJ…-` does not rescan
+  /(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_-]{8,512}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
   // name = value where the name ENDS in a secret word (access_token, client_secret, x-api-key …). The whole name is erased:
   // it starts at the start of a word and reaches the secret word lazily — a `[\w-]*` prefix with no such anchor tries every
   // position of a long word and reads to its end each time (quadratic).
