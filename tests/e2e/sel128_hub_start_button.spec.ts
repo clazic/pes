@@ -515,3 +515,54 @@ test("F1-1 대화 상자를 닫은 뒤 늦게 온 생성 응답은 세션을 저
   expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), "늦은 응답이 세션을 저장하지 않는다").toBeNull();
   expect(new URL(page.url()).pathname, "늦은 응답이 이동시키지 않는다").toBe("/");
 });
+
+// SEL-128 최종 리뷰 2 F2-2: 닫은 직후 poll 없이 바로 하는 이동 두 경로를 고정한다.
+// (a) 닫기 직후 같은 작업에서 링크 클릭·초점 후 Enter — close 이벤트 전 틈도 캡처 클릭 처리기가 막는다.
+// (b) 닫은 직후 ⌘/Ctrl 클릭·가운데 클릭으로 새 탭 — 새 탭의 sessionStorage 에 세션이 없다.
+async function blocked_close_now(page: Page, slug: string, how: "취소" | "Escape"): Promise<void> {
+  await create_with_blocked_move(page, slug);
+  if (how === "취소") await dialog(page).getByRole("button", { name: "취소" }).click();
+  else await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+}
+
+test("F2-2 닫은 직후 poll 없이 목록의 열기 링크를 누르면(취소) 옛 화면은 세션을 읽지 못한다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await blocked_close_now(page, "synthetic-cancel-now", "취소");
+  await page.locator('a[href="legacy-y/index.html"]').click();
+  await page.waitForURL(/legacy-y/);
+  await expect(page).toHaveTitle("STOLEN:null");
+});
+
+test("F2-2 닫은 직후 poll 없이 Esc 뒤 링크에 초점을 두고 Enter 를 눌러도 옛 화면은 세션을 읽지 못한다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await blocked_close_now(page, "synthetic-enter-now", "Escape");
+  await page.locator('a[href="legacy-y/index.html"]').evaluate((el) => (el as { focus(): void }).focus());
+  await page.keyboard.press("Enter");
+  await page.waitForURL(/legacy-y/);
+  await expect(page).toHaveTitle("STOLEN:null");
+});
+
+test("F2-2 닫은 직후 ⌘/Ctrl+클릭으로 새 탭을 열어도 새 탭의 sessionStorage 에 세션이 없다", async ({ page, context }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await blocked_close_now(page, "synthetic-modclick-now", "Escape");
+  const opened = context.waitForEvent("page");
+  await page.locator('a[href="legacy-y/index.html"]').click({ modifiers: ["ControlOrMeta"] });
+  const tab = await opened;
+  await tab.waitForLoadState();
+  await expect(tab).toHaveTitle("STOLEN:null");
+});
+
+test("F2-2 닫은 직후 가운데 클릭으로 새 탭을 열어도 새 탭의 sessionStorage 에 세션이 없다", async ({ page, context }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await blocked_close_now(page, "synthetic-middle-now", "취소");
+  const opened = context.waitForEvent("page");
+  await page.locator('a[href="legacy-y/index.html"]').click({ button: "middle" });
+  const tab = await opened;
+  await tab.waitForLoadState();
+  await expect(tab).toHaveTitle("STOLEN:null");
+});
