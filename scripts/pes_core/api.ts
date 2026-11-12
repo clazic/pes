@@ -1723,12 +1723,13 @@ export class ApiApp {
       .map((row) => (row.resolution === null ? { id: row.id, run_id: row.run_id, state: row.state } : { id: row.id, run_id: row.run_id, state: row.state, resolution: row.resolution }));
     const handoff_runtimes: string[] = Object.values(HANDOFF_APPS).map((app) => app.runtime);
     const runs = this.#db
-      .all<{ id: string; stage: string | null; mode: string; status: string; runtime: string }>(
-        `SELECT n.id AS id, s.key AS stage, n.mode AS mode, n.status AS status, n.runtime AS runtime
+      .all<{ id: string; stage: string | null; mode: string; status: string; runtime: string; actor_kind: string | null }>(
+        `SELECT n.id AS id, s.key AS stage, n.mode AS mode, n.status AS status, n.runtime AS runtime, a.kind AS actor_kind
            FROM (
-             SELECT r.rowid AS rid, r.id AS id, r.project_id AS project_id, r.stage_id AS stage_id, r.mode AS mode, r.status AS status, r.runtime AS runtime
+             SELECT r.rowid AS rid, r.id AS id, r.project_id AS project_id, r.stage_id AS stage_id, r.mode AS mode, r.status AS status, r.runtime AS runtime, r.actor_id AS actor_id
                FROM runs r WHERE r.project_id = ? AND r.edition_id = ? ORDER BY r.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
            ) n LEFT JOIN stages s ON s.project_id = n.project_id AND s.id = n.stage_id
+               LEFT JOIN actors a ON a.id = n.actor_id
           ORDER BY n.rid ASC`,
         project.id,
         edition.id,
@@ -1737,7 +1738,9 @@ export class ApiApp {
         id: row.id,
         stage: row.stage,
         mode: row.mode,
-        status: handoff_runtimes.includes(row.runtime) ? "handed_off" : row.status,
+        // handed_off is only the hand-off import run's shape (commands/handoff_import.ts): runtime *_app_handoff, a human
+        // owner actor, status succeeded. runtime is a free string an agent may send on claim, so the name alone proves nothing.
+        status: handoff_runtimes.includes(row.runtime) && row.status === "succeeded" && row.actor_kind === "human" ? "handed_off" : row.status,
       }));
     return {
       slug: project.slug,
