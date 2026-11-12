@@ -159,8 +159,10 @@ function ValueLine({ kind, label, action, children }: { kind: "default" | "recom
   return (
     <div data-field-kind={kind} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
       <dt className="font-medium text-ink-2">{label}</dt>
-      <dd className="ml-0 min-w-0 text-ink">{children}</dd>
-      {action}
+      <dd className="ml-0 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-ink">
+        <span className="min-w-0">{children}</span>
+        {action}
+      </dd>
     </div>
   );
 }
@@ -224,6 +226,13 @@ export interface CardAnswering {
 export interface CardThread {
   threads: CommentThreadView[];
   unavailable: boolean;
+  /** unavailable 의 이유 — not_connected = 서버에 읽는 길이 아직 없음 · failed = 읽다가 실패(다시 읽기 가능) */
+  reason?: "not_connected" | "failed";
+  /** 이 라운드 의견을 아직 읽는 중 */
+  pending?: boolean;
+  /** 지난 라운드 — 읽기만 한다(쓰기 칸 없음) */
+  readOnly?: boolean;
+  reload?: () => void;
   post: (q: QuestionView, input: CommentInput, key: string) => Promise<CommandResult<{ thread_id: string; message_id: string; thread_created: boolean }>>;
   onPosted: (q: QuestionView, r: CommandResult<{ thread_id: string; message_id: string; thread_created: boolean }>) => void;
 }
@@ -547,6 +556,10 @@ export function QuestionCard(p: CardProps) {
               versionId={q.version_id}
               threads={p.thread.threads}
               unavailable={p.thread.unavailable}
+              reason={p.thread.reason}
+              pending={p.thread.pending}
+              readOnly={p.thread.readOnly}
+              onReload={p.thread.reload}
               draft={comment}
               draftKey={keyFor(scope, q.id, q.version, "comment")}
               post={(input, key) => p.thread.post(q, input, key)}

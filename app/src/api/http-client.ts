@@ -18,7 +18,15 @@ export interface HttpClientOptions {
   baseUrl?: string;
   /** 기본 globalThis.fetch (호출 때 찾는다 — 시험이 나중에 바꿔 끼운 것도 쓴다) */
   fetch?: typeof fetch;
+  /** 쓰기 요청(POST · 영수증 GET · 사전 읽기) 한 번의 시간 제한, 밀리초. 기본 15000. 넘으면 name "TimeoutError" 로 끝난다 */
+  timeoutMs?: number;
 }
+
+/** 쓰기 시간 제한 기본값 — 화면의 “접수 확인 중”(F06)이 production 에서도 나오게 하는 상한 */
+export const WRITE_TIMEOUT_MS = 15_000;
+
+/** 시간 초과·접수 확인 불가 — 화면(AskPane `isTimeout` · describeError)이 name 으로 알아보고 “접수 확인 중 + 같은 멱등 키로 다시 확인”을 보인다 */
+const timeoutError = (message: string): Error => Object.assign(new Error(message), { name: "TimeoutError" });
 
 type Json = Record<string, unknown>;
 
@@ -60,6 +68,26 @@ function touchedBy(type: string): string[] {
 export function createHttpClient(options: HttpClientOptions): HttpClient {
   const base = options.baseUrl ?? "";
   const send = (url: string, init: RequestInit): Promise<Response> => (options.fetch ?? ((u, i) => globalThis.fetch(u, i)))(url, init);
+  const limit = options.timeoutMs ?? WRITE_TIMEOUT_MS;
+  /**
+   * 쓰기 길의 요청 하나(응답 본문을 읽기까지)에 시간 제한을 둔다. 넘으면 요청을 중단하고 TimeoutError 로 끝난다 —
+   * fetch 가 중단 신호를 무시해도 끝나도록 경주시킨다. 멱등 키는 그대로이므로 화면이 같은 키로 다시 보내면 서버가 재생한다.
+   */
+  async function timed<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const ctl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        ctl.abort();
+        reject(timeoutError("서버 응답이 늦어요."));
+      }, limit);
+    });
+    try {
+      return await Promise.race([run(ctl.signal), late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   const headers = (extra: Record<string, string> = {}): Record<string, string> => ({ "x-pes-session": options.session, ...extra });
   const projectUrl = (id: string, rest: string): string => `${base}/api/v1/projects/${encodeURIComponent(id)}${rest}`;
   const idOf = (slug: string): string | undefined => (Object.hasOwn(options.projects, slug) ? options.projects[slug] : undefined);
@@ -94,40 +122,53 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       request_id: "client",
     });
 
-  /** 쓰기 공통: 멱등 키 확인 → 프로젝트 확인 → POST → (성공 뒤) GET P/requests/{key} 로 영수증. 순서 규칙(API 결정 4)은 서버가 같은 키로 재생한다 */
+  /** 쓰기 공통: 멱등 키 확인 → 프로젝트 확인 → POST(시간 제한) → (성공 뒤) GET P/requests/{key} 로 영수증. 순서 규칙(API 결정 4)은 서버가 같은 키로 재생한다 */
   async function write(slug: string, key: string | undefined, rest: string, body: Json, ready?: (id: string) => Promise<Json | void>) {
     if (!key) throw invalid("$.headers.idempotency-key");
     const id = idOf(slug);
     if (id === undefined) throw new PesApiError(fallbackBody(404));
     const extra = (await ready?.(id)) ?? {};
-    const res = await send(projectUrl(id, rest), {
-      method: "POST",
-      headers: headers({ "content-type": "application/json", "idempotency-key": key }),
-      credentials: "omit",
-      body: JSON.stringify({ format_version: FORMAT_VERSION, ...extra, ...body }),
+    const { json, requestId } = await timed(async (signal) => {
+      const res = await send(projectUrl(id, rest), {
+        method: "POST",
+        headers: headers({ "content-type": "application/json", "idempotency-key": key }),
+        credentials: "omit",
+        body: JSON.stringify({ format_version: FORMAT_VERSION, ...extra, ...body }),
+        signal,
+      });
+      if (!res.ok) throw await toApiError(res);
+      const parsed: unknown = await res.json();
+      if (!isRecord(parsed) || !isRecord(parsed.data)) throw new PesApiError(fallbackBody(500));
+      return { json: parsed, requestId: typeof parsed.request_id === "string" ? parsed.request_id : "client" };
     });
-    if (!res.ok) throw await toApiError(res);
-    const json: unknown = await res.json();
-    if (!isRecord(json) || !isRecord(json.data)) throw new PesApiError(fallbackBody(500));
-    const receipt = await readReceipt(id, key, json.replayed === true, typeof json.request_id === "string" ? json.request_id : "");
-    return { data: json.data, receipt, request_id: typeof json.request_id === "string" ? json.request_id : "client" };
+    const receipt = await readReceipt(id, key, json.replayed === true);
+    return { data: json.data as Json, receipt, request_id: requestId };
   }
 
-  /** 서버 본문에는 영수증이 없다 — 쓰기 성공 뒤 GET P/requests/{key} 로 tx 를 받아 만든다. 못 읽어도 쓰기는 이미 됐으니 던지지 않고 받은 만큼으로 만든다 */
-  async function readReceipt(id: string, key: string, replayed: boolean, requestId: string): Promise<Receipt> {
-    let txId = requestId || "client";
+  /**
+   * 서버 본문에는 영수증이 없다 — 쓰기 성공 뒤 GET P/requests/{key} 로 받는다. 번호·시각을 지어내지 않는다:
+   *  - receipt_no: 서버 응답에 있을 때만(글 · 숫자). 없으면 `numbered: false` + tx_id 를 그대로 둔다(화면은 번호 없이 “접수됨”).
+   *  - committed_at: 서버가 시각을 줄 때만 그것을 쓴다. 지금 서버(GET requests/{key})는 시각을 주지 않아, 영수증을 읽은 이 클라이언트의 시각을 쓴다(접수 시각과 몇 초 차이일 수 있다 — SEL-98 이 서버에 싣는다).
+   *  - 조회가 실패하면 쓰기는 됐을 수 있으나 영수증을 모른다: 성공으로 보이지 않고 TimeoutError(“접수 확인 중”)로 던진다. 같은 키로 다시 보내면 서버가 재생하고 그때 영수증을 읽는다.
+   */
+  async function readReceipt(id: string, key: string, replayed: boolean): Promise<Receipt> {
+    const unknown = () => timeoutError("접수는 보냈지만 영수증을 아직 읽지 못했어요.");
+    let data: Json;
     try {
-      const res = await send(projectUrl(id, `/requests/${encodeURIComponent(key)}`), { method: "GET", headers: headers(), credentials: "omit" });
-      if (res.ok) {
+      data = await timed(async (signal) => {
+        const res = await send(projectUrl(id, `/requests/${encodeURIComponent(key)}`), { method: "GET", headers: headers(), credentials: "omit", signal });
+        if (!res.ok) throw unknown();
         const json: unknown = await res.json();
-        const tx = isRecord(json) && isRecord(json.data) ? json.data.tx_id : undefined;
-        if (typeof tx === "string" && tx) txId = tx;
-      }
-    } catch {
-      /* 영수증 조회만 실패 — 쓰기는 성공했다 */
+        if (!isRecord(json) || !isRecord(json.data)) throw unknown();
+        return json.data;
+      });
+    } catch (e) {
+      throw e instanceof Error && e.name === "TimeoutError" ? e : unknown();
     }
-    const digits = /(\d+)$/.exec(txId)?.[1];
-    return { receipt_no: digits ? digits.padStart(4, "0") : txId, tx_id: txId, committed_at: new Date().toISOString(), idempotency_key: key, replayed };
+    if (typeof data.tx_id !== "string" || !data.tx_id) throw unknown();
+    const no = typeof data.receipt_no === "string" && data.receipt_no ? data.receipt_no : typeof data.receipt_no === "number" ? String(data.receipt_no).padStart(4, "0") : "";
+    const at = typeof data.committed_at === "string" && !Number.isNaN(Date.parse(data.committed_at)) ? data.committed_at : new Date().toISOString();
+    return { receipt_no: no || data.tx_id, ...(no ? {} : { numbered: false }), tx_id: data.tx_id, committed_at: at, idempotency_key: key, replayed };
   }
 
   const result = <T,>(w: { data: Json; receipt: Receipt; request_id: string }, data: T): CommandResult<T> => ({ format_version: FORMAT_VERSION, request_id: w.request_id, receipt: w.receipt, data });
@@ -169,9 +210,11 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       if (body.direction === "ask_ai") throw new NotConnectedError("사람이 AI에게 묻는 질문 더하기");
       if (round !== "start") throw new NotConnectedError("번호 라운드에 질문 더하기");
       const w = await write(slug, key, "/questions", { purpose: "stage_start", form_key: "main", direction: "agent_to_human", round_id: null, question: spec(body) }, async (id) => {
-        const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit" });
-        if (!res.ok) throw await toApiError(res);
-        const json: unknown = await res.json();
+        const json = await timed(async (signal) => {
+          const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit", signal });
+          if (!res.ok) throw await toApiError(res);
+          return (await res.json()) as unknown;
+        });
         const stages = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.stages) ? json.data.stages : [];
         const found = stages.find((s) => isRecord(s) && s.key === stage);
         if (!isRecord(found) || typeof found.stage_id !== "string") throw new PesApiError({ ...fallbackBody(404) });

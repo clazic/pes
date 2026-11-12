@@ -1,6 +1,6 @@
 import * as React from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CommentThreadView, PesClient } from "./types";
+import { NotConnectedError, type CommentThreadView, type PesClient } from "./types";
 
 /** 읽기·쓰기는 이 클라이언트 하나를 지난다(U1a 는 가짜, U1b 는 HTTP). 루트 레이아웃이 공급한다. */
 export const ClientContext = React.createContext<PesClient | null>(null);
@@ -43,6 +43,13 @@ export function useRound(slug: string, edition: number, stage: string, round: st
   });
 }
 
+/** useComments 가 돌려주는 모양 — unavailable 이면 reason 이 이유(not_connected = 서버에 읽는 길이 아직 없음 · failed = 읽다가 실패) */
+export interface CommentsRead {
+  threads: CommentThreadView[];
+  unavailable: boolean;
+  reason?: "not_connected" | "failed";
+}
+
 /**
  * 이 라운드의 질문별 의견 스레드(U2c). 읽는 길이 없거나 읽지 못하면 오류로 두지 않고 { unavailable: true } 로 돌려준다 —
  * 화면이 ‘읽지 못했다’고 알리고(빈 스레드로 단정하지 않음), 오류 상태 쿼리가 다시 읽히며 깜빡이는 일이 없다.
@@ -51,11 +58,12 @@ export function useComments(slug: string, edition: number, stage: string, round:
   const client = useClient();
   return useQuery({
     queryKey: keys.comments(slug, edition, stage, round),
-    queryFn: async (): Promise<{ threads: CommentThreadView[]; unavailable: boolean }> => {
+    queryFn: async (): Promise<CommentsRead> => {
       try {
         return { threads: await client.getComments(slug, edition, stage, round), unavailable: false };
-      } catch {
-        return { threads: [], unavailable: true };
+      } catch (e) {
+        // 읽는 길이 아직 없는 것(not_connected)과 일시 오류(failed)를 나눠 화면이 이유를 틀리게 말하지 않게 한다
+        return { threads: [], unavailable: true, reason: e instanceof NotConnectedError ? "not_connected" : "failed" };
       }
     },
     placeholderData: keepPreviousData,

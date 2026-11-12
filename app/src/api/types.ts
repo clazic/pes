@@ -49,8 +49,10 @@ export class PesApiError extends Error {
 
 /** 서버 영수증(mutation_commits). “됨”은 이것을 받은 뒤에만 쓴다(설계 P5). */
 export interface Receipt {
-  /** 화면에 보이는 접수 번호(번호만 — “접수” 같은 말은 화면이 붙인다) */
+  /** 화면에 보이는 접수 번호(번호만 — “접수” 같은 말은 화면이 붙인다). `numbered: false` 이면 서버가 번호를 주지 않은 것 — 이 값은 tx_id 와 같고 화면에 번호로 보이지 않는다 */
   receipt_no: string;
+  /** false = 서버가 접수 번호를 주지 않았다(HTTP 클라이언트가 번호를 지어내지 않는다) — 화면은 번호 없이 “접수됨”. 없으면 번호가 있는 것 */
+  numbered?: boolean;
   tx_id: string;
   committed_at: IsoTime;
   idempotency_key: string;
@@ -304,7 +306,7 @@ export interface QuestionInput {
 /** base_version = 지금 보는 질문 버전 — 어긋나면 conflict */
 export interface QuestionRevision extends QuestionInput {
   base_version: number;
-  /** U2c — 서버 버전 id(QuestionView.version_id). HTTP 클라이언트가 revisions 에 싣는다 */
+  /** U2c — 서버 버전 id(QuestionView.version_id). 서버로 고칠 때 필요하다. 지금 HTTP 클라이언트의 getRound 는 질문·version_id 를 아직 채우지 않아(SEL-98 에서 라운드 읽기가 이어질 때 채운다) 비어 있으면 reviseQuestion 은 요청 없이 “서버 버전을 알 수 없어” 로 거절한다 */
   base_version_id?: string;
 }
 

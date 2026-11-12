@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { AnswerReview } from "./AnswerReview";
 import { makePlan, toAnswerItem, type Plan, type PlanItem } from "./answer-model";
 import { keyFor } from "./draft-keys";
+import { readDefaultUsed, writeDefaultUsed } from "./default-used";
 import { ClosedCard, QuestionCard, type CardTools } from "./QuestionCard";
 import { MessageList } from "./QuestionThread";
 import { AddQuestionDialog, TidyDialog, type TidyKind } from "./QuestionDialogs";
@@ -62,6 +63,8 @@ interface SubmitRequest {
   mode: "bundle" | "single";
   /** 보낸 뒤 지울 초안 키들 */
   drafts: string[];
+  /** 요청을 만들 때 그 초안 키들의 글 — 보내는 사이에 더 쓴 글은 지우지 않으려고 비교한다 */
+  snap: Record<string, string>;
   numbers: number[];
 }
 
@@ -135,7 +138,9 @@ export function AskPane({
 
   /* ── 답 초안 · 기본값 · 제출(U2c) ── */
   const comments = useComments(project, edition, round.stage, roundKey);
-  const threads = comments.data?.threads ?? [];
+  /** 읽는 중 — 라운드를 바꾼 직후 남아 있는 앞 라운드 자료(placeholder)도 이 라운드 것이 아니므로 읽는 중으로 본다 */
+  const commentsPending = comments.isPending || comments.isPlaceholderData;
+  const threads = commentsPending ? [] : (comments.data?.threads ?? []);
   const otherThreads = threads.filter((t) => t.question_id === "__other");
   // 초안은 질문마다 칸에 있다 — 묶음 제출은 모두를 한꺼번에 읽는다. 초안이 바뀔 때마다 다시 그린다
   React.useSyncExternalStore(subscribeDrafts, draftsVersion);
@@ -147,7 +152,7 @@ export function AskPane({
     open: openQs,
     draftOf: (q) => ({ answer: readDraft(keyFor(scope, q.id, q.version, "answer")), opinion: readDraft(keyFor(scope, q.id, q.version, "opinion")) }),
     confirmed: (q) => confirmed.has(qk(q)),
-    defaultUsed: (q) => defaultsUsed.get(qk(q)),
+    defaultUsed: (q) => defaultsUsed.get(qk(q)) ?? readDefaultUsed(keyFor(scope, q.id, q.version, "answer")),
   });
   const requiredLeft = unanswered.filter((q) => q.required && plan.applicable.get(q.id) !== false).length;
 
@@ -168,7 +173,8 @@ export function AskPane({
       el.focus();
     } else if (--a.left <= 0) after.current = null;
   });
-  const receiptNo = (r: CommandResult<unknown>) => r.receipt.receipt_no;
+  /** 영수증 문구 — 서버가 번호를 주지 않았으면(numbered false) 번호를 지어내지 않고 “접수됨” */
+  const receiptText = (r: CommandResult<unknown>) => (r.receipt.numbered === false ? "접수됨" : `접수 ${r.receipt.receipt_no}`);
 
   const submit = useKeyedCommand();
   const [lastReq, setLastReq] = React.useState<SubmitRequest | null>(null);
@@ -180,11 +186,13 @@ export function AskPane({
   };
   const buildRequest = (mode: "bundle" | "single", items: PlanItem[]): SubmitRequest => {
     const input: SubmitInput = { mode, form_version: round.form_version, ...(round.set_id ? { set_id: round.set_id } : {}), answers: items.map(toAnswerItem) };
+    const drafts = items.flatMap((it) => [keyFor(scope, it.q.id, it.q.version, "answer"), keyFor(scope, it.q.id, it.q.version, "opinion")]);
     return {
       sig: JSON.stringify(input),
       input,
       mode,
-      drafts: items.flatMap((it) => [keyFor(scope, it.q.id, it.q.version, "answer"), keyFor(scope, it.q.id, it.q.version, "opinion")]),
+      drafts,
+      snap: Object.fromEntries(drafts.map((k) => [k, readDraft(k)])),
       numbers: items.map((it) => it.q.number),
     };
   };
@@ -200,10 +208,15 @@ export function AskPane({
       const left = res.data.missing_required.length;
       const who = req.mode === "bundle" ? `묶음으로 보냈어요 · 질문 ${req.numbers.length}개` : `질문 ${req.numbers[0]} — 이 답만 보냈어요`;
       const rest = res.data.form_complete ? " 필수 질문에는 모두 답이 있어요." : ` 필수 ${left}개가 남았어요.`;
-      setNote(`${who} · 접수 ${receiptNo(res)}.${res.receipt.replayed ? " 이미 접수된 요청이라 다시 만들지 않았어요." : ""}${rest}`);
+      setNote(`${who} · ${receiptText(res)}.${res.receipt.replayed ? " 이미 접수된 요청이라 다시 만들지 않았어요." : ""}${rest}`);
       setLastReq(null);
       await refresh();
-      for (const key of req.drafts) clearDraft(key);
+      // 보내는 사이에 같은 칸에 더 쓴 글은 지키고, 보낸 그대로인 칸만 비운다
+      for (const key of req.drafts) {
+        if (readDraft(key) !== req.snap[key]) continue;
+        clearDraft(key);
+        if (key.endsWith("|answer")) writeDefaultUsed(key, null);
+      }
     } else if (r.error instanceof PesApiError && r.error.body.error.code === "conflict") {
       // 보던 질문이 그 사이 바뀌었다 — 새로 읽는다(쓰던 초안은 옛 버전 칸에 그대로 남는다)
       await refresh();
@@ -228,7 +241,7 @@ export function AskPane({
   /* ── 질문별 의견(U2c) — 답이 아니다. 제출과 따로 가고, 필수를 채우지 않는다 ── */
   const postComment = (q: QuestionView, input: CommentInput, key: string) => client.addComment(project, edition, q.id, input, key);
   const onPosted = (q: QuestionView, r: CommandResult<unknown>) => {
-    setNote(`질문 ${q.number}에 의견을 남겼어요 · 접수 ${receiptNo(r)}. 답으로 세지 않아요.`);
+    setNote(`질문 ${q.number}에 의견을 남겼어요 · ${receiptText(r)}. 답으로 세지 않아요.`);
     void qc.invalidateQueries({ queryKey: ["round", project, edition, "comments"] });
   };
 
@@ -245,7 +258,7 @@ export function AskPane({
     return r;
   };
   const onSaved = (q: QuestionView, r: CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>) => {
-    setNote(`질문 ${q.number}을 새 버전으로 저장했어요 · 버전 ${r.data.version} · 접수 ${receiptNo(r)}. 옛 답은 지우지 않고 보존해요.`);
+    setNote(`질문 ${q.number}을 새 버전으로 저장했어요 · 버전 ${r.data.version} · ${receiptText(r)}. 옛 답은 지우지 않고 보존해요.`);
     if (saveFits.current) setHiddenId(null);
     else {
       // 고친 질문이 목록에서 빠져 초점이 사라지지 않게 — 거르기로 보낸다
@@ -276,7 +289,7 @@ export function AskPane({
     if (r.ok) {
       // 자리가 바뀌며 초점이 빠질 수 있다 — 같은 단추로 되돌려 연달아 옮길 수 있게
       focusLater(() => document.getElementById(`tool-${dir}-${id}`));
-      setNote(`질문 ${openQs.find((q) => q.id === id)!.number}의 자리를 바꿨어요 · 접수 ${receiptNo(r.value)}.`);
+      setNote(`질문 ${openQs.find((q) => q.id === id)!.number}의 자리를 바꿨어요 · ${receiptText(r.value)}.`);
     }
   };
 
@@ -482,16 +495,18 @@ export function AskPane({
                       blockedReason: reasonFor(q),
                       busy: submit.pending,
                       onSend: () => sendOne(q),
-                      onFilled: (value) =>
+                      onFilled: (value) => {
+                        writeDefaultUsed(keyFor(scope, q.id, q.version, "answer"), value);
                         setDefaultsUsed((prev) => {
                           const next = new Map(prev);
                           if (value === null) next.delete(qk(q));
                           else next.set(qk(q), value);
                           return next;
-                        }),
+                        });
+                      },
                     }
               }
-              thread={{ threads: threads.filter((t) => t.question_id === q.id), unavailable: comments.data?.unavailable === true, post: postComment, onPosted }}
+              thread={{ threads: threads.filter((t) => t.question_id === q.id), unavailable: !commentsPending && comments.data?.unavailable === true, reason: comments.data?.reason, pending: commentsPending, readOnly: past, reload: () => void comments.refetch(), post: postComment, onPosted }}
             />
           ))}
         </ol>

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ArrowRight } from "lucide-react";
-import { useComments, useRound, useWorkspace } from "@/api/queries";
+import { useRound, useWorkspace } from "@/api/queries";
 import type { RoundView, WorkspaceView } from "@/api/types";
 import { workspaceActions } from "@/app/actions";
 import { useArrival } from "@/app/arrival";
@@ -48,10 +48,9 @@ export function WorkspaceScreen() {
   const [sp, setSp] = useSearchParams();
   const ws = useWorkspace(slug, edition);
   const rq = useRound(slug, edition, stage, roundParam);
-  // 질문별 의견은 화면이 그려지기 전에 받거나 못 받았다고 정해진다(질문 영역이 나중에 바뀌어 번쩍이지 않게). 못 읽어도 화면은 그려진다
-  const cq = useComments(slug, edition, stage, roundParam);
+  // 질문별 의견은 부차 읽기다 — 첫 표시를 기다리지 않는다(AskPane 이 읽고, 스레드 칸만 “불러오는 중”을 보인다)
   const phone = useIsPhone();
-  const ready = !!ws.data && !!rq.data && !rq.isPlaceholderData && !cq.isPending;
+  const ready = !!ws.data && !!rq.data && !rq.isPlaceholderData;
   useArrival(ready);
 
   const view = parseView(sp.get("view"));
@@ -176,7 +175,7 @@ export function WorkspaceScreen() {
   }, [ready, title, w]);
 
   // 불러오는 동안에도 같은 틀(영역 셋 · 하나의 <main>)을 그린다 — 자료가 오면 그 안만 바뀐다
-  if (ws.isPending || (rq.isPending && !rq.data) || (!!rq.data && cq.isPending)) {
+  if (ws.isPending || (rq.isPending && !rq.data)) {
     return (
       <div className="ws-frame">
         <ViewSwitch view={view} onChange={() => {}} />
