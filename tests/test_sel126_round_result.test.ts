@@ -171,7 +171,7 @@ test("[신규] result 는 version_no(10진 글) · title · created_at(ISO) 도 
 // ---------------------------------------------------------------------------
 // (2) 결과 글이 없으면 null
 
-test("[신규] 결과 글이 없는 라운드는 result:null — 칸은 있고, 봉인 전 · 결과 없이 봉인한 라운드 · 단계 시작 자리 모두", async () => {
+test("[신규] 결과 글이 없는 라운드는 result:null — 칸은 있고, 봉인 전 · 글 없이 봉인한 라운드 · 단계 시작 자리 모두", async () => {
   await with_api(async (env) => {
     const form = await make_form(env, [single_spec("질문")], "b1");
     // 열린(봉인 전) 라운드: 글 객체가 있어도 아직 이 라운드의 결과로 담기지 않았다
@@ -179,11 +179,14 @@ test("[신규] 결과 글이 없는 라운드는 result:null — 칸은 있고, 
     const open = assert_ok(await owner_get(env, round_path("1")));
     assert.ok("result" in open, "result 칸은 늘 있다");
     assert.equal(open.result, null);
-    // 결과 없이 봉인한 라운드
-    await seal(env, form.round_id, [], "b1-seal").catch(() => undefined);
+    // 글 없이 봉인한 라운드 — versions 가 비면 봉인은 거절되므로(아래 별도 시험), 글이 아닌 출처 객체만 담아 정상 봉인한다
+    const src_obj = (await create_object(env.service, env.ctx("b1-so"), { kind: "source", edition_id: env.p.edition_id })).result as { object_id: string };
+    const src = (await add_source(env.service, env.ctx("b1-sv"), { object_id: src_obj.object_id, source_kind: "web", title: "합성 출처", url: "https://example.invalid/b1", method: "fetch", verification_state: "unverified" })).result as { object_id: string; version_id: string };
+    await seal(env, form.round_id, [{ object_id: src.object_id, version_id: src.version_id }], "b1-seal");
     const after = assert_ok(await owner_get(env, round_path("1")));
+    assert.equal(after.state, "closed", "봉인됐다 — 앞의 열린 라운드 읽기를 다시 읽은 것이 아니다");
     assert.ok("result" in after);
-    assert.equal(after.result, null, "결과가 담기지 않았으면 지어내지 않는다");
+    assert.equal(after.result, null, "글이 담기지 않았으면 지어내지 않는다");
     // 단계 시작 자리
     const start_place = await owner_get(env, round_path("start"));
     if (start_place.status === 200) {
@@ -192,6 +195,16 @@ test("[신규] 결과 글이 없는 라운드는 result:null — 칸은 있고, 
     } else {
       assert_error(start_place, 404, "not_found");
     }
+  });
+});
+
+test("[신규] 봉인은 versions 가 비면 거절한다(결과 없이 봉인하는 길은 없다) — 라운드는 열린 채 남고 result:null", async () => {
+  await with_api(async (env) => {
+    const form = await make_form(env, [single_spec("질문")], "b1e");
+    await assert.rejects(() => seal(env, form.round_id, [], "b1e-seal"), /versions must not be empty|invalid_payload/);
+    const still = assert_ok(await owner_get(env, round_path("1")));
+    assert.equal(still.state, "current");
+    assert.equal(still.result, null);
   });
 });
 
