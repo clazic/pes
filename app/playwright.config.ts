@@ -5,11 +5,15 @@
 // 폴더를 나누는 이유: 루트 시험이 읽는 app/dist(production)를 이 e2e 가 시험 모드 빌드로 덮어쓰지 않게. 실제 홈·실제 자료는 읽지 않는다(앱은 가짜 클라이언트만 쓴다) —
 // 그래도 자식 프로세스의 HOME·USERPROFILE·PES_HOME 은 임시 폴더로 바꿔 둔다.
 // 브라우저가 없으면 건너뛰지 않고 실패한다(CI 계약).
+import { assert_temp_home_env } from "../tests/helpers/temp_home_check.ts";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
+
+// SEL-122: 실제 계정 홈에서 시작하면 설정을 읽은 바로 뒤, 빈 포트를 고르거나 임시 폴더를 만들기 전에 거절한다(문자열만 비교 — 루트 playwright.config.ts 와 같다)
+assert_temp_home_env();
 
 // 임시 홈은 주 프로세스에서 한 번만 만든다(워커·설정 재로드는 환경변수로 물려받음) — 끝나면 globalTeardown 이 지운다
 process.env.PES_APP_E2E_HOME ??= mkdtempSync(join(tmpdir(), "pes-app-e2e-"));
@@ -40,6 +44,7 @@ const origin = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: "e2e",
   testMatch: "**/*.spec.ts",
+  globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
