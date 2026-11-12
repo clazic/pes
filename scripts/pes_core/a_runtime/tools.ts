@@ -7,7 +7,7 @@
 import type { CommandService, MutationContext } from "../commands.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
-import { list_references, read_reference, reference_caller } from "../references.ts";
+import { list_references, read_reference, reference_caller, type ReferenceContent } from "../references.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
 
 export const A_TOOL_ALLOWLIST: readonly string[] = Object.freeze([
@@ -66,7 +66,11 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
 ]);
 
 const RESULT_TEXT_MAX = 4000;
-/** A reference read is the point of its call: it gets a larger reply, with each long text cut at a fixed length (valid JSON, never cut mid-way). */
+/**
+ * A reference read is the point of its call: it gets a larger reply. The reply is built item by item inside this length
+ * budget (JSON characters), so it is always valid JSON: a long text field is cut at REFERENCE_FIELD_MAX and named in the
+ * item's truncated_fields, and items that do not fit are left out and counted in omitted_items (content.truncated = true).
+ */
 const REFERENCE_TEXT_MAX = 60_000;
 const REFERENCE_FIELD_MAX = 12_000;
 const REFERENCE_ITEMS_MAX = 40;
@@ -119,22 +123,49 @@ function ok(call: ToolCall, body: unknown, effect: ToolEffect = { kind: "none" }
   return { result: { call_id: call.id, name: call.name, content: clip(JSON.stringify({ ok: true, ...(body as object) }), max), is_error: false }, effect };
 }
 
-/** Keep a reference's content to a size the model can take: long fields are cut (and say so), the item count is capped. */
-function bounded_reference_content(content: { items: Array<Record<string, unknown>> } | null): unknown {
+/** The text fields of an item that are cut at REFERENCE_FIELD_MAX. */
+const REFERENCE_FIELDS = ["body_md", "summary", "quote", "title"] as const;
+
+/**
+ * Keep a reference's content to a size the model can take. Items are added one at a time while the whole reply
+ * ({ok, reference, content}) stays within `budget` JSON characters; the first item that does not fit and every item after
+ * it are counted in omitted_items. No JSON text is ever cut: the result is an object that still serializes whole.
+ */
+function bounded_reference_content(reference: unknown, content: ReferenceContent | null, budget: number = REFERENCE_TEXT_MAX): unknown {
   if (content === null) return null;
-  let truncated = content.items.length > REFERENCE_ITEMS_MAX;
-  const items = content.items.slice(0, REFERENCE_ITEMS_MAX).map((item) => {
-    const out: Record<string, unknown> = { ...item };
-    for (const field of ["body_md", "summary", "quote", "title"]) {
-      const value = out[field];
+  // what the reply costs before any item: the frame, the reference row, the status map and the truncation marks
+  const frame = JSON.stringify({ ok: true, reference, content: { items: [], items_status: content.items_status, truncated: true, omitted_items: content.items.length } }).length;
+  let left = budget - frame;
+  const items: Array<Record<string, unknown>> = [];
+  let field_cut = false;
+  for (const raw of content.items) {
+    if (items.length >= REFERENCE_ITEMS_MAX) break;
+    const item: Record<string, unknown> = { ...raw };
+    const cut: string[] = [];
+    for (const field of REFERENCE_FIELDS) {
+      const value = item[field];
       if (typeof value === "string" && value.length > REFERENCE_FIELD_MAX) {
-        out[field] = value.slice(0, REFERENCE_FIELD_MAX);
-        truncated = true;
+        item[field] = value.slice(0, REFERENCE_FIELD_MAX);
+        cut.push(field);
       }
     }
-    return out;
-  });
-  return truncated ? { items, truncated: true } : { items };
+    if (cut.length > 0) item["truncated_fields"] = cut;
+    const cost = JSON.stringify(item).length + 1; // + the comma
+    if (cost > left) break;
+    left -= cost;
+    items.push(item);
+    if (cut.length > 0) field_cut = true;
+  }
+  const omitted = content.items.length - items.length;
+  if (omitted === 0 && !field_cut) return { items, items_status: content.items_status };
+  return { items, items_status: content.items_status, truncated: true, omitted_items: omitted };
+}
+
+/** A reference reply: bounded content, and an error (never a cut-off string) if the whole reply still does not fit. */
+function reference_ok(call: ToolCall, read: { reference: unknown; content: ReferenceContent | null }): ToolOutcome {
+  const text = JSON.stringify({ ok: true, reference: read.reference, content: bounded_reference_content(read.reference, read.content) });
+  if (text.length > REFERENCE_TEXT_MAX) return refused(call, "the reference reply is too large to give; read fewer items");
+  return { result: { call_id: call.id, name: call.name, content: text, is_error: false }, effect: { kind: "none" } };
 }
 
 function refused(call: ToolCall, message: string): ToolOutcome {
@@ -277,7 +308,7 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
           if (typeof reference_id !== "string" || reference_id.length === 0) return refused(call, "reference_id must be a non-empty string");
           // the same decision as the HTTP read: permission to the source, the stricter Go switch, original gone
           const read = read_reference(env.db, env.run.project_id, reference_id, reference_caller(env.db, env.run.actor_id, true));
-          return ok(call, { reference: read.reference, content: bounded_reference_content(read.content) }, { kind: "none" }, REFERENCE_TEXT_MAX);
+          return reference_ok(call, read);
         }
         return ok(call, { context: build_context(env.db, env.run) });
       }

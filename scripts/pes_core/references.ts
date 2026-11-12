@@ -15,6 +15,8 @@
 //               is missing/damaged: fail closed), an AI caller (a token, the A tool) gets content = null and
 //               ai_delivery = {allowed:false, withheld_reason}. A person (the owner session) is not affected.
 //   original    status 'source_missing' (tombstone): no content for anyone; ai_delivery.withheld_reason = 'source_missing'.
+//   content     content.items_status tells, per scope item, ok | none | not_supported | snapshot_content_unavailable (see
+//               ReferenceItemStatus): an empty list is never silent about why it is empty.
 //   new version a GET computes it (the source's newest snapshot differs from the pinned one); nothing is written.
 
 import { read_credential_actor } from "./actors.ts";
@@ -27,6 +29,23 @@ type ReadDb = Pick<Db, "get" | "all">;
 /** The items a person can choose to attach. REF1a delivers content for final_report and sources; the others are kept in scope for later. */
 export const REFERENCE_SCOPE_ITEMS: readonly string[] = ["final_report", "stage_report", "sources", "decisions", "questions_answers", "files"];
 export const DEFAULT_REFERENCE_SCOPE: readonly string[] = ["final_report", "sources"];
+/** The items whose content REF1a delivers. The other scope items can be chosen (for later) but are reported as not_supported. */
+export const SUPPORTED_REFERENCE_ITEMS: readonly string[] = ["final_report", "sources"];
+
+/**
+ * What a scope item came out as, so a reader (person, A, B, HTTP: all get the same object) can tell three empties apart:
+ *   ok                            the snapshot holds at least one such item
+ *   none                          the item is supported and the snapshot was read, but it holds none
+ *   not_supported                 this item is not delivered yet (REF1a delivers final_report and sources)
+ *   snapshot_content_unavailable  the snapshot's contents cannot be read (no receipt, no sealed round contents — e.g. a
+ *                                 legacy stage snapshot), so "none" cannot be claimed
+ */
+export type ReferenceItemStatus = "ok" | "none" | "not_supported" | "snapshot_content_unavailable";
+
+export interface ReferenceContent {
+  items: Array<Record<string, unknown>>;
+  items_status: Record<string, ReferenceItemStatus>;
+}
 
 export const REFERENCE_NO_PERMISSION_KEYS: readonly string[] = ["access", "id", "state"];
 
@@ -180,8 +199,11 @@ interface VersionRef {
   version_id: string;
 }
 
-/** The versions a snapshot holds: the receipt of the command that took it, else the sealed round's contents. */
-function snapshot_versions(db: ReadDb, project_id: string, snapshot_id: string): VersionRef[] {
+/**
+ * The versions a snapshot holds: the receipt of the command that took it, else the sealed round's contents.
+ * readable=false when neither source can be read — then an empty list means "unknown", not "nothing in it".
+ */
+function snapshot_versions(db: ReadDb, project_id: string, snapshot_id: string): { versions: VersionRef[]; readable: boolean } {
   const receipt = db.get<{ result_json: string }>(
     `SELECT result_json FROM mutation_commits
       WHERE project_id = ? AND action IN ('edition.snapshotted', 'round.sealed') AND json_extract(result_json, '$.snapshot_id') = ?
@@ -193,33 +215,38 @@ function snapshot_versions(db: ReadDb, project_id: string, snapshot_id: string):
     try {
       const parsed = JSON.parse(receipt.result_json) as { versions?: unknown };
       if (Array.isArray(parsed.versions)) {
-        return parsed.versions.flatMap((entry): VersionRef[] => {
+        const versions = parsed.versions.flatMap((entry): VersionRef[] => {
           const e = entry as { object_id?: unknown; version_id?: unknown };
           return typeof e.object_id === "string" && typeof e.version_id === "string" ? [{ object_id: e.object_id, version_id: e.version_id }] : [];
         });
+        return { versions, readable: true };
       }
     } catch {
       // damaged receipt: fall through to the round contents
     }
   }
-  return db.all<VersionRef>(
+  // A round-scope snapshot keeps its contents in round_contents. A stage/edition-scope snapshot has no round (round_id NULL):
+  // the join finds nothing — a legacy import's stage snapshot is exactly that (its manifest only says legacy_unverified).
+  const versions = db.all<VersionRef>(
     `SELECT rc.object_id AS object_id, rc.version_id AS version_id
        FROM snapshots s JOIN round_contents rc ON rc.project_id = s.project_id AND rc.round_id = s.round_id
       WHERE s.project_id = ? AND s.id = ? ORDER BY rc.position`,
     project_id,
     snapshot_id,
   );
+  return { versions, readable: versions.length > 0 };
 }
 
 /**
  * The pinned content: the chosen items of the pinned snapshot, each with its citation (which project, label, snapshot,
  * object, version). It is the version the snapshot holds — a newer version in the source does not change it.
+ * items_status says, per scope item, why there are (or are no) items of it.
  */
-export function reference_content(db: ReadDb, row: ReferenceRow): { items: Array<Record<string, unknown>> } {
+export function reference_content(db: ReadDb, row: ReferenceRow): ReferenceContent {
   const project_id = row.referenced_project_id as string;
   const snapshot_id = row.source_snapshot_id as string;
   const scope = parse_scope(row.scope_json);
-  const versions = snapshot_versions(db, project_id, snapshot_id);
+  const { versions, readable } = snapshot_versions(db, project_id, snapshot_id);
   const citation = (v: VersionRef): Record<string, unknown> => ({
     reference_id: row.id,
     project_id,
@@ -229,7 +256,18 @@ export function reference_content(db: ReadDb, row: ReferenceRow): { items: Array
     version_id: v.version_id,
   });
   const items: Array<Record<string, unknown>> = [];
+  const items_status: Record<string, ReferenceItemStatus> = {};
   for (const item of scope) {
+    if (item in items_status) continue;
+    if (!SUPPORTED_REFERENCE_ITEMS.includes(item)) {
+      items_status[item] = "not_supported";
+      continue;
+    }
+    if (!readable) {
+      items_status[item] = "snapshot_content_unavailable";
+      continue;
+    }
+    let found = 0;
     if (item === "final_report") {
       for (const v of versions) {
         const a = db.get<{ kind: string; title: string; summary: string; body_md: string | null }>(
@@ -242,6 +280,7 @@ export function reference_content(db: ReadDb, row: ReferenceRow): { items: Array
         );
         if (a === undefined || a.kind !== "report") continue;
         items.push({ item, object_id: v.object_id, version_id: v.version_id, kind: a.kind, title: a.title, summary: a.summary, body_md: a.body_md, citation: citation(v) });
+        found += 1;
       }
     } else if (item === "sources") {
       for (const v of versions) {
@@ -255,17 +294,19 @@ export function reference_content(db: ReadDb, row: ReferenceRow): { items: Array
         );
         if (s === undefined) continue;
         items.push({ item, object_id: v.object_id, version_id: v.version_id, kind: s.kind, title: s.title, url: s.url, quote: s.quote, citation: citation(v) });
+        found += 1;
       }
     }
+    items_status[item] = found > 0 ? "ok" : "none";
   }
-  return { items };
+  return { items, items_status };
 }
 
 /**
  * The read of ONE reference: {reference, content}. No access → forbidden (nothing about the source). Unknown id, or an id of
  * another project → not_found. content is null when the original is gone, or when the caller is an AI and Go is OFF on either side.
  */
-export function read_reference(db: ReadDb, project_id: string, reference_id: string, caller: ReferenceCaller): { reference: Record<string, unknown>; content: { items: Array<Record<string, unknown>> } | null } {
+export function read_reference(db: ReadDb, project_id: string, reference_id: string, caller: ReferenceCaller): { reference: Record<string, unknown>; content: ReferenceContent | null } {
   const row = reference_row(db, project_id, reference_id);
   if (row === undefined) throw new ApiError("not_found", "reference not found");
   const decision = decide(db, row, caller);

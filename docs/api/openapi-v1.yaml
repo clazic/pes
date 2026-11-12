@@ -1759,7 +1759,16 @@ paths:
     get:
       summary: Read one reference with the pinned content and citations
       description: |
-        data = {reference: <row>, content}. content = {items:[...]} or null. Each item is
+        data = {reference: <row>, content}. content = {items:[...], items_status:{<scope item>: ok|none|not_supported|
+        snapshot_content_unavailable}} or null. items_status has one entry per item in `scope` and is the same object for the
+        owner, a token, A `context.get` and B `pes_context`: ok = the snapshot holds such items; none = the item is supported
+        and the snapshot was read, but holds none ("not in the original"); not_supported = this item is not delivered yet (REF1a
+        delivers final_report and sources; stage_report, decisions, questions_answers and files can be attached for later and
+        read as not_supported); snapshot_content_unavailable = the snapshot's contents cannot be read (for example a
+        stage-scope snapshot of a legacy import, which keeps no contents), so "none" cannot be claimed. A and B give the same
+        content except that A bounds it: A keeps the whole tool reply within 60000 JSON characters by adding items one at a
+        time, cutting any text field at 12000 characters (the item then lists it in `truncated_fields`) and leaving out the
+        items that do not fit (content.truncated = true, content.omitted_items = their number). B and HTTP do not cut. Each item is
         {item (final_report|sources), object_id, version_id, kind, title, ... , citation: {reference_id, project_id,
         project_label, snapshot_id, object_id, version_id}}: final_report carries title, summary, body_md of the report;
         sources carries title, url, quote. Only the items in `scope` appear. The content is the version the pinned snapshot
