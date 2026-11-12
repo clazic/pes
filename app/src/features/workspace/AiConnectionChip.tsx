@@ -1,7 +1,7 @@
 import * as React from "react";
-import type { AiConnectionView, Mode } from "@/api/types";
+import type { AiConnectionView, AiDispatchView, Mode } from "@/api/types";
 import { StatusMark, TONE_TEXT } from "@/components/pes/status";
-import { lookup } from "@/components/pes/status-registry";
+import { lookup, STATUS } from "@/components/pes/status-registry";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,18 +45,15 @@ const CHIP_TONE: Record<ChipState, string> = {
   unknown: "border-dashed border-control bg-surface text-ink-2",
 };
 
-/** 나간 전송의 상태 낱말 — 취소 시도(끝나지 않음)와 결과를 모르는 것(unknown)을 뭉개지 않는다 */
-function dispatchLabel(state: string): string {
-  switch (state) {
-    case "sent":
-      return lookup("dispatch", "sent").label;
-    case "cancel_requested":
-      return lookup("dispatch", "cancel_requested").label;
-    case "cancelled":
-      return lookup("dispatch", "cancelled").label;
-    default:
-      return lookup("dispatch", "unknown").label;
-  }
+/** 나간 전송의 상태 낱말 — DB 8값은 각자 자기 말이고, 취소 시도(별도 칸)·결과를 모르는 것(unknown)·정리 결과를 뭉개지 않는다 */
+function dispatchLabel(d: AiDispatchView): string {
+  const base = Object.hasOwn(STATUS.dispatch, d.state) ? lookup("dispatch", d.state).label : lookup("dispatch", "unknown").label;
+  const parts = [base];
+  if (d.cancel_state === "requested") parts.push(lookup("dispatch", "cancel_requested").label);
+  else if (d.cancel_state === "cancelled") parts.push(lookup("dispatch", "cancelled").label);
+  if (d.resolution === "charged") parts.push("정리됨 · 청구됨");
+  else if (d.resolution === "not_charged") parts.push("정리됨 · 청구 안 됨");
+  return parts.join(" · ");
 }
 
 const PANEL_ID = "ai-connection-panel";
@@ -138,7 +135,7 @@ export function AiConnectionChip({ ai, mode }: { ai?: AiConnectionView; mode: Mo
               <ul className="mt-1 space-y-0.5">
                 {dispatches.map((d) => (
                   <li key={d.id} data-dispatch={d.id} data-state={d.state} className="text-meta text-ink">
-                    전송 {d.id} · {dispatchLabel(d.state)}
+                    전송 {d.id} · {dispatchLabel(d)}
                   </li>
                 ))}
               </ul>

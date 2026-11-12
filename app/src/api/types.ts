@@ -140,11 +140,17 @@ export interface StageRef {
 /** project_policy_versions 읽기. 확정 전 = pending, 누락·손상은 각각 missing · corrupt(허용으로 해석하지 않는다) */
 export type AiPolicy = "allowed" | "denied" | "missing" | "corrupt" | "pending";
 
-/** outbound_dispatches 읽기 — 보낸 뒤 끝난 것(cancelled)과 결과를 모르는 것(unknown)을 구분한다 */
+/**
+ * outbound_dispatches 읽기 — state 는 DB 8값 그대로(서버가 이름을 바꾸거나 합치지 않는다). `cancel_requested` · `cancelled` 는
+ * 서버가 보내지 않는 옛 값(U1d 첫 모양) — 사전이 계속 읽는다. 취소 시도는 state 가 아니라 별도 칸 cancel_state 이며
+ * 서버는 DB 근거가 생길 때만 보낸다(지금은 보내지 않는다). resolution 은 결과를 모르던 전송을 사람이 정리한 결과(행이 있을 때만).
+ */
 export interface AiDispatchView {
   id: string;
   run_id: string;
-  state: "sent" | "cancel_requested" | "cancelled" | "unknown";
+  state: "prepared" | "authorized" | "sent" | "response" | "adopted" | "blocked" | "failed" | "unknown" | "cancel_requested" | "cancelled";
+  resolution?: "charged" | "not_charged";
+  cancel_state?: "requested" | "cancelled";
 }
 
 export interface AiConnectionView {
@@ -154,12 +160,14 @@ export interface AiConnectionView {
 
 /* ───────────── 실행(중단 · 취소 · 인계) · 실행 권한(U1d) ───────────── */
 
-export type RunStatus = "running" | "queued" | "waiting_human" | "interrupted" | "cancelled" | "handed_off" | "failed" | "succeeded";
+/** runs.status 8값 그대로 + handed_off(서버가 앱 인계 가져오기 기록 run 에만 붙이는 값) */
+export type RunStatus = "running" | "queued" | "waiting_human" | "blocked_usage" | "interrupted" | "cancelled" | "handed_off" | "failed" | "succeeded";
 export type ExternalStop = "pending" | "confirmed" | "failed" | "unknown";
 
 export interface RunView {
   id: string;
-  stage: StageKey;
+  /** 단계가 없는 run 은 null */
+  stage: StageKey | null;
   mode: Mode;
   status: RunStatus;
   /** 바깥에서 멈춘 결과 — unknown 은 “중단 확인됨”이 아니다(연결 끊김 ≠ 취소) */
