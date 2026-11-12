@@ -8,7 +8,7 @@
     "node": ">=26"
   },
   "scripts": {
-    "test": "node --import ./tests/helpers/require_temp_home.ts --test \"tests/**/*.test.ts\"",
+    "test": "node scripts/run_tests.ts",
     "typecheck": "tsc --noEmit",
     "lint:skills": "node scripts/lint_skills.ts",
     "check:ddl": "node scripts/check_ddl.ts"
