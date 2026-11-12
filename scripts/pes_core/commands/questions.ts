@@ -1212,8 +1212,6 @@ function run_state_change(runtime: CommandRuntime, kind: StateKind): CommandResu
       });
     }
   }
-  const { guard } = member_actor_with_guard(runtime, payload);
-
   const row = runtime.db.get<StateQuestionRow>(
     `SELECT o.current_version_id AS current_version_id, qv.text, qv.type, qv.state, qv.importance,
             qv.required, qv.allow_comment_as_answer, qv.default_value, qv.options, qv.show_if, qv.help
@@ -1227,9 +1225,11 @@ function run_state_change(runtime: CommandRuntime, kind: StateKind): CommandResu
     project.id,
     question_id,
   );
+  // a question that does not exist is not_found for everyone; the lease rule applies to a question that does
   if (row === undefined) {
     throw new ApiError("not_found", "question not found");
   }
+  const { guard } = member_actor_with_guard(runtime, payload);
   if (has_own(payload, "base_version_id")) {
     const base = require_non_empty_string(payload, "base_version_id");
     if (base !== row.current_version_id) {
