@@ -180,7 +180,8 @@ export interface EventFacts {
  * Payload keys that name a material OBJECT or a VERSION, matched against the closed sets. Every event type that names one
  * of these ids in its payload must be listed here (grep the type in commands/): annotation.created (target_object_id,
  * target_version_id), content.citation_added (source_version_id, artifact_version_id), content.relation_linked
- * (from_version_id, to_version_id), followup.proposed (proposed_version_id), dispatch.adopted (adopted_version_id).
+ * (from_version_id, to_version_id), followup.proposed (proposed_version_id), dispatch.adopted (adopted_version_id),
+ * run.input_receipt_recorded (input_version_id).
  */
 export const CLOSED_OBJECT_PAYLOAD_KEYS = ["object_id", "target_object_id"] as const;
 export const CLOSED_VERSION_PAYLOAD_KEYS = [
@@ -192,6 +193,7 @@ export const CLOSED_VERSION_PAYLOAD_KEYS = [
   "to_version_id",
   "proposed_version_id",
   "adopted_version_id",
+  "input_version_id",
 ] as const;
 
 /**
