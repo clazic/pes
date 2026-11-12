@@ -6,7 +6,7 @@
 
 import type { CommandService, MutationContext } from "../commands.ts";
 import { ai_material_rows } from "../commands/file_access.ts";
-import { thread_reply_route } from "../commands/thread_reads.ts";
+import { ai_thread_row, open_annotation_threads, thread_reply_route } from "../commands/thread_reads.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { decide, list_references, read_reference, reference_caller, reference_row, type ReferenceContent } from "../references.ts";
@@ -36,14 +36,14 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
   {
     name: "context.get",
     description:
-      // kept as short as before SEL-113: the spec goes out with every request; how to read a reference is said in the reply
-      // itself, and only when there is one (context.references_help)
-      "Read the project, stage, round, current objects, materials and questions.",
-    parameters: { type: "object", properties: { reference_id: { type: "string" }, references_offset: { type: "integer" } } },
+      // kept as short as before SEL-113: the spec goes out with every request (a few words of the other descriptions were cut in
+      // SEL-124 to pay for threads_offset); how to read a reference is said in the reply itself, and only when there is one
+      "Read the project, stage, round, objects, materials, questions.",
+    parameters: { type: "object", properties: { reference_id: { type: "string" }, references_offset: { type: "integer" }, threads_offset: { type: "integer" } } },
   },
   {
     name: "result.submit",
-    description: "Append new versions to existing artifact objects. Each item: op=append_version, object_id, title, summary, body_md.",
+    description: "Append versions to existing artifacts. Item: op=append_version, object_id, title, summary, body_md.",
     parameters: {
       type: "object",
       properties: { results: { type: "array", items: { type: "object", properties: { op: { type: "string" }, object_id: { type: "string" }, title: { type: "string" } }, required: ["op", "object_id"] } } },
@@ -52,7 +52,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
   },
   {
     name: "question.ask",
-    description: "Ask the person questions and wait for the answers. Each question: text, type, required, options.",
+    description: "Ask the person questions and wait. Question: text, type, required, options.",
     parameters: { type: "object", properties: { questions: { type: "array", items: { type: "object" } } }, required: ["questions"] },
   },
   { name: "assumption.propose", description: "Propose an assumption for a person to review.", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
@@ -313,77 +313,109 @@ function context_reference_row(row: Record<string, unknown>): Record<string, unk
 /** Said in the context reply only when there is a reference (the tool spec stays short: it goes out with every request). */
 const REFERENCES_HELP = "call context.get with reference_id to read one reference";
 
+/** What one context.get returns: everything from the start, or one list's next page (references or open comment threads). */
+type ContextPage = { kind: "all" } | { kind: "references" | "threads"; offset: number };
+
 /**
- * context.get without reference_id. offset === null: the whole context (frame, questions, objects, the reference list from
- * the start). offset = n: the next page of the reference list only. Built object by object inside CONTEXT_TEXT_MAX; the JSON
- * is never cut. context.references_page = {offset, returned, total, next_offset} (left out when there is no reference); when anything is left out,
- * context.truncated = true, context.omitted = {questions, objects, materials (when any), references} and context.next says how to read on.
+ * context.get without reference_id. page "all": the whole context (frame, questions, objects, the reference list and the open comment
+ * threads from the start). page "references" / "threads" with offset n: the next page of that list only. Built object by object inside
+ * CONTEXT_TEXT_MAX; the JSON is never cut. context.references_page / threads_page = {offset, returned, total, next_offset} (left out when
+ * there is none); when anything is left out, context.truncated = true, context.omitted = {questions, objects, materials (when any),
+ * references, threads (when any)} and context.next says how to read on. The threads (SEL-124: the open annotation threads, last
+ * activity first) are filled last, after every other list, so a context without threads keeps its sizes exactly.
  */
-function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle, offset: number | null): ToolOutcome {
+function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle, page: ContextPage): ToolOutcome {
+  const whole = page.kind === "all";
   const full = build_context(db, run);
   const all_refs = (full["references"] as Array<Record<string, unknown>>).map(context_reference_row);
-  const start = offset ?? 0;
-  const questions = offset === null ? (full["questions"] as unknown[]) : [];
-  const objects = offset === null ? (full["objects"] as unknown[]) : [];
+  const all_threads = page.kind === "references" ? [] : open_annotation_threads(db, run.project_id, CONTEXT_FIELD_MAX);
+  const start = page.kind === "references" ? page.offset : 0;
+  const thread_start = page.kind === "threads" ? page.offset : 0;
+  const questions = whole ? (full["questions"] as unknown[]) : [];
+  const objects = whole ? (full["objects"] as unknown[]) : [];
   // SEL-115: the allowed materials only (build_context already drops a denied file) — first page only, left out when there is none
-  const materials = offset === null ? (full["materials"] as unknown[]) : [];
-  const frame: Record<string, unknown> =
-    offset === null ? { topic: cut_text(full["topic"]), stage: full["stage"], round_no: full["round_no"] } : {};
-  const kept = { questions: [] as unknown[], objects: [] as unknown[], materials: [] as unknown[], references: [] as unknown[] };
+  const materials = whole ? (full["materials"] as unknown[]) : [];
+  const frame: Record<string, unknown> = whole ? { topic: cut_text(full["topic"]), stage: full["stage"], round_no: full["round_no"] } : {};
+  const kept = { questions: [] as unknown[], objects: [] as unknown[], materials: [] as unknown[], references: [] as unknown[], threads: [] as unknown[] };
   // the cost of the reply before any list entry, with every mark at its widest
-  const total = all_refs.length;
+  const total = page.kind === "threads" ? 0 : all_refs.length;
+  const thread_total = all_threads.length;
+  const has_threads = page.kind !== "references" && !(thread_total === 0 && thread_start === 0);
+  const next_text = (refs: number | null, threads: number | null): string =>
+    [
+      ...(refs === null ? [] : [`call context.get with references_offset: ${refs} for the next page of references`]),
+      ...(threads === null ? [] : [`call context.get with threads_offset: ${threads} for the next page of threads`]),
+    ].join("; ");
   const marks = {
     truncated: true,
-    omitted: { questions: questions.length, objects: objects.length, materials: materials.length, references: total },
-    next: `call context.get with references_offset: ${total} for the next page of references`,
-    references_page: { offset: start, returned: total, total, next_offset: total },
-    references_help: REFERENCES_HELP,
+    omitted: { questions: questions.length, objects: objects.length, materials: materials.length, references: total, ...(has_threads ? { threads: thread_total } : {}) },
+    next: next_text(page.kind === "threads" ? null : total, has_threads ? thread_total : null),
+    ...(page.kind === "threads" ? {} : { references_page: { offset: start, returned: total, total, next_offset: total }, references_help: REFERENCES_HELP }),
+    ...(has_threads ? { threads_page: { offset: thread_start, returned: thread_total, total: thread_total, next_offset: thread_total } } : {}),
   };
-  let left = CONTEXT_TEXT_MAX - JSON.stringify({ ok: true, context: { ...frame, questions: [], objects: [], materials: [], references: [], ...marks } }).length;
+  let left =
+    CONTEXT_TEXT_MAX -
+    JSON.stringify({ ok: true, context: { ...frame, questions: [], objects: [], materials: [], references: [], ...(has_threads ? { threads: [] } : {}), ...marks } }).length;
   let full_stop = false;
+  const take = (entry: unknown, into: unknown[]): boolean => {
+    const cost = JSON.stringify(entry).length + 1; // + the comma
+    if (cost > left) {
+      full_stop = true;
+      return false;
+    }
+    left -= cost;
+    into.push(entry);
+    return true;
+  };
   const fill = (list: unknown[], into: unknown[]): void => {
     for (const entry of list) {
-      if (full_stop) return;
-      const cost = JSON.stringify(entry).length + 1; // + the comma
-      if (cost > left) {
-        full_stop = true;
-        return;
-      }
-      left -= cost;
-      into.push(entry);
+      if (full_stop || !take(entry, into)) return;
     }
   };
   fill(questions, kept.questions);
   fill(objects, kept.objects);
   fill(materials, kept.materials);
   fill(start >= total ? [] : all_refs.slice(start), kept.references);
+  // the thread rows are read one by one (their anchors are judged only for the rows that are given)
+  if (has_threads) {
+    for (const thread of all_threads.slice(thread_start)) {
+      if (full_stop) break;
+      if (!take(ai_thread_row(db, run.project_id, thread, CONTEXT_FIELD_MAX), kept.threads)) break;
+    }
+  }
   const returned = kept.references.length;
   const after = Math.min(start, total) + returned;
   const next_offset = after < total ? after : null;
+  const threads_returned = kept.threads.length;
+  const threads_after = Math.min(thread_start, thread_total) + threads_returned;
+  const threads_next = has_threads && threads_after < thread_total ? threads_after : null;
   const omitted = {
     questions: questions.length - kept.questions.length,
     objects: objects.length - kept.objects.length,
     ...(materials.length === 0 ? {} : { materials: materials.length - kept.materials.length }),
     references: total - after,
+    ...(has_threads ? { threads: thread_total - threads_after } : {}),
   };
-  const cut = omitted.questions > 0 || omitted.objects > 0 || (omitted.materials ?? 0) > 0 || next_offset !== null;
+  const cut = omitted.questions > 0 || omitted.objects > 0 || (omitted.materials ?? 0) > 0 || next_offset !== null || threads_next !== null;
   const context: Record<string, unknown> = {
     ...frame,
-    ...(offset === null ? { questions: kept.questions, objects: kept.objects } : {}),
+    ...(whole ? { questions: kept.questions, objects: kept.objects } : {}),
     ...(materials.length === 0 ? {} : { materials: kept.materials }),
     // no reference at all: neither the empty list nor the page line is given (they would only add length to every later request)
-    ...(total === 0 && start === 0
+    ...(page.kind === "threads" || (total === 0 && start === 0)
       ? {}
       : {
           references: kept.references,
           references_page: { offset: start, returned, total, next_offset },
           references_help: REFERENCES_HELP,
         }),
+    // no open comment thread at all: no threads field either (same rule)
+    ...(has_threads ? { threads: kept.threads, threads_page: { offset: thread_start, returned: threads_returned, total: thread_total, next_offset: threads_next } } : {}),
     ...(cut
       ? {
           truncated: true,
-          omitted,
-          ...(next_offset === null ? {} : { next: `call context.get with references_offset: ${next_offset} for the next page of references` }),
+          omitted: page.kind === "threads" ? { threads: omitted.threads } : omitted,
+          ...(next_offset === null && threads_next === null ? {} : { next: next_text(next_offset, threads_next) }),
         }
       : {}),
   };
@@ -485,10 +517,17 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
       case "context.get": {
         const reference_id = args["reference_id"];
         const offset = args["references_offset"];
-        if (reference_id !== undefined && offset !== undefined) return refused(call, "give reference_id or references_offset, not both");
+        const threads_offset = args["threads_offset"];
+        if (reference_id !== undefined && (offset !== undefined || threads_offset !== undefined)) return refused(call, "give reference_id or an offset, not both");
+        if (offset !== undefined && threads_offset !== undefined) return refused(call, "give references_offset or threads_offset, not both");
+        const whole_number = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
         if (offset !== undefined) {
-          if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) return refused(call, "references_offset must be a whole number of 0 or more");
-          return context_ok(call, env.db, env.run, offset);
+          if (!whole_number(offset)) return refused(call, "references_offset must be a whole number of 0 or more");
+          return context_ok(call, env.db, env.run, { kind: "references", offset });
+        }
+        if (threads_offset !== undefined) {
+          if (!whole_number(threads_offset)) return refused(call, "threads_offset must be a whole number of 0 or more");
+          return context_ok(call, env.db, env.run, { kind: "threads", offset: threads_offset });
         }
         if (reference_id !== undefined) {
           if (typeof reference_id !== "string" || reference_id.length === 0) return refused(call, "reference_id must be a non-empty string");
@@ -496,7 +535,7 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
           const read = read_reference(env.db, env.run.project_id, reference_id, reference_caller(env.db, env.run.actor_id, true));
           return reference_ok(call, read);
         }
-        return context_ok(call, env.db, env.run, null);
+        return context_ok(call, env.db, env.run, { kind: "all" });
       }
       case "result.submit": {
         const results = args["results"];

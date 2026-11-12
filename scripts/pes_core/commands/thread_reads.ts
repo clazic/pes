@@ -50,7 +50,7 @@ export interface CurrentAnchor {
  * - otherwise the version the anchor was made on: where it stood (exact)
  * - otherwise judged fresh from the text (moved / ambiguous / lost are shown as they are, never hidden)
  */
-export function current_anchor(db: Db, project_id: string, anchor: Pick<AnchorRaw, "id" | "exact_quote" | "prefix" | "suffix" | "start_cp" | "target_object_id" | "target_version_id">): CurrentAnchor {
+export function current_anchor(db: Pick<Db, "get">, project_id: string, anchor: Pick<AnchorRaw, "id" | "exact_quote" | "prefix" | "suffix" | "start_cp" | "target_object_id" | "target_version_id">): CurrentAnchor {
   const object = db.get<{ current_version_id: string | null }>("SELECT current_version_id FROM objects WHERE project_id = ? AND id = ?", project_id, anchor.target_object_id);
   const version_id = object?.current_version_id ?? null;
   const body =
@@ -110,7 +110,7 @@ export function anchor_on_version(
   };
 }
 
-function anchor_raw(db: Db, project_id: string, anchor_id: string): AnchorRaw | undefined {
+function anchor_raw(db: Pick<Db, "get">, project_id: string, anchor_id: string): AnchorRaw | undefined {
   return db.get<AnchorRaw>(
     `SELECT id, exact_quote, prefix, suffix, text_format_version, start_cp, end_cp, target_object_id, target_version_id
        FROM anchors WHERE project_id = ? AND id = ?`,
@@ -178,6 +178,85 @@ export function thread_rows(db: Db, project_id: string, filter: ThreadFilter): A
       summary: row.summary,
     };
   });
+}
+
+/** One open annotation thread in the order the AI context lists them (lazy: only the page that is built reads its anchor). */
+export interface OpenAnnotationThread {
+  id: string;
+  anchor_id: string;
+  target_object_id: string;
+  target_version_id: string;
+  /** the text of the last message that is not withdrawn (cut to `text_max`+1 characters); "" when there is none */
+  last_text: string;
+}
+
+/**
+ * The open annotation threads of a project, last activity first (SEL-124): the thread whose last message was written most recently
+ * comes first (messages are ordered by their write order, so equal times keep the later write first). One query for the whole list.
+ */
+export function open_annotation_threads(db: Pick<Db, "all">, project_id: string, text_max: number): OpenAnnotationThread[] {
+  const rows = db.all<{ id: string; anchor_id: string; target_object_id: string; target_version_id: string; last_text: string | null }>(
+    `SELECT t.object_id AS id, t.anchor_id AS anchor_id, t.target_object_id AS target_object_id, t.target_version_id AS target_version_id,
+            lm.text AS last_text
+       FROM threads t
+       JOIN objects o ON o.project_id = t.project_id AND o.id = t.object_id
+       JOIN thread_versions tv ON tv.project_id = o.project_id AND tv.version_id = o.current_version_id
+       LEFT JOIN (
+         SELECT m.thread_id AS thread_id, substr(mv.body_md, 1, ?) AS text, m.rowid AS pos
+           FROM messages m
+           JOIN objects mo ON mo.project_id = m.project_id AND mo.id = m.object_id
+           JOIN message_versions mv ON mv.project_id = mo.project_id AND mv.version_id = mo.current_version_id
+          WHERE m.project_id = ? AND mv.state <> 'withdrawn'
+            AND m.rowid = (SELECT max(m2.rowid) FROM messages m2
+                             JOIN objects mo2 ON mo2.project_id = m2.project_id AND mo2.id = m2.object_id
+                             JOIN message_versions mv2 ON mv2.project_id = mo2.project_id AND mv2.version_id = mo2.current_version_id
+                            WHERE m2.project_id = m.project_id AND m2.thread_id = m.thread_id AND mv2.state <> 'withdrawn')
+       ) lm ON lm.thread_id = t.object_id
+      WHERE t.project_id = ? AND t.context_kind = 'annotation' AND tv.state = 'open' AND t.anchor_id IS NOT NULL AND t.target_version_id IS NOT NULL
+      ORDER BY lm.pos DESC, o.display_no DESC, o.id DESC`,
+    text_max + 1,
+    project_id,
+    project_id,
+  );
+  return rows.map((row) => ({ id: row.id, anchor_id: row.anchor_id, target_object_id: row.target_object_id, target_version_id: row.target_version_id, last_text: row.last_text ?? "" }));
+}
+
+/**
+ * The AI-facing row of one open annotation thread: its id, where its anchor stands now, the anchor's first quote and the last message.
+ * The quote follows the AI-reference decision (SEL-115) of the version it was made on and of the version the anchor stands on now; when
+ * either is closed the quote is `null` with `quote_withheld: true` (the thread id, the status and the message — a person's own words — stay).
+ * Fields longer than `text_max` are cut and named in `truncated_fields`.
+ */
+export function ai_thread_row(db: Pick<Db, "get" | "all">, project_id: string, thread: OpenAnnotationThread, text_max: number): Record<string, unknown> {
+  const raw = anchor_raw(db, project_id, thread.anchor_id);
+  const current = raw === undefined ? undefined : current_anchor(db, project_id, raw);
+  const closed =
+    raw === undefined ||
+    material_object_denied(db, project_id, thread.target_object_id) ||
+    version_ai_denied(db, project_id, thread.target_version_id) ||
+    (current?.evaluated_version_id != null && version_ai_denied(db, project_id, current.evaluated_version_id));
+  const cut: string[] = [];
+  let quote: string | null = null;
+  if (!closed && raw !== undefined) {
+    quote = raw.exact_quote;
+    if (quote.length > text_max) {
+      quote = quote.slice(0, text_max);
+      cut.push("quote");
+    }
+  }
+  let text = thread.last_text;
+  if (text.length > text_max) {
+    text = text.slice(0, text_max);
+    cut.push("last_message");
+  }
+  return {
+    id: thread.id,
+    anchor_status: current?.status ?? "lost",
+    quote,
+    ...(closed ? { quote_withheld: true } : {}),
+    last_message: { text },
+    ...(cut.length > 0 ? { truncated_fields: cut } : {}),
+  };
 }
 
 /** The followups raised from one thread, oldest first: {id, kind, state}. */
