@@ -351,9 +351,12 @@ export interface AlertView {
 export interface ResultView {
   /** 결과물 제목(사람·AI 가 쓴 글) */
   title: string;
-  version: number;
-  status: "adopted" | "draft";
-  updated_at: IsoTime;
+  /** 글 버전 번호 — 서버가 안 주면 null(SEL-126: 지어내지 않는다, 화면은 "v…" 표시를 숨긴다) */
+  version: number | null;
+  /** 채택 여부 — 라운드 읽기는 주지 않으므로 서버에서 온 결과 글은 null(화면은 채택본/초안 표시를 숨긴다) */
+  status: "adopted" | "draft" | null;
+  /** 이 버전이 쓰인 시각 — 서버가 안 주면 null(화면은 날짜를 숨긴다) */
+  updated_at: IsoTime | null;
   paragraphs: string[];
   /**
    * U4b(SEL-112) — 결과 글 선택 도구(첨언)의 기준. 셋이 모두 있어야 선택 도구가 켜진다(서버가 안 주면 없다 — 지어내지 않는다).
@@ -600,7 +603,8 @@ export interface ReferenceContent {
 export interface ReferenceSnapshot {
   id: string;
   key: string;
-  label: string;
+  /** 서버에는 스냅숏 이름이 없어 null 일 수 있다(지어내지 않는다) — 화면은 key 로 보여 준다 */
+  label: string | null;
   approved: boolean;
   recommended: boolean;
 }
@@ -629,7 +633,7 @@ export interface ReferenceRefreshInput {
 
 /**
  * 참고 프로젝트 읽기 · 쓰기 — 쓰기는 모두 멱등 키 필수(없으면 요청 없이 invalid_payload) · 같은 키·같은 요청은 처음 영수증을 replayed 로 · 거절은 PesApiError.
- * 후보 읽기(getReferenceCandidates)는 서버에 읽는 길이 아직 없어 HTTP 클라이언트가 NotConnectedError 로 답한다(후속 SEL-120). scope=null 은 프로젝트가 아직 없는 생성 화면.
+ * 후보 읽기(getReferenceCandidates)는 작업 중(scope 있음)이면 GET P/reference-candidates(소유자 세션만, SEL-120). scope=null(프로젝트가 아직 없는 생성 화면)은 서버에 길이 없어 HTTP 클라이언트가 NotConnectedError 로 답한다.
  */
 export interface ReferencesMethods {
   /** 모르는 slug · 없는 판 = [] */
