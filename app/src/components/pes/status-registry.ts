@@ -35,6 +35,31 @@ export const STATUS = {
     waiting: d("기다림", "pause", "off", "다른 사람이나 시각을 기다림 — 내 할 일 아님"),
     done: d("끝남", "circle", "ok", "판 완료 · 누구의 할 일도 없음"),
   },
+  // AI 연결(U1d · F07): project_policy_versions 읽기. 모르는 값은 켜짐(허용)으로 읽지 않는다(설계 P4)
+  ai: {
+    on: d("켜짐", "circle", "ok", "정책 = 허용"),
+    blocked: d("차단 중", "square", "bad", "정책 막음·누락·손상 — 보내지 않음"),
+    changing: d("변경 중", "tri", "warn", "정책 확정 전 — 새 전송 없음"),
+    unknown: d("알 수 없음", "dotring", "unk", "서버가 AI 연결 칸을 보내지 않음 — 허용으로 해석하지 않음"),
+  },
+  // 실행(U1d): 중단 · 취소 · 인계는 서로 다른 사실이다(UI 44·49·104)
+  run: {
+    running: d("실행 중", "ring", "run", "runs.status = running"),
+    queued: d("대기", "dash", "off", "runs.status = queued"),
+    waiting_human: d("사람 답 기다림", "pause", "warn", "runs.status = waiting_human"),
+    interrupted: d("중단됨", "square", "bad", "runs.status = interrupted"),
+    cancelled: d("취소됨", "hsquare", "off", "runs.status = cancelled"),
+    handed_off: d("인계됨", "tri", "unk", "runs.status = handed_off"),
+    failed: d("실패", "square", "bad", "runs.status = failed"),
+    succeeded: d("완료", "circle", "ok", "runs.status = succeeded"),
+  },
+  // 나간 전송(outbound_dispatches) — 취소 시도와 결과를 모르는 것은 같은 말로 뭉개지 않는다
+  dispatch: {
+    sent: d("보냄", "circle", "ok", "outbound_dispatches.state = sent"),
+    cancel_requested: d("취소 시도", "tri", "warn", "취소를 요청했지만 끝난 것은 아님"),
+    cancelled: d("취소됨", "hsquare", "off", "취소가 끝남 — 이미 읽힌 자료의 회수를 뜻하지 않는다"),
+    unknown: d("알 수 없음", "dotring", "unk", "결과를 모름"),
+  },
 } as const satisfies Record<string, Record<string, StatusDef>>;
 
 export type StatusDomain = keyof typeof STATUS;

@@ -63,9 +63,11 @@ function ResearchFlow({ ws }: { ws: WorkspaceView }) {
             const here = viewStage === s.key;
             const expanded = s.rounds.length > 0 && (here || ws.current.stage === s.key);
             const reasonId = `sidebar-stage-${s.key}-reason`;
+            // 과거 승인은 stale 이어도 남는 사실이다. 이전된 프로젝트의 승인은 “검증 안 됨”을 붙인다(U1d · F06)
+            const pastNote = s.past_approval ? (s.past_approval.origin === "legacy_unverified" ? "검증 안 됨" : "과거 승인") : null;
             return (
               <SidebarMenuItem key={s.key}>
-                <SidebarMenuButton asChild isActive={here} tooltip={`${STAGE_LABEL[s.key]} · ${def.label}`}>
+                <SidebarMenuButton asChild isActive={here} tooltip={`${STAGE_LABEL[s.key]} · ${def.label}${pastNote ? ` · ${pastNote}` : ""}`}>
                   <Link
                     to={latest ? roundHref(ws.slug, ws.edition, s.key, latest.round_id) : "#"}
                     aria-disabled={latest ? undefined : true}
@@ -80,6 +82,7 @@ function ResearchFlow({ ws }: { ws: WorkspaceView }) {
                     <span className={cn("ml-auto shrink-0 text-caption", def.tone === "you" ? "font-semibold" : "opacity-75")}>
                       <span className="sr-only"> · </span>
                       {def.label}
+                      {pastNote ? ` · ${pastNote}` : null}
                     </span>
                   </Link>
                 </SidebarMenuButton>

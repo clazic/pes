@@ -110,7 +110,9 @@ export function fakeBoot(initial: WorkspaceView) {
     client,
     set: (next: WorkspaceView) => void (current = next),
     async open(path = CURRENT, env: Env = {}) {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      // 가짜 시계를 쓰는 시험 파일에서만 advanceTimers 를 넘긴다. 실제 시계인 파일(parity)에서
+      // user-event 가 vi.advanceTimersByTime 을 부르면 "timers APIs are not mocked" 로 죽는다(시험 도구 버그)
+      const user = userEvent.setup(vi.isFakeTimers() ? { advanceTimers: vi.advanceTimersByTime } : {});
       const app = await renderApp(path, { width: 1440, ...env }, { client });
       await ready();
       return { user, ...app };

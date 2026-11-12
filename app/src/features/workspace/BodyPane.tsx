@@ -7,6 +7,7 @@ import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
 import { formatAt, placeLabel } from "@/lib/labels";
 import { roundHref } from "./paths";
+import { RecordsPanel, RunPanel } from "./StatusPanels";
 
 function AlertCard({ alert, slug, edition }: { alert: AlertView; slug: string; edition: number }) {
   const ack = useAcknowledgeAlert(slug, edition);
@@ -207,6 +208,9 @@ export function BodyPane({
           </>
         )}
       </article>
+
+      <RunPanel ws={ws} />
+      <RecordsPanel ws={ws} />
     </div>
   );
 }

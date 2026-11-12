@@ -34,6 +34,13 @@ export const WORKSPACE: WorkspaceView = {
   turn: { side: "you", count: 1, text: "조사 R2 질문 2개에 답해 주세요" },
 };
 
+/**
+ * 앱 기본(가짜 클라이언트) 작업 공간 — U1d 칸(ai_connection)까지 있는 합성 자료.
+ * WORKSPACE 는 “서버가 주는 최소 모양”을 지키는 계약 fixture 라 여기에 AI 연결 칸을 더하지 않는다.
+ * (http-client.test.ts 가 `가짜 클라이언트의 getWorkspace = 서버 fixture WORKSPACE` 를 지킨다)
+ */
+export const DEMO_WORKSPACE: WorkspaceView = { ...WORKSPACE, ai_connection: { policy: "allowed" } };
+
 /** 보낸 답 + 영수증(합성). 시각은 ISO(한국 시각 +09:00) */
 const sent = (answer: string, committed_at: string, n: string) => ({
   answer,
