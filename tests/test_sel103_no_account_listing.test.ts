@@ -188,5 +188,8 @@ test("E1 the CI browser job runs `npx playwright test` with a temporary HOME / U
   const step = ci.slice(start, ci.indexOf("\n  # ", start) > 0 ? ci.indexOf("\n  # ", start) : undefined);
   assert.match(step, /HOME:/, "HOME is set for the step");
   assert.match(step, /USERPROFILE:/, "USERPROFILE is set for the step");
-  assert.match(ci.slice(ci.indexOf("  browser:"), start), /PLAYWRIGHT_BROWSERS_PATH:/, "browsers are installed and found outside HOME");
+  // job 수준 env 에서는 runner 컨텍스트를 쓸 수 없다(쓰면 ci.yml 전체가 무효) — 단계에서 GITHUB_ENV 로 넘긴다.
+  const before = ci.slice(ci.indexOf("  browser:"), start);
+  assert.match(before, /PLAYWRIGHT_BROWSERS_PATH=\$RUNNER_TEMP\/pw-browsers" >> "\$GITHUB_ENV"/, "browsers are installed and found outside HOME");
+  assert.doesNotMatch(ci, /^ {4}env:\r?\n(?: {6}.*\r?\n)*? {6}\w+: \$\{\{ runner\./m, "no runner context in a job-level env");
 });
