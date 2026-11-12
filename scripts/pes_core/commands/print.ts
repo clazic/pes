@@ -1025,14 +1025,28 @@ function artifact_version_denied(db: Pick<Db, "all" | "get">, project_id: string
     .some((row) => file_ai_denied(db, project_id, row.blob_id));
 }
 
+/** True when this object version (any kind) belongs to a closed file material, or is an artifact version that carries a closed file. */
+function version_denied(db: Pick<Db, "all" | "get">, project_id: string, version_id: string): boolean {
+  const owner = db.get<{ object_id: string }>("SELECT object_id FROM object_versions WHERE project_id = ? AND id = ?", project_id, version_id);
+  if (owner !== undefined && material_object_denied(db, project_id, owner.object_id)) return true;
+  return artifact_version_denied(db, project_id, version_id);
+}
+
 /**
- * Drop from a stored print manifest what a non-human caller may not see, with the same decision as every other AI exit:
- * a footnote whose source is a closed material (object unit), a body / table whose file is closed (and the footnotes it carries).
- * What stays is renumbered so that no gap in `position` / `citation_no` counts what was dropped.
+ * Drop from a stored print manifest what a non-human caller may not see, with the same decision as every other AI exit
+ * (SEL-115 material_object_denied / file_ai_denied), over EVERY material reference the manifest carries:
+ *   - a body / table whose version carries a closed file, with the footnotes and comments it carries;
+ *   - a footnote whose source is a closed material (object unit);
+ *   - a reflection whose source version belongs to a closed material or carries a closed file;
+ *   - an excluded entry (removed / archived / draft / thread …) that names a closed material or a version carrying a closed file.
+ * What stays is renumbered so that no gap in `position` / `citation_no` counts what was dropped. `withheld` is true when a
+ * printed item was dropped (the fixed document then carries closed content). Dropping only excluded entries (which are not in
+ * the document) changes the manifest but keeps the document.
  */
 export function print_ai_view(db: Pick<Db, "all" | "get">, project_id: string, manifest: unknown): PrintAiView {
-  if (!is_record(manifest) || !Array.isArray(manifest.items)) return { manifest, withheld: true };
+  if (!is_record(manifest) || !Array.isArray(manifest.items) || !Array.isArray(manifest.excluded)) return { manifest, withheld: true };
   const items = manifest.items as Array<Record<string, unknown>>;
+  const excluded = manifest.excluded as Array<Record<string, unknown>>;
   const closed_versions = new Set<string>();
   for (const item of items) {
     if ((item.category === "body" || item.category === "table") && typeof item.version_id === "string" && artifact_version_denied(db, project_id, item.version_id)) {
@@ -1040,18 +1054,30 @@ export function print_ai_view(db: Pick<Db, "all" | "get">, project_id: string, m
     }
   }
   const kept = items.filter((item) => {
-    if (item.category === "footnote") {
-      if (typeof item.cited_by_version_id === "string" && closed_versions.has(item.cited_by_version_id)) return false;
-      return !(typeof item.object_id === "string" && material_object_denied(db, project_id, item.object_id));
+    switch (item.category) {
+      case "body":
+      case "table":
+        return !(typeof item.version_id === "string" && closed_versions.has(item.version_id));
+      case "footnote":
+        if (typeof item.cited_by_version_id === "string" && closed_versions.has(item.cited_by_version_id)) return false;
+        return !(typeof item.object_id === "string" && material_object_denied(db, project_id, item.object_id));
+      case "comment":
+        return !(typeof item.target_version_id === "string" && closed_versions.has(item.target_version_id));
+      case "reflection":
+        return !(typeof item.source_version_id === "string" && version_denied(db, project_id, item.source_version_id));
+      default:
+        return true;
     }
-    if (item.category === "body" || item.category === "table") return !(typeof item.version_id === "string" && closed_versions.has(item.version_id));
-    return true;
   });
-  if (kept.length === items.length) return { manifest, withheld: false };
+  const kept_excluded = excluded.filter((entry) => {
+    if (typeof entry.object_id === "string" && material_object_denied(db, project_id, entry.object_id)) return false;
+    return !(typeof entry.version_id === "string" && version_denied(db, project_id, entry.version_id));
+  });
+  if (kept.length === items.length && kept_excluded.length === excluded.length) return { manifest, withheld: false };
+  if (kept.length === items.length) return { manifest: { ...manifest, excluded: kept_excluded }, withheld: false };
 
   const per_stage = new Map<string, number>();
   const per_citing = new Map<string, number>();
-  let note_position = 0;
   const out = kept.map((item) => ({ ...item }));
   const articles = out
     .filter((item) => item.category === "body" || item.category === "table")
@@ -1062,14 +1088,24 @@ export function print_ai_view(db: Pick<Db, "all" | "get">, project_id: string, m
     per_stage.set(stage, at + 1);
     item.position = at;
   }
+  const counters = new Map<string, number>();
   for (const item of out) {
-    if (item.category !== "footnote") continue;
-    item.position = note_position;
-    note_position += 1;
-    const citing = String(item.cited_by_version_id);
-    const no = (per_citing.get(citing) ?? 0) + 1;
-    per_citing.set(citing, no);
-    item.citation_no = no;
+    if (item.category === "body" || item.category === "table") continue;
+    const category = String(item.category);
+    if (category === "footnote" || category === "comment" || category === "reflection") {
+      const at = counters.get(category) ?? 0;
+      counters.set(category, at + 1);
+      item.position = at;
+    }
+    if (category === "footnote") {
+      const citing = String(item.cited_by_version_id);
+      const no = (per_citing.get(citing) ?? 0) + 1;
+      per_citing.set(citing, no);
+      item.citation_no = no;
+    }
   }
-  return { manifest: { ...manifest, items: out, output: null }, withheld: true };
+  const comments = is_record(manifest.comments)
+    ? { ...manifest.comments, items: out.filter((item) => item.category === "comment") }
+    : manifest.comments;
+  return { manifest: { ...manifest, items: out, excluded: kept_excluded, comments, output: null }, withheld: true };
 }

@@ -3664,7 +3664,8 @@ export class ApiApp {
           round_id: row.round_id,
           content_hash: row.content_hash,
         },
-        manifest,
+        // a human: the manifest as fixed; any other caller: the AI view (closed excluded entries left out, nothing printed is)
+        manifest: view.manifest,
         output,
         document: new TextDecoder("utf-8").decode(document.bytes),
       },
