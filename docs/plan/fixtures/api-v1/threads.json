@@ -24,7 +24,7 @@
           "prefix": "2장 합성 정책 분석에서 ",
           "suffix": " 첫 번째는 현행 유지다.",
           "start_cp": 120,
-          "end_cp": 132
+          "end_cp": 133
         },
         "initial_message": {
           "body_md": "이 문장의 근거를 더 설명해 주세요."
@@ -79,7 +79,7 @@
           "prefix": "",
           "suffix": "",
           "start_cp": 200,
-          "end_cp": 214
+          "end_cp": 216
         },
         "initial_message": {
           "body_md": "찾을 수 없는 인용의 합성 첨언"
