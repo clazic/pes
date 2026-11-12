@@ -40,11 +40,13 @@ export function QuestionFields({
   const condOptions = cond && isChoice(kindOf(cond)) ? (cond.options ?? []) : null;
 
   const changeKind = (kind: QuestionKind) => {
+    // 선택지 ↔ 글 사이에서는 기본값의 뜻이 달라진다(선택지 id ↔ 글) — 새 유형에 맞지 않는 값이 남지 않게 비운다
+    const patch: Partial<EditorValue> = isChoice(kind) === isChoice(value.kind) ? { kind } : { kind, default_value: "" };
     if (isChoice(kind) && value.options.length < 2) {
       const next = [...value.options];
       while (next.length < 2) next.push({ id: newOptionId(next), label: "" });
-      set({ kind, options: next });
-    } else set({ kind });
+      set({ ...patch, options: next });
+    } else set(patch);
   };
   const setOption = (id: string, label: string) => set({ options: value.options.map((o) => (o.id === id ? { ...o, label } : o)) });
 
@@ -107,7 +109,7 @@ export function QuestionFields({
             ))}
           </select>
         </Field>
-        <label htmlFor={`${prefix}-required`} className="flex min-h-9 items-center gap-2 text-meta font-medium text-ink">
+        <label htmlFor={`${prefix}-required`} className="flex min-h-9 items-center gap-2 text-meta font-medium text-ink coarse:min-h-[44px]">
           <input id={`${prefix}-required`} type="checkbox" className="size-4 accent-primary" checked={value.required} onChange={(e) => set({ required: e.target.checked })} />
           필수
         </label>

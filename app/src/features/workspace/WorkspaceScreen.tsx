@@ -185,7 +185,7 @@ export function WorkspaceScreen() {
 
   const editBlocked = past ? PAST_REASON.edit : phone ? PHONE_REASON.edit : undefined;
   const annotateBlocked = past ? PAST_REASON.annotate : phone ? PHONE_REASON.annotate : undefined;
-  const peekQ = peekParam ? round.questions.find((q) => q.id === peekParam) : undefined;
+  const peekQ = peekParam ? openQs.find((q) => q.id === peekParam) : undefined;
 
   return (
     <div className="ws-frame">

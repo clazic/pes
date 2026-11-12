@@ -40,10 +40,5 @@ export function useKeyedCommand() {
     }
   }, []);
 
-  const reset = React.useCallback(() => {
-    keyRef.current = null;
-    setError(null);
-  }, []);
-
-  return { run, pending, error, reset };
+  return { run, pending, error };
 }

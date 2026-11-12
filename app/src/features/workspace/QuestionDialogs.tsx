@@ -126,10 +126,9 @@ export function TidyDialog({
     if (r.ok) onDone();
   };
   return (
-    // 비모달 — 뒤의 질문 목록을 가리지 않고(읽는 사람이 어느 질문인지 보며 확정), 바깥을 눌러도 닫히지 않는다. Esc · 취소로 닫는다
-    <Dialog open modal={false} onOpenChange={(o) => !o && onClose()}>
+    // 모달 — 상태를 바꾸는 확인이라 초점이 안에 갇히고 뒤 화면은 비활성이다. Esc · 취소로 닫는다
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
-        onInteractOutside={(e) => e.preventDefault()}
         // 닫힌 뒤 초점은 작업 공간이 정한다 — 끝냈으면 다음 질문, 취소 · Esc 는 연 단추
         onCloseAutoFocus={(e) => e.preventDefault()}
       >

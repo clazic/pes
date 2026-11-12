@@ -14,10 +14,17 @@ import { FILTERS, isOpen, matchesFilter, type QuestionFilter } from "./question-
 
 export { DRAFT_USER } from "./QuestionCard";
 
-const rect = (el: Element | null) => (el instanceof HTMLElement ? el : null);
+const asHtml = (el: Element | null) => (el instanceof HTMLElement ? el : null);
 
-/** 질문 항목 하나를 가리킨다(초점을 받는 li) */
-const itemEl = (id: string) => rect(document.querySelector(`[data-question="${id}"]`));
+/** 질문 항목 하나를 가리킨다(초점을 받는 li). id 는 서버가 주는 값이라 선택자에 그대로 넣지 않는다 */
+const itemEl = (id: string) => asHtml(document.querySelector(`[data-question="${CSS.escape(id)}"]`));
+
+/** 방금 고치거나 더한 질문이 지금 거르기에 걸리는가 — 서버가 돌려주는 칸만으로 판단한다 */
+const fitsFilter = (f: QuestionFilter, v: { importance: QuestionInput["importance"]; direction: QuestionInput["direction"]; needs_recheck: boolean }) =>
+  f === "all" || (f === "high" && v.importance === "high") || (f === "recheck" && v.needs_recheck) || (f === "ask_ai" && v.direction === "ask_ai");
+
+/** 대상 질문이 목록에서 빠졌을 때 초점이 갈 곳 — 거르기 (고른 라디오) */
+const filterEl = () => asHtml(document.querySelector('input[name="ask-filter"]:checked')) ?? document.getElementById("ask-title");
 
 /** J/K 를 글자로 써야 하는 자리 — 글 입력 · 선택 · 열린 대화 상자 · 메뉴 안 */
 function typingTarget(t: EventTarget | null): boolean {
@@ -109,23 +116,39 @@ export function AskPane({
   /* ── 질문 고치기 ── */
   const [editing, setEditing] = React.useState<string[]>([]);
   const setEditingFor = (id: string, on: boolean) => setEditing((list) => (on ? (list.includes(id) ? list : [...list, id]) : list.filter((x) => x !== id)));
+  /** 저장하거나 더한 질문이 지금 거르기에서 보이지 않게 된 경우 그 id (알림에 덧붙인다) */
+  const [hiddenId, setHiddenId] = React.useState<string | null>(null);
+  const saveFits = React.useRef(true);
   const save = async (id: string, body: QuestionRevision, key: string) => {
     const r = await client.reviseQuestion(project, edition, id, body, key);
+    saveFits.current = fitsFilter(filter, { importance: body.importance, direction: body.direction, needs_recheck: r.data.needs_recheck });
     await refresh();
     return r;
   };
-  const onSaved = (q: QuestionView, r: CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>) =>
+  const onSaved = (q: QuestionView, r: CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>) => {
     setNote(`질문 ${q.number}을 새 버전으로 저장했어요 · 버전 ${r.data.version} · 접수 ${receiptNo(r)}. 옛 답은 지우지 않고 보존해요.`);
+    if (saveFits.current) setHiddenId(null);
+    else {
+      // 고친 질문이 목록에서 빠져 초점이 사라지지 않게 — 거르기로 보낸다
+      setHiddenId(q.id);
+      focusLater(filterEl);
+    }
+  };
 
   /* ── 순서 바꾸기 ── */
   const reorder = useKeyedCommand();
   const move = async (id: string, dir: "up" | "down") => {
+    // 보이는 이웃과 자리를 바꾼다 — 거르는 중에도 보이는 순서가 실제로 바뀐다(숨은 질문은 제자리)
+    const seen = visible.map((q) => q.id);
+    const vi = seen.indexOf(id);
+    const vj = dir === "up" ? vi - 1 : vi + 1;
+    if (vi < 0 || vj < 0 || vj >= seen.length) return;
     const ids = openQs.map((q) => q.id);
     const i = ids.indexOf(id);
-    const j = dir === "up" ? i - 1 : i + 1;
-    if (i < 0 || j < 0 || j >= ids.length) return;
+    const j = ids.indexOf(seen[vj]!);
     [ids[i], ids[j]] = [ids[j]!, ids[i]!];
     setNote(null);
+    setHiddenId(null);
     const r = await reorder.run(JSON.stringify(ids), async (key) => {
       const res = await client.reorderQuestions(project, edition, round.stage, roundKey, ids, key);
       await refresh();
@@ -134,7 +157,7 @@ export function AskPane({
     if (r.ok) {
       // 자리가 바뀌며 초점이 빠질 수 있다 — 같은 단추로 되돌려 연달아 옮길 수 있게
       focusLater(() => document.getElementById(`tool-${dir}-${id}`));
-      setNote(`질문 ${openQs[i]!.number}의 자리를 바꿨어요 · 접수 ${receiptNo(r.value)}.`);
+      setNote(`질문 ${openQs.find((q) => q.id === id)!.number}의 자리를 바꿨어요 · 접수 ${receiptNo(r.value)}.`);
     }
   };
 
@@ -148,8 +171,10 @@ export function AskPane({
 
   /* ── 질문 더하기 ── */
   const [adding, setAdding] = React.useState(false);
+  const addFits = React.useRef(true);
   const add = async (body: QuestionInput, key: string) => {
     const r = await client.addQuestion(project, edition, round.stage, roundKey, body, key);
+    addFits.current = fitsFilter(filter, { importance: body.importance, direction: body.direction, needs_recheck: false });
     await refresh();
     return r;
   };
@@ -203,7 +228,7 @@ export function AskPane({
   const prevOff = visible.length === 0 || pos <= 1;
   const nextOff = visible.length === 0 || pos >= visible.length;
 
-  const toolsFor = (i: number): CardTools | null => (past ? null : { ...(blocked ? { blocked } : {}), first: i === 0, last: i === openQs.length - 1 });
+  const toolsFor = (i: number): CardTools | null => (past ? null : { ...(blocked ? { blocked } : {}), first: i === 0, last: i === visible.length - 1 });
   const editTarget = visible.find((q) => q.id === cur) ?? visible[0];
 
   return (
@@ -249,6 +274,7 @@ export function AskPane({
       </div>
       <p role="status" className={cn("text-meta text-ink", note && "mt-3")}>
         {note}
+        {note && hiddenId && !visible.some((q) => q.id === hiddenId) ? " 지금 거르기에서는 보이지 않아요. ‘전체’로 보세요." : ""}
       </p>
       {reorder.error ? (
         <p role="alert" className="mt-3 rounded-md border border-bad-line bg-bad-soft px-3 py-2 text-meta text-bad">
@@ -290,7 +316,7 @@ export function AskPane({
               actions={actions}
               open={peekId === q.id}
               onPeek={onPeek}
-              tools={toolsFor(openQs.indexOf(q))}
+              tools={toolsFor(visible.indexOf(q))}
               editing={editing.includes(q.id)}
               onEditing={(on) => setEditingFor(q.id, on)}
               save={save}
@@ -335,10 +361,17 @@ export function AskPane({
         }}
         add={add}
         onAdded={(id) => {
-          setNote("질문을 더했어요. 사람이 더한 질문으로 보여요.");
-          setCur(id);
-          curRef.current = id;
-          focusLater(() => itemEl(id));
+          if (addFits.current) {
+            setHiddenId(null);
+            setNote("질문을 더했어요. 사람이 더한 질문으로 보여요.");
+            setCur(id);
+            curRef.current = id;
+            focusLater(() => itemEl(id));
+          } else {
+            setHiddenId(id);
+            setNote("질문을 더했어요. 사람이 더한 질문으로 보여요.");
+            focusLater(filterEl);
+          }
         }}
       />
       {tidy ? (
@@ -356,6 +389,7 @@ export function AskPane({
           onDone={() => {
             const n = tidy.q.number;
             const name = { withdraw: "철회했어요", defer: "보류했어요", merge: "합쳤어요" }[tidy.kind];
+            setHiddenId(null);
             setNote(`질문 ${n}을 ${name}. ‘정리된 질문’에 남아 있어요.`);
             const next = visible.find((x) => x.id !== tidy.q.id && x.number > n) ?? visible.find((x) => x.id !== tidy.q.id);
             setTidy(null);
