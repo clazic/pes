@@ -29,6 +29,7 @@ import { JUDGEMENT_COMMAND_ENTRIES } from "./commands/judgements.ts";
 import { LEGACY_COMMAND_ENTRIES } from "./commands/legacy.ts";
 import { MIGRATION_COMMAND_ENTRIES } from "./commands/migration.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
+import { PRINT_COMMAND_ENTRIES } from "./commands/print.ts";
 import { make_register_command, type BuildHooks, type Created } from "./commands/projects.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RECORD_COMMAND_ENTRIES } from "./commands/records.ts";
@@ -533,6 +534,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...RECORD_COMMAND_ENTRIES,
   ...JUDGEMENT_COMMAND_ENTRIES,
   ...AI_COMMAND_ENTRIES,
+  ...PRINT_COMMAND_ENTRIES,
 ]);
 
 /**
@@ -701,11 +703,21 @@ export class CommandService {
     const ctx_snapshot = snapshot_context(ctx);
     validate_context(ctx_snapshot);
     const hash = request_hash(command, payload_snapshot);
+    // Side effects outside the database (object-store files) register an undo here; any failure of the
+    // transaction, COMMIT included, runs them so a refused command leaves no stray file.
+    const undos: Array<() => void> = [];
     try {
       return tx(this.#db, () =>
-        this.#execute_in_tx(definition, command, ctx_snapshot, payload_snapshot, hash),
+        this.#execute_in_tx(definition, command, ctx_snapshot, payload_snapshot, hash, (undo) => undos.push(undo)),
       );
     } catch (error) {
+      for (const undo of undos.reverse()) {
+        try {
+          undo();
+        } catch {
+          // best effort; a later gc reconciles the disk
+        }
+      }
       throw translate_error(error);
     }
   }
@@ -716,6 +728,7 @@ export class CommandService {
     ctx: MutationContext,
     payload: unknown,
     hash: string,
+    on_rollback: (undo: () => void) => void,
   ): CommandOutcome {
     const now_ms = checked_now_ms(this.#clock);
 
@@ -788,6 +801,7 @@ export class CommandService {
       actor_id,
       run_config: this.#run_config,
       objects_dir: this.#objects_dir,
+      on_rollback,
     };
     const outcome = definition.run(runtime);
     write_events(runtime, project?.id ?? result_project_id(outcome.result), outcome.events);

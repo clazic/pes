@@ -48,6 +48,12 @@ export interface CommandRuntime {
    * commands that need stored bytes fail closed when it is null.
    */
   objects_dir: string | null;
+  /**
+   * Register an undo for a side effect outside the database (a file written to the object store). The service runs
+   * the registered undos, newest first, when the transaction fails for any reason (also at COMMIT); on success they
+   * are dropped. Optional: a runtime built by hand (legacy import) has none.
+   */
+  on_rollback?: (undo: () => void) => void;
 }
 
 /**

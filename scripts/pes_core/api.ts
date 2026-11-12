@@ -52,6 +52,7 @@ import {
   type ReceiptRow,
 } from "./commands/api_reads.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
+import { find_print_snapshot, is_print_scope, print_output_of } from "./commands/print.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
@@ -334,6 +335,7 @@ const CREATED_ACTIONS = new Set([
   "decision.superseded",
   "decision.revoked",
   "reflection.created",
+  "print.committed",
 ]);
 const ACCEPTED_ACTIONS = new Set(["run.interrupted", "run.cancelled"]);
 
@@ -611,6 +613,19 @@ export class ApiApp {
       route("GET", `${P}/workspace`, "workspace.get", {
         who: "any", scope: "context:read", go: true,
         act: async (_r, project, auth) => this.#workspace(project, auth),
+      }),
+      // SEL-119 U6a: range print. The two POSTs are the owner session's (an agent token is 403 forbidden); GET reads a stored print only.
+      route("GET", `${P}/print`, "print.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#print_read(r, project),
+      }),
+      route("POST", `${P}/print/prepare`, "print.prepare", {
+        who: "session",
+        act: async (r, project, auth) => this.#print_write(r, project, auth, "print.prepare", 200),
+      }),
+      route("POST", `${P}/print/commit`, "print.commit", {
+        who: "session",
+        act: async (r, project, auth) => this.#print_write(r, project, auth, "print.commit", 201),
       }),
       route("POST", `${P}/runs`, "runs.create", {
         who: "session",
@@ -3367,6 +3382,61 @@ export class ApiApp {
     });
     if (round === null) throw new Fail("not_found", { target: "$.query.round_no" });
     return { status: 200, data: round };
+  }
+
+  // -------------------------------------------------------------------------
+  // SEL-119 U6a: range print
+
+  /** POST P/print/prepare (200) and P/print/commit (201): the body is the command's input; the command checks every field. */
+  async #print_write(request: RouteRequest, project: ProjectRow, auth: AuthInfo, command: string, status: number): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), command, body));
+    return { status, data: result_record(out.result), replayed: out.replayed };
+  }
+
+  /**
+   * GET P/print?scope=&snapshot= — a pure read of a print that was already committed: the snapshot row, its manifest blob and its
+   * output blob. Nothing is built or written here. Without `snapshot` it is the newest print of the current round / stage / edition.
+   */
+  async #print_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const scope = request.query.get("scope");
+    if (!is_print_scope(scope)) invalid("$.query.scope");
+    const snapshot = request.query.get("snapshot");
+    if (snapshot !== null && (snapshot.length === 0 || !snapshot.isWellFormed())) invalid("$.query.snapshot");
+    const row = read_tx(this.#db, () => find_print_snapshot(this.#db, project.id, scope, snapshot));
+    if (row === undefined) throw new Fail("not_found", { target: snapshot === null ? "$.query.scope" : "$.query.snapshot" });
+    const store = { db: this.#db, objects_dir: this.#objects_dir };
+    const read = async (blob_id: string) => this.#exec(async () => ({ result: await get_blob(store, project.id, blob_id), replayed: false }));
+    const stored = (await read(row.manifest_blob_id)).result;
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.bytes));
+    } catch {
+      throw new Fail("conflict", { details: { reason: "print_manifest_unreadable" } });
+    }
+    const output = print_output_of(manifest);
+    if (output === null) throw new Fail("not_found", { target: "$.query.snapshot" });
+    const document = (await read(output.blob_id)).result;
+    if (document.sha256 !== output.sha256 || document.size !== output.size) {
+      throw new Fail("conflict", { details: { reason: "print_output_mismatch" } });
+    }
+    return {
+      status: 200,
+      data: {
+        snapshot: {
+          id: row.id,
+          scope: row.scope,
+          edition_id: row.edition_id,
+          stage_id: row.stage_id,
+          round_id: row.round_id,
+          content_hash: row.content_hash,
+        },
+        manifest,
+        output,
+        document: new TextDecoder("utf-8").decode(document.bytes),
+      },
+    };
   }
 
   /** The text of a comment body: a string; blank is a content problem (422), not a shape problem. */

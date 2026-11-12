@@ -65,7 +65,10 @@
             "POST /api/v1/projects/{id}/decisions",
             "GET /api/v1/projects/{id}/decisions",
             "POST /api/v1/projects/{id}/reflections",
-            "GET /api/v1/projects/{id}/reflections"
+            "GET /api/v1/projects/{id}/reflections",
+            "GET /api/v1/projects/{id}/print",
+            "POST /api/v1/projects/{id}/print/prepare",
+            "POST /api/v1/projects/{id}/print/commit"
           ],
           "unsupported": [
             "POST /api/v1/projects/{id}/exports",
@@ -247,6 +250,15 @@
                 "supported": true
               },
               "reflections.list": {
+                "supported": true
+              },
+              "print.get": {
+                "supported": true
+              },
+              "print.prepare": {
+                "supported": true
+              },
+              "print.commit": {
                 "supported": true
               },
               "editions.create": {
