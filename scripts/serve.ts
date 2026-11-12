@@ -42,6 +42,7 @@ import { AppCodes, CODE_SHAPE, code_ttl_ms, valid_projects } from "./pes_core/ap
 import type { BridgeReply } from "./pes_core/cli_bridge.ts";
 import type { Db } from "./pes_core/db.ts";
 import { needs_document_sandbox } from "./pes_core/document_sandbox.ts";
+import { escapes_parent } from "./pes_core/rel_path.ts";
 
 const MAX_BODY = 256 * 1024;
 const MAX_API_BODY = 2 * MAX_BODY;
@@ -375,7 +376,7 @@ async function start(config: Config): Promise<void> {
     const single_project_home = existsSync(join(root, "project.json"));
     const screen = (absolute: string, base: string): boolean => {
       const rel = relative(base, absolute);
-      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+      if (rel === "" || escapes_parent(rel)) return false;
       const words = rel.split(sep).filter((word) => word !== "");
       const ask = (name: string | undefined): boolean => name !== undefined && /^ask-.*\.html$/.test(name);
       if (words.length === 1) return words[0] === "index.html" || (ask(words[0]) && single_project_home);
