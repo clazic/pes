@@ -6,13 +6,12 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
 
 import { extract_text } from "../scripts/pes_core/file_extract.ts";
 import { extract_text_isolated } from "../scripts/pes_core/file_extract_isolated.ts";
 import { make_docx } from "./helpers/sel116_env.ts";
 
-const HOSTILE = pathToFileURL(new URL("./helpers/sel116_hostile_worker.ts", import.meta.url).pathname).href;
+const HOSTILE = new URL("./helpers/sel116_hostile_worker.ts", import.meta.url).href;
 const BYTES = new TextEncoder().encode("hello");
 
 function hostile(name: string, options: { heap_mb?: number; timeout_ms?: number } = {}) {
