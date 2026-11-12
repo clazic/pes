@@ -155,7 +155,7 @@ test("GET print refuses what is not a stored print of that scope: unknown id, ot
   });
 });
 
-test("GET print: no credential 401, a token without context:read 403, a token with context:read reads, unknown project 404", async () => {
+test("GET print: no credential 401, any agent token 403 (a print is a human's document), the owner session reads, unknown project 404", async () => {
   await with_api(async (env) => {
     const s = await open_scene(env);
     const done = await http_commit(env, { scope: "round", round_id: s.round.round_id });
@@ -164,7 +164,9 @@ test("GET print: no credential 401, a token without context:read 403, a token wi
     const url = `/print?scope=round&snapshot=${done.snapshot_id}`;
     assert_final_error(await get(env, url, "none"), 401, "unauthenticated");
     assert_final_error(await get(env, url, { token: writer.token }), 403, "forbidden");
-    assert.equal(assert_ok(await get(env, url, { token: reader.token })).snapshot.id, done.snapshot_id);
+    // leader 승인(SEL-119 사용자 결정): 인쇄물은 사람용 — context:read 토큰도 403 이다 (전에는 읽을 수 있었다)
+    assert_final_error(await get(env, url, { token: reader.token }), 403, "forbidden");
+    assert.equal(assert_ok(await get(env, url)).snapshot.id, done.snapshot_id);
     assert_error(await call(env, { method: "GET", path: `/api/v1/projects/no-such-project${url}`, auth: "owner" }), 404, "not_found");
   });
 });

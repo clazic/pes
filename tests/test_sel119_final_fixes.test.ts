@@ -2,8 +2,9 @@
  * SEL-119 U6a — 최종 리뷰(F1) 필수 7건 수정 시험. 합성 데이터만, 실제 모델·네트워크 호출 없음.
  * 각 시험은 리뷰의 합성 재현을 그대로 옮겼고, 고치기 전에 실패해야 한다.
  *
- *  F1-1  인쇄 파생 blob(출력·manifest)을 GET files/{b}/content·preview 로 바로 읽어 AI 금지를 우회하지 못한다:
- *        비사람이 읽을 때 그 blob 을 쓰는 인쇄의 현재 AI 판정(print_ai_view)을 다시 본다. 금지 뒤 → 403.
+ *  F1-1  인쇄 파생 blob(출력·manifest)을 GET files/{b}/content·preview 로 바로 읽어 AI 금지를 우회하지 못한다.
+ *        [leader 승인 · 최종 2회차 사용자 결정] 인쇄물은 사람용이다: 인쇄가 만든 blob 은 금지 여부와 상관없이 비사람에게 403 이다
+ *        (이전 판은 "허용일 때는 읽고 금지 뒤에만 403" 이었다).
  *  F1-2  print.commit 이 롤백된 뒤의 파일 정리는 쓰기 잠금 안에서, 지금 어떤 blob 행도 그 파일을 쓰지 않을 때만 지운다.
  *        (별도 SQLite 연결 둘: A 의 ROLLBACK 직후·정리 직전에 B 가 같은 내용을 인쇄해 성공하면 B 의 파일은 남는다.)
  *  F1-3  AI manifest 필터가 reflection 의 금지 자료 버전과 excluded 의 금지 산출물 id 를 남기지 않는다.
@@ -55,37 +56,32 @@ test("F1-1 a stored print's output and manifest blobs are not a way around the A
     await add_citation(env.service, env.ctx("f1-cite"), { artifact_version_id: s.body.version_id, source_version_id: secret.data.version_id, quote: SECRET_QUOTE });
     const done = await owner_commit(env, { scope: "round", round_id: s.round.round_id }, "f1-commit");
     const agent = await make_agent(env, "f1-reader", ["context:read", "file:read"]);
-
-    // allowed: the agent reads the print normally and learns the output id
-    const first = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
-    assert.equal(first.status, 200);
-    const output_id = first.json.data.output.blob_id as string;
-    assert.equal(output_id, done.output_blob_id);
-    const before = await call(env, { method: "GET", path: P(env, `/files/${output_id}/content`), auth: { token: agent.token } });
-    assert.equal(before.status, 200, "while allowed the derived file reads as before");
-
-    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
-    const print = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
-    assert.equal(print.json.data.document, null);
-    for (const [blob_id, what] of [
+    const output_id = done.output_blob_id as string;
+    const blobs = [
       [output_id, "output"],
       [done.manifest_blob_id as string, "manifest"],
-    ] as const) {
-      for (const route of ["content", "preview"]) {
-        const raw = await call(env, { method: "GET", path: P(env, `/files/${blob_id}/${route}`), auth: { token: agent.token } });
-        assert.equal(raw.status, 403, `${what} ${route}: an agent must not read a print blob that carries a closed material`);
-        const text = raw.bytes === null ? JSON.stringify(raw.json) : new TextDecoder().decode(raw.bytes);
-        assert.ok(!text.includes(SECRET_QUOTE) && !text.includes("비공개제목-f1") && !text.includes(secret.data.object_id), `${what} ${route}: no closed fact`);
+    ] as const;
+    const agent_reads_nothing = async (when: string) => {
+      const print = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
+      assert.equal(print.status, 403, `${when}: print`);
+      for (const [blob_id, what] of blobs) {
+        for (const route of ["content", "preview"]) {
+          const raw = await call(env, { method: "GET", path: P(env, `/files/${blob_id}/${route}`), auth: { token: agent.token } });
+          assert.equal(raw.status, 403, `${when}: ${what} ${route}: an agent must not read a print blob`);
+          const text = raw.bytes === null ? JSON.stringify(raw.json) : new TextDecoder().decode(raw.bytes);
+          assert.ok(!text.includes(SECRET_QUOTE) && !text.includes("비공개제목-f1") && !text.includes(secret.data.object_id), `${when}: ${what} ${route}: no closed fact`);
+        }
       }
-    }
+    };
+    await agent_reads_nothing("nothing denied");
+    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+    await agent_reads_nothing("source denied");
     // the human still reads the stored bytes
     const human = await call(env, { method: "GET", path: P(env, `/files/${output_id}/content`), auth: "owner" });
     assert.equal(human.status, 200);
     assert.ok(new TextDecoder().decode(human.bytes!).includes(SECRET_QUOTE));
-    // allow again: the agent reads it again
     assert_ok(await set_access(env, secret.data.file_policy_id, "allow"));
-    const back = await call(env, { method: "GET", path: P(env, `/files/${output_id}/content`), auth: { token: agent.token } });
-    assert.equal(back.status, 200);
+    await agent_reads_nothing("source allowed again");
   });
 });
 
@@ -140,7 +136,7 @@ test("F1-2 cleanup after a rolled back print never deletes a file another connec
 // ---------------------------------------------------------------------------
 // F1-3
 
-test("F1-3a a reflection whose source is a closed material is left out of an agent's print view, and the document is withheld", async () => {
+test("F1-3a a reflection whose source is a closed material is nowhere in an agent's answer: the print is a human's document (403)", async () => {
   await with_api(async (env) => {
     const s = await scene(env, "f3a");
     const secret = await new_material(env, "f3a", { name: "비공개파일-f3a.txt", extra: { title: "비공개제목-f3a" } });
@@ -152,16 +148,17 @@ test("F1-3a a reflection whose source is a closed material is left out of an age
     const done = await owner_commit(env, { scope: "round", round_id: s.round.round_id }, "f3a-commit");
     const agent = await make_agent(env, "f3a-reader", ["context:read"]);
     const res = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 403);
     const wire = wire_of(res);
     for (const needle of [secret.data.version_id, secret.data.object_id, "반영 안 함-f3a"]) assert.ok(!wire.includes(needle), `"${needle}" must not appear`);
-    assert.equal(res.json.data.document, null);
-    assert.deepEqual(res.json.data.withheld, { reason: "ai_reference_denied" });
-    assert.equal(res.json.data.manifest.items.filter((i: any) => i.category === "reflection").length, 0);
+    assert.equal(res.json.data, undefined);
+    // the human's print keeps the reflection as fixed
+    const human = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: "owner" });
+    assert.equal(human.json.data.manifest.items.filter((i: any) => i.category === "reflection").length, 1);
   });
 });
 
-test("F1-3b an excluded draft that carries a closed file is not named in an agent's print view", async () => {
+test("F1-3b an excluded draft that carries a closed file is not named to an agent (403); the human manifest still records it", async () => {
   await with_api(async (env) => {
     const s = await scene(env, "f3b");
     const draft = await art(env, "f3b-draft", { stage_id: s.plan, body_md: "초안본문-f3b", title: "초안제목-f3b", status: "draft" });
@@ -173,11 +170,9 @@ test("F1-3b an excluded draft that carries a closed file is not named in an agen
     assert.ok(wire_of(human).includes(draft.object_id), "the human manifest records the draft as excluded");
     const agent = await make_agent(env, "f3b-reader", ["context:read"]);
     const res = await call(env, { method: "GET", path: P(env, `/print?scope=round&snapshot=${done.snapshot_id}`), auth: { token: agent.token } });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 403);
     assert.ok(!wire_of(res).includes(draft.object_id), "closed draft object id");
     assert.ok(!wire_of(res).includes(draft.version_id), "closed draft version id");
-    // nothing closed is in the printed document itself: the agent still gets it
-    assert.equal(typeof res.json.data.document, "string");
   });
 });
 
