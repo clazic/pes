@@ -25,7 +25,7 @@
  *                                     → 앱 {label: 판 번호가 들어간 글, version: Number(version_no)}
  *              .source              ← 서버에 칸 없음 → 앱이 null
  *  ReflectionView.submission        ← submitted ? "submitted" : "none"   (있던 것)
- *                .sent_count        ← entries.length                      (있던 것으로 계산)
+ *                .sent_count        ← 서버가 안 줌 → 앱이 null (leader 결정 2026-11-12: 처리 줄 수로 지어내지 않는다)
  *                .entries[]         ← entries[] (아래)
  *  ReflectionEntry.id/.disposition/.rationale/.applied_tx_id  ← 같은 이름 (있던 것)
  *                .actor             ← actor {id,kind,name}                (**새**; 옛 actor_id 그대로)

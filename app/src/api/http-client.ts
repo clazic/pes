@@ -331,7 +331,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const data = await readData(slug, `/reflections?edition=${edition}&stage=${encodeURIComponent(stage)}&round_no=${round}`);
       if (data === null) return null;
       const entries = listOf(data, "entries").map((r) => reflectionEntry(slug, edition, r));
-      return { submission: data.submitted === true ? "submitted" : "none", sent_count: entries.length, entries };
+      return { submission: data.submitted === true ? "submitted" : "none", sent_count: null, entries };
     },
     async assessAssumption(slug, _edition, objectId, input, key) {
       const state = input.verdict === "confirm" ? "confirmed" : input.verdict === "reject" ? "rejected" : "revised";

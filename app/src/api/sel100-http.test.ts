@@ -28,7 +28,7 @@
 //  읽기 행 → 앱 행 (필드 대응표, 서버 키는 tests/test_sel100_reads.test.ts):
 //     AssumptionRow: object_id←id, version←Number(version_no), proposed_by←proposed_by, assessed_by←assessed_by, original←{version_id: revised_from_version_id, statement: revised_from_statement}|null, copied_from←null, source←null
 //     DecisionRow:   proposed_by, decided_by, supersedes←{object_id: supersedes_decision_id, statement: 같은 목록 그 결정의 statement}|null, superseded_by, originated_from←{label(판 번호가 든 글), version: Number(originated_from_version_no)}|null, source←null
-//     ReflectionView: submission←submitted?"submitted":"none", sent_count←entries.length;  ReflectionEntry: opinion←source_text ?? "", actor←actor, source←링크(source_version_id), result_version←링크(result_version_id)|null,
+//     ReflectionView: submission←submitted?"submitted":"none", sent_count←null(서버가 보낸 의견 수를 주지 않는다);  ReflectionEntry: opinion←source_text ?? "", actor←actor, source←링크(source_version_id), result_version←링크(result_version_id)|null,
 //                    followup←{id, kind, state, label←description, result_version←링크|null}|null    링크 = {label: 비어 있지 않은 글, href: "/p/<slug>/e/<ed>/" 로 시작하고 그 버전 id 가 든 앱 안 주소}
 import { describe, expect, it, vi } from "vitest";
 import { createFakeClient } from "@/api/fake-client";
@@ -186,7 +186,7 @@ describe("읽기 — 반영 (GET P/reflections?edition=&stage=&round_no=)", () =
     expect(r.url.searchParams.get("round_no")).toBe("2");
     expect(r.url.searchParams.has("round_id")).toBe(false);
     expect(view?.submission).toBe("submitted");
-    expect(view?.sent_count).toBe(3);
+    expect(view?.sent_count).toBeNull();
     expect(view?.entries).toHaveLength(3);
   });
 
@@ -210,9 +210,9 @@ describe("읽기 — 반영 (GET P/reflections?edition=&stage=&round_no=)", () =
 
   it("미제출(submitted:false) 은 submission:'none' · 0건 제출은 submitted + 빈 목록 — 서로 다르다", async () => {
     const none = server({ "GET /reflections": { status: 200, body: ok(sReflection([], { submitted: false })) } });
-    expect(await (await make(none)).getReflections(SLUG, ED, "research", "2")).toMatchObject({ submission: "none", sent_count: 0, entries: [] });
+    expect(await (await make(none)).getReflections(SLUG, ED, "research", "2")).toMatchObject({ submission: "none", sent_count: null, entries: [] });
     const zero = server({ "GET /reflections": { status: 200, body: ok(sReflection([], { submitted: true })) } });
-    expect(await (await make(zero)).getReflections(SLUG, ED, "research", "2")).toMatchObject({ submission: "submitted", sent_count: 0, entries: [] });
+    expect(await (await make(zero)).getReflections(SLUG, ED, "research", "2")).toMatchObject({ submission: "submitted", sent_count: null, entries: [] });
   });
 
   it("'start' · 숫자가 아닌 라운드 · 모르는 slug 는 요청 없이 null, 서버 404 도 null, 다른 오류는 PesApiError", async () => {
