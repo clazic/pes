@@ -72,3 +72,25 @@ test("R1-2: 닫힌 자료 id 를 annotation·citation·relation·followup 의 �
     for (const seq of [...hidden, shown]) assert.ok(owner_seqs.has(seq), `the owner sees event ${seq}`);
   });
 });
+
+/** SEL-127 리뷰 F1-1 — dispatch.adopted 는 adopted_version_id 를 싣는다. 닫힌 자료 판이면 비사람 changes 에서 숨는다. */
+test("F1-1: 닫힌 자료 판을 adopted_version_id 로 실은 dispatch.adopted 는 비사람 changes 에서 숨고, 열린 자료 판이면 나간다", async () => {
+  await with_api(async (env) => {
+    const agent = await make_agent(env, "sel127-adopted", ["context:read", "file:read"], "external_agent");
+    const closed = await material(env, "adopted-closed");
+    const open = await material(env, "adopted-open");
+    assert_ok(await set_access(env, closed.file_policy_id, "deny"));
+
+    const hidden = add_event(env, "dispatch.adopted", { dispatch_id: "d-closed", run_id: "r-1", adopted_version_id: closed.version_id });
+    const shown = add_event(env, "dispatch.adopted", { dispatch_id: "d-open", run_id: "r-2", adopted_version_id: open.version_id });
+
+    const agent_feed = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?limit=100"), auth: { token: agent.token } })).events as Array<{ event_seq: string }>;
+    const agent_seqs = new Set(agent_feed.map((e) => e.event_seq));
+    assert.ok(!agent_seqs.has(hidden), "dispatch.adopted naming a closed material version must not reach the agent feed");
+    assert.ok(agent_seqs.has(shown), "dispatch.adopted naming an open material version still reaches the agent feed");
+
+    const owner_feed = assert_ok(await call(env, { method: "GET", path: P(env, "/changes?limit=100"), auth: "owner" })).events as Array<{ event_seq: string }>;
+    const owner_seqs = new Set(owner_feed.map((e) => e.event_seq));
+    assert.ok(owner_seqs.has(hidden) && owner_seqs.has(shown), "the owner sees both dispatch.adopted events");
+  });
+});
