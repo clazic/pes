@@ -119,13 +119,72 @@ export interface RoundRef {
   state: "closed" | "current";
 }
 
+/**
+ * 과거 승인(U1d · F06) — 단계가 지금 stale 이어도 “그때 승인했다”는 사실은 남는다.
+ * at = null 은 시각을 모르는 옛 승인. origin = legacy_unverified 는 이전된 프로젝트의 승인(검증 안 됨).
+ */
+export interface PastApprovalView {
+  at: IsoTime | null;
+  origin: "verified" | "legacy_unverified";
+}
+
 export interface StageRef {
   key: StageKey;
   view: StageView;
+  past_approval?: PastApprovalView;
   rounds: RoundRef[];
 }
 
-/** 작업 공간 읽기 묶음(GET P/workspace) 중 U1a 가 쓰는 칸 */
+/* ───────────── AI 연결(U1d · F07) — 정책 읽기 + 나간 전송 ───────────── */
+
+/** project_policy_versions 읽기. 확정 전 = pending, 누락·손상은 각각 missing · corrupt(허용으로 해석하지 않는다) */
+export type AiPolicy = "allowed" | "denied" | "missing" | "corrupt" | "pending";
+
+/** outbound_dispatches 읽기 — 보낸 뒤 끝난 것(cancelled)과 결과를 모르는 것(unknown)을 구분한다 */
+export interface AiDispatchView {
+  id: string;
+  run_id: string;
+  state: "sent" | "cancel_requested" | "cancelled" | "unknown";
+}
+
+export interface AiConnectionView {
+  policy: AiPolicy;
+  dispatches?: AiDispatchView[];
+}
+
+/* ───────────── 실행(중단 · 취소 · 인계) · 실행 권한(U1d) ───────────── */
+
+export type RunStatus = "running" | "queued" | "waiting_human" | "interrupted" | "cancelled" | "handed_off" | "failed" | "succeeded";
+export type ExternalStop = "pending" | "confirmed" | "failed" | "unknown";
+
+export interface RunView {
+  id: string;
+  stage: StageKey;
+  mode: Mode;
+  status: RunStatus;
+  /** 바깥에서 멈춘 결과 — unknown 은 “중단 확인됨”이 아니다(연결 끊김 ≠ 취소) */
+  external_stop?: ExternalStop;
+}
+
+/** 외부 앱의 질문·권한 — PES 연구 질문(QuestionView)과 섞지 않는다(RUN A9 · B0) */
+export interface RunPermissionView {
+  id: string;
+  run_id: string;
+  source: "pes_tool" | "external_app";
+  kind: "question" | "permission";
+  text: string;
+  state: "waiting" | "answered";
+}
+
+/** 작업 공간의 기록 개수(가정 · 결정 · 의견). empty 는 서버가 판정한 “모두 0건” */
+export interface RecordsView {
+  assumptions: { count: number };
+  decisions: { count: number };
+  comments: { count: number };
+  empty: boolean;
+}
+
+/** 작업 공간 읽기 묶음(GET P/workspace) 중 화면이 쓰는 칸. U1d 칸은 서버가 아직 주지 않으면 없다(모르면 모른다고 그린다) */
 export interface WorkspaceView {
   slug: string;
   /** 프로젝트 제목(사람이 정한 글) */
@@ -135,6 +194,13 @@ export interface WorkspaceView {
   current: { stage: StageKey; round_id: number | null };
   stages: StageRef[];
   turn: TurnView;
+  /** U1d — 없으면 unknown(켜짐 아님) */
+  ai_connection?: AiConnectionView;
+  /** U1d — 없으면 “정보 없음”(0건이라 단정하지 않음) */
+  runs?: RunView[];
+  run_permissions?: RunPermissionView[];
+  /** 서버 작업 공간 읽기에 이미 있는 칸 */
+  records?: RecordsView;
 }
 
 export type Importance = "high" | "normal" | "low";

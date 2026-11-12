@@ -1,11 +1,12 @@
 import { ROUNDS, WORKSPACE } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type PesClient, type Receipt, type RoundView } from "./types";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type PesClient, type Receipt, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
  * 모양은 API 계약 그대로(types.ts): 쓰기는 멱등 키 필수 · CommandResult · 영수증 · 거절은 ApiError 봉투.
  * 앱(루트 레이아웃)마다 하나씩 만들어 상태(오류 확인 · 멱등 기록)가 시험 사이에 새지 않는다.
  * 돌려주는 값은 복사본이다(화면이 고쳐도 원본이 바뀌지 않음).
+ * workspace 를 주면 그 작업 공간을 쓴다(앱은 U1d 칸이 있는 DEMO_WORKSPACE, 계약 시험은 WORKSPACE).
  */
 
 /** 오류 문장 — 2단계 코어(scripts/pes_core/api_support.ts)의 문장·다음 할 일과 같다 */
@@ -18,7 +19,7 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
 };
 
-export function createFakeClient(): PesClient {
+export function createFakeClient(workspace: WorkspaceView = WORKSPACE): PesClient {
   const rounds: RoundView[] = structuredClone(ROUNDS);
   /** 멱등 기록: 키 → (요청 지문, 처음 결과) */
   const commits = new Map<string, { request: string; result: CommandResult<{ alert_id: string }> }>();
@@ -27,7 +28,7 @@ export function createFakeClient(): PesClient {
   const txLog: ChangeTx[] = [];
   let req = 0;
   const copy = <T,>(v: T) => Promise.resolve(structuredClone(v));
-  const find = (slug: string, edition: number) => (slug === WORKSPACE.slug && edition === WORKSPACE.edition ? WORKSPACE : null);
+  const find = (slug: string, edition: number) => (slug === workspace.slug && edition === workspace.edition ? workspace : null);
   const requestId = () => `req-${++req}`;
   const reject = (code: ApiErrorCode, target?: string) => {
     const body: ApiError = {
@@ -39,7 +40,7 @@ export function createFakeClient(): PesClient {
   };
 
   return {
-    listProjects: () => copy([{ slug: WORKSPACE.slug, edition: WORKSPACE.edition, current: WORKSPACE.current }]),
+    listProjects: () => copy([{ slug: workspace.slug, edition: workspace.edition, current: workspace.current }]),
     getWorkspace: (slug, edition) => copy(find(slug, edition)),
     getRound(slug, edition, stage, round) {
       if (!find(slug, edition)) return copy(null);

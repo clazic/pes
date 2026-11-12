@@ -1,4 +1,5 @@
 import { createFakeClient } from "./fake-client";
+import { DEMO_WORKSPACE } from "./fixture";
 import { createHttpClient } from "./http-client";
 import type { PesClient } from "./types";
 
@@ -11,7 +12,7 @@ import type { PesClient } from "./types";
  */
 export function selectClient(win: unknown, fetchImpl?: typeof fetch): PesClient | null {
   const config = typeof win === "object" && win !== null ? (win as { __PES_APP__?: unknown }).__PES_APP__ : undefined;
-  if (typeof config !== "object" || config === null || (config as { api?: unknown }).api !== "http") return import.meta.env.MODE !== "production" ? createFakeClient() : null;
+  if (typeof config !== "object" || config === null || (config as { api?: unknown }).api !== "http") return import.meta.env.MODE !== "production" ? createFakeClient(DEMO_WORKSPACE) : null;
   const { session, projects } = config as { session?: unknown; projects?: unknown };
   const map: Record<string, string> = {};
   if (typeof projects === "object" && projects !== null && !Array.isArray(projects)) {

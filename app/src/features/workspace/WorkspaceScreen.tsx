@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { placeLabel } from "@/lib/labels";
 import { useIsPhone } from "@/lib/media";
 import { AskPane } from "./AskPane";
+import { AiConnectionChip } from "./AiConnectionChip";
 import { BodyPane } from "./BodyPane";
 import { PeekDialog, PrintPreview, ViewSwitch } from "./Overlays";
 import { parseView, roundHref, type View } from "./paths";
@@ -218,6 +219,7 @@ function ScreenHead({ ws, round, title, past, onGoToQuestions }: { ws: Workspace
         <p className="text-meta text-muted-foreground">
           {ws.edition}판 · {past ? "지난 라운드" : "현재 진행"} · 질문 {round.questions.length}개{past ? "" : ` · 답할 질문 ${open}개`}
         </p>
+        <AiConnectionChip ai={ws.ai_connection} mode={ws.mode} />
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2" data-print="hide">
         <Status of="turn" value={turnKey(ws.turn)} label={turnLabel(ws.turn)} />
