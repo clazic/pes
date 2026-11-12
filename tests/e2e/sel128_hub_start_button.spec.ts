@@ -40,8 +40,18 @@ interface Seen {
 }
 function watch(page: Page) {
   const pending: Promise<Seen>[] = [];
-  page.on("request", (r) => pending.push(r.allHeaders().then((headers) => ({ url: new URL(r.url()), method: r.method(), headers, body: r.postData(), frame_url: r.frame().url() }))));
-  return { done: async (): Promise<Seen[]> => Promise.all(pending) };
+  // done() 뒤에 오는 요청은 모으지 않는다 — 모으면 테스트가 끝날 때 allHeaders 가 "Test ended" 로 거절돼 시험이 흔들린다(sel85 C2, Windows CI). done() 전의 요청은 모두 기다려 단언한다
+  let closed = false;
+  page.on("request", (r) => {
+    if (closed) return;
+    pending.push(r.allHeaders().then((headers) => ({ url: new URL(r.url()), method: r.method(), headers, body: r.postData(), frame_url: r.frame().url() })));
+  });
+  return {
+    done: async (): Promise<Seen[]> => {
+      closed = true;
+      return Promise.all(pending);
+    },
+  };
 }
 const creates = (all: Seen[]): Seen[] => all.filter((r) => r.url.pathname === CREATE);
 const start_button = (page: Page) => page.getByRole("button", { name: "프로젝트 시작" });
@@ -131,6 +141,28 @@ test("2 키보드만으로: Tab 으로 버튼 → Enter 로 열림(주제 칸 �
   await page.keyboard.press("Tab"); // 이름(slug) 칸 — 비워 둔다
   await expect(slug_input(page)).toBeFocused();
   await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/p\/[a-z0-9][a-z0-9-]*\/e\/[0-9]+\/s\/plan\/r\/start$/);
+  expect(ws.slugs()).toHaveLength(1);
+});
+
+// CI(macOS) 2 키보드만으로 실패의 원인: Esc 로 닫은 대화 상자의 close 이벤트가 느린 기계에서 '다시 열기·제출' 뒤에 도착해, 지금 열린 대화 상자의 진행 중 요청을 버렸다(gen 이 올라감).
+// 이벤트 도착 시점은 기계마다 달라 시험이 흔들리므로, 늦게 온 close 를 직접 보내 결정적으로 고정한다.
+test("2 닫은 뒤 다시 열어 제출했는데 앞 대화 상자의 close 이벤트가 그제야 도착해도 진행 중 요청은 버려지지 않는다 — 만들어지고 이동하며 입력 초점도 뺏기지 않는다", async ({ page }) => {
+  ws = await open_empty_home();
+  await open_with_code(page, ws);
+  await start_button(page).click();
+  await expect(topic_input(page)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+  await start_button(page).click(); // 다시 열기
+  await expect(topic_input(page)).toBeFocused();
+  await topic_input(page).fill("늦은 close 이벤트 합성 주제");
+  // 앞 대화 상자의 close 가 이제야 도착한 것처럼 — 열려 있는 대화 상자에서 일어난 일이 아니므로 아무것도 바뀌면 안 된다
+  await page.evaluate('document.getElementById("pes-start-dlg").dispatchEvent(new Event("close"))');
+  await expect(topic_input(page)).toBeFocused();
+  await expect(dialog(page)).toBeVisible();
+  await topic_input(page).press("Enter");
+  await page.evaluate('document.getElementById("pes-start-dlg").dispatchEvent(new Event("close"))').catch(() => undefined); // 요청이 가는 중에 또 한 번(이미 이동했으면 문맥이 사라져 거절돼도 상관없다)
   await expect(page).toHaveURL(/\/p\/[a-z0-9][a-z0-9-]*\/e\/[0-9]+\/s\/plan\/r\/start$/);
   expect(ws.slugs()).toHaveLength(1);
 });

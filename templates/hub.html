@@ -226,6 +226,11 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
     const el = $(focusId);
     if (el) el.focus();
   };
+  // 닫힌 대화 상자의 뒷정리 — 떠나는 중 가정을 거두고 3초 타이머를 끄며 세션 값을 지운다. 세대를 올려, 그 대화 상자에서 보낸 요청의 늦은 응답은 저장도 이동도 하지 않는다
+  const dismiss = () => {
+    gen++; clearTimeout(leaveTimer); leaving = false; unstore(); flight = false;
+    const go = $('pes-start-go'); if (go) go.disabled = false;
+  };
   const build = () => {
     document.body.insertAdjacentHTML('beforeend',
       '<dialog id="pes-start-dlg" aria-labelledby="pes-start-ttl"><form id="pes-start-form" novalidate>' +
@@ -238,9 +243,10 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
       '</form></dialog>');
     dlg = $('pes-start-dlg');
     $('pes-start-cancel').addEventListener('click', () => dlg.close());
-    // 닫힘(취소·Esc·그 밖의 모든 닫힘) — 떠나는 중 가정을 거두고 3초 타이머를 끄며 세션 값을 지운다. 진행 중 요청은 세대가 바뀌어 늦은 응답이 무시된다
+    // 닫힘(취소·Esc·그 밖의 모든 닫힘) — 닫힌 대화 상자의 뒷정리. close 이벤트는 닫힌 뒤 한참 늦게 올 수 있어(느린 기계에서 다시 열고 제출한 뒤에 도착) 지금 열려 있는 대화 상자는 건드리지 않는다
     dlg.addEventListener('close', () => {
-      gen++; clearTimeout(leaveTimer); leaving = false; unstore(); flight = false; $('pes-start-go').disabled = false;
+      if (dlg.open) return;
+      dismiss();
       const b = opener && opener.isConnected ? opener : $('pes-start'); if (b) b.focus();
     });
     $('pes-start-form').addEventListener('submit', submit);
@@ -315,6 +321,9 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
     if (handoff === null) { note(NO_SESSION); return; }
     note('');
     if (dlg === null) build();
+    if (dlg.open) return;
+    // 버튼은 대화 상자가 닫혀 있을 때만 눌린다 — 이전 대화 상자의 요청·타이머·값은 close 이벤트가 늦어도 여기서 확실히 거둔다
+    dismiss();
     setErr('');
     dlg.showModal();
     $('pes-start-topic').focus();

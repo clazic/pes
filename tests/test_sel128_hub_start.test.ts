@@ -294,7 +294,7 @@ test("6 pes remote 로 허용한 주소(trusted_origins)에서도 소유자 세�
 
 test("7 CREATE 상수와 API 문서: POST /api/v1/projects 는 localSession 하나 — 에이전트 토큰은 안 된다(문서·실제 일치)", () => {
   assert.equal(CREATE, "/api/v1/projects");
-  const spec = readFileSync(join(import.meta.dirname, "..", "docs", "api", "openapi-v1.yaml"), "utf8");
+  const spec = readFileSync(join(import.meta.dirname, "..", "docs", "api", "openapi-v1.yaml"), "utf8").replace(/\r\n/g, "\n"); // Windows 체크아웃(autocrlf)의 CRLF 도 LF 로
   const block = /\n {2}\/api\/v1\/projects:\n {4}post:([\s\S]*?)\n {2}\/api\/v1\/projects\/\{id\}\/context:/.exec(spec);
   assert.ok(block);
   assert.ok(/security: \[\{ localSession: \[\] \}\]/.test(block[1] as string));
