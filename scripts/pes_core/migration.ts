@@ -17,7 +17,7 @@
 // environment or the real home: every path comes from the caller.
 
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { BackupError, prepare_project_restore, type PreparedProjectRestore } from "./backup.ts";
 import type { CommandService } from "./commands.ts";
