@@ -41,6 +41,7 @@ import type { ApiApp } from "./pes_core/api.ts";
 import { AppCodes, CODE_SHAPE, code_ttl_ms, valid_projects } from "./pes_core/app_session.ts";
 import type { BridgeReply } from "./pes_core/cli_bridge.ts";
 import type { Db } from "./pes_core/db.ts";
+import { escapes_parent } from "./pes_core/rel_path.ts";
 
 const MAX_BODY = 256 * 1024;
 const MAX_API_BODY = 2 * MAX_BODY;
@@ -358,7 +359,7 @@ async function start(config: Config): Promise<void> {
   const in_report_zone = (file: string): boolean => {
     const zone = (absolute: string, base: string): boolean => {
       const rel = relative(base, absolute);
-      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+      if (rel === "" || escapes_parent(rel)) return false;
       const words = rel.split(sep).filter((word) => word !== "");
       const first_under = (name: string | undefined): boolean => name !== undefined && (name.toLowerCase() === "reports" || name.toLowerCase() === "out");
       if (existsSync(join(root, "project.json")) && first_under(words[0])) return true;
