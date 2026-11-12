@@ -1,7 +1,7 @@
 import * as React from "react";
 
 /**
- * production 빌드에서 세션 조각(#pes=…)도 같은 탭에 받아 둔 것도 없을 때의 화면(U1b, R1 필수 1).
+ * production 빌드에서 1회용 코드(#code=…)를 세션으로 바꾸지 못했고(없음·쓴 코드·만료·거절) 같은 탭에 받아 둔 것도 없을 때의 화면(U1b, SEL-85).
  * 가짜(합성) 자료도 서버 요청도 없다 — 앱은 `pes open <프로젝트> --app` 으로 열어야 서버 자료를 읽는다. 화면 제목(data-screen-title)은 두지 않는다(작업 공간 화면이 아니다).
  */
 export function OpenGuidance() {

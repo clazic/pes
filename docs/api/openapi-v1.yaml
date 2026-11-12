@@ -1378,3 +1378,36 @@ paths:
         "409": { description: State conflict, stale revision, or idempotency key reuse }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+x-app-session:
+  description: |
+    SEL-85. How `pes open <slug> --app` hands the owner's session to the web app without the session ever being in an address. These two routes are
+    answered by the HTTP server layer (scripts/serve.ts) before the API app: they are NOT in `paths` or in capabilities.routes, carry no project data,
+    need no Idempotency-Key, and every answer (success or error) has `Cache-Control: no-store`. Success and error bodies use the envelopes above.
+    A code is 32 random bytes in base64url (43 characters), kept only in the server process memory (never a file, database row or log line), valid
+    for one exchange and for PES_APP_CODE_TTL_MS milliseconds (default 60000, at most 600000), and removed the moment it is read.
+  issue_code:
+    method: POST
+    path: /api/v1/app-session/codes
+    caller: "the CLI, with the owner's session in x-pes-session (securityScheme localSession); without it 401 unauthenticated and nothing is made"
+    request: '{"projects": {"<slug>": "<project id>"}} (closed shape, at most 64 slugs, other keys are 400)'
+    response: '201 {"data": {"code": "<43 characters>"}} (the code stands for the owner session the SERVER holds; the caller never chooses it)'
+    errors:
+      - "400 invalid_payload"
+      - "401 unauthenticated"
+      - "413 payload_too_large"
+      - "429 rate_limited (60 per minute)"
+  exchange:
+    method: POST
+    path: /api/v1/app-session
+    caller: "the web app, no credential - the code is the proof"
+    origin: "only http://127.0.0.1:<this server's port> is accepted; any other Origin (localhost, trusted_origins entries, null) and a missing Origin are 403 forbidden"
+    refused: "GET, a code in the query string and a CORS preflight give nothing"
+    request: '{"code": "<code>"} (a body of at most 4096 bytes)'
+    response: '200 {"data": {"session": "<owner session>", "projects": {"<slug>": "<project id>"}}}'
+    once: "exactly one of any number of concurrent exchanges of a code gets the session; the rest are 401"
+    errors:
+      - "400 invalid_payload (not JSON, not an object, no code or a malformed one)"
+      - "401 unauthenticated (unknown, used and expired codes look the same)"
+      - "403 forbidden"
+      - "413 payload_too_large"
+      - "429 rate_limited (120 attempts per minute, every attempt counts)"
