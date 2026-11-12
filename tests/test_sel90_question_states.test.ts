@@ -404,14 +404,19 @@ test("API 자격: 없으면 401, run:submit 없는 토큰·리스 없는 에이�
   await with_api(async (env) => {
     const f = await two_question_form(env);
     const q1 = f.ids[0]!;
+    const agents: Record<string, Awaited<ReturnType<typeof make_agent>>> = {};
+    for (const kind of ROUTES) {
+      agents[`reader-${kind}`] = await make_agent(env, `reader-${kind}`, ["context:read"]);
+      agents[`writer-${kind}`] = await make_agent(env, `writer-${kind}`, ["run:submit"]);
+    }
     const sig = state_signature(env.db);
     for (const kind of ROUTES) {
       const path = P(env, `/questions/${q1}/${kind}`);
       const body = route_body(kind, f.ids[1]!);
       assert_final_error(await call(env, { method: "POST", path, body }), 401, "unauthenticated", { next_action: NEXT_ACTION.unauthenticated });
-      const reader = await make_agent(env, `reader-${kind}`, ["context:read"]);
+      const reader = agents[`reader-${kind}`]!;
       assert_final_error(await call(env, { method: "POST", path, auth: { token: reader.token }, body }), 403, "forbidden");
-      const writer = await make_agent(env, `writer-${kind}`, ["run:submit"]);
+      const writer = agents[`writer-${kind}`]!;
       assert_final_error(await call(env, { method: "POST", path, auth: { token: writer.token }, body }), 403, "forbidden");
     }
     assert.equal(state_signature(env.db), sig);

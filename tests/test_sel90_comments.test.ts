@@ -249,6 +249,7 @@ test("POST P/threads: 잘못된 요청은 거부하고 쓰지 않는다 (키 없
     const f = await make_form(env, [single_spec("API 의견 질문")]);
     const q = f.ids[0]!;
     const ok_body = { target_object_id: q, context_kind: "question_comment", initial_message: { body_md: "x" } };
+    const reader = await make_agent(env, "reader", ["context:read"]);
     const sig = state_signature(env.db);
     assert_final_error(await call(env, { method: "POST", path: P(env, "/threads"), auth: "owner", body: ok_body, key: null }), 400, "invalid_payload", { target: /idempotency-key/i });
     assert_final_error(await owner_post(env, "/threads", { ...ok_body, initial_message: { body_md: "  " } }), 422, "validation_failed", { target: "$.body.initial_message.body_md" });
@@ -258,7 +259,6 @@ test("POST P/threads: 잘못된 요청은 거부하고 쓰지 않는다 (키 없
     assert_final_error(await owner_post(env, "/threads", { ...ok_body, surprise: 1 }), 400, "invalid_payload");
     assert_final_error(await owner_post(env, "/threads", { target_object_id: q, context_kind: "question_comment" }), 400, "invalid_payload", { target: "$.body.initial_message" });
     assert_final_error(await call(env, { method: "POST", path: P(env, "/threads"), body: ok_body }), 401, "unauthenticated");
-    const reader = await make_agent(env, "reader", ["context:read"]);
     assert_final_error(await call(env, { method: "POST", path: P(env, "/threads"), auth: { token: reader.token }, body: ok_body }), 403, "forbidden");
     assert.equal(state_signature(env.db), sig);
   });

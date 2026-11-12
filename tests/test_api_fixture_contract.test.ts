@@ -403,6 +403,51 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
       return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id } };
     },
   },
+  // SEL-90 U2a
+  "questions.withdraw": {
+    normal: async (env) => {
+      const round = await open_round(env);
+      const q = await ask(env, round.stage_id, round.round_id);
+      return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id } };
+    },
+    error: async (env) => {
+      const round = await open_round(env);
+      const q = await ask(env, round.stage_id, round.round_id);
+      // the error case: the question already left the form, so the fixture request is an invalid transition (409 conflict)
+      assert_ok(await call(env, { method: "POST", path: P(env, `/questions/${q.question_id}/withdraw`), auth: "owner", body: {} }), 201);
+      return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id } };
+    },
+  },
+  "questions.defer": {
+    normal: async (env) => {
+      const round = await open_round(env);
+      const q = await ask(env, round.stage_id, round.round_id);
+      return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id } };
+    },
+    error: async (env) => {
+      const round = await open_round(env);
+      const q = await ask(env, round.stage_id, round.round_id);
+      // the error case: the question already left the form, so the fixture request is an invalid transition (409 conflict)
+      assert_ok(await call(env, { method: "POST", path: P(env, `/questions/${q.question_id}/withdraw`), auth: "owner", body: {} }), 201);
+      return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id } };
+    },
+  },
+  "questions.merge": {
+    normal: async (env) => {
+      const round = await open_round(env);
+      const q = await ask(env, round.stage_id, round.round_id);
+      const t = await ask(env, round.stage_id, round.round_id);
+      return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id, qst_01J9Z3K7QE: t.question_id } };
+    },
+    error: async (env) => {
+      const round = await open_round(env);
+      const q = await ask(env, round.stage_id, round.round_id);
+      const t = await ask(env, round.stage_id, round.round_id);
+      // the error case: the question already left the form, so the fixture request is an invalid transition (409 conflict)
+      assert_ok(await call(env, { method: "POST", path: P(env, `/questions/${q.question_id}/withdraw`), auth: "owner", body: {} }), 201);
+      return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id, qst_01J9Z3K7QE: t.question_id } };
+    },
+  },
   "submissions.create": {
     normal: async (env) => {
       const round = await open_round(env);
