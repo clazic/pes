@@ -125,9 +125,13 @@ function DecisionLine({ row, all, onJudge }: { row: DecisionRow; all: DecisionRo
           {row.supersedes ? (
             <p className="mt-1">
               대체한 옛 결정:{" "}
-              <Link to={{ hash: `#decision-${row.supersedes.object_id}` }} className="text-primary-ink underline underline-offset-2">
-                {row.supersedes.statement}
-              </Link>
+              {row.supersedes.statement ? (
+                <Link to={{ hash: `#decision-${row.supersedes.object_id}` }} className="text-primary-ink underline underline-offset-2">
+                  {row.supersedes.statement}
+                </Link>
+              ) : (
+                "이 목록에 없는 결정"
+              )}
             </p>
           ) : null}
         </div>

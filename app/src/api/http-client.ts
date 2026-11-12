@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type CommentMessageView, type CommentThreadView, type PesClient, type ProjectRef, type QuestionInput, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -158,7 +158,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
 
   /**
    * (옛 서버 호환) 성공 본문에 영수증이 없으면 쓰기 성공 뒤 GET P/requests/{key} 로 받는다. 번호·시각을 지어내지 않는다:
-   *  - receipt_no: 서버 응답에 있을 때만(글 · 숫자). 없으면 `numbered: false` + tx_id 를 그대로 둔다(화면은 번호 없이 “접수됨”).
+   *  - receipt_no: 서버 응답에 있을 때만(글 · 숫자). `numbered`(번호를 서버가 줬는가)를 늘 싣는다. 없으면 `numbered: false` + tx_id 를 그대로 둔다(화면은 번호 없이 “접수됨”).
    *  - committed_at: 서버가 시각을 줄 때만 그것을 쓴다. 옛 서버(GET requests/{key})는 시각을 주지 않아, 영수증을 읽은 이 클라이언트의 시각을 쓴다(접수 시각과 몇 초 차이일 수 있다 — 영수증을 싣는 서버(SEL-98)에서는 이 길을 타지 않는다).
    *  - 조회가 실패하면 쓰기는 됐을 수 있으나 영수증을 모른다: 성공으로 보이지 않고 TimeoutError(“접수 확인 중”)로 던진다. 같은 키로 다시 보내면 서버가 재생하고 그때 영수증을 읽는다.
    */
@@ -179,7 +179,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     if (typeof data.tx_id !== "string" || !data.tx_id) throw unknown();
     const no = typeof data.receipt_no === "string" && data.receipt_no ? data.receipt_no : typeof data.receipt_no === "number" ? String(data.receipt_no).padStart(4, "0") : "";
     const at = typeof data.committed_at === "string" && !Number.isNaN(Date.parse(data.committed_at)) ? data.committed_at : new Date().toISOString();
-    return { receipt_no: no || data.tx_id, ...(no ? {} : { numbered: false }), tx_id: data.tx_id, committed_at: at, idempotency_key: key, replayed };
+    return { receipt_no: no || data.tx_id, numbered: no !== "", tx_id: data.tx_id, committed_at: at, idempotency_key: key, replayed };
   }
 
   const result = <T,>(w: { data: Json; receipt: Receipt; request_id: string }, data: T): CommandResult<T> => ({ format_version: FORMAT_VERSION, request_id: w.request_id, receipt: w.receipt, data });
@@ -213,18 +213,120 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       return result(w, kind === "merge" ? { ...base, merged_into: text(question.merged_into_question_id) } : base);
     });
 
-  /**
-   * 가정 · 결정 · 반영(U3b) — 서버 계약은 SEL-93(U3a)이 정한다. 그 전에는 경로를 지어내지 않고 not_supported 로 거절한다(화면은 “아직 서버에서 읽을 수 없음”을 그대로 보인다).
-   * 서버 요청을 보내지 않는다 — 경로가 생기면 이 자리에서 http 매핑을 채운다.
-   */
-  const notSupported = (what: string): Promise<never> =>
-    Promise.reject(
-      new PesApiError({
-        format_version: FORMAT_VERSION,
-        error: { code: "not_supported", message: `${what}은(는) 서버가 아직 지원하지 않습니다.`, retryable: false, next_action: "reread_context" },
-        request_id: "client",
-      }),
-    );
+  /* ───────────── 가정 · 결정 · 반영 (U3c · SEL-100) — 서버 계약은 SEL-93(U3a)·SEL-100 읽기 칸 보강. 서버가 안 주는 값은 null · "" 로 두고 지어내지 않는다 ───────────── */
+
+  /** GET P/<rest> → data. 모르는 slug 는 요청 없이 null, 서버 404(없는 판 · 라운드)는 null, 그 밖의 거절은 PesApiError */
+  async function readData(slug: string, rest: string): Promise<Json | null> {
+    const id = idOf(slug);
+    if (id === undefined) return null;
+    const res = await send(projectUrl(id, rest), { method: "GET", headers: headers(), credentials: "omit" });
+    if (!res.ok) {
+      const error = await toApiError(res);
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+    const body: unknown = await res.json();
+    if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
+    return body.data;
+  }
+  const listOf = (data: Json | null, name: string): Json[] => {
+    if (data === null) return [];
+    const rows = data[name];
+    if (!Array.isArray(rows)) throw new PesApiError(fallbackBody(500));
+    return rows.filter(isRecord);
+  };
+  const nullable = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+  /** 서버의 행위자 {id, kind, name}. 서버가 주지 않으면(null) id 만 알 때 사람이라고 단정하지 않는다 */
+  const actorOf = (v: unknown, fallbackId = ""): Actor => (isRecord(v) ? { id: text(v.id), kind: v.kind === "human" ? "human" : "ai", name: text(v.name) } : { id: fallbackId, kind: "ai", name: "" });
+  const actorOrNull = (v: unknown): Actor | null => (isRecord(v) ? actorOf(v) : null);
+  const shortId = (id: string): string => (id.length > 12 ? `${id.slice(0, 8)}…` : id);
+  /** 버전 id → 앱 안 링크. 서버는 버전이 어느 라운드 글인지 주지 않아 쪽을 지어내지 않고, 기록 화면의 그 버전 자리(해시)로 둔다 */
+  const versionLink = (slug: string, edition: number, kind: string, version_id: string): Link => ({
+    label: `${kind} ${shortId(version_id)}`,
+    href: `/p/${encodeURIComponent(slug)}/e/${edition}/records#version-${encodeURIComponent(version_id)}`,
+  });
+
+  function assumptionRow(r: Json): AssumptionRow {
+    const revised_version = nullable(r.revised_from_version_id);
+    return {
+      object_id: text(r.id),
+      version_id: text(r.version_id),
+      version: Number(r.version_no),
+      statement: text(r.statement),
+      state: r.state as AssumptionRow["state"],
+      proposed_by: actorOf(r.proposed_by, text(r.proposed_by_actor_id)),
+      assessed_by: actorOrNull(r.assessed_by),
+      assessed_at: nullable(r.assessed_at),
+      needs_review: r.needs_review === true,
+      rationale: text(r.rationale),
+      original: revised_version !== null && typeof r.revised_from_statement === "string" ? { version_id: revised_version, statement: r.revised_from_statement } : null,
+      copied_from: null,
+      source: null,
+    };
+  }
+
+  function decisionRows(rows: Json[]): DecisionRow[] {
+    const statements = new Map(rows.map((r) => [text(r.id), text(r.statement)]));
+    return rows.map((r) => {
+      const supersedes_id = nullable(r.supersedes_decision_id);
+      const edition_no = typeof r.originated_from_edition_no === "number" ? r.originated_from_edition_no : null;
+      const origin_version = nullable(r.originated_from_version_no);
+      return {
+        object_id: text(r.id),
+        version_id: text(r.version_id),
+        version: Number(r.version_no),
+        statement: text(r.statement),
+        state: r.state as DecisionRow["state"],
+        scope: r.scope as DecisionRow["scope"],
+        proposed_by: actorOf(r.proposed_by),
+        decided_by: actorOrNull(r.decided_by),
+        rationale: text(r.rationale),
+        supersedes: supersedes_id === null ? null : { object_id: supersedes_id, statement: statements.get(supersedes_id) ?? "" },
+        superseded_by: nullable(r.superseded_by),
+        originated_from: origin_version === null ? null : { label: edition_no === null ? "이전 판에서 복사" : `${edition_no}판에서 복사`, version: Number(origin_version) },
+        source: null,
+      };
+    });
+  }
+
+  function reflectionEntry(slug: string, edition: number, r: Json): ReflectionEntry {
+    const result = nullable(r.result_version_id);
+    const f = isRecord(r.followup) ? r.followup : null;
+    const followup_result = f === null ? null : nullable(f.result_version_id);
+    return {
+      id: text(r.id),
+      opinion: text(r.source_text),
+      source: versionLink(slug, edition, "원문 버전", text(r.source_version_id)),
+      disposition: r.disposition as ReflectionEntry["disposition"],
+      rationale: text(r.rationale),
+      actor: actorOrNull(r.actor),
+      applied_tx_id: nullable(r.applied_tx_id),
+      result_version: result === null ? null : versionLink(slug, edition, "결과 버전", result),
+      followup:
+        f === null
+          ? null
+          : { id: text(f.id), kind: f.kind as FollowupView["kind"], state: f.state as FollowupView["state"], label: text(f.description), result_version: followup_result === null ? null : versionLink(slug, edition, "후속 결과 버전", followup_result) },
+    };
+  }
+
+  /** 결정 쓰기의 사전 읽기 — 서버 쓰기 본문에 scope 가 필요하고 앱은 행에서 scope 를 받아 둔 적이 없어서, 그 판의 결정 목록에서 그 결정을 찾는다. 없으면 POST 없이 not_found */
+  const decisionScope = (edition: number, decision_id: string) => async (id: string): Promise<Json> => {
+    const data = await timed(async (signal) => {
+      const res = await send(projectUrl(id, `/decisions?edition=${edition}`), { method: "GET", headers: headers(), credentials: "omit", signal });
+      if (!res.ok) throw await toApiError(res);
+      const body: unknown = await res.json();
+      if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
+      return body.data;
+    });
+    const found = listOf(data, "decisions").find((r) => r.id === decision_id);
+    if (!found || (found.scope !== "project" && found.scope !== "edition")) throw new PesApiError(fallbackBody(404));
+    return { scope: found.scope };
+  };
+  const judged = (w: { data: Json; receipt: Receipt; request_id: string }, name: "assumption" | "decision") => {
+    const row = objectAt(w.data, name);
+    return result(w, { object_id: text(row.id), version_id: text(row.version_id) });
+  };
+  const given = (v: string): Json => (v ? { rationale: v } : {});
 
   /** 라운드 자리 글: "start"(단계 시작 질문) 또는 1 이상의 번호(10진). 그 밖은 자리가 아니다(null) — 요청 없이 없는 자리로 본다 */
   function placeOf(round: string): { round_id: number | null } | null {
@@ -326,13 +428,43 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
 
   return {
     capabilities: { questionTools: true },
-    getAssumptions: () => notSupported("가정 읽기"),
-    getDecisions: () => notSupported("결정 읽기"),
-    getReflections: () => notSupported("반영 내역 읽기"),
-    assessAssumption: () => notSupported("가정 판단 기록"),
-    adoptDecision: () => notSupported("결정 채택 기록"),
-    supersedeDecision: () => notSupported("결정 대체 기록"),
-    revokeDecision: () => notSupported("결정 철회 기록"),
+    async getAssumptions(slug, edition) {
+      return listOf(await readData(slug, `/assumptions?edition=${edition}`), "assumptions").map(assumptionRow);
+    },
+    async getDecisions(slug, edition) {
+      return decisionRows(listOf(await readData(slug, `/decisions?edition=${edition}`), "decisions"));
+    },
+    async getReflections(slug, edition, stage, round) {
+      // 'start'(단계 시작)에는 라운드가 없어 반영도 없다 — 서버에 묻지 않는다
+      if (!/^[1-9]\d*$/.test(round)) return null;
+      const data = await readData(slug, `/reflections?edition=${edition}&stage=${encodeURIComponent(stage)}&round_no=${round}`);
+      if (data === null) return null;
+      const entries = listOf(data, "entries").map((r) => reflectionEntry(slug, edition, r));
+      return { submission: data.submitted === true ? "submitted" : "none", sent_count: null, entries };
+    },
+    async assessAssumption(slug, _edition, objectId, input, key) {
+      const state = input.verdict === "confirm" ? "confirmed" : input.verdict === "reject" ? "rejected" : "revised";
+      const w = await write(slug, key, "/assumptions", {
+        assumption_id: objectId,
+        base_version_id: input.base_version_id,
+        state,
+        ...given(input.rationale),
+        ...(input.verdict === "revise" && input.statement !== undefined ? { statement: input.statement } : {}),
+      });
+      return judged(w, "assumption");
+    },
+    async adoptDecision(slug, edition, objectId, input, key) {
+      const w = await write(slug, key, "/decisions", { state: "adopted", decision_id: objectId, base_version_id: input.base_version_id, ...given(input.rationale) }, decisionScope(edition, objectId));
+      return judged(w, "decision");
+    },
+    async supersedeDecision(slug, edition, objectId, input, key) {
+      const w = await write(slug, key, "/decisions", { state: "adopted", supersedes: objectId, base_version_id: input.base_version_id, statement: input.statement, rationale: input.rationale }, decisionScope(edition, objectId));
+      return judged(w, "decision");
+    },
+    async revokeDecision(slug, edition, objectId, input, key) {
+      const w = await write(slug, key, "/decisions", { state: "revoked", decision_id: objectId, base_version_id: input.base_version_id, rationale: input.rationale }, decisionScope(edition, objectId));
+      return judged(w, "decision");
+    },
     getQuestionVersions: notConnected("질문 버전 기록 읽기"),
 
     /** GET P/stages/{stage}/rounds/{round}/threads — 의견 목록. 라운드를 못 찾으면(404) 빈 목록, 그 밖의 거절은 PesApiError */

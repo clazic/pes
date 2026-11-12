@@ -113,7 +113,7 @@ function Body({ view }: { view: ReflectionView | null }) {
       return (
         <div className="mt-3">
           <p className="text-meta font-medium text-ink">처리 0건</p>
-          <p className="mt-0.5 text-caption text-ink-2">의견 {view!.sent_count}개를 보냈지만 아직 처리된 줄이 없어요.</p>
+          <p className="mt-0.5 text-caption text-ink-2">지난 라운드에 의견을 제출했지만 아직 처리된 줄이 없어요.</p>
         </div>
       );
     default: {
@@ -122,7 +122,7 @@ function Body({ view }: { view: ReflectionView | null }) {
       return (
         <>
           <p className="mt-0.5 text-caption text-ink-2">
-            의견 {view!.sent_count}개를 보냈고 {entries.length}줄이 처리됐어요.
+            {entries.length}줄이 처리됐어요.
             {hasMissing ? " 적용 기록이 모자란 줄은 ‘적용’이나 ‘부분’으로 세지 않아요." : ""}
           </p>
           <Bar entries={entries} />

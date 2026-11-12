@@ -154,21 +154,37 @@ describe("권장 2 — not_supported 는 차분한 안내", () => {
     expect(screen.queryByRole("button", { name: "다시 읽기" })).toBeNull();
   });
 
-  it("http 클라이언트: 가정 · 결정 · 반영 읽기와 쓰기 7개가 요청 없이 not_supported 로 거절한다", async () => {
-    const fetchSpy = vi.fn();
+  it("http 클라이언트: 가정 · 결정 · 반영 읽기와 쓰기 7개가 각자 정해진 경로로 요청을 보내고 not_supported 를 내지 않는다 (SEL-100 이 SEL-94 의 '서버에 아직 없음'을 뒤집음)", async () => {
+    const seen: string[] = [];
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(`${(init?.method ?? "GET").toUpperCase()} ${new URL(String(input), "http://app.invalid").pathname}`);
+      return new Response(JSON.stringify({ format_version: FORMAT_VERSION, request_id: "r", error: { code: "not_found", message: "없음(시험)", retryable: false, next_action: "reread_context" } }), { status: 404 });
+    });
     const http = createHttpClient({ session: "s", projects: { demo: "p-1" }, fetch: fetchSpy as unknown as typeof fetch });
     const base = { base_version_id: "x-v1" };
-    const calls: Promise<unknown>[] = [
-      http.getAssumptions("demo", 1),
-      http.getDecisions("demo", 1),
-      http.getReflections("demo", 1, "research", "1"),
-      http.assessAssumption("demo", 1, "as-1", { verdict: "confirm", rationale: "", ...base }, "k"),
-      http.adoptDecision("demo", 1, "dec-1", { rationale: "", ...base }, "k"),
-      http.supersedeDecision("demo", 1, "dec-1", { statement: "s", rationale: "r", ...base }, "k"),
-      http.revokeDecision("demo", 1, "dec-1", { rationale: "r", ...base }, "k"),
+    const P = "/api/v1/projects/p-1";
+    // 결정 쓰기 셋은 먼저 그 판의 결정 목록을 읽어 scope 를 알아낸다(없는 결정이라 POST 없이 not_found) — 첫 요청이 그 사전 읽기다
+    const cases: Array<[string, () => Promise<unknown>, string]> = [
+      ["getAssumptions", () => http.getAssumptions("demo", 1), `GET ${P}/assumptions`],
+      ["getDecisions", () => http.getDecisions("demo", 1), `GET ${P}/decisions`],
+      ["getReflections", () => http.getReflections("demo", 1, "research", "1"), `GET ${P}/reflections`],
+      ["assessAssumption", () => http.assessAssumption("demo", 1, "as-1", { verdict: "confirm", rationale: "", ...base }, "k"), `POST ${P}/assumptions`],
+      ["adoptDecision", () => http.adoptDecision("demo", 1, "dec-1", { rationale: "", ...base }, "k"), `GET ${P}/decisions`],
+      ["supersedeDecision", () => http.supersedeDecision("demo", 1, "dec-1", { statement: "s", rationale: "r", ...base }, "k"), `GET ${P}/decisions`],
+      ["revokeDecision", () => http.revokeDecision("demo", 1, "dec-1", { rationale: "r", ...base }, "k"), `GET ${P}/decisions`],
     ];
-    for (const c of calls) await expect(c).rejects.toMatchObject({ name: "PesApiError", body: { error: { code: "not_supported", retryable: false } } });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    for (const [name, call, expected] of cases) {
+      seen.length = 0;
+      const outcome = await call().then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(seen[0], `${name} 의 첫 요청`).toBe(expected);
+      if (outcome !== null) {
+        expect(outcome).toBeInstanceOf(PesApiError);
+        expect((outcome as PesApiError).body.error.code, `${name} 는 not_supported 를 내지 않는다(서버 404 = not_found 만)`).not.toBe("not_supported");
+      }
+    }
   });
 });
 
