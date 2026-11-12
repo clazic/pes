@@ -167,10 +167,12 @@ test("B3 control — the same probe in a home that is NOT the account home runs,
 // ---------------------------------------------------------------------------
 // C · the entry points
 
-test("C1 npm test goes through the entry: package.json's test script has --import ./tests/helpers/require_temp_home.ts", () => {
+test("C1 npm test goes through the entry: package.json's test script is the runner (SEL-106), which passes --import ./tests/helpers/require_temp_home.ts", async () => {
   const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { scripts: Record<string, string> };
-  const script = pkg.scripts.test;
-  assert.match(script, /--import \.\/tests\/helpers\/require_temp_home\.ts\b/);
+  assert.equal(pkg.scripts.test, "node scripts/run_tests.ts");
+  const { build_node_args } = await import("../scripts/run_tests.ts");
+  const args: string[] = build_node_args({}, [], 4);
+  assert.deepEqual(args.slice(0, 2), ["--import", "./tests/helpers/require_temp_home.ts"], "the runner's node arguments start with the entry");
   assert.ok(existsSync(ENTRY));
 });
 
