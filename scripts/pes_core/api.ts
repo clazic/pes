@@ -53,6 +53,7 @@ import {
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_rows, material_version_denied, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
+import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
@@ -340,6 +341,11 @@ const CREATED_ACTIONS = new Set([
   "decision.revoked",
   "reflection.created",
   "file.material_uploaded",
+  "annotation.create",
+  "annotation.reanchor",
+  "thread.reply",
+  "thread.resolve",
+  "followup.propose",
 ]);
 const ACCEPTED_ACTIONS = new Set(["run.interrupted", "run.cancelled"]);
 
@@ -714,6 +720,36 @@ export class ApiApp {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#thread_message(r, project, auth),
       }),
+      // SEL-99 U4a: selection comments and follow-ups. A token (with a lease) may comment, reply, re-judge an anchor and PROPOSE;
+      // resolving a thread, adopting a follow-up and pinning an anchor to a stretch are the owner session's (403 human_required).
+      route("GET", `${P}/threads`, "threads.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#threads_read(r, project),
+      }),
+      route("GET", `${P}/threads/{t}`, "threads.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#thread_read(r, project),
+      }),
+      route("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create", {
+        who: "human",
+        act: async (r, project, auth) => this.#thread_resolve(r, project, auth),
+      }),
+      route("POST", `${P}/threads/{t}/reanchor`, "threads.reanchor", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#thread_reanchor(r, project, auth),
+      }),
+      route("GET", `${P}/followups`, "followups.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#followups_read(r, project),
+      }),
+      route("POST", `${P}/followups`, "followups.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#followup_create(r, project, auth),
+      }),
+      route("POST", `${P}/followups/{f}/apply`, "followups.apply", {
+        who: "human",
+        act: async (r, project, auth) => this.#followup_apply(r, project, auth),
+      }),
       route("POST", `${P}/submissions`, "submissions.create", {
         who: "human",
         act: async (r, project, auth) => this.#submissions(r, project, auth),
@@ -798,10 +834,8 @@ export class ApiApp {
         act: async (r, project, auth) => this.#file_ai_access_set(r, project, auth),
       }),
       unsupported("POST", `${P}/exports`, "exports.create"),
-      unsupported("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create"),
       unsupported("POST", `${P}/editions`, "editions.create"),
       unsupported("POST", `${P}/agent-tokens`, "agent_tokens.create"),
-      unsupported("POST", `${P}/followups/{f}/apply`, "followups.apply"),
       unsupported("DELETE", P, "projects.delete"),
     ];
   }
@@ -3423,18 +3457,96 @@ export class ApiApp {
     return value;
   }
 
-  /** SEL-90: POST P/threads — a comment thread on a question (annotation threads stay 501 until U4a). */
+  /**
+   * The API error of a thread / follow-up core refusal: the reasons the core carries (quote_not_found, thread_closed, basis_changed ...)
+   * become the documented codes, targets and next actions. `no_text_target` names the field when a version has no text to quote.
+   */
+  #thread_failure(error: unknown, no_text_target = "$.body.target_version_id"): Fail {
+    if (error instanceof ApiError && error.code === "invalid_payload" && is_record(error.details)) {
+      const reason = error.details.reason;
+      const target_version_id = error.details.target_version_id;
+      switch (reason) {
+        case "quote_not_found":
+        case "ambiguous_quote":
+          return new Fail("validation_failed", {
+            target: "$.body.anchor.exact_quote",
+            details: { reason, target_version_id: typeof target_version_id === "string" ? target_version_id : null },
+            next_action: "choose_exact_quote",
+          });
+        case "anchor_length_mismatch":
+          return new Fail("validation_failed", { target: "$.body.anchor", details: { reason } });
+        case "target_not_text":
+          return new Fail("validation_failed", { target: "$.body.target_object_id", details: { reason } });
+        case "no_text":
+          return new Fail("validation_failed", { target: no_text_target, details: { reason } });
+        case "range_empty":
+        case "range_outside":
+          return new Fail("validation_failed", { target: "$.body.end_cp", details: { reason } });
+        case "followup_kind":
+          return new Fail("validation_failed", { target: "$.body.followup.kind", details: { reason } });
+        case "followup_required":
+        case "followup_not_allowed":
+          return new Fail("validation_failed", { target: "$.body.followup", details: { reason } });
+        case "no_anchor":
+          return new Fail("validation_failed", { target: "$.path.thread_id", details: { reason } });
+        case "no_proposed_text":
+          return new Fail("validation_failed", { target: "$.path.followup_id", details: { reason } });
+        default:
+          break;
+      }
+    }
+    const failure = fail_from(error);
+    switch (failure.code) {
+      case "thread_closed":
+      case "already_resolved":
+        return new Fail(failure.code, { target: "$.path.thread_id", details: failure.details });
+      case "basis_changed":
+        return new Fail(failure.code, { target: "$.body.base_version_id", details: failure.details });
+      default:
+        return failure;
+    }
+  }
+
+  /** The anchor of a selection comment, as the API reads it (shape only; where the quote stands is the core's). */
+  #anchor_input(value: unknown): Record<string, unknown> {
+    if (!is_record(value)) invalid("$.body.anchor");
+    for (const key of Object.keys(value)) {
+      if (!["exact_quote", "prefix", "suffix", "start_cp", "end_cp"].includes(key)) invalid(`$.body.anchor.${key}`);
+    }
+    const quote = value.exact_quote;
+    if (typeof quote !== "string" || !quote.isWellFormed()) invalid("$.body.anchor.exact_quote");
+    if (quote.trim().length === 0) validation("$.body.anchor.exact_quote", { reason: "empty" });
+    const out: Record<string, unknown> = { exact_quote: quote };
+    for (const field of ["prefix", "suffix"]) {
+      const text = value[field];
+      if (text === undefined || text === null) continue;
+      if (typeof text !== "string" || !text.isWellFormed()) invalid(`$.body.anchor.${field}`);
+      out[field] = text;
+    }
+    for (const field of ["start_cp", "end_cp"]) {
+      const position = value[field];
+      if (position === undefined || position === null) continue;
+      if (typeof position !== "number" || !Number.isSafeInteger(position) || position < 0) invalid(`$.body.anchor.${field}`);
+      out[field] = position;
+    }
+    if ((out.start_cp === undefined) !== (out.end_cp === undefined)) invalid("$.body.anchor");
+    return out;
+  }
+
+  /** SEL-90 / SEL-99: POST P/threads — a comment thread on a question (question_comment) or on a stretch of a text (annotation). */
   async #thread_create(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    if (body.context_kind === "annotation") throw new Fail("not_supported");
     reject_unknown(
       body,
-      ["target_object_id", "target_version_id", "context_kind", "initial_message", "run_id", "lease_id", "fence"]);
+      ["target_object_id", "target_version_id", "context_kind", "anchor", "initial_message", "run_id", "lease_id", "fence"]);
     const target_object_id = require_text(body, "target_object_id");
     const target_version_id = optional_text(body, "target_version_id");
     if (body.context_kind === undefined) invalid_field("context_kind");
-    if (body.context_kind !== "question_comment") validation("$.body.context_kind");
+    if (body.context_kind !== "question_comment" && body.context_kind !== "annotation") validation("$.body.context_kind");
+    const annotation = body.context_kind === "annotation";
+    if (!annotation && body.anchor !== undefined) invalid("$.body.anchor");
+    const anchor = annotation ? this.#anchor_input(body.anchor) : null;
     const initial = body.initial_message;
     if (!is_record(initial)) invalid("$.body.initial_message");
     for (const field of Object.keys(initial)) {
@@ -3442,6 +3554,24 @@ export class ApiApp {
     }
     const body_md = this.#comment_body(initial.body_md, "$.body.initial_message.body_md");
     const guard = this.#guard_fields(body);
+    if (anchor !== null) {
+      const payload: Record<string, unknown> = { target_object_id, body_md, anchor };
+      if (target_version_id !== undefined) payload.target_version_id = target_version_id;
+      if (guard !== null && !auth.session) Object.assign(payload, guard);
+      const out = await this.#exec(
+        () => this.#service.execute(this.#ctx(project, auth, key), "annotation.create", payload),
+        (error) => this.#thread_failure(error),
+      );
+      const result = result_record(out.result);
+      return {
+        status: 201,
+        data: {
+          thread: { id: result.thread_id, state: "open", anchor_id: result.anchor_id, anchor_status: result.anchor_status },
+          message: { id: result.message_id, version_no: "1" },
+        },
+        replayed: out.replayed,
+      };
+    }
     const payload: Record<string, unknown> = { question_id: target_object_id, body_md };
     if (target_version_id !== undefined) payload.question_version_id = target_version_id;
     if (guard !== null && !auth.session) Object.assign(payload, guard);
@@ -3457,7 +3587,7 @@ export class ApiApp {
     };
   }
 
-  /** SEL-90: POST P/threads/{t}/messages — one more message in a question's comment thread. */
+  /** SEL-90 / SEL-99: POST P/threads/{t}/messages — one more message in a thread (a question's comment thread, or a selection comment). */
   async #thread_message(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
@@ -3466,22 +3596,247 @@ export class ApiApp {
     const body_md = this.#comment_body(body.body_md, "$.body.body_md");
     const reply_to = optional_text(body, "reply_to");
     const guard = this.#guard_fields(body);
-    const thread = this.#db.get<{ target_object_id: string; context_kind: string }>(
-      "SELECT target_object_id, context_kind FROM threads WHERE project_id = ? AND object_id = ?",
-      project.id,
-      thread_id,
-    );
-    if (thread === undefined || thread.context_kind !== "question_comment") throw new Fail("not_found");
-    const payload: Record<string, unknown> = { question_id: thread.target_object_id, thread_id, body_md };
+    // the same route the A thread.reply tool takes (thread_reply_route): one command per kind of thread
+    const route = thread_reply_route(this.#db, project.id, thread_id);
+    if (route === undefined) throw new Fail("not_found");
+    if (route.command === "thread.reply") {
+      const payload: Record<string, unknown> = { thread_id, body_md };
+      if (reply_to !== undefined) payload.reply_to = reply_to;
+      if (guard !== null && !auth.session) Object.assign(payload, guard);
+      const out = await this.#exec(
+        () => this.#service.execute(this.#ctx(project, auth, key), "thread.reply", payload),
+        (error) => this.#thread_failure(error),
+      );
+      const result = result_record(out.result);
+      return {
+        status: 201,
+        data: { thread_id, message: { id: result.message_id, version_no: "1", author_actor_id: auth.actor_id } },
+        replayed: out.replayed,
+      };
+    }
+    const payload: Record<string, unknown> = { question_id: route.question_id, thread_id, body_md };
     if (reply_to !== undefined) payload.reply_to = reply_to;
     if (guard !== null && !auth.session) Object.assign(payload, guard);
-    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload));
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload),
+      (error) => this.#thread_failure(error),
+    );
     const result = result_record(out.result);
     return {
       status: 201,
       data: { message: { id: result.message_id, version_no: "1", thread_id } },
       replayed: out.replayed,
     };
+  }
+
+  /** SEL-99: POST P/threads/{t}/resolutions — the owner closes a thread; a change to be made becomes a PROPOSED follow-up (resolved is not applied). */
+  async #thread_resolve(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["resolution", "reason", "followup"]);
+    const thread_id = request.params[1] as string;
+    const resolution = body.resolution;
+    if (typeof resolution !== "string") invalid_field("resolution");
+    if (!["edit_text", "next_round_task", "reopen_stage", "none"].includes(resolution)) validation("$.body.resolution");
+    const reason = body.reason;
+    if (typeof reason !== "string" || !reason.isWellFormed()) invalid_field("reason");
+    if (reason.trim().length === 0) validation("$.body.reason", { reason: "empty" });
+    const payload: Record<string, unknown> = { thread_id, resolution, reason };
+    const raw = body.followup;
+    if (raw !== undefined && raw !== null) {
+      if (!is_record(raw)) invalid("$.body.followup");
+      for (const field of Object.keys(raw)) {
+        if (!["kind", "description", "proposed_body_md", "target_version_id", "target_stage_id", "target_round_id"].includes(field)) invalid(`$.body.followup.${field}`);
+      }
+      if (typeof raw.kind !== "string") invalid("$.body.followup.kind");
+      if (raw.kind !== resolution) validation("$.body.followup.kind", { reason: "followup_kind" });
+      for (const [field, value] of Object.entries(raw)) {
+        if (value !== null && (typeof value !== "string" || !value.isWellFormed())) invalid(`$.body.followup.${field}`);
+      }
+      payload.followup = raw;
+    }
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "thread.resolve", payload),
+      (error) => this.#thread_failure(error),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        thread: { id: thread_id, state: "resolved" },
+        followup: typeof result.followup_id === "string" ? { id: result.followup_id, state: "proposed" } : null,
+        applied: false,
+        note: "해결됨과 반영됨은 다릅니다.",
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-99: POST P/threads/{t}/reanchor — judge the anchor again (a person or a leased agent), or pin it to a stretch (the owner session only). */
+  async #thread_reanchor(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["version_id", "start_cp", "end_cp", "run_id", "lease_id", "fence"]);
+    const thread_id = request.params[1] as string;
+    const given = (field: string): boolean => body[field] !== undefined && body[field] !== null;
+    if ((given("start_cp") || given("end_cp")) && !auth.session) {
+      throw new Fail("human_required", { target: "$.headers.Authorization", details: { actor_kind: auth.kind, required: "human_owner" } });
+    }
+    const payload: Record<string, unknown> = { thread_id };
+    const version_id = optional_text(body, "version_id");
+    if (version_id !== undefined) payload.version_id = version_id;
+    for (const field of ["start_cp", "end_cp"]) {
+      if (!given(field)) continue;
+      const value = body[field];
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid_field(field);
+      payload[field] = value;
+    }
+    const guard = this.#guard_fields(body);
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "annotation.reanchor", payload),
+      (error) => this.#thread_failure(error, "$.body.version_id"),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        thread_id,
+        anchor: {
+          id: result.anchor_id,
+          status: result.status,
+          start_cp: result.start_cp,
+          end_cp: result.end_cp,
+          candidates: result.candidates,
+          evaluated_version_id: result.evaluated_version_id,
+          resolution_id: result.resolution_id,
+          confirmed_by_actor_id: result.confirmed_by_actor_id,
+        },
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-99: POST P/followups — propose a follow-up of a thread (a person or a leased agent; a proposal is never an adoption). */
+  async #followup_create(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, [
+      "origin_thread_id",
+      "kind",
+      "description",
+      "proposed_body_md",
+      "base_version_id",
+      "target_stage_id",
+      "target_round_id",
+      "run_id",
+      "lease_id",
+      "fence",
+    ]);
+    const origin_thread_id = require_text(body, "origin_thread_id");
+    const kind = body.kind;
+    if (typeof kind !== "string") invalid_field("kind");
+    if (!["edit_text", "next_round_task", "reopen_stage", "none"].includes(kind)) validation("$.body.kind");
+    const description = body.description;
+    if (typeof description !== "string" || !description.isWellFormed()) invalid_field("description");
+    if (description.trim().length === 0) validation("$.body.description", { reason: "empty" });
+    const payload: Record<string, unknown> = { origin_thread_id, kind, description };
+    for (const field of ["proposed_body_md", "base_version_id", "target_stage_id", "target_round_id"]) {
+      const value = body[field];
+      if (value === undefined || value === null) continue;
+      if (typeof value !== "string" || !value.isWellFormed()) invalid_field(field);
+      payload[field] = value;
+    }
+    const guard = this.#guard_fields(body);
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "followup.propose", payload),
+      (error) => this.#thread_failure(error),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: { followup: { id: result.followup_id, kind: result.kind, state: "proposed", version_no: "1", base_version_id: result.base_version_id ?? null } },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-99: POST P/followups/{f}/apply — the owner adopts a follow-up; an edit becomes a new version of the text (the thread is not resolved by it). */
+  async #followup_apply(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["base_version_id", "expected_rev"]);
+    const followup_id = request.params[1] as string;
+    const base_version_id = require_text(body, "base_version_id");
+    const expected_rev = parse_decimal(body.expected_rev, "$.body.expected_rev");
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "followup.apply", { followup_id, base_version_id, expected_rev }),
+      (error) => {
+        const failure = this.#thread_failure(error);
+        return failure.code === "rev_conflict"
+          ? new Fail("rev_conflict", { target: "$.body.expected_rev", details: failure.details, next_action: "reread_followup" })
+          : failure;
+      },
+    );
+    const result = result_record(out.result);
+    return {
+      status: 200,
+      data: {
+        followup: { id: followup_id, state: "applied", applied_tx_id: result.applied_tx_id, result_version_id: result.result_version_id ?? null },
+        thread: typeof result.thread_id === "string" ? { id: result.thread_id, state: result.thread_state } : null,
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** GET P/threads?target_object_id=&context_kind=&state= */
+  async #threads_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const filter: { target_object_id?: string; context_kind?: string; state?: string } = {};
+    const target = request.query.get("target_object_id");
+    if (target !== null) {
+      if (target.length === 0) invalid("$.query.target_object_id");
+      filter.target_object_id = target;
+    }
+    const context_kind = request.query.get("context_kind");
+    if (context_kind !== null) {
+      if (!THREAD_CONTEXT_KINDS.includes(context_kind)) invalid("$.query.context_kind");
+      filter.context_kind = context_kind;
+    }
+    const state = request.query.get("state");
+    if (state !== null) {
+      if (!THREAD_STATES.includes(state)) invalid("$.query.state");
+      filter.state = state;
+    }
+    return { status: 200, data: { threads: read_tx(this.#db, () => thread_rows(this.#db, project.id, filter)) } };
+  }
+
+  /** GET P/threads/{t} */
+  async #thread_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const thread_id = request.params[1] as string;
+    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id));
+    if (detail === undefined) throw new Fail("not_found", { target: "$.path.thread_id" });
+    return { status: 200, data: detail };
+  }
+
+  /** GET P/followups?thread_id=&state=&kind= */
+  async #followups_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const filter: { thread_id?: string; state?: string; kind?: string } = {};
+    const thread_id = request.query.get("thread_id");
+    if (thread_id !== null) {
+      if (thread_id.length === 0) invalid("$.query.thread_id");
+      filter.thread_id = thread_id;
+    }
+    const state = request.query.get("state");
+    if (state !== null) {
+      if (!FOLLOWUP_STATES.includes(state)) invalid("$.query.state");
+      filter.state = state;
+    }
+    const kind = request.query.get("kind");
+    if (kind !== null) {
+      if (!FOLLOWUP_KINDS.includes(kind)) invalid("$.query.kind");
+      filter.kind = kind;
+    }
+    return { status: 200, data: { followups: read_tx(this.#db, () => followup_rows(this.#db, project.id, filter)) } };
   }
 
   // -------------------------------------------------------------------------

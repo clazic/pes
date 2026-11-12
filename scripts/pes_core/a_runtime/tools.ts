@@ -6,6 +6,7 @@
 
 import type { CommandService, MutationContext } from "../commands.ts";
 import { ai_material_rows } from "../commands/file_access.ts";
+import { thread_reply_route } from "../commands/thread_reads.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
@@ -31,7 +32,7 @@ const TEXT_ARG = {
 };
 
 export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
-  { name: "context.get", description: "Read the project, stage, round, current objects, the user's allowed materials and questions.", parameters: { type: "object", properties: {} } },
+  { name: "context.get", description: "Read the project, stage, round, current objects, materials and questions.", parameters: { type: "object", properties: {} } },
   {
     name: "result.submit",
     description: "Append new versions to existing artifact objects. Each item: op=append_version, object_id, title, summary, body_md.",
@@ -58,9 +59,26 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
       "Write the round reflection. Entry: source_version_id, disposition, rationale; applied/partial add result_version_id, evidence_tx_id.",
     parameters: { type: "object", properties: { entries: { type: "array", items: { type: "object" } } }, required: ["entries"] },
   },
-  // thread.reply stays on the allowlist above (decision 0013) but is NOT offered to a model yet: no PES command backs
-  // it, so every call would only come back as an error and waste a turn. Add its spec here when the command exists.
-  { name: "followup.propose", description: "Propose a follow-up task for a person.", parameters: TEXT_ARG },
+  {
+    name: "thread.reply",
+    description: "Reply in a comment thread.",
+    parameters: { type: "object", properties: { thread_id: { type: "string" }, text: { type: "string" }, reply_to: { type: "string" } }, required: ["thread_id", "text"] },
+  },
+  {
+    name: "followup.propose",
+    description: "Propose a follow-up (a note, or with thread_id a follow-up of that thread). edit_text needs proposed_body_md; next_round_task and reopen_stage need target_stage_id.",
+    parameters: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string" },
+        text: { type: "string" },
+        kind: { type: "string", enum: ["edit_text", "next_round_task", "reopen_stage", "none"] },
+        proposed_body_md: { type: "string" },
+        target_stage_id: { type: "string" },
+      },
+      required: ["text"],
+    },
+  },
 ]);
 
 const RESULT_TEXT_MAX = 4000;
@@ -234,6 +252,26 @@ function note_text(call: ToolCall, args: Record<string, unknown>): string | null
   return `${NOTE_LABEL[call.name] ?? ""}\n${title}${text.trim()}`.slice(0, 8000);
 }
 
+/** The lease of the run: a thread command is written under it (an agent may comment or propose only while it holds the lease). */
+function lease_of(env: ToolEnv): { run_id: string; lease_id: string; fence: number } {
+  return { run_id: env.run.run_id, lease_id: env.run.lease_id, fence: env.run.fence };
+}
+
+/** A plain note (a follow-up without a thread): the older behaviour of followup.propose. */
+async function write_note(env: ToolEnv, call: ToolCall, args: Record<string, unknown>, key: string): Promise<ToolOutcome> {
+  const text = note_text(call, args);
+  if (text === null) return refused(call, "text must be a non-empty string");
+  const stage_key =
+    env.run.stage_id === null
+      ? undefined
+      : env.db.get<{ key: string }>("SELECT key FROM stages WHERE project_id = ? AND id = ?", env.run.project_id, env.run.stage_id)?.key;
+  const out = (await execute_with_retries(env, "project.add_note", key, {
+    text,
+    ...(stage_key === undefined ? {} : { stage: stage_key }),
+  })) as { object_id: string };
+  return ok(call, { recorded_as: out.object_id });
+}
+
 /**
  * Run one tool call. A name outside the allowlist, bad arguments or a PES refusal come back as an error result
  * for the model; the loop goes on. Only an unsaveable answer throws (SaveFailedError).
@@ -276,8 +314,46 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
         })) as { set_id: string };
         return ok(call, { question_set_id: out.set_id, note: "waiting for a person to answer" }, { kind: "wait", question_set_id: out.set_id });
       }
-      case "thread.reply":
-        return refused(call, "thread.reply is not connected to a PES command in this version");
+      case "thread.reply": {
+        const thread_id = args["thread_id"];
+        const text = args["text"];
+        if (typeof thread_id !== "string" || thread_id.length === 0) return refused(call, "thread_id must be a non-empty string");
+        if (typeof text !== "string") return refused(call, "text must be a string");
+        const reply_to = args["reply_to"];
+        if (reply_to !== undefined && reply_to !== null && typeof reply_to !== "string") return refused(call, "reply_to must be a string");
+        // the same route as B (POST P/threads/{t}/messages): a question comment thread takes question.comment_add
+        const route = thread_reply_route(env.db, env.run.project_id, thread_id);
+        const out = (await execute_with_retries(env, route?.command ?? "thread.reply", key, {
+          ...(route?.command === "question.comment_add" ? { question_id: route.question_id } : {}),
+          thread_id,
+          body_md: text,
+          ...(typeof reply_to === "string" ? { reply_to } : {}),
+          ...lease_of(env),
+        })) as { message_id: string; message_version_id: string };
+        return ok(call, { thread_id, message_id: out.message_id, message_version_id: out.message_version_id });
+      }
+      case "followup.propose": {
+        const thread_id = args["thread_id"];
+        // with a thread: a real follow-up (a proposal; the text, the thread and the reflection stay as they are)
+        if (thread_id !== undefined && thread_id !== null) {
+          if (typeof thread_id !== "string" || thread_id.length === 0) return refused(call, "thread_id must be a non-empty string");
+          const text = args["text"];
+          if (typeof text !== "string") return refused(call, "text must be a string");
+          const kind = args["kind"] === undefined || args["kind"] === null ? "none" : args["kind"];
+          const payload: Record<string, unknown> = { origin_thread_id: thread_id, kind, description: text };
+          for (const field of ["proposed_body_md", "target_stage_id", "target_round_id"]) {
+            const value = args[field];
+            if (value !== undefined && value !== null) payload[field] = value;
+          }
+          const out = (await execute_with_retries(env, "followup.propose", key, { ...payload, ...lease_of(env) })) as {
+            followup_id: string;
+            version_id: string;
+            kind: string;
+          };
+          return ok(call, { thread_id, followup_id: out.followup_id, kind: out.kind, state: "proposed", note: "a person must adopt it" });
+        }
+        return await write_note(env, call, args, key);
+      }
       case "assumption.propose": {
         const text = args["text"];
         if (typeof text !== "string" || text.trim().length === 0) return refused(call, "text must be a non-empty string");
@@ -311,19 +387,8 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
         };
         return ok(call, { count: out.count, applied_count: out.applied_count, partial_count: out.partial_count });
       }
-      default: {
-        const text = note_text(call, args);
-        if (text === null) return refused(call, "text must be a non-empty string");
-        const stage_key =
-          env.run.stage_id === null
-            ? undefined
-            : env.db.get<{ key: string }>("SELECT key FROM stages WHERE project_id = ? AND id = ?", env.run.project_id, env.run.stage_id)?.key;
-        const out = (await execute_with_retries(env, "project.add_note", key, {
-          text,
-          ...(stage_key === undefined ? {} : { stage: stage_key }),
-        })) as { object_id: string };
-        return ok(call, { recorded_as: out.object_id });
-      }
+      default:
+        return refused(call, "this tool is not available");
     }
   } catch (error) {
     if (error instanceof ApiError) return refused(call, `${error.code}: ${error.message}`);

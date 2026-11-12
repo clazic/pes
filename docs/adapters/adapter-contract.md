@@ -1,17 +1,17 @@
 # 어댑터 계약 — 방식 B (AI 도구가 PES에 접속해 일한다)
 
-방식 B는 사람이 직접 켠 AI 도구(Claude Code, Codex CLI, OpenCode TUI)가 PES의 로컬 API로 일하는 방식이다. 이 문서는 도구마다 달라지지 않는 **공통 계약**이다. 도구별 차이는 [claude-code.md](claude-code.md)·[claude-app.md](claude-app.md)·[codex.md](codex.md)·[opencode-tui.md](opencode-tui.md)에 적는다. 구현은 `scripts/pes_core/mcp_server.ts`(MCP 도구 14개)와 `scripts/pes_core/adapters/`다.
+방식 B는 사람이 직접 켠 AI 도구(Claude Code, Codex CLI, OpenCode TUI)가 PES의 로컬 API로 일하는 방식이다. 이 문서는 도구마다 달라지지 않는 **공통 계약**이다. 도구별 차이는 [claude-code.md](claude-code.md)·[claude-app.md](claude-app.md)·[codex.md](codex.md)·[opencode-tui.md](opencode-tui.md)에 적는다. 구현은 `scripts/pes_core/mcp_server.ts`(MCP 도구 16개)와 `scripts/pes_core/adapters/`다.
 
 이 문서의 JSON 예시는 시험이 그대로 실행한다(「문서만 보고 재현」). 예시를 고치면 같은 PR에서 시험이 맞는지 확인한다.
 
 ## 1. 한눈에
 
-- AI 도구는 **MCP 서버**가 내놓는 **닫힌 도구 14개**로만 PES를 읽고 쓴다. 승인·재개방·봉인·정책 바꾸기·프로젝트 등록·토큰 만들기 도구는 **없다** — 그것은 사람의 일이다. 가정을 확인·반려하거나 결정을 채택·대체·폐기하는 도구도 **없다**: 세 도구(`pes_assumption_propose`·`pes_decision_propose`·`pes_reflection_write`)는 제안하거나 반영 내역을 쓸 뿐이다.
+- AI 도구는 **MCP 서버**가 내놓는 **닫힌 도구 16개**로만 PES를 읽고 쓴다. 승인·재개방·봉인·정책 바꾸기·프로젝트 등록·토큰 만들기 도구는 **없다** — 그것은 사람의 일이다. 가정을 확인·반려하거나 결정을 채택·대체·폐기하는 도구도 **없다**: 세 도구(`pes_assumption_propose`·`pes_decision_propose`·`pes_reflection_write`)는 제안하거나 반영 내역을 쓸 뿐이다. 스레드를 해결하거나 후속을 채택하거나 앵커를 다시 붙이는 도구도 **없다**(3단계 U4a는 사람만, 에이전트 적용은 후속): 두 도구(`pes_thread_reply`·`pes_followup_propose`)는 답글을 달거나 후속을 제안할 뿐이다.
 - MCP 서버는 프로젝트 **에이전트 토큰**을 메모리에만 들고, 자기 API 호출의 `Authorization` 헤더에만 쓴다. 클라이언트로 돌려주는 어떤 답에도, 어떤 파일에도 토큰을 쓰지 않는다. 표준 출력에는 JSON-RPC 줄만 나간다.
 - 무엇을 할 수 있는지는 PES API가 정한다(토큰 범위·소유자 세션·정책). 도구가 대신 판단하지 않는다. PES가 거부하면 도구 결과는 `isError: true`이고 내용은 API 오류 그대로다(`code`, 한국어 `message`, `retryable`, `target`, `next_action`).
 - 결과 제출은 **승인이 아니다**. `pes_complete`도 단계를 승인하거나 봉인하지 않는다.
 
-## 2. 도구 14개
+## 2. 도구 16개
 
 읽기 도구 `pes_context`·`pes_read`를 뺀 모든 도구가 `idempotency_key`(비어 있지 않은 문자열)를 받는다. API의 `Idempotency-Key`로 그대로 간다.
 
@@ -31,6 +31,8 @@
 | `pes_assumption_propose` | 가정 하나를 제안 `{statement, rationale?}`. 제안일 뿐이다: 사람이 확인하기 전에는 `needs_review`이고, 확인·반려·수정은 사람 소유자만 한다. lease가 필요 없다(토큰의 `run:submit` 범위) | `POST /assumptions` (`state: "proposed"`) |
 | `pes_decision_propose` | 결정 하나를 제안 `{statement, scope(project\|edition), rationale?}`. 제안은 채택이 아니다: 채택·대체·폐기는 사람 소유자만 한다. lease가 필요 없다 | `POST /decisions` (`state: "proposed"`) |
 | `pes_reflection_write` | 한 라운드의 반영 내역 `{target_round_id, entries:[{source_version_id, disposition, rationale, result_version_id?, followup_id?, evidence_tx_id?}]}`. `applied`·`partial`은 증거가 있어야 한다(`evidence_tx_id`가 결과 버전을 만든 tx, 또는 그 tx로 적용된 후속): 없으면 `evidence_required`, 안 맞으면 `validation_failed`. `entries`가 빈 배열이면 "0건 제출"이다. lease가 필요 없다 | `POST /reflections` |
+| `pes_thread_reply` | 댓글 스레드(구간 첨언·질문 의견)에 답글 `{thread_id, body_md, reply_to?}`. 답글일 뿐이다: 스레드를 해결하는 것은 사람만 한다. 닫힌 스레드는 `thread_closed`(409). **lease가 필요하다**(없으면 403 `forbidden`) | `POST /threads/{t}/messages` |
+| `pes_followup_propose` | 스레드의 후속 조치를 제안 `{thread_id, kind, description, proposed_body_md?, base_version_id?, target_stage_id?, target_round_id?}`. 제안일 뿐이다(글·스레드·반영 내역은 그대로, `edit_text`는 현재가 아닌 새 버전으로 저장): 채택은 사람 소유자만 한다. **lease가 필요하다** | `POST /followups` |
 
 ### 2.1 `idempotency_key` 규칙 (claim_required와 함께)
 

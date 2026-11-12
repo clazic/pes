@@ -17,6 +17,7 @@ import { ClaudeAppAdapter } from "../scripts/pes_core/adapters/claude_app.ts";
 import { SESSION_SECRET, assert_ok, call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
 import { with_cleanup } from "./helpers/adapter_b_flow.ts";
 import { P, http_blob, set_access, text_bytes, upload_material, wire_of } from "./helpers/sel115_env.ts";
+import { text_artifact } from "./helpers/sel99_env.ts";
 
 /** 제목 없이 올린 자료: title 기본값 = 파일 이름. */
 async function untitled_material(env: ApiEnv, label: string, marker: string, name: string) {
@@ -296,3 +297,44 @@ for (const kind of ["external_agent", "internal_ai"] as const) {
     });
   });
 }
+
+// SEL-99 합치기 점검: 스레드·앵커·후속 읽기와 첨언 쓰기는 글(artifact)만 대상이라 자료(source) 객체를 못 건드린다 — 닫힌 자료가
+// 있어도 이 새 출구들에 자료의 이름·id·해시·본문이 안 나가고, 자료 객체를 첨언 대상으로 삼으면 거절된다(스레드가 자료 id 를 싣는 길이 없다).
+test("SEL-99 출구: 스레드·후속 읽기·변경분에 deny 자료의 흔적이 없고, deny 자료 객체는 첨언 대상이 못 된다", async () => {
+  await with_api(async (env) => {
+    const secret = await untitled_material(env, "sel99", "SECRET-SEL99", "비공개-sel99.txt");
+    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+    const art = await text_artifact(env, "s99", "머리글\n\n근거는 부록 A 에 있다.\n");
+    const quote = "근거는 부록 A 에 있다.";
+    const made = await call(env, {
+      method: "POST",
+      path: P(env, "/threads"),
+      auth: "owner",
+      body: {
+        target_object_id: art.object_id,
+        target_version_id: art.version_id,
+        context_kind: "annotation",
+        anchor: { exact_quote: quote, start_cp: 5, end_cp: 5 + [...quote].length },
+        initial_message: { body_md: "첨언" },
+      },
+    });
+    const thread_id: string = assert_ok(made, 201).thread.id;
+
+    // 자료 객체는 첨언 대상이 아니다: 사람도 AI 도 422 target_not_text — 스레드·앵커 어디에도 자료 id 가 들어갈 길이 없다
+    const refused = await call(env, {
+      method: "POST",
+      path: P(env, "/threads"),
+      auth: "owner",
+      body: { target_object_id: secret.data.object_id, context_kind: "annotation", anchor: { exact_quote: "x" }, initial_message: { body_md: "첨언" } },
+    });
+    assert.equal(refused.status, 422, JSON.stringify(refused.json));
+    assert.equal(refused.json.error.details.reason, "target_not_text");
+
+    const agent = await make_agent(env, "sel99-sweep", ["context:read", "file:read"]);
+    for (const path of ["/threads", `/threads/${thread_id}`, "/followups", `/followups?thread_id=${thread_id}`, "/changes?limit=100", "/context", "/workspace"]) {
+      const res = await agent_get(env, agent.token, path);
+      assert.ok(res.status < 500, `${path} ${res.status}`);
+      assert_clean(wire_of(res), secret, `agent GET ${path}`);
+    }
+  });
+});
