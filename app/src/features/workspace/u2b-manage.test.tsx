@@ -178,8 +178,11 @@ describe("철회 · 보류 · 합치기 (지우지 않는다)", () => {
     failNext(timeoutError());
     await user.click(within(dlg).getByRole("button", { name: "철회 확정" }));
     expect(await within(dlg).findByRole("alert")).toBeInTheDocument();
-    expect(openOrder()).toContain("q-23");
     expect(calls("withdrawQuestion")).toHaveLength(1);
+    // 모달이라 열려 있는 동안 뒤 화면은 접근성 트리에서 빠진다 — 닫은 뒤 질문이 그대로 열려 있는지 본다
+    await user.click(within(dlg).getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "질문 23 철회" })).toBeNull());
+    expect(openOrder()).toContain("q-23");
   });
 
   it("대화 상자가 열려 있을 때 J/K 는 질문 이동이 아니다", async () => {
