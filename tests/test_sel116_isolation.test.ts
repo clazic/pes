@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { extract_text } from "../scripts/pes_core/file_extract.ts";
+import { PARSED_FORMATS, extract_text } from "../scripts/pes_core/file_extract.ts";
 import { extract_text_isolated } from "../scripts/pes_core/file_extract_isolated.ts";
 import { make_docx } from "./helpers/sel116_env.ts";
 
@@ -76,4 +76,17 @@ test("isolation: a source over the size limit is refused before any thread is st
   const out = extract_text_isolated("a.txt", new Uint8Array(32 * 1024 * 1024 + 1));
   assert.equal(out.status, "failed");
   assert.equal(out.reason, "too_large");
+});
+
+test("isolation: every format that extract_text really parses is in PARSED_FORMATS (so it never runs inline in the server thread)", () => {
+  const bytes = new TextEncoder().encode("PK\u0003\u0004 synthetic, long enough to be looked at");
+  const names = ["txt", "md", "csv", "docx", "xlsx", "pptx", "hwpx", "hwp", "doc", "xls", "ppt", "pdf", "rtf", "odt", "ods", "odp", "epub", "html", "json", "xml", "zip", "xyz", ""];
+  for (const ext of names) {
+    const out = extract_text(ext === "" ? "noext" : `a.${ext.toUpperCase()}`, bytes);
+    if (out.reason !== "unsupported_format") {
+      assert.ok(PARSED_FORMATS.has(ext), `.${ext} is parsed by extract_text (${out.status}/${out.reason}) but is not in PARSED_FORMATS`);
+    }
+  }
+  // and the other way: nothing listed there answers "unsupported"
+  for (const ext of PARSED_FORMATS) assert.notEqual(extract_text(`a.${ext}`, bytes).reason, "unsupported_format", ext);
 });

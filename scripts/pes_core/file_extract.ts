@@ -81,6 +81,13 @@ export type SourceFormat = "txt" | "md" | "csv" | "docx" | "xlsx" | "pptx" | "hw
 
 const KNOWN_FORMATS: ReadonlySet<string> = new Set(["txt", "md", "csv", "docx", "xlsx", "pptx", "hwpx", "hwp", "doc", "xls", "ppt", "pdf"]);
 
+/**
+ * Formats extract_text really parses (the cases of its switch). Every other format answers "unsupported" without reading a byte.
+ * file_extract_isolated.ts uses this one list to decide which files need a worker thread — a format added to the switch of
+ * extract_text must be added here, or it would run inline in the server thread (tests/test_sel116_isolation.test.ts checks it).
+ */
+export const PARSED_FORMATS: ReadonlySet<string> = new Set(["txt", "md", "csv", "docx", "xlsx", "pptx", "hwpx"]);
+
 /** The format is the lower-case extension of the original file name; anything else is "unknown". */
 export function format_of(original_name: string | null): SourceFormat {
   const name = original_name ?? "";

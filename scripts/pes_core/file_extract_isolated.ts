@@ -18,7 +18,7 @@
 import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { MAX_SOURCE_BYTES, extract_text, format_of, too_large_outcome, type ExtractOutcome } from "./file_extract.ts";
+import { MAX_SOURCE_BYTES, PARSED_FORMATS, extract_text, format_of, too_large_outcome, type ExtractOutcome } from "./file_extract.ts";
 import { FLAG_DONE, FLAG_OUT_OF_MEMORY, FLAG_PENDING, FLAG_TIMEOUT } from "./file_extract_flags.ts";
 
 /** Old-generation heap of the extraction thread. A 30万-row workbook needs well below this; a hostile file hits it quickly. */
@@ -33,9 +33,6 @@ const MAIN_WAIT_SLACK_MS = 5_000;
 
 const SUPERVISOR_URL = pathToFileURL(fileURLToPath(new URL("./file_extract_supervisor.ts", import.meta.url))).href;
 const WORKER_URL = pathToFileURL(fileURLToPath(new URL("./file_extract_worker.ts", import.meta.url))).href;
-
-/** Formats that are really parsed. The others answer "unsupported" without reading a byte, so they need no thread. */
-const PARSED_FORMATS: ReadonlySet<string> = new Set(["txt", "md", "csv", "docx", "xlsx", "pptx", "hwpx"]);
 
 function failed(code: string, message: string): ExtractOutcome {
   return { status: "failed", reason: code, text: null, page_count: null, table_count: 0, warnings: [{ code, message }] };
