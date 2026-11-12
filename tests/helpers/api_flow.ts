@@ -129,7 +129,10 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/claims",
   "POST /api/v1/projects/{id}/policies/opencode-go/revisions",
   "POST /api/v1/projects/{id}/questions",
+  "POST /api/v1/projects/{id}/questions/{q}/defer",
+  "POST /api/v1/projects/{id}/questions/{q}/merge",
   "POST /api/v1/projects/{id}/questions/{q}/revisions",
+  "POST /api/v1/projects/{id}/questions/{q}/withdraw",
   "POST /api/v1/projects/{id}/rounds/{rd}/seal",
   "POST /api/v1/projects/{id}/runs",
   "POST /api/v1/projects/{id}/runs/{r}/cancel",
@@ -145,6 +148,9 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/stages/{s}/reopen",
   "POST /api/v1/projects/{id}/stages/{s}/rounds",
   "POST /api/v1/projects/{id}/submissions",
+  // SEL-90 U2a: question comments (annotation context stays 501 until U4a)
+  "POST /api/v1/projects/{id}/threads",
+  "POST /api/v1/projects/{id}/threads/{t}/messages",
   "POST /api/v1/projects/{id}/uploads",
   "POST /api/v1/projects/{id}/uploads/{b}/complete",
   "PUT /api/v1/projects/{id}/uploads/{b}",
@@ -153,8 +159,7 @@ export const EXPECTED_ROUTES: readonly string[] = [
 /** Routes the closed 2단계 list does NOT have and capabilities must say are unsupported (no fake success). */
 export const EXPECTED_UNSUPPORTED: readonly string[] = [
   "POST /api/v1/projects/{id}/exports",
-  "POST /api/v1/projects/{id}/threads",
-  "POST /api/v1/projects/{id}/threads/{t}/messages",
+  "POST /api/v1/projects/{id}/threads/{t}/resolutions",
   "POST /api/v1/projects/{id}/assumptions",
   "POST /api/v1/projects/{id}/decisions",
   "POST /api/v1/projects/{id}/reflections",

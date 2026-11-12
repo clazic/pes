@@ -102,5 +102,52 @@
         }
       }
     }
-  }
+  },
+  "extra": [
+    {
+      "name": "question_comment",
+      "request": {
+        "path_params": {
+          "project_id": "prj_01J9Z3K7Q2"
+        },
+        "headers": {
+          "Cookie": "__Host-pes_session=${PES_SESSION}",
+          "X-CSRF-Token": "${PES_CSRF}",
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "idem_thread_qc_01J9Z3K7Q2"
+        },
+        "body": {
+          "format_version": "1.0",
+          "target_object_id": "qst_01J9Z3K7QB",
+          "target_version_id": "qvr_01J9Z3K7QC",
+          "context_kind": "question_comment",
+          "initial_message": {
+            "body_md": "이 질문은 범위가 모호합니다."
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "format_version": "1.0",
+          "request_id": "req_thread_qc_01J9Z3K7QN",
+          "data": {
+            "thread": {
+              "id": "thr_01J9Z3K7QH",
+              "state": "open"
+            },
+            "message": {
+              "id": "msg_01J9Z3K7Q2",
+              "version_no": "1",
+              "thread_id": "thr_01J9Z3K7QH"
+            }
+          }
+        }
+      }
+    }
+  ]
 }

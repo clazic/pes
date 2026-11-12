@@ -45,6 +45,9 @@
             "GET /api/v1/projects/{id}/requests/{key}",
             "POST /api/v1/projects/{id}/questions",
             "POST /api/v1/projects/{id}/questions/{q}/revisions",
+            "POST /api/v1/projects/{id}/questions/{q}/withdraw",
+            "POST /api/v1/projects/{id}/questions/{q}/defer",
+            "POST /api/v1/projects/{id}/questions/{q}/merge",
             "POST /api/v1/projects/{id}/submissions",
             "POST /api/v1/projects/{id}/stages/{s}/rounds",
             "POST /api/v1/projects/{id}/rounds/{rd}/seal",
@@ -54,12 +57,12 @@
             "POST /api/v1/projects/{id}/uploads",
             "PUT /api/v1/projects/{id}/uploads/{b}",
             "POST /api/v1/projects/{id}/uploads/{b}/complete",
-            "GET /api/v1/projects/{id}/files/{b}/content"
+            "GET /api/v1/projects/{id}/files/{b}/content",
+            "POST /api/v1/projects/{id}/threads",
+            "POST /api/v1/projects/{id}/threads/{t}/messages"
           ],
           "unsupported": [
             "POST /api/v1/projects/{id}/exports",
-            "POST /api/v1/projects/{id}/threads",
-            "POST /api/v1/projects/{id}/threads/{t}/messages",
             "POST /api/v1/projects/{id}/threads/{t}/resolutions",
             "POST /api/v1/projects/{id}/assumptions",
             "POST /api/v1/projects/{id}/decisions",
@@ -165,6 +168,15 @@
               "questions.revise": {
                 "supported": true
               },
+              "questions.withdraw": {
+                "supported": true
+              },
+              "questions.defer": {
+                "supported": true
+              },
+              "questions.merge": {
+                "supported": true
+              },
               "submissions.create": {
                 "supported": true
               },
@@ -199,10 +211,10 @@
                 "supported": false
               },
               "threads.create": {
-                "supported": false
+                "supported": true
               },
               "threads.messages.create": {
-                "supported": false
+                "supported": true
               },
               "threads.resolutions.create": {
                 "supported": false

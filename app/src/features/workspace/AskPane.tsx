@@ -1,13 +1,19 @@
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, PenLine, Plus } from "lucide-react";
-import { useClient } from "@/api/queries";
-import type { CommandResult, QuestionInput, QuestionRevision, QuestionView, RoundView } from "@/api/types";
+import { useClient, useComments } from "@/api/queries";
+import { NotConnectedError, PesApiError, type CommandResult, type CommentInput, type QuestionInput, type QuestionRevision, type QuestionView, type RoundView, type SubmitInput } from "@/api/types";
 import { type PesAction } from "@/app/actions";
 import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
+import { clearDraft, draftsVersion, readDraft, readLiveDraft, subscribeDrafts } from "@/lib/draft";
 import { cn } from "@/lib/utils";
+import { AnswerReview } from "./AnswerReview";
+import { makePlan, toAnswerItem, type Plan, type PlanItem } from "./answer-model";
+import { keyFor } from "./draft-keys";
+import { readDefaultUsed, writeDefaultUsed } from "./default-used";
 import { ClosedCard, QuestionCard, type CardTools } from "./QuestionCard";
+import { MessageList } from "./QuestionThread";
 import { AddQuestionDialog, TidyDialog, type TidyKind } from "./QuestionDialogs";
 import { useKeyedCommand } from "./question-command";
 import { FILTERS, isOpen, matchesFilter, type QuestionFilter } from "./question-model";
@@ -49,6 +55,43 @@ function FilterRadio({ value, label, count, checked, onChange }: { value: Questi
     </label>
   );
 }
+
+/** 보낼 요청 한 건의 사진 — 시간 초과 뒤 ‘접수 다시 확인’이 같은 요청 · 같은 멱등 키로 다시 보낸다 */
+interface SubmitRequest {
+  sig: string;
+  input: SubmitInput;
+  mode: "bundle" | "single";
+  /** 보낸 뒤 지울 초안 키들 */
+  drafts: string[];
+  /** 요청을 만들 때 그 초안 키들의 글 — 보내는 사이에 더 쓴 글은 지우지 않으려고 비교한다 */
+  snap: Record<string, string>;
+  numbers: number[];
+}
+
+/** 보던 질문 버전이 바뀐 거절 — 서버(U2a)는 question_version_changed(next_action=reread_question), 그 밖의 충돌은 conflict */
+const isVersionConflict = (e: unknown): boolean => e instanceof PesApiError && (e.body.error.code === "conflict" || e.body.error.code === "question_version_changed");
+
+const isTimeout = (e: unknown) => e instanceof Error && e.name === "TimeoutError";
+
+/** 제출 실패 문장 — 서버가 거절한 것은 아무것도 접수되지 않았다고 말하고, 연결 문제는 보냈는지 모른다고 말한다(두 번 접수되지 않는다는 말과 함께) */
+function submitErrorText(e: unknown): string {
+  if (e instanceof PesApiError) return `${e.body.error.message} 아무것도 접수되지 않았어요.${isVersionConflict(e) ? " 질문을 새로 읽었어요 — 바뀐 문구를 확인해 주세요." : ""}`;
+  if (e instanceof NotConnectedError) return `${e.message} 아무것도 접수되지 않았어요.`;
+  return "보내지 못했어요. 연결을 확인하고 다시 눌러 주세요. 같은 요청이라 다시 눌러도 두 번 접수되지 않아요.";
+}
+
+/** 거절 사유 details.question_ids */
+function missingIds(e: unknown): string[] {
+  const d = e instanceof PesApiError ? e.body.error.details : null;
+  const ids = d && typeof d === "object" && d.reason === "required_missing" ? d.question_ids : null;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
+}
+
+const SEND_REASON = {
+  recheck: "새 문구를 확인했다고 체크해 주세요.",
+  inapplicable: "지금은 답하지 않는 질문이에요.",
+  opinion_only: "이 질문은 답이 있어야 보낼 수 있어요.",
+} as const;
 
 /**
  * 질문 영역(설계 4.7 질문·답 · 4.16 · U2b). 위에서 아래: 제목 · 도구 → 거르기 · 이동 → 열린 질문 → 정리된 질문 → 보내기.
@@ -92,10 +135,29 @@ export function AskPane({
     ask_ai: openQs.filter((q) => matchesFilter(q, "ask_ai")).length,
   };
   const unanswered = openQs.filter((q) => !q.sent);
-  const requiredLeft = unanswered.filter((q) => q.required).length;
   const scope = React.useMemo(() => ({ project, edition, form: round.form_version }), [project, edition, round.form_version]);
   const roundKey = round.round_id === null ? "start" : String(round.round_id);
   const blocked = editBlocked ?? (client.capabilities?.questionTools === false ? "서버와 아직 이어지지 않아 질문을 바꿀 수 없어요." : undefined);
+
+  /* ── 답 초안 · 기본값 · 제출(U2c) ── */
+  const comments = useComments(project, edition, round.stage, roundKey);
+  /** 읽는 중 — 라운드를 바꾼 직후 남아 있는 앞 라운드 자료(placeholder)도 이 라운드 것이 아니므로 읽는 중으로 본다 */
+  const commentsPending = comments.isPending || comments.isPlaceholderData;
+  const threads = commentsPending ? [] : (comments.data?.threads ?? []);
+  const otherThreads = threads.filter((t) => t.question_id === "__other");
+  // 초안은 질문마다 칸에 있다 — 묶음 제출은 모두를 한꺼번에 읽는다. 초안이 바뀔 때마다 다시 그린다
+  React.useSyncExternalStore(subscribeDrafts, draftsVersion);
+  const qk = (q: QuestionView) => `${q.id}@${q.version}`;
+  /** ‘새 문구를 확인했어요’ 체크 · ‘기본값 쓰기’로 채운 글 — 질문 버전이 바뀌면 키가 달라져 이어지지 않는다 */
+  const [confirmed, setConfirmed] = React.useState<ReadonlySet<string>>(new Set());
+  const [defaultsUsed, setDefaultsUsed] = React.useState<ReadonlyMap<string, string>>(new Map());
+  const plan: Plan = makePlan({
+    open: openQs,
+    draftOf: (q) => ({ answer: readDraft(keyFor(scope, q.id, q.version, "answer")), opinion: readDraft(keyFor(scope, q.id, q.version, "opinion")) }),
+    confirmed: (q) => confirmed.has(qk(q)),
+    defaultUsed: (q) => defaultsUsed.get(qk(q)) ?? readDefaultUsed(keyFor(scope, q.id, q.version, "answer")),
+  });
+  const requiredLeft = unanswered.filter((q) => q.required && plan.applicable.get(q.id) !== false).length;
 
   /* ── 명령 뒤 처리: 라운드를 다시 읽고, 알림 글을 남기고, 초점을 되돌린다 ── */
   const refresh = React.useCallback(() => qc.invalidateQueries({ queryKey: ["round", project, edition] }), [qc, project, edition]);
@@ -114,7 +176,77 @@ export function AskPane({
       el.focus();
     } else if (--a.left <= 0) after.current = null;
   });
-  const receiptNo = (r: CommandResult<unknown>) => r.receipt.receipt_no;
+  /** 영수증 문구 — 서버가 번호를 주지 않았으면(numbered false) 번호를 지어내지 않고 “접수됨” */
+  const receiptText = (r: CommandResult<unknown>) => (r.receipt.numbered === false ? "접수됨" : `접수 ${r.receipt.receipt_no}`);
+
+  const submit = useKeyedCommand();
+  const [lastReq, setLastReq] = React.useState<SubmitRequest | null>(null);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  /** 검토 대화 상자를 닫고 초점을 연 단추로 — 대화 상자는 닫힐 때 사라지므로 초점은 작업 공간이 정한다 */
+  const closeReview = () => {
+    setReviewOpen(false);
+    focusLater(() => document.getElementById("review-answers"));
+  };
+  const buildRequest = (mode: "bundle" | "single", items: PlanItem[]): SubmitRequest => {
+    const input: SubmitInput = { mode, form_version: round.form_version, ...(round.set_id ? { set_id: round.set_id } : {}), answers: items.map(toAnswerItem) };
+    const drafts = items.flatMap((it) => [keyFor(scope, it.q.id, it.q.version, "answer"), keyFor(scope, it.q.id, it.q.version, "opinion")]);
+    return {
+      sig: JSON.stringify(input),
+      input,
+      mode,
+      drafts,
+      snap: Object.fromEntries(drafts.map((k) => [k, readDraft(k)])),
+      numbers: items.map((it) => it.q.number),
+    };
+  };
+  /** 한 번 보낸다 — 성공은 영수증을 받은 뒤에만 말하고, 그때서야 보낸 질문의 초안만 지운다. 거절이면 초안은 그대로(부분 접수 0) */
+  const send = async (req: SubmitRequest) => {
+    setNote(null);
+    setLastReq(req);
+    const r = await submit.run(req.sig, (key) => client.submitAnswers(project, edition, round.stage, roundKey, req.input, key));
+    if (req.mode === "bundle") closeReview();
+    else setReviewOpen(false);
+    if (r.ok) {
+      const res = r.value;
+      const left = res.data.missing_required.length;
+      const who = req.mode === "bundle" ? `묶음으로 보냈어요 · 질문 ${req.numbers.length}개` : `질문 ${req.numbers[0]} — 이 답만 보냈어요`;
+      const rest = res.data.form_complete ? " 필수 질문에는 모두 답이 있어요." : ` 필수 ${left}개가 남았어요.`;
+      setNote(`${who} · ${receiptText(res)}.${res.receipt.replayed ? " 이미 접수된 요청이라 다시 만들지 않았어요." : ""}${rest}`);
+      setLastReq(null);
+      await refresh();
+      // 보내는 사이에 같은 칸에 더 쓴 글은 지키고, 보낸 그대로인 칸만 비운다
+      for (const key of req.drafts) {
+        if (readLiveDraft(key) !== req.snap[key]) continue;
+        clearDraft(key);
+        if (key.endsWith("|answer")) writeDefaultUsed(key, null);
+      }
+    } else if (isVersionConflict(r.error)) {
+      // 보던 질문이 그 사이 바뀌었다 — 새로 읽는다(쓰던 초안은 옛 버전 칸에 그대로 남는다)
+      await refresh();
+    }
+  };
+  const sendOne = (q: QuestionView) => {
+    const it = plan.single.get(q.id);
+    if (it && !submit.pending) void send(buildRequest("single", [it]));
+  };
+  const reasonFor = (q: QuestionView): string | null => {
+    if (plan.single.has(q.id)) return null;
+    const skip = plan.skipped.find((x) => x.q.id === q.id);
+    return skip ? SEND_REASON[skip.reason] : "";
+  };
+  const failure = submit.failure;
+  const timedOut = !!failure && isTimeout(failure);
+  const missingFromServer = missingIds(failure).flatMap((id) => {
+    const q = all.find((x) => x.id === id);
+    return q ? [q] : [];
+  });
+
+  /* ── 질문별 의견(U2c) — 답이 아니다. 제출과 따로 가고, 필수를 채우지 않는다 ── */
+  const postComment = (q: QuestionView, input: CommentInput, key: string) => client.addComment(project, edition, q.id, input, key);
+  const onPosted = (q: QuestionView, r: CommandResult<unknown>) => {
+    setNote(`질문 ${q.number}에 의견을 남겼어요 · ${receiptText(r)}. 답으로 세지 않아요.`);
+    void qc.invalidateQueries({ queryKey: ["round", project, edition, "comments"] });
+  };
 
   /* ── 질문 고치기 ── */
   const [editing, setEditing] = React.useState<string[]>([]);
@@ -129,7 +261,7 @@ export function AskPane({
     return r;
   };
   const onSaved = (q: QuestionView, r: CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>) => {
-    setNote(`질문 ${q.number}을 새 버전으로 저장했어요 · 버전 ${r.data.version} · 접수 ${receiptNo(r)}. 옛 답은 지우지 않고 보존해요.`);
+    setNote(`질문 ${q.number}을 새 버전으로 저장했어요 · 버전 ${r.data.version} · ${receiptText(r)}. 옛 답은 지우지 않고 보존해요.`);
     if (saveFits.current) setHiddenId(null);
     else {
       // 고친 질문이 목록에서 빠져 초점이 사라지지 않게 — 거르기로 보낸다
@@ -160,7 +292,7 @@ export function AskPane({
     if (r.ok) {
       // 자리가 바뀌며 초점이 빠질 수 있다 — 같은 단추로 되돌려 연달아 옮길 수 있게
       focusLater(() => document.getElementById(`tool-${dir}-${id}`));
-      setNote(`질문 ${openQs.find((q) => q.id === id)!.number}의 자리를 바꿨어요 · 접수 ${receiptNo(r.value)}.`);
+      setNote(`질문 ${openQs.find((q) => q.id === id)!.number}의 자리를 바꿨어요 · ${receiptText(r.value)}.`);
     }
   };
 
@@ -280,10 +412,35 @@ export function AskPane({
           </ActionButton>
         </div>
       </div>
-      <p role="status" className={cn("text-meta text-ink", note && "mt-3")}>
-        {note}
-        {note && hiddenId && !visible.some((q) => q.id === hiddenId) ? " 지금 거르기에서는 보이지 않아요. ‘전체’로 보세요." : ""}
+      <p role="status" className={cn("text-meta text-ink", (note || submit.pending) && "mt-3")}>
+        {submit.pending ? "보내는 중이에요. 접수 번호가 올 때까지 기다려 주세요." : note}
+        {!submit.pending && note && hiddenId && !visible.some((q) => q.id === hiddenId) ? " 지금 거르기에서는 보이지 않아요. ‘전체’로 보세요." : ""}
       </p>
+      {timedOut && lastReq ? (
+        <div role="status" className="mt-3 rounded-md border border-warn-line bg-warn-soft px-3 py-2.5">
+          <p className="text-meta text-ink">
+            <strong className="font-semibold">접수 확인 중</strong> — 서버 응답이 늦어요. 접수됐는지 아직 몰라요. 같은 요청으로 다시 확인하면 두 번 접수되지 않아요.
+          </p>
+          <Button className="mt-2 bg-background coarse:min-h-[44px]" size="sm" aria-disabled={submit.pending ? true : undefined} onClick={() => !submit.pending && void send(lastReq)}>
+            접수 다시 확인
+          </Button>
+        </div>
+      ) : null}
+      {failure && !timedOut ? (
+        <div role="alert" className="mt-3 rounded-md border border-bad-line bg-bad-soft px-3 py-2.5 text-meta text-bad">
+          <p>{submitErrorText(failure)}</p>
+          {missingFromServer.length ? (
+            <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <span>비어 있는 필수:</span>
+              {missingFromServer.map((q) => (
+                <Button key={q.id} size="xs" className="bg-background coarse:min-h-[44px]" onClick={() => goTo(q.id)}>
+                  질문 {q.number}로 가기
+                </Button>
+              ))}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {reorder.error ? (
         <p role="alert" className="mt-3 rounded-md border border-bad-line bg-bad-soft px-3 py-2 text-meta text-bad">
           {reorder.error}
@@ -331,6 +488,28 @@ export function AskPane({
               onSaved={onSaved}
               onMove={move}
               onTidy={(id, kind) => setTidy({ q: all.find((x) => x.id === id)!, kind })}
+              answering={
+                past
+                  ? null
+                  : {
+                      applicable: plan.applicable.get(q.id) !== false,
+                      confirmed: confirmed.has(qk(q)),
+                      onConfirm: (on) => setConfirmed((prev) => (on ? new Set(prev).add(qk(q)) : new Set([...prev].filter((k) => k !== qk(q))))),
+                      blockedReason: reasonFor(q),
+                      busy: submit.pending,
+                      onSend: () => sendOne(q),
+                      onFilled: (value) => {
+                        writeDefaultUsed(keyFor(scope, q.id, q.version, "answer"), value);
+                        setDefaultsUsed((prev) => {
+                          const next = new Map(prev);
+                          if (value === null) next.delete(qk(q));
+                          else next.set(qk(q), value);
+                          return next;
+                        });
+                      },
+                    }
+              }
+              thread={{ threads: threads.filter((t) => t.question_id === q.id), unavailable: !commentsPending && comments.data?.unavailable === true, reason: comments.data?.reason, pending: commentsPending, readOnly: past, reload: () => void comments.refetch(), post: postComment, onPosted }}
             />
           ))}
         </ol>
@@ -352,14 +531,38 @@ export function AskPane({
         </section>
       ) : null}
 
+      {otherThreads.length ? (
+        <section aria-label="질문에 묶이지 않은 의견" className="mt-6 border-t pt-4">
+          <h3 className="text-meta font-semibold text-ink">질문에 묶이지 않은 의견</h3>
+          <p className="mb-2 text-caption text-muted-foreground">이전된 프로젝트에서 질문에 붙지 않은 채 남은 의견이에요.</p>
+          <MessageList threads={otherThreads} label="묶이지 않은 의견 목록" />
+        </section>
+      ) : null}
+
       {!past ? (
         <div className="mt-2 space-y-3 border-t pt-4">
           <p className="text-caption text-muted-foreground">초안은 이 탭에만 있어요. 탭을 닫거나 다른 기기로 옮기면 남지 않습니다.</p>
-          <ActionButton variant="default" blockedReason="합성 자료 화면이라 답을 보내지 않습니다 — 서버 연결 뒤에 열립니다." reasonId="send-reason">
-            답 검토 후 보내기
-          </ActionButton>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <Button
+              id="review-answers"
+              variant="default"
+              className="coarse:min-h-[44px]"
+              aria-disabled={plan.items.length === 0 || submit.pending ? true : undefined}
+              aria-describedby="review-hint"
+              onClick={(e) => {
+                if (plan.items.length === 0 || submit.pending) return void e.preventDefault();
+                setReviewOpen(true);
+              }}
+            >
+              답 검토 후 보내기
+            </Button>
+            <span id="review-hint" className="text-caption text-muted-foreground">
+              {plan.items.length ? `보낼 초안 ${plan.items.length}개${plan.missing.length ? ` · 비어 있는 필수 ${plan.missing.length}개` : ""}` : "보낼 초안이 아직 없어요."}
+            </span>
+          </div>
         </div>
       ) : null}
+      {reviewOpen ? <AnswerReview plan={plan} pending={submit.pending} onCancel={closeReview} onConfirm={() => void send(buildRequest("bundle", plan.items))} /> : null}
 
       <AddQuestionDialog
         open={adding}

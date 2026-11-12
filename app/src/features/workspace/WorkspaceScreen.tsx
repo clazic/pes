@@ -48,6 +48,7 @@ export function WorkspaceScreen() {
   const [sp, setSp] = useSearchParams();
   const ws = useWorkspace(slug, edition);
   const rq = useRound(slug, edition, stage, roundParam);
+  // 질문별 의견은 부차 읽기다 — 첫 표시를 기다리지 않는다(AskPane 이 읽고, 스레드 칸만 “불러오는 중”을 보인다)
   const phone = useIsPhone();
   const ready = !!ws.data && !!rq.data && !rq.isPlaceholderData;
   useArrival(ready);

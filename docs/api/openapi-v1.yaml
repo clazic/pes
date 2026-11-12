@@ -64,6 +64,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ThreadId:
+      name: t
+      in: path
+      required: true
+      schema: { type: string }
     StageId:
       name: s
       in: path
@@ -490,6 +495,76 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    QuestionState:
+      type: string
+      enum: [draft, open, deferred, merged, withdrawn, closed]
+      description: "A question version's state. withdraw/defer/merge write a new version with state withdrawn / deferred / merged (earlier versions and answers stay)."
+    QuestionWithdrawBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        reason: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    QuestionDeferBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        defer_until:
+          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way)"
+          oneOf:
+            - { type: integer, minimum: 0 }
+            - { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        reason: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    QuestionMergeBody:
+      type: object
+      required: [merged_into_question_id]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        merged_into_question_id: { type: string, minLength: 1, description: "An open question of the same project (not this one)" }
+        reason: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    ThreadCreateBody:
+      type: object
+      required: [target_object_id, context_kind, initial_message]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        target_object_id: { type: string, minLength: 1, description: "The question the comment is about" }
+        target_version_id: { type: string, description: "A version of that question; the current one when absent" }
+        context_kind: { type: string, enum: [question_comment, annotation], description: "annotation is 501 not_supported until U4a" }
+        initial_message:
+          type: object
+          required: [body_md]
+          additionalProperties: false
+          properties:
+            body_md: { type: string, minLength: 1 }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    ThreadMessageBody:
+      type: object
+      required: [body_md]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        body_md: { type: string, minLength: 1 }
+        reply_to: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
     AnswerItem:
       type: object
       required: [question_id]
@@ -511,6 +586,7 @@ components:
           type: array
           minItems: 1
           items: { $ref: "#/components/schemas/AnswerItem" }
+        mode: { type: string, enum: [bundle, single], description: "bundle: every applicable required question of the form must be filled (422 required_missing / not_applicable); single: exactly one item. Absent: a partial submission is accepted as before. The response carries form_complete and missing_required" }
         submitted_via: { type: string, description: "Checked, not stored (the server sets via)" }
         client_request_id: { type: string, description: "Checked, not stored (the Idempotency-Key header is the key)" }
     RoundStartBody:
@@ -912,7 +988,7 @@ paths:
   /api/v1/projects/{id}/workspace:
     get:
       summary: "Work-space read model for the web app (SEL-82 U1b): slug, title, edition, mode, current stage and round, stages with their rounds, whose turn it is, the actions this caller can take (with a reason when one cannot), and record counts. Read-only; machine values only (the screen makes its own words)"
-      description: "data = { slug, title, edition, mode (A|B), current {stage, round_id|null}, stages [{key, view, rounds [{round_id|null, state}]}], turn {side}, actions [{action, enabled, disabled_reason|null}], records {assumptions, decisions, comments: {count}, empty} }. round_id null is the stage-start place (there is no R0). actions are for display; the server still checks every write."
+      description: "data = { slug, title, edition, mode (A|B), current {stage, round_id|null}, stages [{key, view, rounds [{round_id|null, state}]}], turn {side}, actions [{action, enabled, disabled_reason|null}], records {assumptions, decisions, comments: {count}, empty}, ai_connection {policy, dispatches [{id, run_id, state, resolution?}]}, runs [{id, stage|null, mode, status}] }, and stages[].past_approval {at|null, origin} on a stage that has an approval row. round_id null is the stage-start place (there is no R0). actions are for display; the server still checks every write. SEL-87 fields (read-only, no new table, machine values only): ai_connection.policy = allowed|denied|missing|corrupt from the allow_opencode_go bit of the current policy row (NULL pointer = missing; any other damage = corrupt; never pending - the DB holds only confirmed rows). dispatches[].state is the outbound_dispatches value as stored (prepared authorized sent response adopted blocked failed unknown); resolution (charged|not_charged) is present only when a dispatch_resolutions row exists. runs[].status is the runs value as stored (queued running waiting_human blocked_usage succeeded failed cancelled interrupted), except a hand-off import run reads handed_off (the owner's succeeded import run: runtime claude_app_handoff, codex_app_handoff or opencode_app_handoff, made by a human actor, status succeeded; the runtime name alone is not enough, so an agent run that claimed with such a runtime name keeps its stored status); stage is null when the run has no stage. past_approval.at is the approval commit time (ISO 8601) or null when that time is unknown (0); origin is verified or legacy_unverified; a stage never approved has no key. Lists are capped: only the newest 50 dispatches and the newest 50 runs are sent (oldest of those first). runs are limited to the ACTIVE edition (runs.edition_id), so an older edition's runs are not shown; dispatches are NOT limited by edition (what was sent out and what must be settled are facts of the whole project), so the newest 50 dispatches of the project are sent whatever edition their run belongs to (dispatches[].run_id may point at a run that is not in runs[]). A past_approval.at that is not a valid time (a damaged value) is null, never an error. NOT sent, on purpose (no DB evidence): run_permissions (nothing stores external-app questions or permissions), cancel_state (no cancel-attempt column or event), external_stop (a lost connection is not a cancel), and the policy value pending (no store for an undecided policy). The app draws a missing field as unknown / no information, never as on or none."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security: [{ agentToken: [] }, { localSession: [] }]
@@ -1217,6 +1293,146 @@ paths:
         "422": { description: A question or answer breaks the rules }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/withdraw:
+    post:
+      summary: Withdraw a question (a new version in state withdrawn; earlier versions and answers stay)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionWithdrawBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/defer:
+    post:
+      summary: Defer a question (a new version in state deferred, optionally until a time)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionDeferBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/merge:
+    post:
+      summary: Merge a question into another open one (a new version in state merged; answers are not carried over)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionMergeBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads:
+    post:
+      summary: Start a comment thread on a question (never an answer)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ThreadCreateBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "501": { description: "context_kind annotation is not supported yet (U4a)" }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads/{t}/messages:
+    post:
+      summary: Add a message to a question comment thread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ThreadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ThreadMessageBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/submissions:
     post:
       summary: Submit answers and comments (owner session only)
@@ -1378,3 +1594,36 @@ paths:
         "409": { description: State conflict, stale revision, or idempotency key reuse }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+x-app-session:
+  description: |
+    SEL-85. How `pes open <slug> --app` hands the owner's session to the web app without the session ever being in an address. These two routes are
+    answered by the HTTP server layer (scripts/serve.ts) before the API app: they are NOT in `paths` or in capabilities.routes, carry no project data,
+    need no Idempotency-Key, and every answer (success or error) has `Cache-Control: no-store`. Success and error bodies use the envelopes above.
+    A code is 32 random bytes in base64url (43 characters), kept only in the server process memory (never a file, database row or log line), valid
+    for one exchange and for PES_APP_CODE_TTL_MS milliseconds (default 60000, at most 600000), and removed the moment it is read.
+  issue_code:
+    method: POST
+    path: /api/v1/app-session/codes
+    caller: "the CLI, with the owner's session in x-pes-session (securityScheme localSession); without it 401 unauthenticated and nothing is made"
+    request: '{"projects": {"<slug>": "<project id>"}} (closed shape, at most 64 slugs, other keys are 400)'
+    response: '201 {"data": {"code": "<43 characters>"}} (the code stands for the owner session the SERVER holds; the caller never chooses it)'
+    errors:
+      - "400 invalid_payload"
+      - "401 unauthenticated"
+      - "413 payload_too_large"
+      - "429 rate_limited (60 requests per minute, or 64 unused live codes already exist: Retry-After is the time to the soonest expiry; a live code is never dropped to make room)"
+  exchange:
+    method: POST
+    path: /api/v1/app-session
+    caller: "the web app, no credential - the code is the proof"
+    origin: "only http://127.0.0.1:<this server's port> is accepted; any other Origin (localhost, trusted_origins entries, null) and a missing Origin are 403 forbidden"
+    refused: "GET, a code in the query string and a CORS preflight give nothing"
+    request: '{"code": "<code>"} (a body of at most 4096 bytes)'
+    response: '200 {"data": {"session": "<owner session>", "projects": {"<slug>": "<project id>"}}}'
+    once: "exactly one of any number of concurrent exchanges of a code gets the session; the rest are 401"
+    errors:
+      - "400 invalid_payload (not JSON, not an object, no code or a malformed one)"
+      - "401 unauthenticated (unknown, used and expired codes look the same)"
+      - "403 forbidden"
+      - "413 payload_too_large"
+      - "429 rate_limited (only FAILED attempts count, 120 per minute; a good code is traded even when the budget is spent and a good exchange is not counted; a body that is not a JSON object (400) or too large (413) is refused before the budget and not counted either)"

@@ -311,10 +311,10 @@ test("capabilities is open, complete, and says what is not supported", async () 
       assert.equal(entry.supported, supported.has(norm(route)), `${operation} (${route}) supported flag`);
       if (!entry.supported) assert.ok(unsupported.has(norm(route)), `${operation} (${route}) is listed as unsupported`);
     }
-    for (const op of ["runs.heartbeat", "runs.inputs", "runs.input_receipts", "submissions.create", "questions.create", "stages.approve", "changes.list", "rounds.seal", "runs.handoff", "runs.cancel"]) {
+    for (const op of ["runs.heartbeat", "runs.inputs", "runs.input_receipts", "submissions.create", "questions.create", "questions.withdraw", "questions.defer", "questions.merge", "threads.create", "threads.messages.create", "stages.approve", "changes.list", "rounds.seal", "runs.handoff", "runs.cancel"]) {
       assert.equal(caps.operations[op].supported, true, op);
     }
-    for (const op of ["exports.create", "threads.create", "decisions.create", "reflections.create", "assumptions.create", "projects.delete"]) {
+    for (const op of ["exports.create", "threads.resolutions.create", "decisions.create", "reflections.create", "assumptions.create", "projects.delete"]) {
       assert.equal(caps.operations[op].supported, false, op);
     }
     for (const code of [

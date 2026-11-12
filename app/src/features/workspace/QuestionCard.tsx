@@ -1,21 +1,21 @@
 import * as React from "react";
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Eye, History, Import, PenLine, Settings2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, History, Import, MessageSquare, PenLine, Send, Settings2 } from "lucide-react";
 import { useClient } from "@/api/queries";
-import type { CommandResult, QuestionRevision, QuestionView } from "@/api/types";
+import type { CommandResult, CommentInput, CommentThreadView, QuestionRevision, QuestionView } from "@/api/types";
 import { type PesAction, questionActions } from "@/app/actions";
 import { Status } from "@/components/pes/status";
 import { Button } from "@/components/ui/button";
-import { draftKey, originForm, readDraft, useDraft, type DraftField, type DraftSetOptions } from "@/lib/draft";
+import { readDraft, useDraft, type DraftSetOptions } from "@/lib/draft";
+import { keyFor, type DraftScope } from "./draft-keys";
+import { DraftTextarea } from "./draft-textarea";
 import { DIRECTION_CHIP, formatAt, importanceLabel, KIND_LABEL, SOURCE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { QuestionEditor } from "./QuestionEditor";
+import { QuestionThread } from "./QuestionThread";
 import { directionOf, isChoice, kindOf, optionLabel, showIfLine, statusOf } from "./question-model";
 import type { TidyKind } from "./QuestionDialogs";
-
-const fieldClass =
-  "mt-1 block w-full resize-y rounded-md border border-control bg-background px-2.5 py-2 text-body text-ink shadow-xs outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 /** 카드 표식 하나 — 서로 다른 뜻은 서로 다른 칩(중요도 ≠ 필수). tone: strong = 필수, quiet = 테두리 없는 보조 표시 */
 function Chip({ chip, tone = "plain", children }: { chip: string; tone?: "plain" | "strong" | "quiet"; children: React.ReactNode }) {
@@ -34,41 +34,10 @@ function Chip({ chip, tone = "plain", children }: { chip: string; tone?: "plain"
   );
 }
 
-/** 로그인 없는 이 컴퓨터 화면의 사용자 칸(초안 키) — 로그인이 생기면 사용자 id 로 바뀐다 */
-export const DRAFT_USER = "local";
-
-export type DraftScope = { project: string; edition: number; form: number };
-/** 초안 키 — 폼 버전 칸은 그 질문 버전이 이 탭에 처음 보인 때의 것(폼이 올라가도 질문 버전이 같으면 같은 키) */
-const keyFor = (scope: DraftScope, question: string, version: number, field: DraftField, write = true) =>
-  draftKey({ project: scope.project, user: DRAFT_USER, edition: scope.edition, form: originForm({ project: scope.project, user: DRAFT_USER, edition: scope.edition, question, version }, scope.form, write), question, version, field });
+export { DRAFT_USER, type DraftScope } from "./draft-keys";
 
 /** 이어 붙이기 — 새 칸에 이미 쓴 글이 있으면 그 뒤에 옛 글을 붙인다(덮어쓰지 않음) */
 const merge = (now: string, old: string) => (!old ? now : !now ? old : `${now}\n${old}`);
-
-/**
- * 초안 칸 — 같은 DOM 노드를 유지한다(갱신이 와도 다시 만들지 않음 → 초점 · 선택 범위 · 값 그대로).
- * 한글 조합 중(compositionstart ~ end)에는 화면 값만 바꾸고 저장하지 않으며, 조합이 끝나면 확정된 값을 저장한다.
- */
-function DraftTextarea({ id, rows, draft }: { id: string; rows: number; draft: [string, (v: string, o?: DraftSetOptions) => void] }) {
-  const [value, setValue] = draft;
-  const composing = React.useRef(false);
-  return (
-    <textarea
-      id={id}
-      rows={rows}
-      className={fieldClass}
-      value={value}
-      onCompositionStart={() => {
-        composing.current = true;
-      }}
-      onCompositionEnd={(e) => {
-        composing.current = false;
-        setValue(e.currentTarget.value);
-      }}
-      onChange={(e) => setValue(e.target.value, { store: !composing.current })}
-    />
-  );
-}
 
 type Review = { from: number; answer: string; opinion: string };
 
@@ -186,11 +155,14 @@ function findReview(scope: DraftScope, q: QuestionView): Review | null {
 }
 
 /** 값 구분 한 줄 — 기본값 · AI 추천은 표시일 뿐 답이 아니다(서로 다른 노드, 서로 다른 말) */
-function ValueLine({ kind, label, children }: { kind: "default" | "recommendation"; label: string; children: React.ReactNode }) {
+function ValueLine({ kind, label, action, children }: { kind: "default" | "recommendation"; label: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div data-field-kind={kind} className="flex flex-wrap gap-x-2 text-meta">
+    <div data-field-kind={kind} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
       <dt className="font-medium text-ink-2">{label}</dt>
-      <dd className="ml-0 min-w-0 text-ink">{children}</dd>
+      <dd className="ml-0 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-ink">
+        <span className="min-w-0">{children}</span>
+        {action}
+      </dd>
     </div>
   );
 }
@@ -234,6 +206,37 @@ export interface CardTools {
   last: boolean;
 }
 
+/** 답하기 쪽(U2c) — 지난 라운드면 null: 답 · 보내기 도구가 없다 */
+export interface CardAnswering {
+  /** show_if 가 맞는가. 안 맞으면 필수로 세지 않고 묶음에서 빠진다(초안은 그대로) */
+  applicable: boolean;
+  /** 재확인 필요 질문의 ‘새 문구를 확인했어요’ */
+  confirmed: boolean;
+  onConfirm: (on: boolean) => void;
+  /** null = 보낼 수 있다 · "" = 보낼 것이 아직 없다 · 글 = 막힌 까닭 */
+  blockedReason: string | null;
+  /** 어떤 제출이 가는 중 */
+  busy: boolean;
+  onSend: () => void;
+  /** ‘기본값 쓰기’로 채운 글을 알린다. null = 추천 등 다른 값으로 채웠다(기본값 채택 기록을 지운다) */
+  onFilled: (value: string | null) => void;
+}
+
+/** 질문별 의견(U2c) */
+export interface CardThread {
+  threads: CommentThreadView[];
+  unavailable: boolean;
+  /** unavailable 의 이유 — not_connected = 서버에 읽는 길이 아직 없음 · failed = 읽다가 실패(다시 읽기 가능) */
+  reason?: "not_connected" | "failed";
+  /** 이 라운드 의견을 아직 읽는 중 */
+  pending?: boolean;
+  /** 지난 라운드 — 읽기만 한다(쓰기 칸 없음) */
+  readOnly?: boolean;
+  reload?: () => void;
+  post: (q: QuestionView, input: CommentInput, key: string) => Promise<CommandResult<{ thread_id: string; message_id: string; thread_created: boolean }>>;
+  onPosted: (q: QuestionView, r: CommandResult<{ thread_id: string; message_id: string; thread_created: boolean }>) => void;
+}
+
 export interface CardProps {
   q: QuestionView;
   all: QuestionView[];
@@ -251,6 +254,8 @@ export interface CardProps {
   onSaved: (q: QuestionView, r: CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>) => void;
   onMove: (id: string, dir: "up" | "down") => void;
   onTidy: (id: string, kind: TidyKind) => void;
+  answering: CardAnswering | null;
+  thread: CardThread;
 }
 
 /** 도구 단추 하나 — 못 쓰면 숨기지 않고 aria-disabled(초점은 받고, 눌러도 그대로) + 이유 글 */
@@ -315,6 +320,8 @@ export function QuestionCard(p: CardProps) {
   const kind = kindOf(q);
   const answer = useDraft(keyFor(scope, q.id, q.version, "answer"));
   const opinion = useDraft(keyFor(scope, q.id, q.version, "opinion"));
+  const comment = useDraft(keyFor(scope, q.id, q.version, "comment"));
+  const [threadOpen, setThreadOpen] = React.useState(false);
   // 새 버전이 되었거나 처음 그릴 때(그 그림에서 바로): 앞 버전 초안이 있고 새 칸이 비었으면 검토 영역을 연다
   const reviewFor = `${keyFor(scope, q.id, q.version, "answer")}|${q.sent ? "sent" : ""}`;
   const [rv, setRv] = React.useState(() => ({ for: reviewFor, review: findReview(scope, q) }));
@@ -341,9 +348,25 @@ export function QuestionCard(p: CardProps) {
   const rec = q.recommendation ?? null;
   const prev = q.previous_answer ?? null;
   const editId = `tool-edit-${q.id}`;
+  const ans = p.answering;
+  const canAnswer = !!ans && !q.sent;
+  /** 보낸 질문인데 칸에 글이 남아 있다(보내는 사이 쓴 글 · 조합 중인 글) — 입력 칸을 없애지 않는다 */
+  const keepFields = !!q.sent && (answer[0] !== "" || opinion[0] !== "");
+  const reasonId = `${q.id}-send-reason`;
+  const sendOff = !ans || ans.blockedReason !== null || ans.busy;
+  const useDefault = () => {
+    if (!ans || q.default_value == null) return;
+    answer[1](q.default_value);
+    ans.onFilled(q.default_value);
+  };
+  const useRecommendation = () => {
+    if (!ans || !rec) return;
+    answer[1](rec.value);
+    ans.onFilled(null);
+  };
 
   return (
-    <li data-question={q.id} data-status="open" tabIndex={-1} className="border-t py-4 outline-none first:border-t-0 first:pt-1 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+    <li data-question={q.id} data-status="open" data-applicable={ans && !ans.applicable ? "false" : undefined} tabIndex={-1} className="border-t py-4 outline-none first:border-t-0 first:pt-1 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
       <QuestionContextMenu q={q} actions={questionActions(p.actions, q.id)}>
         <div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -399,7 +422,16 @@ export function QuestionCard(p: CardProps) {
           <p className="mt-2 text-body text-ink">{q.text}</p>
           {q.help ? <p className="mt-1 text-meta text-muted-foreground">{q.help}</p> : null}
           {showIf ? <p className="mt-1 text-caption text-ink-2">{showIf}</p> : null}
+          {ans && !ans.applicable ? <p className="mt-1.5 text-meta text-ink-2">지금은 답하지 않아도 돼요. 필수로 세지 않고 보내지도 않아요. 써 둔 초안은 지우지 않아요.</p> : null}
           {q.needs_recheck ? <p className="mt-1.5 text-meta text-ink-2">질문이 바뀌어 답을 다시 확인해야 해요. 옛 답은 남아 있고, 새 답으로 옮겨지지 않아요.</p> : null}
+          {canAnswer && q.needs_recheck ? (
+            <label className="mt-2 flex min-h-8 cursor-pointer items-center gap-2.5 rounded-md text-meta font-medium text-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring coarse:min-h-[44px]">
+              <input type="checkbox" className="size-4 shrink-0 accent-primary" checked={ans.confirmed} onChange={(e) => ans.onConfirm(e.target.checked)} />
+              <span>
+                <span className="sr-only">{head}</span> 새 문구를 확인했어요
+              </span>
+            </label>
+          ) : null}
           {prev ? (
             <div className="mt-1.5">
               <Button variant="link" aria-expanded={showOld} onClick={() => setShowOld((v) => !v)}>
@@ -419,12 +451,32 @@ export function QuestionCard(p: CardProps) {
           {defaultText || rec ? (
             <dl className="mt-2.5 grid gap-1">
               {defaultText ? (
-                <ValueLine kind="default" label="기본값">
+                <ValueLine
+                  kind="default"
+                  label="기본값"
+                  action={
+                    canAnswer ? (
+                      <Button size="xs" className="coarse:min-h-[44px]" aria-label={`${head} 기본값 쓰기`} onClick={useDefault}>
+                        기본값 쓰기
+                      </Button>
+                    ) : null
+                  }
+                >
                   {defaultText} <span className="text-caption text-muted-foreground">· 고르기 전에는 답이 아니에요</span>
                 </ValueLine>
               ) : null}
               {rec ? (
-                <ValueLine kind="recommendation" label="AI 추천">
+                <ValueLine
+                  kind="recommendation"
+                  label="AI 추천"
+                  action={
+                    canAnswer ? (
+                      <Button size="xs" className="coarse:min-h-[44px]" aria-label={`${head} 추천 쓰기`} onClick={useRecommendation}>
+                        추천 쓰기
+                      </Button>
+                    ) : null
+                  }
+                >
                   {optionLabel(q.options, rec.value)} <span className="text-muted-foreground">— {rec.reason}</span>
                 </ValueLine>
               ) : null}
@@ -434,34 +486,89 @@ export function QuestionCard(p: CardProps) {
           {q.sent ? (
             <div data-field-kind="answer" className="mt-3 rounded-md bg-surface-sunk px-3 py-2">
               <p className="text-body text-ink">{q.sent.answer}</p>
+              {q.used_default ? (
+                <p data-used-default="" className="mt-0.5 text-caption text-ink-2">
+                  기본값 그대로 보냈어요
+                </p>
+              ) : null}
               <p className="mt-1 text-caption text-muted-foreground">
                 보냄 · <time dateTime={q.sent.committed_at}>{formatAt(q.sent.committed_at)}</time> · 접수 {q.sent.receipt_no}
               </p>
             </div>
-          ) : (
-            <>
-              {review ? <DraftReview qid={q.id} version={q.version} review={review} onImport={() => closeReview(true)} onDismiss={() => closeReview(false)} /> : null}
-              {/* 글 칸의 길게 누르기(터치)는 글 고르기 — 맥락 메뉴가 가로채지 않게 */}
-              <div className="mt-3 space-y-3" onPointerDown={(e) => e.pointerType !== "mouse" && e.stopPropagation()}>
-                {isChoice(kind) ? (
-                  <ChoiceAnswer q={q} draft={answer} head={head} />
-                ) : (
-                  <div>
-                    <label className="block text-meta font-medium text-ink" htmlFor={q.id}>
-                      <span className="sr-only">{head} </span>답{q.required ? " (필수)" : ""}
-                    </label>
-                    <DraftTextarea id={q.id} rows={3} draft={answer} />
-                  </div>
-                )}
-                <div data-field-kind="opinion">
-                  <label className="block text-meta font-medium text-ink" htmlFor={`${q.id}-opinion`}>
-                    <span className="sr-only">{head} </span>의견 <span className="font-normal text-muted-foreground">(선택)</span>
+          ) : null}
+          {!q.sent && review ? <DraftReview qid={q.id} version={q.version} review={review} onImport={() => closeReview(true)} onDismiss={() => closeReview(false)} /> : null}
+          {/* 입력 칸은 보낸 뒤에도 같은 자리에 둔다 — 보내는 사이 쓰던 글(한글 조합 중 포함)이 있으면 영수증이 와도 그 칸을 없애지 않는다.
+              보낸 답(위, 영수증 스냅숏)과 그 뒤 쓴 글(이 칸의 초안)은 따로 남고, 조합이 끝난 글은 저장된다. 보낸 그대로면(초안이 비면) 칸도 사라진다 */}
+          {!q.sent || keepFields ? (
+            <div className="mt-3 space-y-3" onPointerDown={(e) => e.pointerType !== "mouse" && e.stopPropagation()}>
+              {q.sent ? <p className="text-caption text-muted-foreground">보낸 뒤에 더 쓴 글이에요 — 아직 보내지 않았어요.</p> : null}
+              {isChoice(kind) ? (
+                <ChoiceAnswer q={q} draft={answer} head={head} />
+              ) : (
+                <div>
+                  <label className="block text-meta font-medium text-ink" htmlFor={q.id}>
+                    <span className="sr-only">{head} </span>답{q.required ? " (필수)" : ""}
                   </label>
-                  <DraftTextarea id={`${q.id}-opinion`} rows={2} draft={opinion} />
+                  <DraftTextarea id={q.id} rows={3} draft={answer} />
                 </div>
+              )}
+              <div data-field-kind="opinion">
+                <label className="block text-meta font-medium text-ink" htmlFor={`${q.id}-opinion`}>
+                  <span className="sr-only">{head} </span>의견 <span className="font-normal text-muted-foreground">(선택)</span>
+                </label>
+                <DraftTextarea id={`${q.id}-opinion`} rows={2} draft={opinion} />
               </div>
-            </>
-          )}
+            </div>
+          ) : null}
+          {!q.sent && ans ? (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Button
+                id={`send-${q.id}`}
+                variant="outline"
+                size="sm"
+                className="coarse:min-h-[44px]"
+                aria-label={`${head} 이 답만 보내기`}
+                aria-disabled={sendOff ? true : undefined}
+                aria-describedby={ans.blockedReason ? reasonId : undefined}
+                onClick={(e) => {
+                  if (sendOff) return void e.preventDefault();
+                  ans.onSend();
+                }}
+              >
+                <Send aria-hidden="true" />
+                이 답만 보내기
+              </Button>
+              {ans.blockedReason ? (
+                <span id={reasonId} className="text-caption text-muted-foreground">
+                  {ans.blockedReason}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="mt-2">
+            <Button id={`thread-toggle-${q.id}`} variant="ghost" size="sm" className="coarse:min-h-[44px]" aria-label={`${head} 의견 스레드`} aria-expanded={threadOpen} aria-controls={threadOpen ? `${q.id}-thread` : undefined} onClick={() => setThreadOpen((v) => !v)}>
+              <MessageSquare aria-hidden="true" />
+              의견 스레드
+            </Button>
+          </div>
+          {threadOpen ? (
+            <QuestionThread
+              qid={q.id}
+              number={q.number}
+              version={q.version}
+              versionId={q.version_id}
+              threads={p.thread.threads}
+              unavailable={p.thread.unavailable}
+              reason={p.thread.reason}
+              pending={p.thread.pending}
+              readOnly={p.thread.readOnly}
+              onReload={p.thread.reload}
+              draft={comment}
+              draftKey={keyFor(scope, q.id, q.version, "comment")}
+              post={(input, key) => p.thread.post(q, input, key)}
+              onPosted={(r) => p.thread.onPosted(q, r)}
+            />
+          ) : null}
 
           {tools ? (
             <div className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1 border-t border-dashed pt-2.5">

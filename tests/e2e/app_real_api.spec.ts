@@ -3,7 +3,12 @@
 // 임시 HOME·USERPROFILE·PES_HOME 의 합성 DB 프로젝트를 serve.ts 가 서빙하고(실제 홈·실제 PES 포트 0), 서버가 /p/<slug>/... 로 내주는 앱 빌드를
 // Chromium 으로 연다. 앱 산출물 = 환경변수 PES_APP_DIR(없으면 app/dist), 자산은 /_app/…(vite base "/_app/").
 //
-// 세션 넘기기(R1 필수 1, leader 결정 = 권장안 A) — 이 파일이 못 박는 해석:
+// SEL-85 로 옮김: 주소 조각은 세션이 아니라 1회용 코드 `#code=<코드>` 이고, 앱이 렌더 전에 지운 뒤 `POST /api/v1/app-session {code}` 로 세션과 바꾼다
+// (계약: tests/test_sel85_app_code.test.ts 머리말). 아래 보안 단언(B1 세션이 주소·요청·Referer·콘솔·localStorage·쿠키에 없음, B2 서버가 심은 비밀 없음,
+// B3 새 탭 이어받기 없음, D1~D3 가짜 자료로 안 돌아감)은 그대로이고, 교환 요청/응답 하나만 알려진 예외로 다룬다: 교환 요청은 세션 헤더가 없고,
+// 교환 응답만 세션을 담는다(B2 에서 그 응답 하나만 뺀다). 새 흐름의 전용 시험은 tests/e2e/sel85_one_time_code.spec.ts.
+//
+// (옛 설명) 세션 넘기기(R1 필수 1, leader 결정 = 권장안 A) — 이 파일이 못 박는 해석:
 //   - 앱을 여는 명령 `pes open <slug> --app` (PES_NO_BROWSER=1 이면 주소만 출력, 시험은 ws.open_app() 으로 받음) 이
 //     http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드>#pes=<base64url JSON {session, projects:{slug:id}}> 를 준다.
 //     시험은 addInitScript 를 쓰지 않는다 — 그 주소로 열기만 한다.
@@ -40,7 +45,10 @@ async function workspaceData(page: Page): Promise<any> {
   return (await res.json()).data;
 }
 
-const payloadOf = (url: string): string => new URL(url).hash.replace(/^#pes=/, "");
+const codeOf = (url: string): string => new URL(url).hash.replace(/^#code=/, "");
+const EXCHANGE = "/api/v1/app-session";
+/** 세션 헤더를 달고 가는 API 읽기 — 교환(POST app-session, 세션 헤더 없음)은 따로 본다 */
+const isRead = (r: { url: URL }): boolean => r.url.pathname.startsWith("/api/") && r.url.pathname !== EXCHANGE;
 
 /** 주소의 조각을 바꾼 주소(경로·쿼리는 그대로) */
 function withHash(url: string, hash: string): string {
@@ -72,7 +80,8 @@ test("A0 앞 조건: 앱 빌드의 자산 경로는 /_app/ 이다(옛 /app/ 이 
 
 test("A1 pes open --app 이 준 주소로만 열어도(addInitScript 없음) 앱 화면이 임시 홈 합성 프로젝트의 서버 자료를 보인다", async ({ page }) => {
   const url = ws.open_app();
-  expect(new URL(url).hash).toMatch(/^#pes=/);
+  expect(new URL(url).hash).toMatch(/^#code=[A-Za-z0-9_-]{20,}$/);
+  expect(url).not.toContain(ws.session);
   const data = await workspaceData(page);
   expect(data.slug).toBe(ws.slug);
   const seen = watchRequests(page);
@@ -85,7 +94,8 @@ test("A1 pes open --app 이 준 주소로만 열어도(addInitScript 없음) 앱
   await expect(page.getByRole("navigation", { name: /연구 흐름/ })).toBeVisible();
   const all = await seen.done();
   // 읽기는 GET 만, 같은 출처, 세션 헤더 포함, workspace 를 실제로 읽었다
-  const apiCalls = all.filter((r) => r.url.pathname.startsWith("/api/"));
+  const apiCalls = all.filter(isRead);
+  expect(all.filter((r) => r.url.pathname === EXCHANGE).map((r) => r.method), "교환은 POST 한 번").toEqual(["POST"]);
   expect(apiCalls.some((r) => r.url.pathname === `/api/v1/projects/${ws.project_id}/workspace`)).toBe(true);
   for (const r of apiCalls) {
     expect(r.method, r.url.pathname).toBe("GET");
@@ -102,7 +112,7 @@ test("A1 pes open --app 이 준 주소로만 열어도(addInitScript 없음) 앱
 
 test("B1 조각은 렌더 뒤 주소창에서 지워지고, 주소·요청 URL·헤더(Referer 포함)·콘솔·localStorage·쿠키 어디에도 세션이 없다(세션 헤더는 API 요청의 x-pes-session 뿐)", async ({ page }) => {
   const url = ws.open_app();
-  const payload = payloadOf(url);
+  const payload = codeOf(url);
   expect(payload.length).toBeGreaterThan(10);
   const consoles: string[] = [];
   page.on("console", (m) => consoles.push(m.text()));
@@ -133,9 +143,10 @@ test("B1 조각은 렌더 뒤 주소창에서 지워지고, 주소·요청 URL·
 
 test("B2 E12 유지: 브라우저가 받은 어떤 응답(본문·헤더)에도 소유자 세션 비밀이 없다(앱 페이지·자산·API 응답 모두)", async ({ page }) => {
   const url = ws.open_app();
-  const payload = payloadOf(url);
+  const payload = codeOf(url);
   const bodies: string[] = [];
   page.on("response", async (r) => {
+    if (new URL(r.url()).pathname === EXCHANGE) return; // 교환 응답은 세션을 돌려주는 유일한 자리다
     try {
       bodies.push(await r.text(), JSON.stringify(await r.allHeaders()));
     } catch {
@@ -199,7 +210,7 @@ async function assertGuidance(browser: Browser, address: string): Promise<void> 
     await expect(page.locator("body")).not.toContainText("예시 연구");
     await expect(page.locator("main [data-screen-title]")).toHaveCount(0);
     await page.waitForTimeout(300);
-    expect((await seen.done()).filter((r) => r.url.pathname.startsWith("/api/")), "/api/ 요청 0").toEqual([]);
+    expect((await seen.done()).filter(isRead), "세션이 필요한 /api/ 요청 0 (코드 교환 시도는 있을 수 있고 거절된다)").toEqual([]);
     expect(page.url(), "깨진 조각도 주소창에 남기지 않는다").not.toContain("pes=");
   } finally {
     await context.close();
@@ -216,29 +227,31 @@ test("D1 조각이 없으면(주소를 그냥 붙여 넣음) 가짜 클라이언
 test("D2 깨진 조각은 모두 안내다 — 빈 값 · base64 아님 · JSON 아님 · 모양 틀림 · 세션 빔 · projects 값이 문자열 아님", async ({ browser }) => {
   const base = ws.open_app();
   const broken = [
-    "#pes=",
-    "#pes=!!!not-base64!!!",
-    `#pes=${b64url("this is not json")}`,
-    `#pes=${b64url("[]")}`,
-    `#pes=${b64url("null")}`,
+    "#code=",
+    "#code=!!!not-a-code!!!",
+    `#code=${b64url("this is not a code")}`,
+    "#code=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", // 모양은 맞지만 서버가 모르는 코드
+    `#code=${"x".repeat(4000)}`,
+    // 옛 세션 조각은 더는 받지 않는다 — 올바른 세션이 들어 있어도 안내
+    `#pes=${b64url(JSON.stringify({ session: ws.session, projects: { [ws.slug]: ws.project_id } }))}`,
     `#pes=${b64url(JSON.stringify({ projects: { [ws.slug]: ws.project_id } }))}`,
-    `#pes=${b64url(JSON.stringify({ session: "", projects: { [ws.slug]: ws.project_id } }))}`,
-    `#pes=${b64url(JSON.stringify({ session: ws.session, projects: "nope" }))}`,
-    `#pes=${b64url(JSON.stringify({ session: ws.session, projects: { [ws.slug]: 7 } }))}`,
-    `#pes=${b64url(JSON.stringify({ session: 12345, projects: {} }))}`,
+    "#pes=",
   ];
   for (const hash of broken) await assertGuidance(browser, withHash(base, hash));
 });
 
-test("D3 서버가 세션을 거절하면(틀린 세션 조각) 가짜 자료로 되돌아가지 않고 오류를 보이며, 틀린 세션도 주소창에 남지 않는다", async ({ page }) => {
-  const url = withHash(ws.open_app(), `#pes=${b64url(JSON.stringify({ session: "synthetic-wrong-session-value", projects: { [ws.slug]: ws.project_id } }))}`);
+test("D3 서버가 세션을 거절하면(교환이 틀린 세션을 돌려줌) 가짜 자료로 되돌아가지 않고 오류를 보이며, 틀린 세션도 주소창에 남지 않는다", async ({ page }) => {
+  await page.route(`**${EXCHANGE}`, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", headers: { "cache-control": "no-store" }, body: JSON.stringify({ data: { session: "synthetic-wrong-session-value", projects: { [ws.slug]: ws.project_id } } }) }),
+  );
+  const url = ws.open_app();
   const data = await workspaceData(page);
   const seen = watchRequests(page);
   await page.goto(url);
   await page.waitForTimeout(800);
   await expect(page.locator("body")).not.toContainText("예시 연구");
   await expect(page.locator("body")).not.toContainText(data.title);
-  const calls = (await seen.done()).filter((r) => r.url.pathname.startsWith("/api/"));
+  const calls = (await seen.done()).filter(isRead);
   expect(calls.length).toBeGreaterThan(0);
   expect(page.url()).not.toContain("pes=");
   expect(page.url()).not.toContain("synthetic-wrong-session-value");

@@ -14,18 +14,27 @@
 //   3. assert_no_real_path(text) — a child's stdout / stderr / a produced file must not mention a protected real path.
 // "Real home" means BOTH os.homedir() (follows $HOME, i.e. the temp folder when the whole run is isolated) and
 // os.userInfo().homedir (the account's home, whatever $HOME says); a duplicate is looked at once.
+// 4. guard_process_fs()        — (SEL-95) the test process itself: every fs call (stat · read · readdir · exists · open · write …, sync, callback
+//                                  and promises) on a path inside the real <home>/.pes, <home>/pes-projects or <home>/.claude is recorded as a
+//                                  PESHomeAccessViolation and thrown; use_home_guard() fails the file at the end even if the test swallowed the
+//                                  throw (try/catch "absent"). Layer 2 can only see *changes* of .pes / pes-projects; a test that stat()ed the real
+//                                  ~/.claude and compared mtimes (D13) passed or flaked depending on other Claude sessions — now it cannot even look.
 // Layer 2 reuses the Playwright globalSetup listing (tests/e2e/helpers/home_guard.ts). All of it works with a *fake* "real home"
 // too, so the guard itself is tested without touching anything real (tests/test_home_guard.test.ts).
 
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, before } from "node:test";
 
 import { snapshot_of } from "../e2e/helpers/home_guard.ts";
 
-export const PROTECTED_NAMES = [".pes", "pes-projects"] as const;
+/** Folders of a real home no test may look at. `.pes` and `pes-projects` are also compared before / after (layer 2); `.claude` is denied only —
+ * other Claude sessions write there all the time, so a before / after comparison of it is a flaky test, not a guard (SEL-95, D13). */
+export const PROTECTED_NAMES = [".pes", "pes-projects", ".claude"] as const;
 
 /** The account's real home, whatever $HOME / %USERPROFILE% say (the home a Python child must never open anything below). */
 export function account_home(): string {
@@ -141,7 +150,7 @@ export interface HomeSnapshot {
 
 export function take_home_snapshot(real_home?: Homes): HomeSnapshot {
   const homes = homes_of(real_home);
-  const list = (): string => JSON.stringify(homes.map((home) => snapshot_of(home)));
+  const list = (): string => unguarded(() => JSON.stringify(homes.map((home) => snapshot_of(home))));
   const first = list();
   return {
     homes,
@@ -158,13 +167,115 @@ export function assert_no_violation(text: string, what: string): void {
   assert.ok(!text.includes("PESHomeAccessViolation"), `home guard: ${what} — the child touched the real PES home:\n${text.split("\n").filter((line) => line.includes("PESHomeAccessViolation")).slice(-2).join("\n")}`);
 }
 
-/** Call once at the top of a test file: compares the real home before / after the file's tests. */
+// ---------------------------------------------------------------------------
+// layer 4 — the test process's own fs calls (SEL-95)
+
+const cjs_fs = createRequire(import.meta.url)("node:fs") as Record<string, any>;
+
+const FS_ONE_PATH = [
+  "statSync", "lstatSync", "existsSync", "accessSync", "readFileSync", "readdirSync", "opendirSync", "openSync", "readlinkSync",
+  "createReadStream", "createWriteStream", "writeFileSync", "appendFileSync", "mkdirSync", "rmSync", "rmdirSync", "unlinkSync", "utimesSync", "chmodSync", "truncateSync",
+  "stat", "lstat", "exists", "access", "readFile", "readdir", "opendir", "open", "readlink", "writeFile", "appendFile", "mkdir", "rm", "rmdir", "unlink", "utimes", "chmod", "truncate",
+] as const;
+const FS_TWO_PATH = ["copyFileSync", "cpSync", "renameSync", "linkSync", "copyFile", "cp", "rename", "link"] as const;
+const FS_PROMISE_NAMES = ["stat", "lstat", "access", "readFile", "readdir", "opendir", "open", "readlink", "writeFile", "appendFile", "mkdir", "rm", "rmdir", "unlink", "utimes", "chmod", "truncate", "copyFile", "cp", "rename", "link", "symlink"] as const;
+
+let allowed = 0;
+
+/** Run `fn` with the process fs guard off (the before / after listing of the guard's own homes). */
+export function unguarded<T>(fn: () => T): T {
+  allowed += 1;
+  try {
+    return fn();
+  } finally {
+    allowed -= 1;
+  }
+}
+
+function as_path(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Buffer.isBuffer(value)) return value.toString("utf8");
+  if (value instanceof URL) {
+    try {
+      return fileURLToPath(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined; // a file descriptor or anything else: not a path
+}
+
+export interface ProcessFsGuard {
+  /** every access that was refused (also the ones the test swallowed) */
+  readonly violations: readonly string[];
+  /** put the original fs functions back; fails when a violation was recorded */
+  release(): void;
+}
+
+/**
+ * Deny (throw `PESHomeAccessViolation: <fn> <path>`) and record every fs call of this process whose path lies in a protected folder of the
+ * real home(s). Decided from the spelling of the path alone (no realpath per call); a symlink alias is the child guard's and layer 2's job.
+ */
+export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
+  const bases = [...new Set(homes_of(real_home).flatMap((home) => [resolve(home), native(home)]))];
+  const folders = bases.flatMap((base) => PROTECTED_NAMES.map((name) => join(base, name)));
+  const violations: string[] = [];
+  const hit = (fn: string, value: unknown): void => {
+    if (allowed > 0) return;
+    const path = as_path(value);
+    if (path === undefined || path === "") return;
+    const full = resolve(path);
+    if (folders.some((folder) => inside(full, folder))) {
+      const message = `PESHomeAccessViolation: ${fn} ${full}`;
+      violations.push(message);
+      throw new Error(message);
+    }
+  };
+  const restore: Array<() => void> = [];
+  const wrap = (target: Record<string, any>, name: string, paths: number, label: string, promise: boolean): void => {
+    const original = target[name];
+    if (typeof original !== "function") return;
+    const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+      try {
+        for (let i = 0; i < paths; i += 1) hit(`${label}${name}`, args[i]);
+      } catch (error) {
+        if (promise) return Promise.reject(error);
+        throw error;
+      }
+      return original.apply(this, args);
+    };
+    for (const key of Object.keys(original)) (wrapped as any)[key] = original[key]; // e.g. realpathSync.native
+    target[name] = wrapped;
+    restore.push(() => {
+      target[name] = original;
+    });
+  };
+  for (const name of FS_ONE_PATH) wrap(cjs_fs, name, 1, "fs.", false);
+  for (const name of FS_TWO_PATH) wrap(cjs_fs, name, 2, "fs.", false);
+  wrap(cjs_fs, "symlinkSync", 2, "fs.", false);
+  for (const name of FS_PROMISE_NAMES) wrap(cjs_fs.promises, name, ["copyFile", "cp", "rename", "link", "symlink"].includes(name) ? 2 : 1, "fs.promises.", true);
+  syncBuiltinESMExports();
+  return {
+    violations,
+    release(): void {
+      for (const undo of restore.reverse()) undo();
+      restore.length = 0;
+      syncBuiltinESMExports();
+      assert.deepEqual(violations, [], `home guard: the test process touched the real home (${violations.length} access)`);
+    },
+  };
+}
+
+/** Call once at the top of a test file: compares the real home before / after the file's tests, and denies every look at the real home (layer 4). */
 export function use_home_guard(): void {
   let snapshot: HomeSnapshot | undefined;
+  let fs_guard: ProcessFsGuard | undefined;
   before(() => {
     snapshot = take_home_snapshot();
+    fs_guard = guard_process_fs();
   });
   after(() => {
+    fs_guard?.release();
     snapshot?.check();
   });
 }

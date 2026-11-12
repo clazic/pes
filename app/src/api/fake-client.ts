@@ -1,5 +1,5 @@
 import { DEMO_HUMAN, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
@@ -18,6 +18,7 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   conflict: { message: "현재 상태에서는 처리할 수 없는 요청입니다.", next_action: "reread_context" },
   rev_conflict: { message: "기준 버전이 현재와 다릅니다.", next_action: "reread_context" },
   not_supported: { message: "아직 서버에서 지원하지 않습니다.", next_action: "reread_context" },
+  question_version_changed: { message: "답변 대상 질문 버전이 바뀌었습니다. 새 버전을 확인해 주세요.", next_action: "reread_question" },
   cursor_expired: { message: "변경 기록이 너무 오래되어 이어 받을 수 없습니다.", next_action: "reread_context" },
   cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
 };
@@ -133,6 +134,21 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
     ...(q.sent ? { answer: { answer: q.sent.answer, receipt_no: q.sent.receipt_no, committed_at: q.sent.committed_at } } : {}),
   });
   const labels = (options: { label: string }[] | undefined) => (options ?? []).map((o) => o.label);
+
+  /* ───────────── 답 제출 · 질문별 의견(U2c) — 서버 계약 SEL-90(U2a)의 모양, 메모리 안에서만 ───────────── */
+  const threads: CommentThreadView[] = [];
+  /** 질문 id → 보낸 값(선택지 id / 글) — 조건(show_if) 판단용 */
+  const rawValues = new Map<string, string | string[]>();
+  let msgSeq = 0;
+  const rejectDetail = (code: ApiErrorCode, message: string, details: Record<string, unknown>): never => {
+    throw new PesApiError({ format_version: FORMAT_VERSION, error: { code, message, retryable: false, next_action: ERRORS[code].next_action, details }, request_id: requestId() });
+  };
+  const filled = (v: unknown) => (Array.isArray(v) ? v.length > 0 : typeof v === "string" ? v.trim() !== "" : false);
+  const roundOf = (stage: string, round: string) => rounds.find((x) => x.stage === stage && (round === "start" ? x.round_id === null : String(x.round_id) === round));
+  const answerText = (q: QuestionView, value: string | string[]) => {
+    const one = (v: string) => q.options?.find((o) => o.id === v)?.label ?? v;
+    return Array.isArray(value) ? value.map(one).join(", ") : one(value);
+  };
 
   return {
     capabilities: { questionTools: true },
@@ -319,6 +335,74 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
         rv.questions = [...sorted, ...rv.questions.filter((q) => statusOf(q) !== "open")];
         bumpForm(rv);
         return { round: rv, data: { form_version: rv.form_version } };
+      });
+    },
+    submitAnswers(slug, edition, stage, round, input, key) {
+      return command("submitAnswers", slug, edition, key, [stage, round, input], () => {
+        const r = roundOf(stage, round);
+        if (!r || r.state !== "current") return rejectNow("not_found", "$.round");
+        const open = r.questions.filter((x) => statusOf(x) === "open");
+        const items = new Map<string, { value: string | string[] | null; comment: string | null; used_default: boolean }>();
+        if (input.mode === "single" && input.answers.length !== 1) rejectDetail("invalid_payload", "개별 제출에는 질문이 정확히 하나여야 해요.", { reason: "single_requires_one_item" });
+        for (const a of input.answers) {
+          const q = open.find((x) => x.id === a.question_id);
+          if (!q) return rejectNow("conflict", "$.answers");
+          if (a.question_version !== q.version) rejectDetail("conflict", "질문이 그 사이 바뀌었어요. 새 문구를 확인해 주세요.", { reason: "stale_question_version", question_ids: [q.id] });
+          items.set(q.id, { value: a.value, comment: a.comment ?? null, used_default: a.used_default === true });
+        }
+        const valueOf = (q: QuestionView): string | string[] | undefined => (items.has(q.id) && filled(items.get(q.id)!.value) ? (items.get(q.id)!.value as string | string[]) : (rawValues.get(q.id) ?? q.sent?.answer));
+        const applicable = (q: QuestionView) => {
+          if (!q.show_if) return true;
+          const cond = open.find((x) => x.id === q.show_if!.question_id);
+          const v = cond ? valueOf(cond) : undefined;
+          return Array.isArray(v) ? v.includes(q.show_if.equals) : v === q.show_if.equals;
+        };
+        const notApplicable = [...items.keys()].filter((id) => filled(items.get(id)!.value) && !applicable(open.find((x) => x.id === id)!));
+        if (notApplicable.length) rejectDetail("invalid_payload", "지금은 답하지 않는 질문이에요.", { reason: "not_applicable", question_ids: notApplicable });
+        const satisfied = (q: QuestionView) => {
+          const it = items.get(q.id);
+          if (it) return filled(it.value) || (q.allow_comment_as_answer === true && filled(it.comment));
+          return !!q.sent;
+        };
+        const missingNow = open.filter((q) => q.required && applicable(q) && !satisfied(q)).map((q) => q.id);
+        if (input.mode === "bundle" && missingNow.length) rejectDetail("invalid_payload", "필수 질문에 아직 답이 없어서 접수하지 않았습니다.", { reason: "required_missing", question_ids: missingNow });
+        const no = String(seq + 1).padStart(4, "0");
+        for (const [id, it] of items) {
+          const q = open.find((x) => x.id === id)!;
+          const sent = { receipt_no: no, tx_id: `tx-${no}`, committed_at: new Date().toISOString() };
+          if (filled(it.value)) {
+            q.sent = { answer: answerText(q, it.value as string | string[]), ...sent };
+            rawValues.set(id, it.value as string | string[]);
+            if (it.used_default) q.used_default = true;
+            else delete q.used_default;
+          } else if (filled(it.comment) && q.allow_comment_as_answer === true) q.sent = { answer: String(it.comment), ...sent };
+          if (q.sent) q.needs_recheck = false;
+        }
+        const missing = open.filter((q) => q.required && applicable(q) && !q.sent).map((q) => q.id);
+        return { round: r, data: { submission_id: `sub-${no}`, answers: [...items.keys()].map((question_id) => ({ question_id, state: "submitted" as const })), form_complete: missing.length === 0, missing_required: missing } };
+      });
+    },
+    async getComments(slug, edition, stage, round) {
+      if (!find(slug, edition)) return [];
+      const r = roundOf(stage, round);
+      if (!r) return [];
+      const ids = new Set(r.questions.map((q) => q.id));
+      return structuredClone(threads.filter((t) => ids.has(t.question_id)));
+    },
+    addComment(slug, edition, questionId, input, key) {
+      return command("addComment", slug, edition, key, [questionId, input], () => {
+        const { r } = target(questionId);
+        if (!input.body_md.trim()) return rejectNow("invalid_payload", "$.body_md");
+        let t = input.thread_id ? threads.find((x) => x.thread_id === input.thread_id && x.question_id === questionId) : undefined;
+        if (input.thread_id && !t) return rejectNow("not_found", "$.thread_id");
+        const created = !t;
+        if (!t) {
+          t = { thread_id: `th-${threads.length + 1}`, question_id: questionId, ...(input.question_version ? { question_version: input.question_version } : {}), messages: [] };
+          threads.push(t);
+        }
+        const message_id = `msg-${++msgSeq}`;
+        t.messages.push({ message_id, body_md: input.body_md, at: new Date().toISOString(), by: "human" });
+        return { round: r, data: { thread_id: t.thread_id, message_id, thread_created: created } };
       });
     },
     getChanges(slug, edition, cursor) {

@@ -2,13 +2,16 @@
 //
 // 사용: node scripts/lint_skills.ts [루트]      (npm run lint:skills)
 //
-// 막는 것은 세 가지뿐이다.
+// 막는 것은 네 가지뿐이다.
 //   1. 업무 상태를 직접 바꾸는 경로 — 코드 블록·인라인 코드(명령 예제) 안의
 //      project.json 쓰기, 업무 표(sqlite) 쓰기 SQL, 잠금 파일(.pes-lock) 조작.
 //      산문 문장은 보지 않는다("project.json 을 직접 고치지 않는다" 같은 정상 문장을 막지 않기 위해).
 //   3. Python 호출 — 코드 블록·인라인 코드 안에서 파이썬 인터프리터로 파이썬 파일을 부르는 꼴·Windows 런처·표준입력 프로그램 (SEL-74: PES 도구는 `node …/scripts/pes.ts`·`setup.ts`).
 //      산문에서 Python 이라는 낱말을 말하는 것은 막지 않는다.
 //      자식 제안 파일(rounds/ 아래 결과 JSON 등)·읽기·이름만 적은 언급은 허용한다.
+//   4. 앱 열기 호출 (SEL-85) — 코드 블록·인라인 코드 안의 `pes open … --app`. 이 명령은 소유자 세션을 1회용 코드로 바꿔 브라우저 주소에 싣는
+//      사람 전용 명령이다. 에이전트·스킬이 부르면 안 된다(open 하위 명령과 --app 옵션이 한 명령에 같이 있는 꼴, 옵션 위치·경로·변수 slug 불문).
+//      산문 문장("… --app 을 부르지 않는다")은 보지 않는다.
 //   2. Claude 전용 표기(anthropic-skills:*, AskUserQuestion, Agent/Task 도구 호출 표기)가
 //      docs/adapters/* 밖에 있는 것 — 산문 포함 전체 텍스트를 본다. 어댑터 노트는 이 규칙만 예외다.
 //
@@ -641,6 +644,34 @@ function check_python(seg: Segment, file: string, out: Violation[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// 규칙 4 — `pes open … --app` 거절 (SEL-85)
+
+const unquote = (word: string): string => word.replace(/^["']+|["']+$/g, "");
+
+/** 한 명령 조각이 `<pes 실행 파일> open … --app …` 인가: `open` 바로 앞 낱말이 pes / pes.ts (경로·따옴표 붙어도) 이고 뒤에 `--app` 낱말이 있다. */
+function is_open_app(piece: string): boolean {
+  const words = shell_words(piece).map(unquote);
+  for (let i = 1; i < words.length; i += 1) {
+    if (words[i] !== "open" || !/(?:^|[\\/])pes(?:\.ts)?$/.test(words[i - 1]!)) continue;
+    if (words.slice(i + 1).includes("--app")) return true;
+  }
+  return false;
+}
+
+function check_open_app(seg: Segment, file: string, out: Violation[]): void {
+  for (const st of statements(seg)) {
+    if (!pieces_of(st.text).some(is_open_app)) continue;
+    out.push({
+      file,
+      line: st.line,
+      rule: "앱 열기 호출",
+      message: "`pes open … --app` 는 사람이 터미널에서 직접 여는 명령이다(소유자 세션을 코드로 바꿔 주소에 싣는다) — 에이전트·스킬·명령 문서가 부르지 않는다",
+      text: st.text.trim().slice(0, 140),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 규칙 2 — Claude 전용 표기는 어댑터 노트에만
 
 const CLAUDE_ONLY: { re: RegExp; what: string }[] = [
@@ -681,6 +712,7 @@ export function lint(root: string): { files: number; violations: Violation[] } {
       check_sql(seg, rel, violations);
       check_lock(seg, rel, violations);
       check_python(seg, rel, violations);
+      check_open_app(seg, rel, violations);
     }
     if (!rel.startsWith("docs/adapters/")) check_claude_marks(text, rel, violations);
   }
