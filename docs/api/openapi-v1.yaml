@@ -1395,7 +1395,7 @@ x-app-session:
       - "400 invalid_payload"
       - "401 unauthenticated"
       - "413 payload_too_large"
-      - "429 rate_limited (60 per minute)"
+      - "429 rate_limited (60 requests per minute, or 64 unused live codes already exist: Retry-After is the time to the soonest expiry; a live code is never dropped to make room)"
   exchange:
     method: POST
     path: /api/v1/app-session
@@ -1410,4 +1410,4 @@ x-app-session:
       - "401 unauthenticated (unknown, used and expired codes look the same)"
       - "403 forbidden"
       - "413 payload_too_large"
-      - "429 rate_limited (120 attempts per minute, every attempt counts)"
+      - "429 rate_limited (only FAILED attempts count, 120 per minute; a good code is traded even when the budget is spent and a good exchange is not counted)"

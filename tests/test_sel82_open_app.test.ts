@@ -6,7 +6,7 @@
  * 해석 (leader 결정 "필수 1 = 권장안 A" + R1 로그 — 구현을 추측하지 않음):
  *   - 명령: `pes open <slug> --app`  (기존 `pes open <slug>` = 옛 대시보드 주소 `http://127.0.0.1:<port>/<slug>/` 는 그대로, 조각 없음).
  *     출력 한 줄(PES_NO_BROWSER=1 이면 브라우저 없이 그 주소만, 아니면 브라우저로 같은 주소를 연다):
- *       http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드|start>#pes=<base64url(JSON {"session": "<소유자 세션>", "projects": {"<slug>": "<프로젝트 id>"}})>
+ *       http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드|start>#code=<1회용 코드>   (SEL-82 원안은 #pes=<세션이 든 JSON> 조각이었다)
  *     경로는 앱 라우터가 그리는 작업 공간 주소(작업 공간 읽기가 알려 주는 현재 판·단계·라운드)다 — `/p/<slug>/` 만 열면 앱이 '없는 화면'이 되기 때문.
  *   - 세션 값은 소유자 세션(PES_LOCAL_SESSION_SECRET > ~/.pes/config.json > 비밀 파일 — api_secret.ts 와 같은 순서). 주소의 조각(# 뒤) 밖 어디에도 나오지 않는다(경로·쿼리·stderr).
  *   - 서버가 꺼져 있으면 서버를 새로 띄우지 않고(open 은 아무것도 시작하지 않는다) 0이 아닌 종료 코드 + 한국어 한두 줄 안내(`pes serve` 를 먼저). 조각·세션 출력 0.
@@ -77,7 +77,7 @@ async function exchange(f: Fx, fragment: string): Promise<any> {
   return res.json().data;
 }
 
-test("pes open <slug> --app prints one app address with #pes=<base64url JSON {session, projects}> and nothing of the session outside the fragment", { timeout: 120_000 }, async () => {
+test("pes open <slug> --app prints one app address with #code=<one-time code> (the exchange gives {session, projects}) and nothing of the session in the address", { timeout: 120_000 }, async () => {
   const f = await start("pes-sel82-open-");
   try {
     const out = f.run(["open", "synthetic", "--app"]);

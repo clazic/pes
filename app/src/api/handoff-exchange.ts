@@ -3,7 +3,7 @@
  * 1회용 코드 `#code=<코드>` 를 싣는다. 조각은 서버·Referer 로 가지 않고 다른 Origin 은 읽지 못한다. main.tsx 가 라우터를 만들기 전에 exchangeHandoff 를 한 번 기다린다:
  *   1. 조각이 `code=` 이면(올바르든 깨졌든) **요청을 보내기 전에** history.replaceState 로 주소에서 지운다(경로·쿼리는 그대로, 새 기록 없음).
  *      옛 `pes=` 조각(세션이 든 SEL-82 꼴)은 받지 않고 지우기만 한다. 다른 조각(`#main` 등)은 건드리지 않는다.
- *   2. 코드 모양이 맞으면 같은 출처 `POST /api/v1/app-session {code}` 를 딱 한 번 보낸다(세션 헤더 없음 · credentials omit · 재시도 없음).
+ *   2. 코드 모양이 맞으면 같은 출처 `POST /api/v1/app-session {code}` 를 딱 한 번 보낸다(세션 헤더 없음 · credentials omit · 재시도 없음 · 5초 제한).
  *      200 이고 data 가 {session, projects} 모양이면 같은 탭 sessionStorage 에 두고 window.__PES_APP__ 로 둔다. 그 밖(거절·네트워크 오류·모양 틀림)은 null.
  *   3. 같은 세션이 이미 같은 탭에 있으면 projects 를 합친다(같은 slug 는 새 값) — 같은 탭에서 프로젝트를 바꿔 열어도 앞의 것을 찾는다. 세션이 다르면 새것으로 덮어쓴다.
  *   4. 조각이 없거나 교환이 실패하면 같은 탭 sessionStorage 에 둔 것을 쓴다(새로고침). 둘 다 없으면 null — 다른 탭·창은 이어받지 못한다.
@@ -50,24 +50,44 @@ function store(win: Window, config: HandoffConfig): void {
   }
 }
 
-/** 코드 하나를 서버에 내고 세션을 받는다. 한 번만 보내고, 어떤 실패든 null. */
+/** 교환 요청의 시간 제한(ms) — CLI 쪽 발급 요청(5초)과 맞춘다. 서버가 연결만 받고 답이 없어도 앱이 빈 화면에 멈추지 않게 끊고 null 로 떨어뜨린다. */
+export const EXCHANGE_TIMEOUT_MS = 5000;
+
+/** 코드 하나를 서버에 내고 세션을 받는다. 한 번만 보내고, 어떤 실패든(시간 초과 포함) null. */
 async function exchange(win: Window, code: string, fetchImpl?: typeof fetch): Promise<HandoffConfig | null> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // fetch 가 신호를 무시하는 구현이어도(시험의 가짜 fetch 등) 제한 시간 뒤에는 반드시 끝난다
+  const timedOut = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, EXCHANGE_TIMEOUT_MS);
+  });
+  const attempt = async (): Promise<HandoffConfig | null> => {
+    try {
+      const send = fetchImpl ?? win.fetch.bind(win);
+      const response = await send(EXCHANGE_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+      });
+      if (response.status !== 200) return null;
+      const body: unknown = await response.json();
+      return validate(isRecord(body) ? body.data : null);
+    } catch {
+      return null;
+    }
+  };
   try {
-    const send = fetchImpl ?? win.fetch.bind(win);
-    const response = await send(EXCHANGE_PATH, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code }),
-      credentials: "omit",
-      cache: "no-store",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-    });
-    if (response.status !== 200) return null;
-    const body: unknown = await response.json();
-    return validate(isRecord(body) ? body.data : null);
-  } catch {
-    return null;
+    return await Promise.race([attempt(), timedOut]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

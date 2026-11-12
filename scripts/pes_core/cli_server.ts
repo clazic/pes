@@ -252,10 +252,14 @@ export async function cmd_hub(args: string[]): Promise<void> {
   say((await server_url(root)) ?? `http://127.0.0.1:${(await root_port(root)) ?? ""}/`);
 }
 
+/** The command that opens `url` in the default browser: the address is the ONLY thing passed on (never a session — SEL-85 tests this for every platform). */
+export function browser_command(url: string, platform: NodeJS.Platform = process.platform): [string, string[]] {
+  return platform === "darwin" ? ["open", [url]] : platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : ["xdg-open", [url]];
+}
+
 /** The default browser, started and let go (macOS `open`, Windows `start`, elsewhere `xdg-open`). A failure is not an error: the address is printed anyway. */
 function open_browser(url: string): void {
-  const [cmd, args]: [string, string[]] =
-    process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : ["xdg-open", [url]];
+  const [cmd, args] = browser_command(url);
   try {
     const child = spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true });
     child.on("error", () => undefined);
@@ -311,6 +315,7 @@ async function issue_app_code(port: number, projects: Record<string, string>): P
   } catch {
     die("서버에서 1회용 코드를 받지 못했습니다 — 서버가 응답하지 않습니다. pes serve 로 서버를 다시 켠 뒤 해 보세요", 1);
   }
+  if (status === 429) die("1회용 코드를 너무 많이 만들었습니다 — 쓰이지 않은 코드가 1분쯤 남아 있습니다. 잠시 뒤 다시 해 보세요", 1);
   if (status === 401) die("서버가 이 세션을 받아들이지 않았습니다 (서버를 켠 환경과 이 명령의 PES_LOCAL_SESSION_SECRET·HOME 이 같아야 합니다)", 1);
   if (typeof code !== "string" || !/^[A-Za-z0-9_-]{20,128}$/.test(code)) die(`서버에서 1회용 코드를 받지 못했습니다 (응답 ${status}) — pes serve 로 서버를 다시 켠 뒤 해 보세요`, 1);
   return code;

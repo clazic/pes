@@ -752,23 +752,27 @@ async function start(config: Config): Promise<void> {
     if (body === null) return;
     const projects = valid_projects(body.projects);
     if (projects === null || Object.keys(body).some((key) => key !== "projects")) return api_error(req, res, 400, "invalid_payload", { target: "$.body.projects" });
-    api_ok(req, res, 201, { code: app_codes.issue({ session, projects }) });
+    const made = app_codes.issue({ session, projects });
+    if ("retry_after_ms" in made) return api_error(req, res, 429, "rate_limited", { retry_after_ms: made.retry_after_ms });
+    api_ok(req, res, 201, { code: made.code });
   };
 
   /**
    * `POST /api/v1/app-session {code}` (the web app): no credential — the code is the proof. It is read and removed in one step, so it works once; an
-   * unknown, used or expired code is the same 401. Every answer is no-store (send() adds it), and a refusal carries no session.
+   * unknown, used or expired code is the same 401. Every answer is no-store (send() adds it), and a refusal carries no session. Only FAILED attempts
+   * (400 for a malformed code, 401) spend the minute's budget — and once it is spent they are 429; a good code is traded even then, so a flood of
+   * bad guesses (256-bit codes: it can only be a nuisance) never keeps the owner's own page from its session.
    */
   const handle_app_code_exchange = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const wait = app_codes.exchange_wait();
-    if (wait !== null) return api_error(req, res, 429, "rate_limited", { retry_after_ms: wait });
     const body = await small_json_body(req, res);
     if (body === null) return;
     const code = body.code;
+    const handoff = typeof code === "string" && CODE_SHAPE.test(code) && Object.keys(body).every((key) => key === "code") ? app_codes.take(code) : null;
+    if (handoff !== null) return api_ok(req, res, 200, { session: handoff.session, projects: handoff.projects });
+    const wait = app_codes.exchange_failed();
+    if (wait !== null) return api_error(req, res, 429, "rate_limited", { retry_after_ms: wait });
     if (typeof code !== "string" || !CODE_SHAPE.test(code) || Object.keys(body).some((key) => key !== "code")) return api_error(req, res, 400, "invalid_payload", { target: "$.body.code" });
-    const handoff = app_codes.take(code);
-    if (handoff === null) return api_error(req, res, 401, "unauthenticated");
-    api_ok(req, res, 200, { session: handoff.session, projects: handoff.projects });
+    api_error(req, res, 401, "unauthenticated");
   };
 
   const query_refused = (query: string): boolean => {
@@ -813,7 +817,7 @@ async function start(config: Config): Promise<void> {
       if (name === "" || /[\r\n\0:]/.test(name) || /[\r\n\0]/.test(String(value))) continue;
       out[name] = String(value);
     }
-    res.writeHead(response.status, { "Cache-Control": "no-store", ...out, "Content-Length": bytes.length });
+    res.writeHead(response.status, { ...out, "Content-Length": bytes.length });
     res.end(method === "HEAD" ? undefined : bytes);
   };
 

@@ -11,18 +11,22 @@
 //  - a code is 32 random bytes (crypto) in base64url (43 characters). The table is keyed by the SHA-256 of the code, so a lookup compares hashes
 //    (no timing signal about the code text) and the table never holds the code itself.
 //  - `take` finds and removes in one synchronous step: of any number of concurrent exchanges of one code, exactly one gets the session.
-//  - an expired code is removed when it is met and by every `issue`/`take` sweep; the table is also capped, the oldest code goes first.
+//  - an expired code is removed when it is met and by every `issue`/`take` sweep; the table is also capped (64 unused live codes): when it is full a
+//    new code is REFUSED (the caller is told to wait) — a live, unused code is never dropped to make room.
 //  - the session handed out is the SERVER's own owner session (the issuer proved it holds it before a code was made — see serve.ts); a caller never
 //    chooses which session a code stands for.
-//  - request budget: the exchange endpoint takes no credential, so every attempt (good or bad) counts against a sliding minute window.
+//  - request budget: the exchange endpoint takes no credential, so FAILED attempts (a code that is unknown, used, expired or malformed) count against
+//    a sliding minute window; a good exchange is not counted and is never refused for the budget (so a flood of bad guesses cannot keep the owner's own
+//    page from trading its code). Code requests (the caller holds the owner session) count against their own window.
 
 import { createHash, randomBytes } from "node:crypto";
 
 export const DEFAULT_CODE_TTL_MS = 60_000;
 const MAX_CODE_TTL_MS = 10 * 60_000;
-const MAX_LIVE_CODES = 64;
+/** Most unused, unexpired codes at once (a new code is refused above this). */
+export const MAX_LIVE_CODES = 64;
 const WINDOW_MS = 60_000;
-/** Exchange attempts per minute for the whole server (the endpoint has no credential to count them against). */
+/** Failed exchange attempts per minute for the whole server (the endpoint has no credential to count them against). */
 export const EXCHANGE_ATTEMPTS_PER_MINUTE = 120;
 /** Code requests per minute (the caller holds the owner session; this only bounds a runaway loop). */
 export const ISSUE_REQUESTS_PER_MINUTE = 60;
@@ -73,18 +77,21 @@ export class AppCodes {
     this.#now = options.now ?? Date.now;
   }
 
-  /** Makes a one-time code for `handoff` (the table keeps its own copy). */
-  issue(handoff: AppHandoff): string {
+  /**
+   * Makes a one-time code for `handoff` (the table keeps its own copy), or says how long to wait when MAX_LIVE_CODES unused codes are already live —
+   * nothing live is ever dropped to make room.
+   */
+  issue(handoff: AppHandoff): { code: string } | { retry_after_ms: number } {
     const now = this.#now();
     this.#sweep(now);
-    while (this.#table.size >= MAX_LIVE_CODES) {
-      const oldest = this.#table.keys().next();
-      if (oldest.done === true) break;
-      this.#table.delete(oldest.value);
+    if (this.#table.size >= MAX_LIVE_CODES) {
+      let soonest = Number.POSITIVE_INFINITY;
+      for (const entry of this.#table.values()) soonest = Math.min(soonest, entry.expires_at);
+      return { retry_after_ms: Math.max(1, soonest - now) };
     }
     const code = randomBytes(32).toString("base64url");
     this.#table.set(key_of(code), { expires_at: now + this.#ttl_ms, handoff: { session: handoff.session, projects: { ...handoff.projects } } });
-    return code;
+    return { code };
   }
 
   /** Reads and removes in one step. null for an unknown, used or expired code — the three look the same to the caller. */
@@ -98,8 +105,8 @@ export class AppCodes {
     return entry.expires_at > now ? entry.handoff : null;
   }
 
-  /** Counts one exchange attempt; retry_after_ms when the minute's budget is spent, else null. */
-  exchange_wait(): number | null {
+  /** Counts one FAILED exchange attempt; retry_after_ms when the minute's budget of failures is spent (this one is then refused too), else null. */
+  exchange_failed(): number | null {
     return this.#spend(this.#exchange_hits, EXCHANGE_ATTEMPTS_PER_MINUTE);
   }
 
