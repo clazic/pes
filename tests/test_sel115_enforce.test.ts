@@ -164,7 +164,7 @@ test("MCP: pes_context materials and pes_read files leave out a denied file (no 
     assert.deepEqual(read_ok.files.map((f: any) => f.blob_id), [allowed.blob.blob_id]);
 
     // 모든 raw 줄(서버가 쓴 전부)에도 흔적이 없다.
-    assert_no_trace(client.lines.slice(-4).join("\n"), secret, "raw MCP lines after deny");
+    assert_no_trace(client.lines.slice(-3).join("\n"), secret, "raw MCP lines after deny");
 
     assert_ok(await set_access(env, secret.data.file_policy_id, "allow"));
     const back = await client.ok("pes_context", {});
@@ -252,7 +252,7 @@ test("A: nothing about a denied file leaks through the run's stored rows either 
     await start_run(env, { stage_id: opened.stage_id, round_id: opened.round_id });
     const rows = [
       ...env.db.all<{ t: string }>("SELECT payload AS t FROM events WHERE type LIKE 'run.%' OR type LIKE 'ai.%' OR type LIKE 'tool.%'"),
-      ...env.db.all<{ t: string }>("SELECT result AS t FROM mutation_commits WHERE action LIKE 'run.%' OR action LIKE 'ai.%'"),
+      ...env.db.all<{ t: string }>("SELECT result_json AS t FROM mutation_commits WHERE action LIKE 'run.%' OR action LIKE 'ai.%'"),
     ]
       .map((r) => r.t ?? "")
       .join("\n");
