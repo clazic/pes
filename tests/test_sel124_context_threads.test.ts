@@ -19,7 +19,8 @@
  *   권한·AI 참조 금지(SEL-115): 그 스레드의 앵커가 만들어진 글 버전(target_version_id)이나 앵커가 지금 놓인 글 버전이
  *     version_ai_denied(닫힌 파일 자료이거나 닫힌 파일이 붙은 글 버전)이면 그 스레드의 **인용문은 싣지 않는다**:
  *     quote = null 이고 quote_withheld = true. 스레드 id·anchor_status·마지막 메시지(사람이 쓴 첨언 글)는 그대로 싣는다
- *     (그래야 모델이 답글을 달 수 있다). 모델에게 가는 어떤 요청에도 그 인용문 글자가 없어야 한다. 다시 열면(allow) 다시 실린다.
+ *     (그래야 모델이 답글을 달 수 있다). 자동으로 실리는 앵커 필드(quote 등)로는 그 인용문 글자가 모델 요청에 실리지 않아야 한다
+ *     (사람이 메시지 글에 직접 적은 글자는 thread 읽기와 같은 수준으로 실린다). 다시 열면(allow) 다시 실린다.
  *
  *   크기 상한: context.get 응답은 기존 CONTEXT_TEXT_MAX(4000자) 안에서 항목 단위로 채운다(JSON 은 절대 잘리지 않는다).
  *     못 담은 스레드는 context.omitted.threads(개수) 로 세고, context.truncated = true,

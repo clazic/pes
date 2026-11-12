@@ -6,7 +6,7 @@
 
 import type { CommandService, MutationContext } from "../commands.ts";
 import { ai_material_rows } from "../commands/file_access.ts";
-import { ai_thread_row, open_annotation_threads, thread_reply_route } from "../commands/thread_reads.ts";
+import { ai_thread_row, open_annotation_threads, thread_quote_closed, thread_reply_route, type ThreadQuoteDependency } from "../commands/thread_reads.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { decide, list_references, read_reference, reference_caller, reference_row, type ReferenceContent } from "../references.ts";
@@ -143,6 +143,11 @@ export interface ToolOutcome {
    * a withdrawal stops the run (reference_withdrawn).
    */
   reference_read?: { reference_id: string };
+  /**
+   * Set when the result carries anchor quotes of comment threads (SEL-124 F1): what each quote hangs on. Kept and judged again by the
+   * runner exactly like reference_read (thread_quote_withdrawn); a quote now closed to the AI stops the run (reference_withdrawn).
+   */
+  thread_quotes?: ThreadQuoteDependency[];
 }
 
 /** The answer could not be saved after every retry; the model call it came from must be kept as unknown. */
@@ -212,7 +217,7 @@ function reference_ok(call: ToolCall, read: { reference: unknown; content: Refer
 }
 
 /** Why a reference read may no longer be given to the model: decide()'s withheld reason, or no permission / gone. */
-export type WithdrawnReason = "no_permission" | "detached" | "actor_forbidden" | "source_missing" | "source_go_off" | "project_go_off";
+export type WithdrawnReason = "no_permission" | "detached" | "actor_forbidden" | "source_missing" | "source_go_off" | "project_go_off" | "ai_denied";
 
 /**
  * Decide again, with the same decide() as every other exit, whether a reference read earlier in this run may still be sent
@@ -231,6 +236,15 @@ export function recheck_reference(db: Pick<Db, "get" | "all">, run: RunHandle, r
   if (!d.has_access) return "no_permission";
   if (d.content_allowed) return null;
   return d.delivery.withheld_reason ?? "source_missing";
+}
+
+/**
+ * A comment-thread quote this run was given, judged again (SEL-124 F1) with the same decision that built the context row
+ * (thread_quote_closed: the anchor, its object, the version it was made on, the version it stands on now and the one it stood on when
+ * the quote was given). "ai_denied" when the quote may no longer go to the model. Pure reads: no await.
+ */
+export function thread_quote_withdrawn(db: Pick<Db, "get" | "all">, run: RunHandle, dep: ThreadQuoteDependency): WithdrawnReason | null {
+  return thread_quote_closed(db, run.project_id, dep).closed ? "ai_denied" : null;
 }
 
 function refused(call: ToolCall, message: string): ToolOutcome {
@@ -312,6 +326,8 @@ function context_reference_row(row: Record<string, unknown>): Record<string, unk
 
 /** Said in the context reply only when there is a reference (the tool spec stays short: it goes out with every request). */
 const REFERENCES_HELP = "call context.get with reference_id to read one reference";
+/** Said in the context reply only when there is an open comment thread (SEL-124 R3; the tool specs stay as they are). */
+const THREADS_HELP = "to answer a thread call thread.reply with thread_id = threads[].id";
 
 /** What one context.get returns: everything from the start, or one list's next page (references or open comment threads). */
 type ContextPage = { kind: "all" } | { kind: "references" | "threads"; offset: number };
@@ -351,7 +367,7 @@ function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle,
     omitted: { questions: questions.length, objects: objects.length, materials: materials.length, references: total, ...(has_threads ? { threads: thread_total } : {}) },
     next: next_text(page.kind === "threads" ? null : total, has_threads ? thread_total : null),
     ...(page.kind === "threads" ? {} : { references_page: { offset: start, returned: total, total, next_offset: total }, references_help: REFERENCES_HELP }),
-    ...(has_threads ? { threads_page: { offset: thread_start, returned: thread_total, total: thread_total, next_offset: thread_total } } : {}),
+    ...(has_threads ? { threads_page: { offset: thread_start, returned: thread_total, total: thread_total, next_offset: thread_total }, threads_help: THREADS_HELP } : {}),
   };
   let left =
     CONTEXT_TEXT_MAX -
@@ -376,11 +392,22 @@ function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle,
   fill(objects, kept.objects);
   fill(materials, kept.materials);
   fill(start >= total ? [] : all_refs.slice(start), kept.references);
-  // the thread rows are read one by one (their anchors are judged only for the rows that are given)
+  // the thread rows are read one by one (their anchors are judged only for the rows that are given); the quotes given are what the
+  // runner must judge again before every later request (SEL-124 F1)
+  const quotes: ThreadQuoteDependency[] = [];
   if (has_threads) {
     for (const thread of all_threads.slice(thread_start)) {
       if (full_stop) break;
-      if (!take(ai_thread_row(db, run.project_id, thread, CONTEXT_FIELD_MAX), kept.threads)) break;
+      let built = ai_thread_row(db, run.project_id, thread, CONTEXT_FIELD_MAX);
+      // F2: a threads-only page always moves on. Its first row, when it does not fit as it is (the JSON of a short text can be many
+      // times longer: control characters), is cut shorter until it does — named in truncated_fields — so next_offset never stays put.
+      if (page.kind === "threads" && kept.threads.length === 0 && JSON.stringify(built.row).length + 1 > left) {
+        for (let max = CONTEXT_FIELD_MAX >> 1; max >= 0 && JSON.stringify(built.row).length + 1 > left; max = max === 0 ? -1 : max >> 1) {
+          built = ai_thread_row(db, run.project_id, thread, max);
+        }
+      }
+      if (!take(built.row, kept.threads)) break;
+      if (built.dependency !== null) quotes.push(built.dependency);
     }
   }
   const returned = kept.references.length;
@@ -410,7 +437,13 @@ function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle,
           references_help: REFERENCES_HELP,
         }),
     // no open comment thread at all: no threads field either (same rule)
-    ...(has_threads ? { threads: kept.threads, threads_page: { offset: thread_start, returned: threads_returned, total: thread_total, next_offset: threads_next } } : {}),
+    ...(has_threads
+      ? {
+          threads: kept.threads,
+          threads_page: { offset: thread_start, returned: threads_returned, total: thread_total, next_offset: threads_next },
+          ...(threads_returned > 0 ? { threads_help: THREADS_HELP } : {}),
+        }
+      : {}),
     ...(cut
       ? {
           truncated: true,
@@ -421,7 +454,7 @@ function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle,
   };
   const text = JSON.stringify({ ok: true, context });
   if (text.length > CONTEXT_TEXT_MAX) return refused(call, "the context reply is too large to give");
-  return { result: { call_id: call.id, name: call.name, content: text, is_error: false }, effect: { kind: "none" } };
+  return { result: { call_id: call.id, name: call.name, content: text, is_error: false }, effect: { kind: "none" }, ...(quotes.length > 0 ? { thread_quotes: quotes } : {}) };
 }
 
 /** Questions of this stage/round with the people's answers (what a resumed run must see again). */

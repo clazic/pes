@@ -66,7 +66,8 @@ import {
   is_supported_format,
   type RequestFormat,
 } from "./spec.ts";
-import { SaveFailedError, TOOL_SPECS, question_context, recheck_reference, run_tool, type RunHandle, type ToolEffect, type WithdrawnReason } from "./tools.ts";
+import { SaveFailedError, TOOL_SPECS, question_context, recheck_reference, run_tool, thread_quote_withdrawn, type RunHandle, type ToolEffect, type WithdrawnReason } from "./tools.ts";
+import type { ThreadQuoteDependency } from "../commands/thread_reads.ts";
 import {
   current_run_settings,
   read_connection_facts,
@@ -563,6 +564,9 @@ export class BuiltinExecutor {
     // references whose content this run read (and keeps in turns): decided again before every request and once more at
     // the last boundary right before the HTTP call. One that may no longer go stops the run; nothing is scrubbed or sent.
     const reads: string[] = [];
+    // SEL-124 F1: comment-thread quotes this run was given (context.get threads[].quote) are kept in turns the same way and judged
+    // again at the same two points; a quote now closed to the AI stops the run like a withdrawn reference.
+    const quotes: ThreadQuoteDependency[] = [];
 
     for (let turn_no = 0; turn_no < drive.max_turns; turn_no += 1) {
       if (!this.#live(handle)) return this.#result_of(handle.project_id, handle.run_id);
@@ -585,7 +589,7 @@ export class BuiltinExecutor {
 
       // 3b. reference content kept from earlier reads: decided again now, after the awaits above, with the same decide()
       //     as every other exit. Any withdrawal stops the run before a request is built.
-      const early = this.#withdrawn_reference(handle, reads);
+      const early = this.#withdrawn_reference(handle, reads, quotes);
       if (early !== null) return this.#stop_reference_withdrawn(handle, early);
 
       // 4. the gate
@@ -619,7 +623,7 @@ export class BuiltinExecutor {
       // 5b. the last boundary: every await of this turn (key read, heartbeat, prepare, authorize) is behind us. The
       //     references are decided once more; from here to the HTTP call nothing awaits (mark_sent runs synchronously),
       //     so nothing can change in between. A withdrawal blocks the authorized dispatch (never "sent") and stops the run.
-      const late = this.#withdrawn_reference(handle, reads);
+      const late = this.#withdrawn_reference(handle, reads, quotes);
       if (late !== null) {
         await this.#block_unsent(drive, request_key, dispatch_id, late.reason);
         return this.#stop_reference_withdrawn(handle, late);
@@ -789,6 +793,7 @@ export class BuiltinExecutor {
       // tools
       const results = [];
       const read_now: Array<{ result_index: number; reference_id: string }> = [];
+      const quotes_now: ThreadQuoteDependency[] = [];
       let version_id: string | null = null;
       let wait: ToolEffect | null = null;
       try {
@@ -806,6 +811,7 @@ export class BuiltinExecutor {
           );
           results.push(done.result);
           if (done.reference_read !== undefined) read_now.push({ result_index: results.length - 1, reference_id: done.reference_read.reference_id });
+          if (done.thread_quotes !== undefined) quotes_now.push(...done.thread_quotes);
           if (done.effect.kind === "version" && version_id === null) version_id = done.effect.version_id;
           if (done.effect.kind === "wait") wait = done.effect;
         }
@@ -833,6 +839,9 @@ export class BuiltinExecutor {
       turns.push({ role: "assistant", text: reply.text, calls: reply.calls });
       turns.push({ role: "tool_results", results });
       for (const read of read_now) if (!reads.includes(read.reference_id)) reads.push(read.reference_id);
+      for (const dep of quotes_now) {
+        if (!quotes.some((q) => q.anchor_id === dep.anchor_id && q.evaluated_version_id === dep.evaluated_version_id)) quotes.push(dep);
+      }
     }
 
     this.#log(`run ${handle.run_id}: the turn cap was reached`);
@@ -843,10 +852,19 @@ export class BuiltinExecutor {
    * Decide every reference this run read again, with the same decide() as every other exit. Returns the first one that may
    * no longer go (and why), or null. Pure reads: no await, so it can sit right before the HTTP call.
    */
-  #withdrawn_reference(handle: RunHandle, reads: readonly string[]): { reference_id: string; reason: WithdrawnReason } | null {
+  #withdrawn_reference(
+    handle: RunHandle,
+    reads: readonly string[],
+    quotes: readonly ThreadQuoteDependency[],
+  ): { reference_id: string; reason: WithdrawnReason } | null {
     for (const reference_id of reads) {
       const reason = recheck_reference(this.#db, handle, reference_id);
       if (reason !== null) return { reference_id, reason };
+    }
+    // the comment-thread quotes given by context.get (SEL-124 F1), named by their thread in the log
+    for (const dep of quotes) {
+      const reason = thread_quote_withdrawn(this.#db, handle, dep);
+      if (reason !== null) return { reference_id: `thread ${dep.thread_id} quote`, reason };
     }
     return null;
   }

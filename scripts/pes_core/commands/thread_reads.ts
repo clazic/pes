@@ -222,19 +222,53 @@ export function open_annotation_threads(db: Pick<Db, "all">, project_id: string,
 }
 
 /**
- * The AI-facing row of one open annotation thread: its id, where its anchor stands now, the anchor's first quote and the last message.
- * The quote follows the AI-reference decision (SEL-115) of the version it was made on and of the version the anchor stands on now; when
- * either is closed the quote is `null` with `quote_withheld: true` (the thread id, the status and the message — a person's own words — stay).
- * Fields longer than `text_max` are cut and named in `truncated_fields`.
+ * What a quote given to the AI hangs on (SEL-124 F1): the anchor, the object and version it was made on, and the version the anchor stood
+ * on when the quote was given. The runner keeps it while the quote stays in its history and judges it again before every request.
  */
-export function ai_thread_row(db: Pick<Db, "get" | "all">, project_id: string, thread: OpenAnnotationThread, text_max: number): Record<string, unknown> {
-  const raw = anchor_raw(db, project_id, thread.anchor_id);
+export interface ThreadQuoteDependency {
+  thread_id: string;
+  anchor_id: string;
+  target_object_id: string;
+  target_version_id: string;
+  /** the version the anchor stood on when the quote was given (null when it was judged on none) */
+  evaluated_version_id: string | null;
+}
+
+/**
+ * Whether an anchor quote may NOT go to the AI: the anchor is gone, its object is a closed material, or the version it was made on or
+ * the version it stands on now (and, for a quote already given, the version it stood on then) is closed to the AI (SEL-115
+ * version_ai_denied). The one decision used both when the context row is built and when the runner judges a kept quote again.
+ */
+export function thread_quote_closed(
+  db: Pick<Db, "get" | "all">,
+  project_id: string,
+  dep: Pick<ThreadQuoteDependency, "anchor_id" | "target_object_id" | "target_version_id"> & { evaluated_version_id?: string | null },
+): { closed: boolean; raw: AnchorRaw | undefined; current: CurrentAnchor | undefined } {
+  const raw = anchor_raw(db, project_id, dep.anchor_id);
   const current = raw === undefined ? undefined : current_anchor(db, project_id, raw);
   const closed =
     raw === undefined ||
-    material_object_denied(db, project_id, thread.target_object_id) ||
-    version_ai_denied(db, project_id, thread.target_version_id) ||
-    (current?.evaluated_version_id != null && version_ai_denied(db, project_id, current.evaluated_version_id));
+    material_object_denied(db, project_id, dep.target_object_id) ||
+    version_ai_denied(db, project_id, dep.target_version_id) ||
+    (current?.evaluated_version_id != null && version_ai_denied(db, project_id, current.evaluated_version_id)) ||
+    (dep.evaluated_version_id != null && version_ai_denied(db, project_id, dep.evaluated_version_id));
+  return { closed, raw, current };
+}
+
+/**
+ * The AI-facing row of one open annotation thread: its id, where its anchor stands now, the anchor's first quote and the last message.
+ * The quote follows the AI-reference decision (SEL-115) of the version it was made on and of the version the anchor stands on now; when
+ * either is closed the quote is `null` with `quote_withheld: true` (the thread id, the status and the message — a person's own words — stay).
+ * Fields longer than `text_max` are cut and named in `truncated_fields` (a caller may pass a smaller `text_max` so one row fits an
+ * otherwise empty page). `dependency` is set when the row carries a quote: what the runner must judge again before every request.
+ */
+export function ai_thread_row(
+  db: Pick<Db, "get" | "all">,
+  project_id: string,
+  thread: OpenAnnotationThread,
+  text_max: number,
+): { row: Record<string, unknown>; dependency: ThreadQuoteDependency | null } {
+  const { closed, raw, current } = thread_quote_closed(db, project_id, thread);
   const cut: string[] = [];
   let quote: string | null = null;
   if (!closed && raw !== undefined) {
@@ -249,7 +283,7 @@ export function ai_thread_row(db: Pick<Db, "get" | "all">, project_id: string, t
     text = text.slice(0, text_max);
     cut.push("last_message");
   }
-  return {
+  const row = {
     id: thread.id,
     anchor_status: current?.status ?? "lost",
     quote,
@@ -257,6 +291,17 @@ export function ai_thread_row(db: Pick<Db, "get" | "all">, project_id: string, t
     last_message: { text },
     ...(cut.length > 0 ? { truncated_fields: cut } : {}),
   };
+  const dependency: ThreadQuoteDependency | null =
+    quote === null || quote.length === 0
+      ? null
+      : {
+          thread_id: thread.id,
+          anchor_id: thread.anchor_id,
+          target_object_id: thread.target_object_id,
+          target_version_id: thread.target_version_id,
+          evaluated_version_id: current?.evaluated_version_id ?? null,
+        };
+  return { row, dependency };
 }
 
 /** The followups raised from one thread, oldest first: {id, kind, state}. */
