@@ -17,8 +17,7 @@
  *
  * 후속 연결 — 이슈 본문은 `followups.source_version_id` 라고 쓰지만 그런 칸은 없다. 후속(followups)의 원문 칸은 **origin_version_id** 다
  *   (migrations/001_initial.sql 913~927행). 해석: followup_id 를 주면 followups.origin_version_id 가 entry.source_version_id 와 같아야 한다.
- *   origin_version_id 가 NULL 인 후속은 지금처럼 통과한다 — 기존 시험(test_sel93_reflection 183행 f-ok)이 NULL 후속을 증거로 쓰고 있어 그 시험을 깨지 않기 위한 해석이다.
- *   (진짜 후속을 만드는 명령은 아직 없고 followup.propose 는 메모뿐이라, NULL 허용이 실제 구멍인지는 leader 판단: 보고서 "스스로 정한 해석" 참고.)
+ *   leader 결정(2026-11-12): origin_version_id 가 NULL 인 후속도 **거절**한다(원문과 연결 안 된 후속은 증거가 아니다). 기존 f-ok 시험은 origin 을 source 로 맞춘 뒤 통과하도록 옮겼다.
  *   origin 이 다른 버전이면 거절: 422 validation_failed, target `$.body.entries[i].followup_id`, 아무것도 쓰지 않는다.
  */
 
@@ -196,11 +195,17 @@ test("a follow-up that came from ANOTHER version is refused (an applied follow-u
   });
 });
 
-test("regression: a follow-up with no origin (origin_version_id NULL) is still accepted, as before", async () => {
+test("a follow-up with no origin (origin_version_id NULL) is refused: not linked to any opinion, it is no evidence", async () => {
   await with_api(async (env) => {
     const s = await scene(env);
     const f = applied_followup(env, "null", null);
-    const out = assert_ok(await post(env, "/reflections", "owner", { target_round_id: s.round_id, entries: [entry(s.source.version_id, { followup_id: f.object_id, evidence_tx_id: f.tx })] }), 201);
-    assert.equal(out.reflection.applied_count, 1);
+    const sig = state_signature(env.db);
+    assert_final_error(
+      await post(env, "/reflections", "owner", { target_round_id: s.round_id, entries: [entry(s.source.version_id, { followup_id: f.object_id, evidence_tx_id: f.tx })] }),
+      422,
+      "validation_failed",
+      { target: "$.body.entries[0].followup_id" },
+    );
+    assert.equal(state_signature(env.db), sig);
   });
 });
