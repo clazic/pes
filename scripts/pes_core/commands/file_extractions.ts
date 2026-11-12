@@ -15,7 +15,7 @@
 
 import { ApiError } from "../errors.ts";
 import { require_safe_id } from "../files.ts";
-import { EXTRACTOR, EXTRACTOR_VERSION, type ExtractWarning } from "../file_extract.ts";
+import { EXTRACTOR, EXTRACTOR_VERSION, TRANSIENT_REASONS, type ExtractWarning } from "../file_extract.ts";
 import { access_state_of_blob, file_ai_denied, material_object_denied } from "./file_access.ts";
 import type { CommandRuntime } from "./shared.ts";
 
@@ -170,20 +170,31 @@ export function closed_to_ai(db: CommandRuntime["db"], project_id: string, blob_
   return access_state_of_blob(db, project_id, blob_id)?.effective === "deny" || material_object_denied(db, project_id, object_id);
 }
 
+/**
+ * The extraction that already answers this (version, blob, extractor, extractor_version), if any. An attempt that failed for a
+ * reason about the moment, not the file (TRANSIENT_REASONS: time limit, unexpected error, a thread still running, workers not
+ * allowed) does NOT count — it stays in the table as the record of that attempt, and the next request for the file tries again
+ * (a new row, receipt and event). Final answers (extracted, partial, unsupported, failed/too_large and the damaged-file reasons)
+ * are returned as before. When there are several rows, the newest counted one answers.
+ */
 export function existing_extraction(
   db: CommandRuntime["db"],
   project_id: string,
   version_id: string,
   blob_id: string,
 ): ExtractionRow | undefined {
+  const marks = TRANSIENT_REASONS.map(() => "?").join(", ");
   return db.get<ExtractionRow>(
     `SELECT ${EXTRACTION_COLUMNS} FROM file_extractions
-      WHERE project_id = ? AND version_id = ? AND blob_id = ? AND extractor = ? AND extractor_version = ?`,
+      WHERE project_id = ? AND version_id = ? AND blob_id = ? AND extractor = ? AND extractor_version = ?
+        AND (status <> 'failed' OR COALESCE(json_extract(warnings_json, '$[0].code'), '') NOT IN (${marks}))
+      ORDER BY rowid DESC LIMIT 1`,
     project_id,
     version_id,
     blob_id,
     EXTRACTOR,
     EXTRACTOR_VERSION,
+    ...TRANSIENT_REASONS,
   );
 }
 
