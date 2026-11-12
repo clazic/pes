@@ -53,7 +53,7 @@ import {
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
-import { find_print_snapshot, is_print_scope, print_ai_view, print_output_of } from "./commands/print.ts";
+import { find_print_snapshot, is_print_scope, print_ai_view, print_output_of, prints_using_blob } from "./commands/print.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
@@ -4308,6 +4308,26 @@ export class ApiApp {
     return { status: 200, data: out.result, replayed: out.replayed };
   }
 
+  /**
+   * SEL-119: a print's output and manifest blobs carry the cited sources and bodies of the print, but their own policy is not
+   * the sources'. A non-human caller reading one directly gets the same decision as GET P/print, now (print_ai_view): the output
+   * of a print that is withheld, or a manifest the AI view would change, is forbidden. An unreadable manifest fails closed.
+   */
+  async #print_blob_guard(project_id: string, blob_id: string): Promise<void> {
+    const prints = read_tx(this.#db, () => prints_using_blob(this.#db, project_id, blob_id));
+    const store = { db: this.#db, objects_dir: this.#objects_dir };
+    for (const print of prints) {
+      let manifest: unknown;
+      try {
+        manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode((await get_blob(store, project_id, print.manifest_blob_id)).bytes));
+      } catch {
+        throw new Fail("forbidden", { target: "$.path.blob_id" });
+      }
+      const view = read_tx(this.#db, () => print_ai_view(this.#db, project_id, manifest));
+      if (view.withheld || (print.role === "manifest" && view.manifest !== manifest)) throw new Fail("forbidden", { target: "$.path.blob_id" });
+    }
+  }
+
   /** `preview` = the same bytes and the same safety headers as content, plus a content-disposition: inline only for the few types a browser shows safely. */
   async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo, preview: boolean): Promise<HandlerResult> {
     read_tx(this.#db, () => {
@@ -4315,6 +4335,7 @@ export class ApiApp {
         throw new Fail("forbidden", { target: "$.path.blob_id" });
       }
     });
+    if (auth.kind !== "human") await this.#print_blob_guard(project.id, request.params[1] as string);
     const blob = await this.#exec(async () => ({
       result: await get_blob(
         { db: this.#db, objects_dir: this.#objects_dir },

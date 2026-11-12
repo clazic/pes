@@ -1109,3 +1109,21 @@ export function print_ai_view(db: Pick<Db, "all" | "get">, project_id: string, m
     : manifest.comments;
   return { manifest: { ...manifest, items: out, excluded: kept_excluded, comments, output: null }, withheld: true };
 }
+
+/**
+ * The stored prints whose manifest or output IS this blob (a print's derived files), for the file exits (GET files/{b}/content and
+ * preview): a non-human caller reading such a blob directly must get the same answer as GET P/print. Pure SELECT; [] for any other blob.
+ */
+export function prints_using_blob(db: Pick<Db, "all">, project_id: string, blob_id: string): Array<{ manifest_blob_id: string; role: "manifest" | "output" }> {
+  return db
+    .all<{ manifest_blob_id: string; is_manifest: bigint }>(
+      `SELECT s.manifest_blob_id AS manifest_blob_id, (s.manifest_blob_id = ?) AS is_manifest
+         FROM snapshots s ${PRINTED_EVENT}
+        WHERE s.project_id = ? AND (s.manifest_blob_id = ? OR json_extract(e.payload, '$.output_blob_id') = ?)`,
+      blob_id,
+      project_id,
+      blob_id,
+      blob_id,
+    )
+    .map((row) => ({ manifest_blob_id: row.manifest_blob_id, role: Number(row.is_manifest) !== 0 ? "manifest" : "output" }));
+}
