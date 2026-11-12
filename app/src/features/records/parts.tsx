@@ -15,7 +15,7 @@ export const noteClass = "text-caption text-ink-2";
 export function TableScroll({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-    <div role="group" aria-label={`${label} 표 — 옆으로 밀어 볼 수 있어요`} tabIndex={0} className="overflow-x-auto rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+    <div role="group" data-table-scroll="" aria-label={`${label} 표 — 옆으로 밀어 볼 수 있어요`} tabIndex={0} className="overflow-x-auto rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
       {children}
     </div>
   );
@@ -30,9 +30,13 @@ export function ActorName({ actor }: { actor: Actor }) {
   );
 }
 
-/** 근거 링크 — 앱 안 주소(/p/…)는 라우터 링크, 보고서 · 산출물(/<slug>/reports · out)은 같은 탭 평범한 링크 */
+/** 같은 사이트 안 주소만 링크로 그린다 — `/`로 시작하고 `//`(다른 사이트) · `/\\` · 공백이 없는 것 */
+export const isSafeHref = (href: string): boolean => /^\/(?![/\\])\S*$/.test(href);
+
+/** 근거 링크 — 앱 안 주소(/p/…)는 라우터 링크, 보고서 · 산출물(/<slug>/reports · out)은 같은 탭 평범한 링크. 안전하지 않은 주소는 글자만 */
 export function SourceLink({ link, className }: { link: SourceRef; className?: string }) {
   const cls = cn("text-primary-ink underline underline-offset-2 hover:decoration-2", className);
+  if (!isSafeHref(link.href)) return <span className={className}>{link.label}</span>;
   return link.href.startsWith("/p/") ? (
     <Link to={link.href} className={cls}>
       {link.label}
@@ -54,7 +58,7 @@ export function When({ at }: { at: string | null }) {
 
 /** 읽기 실패 말 — 서버가 아직 못 주는 것(not_supported)과 일시 실패를 가른다. 기록 없음이라고 하지 않는다 */
 export function readFailureText(error: unknown): string {
-  if (error instanceof PesApiError && error.body.error.code === "not_supported") return "아직 서버에서 읽을 수 없어요.";
+  if (isNotSupported(error)) return "아직 서버에서 읽을 수 없어요.";
   return "불러오지 못했어요.";
 }
 
@@ -68,7 +72,17 @@ export function Skeleton() {
   );
 }
 
+/** 서버가 아직 못 주는 것 — 고장이 아니다. 다시 읽어도 같으니 재시도 단추도 없다 */
+export const isNotSupported = (error: unknown): boolean => error instanceof PesApiError && error.body.error.code === "not_supported";
+
 export function ReadFailure({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (isNotSupported(error)) {
+    return (
+      <p data-read-state="not-supported" className="mt-3 rounded-md border border-dashed border-control bg-surface px-3 py-2 text-meta text-ink-2">
+        {readFailureText(error)}
+      </p>
+    );
+  }
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
       <p className="text-meta font-medium text-bad">{readFailureText(error)}</p>

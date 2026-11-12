@@ -10,7 +10,7 @@ export type JudgeSpec =
   | { kind: "assess"; verdict: "confirm" | "reject" | "revise"; row: AssumptionRow }
   | { kind: "adopt" | "supersede" | "revoke"; row: DecisionRow };
 
-const TITLE = { confirm: "가정 확인", reject: "가정 틀림", revise: "가정 고침", adopt: "결정 채택", supersede: "결정 대체", revoke: "결정 철회" } as const;
+export const TITLE = { confirm: "가정 확인", reject: "가정 틀림", revise: "가정 고침", adopt: "결정 채택", supersede: "결정 대체", revoke: "결정 철회" } as const;
 const WHAT = {
   confirm: "이 가정을 확인으로 기록합니다.",
   reject: "이 가정을 틀림으로 기록합니다. 가정은 지워지지 않고 기록으로 남아요.",
@@ -19,6 +19,9 @@ const WHAT = {
   supersede: "새 결정을 만들고 이 결정을 대체됨으로 바꿉니다. 옛 결정은 그대로 남아요.",
   revoke: "이 결정을 철회합니다. 결정은 지워지지 않고 기록으로 남아요.",
 } as const;
+
+/** 서버가 끝까지 거절한 것(다시 보내도 같은 결과) — retryable 이면 서버가 이미 받았을 수 있어 거절로 치지 않는다 */
+const isFinalRejection = (e: unknown): e is PesApiError => e instanceof PesApiError && !e.body.error.retryable;
 
 export const actionOf = (spec: JudgeSpec): keyof typeof TITLE => (spec.kind === "assess" ? spec.verdict : spec.kind);
 /** 근거를 꼭 써야 하는가 — 확인 · 채택만 선택 */
@@ -30,11 +33,12 @@ const fieldClass =
 
 /**
  * 판단 기록 대화 상자(F06) — 성공은 영수증을 받은 뒤에만 말한다. 보내는 동안은 aria-disabled(초점 유지)이고 두 번 눌러도 한 번만 보낸다.
+ *  - 사람이 본 버전(base_version_id = 열 때의 행 version_id)을 같이 보낸다. 그 사이 바뀌었으면 서버가 rev_conflict 로 거절 → “다른 곳에서 바뀌었어요” + 다시 보기(다시 읽고 닫음).
  *  - 서버 거절(PesApiError): role=alert 에 서버 말을 그대로, 입력한 글 · 대화 상자는 그대로(다음 시도는 새 멱등 키).
- *  - 답이 오지 않음(시간 초과 등): 실패가 아니라 “접수 확인 중”. 다시 누르면 같은 멱등 키로 보내 서버가 처음 영수증을 돌려준다.
+ *  - 답이 오지 않음(시간 초과 등)과 서버가 다시 보내도 된다고 한 거절(retryable): 실패가 아니라 “접수 확인 중”. 다시 누르면 같은 멱등 키로 보내 서버가 처음 영수증을 돌려준다.
  *  - 성공: onDone(영수증) → 부모가 닫고 접수 번호를 알린다. 행은 영수증 뒤 다시 읽어 바뀐다(낙관적 갱신 없음).
  */
-export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone }: { spec: JudgeSpec; slug: string; edition: number; opener: HTMLElement | null; onClose: () => void; onDone: (r: JudgeResult) => void }) {
+export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone, onStale }: { spec: JudgeSpec; slug: string; edition: number; opener: HTMLElement | null; onClose: () => void; onDone: (r: JudgeResult) => void; onStale: () => void }) {
   const client = useClient();
   const qc = useQueryClient();
   const action = actionOf(spec);
@@ -51,10 +55,12 @@ export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone }: { 
   const send = useMutation({
     mutationFn: ({ key, rationale: why, statement: said }: { key: string; rationale: string; statement: string }): Promise<JudgeResult> => {
       const id = spec.row.object_id;
-      if (spec.kind === "assess") return client.assessAssumption(slug, edition, id, spec.verdict === "revise" ? { verdict: "revise", rationale: why, statement: said } : { verdict: spec.verdict, rationale: why }, key);
-      if (spec.kind === "adopt") return client.adoptDecision(slug, edition, id, { rationale: why }, key);
-      if (spec.kind === "supersede") return client.supersedeDecision(slug, edition, id, { statement: said, rationale: why }, key);
-      return client.revokeDecision(slug, edition, id, { rationale: why }, key);
+      // 열 때 사람이 본 버전 — 대화 상자가 열린 뒤 다시 읽혀도 spec.row 는 그대로다
+      const base_version_id = spec.row.version_id;
+      if (spec.kind === "assess") return client.assessAssumption(slug, edition, id, spec.verdict === "revise" ? { verdict: "revise", base_version_id, rationale: why, statement: said } : { verdict: spec.verdict, base_version_id, rationale: why }, key);
+      if (spec.kind === "adopt") return client.adoptDecision(slug, edition, id, { base_version_id, rationale: why }, key);
+      if (spec.kind === "supersede") return client.supersedeDecision(slug, edition, id, { base_version_id, statement: said, rationale: why }, key);
+      return client.revokeDecision(slug, edition, id, { base_version_id, rationale: why }, key);
     },
     onSuccess: async (result) => {
       done.current = true;
@@ -63,14 +69,23 @@ export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone }: { 
       await Promise.all([qc.invalidateQueries({ queryKey: keys.records(slug, edition) }), qc.invalidateQueries({ queryKey: keys.workspace(slug, edition) })]);
     },
     onError: (e) => {
-      // 서버가 거절했으면 같은 키를 다시 쓰지 않는다. 답을 못 받은 것은 키를 그대로 둔다
-      if (e instanceof PesApiError) attempt.current = null;
+      // 서버가 거절했으면 같은 키를 다시 쓰지 않는다. 답을 못 받았거나 서버가 처음 영수증이 있을 수 있다고 한(retryable) 것은 키를 그대로 둔다
+      if (isFinalRejection(e)) attempt.current = null;
     },
   });
 
   const sending = send.isPending;
-  const rejected = send.isError && send.error instanceof PesApiError ? send.error : null;
+  const rejected = send.isError && isFinalRejection(send.error) ? send.error : null;
   const unknown = send.isError && !rejected;
+  /** 내가 본 버전이 낡았다 — 다시 읽어야 한다 */
+  const stale = rejected?.body.error.code === "rev_conflict";
+  const [reloading, setReloading] = React.useState(false);
+  const reread = async () => {
+    setReloading(true);
+    done.current = true; // 닫힐 때 초점은 부모가 알림 줄로 옮긴다
+    await Promise.all([qc.invalidateQueries({ queryKey: keys.records(slug, edition) }), qc.invalidateQueries({ queryKey: keys.workspace(slug, edition) })]);
+    onStale();
+  };
 
   const submit = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -169,9 +184,13 @@ export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone }: { 
             </div>
 
             <p role="status" className="mt-3 text-meta text-ink-2">
-              {sending ? "접수 확인 중 — 서버가 받았는지 확인하고 있어요." : unknown ? "접수 확인 중 — 답이 오지 않았어요. 실패한 것이 아닐 수 있어요. 다시 누르면 중복 없이 확인해요." : ""}
+              {sending ? "접수 확인 중 — 서버가 받았는지 확인하고 있어요." : unknown ? "접수 확인 중 — 답이 오지 않았어요. 실패한 것이 아닐 수 있어요. 다시 누르면 중복 없이 확인해요. 글을 고치고 누르면 새 요청으로 보내요." : ""}
             </p>
-            {rejected ? (
+            {stale ? (
+              <p role="alert" className="mt-2 text-meta font-medium text-ink">
+                다른 곳에서 바뀌었어요. 지금 보고 있는 내용은 낡았어요. 다시 보고 판단해 주세요.
+              </p>
+            ) : rejected ? (
               <p role="alert" className="mt-2 text-meta font-medium text-bad">
                 기록하지 못했어요. {rejected.message} 입력한 글은 그대로 있어요.
               </p>
@@ -181,9 +200,15 @@ export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone }: { 
               <Button type="button" variant="ghost" onClick={() => !sending && onClose()} aria-disabled={sending || undefined}>
                 취소
               </Button>
-              <Button type="submit" variant="default" aria-disabled={sending || undefined}>
-                판단 기록
-              </Button>
+              {stale ? (
+                <Button type="button" variant="default" onClick={() => !reloading && void reread()} aria-disabled={reloading || undefined}>
+                  다시 보기
+                </Button>
+              ) : (
+                <Button type="submit" variant="default" aria-disabled={sending || undefined}>
+                  판단 기록
+                </Button>
+              )}
             </div>
           </form>
         </DialogPrimitive.Content>

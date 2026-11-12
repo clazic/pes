@@ -18,7 +18,7 @@ export type IsoTime = string;
 /* ───────────── 봉투 · 오류 · 영수증 (API 결정 4 · 3절 오류 봉투) ───────────── */
 
 /** 2단계 코어(api_support.ts)의 닫힌 오류 코드 중 U1a 가짜 클라이언트가 쓰는 것 */
-export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "cursor_expired" | "cursor_invalid" | "not_supported";
+export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "rev_conflict" | "cursor_expired" | "cursor_invalid" | "not_supported";
 
 export interface ApiError {
   format_version: typeof FORMAT_VERSION;
@@ -353,7 +353,11 @@ export interface ReflectionView {
   sent_count: number;
   entries: ReflectionEntry[];
 }
-export interface AssessInput {
+/** 판단 입력 공통 — 사람이 본 버전(= 행의 version_id). 그 사이 바뀌었으면 서버가 rev_conflict 로 거절한다 */
+export interface BaseVersion {
+  base_version_id: string;
+}
+export interface AssessInput extends BaseVersion {
   verdict: "confirm" | "reject" | "revise";
   rationale: string;
   statement?: string;
@@ -378,8 +382,8 @@ export interface PesClient {
   getReflections(slug: string, edition: number, stage: string, round: string): Promise<ReflectionView | null>;
   /** 사람 판단 쓰기(U3b) — 멱등 키 필수. 거절은 PesApiError */
   assessAssumption(slug: string, edition: number, objectId: string, input: AssessInput, idempotencyKey: string | undefined): Promise<JudgeResult>;
-  adoptDecision(slug: string, edition: number, objectId: string, input: { rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
+  adoptDecision(slug: string, edition: number, objectId: string, input: BaseVersion & { rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
   /** 새 결정을 만든다(옛 결정은 덮어쓰지 않음) */
-  supersedeDecision(slug: string, edition: number, objectId: string, input: { statement: string; rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
-  revokeDecision(slug: string, edition: number, objectId: string, input: { rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
+  supersedeDecision(slug: string, edition: number, objectId: string, input: BaseVersion & { statement: string; rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
+  revokeDecision(slug: string, edition: number, objectId: string, input: BaseVersion & { rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
 }

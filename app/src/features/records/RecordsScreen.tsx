@@ -5,11 +5,9 @@ import type { JudgeResult } from "@/api/types";
 import { useArrival } from "@/app/arrival";
 import { NotFound } from "@/app/NotFound";
 import { placeLabel } from "@/lib/labels";
-import { JudgeDialog, actionOf, type JudgeSpec } from "./JudgeDialog";
+import { JudgeDialog, TITLE, actionOf, type JudgeSpec } from "./JudgeDialog";
 import { AssumptionsSection, DecisionsSection } from "./RecordTables";
 import { ReflectionSection } from "./ReflectionSection";
-
-const DONE_WORD = { confirm: "가정 확인", reject: "가정 틀림", revise: "가정 고침", adopt: "결정 채택", supersede: "결정 대체", revoke: "결정 철회" } as const;
 
 /**
  * 가정·결정·반영 화면(U3b · F04 · F06) — `/p/:slug/e/:edition/records`. 연구 공간 틀(사이드바 · 머리줄) 안의 본문 하나.
@@ -33,9 +31,15 @@ export function RecordsScreen() {
   }, [w]);
 
   const onDone = React.useCallback((spec: JudgeSpec, r: JudgeResult) => {
-    setReceipt(`접수 ${r.receipt.receipt_no} · ${DONE_WORD[actionOf(spec)]}을(를) 기록했어요.${r.receipt.replayed ? " (이미 처리된 요청이라 처음 접수를 다시 보여요.)" : ""}`);
+    setReceipt(`접수 ${r.receipt.receipt_no} · ${TITLE[actionOf(spec)]}을(를) 기록했어요.${r.receipt.replayed ? " (이미 처리된 요청이라 처음 접수를 다시 보여요.)" : ""}`);
     setDialog(null);
     // 단추가 사라질 수 있다 — 접수 줄이 그려진 다음 초점을 둔다
+    window.setTimeout(() => receiptRef.current?.focus(), 0);
+  }, []);
+
+  const onStale = React.useCallback(() => {
+    setReceipt("다른 곳에서 바뀌어 다시 읽었어요. 바뀐 내용을 보고 다시 판단해 주세요.");
+    setDialog(null);
     window.setTimeout(() => receiptRef.current?.focus(), 0);
   }, []);
 
@@ -76,7 +80,7 @@ export function RecordsScreen() {
           <ReflectionSection slug={w.slug} edition={w.edition} stage={w.current.stage} round={round} />
         </div>
       </div>
-      {dialog ? <JudgeDialog spec={dialog.spec} slug={w.slug} edition={w.edition} opener={dialog.opener} onClose={() => setDialog(null)} onDone={(r) => onDone(dialog.spec, r)} /> : null}
+      {dialog ? <JudgeDialog spec={dialog.spec} slug={w.slug} edition={w.edition} opener={dialog.opener} onClose={() => setDialog(null)} onDone={(r) => onDone(dialog.spec, r)} onStale={onStale} /> : null}
     </main>
   );
 }

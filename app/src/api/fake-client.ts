@@ -16,6 +16,7 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   invalid_payload: { message: "요청 내용이 올바르지 않습니다.", next_action: "fix_request" },
   idempotency_key_reuse: { message: "같은 Idempotency-Key로 다른 요청을 보냈습니다.", next_action: "use_new_key" },
   conflict: { message: "현재 상태에서는 처리할 수 없는 요청입니다.", next_action: "reread_context" },
+  rev_conflict: { message: "기준 버전이 현재와 다릅니다.", next_action: "reread_context" },
   not_supported: { message: "아직 서버에서 지원하지 않습니다.", next_action: "reread_context" },
   cursor_expired: { message: "변경 기록이 너무 오래되어 이어 받을 수 없습니다.", next_action: "reread_context" },
   cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
@@ -26,6 +27,12 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
   const u3 = structuredClone(u3Data);
   /** 사람 판단 쓰기의 멱등 기록 */
   const judged = new Map<string, { request: string; result: JudgeResult }>();
+  /** 판단으로 바뀐 행의 새 version_id 번호 — 낙관적 확인(base_version_id)이 새 버전을 알아보게 한다 */
+  let versionSeq = 100;
+  const bump = (row: { object_id: string; version_id: string; version: number }) => {
+    row.version += 1;
+    row.version_id = `${row.object_id}-v${++versionSeq}`;
+  };
   let nextDecision = 1 + Math.max(0, ...u3.decisions.map((x) => Number(/^dec-(\d+)$/.exec(x.object_id)?.[1] ?? 0)));
   /** 멱등 기록: 키 → (요청 지문, 처음 결과) */
   const commits = new Map<string, { request: string; result: CommandResult<{ alert_id: string }> }>();
@@ -46,7 +53,8 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
   };
 
   /** 사람 판단 쓰기 공통 — 순서(API 결정 4): 요청 검사 → 완료 영수증 재생 → 대상 검사 · 변경 */
-  function judge(name: string, slug: string, edition: number, objectId: string, input: unknown, idempotencyKey: string | undefined, apply: () => string | null): Promise<JudgeResult> {
+  const STALE = Symbol("stale");
+  function judge(name: string, slug: string, edition: number, objectId: string, input: unknown, idempotencyKey: string | undefined, apply: () => string | null | typeof STALE): Promise<JudgeResult> {
     if (!idempotencyKey) return reject("invalid_payload", "$.headers.idempotency-key");
     const request = JSON.stringify([name, slug, edition, objectId, input]);
     const done = judged.get(idempotencyKey);
@@ -56,11 +64,13 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
     }
     if (!find(slug, edition)) return reject("not_found", "$.project");
     const outId = apply();
+    if (outId === STALE) return reject("rev_conflict", "$.body.base_version_id");
     if (outId === null) return reject("conflict");
+    const out = [...u3.assumptions, ...u3.decisions].find((x) => x.object_id === outId);
     const n = String(++seq).padStart(4, "0");
     const receipt: Receipt = { receipt_no: n, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
     txLog.push({ tx_id: receipt.tx_id, touched: ["workspace"] });
-    const result: JudgeResult = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: { object_id: outId, version_id: `${outId}-v${seq}` } };
+    const result: JudgeResult = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: { object_id: outId, version_id: out?.version_id ?? `${outId}-v${seq}` } };
     judged.set(idempotencyKey, { request, result });
     return copy(result);
   }
@@ -102,7 +112,9 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
       judge("assessAssumption", slug, edition, objectId, input, key, () => {
         const row = u3.assumptions.find((x) => x.object_id === objectId);
         // 판단 전이거나 다시 봐야 하는 가정만 판단할 수 있다 — 이미 끝난 가정은 거절(덮어쓰지 않음)
-        if (!row || !(row.state === "proposed" || row.needs_review)) return null;
+        // 화면 규칙(assumptionNeedsJudging)과 같다 — 판단 전 · 재확인 필요 · 사람 판단 없는 확인
+        if (!row || !(row.state === "proposed" || row.needs_review || (row.state === "confirmed" && row.assessed_by?.kind !== "human"))) return null;
+        if (input.base_version_id !== row.version_id) return STALE;
         if (input.verdict === "revise") {
           row.original ??= { version_id: row.version_id, statement: row.statement };
           row.statement = input.statement ?? row.statement;
@@ -112,26 +124,29 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
         row.assessed_at = new Date().toISOString();
         row.needs_review = false;
         row.rationale = input.rationale;
-        row.version += 1;
+        bump(row);
         return objectId;
       }),
     adoptDecision: (slug, edition, objectId, input, key) =>
       judge("adoptDecision", slug, edition, objectId, input, key, () => {
         const row = u3.decisions.find((x) => x.object_id === objectId);
         if (!row || row.state !== "proposed") return null;
+        if (input.base_version_id !== row.version_id) return STALE;
         row.state = "adopted";
         row.decided_by = DEMO_HUMAN;
         row.rationale = input.rationale;
-        row.version += 1;
+        bump(row);
         return objectId;
       }),
     supersedeDecision: (slug, edition, objectId, input, key) =>
       judge("supersedeDecision", slug, edition, objectId, input, key, () => {
         const old = u3.decisions.find((x) => x.object_id === objectId);
         if (!old || old.state !== "adopted") return null;
+        if (input.base_version_id !== old.version_id) return STALE;
         const id = `dec-${nextDecision++}`;
         old.state = "superseded";
         old.superseded_by = id;
+        bump(old);
         u3.decisions.push({
           object_id: id,
           version_id: `${id}-v1`,
@@ -153,10 +168,11 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
       judge("revokeDecision", slug, edition, objectId, input, key, () => {
         const row = u3.decisions.find((x) => x.object_id === objectId);
         if (!row || row.state !== "adopted") return null;
+        if (input.base_version_id !== row.version_id) return STALE;
         row.state = "revoked";
         row.decided_by = DEMO_HUMAN;
         row.rationale = input.rationale;
-        row.version += 1;
+        bump(row);
         return objectId;
       }),
     getChanges(slug, edition, cursor) {
