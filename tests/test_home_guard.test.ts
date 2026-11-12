@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { make_ctx, run_pes } from "./helpers/compat_env.ts";
-import { account_home, assert_isolated_env, assert_no_real_path, guard_process_fs, protected_paths, real_homes, take_home_snapshot, touches_protected, unguarded, use_home_guard } from "./helpers/home_guard.ts";
+import { account_home, assert_isolated_env, assert_no_real_path, guard_process_fs, listed_homes, protected_paths, real_homes, take_home_snapshot, touches_protected, unguarded, use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
 
@@ -181,7 +181,12 @@ test("'real home' means both os.homedir() and the account's home; a snapshot and
   const homes = real_homes();
   assert.ok(homes.length >= 1 && homes.length <= 2);
   assert.ok(homes.includes(account_home()) || homes.some((h) => h.toLowerCase() === account_home().toLowerCase()));
-  assert.deepEqual(take_home_snapshot().homes, homes);
+  // SEL-103 (leader 승인: 실제 홈 목록 제거): the PROTECTION covers both homes, the before / after LISTING only the temporary one — the account home is never listed
+  const listed = take_home_snapshot().homes;
+  assert.deepEqual(listed, listed_homes());
+  assert.deepEqual(listed, homes.filter((home) => home.toLowerCase() !== account_home().toLowerCase()), "the listing is the homes minus the account home");
+  assert.ok(!listed.some((home) => home.toLowerCase() === account_home().toLowerCase()), "the account home is not listed");
+  assert.deepEqual(take_home_snapshot(account_home()).homes, [], "…even when it is passed in");
   for (const home of homes) assert.ok(touches_protected(join(home, ".pes", "x")), home);
 
   // with $HOME / %USERPROFILE% pointing at a temp folder (an isolated run), os.homedir() follows it but the account home must still be listed
@@ -195,7 +200,7 @@ test("'real home' means both os.homedir() and the account's home; a snapshot and
     assert.equal(child.status, 0, child.stderr);
     const seen = JSON.parse(child.stdout) as { homes: string[]; account: string };
     assert.ok(seen.homes.some((h) => h === temp || h.toLowerCase() === temp.toLowerCase()), "os.homedir() (the temp folder) is listed");
-    assert.ok(seen.homes.includes(seen.account), "the account home is listed too");
+    assert.ok(seen.homes.includes(seen.account), "the account home is protected too (real_homes), though never listed");
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

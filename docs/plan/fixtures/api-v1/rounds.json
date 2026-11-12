@@ -36,6 +36,11 @@
             "state": "open",
             "stage_id": "stg_01J9Z3K7Q4"
           }
+        },
+        "receipt": {
+          "receipt_no": "52",
+          "tx_id": "txn_01J9Z3K7R12",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

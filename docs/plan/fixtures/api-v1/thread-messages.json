@@ -36,6 +36,11 @@
             "version_no": "2",
             "author_actor_id": "act_01J9Z3K7Q7"
           }
+        },
+        "receipt": {
+          "receipt_no": "55",
+          "tx_id": "txn_01J9Z3K7R15",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }
