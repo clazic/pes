@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +18,11 @@ const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const playwrightCli = path.join(appDir, "node_modules", "playwright", "cli.js");
 
 const home = process.env.HOME ?? "";
-if (!home || home === "/Users/clazic" || /^[A-Za-z]:\\Users\\[^\\]+$/.test(process.env.USERPROFILE ?? "")) {
+// 실제 계정 홈은 HOME 을 무시하는 os.userInfo().homedir 로 구한다(이름을 코드에 적지 않는다)
+const realHome = path.resolve(os.userInfo().homedir);
+const looksLikeAccountHome = (p) => /^\/Users\/[^/]+\/?$/.test(p) || /^\/home\/[^/]+\/?$/.test(p) || /^[A-Za-z]:\\Users\\[^\\]+\\?$/.test(p);
+const profile = process.env.USERPROFILE ?? "";
+if (!home || path.resolve(home) === realHome || looksLikeAccountHome(home) || (profile && (path.resolve(profile) === realHome || looksLikeAccountHome(profile)))) {
   // 실제 홈에서 돌리지 않는다(임시 HOME 필수)
   console.error(`HOME 이 임시 폴더가 아니다: ${home}`);
   process.exit(2);
