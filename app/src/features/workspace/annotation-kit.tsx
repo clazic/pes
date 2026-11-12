@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { CommandResult, Receipt, StageKey } from "@/api/types";
 import { PesApiError } from "@/api/types";
-import { useKeyedCommand } from "./question-command";
+import { peekPending, useKeyedCommand } from "./question-command";
 
 /**
  * 결과 글 첨언(U4b · SEL-112) 공통 도구 — 첨언 칸 안 모든 쓰기가 같은 상태 줄(role=status) · 같은 영수증 말 · 같은 다시 읽기 규칙을 쓴다.
@@ -54,14 +54,14 @@ export const receiptText = (r: Receipt): string => (r.numbered === false ? "접�
  * 쓰기 하나 — 멱등 키 하나(같은 요청의 다시 보내기는 같은 키), 보내는 동안 한 번만, 성공은 영수증 뒤.
  * 반환 alert = 거절 문장(시간 초과는 거절이 아니다 — 상태 줄이 “접수 확인 중” 으로 말한다).
  */
-export function useAnnotationWrite(ctx: AnnotationCtx) {
-  const cmd = useKeyedCommand();
+export function useAnnotationWrite(ctx: AnnotationCtx, scope?: string) {
+  const cmd = useKeyedCommand(scope);
   const { say, refresh } = ctx;
   const { run: runKeyed } = cmd;
   const run = React.useCallback(
-    async <T,>(sig: string, call: (key: string) => Promise<CommandResult<T>>, done: string) => {
+    async <T,>(sig: string, call: (key: string) => Promise<CommandResult<T>>, done: string, keep?: unknown) => {
       say({ kind: "pending" });
-      const r = await runKeyed(sig, (key) => call(key));
+      const r = await runKeyed(sig, (key) => call(key), keep);
       if (r.ok) {
         say({ kind: "done", receipt: r.value.receipt, text: done });
         void refresh();
@@ -79,6 +79,46 @@ export function useAnnotationWrite(ctx: AnnotationCtx) {
   );
   const alert = cmd.error && !isTimeout(cmd.failure) ? cmd.error : null;
   return { run, pending: cmd.pending, alert };
+}
+
+/**
+ * 첨언 쓰기의 확인 중 요청 칸(scope) — 프로젝트 · 판 · 글(object) · 작업별. 대화 상자를 닫았다 다시 열어도(컴포넌트가 사라져도) 같은 요청은 같은 멱등 키로 다시 확인한다.
+ * (서버가 커밋하고 영수증만 잃은 경우 재생되어 첨언 · 할 일이 두 번 생기지 않는다)
+ */
+export const annotationScope = (ctx: Pick<AnnotationCtx, "slug" | "edition" | "objectId">, task: string): string => `annotation|${ctx.slug}|${ctx.edition}|${ctx.objectId}|${task}`;
+
+/** 확인 중 요청이 처음 보낸 내용(keep) — 없으면 null */
+export const pendingKeep = (scope: string): unknown => peekPending(scope)?.keep ?? null;
+
+/** “할 일로” 두 단계 진행: 첨언 스레드는 만들었고 제안은 아직 확인 못 함 — 대화 상자 밖(sessionStorage, 못 쓰면 메모리)에 둔다 */
+export interface TaskProgress {
+  /** 고른 구간 서명(글 버전 · 위치) */
+  anchor: string;
+  thread_id: string;
+  text: string;
+}
+const TASK_PREFIX = "pes-annotation-task:";
+const taskMemory = new Map<string, TaskProgress | null>();
+export function loadTaskProgress(scope: string): TaskProgress | null {
+  if (taskMemory.has(scope)) return taskMemory.get(scope) ?? null;
+  try {
+    const raw = window.sessionStorage.getItem(TASK_PREFIX + scope);
+    if (raw === null) return null;
+    const v: unknown = JSON.parse(raw);
+    if (v && typeof v === "object" && typeof (v as TaskProgress).anchor === "string" && typeof (v as TaskProgress).thread_id === "string" && typeof (v as TaskProgress).text === "string") return v as TaskProgress;
+    return null;
+  } catch {
+    return null;
+  }
+}
+export function saveTaskProgress(scope: string, value: TaskProgress | null) {
+  try {
+    if (value) window.sessionStorage.setItem(TASK_PREFIX + scope, JSON.stringify(value));
+    else window.sessionStorage.removeItem(TASK_PREFIX + scope);
+    taskMemory.delete(scope);
+  } catch {
+    taskMemory.set(scope, value);
+  }
 }
 
 /** 글 상태 줄 — 모든 첨언 쓰기의 영수증 · 접수 확인 중 · 안내가 여기 모인다 */

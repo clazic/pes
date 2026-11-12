@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { cpLength, sliceCp, snapUtf16Range, utf16ToCp } from "@/lib/anchor-text";
 import { formatAt } from "@/lib/labels";
 import { AnnotationRegion } from "./AnnotationRegion";
-import { AnnotationContext, ErrorLine, Quote, useAnnotationWrite, useAnnotationCtx, type AnnotationCtx, type Note } from "./annotation-kit";
+import { AnnotationContext, ErrorLine, Quote, annotationScope, loadTaskProgress, pendingKeep, saveTaskProgress, useAnnotationWrite, useAnnotationCtx, type AnnotationCtx, type Note } from "./annotation-kit";
 import { controlClass, Field } from "./fields";
 import { parseBody, segmentsOf, type Block, type CellBlock, type MarkSpec } from "./result-blocks";
 
@@ -152,6 +152,7 @@ function TextCommandDialog({
   title,
   description,
   quote,
+  initialText,
   label,
   submitLabel,
   emptyHint,
@@ -164,6 +165,8 @@ function TextCommandDialog({
   title: string;
   description: string;
   quote: string;
+  /** 확인 중인 요청이 처음 보낸 글 — 다시 열었을 때 되살린다(같은 글이면 같은 멱등 키로 확인한다) */
+  initialText?: string;
   label: string;
   submitLabel: string;
   emptyHint: string;
@@ -174,7 +177,7 @@ function TextCommandDialog({
   onCancel: () => void;
 }) {
   const ctx = useAnnotationCtx();
-  const [text, setText] = React.useState("");
+  const [text, setText] = React.useState(initialText ?? "");
   const [tried, setTried] = React.useState(false);
   const box = React.useRef<HTMLTextAreaElement>(null);
   const empty = text.trim() === "";
@@ -242,17 +245,32 @@ function TextCommandDialog({
   );
 }
 
+function annotationInput(ctx: AnnotationCtx, picked: Picked, text: string): AnnotationInput {
+  return {
+    target_object_id: ctx.objectId,
+    target_version_id: ctx.versionId,
+    anchor: { exact_quote: picked.quote, prefix: picked.prefix, suffix: picked.suffix, start_cp: picked.start_cp, end_cp: picked.end_cp },
+    body_md: text,
+  };
+}
+
+/** 확인 중인 첨언 요청(keep)이 지금 고른 구간 · 글 버전과 같으면 그 글 — 아니면 빈 글 */
+function keptBody(keep: unknown, ctx: AnnotationCtx, picked: Picked): string {
+  if (!keep || typeof keep !== "object") return "";
+  const k = keep as Partial<AnnotationInput>;
+  const same = k.target_object_id === ctx.objectId && k.target_version_id === ctx.versionId && k.anchor?.start_cp === picked.start_cp && k.anchor?.end_cp === picked.end_cp;
+  return same && typeof k.body_md === "string" ? k.body_md : "";
+}
+
 function AnnotateDialog({ ctx, picked, doneRef, onDone, onCancel }: { ctx: AnnotationCtx; picked: Picked; doneRef: React.RefObject<boolean>; onDone: () => void; onCancel: () => void }) {
   const client = useClient();
-  const write = useAnnotationWrite(ctx);
+  const scope = annotationScope(ctx, "create");
+  const write = useAnnotationWrite(ctx, scope);
+  // 시간 초과 뒤 닫았다 다시 연 같은 구간이면, 확인 중인 첨언 글을 되살린다
+  const [initial] = React.useState(() => keptBody(pendingKeep(scope), ctx, picked));
   const submit = async (text: string) => {
-    const input: AnnotationInput = {
-      target_object_id: ctx.objectId,
-      target_version_id: ctx.versionId,
-      anchor: { exact_quote: picked.quote, prefix: picked.prefix, suffix: picked.suffix, start_cp: picked.start_cp, end_cp: picked.end_cp },
-      body_md: text,
-    };
-    const r = await write.run(JSON.stringify(input), (key) => client.createAnnotation(ctx.slug, ctx.edition, input, key), "첨언을 남겼어요.");
+    const input = annotationInput(ctx, picked, text);
+    const r = await write.run(JSON.stringify(input), (key) => client.createAnnotation(ctx.slug, ctx.edition, input, key), "첨언을 남겼어요.", input);
     if (r.ok) onDone();
   };
   return (
@@ -260,6 +278,7 @@ function AnnotateDialog({ ctx, picked, doneRef, onDone, onCancel }: { ctx: Annot
       title="첨언 달기"
       description="고른 구간에 첨언을 남겨요. 글은 바뀌지 않고, 구간은 글이 고쳐져도 인용문으로 다시 찾아요."
       quote={picked.quote}
+      initialText={initial}
       label="첨언"
       submitLabel="첨언 달기"
       emptyHint="첨언을 적어 주세요."
@@ -275,35 +294,43 @@ function AnnotateDialog({ ctx, picked, doneRef, onDone, onCancel }: { ctx: Annot
 /** “할 일로” — 첨언 스레드를 먼저 만들고 그 스레드에서 다음 라운드 할 일을 제안한다. 제안일 뿐 적용하지 않는다 */
 function TaskDialog({ ctx, picked, doneRef, onDone, onCancel }: { ctx: AnnotationCtx; picked: Picked; doneRef: React.RefObject<boolean>; onDone: () => void; onCancel: () => void }) {
   const client = useClient();
-  const create = useAnnotationWrite(ctx);
-  const propose = useAnnotationWrite(ctx);
-  // 스레드는 만들어졌는데 제안이 막혔을 때, 다시 눌러도 스레드를 또 만들지 않는다
-  const created = React.useRef<string | null>(null);
+  const createScope = annotationScope(ctx, "task-create");
+  const progressScope = annotationScope(ctx, "task-thread");
+  const create = useAnnotationWrite(ctx, createScope);
+  const propose = useAnnotationWrite(ctx, annotationScope(ctx, "task-propose"));
+  const anchor = `${ctx.versionId}|${picked.start_cp}|${picked.end_cp}`;
+  // 스레드는 만들어졌는데 제안이 막혔을 때, 다시 눌러도 · 닫았다 다시 열어도 스레드를 또 만들지 않는다(진행은 대화 상자 밖에 둔다)
+  const [initial] = React.useState(() => {
+    const p = loadTaskProgress(progressScope);
+    return p && p.anchor === anchor ? p.text : keptBody(pendingKeep(createScope), ctx, picked);
+  });
   const submit = async (text: string) => {
-    if (created.current === null) {
-      const input: AnnotationInput = {
-        target_object_id: ctx.objectId,
-        target_version_id: ctx.versionId,
-        anchor: { exact_quote: picked.quote, prefix: picked.prefix, suffix: picked.suffix, start_cp: picked.start_cp, end_cp: picked.end_cp },
-        body_md: text,
-      };
-      const r = await create.run(JSON.stringify(input), (key) => client.createAnnotation(ctx.slug, ctx.edition, input, key), "첨언을 남겼어요.");
+    const progress = loadTaskProgress(progressScope);
+    let origin = progress && progress.anchor === anchor ? progress.thread_id : null;
+    if (origin === null) {
+      const input = annotationInput(ctx, picked, text);
+      const r = await create.run(JSON.stringify(input), (key) => client.createAnnotation(ctx.slug, ctx.edition, input, key), "첨언을 남겼어요.", input);
       if (!r.ok) return;
-      created.current = r.value.data.thread_id;
+      origin = r.value.data.thread_id;
+      saveTaskProgress(progressScope, { anchor, thread_id: origin, text });
     }
-    const origin = created.current;
+    const thread = origin;
     const r = await propose.run(
-      `${origin}|${text}`,
-      (key) => client.proposeFollowup(ctx.slug, ctx.edition, { origin_thread_id: origin, kind: "next_round_task", description: text, target_stage: ctx.stage }, key),
+      `${thread}|${text}`,
+      (key) => client.proposeFollowup(ctx.slug, ctx.edition, { origin_thread_id: thread, kind: "next_round_task", description: text, target_stage: ctx.stage }, key),
       "다음 라운드 할 일로 남겼어요. 제안 상태예요.",
     );
-    if (r.ok) onDone();
+    if (r.ok) {
+      saveTaskProgress(progressScope, null);
+      onDone();
+    }
   };
   return (
     <TextCommandDialog
       title="다음 라운드 할 일"
       description="고른 구간을 첨언으로 남기고, 다음 라운드에서 할 일로 제안해요. 제안만 남고 글은 바뀌지 않아요."
       quote={picked.quote}
+      initialText={initial}
       label="할 일"
       submitLabel="할 일로 남기기"
       emptyHint="할 일을 적어 주세요."
@@ -451,10 +478,11 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
     () =>
       threads.flatMap((t): MarkSpec[] => {
         const c = t.anchor.current;
-        if (t.state === "archived" || (c.status !== "exact" && c.status !== "moved") || c.start_cp === null || c.end_cp === null) return [];
+        // 판정이 지금 보는 글과 다른 버전 기준이면 그 위치를 이 글에 칠하지 않는다(다른 버전의 좌표다)
+        if (t.state === "archived" || c.evaluated_version_id !== result.version_id || (c.status !== "exact" && c.status !== "moved") || c.start_cp === null || c.end_cp === null) return [];
         return [{ thread_id: t.thread_id, start_cp: c.start_cp, end_cp: c.end_cp, state: t.state, status: c.status }];
       }),
-    [threads],
+    [threads, result.version_id],
   );
 
   // 선택 · 키보드(Alt+M · Esc)
@@ -554,7 +582,7 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
     restoreSelection();
   }, [focusTick, restoreSelection]);
 
-  const reanchorWrite = useAnnotationWrite(ctx);
+  const reanchorWrite = useAnnotationWrite(ctx, annotationScope({ slug: ws.slug, edition: ws.edition, objectId: result.object_id }, "reanchor"));
   const finish = () => {
     doneRef.current = true;
     setDialog(null);

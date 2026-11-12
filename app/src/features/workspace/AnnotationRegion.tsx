@@ -8,9 +8,9 @@ import { ActionButton } from "@/components/pes/action-button";
 import { Status } from "@/components/pes/status";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { sliceCp } from "@/lib/anchor-text";
+import { cpLength, sliceCp } from "@/lib/anchor-text";
 import { FOLLOWUP_KIND_LABEL, STAGE_LABEL, formatAt } from "@/lib/labels";
-import { ErrorLine, Quote, StatusLine, shortId, useAnnotationCtx, useAnnotationWrite, type Note } from "./annotation-kit";
+import { ErrorLine, Quote, StatusLine, annotationScope, pendingKeep, shortId, useAnnotationCtx, useAnnotationWrite, type Note } from "./annotation-kit";
 import { controlClass, Field } from "./fields";
 
 const MENU_ORDER: FollowupKind[] = ["edit_text", "next_round_task", "reopen_stage", "none"];
@@ -27,8 +27,13 @@ const itemClass =
 function ResolveDialog({ thread, kind, triggerRef, onClose }: { thread: AnnotationThreadView; kind: FollowupKind; triggerRef: React.RefObject<HTMLButtonElement | null>; onClose: () => void }) {
   const ctx = useAnnotationCtx();
   const client = useClient();
-  const write = useAnnotationWrite(ctx);
-  const [reason, setReason] = React.useState("");
+  const scope = annotationScope(ctx, `resolve:${thread.thread_id}`);
+  const write = useAnnotationWrite(ctx, scope);
+  // 시간 초과 뒤 닫았다 다시 연 같은 해결 방식이면, 확인 중인 해결 이유를 되살린다(같은 요청 = 같은 멱등 키)
+  const [reason, setReason] = React.useState(() => {
+    const k = pendingKeep(scope) as { kind?: unknown; text?: unknown } | null;
+    return k && k.kind === kind && typeof k.text === "string" ? k.text : "";
+  });
   const [tried, setTried] = React.useState(false);
   const earlier = earlierStages(ctx.stage);
   const [reopenStage, setReopenStage] = React.useState<StageKey | undefined>(earlier[0]);
@@ -58,6 +63,7 @@ function ResolveDialog({ thread, kind, triggerRef, onClose }: { thread: Annotati
           key,
         ),
       "첨언을 해결로 기록했어요.",
+      { kind, text },
     );
     if (r.ok) {
       done.current = true;
@@ -131,7 +137,7 @@ function ResolveDialog({ thread, kind, triggerRef, onClose }: { thread: Annotati
 function AdoptDialog({ f, currentVersionId, triggerRef, onClose }: { f: FollowupDetail; currentVersionId: string; triggerRef: React.RefObject<HTMLButtonElement | null>; onClose: () => void }) {
   const ctx = useAnnotationCtx();
   const client = useClient();
-  const write = useAnnotationWrite(ctx);
+  const write = useAnnotationWrite(ctx, annotationScope(ctx, `apply:${f.id}`));
   const done = React.useRef(false);
   // 열어 둔 사이 글이 바뀌면(다시 읽은 뒤) 같은 낡은 제안을 또 보내지 않는다
   const stale = f.base_version_id === null || f.base_version_id !== currentVersionId;
@@ -229,7 +235,7 @@ function FollowupCard({ f, currentVersionId }: { f: FollowupDetail; currentVersi
 function candidateContext(body: string, c: { start_cp: number; end_cp: number }): { before: string; quote: string; after: string } | null {
   try {
     const flat = (s: string) => s.replace(/\s+/g, " ");
-    return { before: flat(sliceCp(body, Math.max(0, c.start_cp - 10), c.start_cp)), quote: flat(sliceCp(body, c.start_cp, c.end_cp)), after: flat(sliceCp(body, c.end_cp, c.end_cp + 10)) };
+    return { before: flat(sliceCp(body, Math.max(0, c.start_cp - 10), c.start_cp)), quote: flat(sliceCp(body, c.start_cp, c.end_cp)), after: flat(sliceCp(body, c.end_cp, Math.min(cpLength(body), c.end_cp + 10))) };
   } catch {
     return null;
   }
@@ -238,15 +244,17 @@ function candidateContext(body: string, c: { start_cp: number; end_cp: number })
 function Candidates({ t, body }: { t: AnnotationThreadView; body: string }) {
   const ctx = useAnnotationCtx();
   const client = useClient();
-  const write = useAnnotationWrite(ctx);
+  const write = useAnnotationWrite(ctx, annotationScope(ctx, `pick:${t.thread_id}`));
   const [picked, setPicked] = React.useState<number | null>(null);
   const cands = t.anchor.current.candidates;
+  // 후보 좌표는 판정 버전 기준 — 그 버전 그대로 보낸다(부르는 쪽이 지금 글 버전과 같을 때만 이 칸을 그린다)
+  const evaluated = t.anchor.current.evaluated_version_id;
   const reason = ctx.readOnly ?? (picked === null ? "붙일 후보를 먼저 고르세요." : undefined);
   const attach = async () => {
     if (picked === null || write.pending) return;
     const c = cands[picked];
     if (!c) return;
-    await write.run(`pick|${t.thread_id}|${c.start_cp}|${c.end_cp}`, (key) => client.reanchorAnnotation(ctx.slug, ctx.edition, t.thread_id, { version_id: ctx.versionId, start_cp: c.start_cp, end_cp: c.end_cp }, key), "후보 구간에 다시 붙였어요.");
+    await write.run(`pick|${t.thread_id}|${evaluated}|${c.start_cp}|${c.end_cp}`, (key) => client.reanchorAnnotation(ctx.slug, ctx.edition, t.thread_id, { version_id: evaluated, start_cp: c.start_cp, end_cp: c.end_cp }, key), "후보 구간에 다시 붙였어요.");
   };
   return (
     <div className="grid gap-2">
@@ -282,6 +290,19 @@ function Candidates({ t, body }: { t: AnnotationThreadView; body: string }) {
   );
 }
 
+/** 판정 버전 ≠ 지금 글 버전 — 인용 · 메시지는 그대로, 위치만 쓰지 않고 다시 읽기를 권한다 */
+function OtherVersion() {
+  const ctx = useAnnotationCtx();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <p className="text-caption text-ink-2">이 첨언의 위치는 다른 글 버전을 기준으로 판정됐어요. 글에 표시하거나 붙이지 않았어요 — 다시 읽으면 지금 버전 기준으로 확인해요.</p>
+      <Button size="sm" onClick={() => void ctx.refresh()}>
+        다시 읽기
+      </Button>
+    </div>
+  );
+}
+
 function Lost({ t }: { t: AnnotationThreadView }) {
   const ctx = useAnnotationCtx();
   const active = ctx.reanchoring === t.thread_id;
@@ -305,13 +326,15 @@ function ThreadCard({ t, index, currentVersionId, body }: { t: AnnotationThreadV
   const ctx = useAnnotationCtx();
   const client = useClient();
   const status = t.anchor.current.status;
+  // 위치 판정이 지금 보는 글과 다른 버전 기준(읽기 사이에 글이 바뀜) — 그 좌표로 표시 · 후보 고르기 · 저장을 하지 않는다
+  const otherVersion = t.anchor.current.evaluated_version_id !== currentVersionId;
   const resolved = t.state === "resolved";
   const open = t.state === "open";
   const [replying, setReplying] = React.useState(false);
   const [reply, setReply] = React.useState("");
   const [tried, setTried] = React.useState(false);
   const [resolving, setResolving] = React.useState<FollowupKind | null>(null);
-  const replyWrite = useAnnotationWrite(ctx);
+  const replyWrite = useAnnotationWrite(ctx, annotationScope(ctx, `reply:${t.thread_id}`));
   const replyBtn = React.useRef<HTMLButtonElement>(null);
   const resolveBtn = React.useRef<HTMLButtonElement>(null);
   const emptyReply = reply.trim() === "";
@@ -371,7 +394,8 @@ function ThreadCard({ t, index, currentVersionId, body }: { t: AnnotationThreadV
         <FollowupCard key={f.id} f={f} currentVersionId={currentVersionId} />
       ))}
 
-      {open && status === "ambiguous" ? <Candidates t={t} body={body} /> : null}
+      {otherVersion ? <OtherVersion /> : null}
+      {open && status === "ambiguous" && !otherVersion ? <Candidates key={`${t.anchor.current.evaluated_version_id}|${JSON.stringify(t.anchor.current.candidates)}`} t={t} body={body} /> : null}
       {open && status === "lost" ? <Lost t={t} /> : null}
 
       <div className="flex flex-wrap items-start gap-2">

@@ -108,6 +108,20 @@ describe("필수 3 — 판정 버전 ≠ 지금 글 버전이면 위치를 쓰�
   });
 });
 
+/* ───────────── 권장 5 ───────────── */
+
+describe("권장 5 — 글 끝 후보도 인용 · 앞 문맥이 보인다", () => {
+  it("본문 맨 끝의 반복 인용 후보에 앞 문맥과 인용이 있다", async () => {
+    const cands = [cpAt(BODY, QUOTE_REPEAT, 0), cpAt(BODY, QUOTE_REPEAT, 1)];
+    expect(cands[1]!.end_cp).toBe(Array.from(BODY).length);
+    await boot({ threads: [thread("th-amb", { status: "ambiguous", quote: QUOTE_REPEAT, candidates: cands })] });
+    const el = await threadOf("th-amb");
+    const last = within(el).getAllByRole("radio")[1]!.closest("label")!;
+    expect(last.textContent).toContain(QUOTE_REPEAT);
+    expect(last.textContent).toContain("중간 설명이다.");
+  });
+});
+
 /* ───────────── 필수 4 ───────────── */
 
 /** 서버는 커밋했는데 응답(영수증)이 늦어 화면은 시간 초과를 받는다 — 한 번만 */
