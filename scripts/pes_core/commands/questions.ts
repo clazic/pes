@@ -58,6 +58,8 @@ const PUBLISH_FIELDS = [
   "form_key",
   "questions",
   "extend_latest",
+  "direction",
+  "intended_actor_id",
   "run_id",
   "lease_id",
   "fence",
@@ -643,6 +645,46 @@ function require_publish_round(
   }
 }
 
+/**
+ * SEL-118 U5a: who a new question is for. The default stays agent_to_human (no intended actor). A human_to_agent
+ * question is the human owner's question to one AI actor of the project: only a human files it, and it names the
+ * AI (an enabled non-human member actor). Filing it is only a record: it never starts a run.
+ */
+function parse_question_direction(
+  runtime: CommandRuntime,
+  payload: Record<string, unknown>,
+  actor_kind: string,
+  project_id: string,
+): { direction: "agent_to_human" | "human_to_agent"; intended_actor_id: string | null } {
+  const direction = payload.direction === undefined ? "agent_to_human" : payload.direction;
+  if (direction !== "agent_to_human" && direction !== "human_to_agent") {
+    return invalid_payload("direction is not a known value");
+  }
+  if (direction === "agent_to_human") {
+    if (payload.intended_actor_id !== undefined && payload.intended_actor_id !== null) {
+      return invalid_payload("intended_actor_id is only for a human_to_agent question");
+    }
+    return { direction, intended_actor_id: null };
+  }
+  if (actor_kind !== "human") {
+    throw new ApiError("forbidden", "only a human files a question for an AI");
+  }
+  const intended = require_non_empty_string(payload, "intended_actor_id");
+  const target = runtime.db.get<{ kind: string }>(
+    `SELECT a.kind AS kind
+       FROM actors a
+       JOIN project_members m ON m.user_id = a.user_id AND m.project_id = ?
+      WHERE a.id = ? AND a.disabled_at IS NULL`,
+    project_id,
+    intended,
+  );
+  if (target === undefined) throw new ApiError("not_found", "intended_actor_id is not an actor of this project");
+  if (target.kind === "human" || target.kind === "system" || target.kind === "legacy_unknown") {
+    return invalid_payload("intended_actor_id must be an AI actor");
+  }
+  return { direction, intended_actor_id: intended };
+}
+
 function run_publish_set(runtime: CommandRuntime): CommandResult {
   const payload = require_record(runtime.payload);
   reject_unknown_fields(payload, PUBLISH_FIELDS);
@@ -665,7 +707,8 @@ function run_publish_set(runtime: CommandRuntime): CommandResult {
   if (project === null || actor_id === null) {
     throw new Error("question.publish_set must resolve a project and actor first");
   }
-  const { guard } = member_actor_with_guard(runtime, payload);
+  const { actor, guard } = member_actor_with_guard(runtime, payload);
+  const ask = parse_question_direction(runtime, payload, actor.kind, project.id);
 
   require_publish_stage(runtime, project.id, stage_id);
   if (round_id !== null) {
@@ -804,10 +847,12 @@ function run_publish_set(runtime: CommandRuntime): CommandResult {
       `INSERT INTO questions
          (project_id, object_id, asked_by_actor_id, intended_actor_id, direction, origin,
           bank_key, original_version_id)
-       VALUES (?, ?, ?, NULL, 'agent_to_human', 'manual', NULL, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'manual', NULL, ?)`,
       project.id,
       fresh.object_id,
       actor_id,
+      ask.intended_actor_id,
+      ask.direction,
       fresh.version_id,
     );
     if (asked.changes !== 1n) {

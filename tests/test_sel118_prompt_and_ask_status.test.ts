@@ -141,9 +141,18 @@ async function build(env: ApiEnv, body: Record<string, unknown>, auth: Auth = "o
   return post(env, "/prompt-builds", auth, body, key);
 }
 
+/** 계획 단계의 열린 판 하나. 한 단계에는 열린 판이 하나뿐이라(이미 있으면 새로 열 수 없다) 있으면 그대로 쓴다. */
+async function open_round_once(env: ApiEnv, tag: string): Promise<{ stage_id: string; round_id: string }> {
+  const open = env.db.get<{ stage_id: string; round_id: string }>(
+    "SELECT stage_id, id AS round_id FROM rounds WHERE project_id = ? AND state = 'open' ORDER BY round_no LIMIT 1",
+    env.p.project_id,
+  );
+  return open ?? open_round(env, tag);
+}
+
 /** 사람→AI 질문 한 개를 소유자가 접수한다(②). */
 async function ask_ai(env: ApiEnv, intended_actor_id: string, text = "합성: 이 문단의 근거를 다시 설명해 줘"): Promise<{ question_id: string; version_id: string; res: any }> {
-  const { stage_id, round_id } = await open_round(env, `ai-${env.seq++}`);
+  const { stage_id, round_id } = await open_round_once(env, `ai-${env.seq++}`);
   const res = await post(env, "/questions", "owner", {
     stage_id,
     round_id,
@@ -217,9 +226,18 @@ function plant_answer(env: ApiEnv, question_id: string, question_version_id: str
   return version_id;
 }
 
+/** 에이전트 한 명은 살아 있는 run 을 하나만 쥘 수 있어(두 번째 claim 은 409) 같은 에이전트의 receipt 는 첫 run·lease 를 이어 쓴다. */
+const LEASES = new WeakMap<object, Map<string, { run_id: string; lease_id: string; fence: unknown }>>();
+
 async function receipt(env: ApiEnv, agent: { actor_id: string; token: string }, input_version_id: string, state: "seen" | "applied" | "ignored", tx?: string) {
-  const run_id = await owner_creates_run(env, agent as any);
-  const lease = await agent_claims(env, agent as any, run_id);
+  let by_agent = LEASES.get(env);
+  if (by_agent === undefined) LEASES.set(env, (by_agent = new Map()));
+  let lease = by_agent.get(agent.actor_id);
+  if (lease === undefined) {
+    const run_id = await owner_creates_run(env, agent as any);
+    lease = await agent_claims(env, agent as any, run_id);
+    by_agent.set(agent.actor_id, lease);
+  }
   return call(env, {
     method: "POST",
     path: P(env, `/runs/${lease.run_id}/input-receipts`),
@@ -383,12 +401,13 @@ test("① assembling is a read: no write at all, no Idempotency-Key needed, no r
     await propose_assumption(env, "합성 가정");
     const agent = await make_agent(env, "w");
     await owner_creates_run(env, agent);
+    const reader = await make_agent(env, "w2", ["context:read"]);
     const before = state_signature(env.db);
     const counts = table_counts(env.db);
     const body = { question: "q", selection: { version_id: v.version_id }, drafts: [{ text: "초안" }] };
     const r1 = await build(env, body, "owner", null);
     const r2 = await build(env, body, "owner", null);
-    const r3 = await build(env, body, { token: (await make_agent(env, "w2", ["context:read"])).token }, null);
+    const r3 = await build(env, body, { token: reader.token }, null);
     for (const r of [r1, r2]) assert.equal(r.status, 200);
     assert.equal(r3.status, 200);
     assert.equal(r1.json.data.prompt_text, r2.json.data.prompt_text, "deterministic");
@@ -598,7 +617,7 @@ test("③ only human_to_agent questions are listed; ?question_id= narrows; 404 f
   await with_api(async (env) => {
     const agent = await make_agent(env, "st6");
     const mine = await ask_ai(env, agent.actor_id);
-    const { stage_id, round_id } = await open_round(env, "st6-a2h");
+    const { stage_id, round_id } = await open_round_once(env, "st6-a2h");
     const a2h = assert_ok(await post(env, "/questions", "owner", { stage_id, round_id, purpose: "review", question: single_spec("에이전트가 사람에게") }), 201).question.id as string;
     const all = statuses(await get(env, "/question-statuses"));
     assert.deepEqual(all.map((i) => i.question_id), [mine.question_id], "the agent_to_human question is not in this list");
