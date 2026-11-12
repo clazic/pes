@@ -473,6 +473,23 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
       return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id, qst_01J9Z3K7QE: t.question_id } };
     },
   },
+  // SEL-98 U2d: the reorder of the form's newest set (two questions, one new set)
+  "question_sets.order": {
+    normal: async (env) => {
+      const round = await open_round(env);
+      const first = await ask(env, round.stage_id, round.round_id);
+      const second = await ask(env, round.stage_id, round.round_id);
+      return { subst: { [PH.qset]: second.set_id, [PH.question]: first.question_id, qst_01J9Z3K7QE: second.question_id } };
+    },
+    error: async (env) => {
+      const round = await open_round(env);
+      const first = await ask(env, round.stage_id, round.round_id);
+      const second = await ask(env, round.stage_id, round.round_id);
+      // the error case: a newer order of the form makes the old set stale (409 conflict, details.reason stale_set)
+      assert_ok(await call(env, { method: "POST", path: P(env, `/question-sets/${second.set_id}/order`), auth: "owner", key: "idem_ord_seed_01J9Z3K7Q2", body: { question_ids: [second.question_id, first.question_id] } }), 201);
+      return { subst: { [PH.qset]: second.set_id, [PH.question]: first.question_id, qst_01J9Z3K7QE: second.question_id } };
+    },
+  },
   "submissions.create": {
     normal: async (env) => {
       const round = await open_round(env);

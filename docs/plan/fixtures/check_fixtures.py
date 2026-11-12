@@ -147,6 +147,13 @@ SPECS = [
         "doc_fragments": ["P/questions/{q}/merge"],
     },
     {
+        "file": "question-set-order.json",
+        "operation": "question_sets.order",
+        "method": "POST",
+        "path": "/api/v1/projects/{project_id}/question-sets/{set}/order",
+        "doc_fragments": ["POST P/question-sets/{set}/order"],
+    },
+    {
         "file": "submissions.json",
         "operation": "submissions.create",
         "method": "POST",
