@@ -81,7 +81,9 @@ export function QuestionThread({
     e.preventDefault();
     if (empty || cmd.pending || pending || readOnly) return;
     const input: CommentInput = { body_md: text.trim(), ...(target ? { thread_id: target.thread_id } : { question_version: version, ...(versionId ? { question_version_id: versionId } : {}) }) };
-    const r = await cmd.run(JSON.stringify(input), (key) => post(input, key));
+    // 같은 의견 = 같은 질문의 같은 글. 서명에 thread_id 를 넣지 않는다 — 첫 요청이 닿았는데 답을 못 받은 사이 의견 목록이 갱신되어 스레드가 보여도
+    // 재시도는 같은 키·처음 내용(thread_id 없음)으로 가야 서버가 재생한다(내용이 다르면 409, 키가 다르면 두 번 접수)
+    const r = await cmd.run(JSON.stringify({ qid, body_md: input.body_md }), (key, kept) => post((kept as CommentInput | undefined) ?? input, key), input);
     if (!r.ok) return;
     // 보내는 사이에 더 쓴 글은 지우지 않는다 — 보낸 그대로일 때만 비운다(한글 조합 중인 글도 비교에 넣는다)
     if (readLiveDraft(draftKey).trim() === input.body_md) clearDraft(draftKey);

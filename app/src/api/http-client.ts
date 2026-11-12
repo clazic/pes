@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type PesClient, type ProjectRef, type QuestionInput, type Receipt, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type CommentMessageView, type CommentThreadView, type PesClient, type ProjectRef, type QuestionInput, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -122,7 +122,10 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       request_id: "client",
     });
 
-  /** 쓰기 공통: 멱등 키 확인 → 프로젝트 확인 → POST(시간 제한) → (성공 뒤) GET P/requests/{key} 로 영수증. 순서 규칙(API 결정 4)은 서버가 같은 키로 재생한다 */
+  /**
+   * 쓰기 공통: 멱등 키 확인 → 프로젝트 확인 → POST(시간 제한) → 성공 본문의 `receipt`(SEL-98). 본문에 영수증이 없는 옛 서버만 GET P/requests/{key} 로 읽는다.
+   * 순서 규칙(API 결정 4)은 서버가 같은 키로 재생한다
+   */
   async function write(slug: string, key: string | undefined, rest: string, body: Json, ready?: (id: string) => Promise<Json | void>) {
     if (!key) throw invalid("$.headers.idempotency-key");
     const id = idOf(slug);
@@ -141,14 +144,22 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       if (!isRecord(parsed) || !isRecord(parsed.data)) throw new PesApiError(fallbackBody(500));
       return { json: parsed, requestId: typeof parsed.request_id === "string" ? parsed.request_id : "client" };
     });
-    const receipt = await readReceipt(id, key, json.replayed === true);
+    const receipt = bodyReceipt(json.receipt, key, json.replayed === true) ?? (await readReceipt(id, key, json.replayed === true));
     return { data: json.data as Json, receipt, request_id: requestId };
   }
 
+  /** 성공 본문의 영수증(서버 SEL-98: 쓰기 201 의 `receipt`) → Receipt. 세 칸이 모두 글일 때만 — 값은 서버 그대로이고 번호를 지어내지 않는다. 재생(replayed)이면 서버가 첫 응답의 영수증을 다시 준다 */
+  function bodyReceipt(raw: unknown, key: string, replayed: boolean): Receipt | null {
+    if (!isRecord(raw)) return null;
+    const { receipt_no, tx_id, committed_at } = raw;
+    if (typeof receipt_no !== "string" || !receipt_no || typeof tx_id !== "string" || !tx_id || typeof committed_at !== "string" || Number.isNaN(Date.parse(committed_at))) return null;
+    return { receipt_no, tx_id, committed_at, idempotency_key: key, replayed };
+  }
+
   /**
-   * 서버 본문에는 영수증이 없다 — 쓰기 성공 뒤 GET P/requests/{key} 로 받는다. 번호·시각을 지어내지 않는다:
+   * (옛 서버 호환) 성공 본문에 영수증이 없으면 쓰기 성공 뒤 GET P/requests/{key} 로 받는다. 번호·시각을 지어내지 않는다:
    *  - receipt_no: 서버 응답에 있을 때만(글 · 숫자). 없으면 `numbered: false` + tx_id 를 그대로 둔다(화면은 번호 없이 “접수됨”).
-   *  - committed_at: 서버가 시각을 줄 때만 그것을 쓴다. 지금 서버(GET requests/{key})는 시각을 주지 않아, 영수증을 읽은 이 클라이언트의 시각을 쓴다(접수 시각과 몇 초 차이일 수 있다 — SEL-98 이 서버에 싣는다).
+   *  - committed_at: 서버가 시각을 줄 때만 그것을 쓴다. 옛 서버(GET requests/{key})는 시각을 주지 않아, 영수증을 읽은 이 클라이언트의 시각을 쓴다(접수 시각과 몇 초 차이일 수 있다 — 영수증을 싣는 서버(SEL-98)에서는 이 길을 타지 않는다).
    *  - 조회가 실패하면 쓰기는 됐을 수 있으나 영수증을 모른다: 성공으로 보이지 않고 TimeoutError(“접수 확인 중”)로 던진다. 같은 키로 다시 보내면 서버가 재생하고 그때 영수증을 읽는다.
    */
   async function readReceipt(id: string, key: string, replayed: boolean): Promise<Receipt> {
@@ -214,6 +225,99 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         request_id: "client",
       }),
     );
+
+  /** 라운드 자리 글: "start"(단계 시작 질문) 또는 1 이상의 번호(10진). 그 밖은 자리가 아니다(null) — 요청 없이 없는 자리로 본다 */
+  function placeOf(round: string): { round_id: number | null } | null {
+    if (round === "start") return { round_id: null };
+    return /^[1-9]\d*$/.test(round) ? { round_id: Number(round) } : null;
+  }
+  const roundPath = (stage: string, round: string): string => `/stages/${encodeURIComponent(stage)}/rounds/${encodeURIComponent(round)}`;
+
+  /** GET P/stages/{stage}/rounds/{round} → data. 서버 404 는 null, 그 밖의 거절은 PesApiError */
+  async function readRound(id: string, stage: string, round: string, signal?: AbortSignal): Promise<Json | null> {
+    const res = await send(projectUrl(id, roundPath(stage, round)), { method: "GET", headers: headers(), credentials: "omit", ...(signal ? { signal } : {}) });
+    if (!res.ok) {
+      const error = await toApiError(res);
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+    const body: unknown = await res.json();
+    if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
+    return body.data;
+  }
+
+  /** 순서 바꾸기를 같은 멱등 키로 다시 보낼 때 같은 폼 세트 id 로 보내려고 처음 알아낸 값을 둔다(이 클라이언트의 수명 동안) */
+  const orderSets = new Map<string, string>();
+
+  /** 서버 답 값 → 화면 글: 선택지는 label(여럿은 ", "), 글은 그대로 */
+  function answerText(value: unknown, options: { id: string; label: string }[]): string {
+    const label = (v: unknown): string => options.find((o) => o.id === v)?.label ?? String(v);
+    if (Array.isArray(value)) return value.map(label).join(", ");
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? label(value) : "";
+  }
+
+  /** 서버 질문 한 줄 → QuestionView. 서버가 주지 않은(null) 칸은 키를 두지 않는다 */
+  function questionViewOf(raw: Json): QuestionView | null {
+    if (typeof raw.id !== "string" || typeof raw.version_id !== "string") return null;
+    const kind: QuestionKind = raw.type === "single" ? "single_choice" : raw.type === "multi" ? "multi_choice" : "free_text";
+    const rawOptions = Array.isArray(raw.options) ? raw.options : [];
+    const options = kind === "free_text" ? [] : rawOptions.flatMap((o) => (isRecord(o) && typeof o.value === "string" ? [{ id: o.value, label: typeof o.label === "string" ? o.label : o.value }] : []));
+    const status: QuestionStatus = raw.state === "withdrawn" || raw.state === "deferred" || raw.state === "merged" ? raw.state : "open";
+    const showIf = isRecord(raw.show_if) && typeof raw.show_if.id === "string" && Array.isArray(raw.show_if.in) && typeof raw.show_if.in[0] === "string" ? { question_id: raw.show_if.id, equals: raw.show_if.in[0] } : null;
+    const view: QuestionView = {
+      id: raw.id,
+      number: Number(raw.display_no),
+      version: Number(raw.version_no),
+      version_id: raw.version_id,
+      required: raw.required === true,
+      source: "ai",
+      text: text(raw.text),
+      kind,
+      ...(kind === "free_text" ? {} : { options }),
+      default_value: typeof raw.default_value === "string" ? raw.default_value : null,
+      show_if: showIf,
+      direction: "ask_human",
+      status,
+      allow_comment_as_answer: raw.allow_comment_as_answer === true,
+    };
+    if (raw.importance === "high" || raw.importance === "normal" || raw.importance === "low") view.importance = raw.importance;
+    if (typeof raw.help === "string" && raw.help) view.help = raw.help;
+    if (status === "merged" && typeof raw.merged_into_question_id === "string") view.merged_into = raw.merged_into_question_id;
+    const a = raw.answer;
+    // 보낸 답: 값이 있는 제출된 답만(의견만 낸 답은 의견 목록에 있다 — 여기서 글을 지어내지 않는다)
+    if (isRecord(a) && a.state === "submitted" && a.value !== null && a.value !== undefined) {
+      const answer = answerText(a.value, options);
+      const receipt_no = text(a.receipt_no);
+      const committed_at = text(a.committed_at);
+      if (a.question_version_id === raw.version_id) {
+        view.sent = { answer, receipt_no, tx_id: text(a.tx_id), committed_at };
+        view.used_default = a.used_default === true;
+      } else {
+        view.needs_recheck = true;
+        view.previous_answer = { answer, ...(typeof a.question_version === "number" ? { version: a.question_version } : {}), receipt_no, committed_at };
+      }
+    }
+    return view;
+  }
+
+  function roundViewOf(data: Json, stage: string): RoundView {
+    const questions = (Array.isArray(data.questions) ? data.questions : []).flatMap((raw) => {
+      const view = isRecord(raw) ? questionViewOf(raw) : null;
+      return view ? [view] : [];
+    });
+    return {
+      stage: stage as RoundView["stage"],
+      round_id: typeof data.round_id === "number" ? data.round_id : null,
+      state: data.state === "closed" ? "closed" : "current",
+      form_version: typeof data.form_version === "number" ? data.form_version : 0,
+      ...(typeof data.set_id === "string" && data.set_id ? { set_id: data.set_id } : {}),
+      questions,
+      result: null,
+      alerts: [],
+      prompt: "",
+    };
+  }
+
   return {
     capabilities: { questionTools: true },
     getAssumptions: () => notSupported("가정 읽기"),
@@ -224,15 +328,66 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     supersedeDecision: () => notSupported("결정 대체 기록"),
     revokeDecision: () => notSupported("결정 철회 기록"),
     getQuestionVersions: notConnected("질문 버전 기록 읽기"),
-    reorderQuestions: notConnected("질문 순서 바꾸기"),
-    getComments: notConnected("의견 읽기"),
+
+    /** GET P/stages/{stage}/rounds/{round}/threads — 의견 목록. 라운드를 못 찾으면(404) 빈 목록, 그 밖의 거절은 PesApiError */
+    async getComments(slug, _edition, stage, round) {
+      const id = idOf(slug);
+      if (id === undefined || !placeOf(round)) return [];
+      const res = await send(projectUrl(id, `${roundPath(stage, round)}/threads`), { method: "GET", headers: headers(), credentials: "omit" });
+      if (!res.ok) {
+        const error = await toApiError(res);
+        if (isNotFound(error)) return [];
+        throw error;
+      }
+      const body: unknown = await res.json();
+      const threads = isRecord(body) && isRecord(body.data) && Array.isArray(body.data.threads) ? body.data.threads : null;
+      if (threads === null) throw new PesApiError(fallbackBody(500));
+      return threads.flatMap((t): CommentThreadView[] => {
+        if (!isRecord(t) || typeof t.thread_id !== "string" || typeof t.question_id !== "string") return [];
+        const messages = (Array.isArray(t.messages) ? t.messages : []).flatMap((m): CommentMessageView[] =>
+          isRecord(m) && typeof m.message_id === "string" && typeof m.body_md === "string"
+            ? [{ message_id: m.message_id, body_md: m.body_md, at: text(m.at), by: m.by === "ai" ? "ai" : "human", ...(typeof m.receipt_no === "string" ? { receipt_no: m.receipt_no } : {}) }]
+            : [],
+        );
+        return [{ thread_id: t.thread_id, question_id: t.question_id, ...(typeof t.question_version === "number" ? { question_version: t.question_version } : {}), messages }];
+      });
+    },
+
+    /**
+     * 순서 바꾸기: 라운드 읽기로 폼 세트 id 를 알고 POST P/question-sets/{set_id}/order. 같은 멱등 키의 다시 보내기는 처음 알아낸 세트 id 를 그대로 쓴다 —
+     * 그 사이 서버 폼이 새 세트로 바뀌었어도(첫 요청이 닿았는데 답을 못 받은 경우) 요청 내용이 같아야 서버가 재생한다(내용이 다르면 409 idempotency_key_reuse).
+     */
+    async reorderQuestions(slug, _edition, stage, round, orderedIds, key) {
+      if (!key) throw invalid("$.headers.idempotency-key");
+      const id = idOf(slug);
+      if (id === undefined) throw new PesApiError(fallbackBody(404));
+      const memo = `${slug}\u0000${stage}\u0000${round}\u0000${key}`;
+      let setId = orderSets.get(memo);
+      if (setId === undefined) {
+        const data = await timed((signal) => readRound(id, stage, round, signal));
+        if (data === null) throw new PesApiError(fallbackBody(404));
+        if (typeof data.set_id !== "string" || !data.set_id) throw invalid("$.set_id", "서버 폼 세트를 알 수 없어 순서를 바꿀 수 없습니다.");
+        setId = data.set_id;
+        orderSets.set(memo, setId);
+      }
+      const w = await write(slug, key, `/question-sets/${q(setId)}/order`, { question_ids: orderedIds });
+      const set = objectAt(w.data, "set");
+      return result(w, { form_version: Number(set.version_no) });
+    },
 
     async addQuestion(slug, _edition, stage, round, body, key) {
       if (!key) throw invalid("$.headers.idempotency-key");
       if (idOf(slug) === undefined) throw new PesApiError(fallbackBody(404));
       if (body.direction === "ask_ai") throw new NotConnectedError("사람이 AI에게 묻는 질문 더하기");
-      if (round !== "start") throw new NotConnectedError("번호 라운드에 질문 더하기");
-      const w = await write(slug, key, "/questions", { purpose: "stage_start", form_key: "main", direction: "agent_to_human", round_id: null, question: spec(body) }, async (id) => {
+      if (!placeOf(round)) throw new PesApiError(fallbackBody(404));
+      const w = await write(slug, key, "/questions", { purpose: "stage_start", form_key: "main", direction: "agent_to_human", question: spec(body) }, async (id) => {
+        // 번호 라운드는 라운드 읽기의 server_round_id 를 round_id 로 보낸다(없으면 쓰기 0 으로 거절 — 지어내지 않는다). start 는 단계 시작 자리(round_id null)
+        let round_id: string | null = null;
+        if (round !== "start") {
+          const data = await timed((signal) => readRound(id, stage, round, signal));
+          if (data === null || typeof data.server_round_id !== "string" || !data.server_round_id) throw new PesApiError(fallbackBody(404));
+          round_id = data.server_round_id;
+        }
         const json = await timed(async (signal) => {
           const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit", signal });
           if (!res.ok) throw await toApiError(res);
@@ -241,7 +396,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         const stages = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.stages) ? json.data.stages : [];
         const found = stages.find((s) => isRecord(s) && s.key === stage);
         if (!isRecord(found) || typeof found.stage_id !== "string") throw new PesApiError({ ...fallbackBody(404) });
-        return { stage_id: found.stage_id };
+        return { stage_id: found.stage_id, round_id };
       });
       const question = objectAt(w.data, "question");
       return result(w, { question_id: text(question.id), version: Number(question.version_no) });
@@ -324,15 +479,23 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
 
     getWorkspace,
 
-    /** 라운드 하나를 읽는 경로는 계획에 아직 없다(types.ts READS.round) — 작업 공간에 있는 자리만 돌려주고 질문·결과는 비워 둔다(지어내지 않음) */
+    /**
+     * GET P/stages/{stage}/rounds/{start|번호} (SEL-98) — 폼 세트 id · 질문(서버 버전 id 포함) · 현재 답까지 한 번에 읽는다.
+     * 그 경로가 404 이면(라운드 읽기가 없는 옛 서버, 또는 그 자리가 없음) 작업 공간 읽기로 폴백한다: 작업 공간에 자리가 있을 때만 질문 없는 빈 뷰, 없으면 null(지어내지 않음).
+     * 라운드 경로는 서버의 활성 판을 읽는다 — 판 번호(edition)는 폴백에서만 맞춰 본다.
+     */
     async getRound(slug, edition, stage, round) {
+      const id = idOf(slug);
+      const place = placeOf(round);
+      if (id === undefined || !place) return null;
+      const data = await readRound(id, stage, round);
+      if (data !== null) return roundViewOf(data, stage);
       const w = await getWorkspace(slug, edition);
       if (!w) return null;
-      const roundId = round === "start" ? null : /^[1-9]\d*$/.test(round) ? Number(round) : undefined;
-      if (roundId === undefined) return null;
-      const place = w.stages.find((s) => s.key === stage)?.rounds.find((r) => r.round_id === roundId);
-      if (!place) return null;
-      const view: RoundView = { stage: stage as RoundView["stage"], round_id: roundId, state: place.state, form_version: 0, questions: [], result: null, alerts: [], prompt: "" };
+      const roundId = place.round_id;
+      const found = w.stages.find((s) => s.key === stage)?.rounds.find((r) => r.round_id === roundId);
+      if (!found) return null;
+      const view: RoundView = { stage: stage as RoundView["stage"], round_id: roundId, state: found.state, form_version: 0, questions: [], result: null, alerts: [], prompt: "" };
       return view;
     },
 

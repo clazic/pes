@@ -18,7 +18,7 @@ FIXTURES = HERE / "api-v1"
 API_DOC = HERE.parent / "stage-1-api.md"
 
 FORMAT_VERSION = "1.0"
-DECIMAL_KEYS = {"rev", "control_rev", "fence", "event_seq"}
+DECIMAL_KEYS = {"rev", "control_rev", "fence", "event_seq", "receipt_no"}
 CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DECIMAL_RE = re.compile(r"^[0-9]+$")
 HANGUL_RE = re.compile(r"[가-힣]")
