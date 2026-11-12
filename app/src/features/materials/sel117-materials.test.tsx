@@ -26,6 +26,9 @@ import {
 
 afterEach(cleanup);
 beforeEach(() => {
+  // 확인 중 시도는 sessionStorage 에 남는다 — 앞 시험의 키가 뒤 시험 화면에 새지 않게 매번 비운다
+  window.sessionStorage.clear();
+  window.localStorage.clear();
   // jsdom 에는 blob 주소가 없다 — 이미지 미리보기가 쓸 수 있게 흉내만
   (URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => "blob:synthetic-preview");
   (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();
@@ -132,7 +135,7 @@ describe("올리기 — 작업 중 자료 목록", () => {
     expect(input.disabled).toBe(false);
   });
 
-  it("파일을 고르면 uploadMaterial 한 번 · 영수증 전에는 “접수 확인 중”만, 새 행도 성공 말도 없다 · 영수증 뒤 다시 읽어 행이 생긴다", async () => {
+  it("파일을 고르면 uploadMaterial 한 번 · 영수증 전에는 “올리는 중”만, 새 행도 성공 말도 없다 · 영수증 뒤 다시 읽어 행이 생긴다", async () => {
     const mc = createMaterialsClient();
     const { container } = await boot(mc);
     await waitRows();
@@ -142,7 +145,8 @@ describe("올리기 — 작업 중 자료 목록", () => {
     await waitFor(() => expect(mc.uploads).toHaveLength(1));
     expect(mc.uploads[0]).toMatchObject({ name: "added-synthetic.txt" });
     expect(mc.uploads[0].key).toBeTruthy();
-    await waitFor(() => expect(statusText()).toContain("접수 확인 중"));
+    await waitFor(() => expect(statusText()).toContain("올리는 중"));
+    expect(statusText()).not.toContain("접수 확인 중");
     expect(statusText()).not.toMatch(/접수\s*\d|접수됨/);
     expect(table().querySelectorAll("[data-material]").length).toBe(before);
     expect(container.textContent).not.toContain("added-synthetic.txt");

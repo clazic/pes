@@ -25,6 +25,11 @@ interface Pending {
   keep?: unknown;
 }
 
+/** 확인 중인 요청 기록 엿보기(지우지 않는다) — 대화 상자를 다시 열 때 처음 보낸 내용을 되살리는 데 쓴다 */
+export function peekPending(scope: string): { sig: string; key: string; keep?: unknown } | null {
+  return loadPending(scope);
+}
+
 function loadPending(scope: string): Pending | null {
   if (pendingMemory.has(scope)) return pendingMemory.get(scope) ?? null;
   try {

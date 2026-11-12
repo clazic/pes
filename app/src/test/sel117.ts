@@ -30,7 +30,7 @@ import { ready } from "@/test/ui";
  *     main 안 region 이름 "내 자료"(제목 h2 "내 자료"). 다른 칸이 늦게 와도 이 칸은 단독으로 그려진다.
  * [올리기]
  *   `input[type=file]` 이름 “자료 파일 고르기”(두 화면 모두; 키보드 초점이 닿는다 — tabindex=-1 아님) · 여러 파일 가능(multiple).
- *   목록 화면: 고르면 파일마다 uploadMaterial 한 번(파일마다 다른 멱등 키). 영수증이 오기 전에는 role=status “접수 확인 중”만 있고 성공 말 · 새 행이 없다 — 영수증 뒤 getMaterials 를 다시 읽어 행이 생긴다(낙관적 갱신 없음).
+ *   목록 화면: 고르면 파일마다 uploadMaterial 한 번(파일마다 다른 멱등 키). 보내기 전 · 보내는 중에는 role=status “올리는 중”만, 영수증이 오기 전 처리 여부를 모르면 “접수 확인 중”만 있고 성공 말 · 새 행이 없다 — 영수증 뒤 getMaterials 를 다시 읽어 행이 생긴다(낙관적 갱신 없음).
  *   성공: role=status 에 “접수 <receipt_no>”(number 없는 영수증이면 “접수됨”). 실패(PesApiError): role=alert 에 서버 메시지, 행 그대로. 시간 초과(TimeoutError): “접수 확인 중” 유지 · 같은 파일을 다시 올리면 **같은 멱등 키**.
  *   행마다 단추형 입력 “새 버전 올리기: <제목>”(input[type=file], 이름에 제목) → uploadMaterial({ object_id: 그 자료 })  — 원본을 덮어쓰지 않고 새 버전.
  * [표] caption “내 자료” 를 가진 table 하나, 열 머리 th[scope=col]. 행 `[data-material="<object_id>"]` + `data-ai-access="allow|deny|unknown"`. 칸 `[data-cell="…"]`:

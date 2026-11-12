@@ -93,8 +93,8 @@ function UploadLines({ items }: { items: UploadItem[] }) {
   return (
     <>
       <div role="status" className="text-meta text-ink">
-        {/* 영수증 전에는 성공 말도 파일 이름도 보이지 않는다 — 접수 확인 중뿐 */}
-        {sending ? <p className="mt-1">접수 확인 중 — 파일 {sending}개를 서버가 받았는지 확인하고 있어요.</p> : null}
+        {/* 영수증 전에는 성공 말도 파일 이름도 보이지 않는다 — 보내기 전·보내는 중은 올리는 중, 처리 여부를 모를 때만 접수 확인 중 */}
+        {sending ? <p className="mt-1">올리는 중 — 파일 {sending}개를 서버에 보내고 있어요.</p> : null}
         {unknown ? <p className="mt-1">접수 확인 중 — 파일 {unknown}개: 답이 오지 않았어요. 실패한 것이 아닐 수 있어요. 같은 파일을 다시 고르면 중복 없이 확인해요.</p> : null}
         {done.map((x) => (
           <p key={x.id} className="mt-1">

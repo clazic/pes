@@ -674,9 +674,13 @@ components:
         Without start_cp/end_cp: judge the anchor again against a version (default the current one) - exact, moved, ambiguous (candidates
         only, nothing is chosen) or lost (nothing is deleted); a judgement is a new row, never an update. With start_cp and end_cp
         (both): the owner session pins the anchor to that stretch (a token is 403 human_required).
+        basis_version_id (optional): the text version the stretch was chosen on. When given, it must be the text's current version
+        (the version the current judgement is on) and, when version_id is given too, that same version; otherwise 409 basis_changed
+        (target $.body.basis_version_id, details {expected, current}, next_action reread_thread) and nothing is written.
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         version_id: { type: string }
+        basis_version_id: { type: string }
         start_cp: { type: integer, minimum: 0 }
         end_cp: { type: integer, minimum: 0 }
         run_id: { type: string }
@@ -2133,7 +2137,7 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: "A token without the lease (forbidden), or a token pinning a stretch (human_required)" }
         "404": { description: Unknown project, thread or version }
-        "409": { description: Idempotency key reuse }
+        "409": { description: "Idempotency key reuse, or basis_changed (basis_version_id is not the text's current version; nothing is written)" }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: The stretch is empty or outside the text, or the version has no text }
         "429": { description: Request budget spent; see Retry-After }

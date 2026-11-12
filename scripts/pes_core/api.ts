@@ -4007,7 +4007,7 @@ export class ApiApp {
   async #thread_reanchor(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["version_id", "start_cp", "end_cp", "run_id", "lease_id", "fence"]);
+    reject_unknown(body, ["version_id", "basis_version_id", "start_cp", "end_cp", "run_id", "lease_id", "fence"]);
     const thread_id = request.params[1] as string;
     const given = (field: string): boolean => body[field] !== undefined && body[field] !== null;
     if ((given("start_cp") || given("end_cp")) && !auth.session) {
@@ -4016,6 +4016,8 @@ export class ApiApp {
     const payload: Record<string, unknown> = { thread_id };
     const version_id = optional_text(body, "version_id");
     if (version_id !== undefined) payload.version_id = version_id;
+    const basis_version_id = optional_text(body, "basis_version_id");
+    if (basis_version_id !== undefined) payload.basis_version_id = basis_version_id;
     for (const field of ["start_cp", "end_cp"]) {
       if (!given(field)) continue;
       const value = body[field];
@@ -4026,7 +4028,11 @@ export class ApiApp {
     if (guard !== null && !auth.session) Object.assign(payload, guard);
     const out = await this.#exec(
       () => this.#service.execute(this.#ctx(project, auth, key), "annotation.reanchor", payload),
-      (error) => this.#thread_failure(error, "$.body.version_id"),
+      (error) => {
+        const failure = this.#thread_failure(error, "$.body.version_id");
+        // the reanchor's basis is the version the stretch was chosen on, not a follow-up's base
+        return failure.code === "basis_changed" ? new Fail("basis_changed", { target: "$.body.basis_version_id", details: failure.details, next_action: "reread_thread" }) : failure;
+      },
     );
     const result = result_record(out.result);
     return {
