@@ -99,7 +99,10 @@ test("B3 the CI app job runs its test steps with a temporary HOME and USERPROFIL
   const start = ci.indexOf("\n  app:\n");
   assert.ok(start > 0, "the app job");
   const job = ci.slice(start, ci.indexOf("\n  install-", start) > 0 ? ci.indexOf("\n  install-", start) : undefined);
-  assert.match(job, /PLAYWRIGHT_BROWSERS_PATH:/, "the browser cache is outside HOME");
+  // the browser cache is outside HOME — set in a step through GITHUB_ENV (a job-level env may not use the runner context: the whole workflow file would be invalid)
+  assert.match(job, /PLAYWRIGHT_BROWSERS_PATH=\$RUNNER_TEMP\/pw-browsers" >> "\$GITHUB_ENV"/, "the browser cache is outside HOME");
+  const job_env = /\n {4}env:\n((?: {6}.*\n)+)/.exec(job.slice(0, job.indexOf("\n    steps:")))?.[1] ?? "";
+  assert.doesNotMatch(job_env, /runner\./, "no runner context in the app job's job-level env");
   const unit = job.slice(job.indexOf("Unit tests (Vitest)"), job.indexOf("Browser tests (Playwright)"));
   const browser = job.slice(job.indexOf("Browser tests (Playwright)"));
   for (const step of [unit, browser]) {

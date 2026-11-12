@@ -310,10 +310,13 @@ jobs:
         working-directory: app
 
     # SEL-122: 시험 단계는 임시 HOME 에서 돈다 — 브라우저는 HOME 밖(PLAYWRIGHT_BROWSERS_PATH)에 설치하고 거기서 찾는다(루트 browser 잡과 같다).
-    env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
-
+    # job 수준 env 에서는 runner 컨텍스트를 쓸 수 없어(쓰면 워크플로 파일 전체가 무효) 첫 단계에서 GITHUB_ENV 로 넘긴다.
     steps:
+      - name: Browsers outside HOME
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/pw-browsers" >> "$GITHUB_ENV"
+
       - name: Check out repository
         uses: actions/checkout@v4
         with:
