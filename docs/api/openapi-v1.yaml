@@ -64,6 +64,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ThreadId:
+      name: t
+      in: path
+      required: true
+      schema: { type: string }
     StageId:
       name: s
       in: path
@@ -490,6 +495,76 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    QuestionState:
+      type: string
+      enum: [draft, open, deferred, merged, withdrawn, closed]
+      description: "A question version's state. withdraw/defer/merge write a new version with state withdrawn / deferred / merged (earlier versions and answers stay)."
+    QuestionWithdrawBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        reason: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    QuestionDeferBody:
+      type: object
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        defer_until:
+          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way)"
+          oneOf:
+            - { type: integer, minimum: 0 }
+            - { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        reason: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    QuestionMergeBody:
+      type: object
+      required: [merged_into_question_id]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        base_version_id: { type: string, minLength: 1 }
+        merged_into_question_id: { type: string, minLength: 1, description: "An open question of the same project (not this one)" }
+        reason: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    ThreadCreateBody:
+      type: object
+      required: [target_object_id, context_kind, initial_message]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        target_object_id: { type: string, minLength: 1, description: "The question the comment is about" }
+        target_version_id: { type: string, description: "A version of that question; the current one when absent" }
+        context_kind: { type: string, enum: [question_comment, annotation], description: "annotation is 501 not_supported until U4a" }
+        initial_message:
+          type: object
+          required: [body_md]
+          additionalProperties: false
+          properties:
+            body_md: { type: string, minLength: 1 }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
+    ThreadMessageBody:
+      type: object
+      required: [body_md]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        body_md: { type: string, minLength: 1 }
+        reply_to: { type: string }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
     AnswerItem:
       type: object
       required: [question_id]
@@ -511,6 +586,7 @@ components:
           type: array
           minItems: 1
           items: { $ref: "#/components/schemas/AnswerItem" }
+        mode: { type: string, enum: [bundle, single], description: "bundle: every applicable required question of the form must be filled (422 required_missing / not_applicable); single: exactly one item. Absent: a partial submission is accepted as before. The response carries form_complete and missing_required" }
         submitted_via: { type: string, description: "Checked, not stored (the server sets via)" }
         client_request_id: { type: string, description: "Checked, not stored (the Idempotency-Key header is the key)" }
     RoundStartBody:
@@ -1213,6 +1289,146 @@ paths:
         "403": { description: Not allowed for this caller, scope, or policy }
         "404": { description: Unknown project or target }
         "409": { description: State conflict, stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/withdraw:
+    post:
+      summary: Withdraw a question (a new version in state withdrawn; earlier versions and answers stay)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionWithdrawBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/defer:
+    post:
+      summary: Defer a question (a new version in state deferred, optionally until a time)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionDeferBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/questions/{q}/merge:
+    post:
+      summary: Merge a question into another open one (a new version in state merged; answers are not carried over)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionMergeBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads:
+    post:
+      summary: Start a comment thread on a question (never an answer)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ThreadCreateBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A question or answer breaks the rules }
+        "501": { description: "context_kind annotation is not supported yet (U4a)" }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/threads/{t}/messages:
+    post:
+      summary: Add a message to a question comment thread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ThreadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ThreadMessageBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or target }
+        "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: A question or answer breaks the rules }
         "429": { description: Request budget spent; see Retry-After }

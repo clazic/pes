@@ -126,6 +126,27 @@ SPECS = [
         "doc_fragments": ["P/questions/{q}/revisions"],
     },
     {
+        "file": "question-withdraw.json",
+        "operation": "questions.withdraw",
+        "method": "POST",
+        "path": "/api/v1/projects/{project_id}/questions/{question_id}/withdraw",
+        "doc_fragments": ["P/questions/{q}/withdraw"],
+    },
+    {
+        "file": "question-defer.json",
+        "operation": "questions.defer",
+        "method": "POST",
+        "path": "/api/v1/projects/{project_id}/questions/{question_id}/defer",
+        "doc_fragments": ["P/questions/{q}/defer"],
+    },
+    {
+        "file": "question-merge.json",
+        "operation": "questions.merge",
+        "method": "POST",
+        "path": "/api/v1/projects/{project_id}/questions/{question_id}/merge",
+        "doc_fragments": ["P/questions/{q}/merge"],
+    },
+    {
         "file": "submissions.json",
         "operation": "submissions.create",
         "method": "POST",

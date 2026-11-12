@@ -10,7 +10,7 @@
 // answer in.
 
 import type { CommandOutcome, CommandService, MutationContext } from "./commands.ts";
-import { prepare_submission, type SubmissionError } from "./commands/questions.ts";
+import { hidden_questions, prepare_submission, type SubmissionError } from "./commands/questions.ts";
 import type { Db } from "./db.ts";
 import { ApiError } from "./errors.ts";
 
@@ -134,8 +134,15 @@ export function resume_ready(
     round_id,
   );
 
+  // A question whose show_if is false is not required (form_complete skips it the same way).
+  const hidden = hidden_questions(
+    db,
+    project_id,
+    required.map((row) => row.question_id),
+  );
   const missing: MissingAnswer[] = [];
   for (const row of required) {
+    if (hidden.has(row.question_id)) continue;
     const answer = db.get<CurrentAnswerRow>(
       `SELECT av.state, av.question_version_id
          FROM answers a

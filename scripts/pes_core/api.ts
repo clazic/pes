@@ -279,6 +279,11 @@ const ACTION_OPERATIONS: readonly string[] = [
   "submissions.create",
   "questions.create",
   "questions.revise",
+  "questions.withdraw",
+  "questions.defer",
+  "questions.merge",
+  "threads.create",
+  "threads.messages.create",
   "rounds.create",
   "rounds.seal",
   "stages.approve",
@@ -296,6 +301,10 @@ const CREATED_ACTIONS = new Set([
   "run.created",
   "question.set_published",
   "question.revised",
+  "question.retracted",
+  "question.deferred",
+  "question.merged",
+  "question.commented",
   "answer.submitted",
   "round.started",
   "policy.changed",
@@ -641,6 +650,26 @@ export class ApiApp {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#question_revise(r, project, auth),
       }),
+      route("POST", `${P}/questions/{q}/withdraw`, "questions.withdraw", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#question_state(r, project, auth, "withdraw"),
+      }),
+      route("POST", `${P}/questions/{q}/defer`, "questions.defer", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#question_state(r, project, auth, "defer"),
+      }),
+      route("POST", `${P}/questions/{q}/merge`, "questions.merge", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#question_state(r, project, auth, "merge"),
+      }),
+      route("POST", `${P}/threads`, "threads.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#thread_create(r, project, auth),
+      }),
+      route("POST", `${P}/threads/{t}/messages`, "threads.messages.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#thread_message(r, project, auth),
+      }),
       route("POST", `${P}/submissions`, "submissions.create", {
         who: "human",
         act: async (r, project, auth) => this.#submissions(r, project, auth),
@@ -682,8 +711,6 @@ export class ApiApp {
         act: async (r, project, auth) => this.#file_read(r, project, auth),
       }),
       unsupported("POST", `${P}/exports`, "exports.create"),
-      unsupported("POST", `${P}/threads`, "threads.create"),
-      unsupported("POST", `${P}/threads/{t}/messages`, "threads.messages.create"),
       unsupported("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create"),
       unsupported("POST", `${P}/assumptions`, "assumptions.create"),
       unsupported("POST", `${P}/decisions`, "decisions.create"),
@@ -1353,6 +1380,41 @@ export class ApiApp {
         value: parse_json_or_null(row.value),
         state: row.state,
         comment: comment?.body_md ?? null,
+      };
+    }
+    if (kind === "message") {
+      const row = this.#db.get<{ thread_id: string; body_md: string; state: string; reply_to: string | null }>(
+        `SELECT mv.thread_id AS thread_id, mv.body_md AS body_md, mv.state AS state, m.reply_to AS reply_to
+           FROM message_versions mv
+           JOIN messages m ON m.project_id = mv.project_id AND m.object_id = mv.object_id
+          WHERE mv.project_id = ? AND mv.version_id = ?`,
+        project_id,
+        version_id,
+      );
+      if (row === undefined) return null;
+      return { thread_id: row.thread_id, body_md: row.body_md, state: row.state, reply_to: row.reply_to };
+    }
+    if (kind === "thread") {
+      const row = this.#db.get<{
+        target_object_id: string;
+        target_version_id: string | null;
+        context_kind: string;
+        state: string;
+      }>(
+        `SELECT t.target_object_id AS target_object_id, t.target_version_id AS target_version_id,
+                t.context_kind AS context_kind, tv.state AS state
+           FROM thread_versions tv
+           JOIN threads t ON t.project_id = tv.project_id AND t.object_id = tv.object_id
+          WHERE tv.project_id = ? AND tv.version_id = ?`,
+        project_id,
+        version_id,
+      );
+      if (row === undefined) return null;
+      return {
+        target_object_id: row.target_object_id,
+        target_version_id: row.target_version_id,
+        context_kind: row.context_kind,
+        state: row.state,
       };
     }
     if (kind === "question") {
@@ -2551,17 +2613,22 @@ export class ApiApp {
     const form_key = body.form_key === undefined ? "main" : require_text(body, "form_key");
     const guard = this.#guard_fields(body);
     const question = check_question(body.question, false);
+    // SEL-90: adding a question to a form keeps the form's earlier open questions, in order, and puts the new one
+    // last (the new set is a new version of the whole form). The core does it (extend_latest); a form with no set
+    // yet starts with this question alone.
     const payload: Record<string, unknown> = {
       stage_id,
       round_id,
       purpose: body.purpose,
       form_key,
       questions: [question],
+      extend_latest: true,
     };
     if (guard !== null && !auth.session) Object.assign(payload, guard);
     const out = await this.#exec(() => publish_set(this.#service, this.#ctx(project, auth, key), payload));
     const result = result_record(out.result);
-    const member = (result.members as Array<Record<string, unknown>>)[0] as Record<string, unknown>;
+    const members = result.members as Array<Record<string, unknown>>;
+    const member = members[members.length - 1] as Record<string, unknown>;
     return {
       status: 201,
       data: {
@@ -2614,8 +2681,9 @@ export class ApiApp {
   async #submissions(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["set_id", "answers", "submitted_via", "client_request_id"]);
+    reject_unknown(body, ["set_id", "answers", "mode", "submitted_via", "client_request_id"]);
     const set_id = require_text(body, "set_id");
+    if (body.mode !== undefined && body.mode !== "bundle" && body.mode !== "single") invalid_field("mode");
     const answers = body.answers;
     if (!Array.isArray(answers) || answers.length < 1) invalid_field("answers");
     const items = answers.map((entry, i) => {
@@ -2642,7 +2710,12 @@ export class ApiApp {
     const index_of = (question_id: unknown): number =>
       Math.max(0, items.findIndex((item) => item.question_id === question_id));
     const out = await this.#exec(
-      () => submit_answers(this.#service, this.#ctx(project, auth, key), { set_id, answers: items }),
+      () =>
+        submit_answers(this.#service, this.#ctx(project, auth, key), {
+          set_id,
+          answers: items,
+          ...(body.mode === undefined ? {} : { mode: body.mode }),
+        }),
       (error) => {
         const failure = fail_from(error);
         const question_id = failure.details?.question_id;
@@ -2654,6 +2727,14 @@ export class ApiApp {
           });
         }
         if (failure.code === "validation_failed") {
+          const reason = failure.details?.reason;
+          // a rule about the whole bundle points at the list; one about a single item points at that item
+          if (reason === "required_missing" || reason === "single_requires_one_item") {
+            return new Fail(failure.code, { target: "$.body.answers", details: failure.details });
+          }
+          if (reason === "not_applicable") {
+            return new Fail(failure.code, { target: `$.body.answers[${index_of(question_id)}]`, details: failure.details });
+          }
           return new Fail(failure.code, {
             target: `$.body.answers[${index_of(question_id)}].${String(failure.details?.field ?? "value")}`,
             details: failure.details,
@@ -2678,7 +2759,140 @@ export class ApiApp {
           answer_version_id: entry.version_id,
           state: entry.version_id === null ? "comment_only" : "submitted",
         })),
+        form_complete: result.form_complete === true,
+        missing_required: Array.isArray(result.missing_required) ? result.missing_required : [],
       },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-90: POST P/questions/{q}/withdraw | defer | merge — a new question version in state withdrawn | deferred | merged. */
+  async #question_state(
+    request: RouteRequest,
+    project: ProjectRow,
+    auth: AuthInfo,
+    kind: "withdraw" | "defer" | "merge",
+  ): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(
+      body,
+      [
+        "base_version_id",
+        "reason",
+        ...(kind === "defer" ? ["defer_until"] : []),
+        ...(kind === "merge" ? ["merged_into_question_id"] : []),
+        "run_id",
+        "lease_id",
+        "fence",
+      ]);
+    const question_id = request.params[1] as string;
+    const payload: Record<string, unknown> = { question_id };
+    const base_version_id = optional_text(body, "base_version_id");
+    if (base_version_id !== undefined) payload.base_version_id = base_version_id;
+    if (body.reason !== undefined && body.reason !== null) {
+      if (typeof body.reason !== "string" || !body.reason.isWellFormed()) invalid_field("reason");
+      payload.reason = body.reason;
+    }
+    if (kind === "defer" && body.defer_until !== undefined && body.defer_until !== null) {
+      // a time in ms: a JSON integer or (like the other large numbers of this API) a decimal string
+      const text = typeof body.defer_until === "number" ? decimal_text(body.defer_until) : parse_decimal(body.defer_until, "$.body.defer_until");
+      const until = text === null ? Number.NaN : Number(text);
+      if (!Number.isSafeInteger(until)) invalid_field("defer_until");
+      payload.defer_until = until;
+    }
+    if (kind === "merge") payload.merged_into_question_id = require_text(body, "merged_into_question_id");
+    const guard = this.#guard_fields(body);
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), `question.${kind}`, payload),
+      (error) => {
+        const failure = targeted(error, { rev_conflict: "$.body.base_version_id" }, { rev_conflict: "reread_question" });
+        if (failure.code === "validation_failed" && typeof failure.details?.field === "string") {
+          return new Fail(failure.code, { target: `$.body.${failure.details.field}`, details: failure.details });
+        }
+        return failure;
+      },
+    );
+    const result = result_record(out.result);
+    const question: Record<string, unknown> = {
+      id: question_id,
+      version_id: result.question_version_id,
+      version_no: String(result.version_no),
+      state: result.state,
+    };
+    if (kind === "merge") question.merged_into_question_id = result.merged_into_question_id;
+    return {
+      status: 201,
+      data: { question, previous_answers_preserved: true },
+      replayed: out.replayed,
+    };
+  }
+
+  /** The text of a comment body: a string; blank is a content problem (422), not a shape problem. */
+  #comment_body(value: unknown, target: string): string {
+    if (typeof value !== "string" || !value.isWellFormed()) invalid(target);
+    if (value.trim().length === 0) validation(target);
+    return value;
+  }
+
+  /** SEL-90: POST P/threads — a comment thread on a question (annotation threads stay 501 until U4a). */
+  async #thread_create(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    if (body.context_kind === "annotation") throw new Fail("not_supported");
+    reject_unknown(
+      body,
+      ["target_object_id", "target_version_id", "context_kind", "initial_message", "run_id", "lease_id", "fence"]);
+    const target_object_id = require_text(body, "target_object_id");
+    const target_version_id = optional_text(body, "target_version_id");
+    if (body.context_kind === undefined) invalid_field("context_kind");
+    if (body.context_kind !== "question_comment") validation("$.body.context_kind");
+    const initial = body.initial_message;
+    if (!is_record(initial)) invalid("$.body.initial_message");
+    for (const field of Object.keys(initial)) {
+      if (field !== "body_md") invalid(`$.body.initial_message.${field}`);
+    }
+    const body_md = this.#comment_body(initial.body_md, "$.body.initial_message.body_md");
+    const guard = this.#guard_fields(body);
+    const payload: Record<string, unknown> = { question_id: target_object_id, body_md };
+    if (target_version_id !== undefined) payload.question_version_id = target_version_id;
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload));
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        thread: { id: result.thread_id, state: "open" },
+        message: { id: result.message_id, version_no: "1", thread_id: result.thread_id },
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-90: POST P/threads/{t}/messages — one more message in a question's comment thread. */
+  async #thread_message(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["body_md", "reply_to", "run_id", "lease_id", "fence"]);
+    const thread_id = request.params[1] as string;
+    const body_md = this.#comment_body(body.body_md, "$.body.body_md");
+    const reply_to = optional_text(body, "reply_to");
+    const guard = this.#guard_fields(body);
+    const thread = this.#db.get<{ target_object_id: string; context_kind: string }>(
+      "SELECT target_object_id, context_kind FROM threads WHERE project_id = ? AND object_id = ?",
+      project.id,
+      thread_id,
+    );
+    if (thread === undefined || thread.context_kind !== "question_comment") throw new Fail("not_found");
+    const payload: Record<string, unknown> = { question_id: thread.target_object_id, thread_id, body_md };
+    if (reply_to !== undefined) payload.reply_to = reply_to;
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload));
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: { message: { id: result.message_id, version_no: "1", thread_id } },
       replayed: out.replayed,
     };
   }
