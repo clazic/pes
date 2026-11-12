@@ -9,8 +9,9 @@
  *
  * ═══ 정한 인터페이스 ═══
  *   GET /api/v1/projects/{id}/reference-candidates          (쿼리 없음. 모르는 쿼리는 무시하지 않아도 되고 시험하지 않는다)
- *     누가: 소유자 세션(사람)만. 토큰(에이전트)은 어떤 범위든 403(forbidden 또는 human_required) — 후보는 붙이기(사람만)를 위한 읽기이고,
+ *     누가: 소유자 세션(사람)만. 토큰(에이전트)은 어떤 범위든 403(human_required) — 후보는 붙이기(사람만)를 위한 읽기이고,
  *           다른 프로젝트의 이름 · 스냅숏 id 를 AI 에게 흘리지 않는다(Go OFF 라도 마찬가지로 fail closed). 무자격 401, 모르는 프로젝트 404.
+ *           토큰의 오류 코드는 human_required 하나(문서 기준). 다른 프로젝트 토큰은 있는 프로젝트든 없는 프로젝트든 같은 401 봉투.
  *     성공: 200 data = { candidates: [후보] }
  *     후보(키 다섯 개뿐): { project_id, key, label, attached, snapshots }
  *       project_id   원본 프로젝트 id
@@ -44,6 +45,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { issue_agent_token } from "../scripts/pes_core/actors.ts";
 import type { Db } from "../scripts/pes_core/db.ts";
 import { approve_stage, seal_round, start_round } from "../scripts/pes_core/editions.ts";
 import { assert_error, assert_ok, call, make_agent, OPENAPI_PATH, with_api, type ApiEnv, type ApiResponse, type Auth } from "./helpers/api_env.ts";
@@ -73,10 +75,27 @@ const get = (env: ApiEnv, auth: Auth = "owner", rest = PATH) => call(env, { meth
 const candidates_of = async (env: ApiEnv, auth: Auth = "owner"): Promise<any[]> => assert_ok(await get(env, auth)).candidates;
 const ids_of = (list: any[]): string[] => list.map((c) => c.project_id);
 
-/** 응답 전체 글자에 원본의 이름 · id · 스냅숏 id 가 있는가 */
+/** 응답 전체(본문 · 헤더)에 원본의 id · 스냅숏 id · 표지 · extra(이름) 가 있는가 */
 function leaks(res: ApiResponse, src: Source, extra: string[] = []): boolean {
-  const text = JSON.stringify(res.json) + (res.bytes === null ? "" : Buffer.from(res.bytes).toString("utf8"));
+  const body = JSON.stringify(res.json) + (res.bytes === null ? "" : Buffer.from(res.bytes).toString("utf8"));
+  const text = body + JSON.stringify(res.headers);
   return [src.p.project_id, src.snapshot_id, src.report_marker, src.source_marker, ...extra].some((m) => text.includes(m));
+}
+
+/** 합성 원본마다 고유한 주제(topic)를 주고 [주제, slug] 를 돌려준다. 이름이 응답에 새면 이 두 값이 잡힌다. */
+function names_of(env: ApiEnv, src: Source): string[] {
+  const topic = `합성주제-${src.tag}-고유값`;
+  env.db.run("UPDATE projects SET topic = ? WHERE id = ?", topic, src.p.project_id);
+  const slug = env.db.get<{ slug: string }>("SELECT slug FROM projects WHERE id = ?", src.p.project_id)!.slug;
+  return [topic, slug];
+}
+
+/** 다른 프로젝트(src)의 소유자 사용자로 만든 에이전트 토큰. 이 프로젝트 경로에는 맞지 않는다. */
+async function other_project_token(env: ApiEnv, src: Source, name: string): Promise<string> {
+  const actor_id = `agent-${name}`;
+  env.db.run("INSERT INTO actors (id, kind, user_id, display_name) VALUES (?, ?, ?, ?)", actor_id, "external_agent", src.user_id, `합성 ${name}`);
+  const out = await issue_agent_token(env.service, ctx_for(src.p, `tok-${name}`), { actor_id, scopes: ["context:read"] });
+  return (out.result as { token: string }).token;
 }
 
 /** 원본의 계획 단계를 열고, 지정한 버전들로 봉인하고 승인한다. 승인된 스냅숏 id 를 돌려준다. */
@@ -214,10 +233,11 @@ test("a project the user is not a member of is absent — no name, id or snapsho
     const mine = await make_source(env, "p1");
     const secret = await make_source(env, "p2");
     grant_access(env, mine);
+    const secret_names = names_of(env, secret);
     const res = await get(env);
     const list = assert_ok(res).candidates;
     assert.deepEqual(ids_of(list), [mine.p.project_id]);
-    assert.equal(leaks(res, secret), false, "the unreachable project leaves no trace");
+    assert.equal(leaks(res, secret, secret_names), false, "the unreachable project leaves no trace");
     assert.equal(list.length, 1, "not even a placeholder row");
 
     grant_access(env, secret);
@@ -225,7 +245,7 @@ test("a project the user is not a member of is absent — no name, id or snapsho
     revoke_access(env, secret);
     const after = await get(env);
     assert.deepEqual(ids_of(assert_ok(after).candidates), [mine.p.project_id]);
-    assert.equal(leaks(after, secret), false);
+    assert.equal(leaks(after, secret, secret_names), false, "after losing membership the name and id are gone again");
   });
 });
 
@@ -249,7 +269,7 @@ test("it agrees with the REF1a decision: a source the user is in is attachable, 
     const attach = (src: Source) => call(env, { method: "POST", path: P(env, "/references"), auth: "owner", body: { referenced_project_id: src.p.project_id, source_snapshot_id: src.snapshot_id } });
     assert_ok(await attach(inside), 201);
     const refused = await attach(outside);
-    assert.ok(refused.status === 403 || refused.status === 404, `expected 403/404, got ${refused.status}`);
+    assert_error(refused, 404, "not_found");
   });
 });
 
@@ -272,10 +292,11 @@ test("an archived project is not a candidate; the other projects are unaffected"
     const old = await make_source(env, "ar2");
     grant_access(env, live);
     grant_access(env, old);
+    const old_names = names_of(env, old);
     env.db.run("UPDATE projects SET status = 'archived' WHERE id = ?", old.p.project_id);
     const res = await get(env);
     assert.deepEqual(ids_of(assert_ok(res).candidates), [live.p.project_id]);
-    assert.equal(leaks(res, old), false);
+    assert.equal(leaks(res, old, old_names), false, "the archived project's name and id do not appear");
   });
 });
 
@@ -419,7 +440,8 @@ test("a source that went away (reference.source_gone) is not offered again as a 
     assert.ok(ids_of(list).includes(b.p.project_id));
     // a project that is still a member project stays offered; its `attached` follows the project_references key (tombstone keeps it)
     const a_row = list.find((c) => c.project_id === a.p.project_id);
-    if (a_row !== undefined) assert.equal(a_row.attached, true, "the tombstone still holds the key, so attaching it again is still a conflict");
+    assert.ok(a_row, "the source project is still a live member project, so its row stays");
+    assert.equal(a_row.attached, true, "the tombstone still holds the key, so attaching it again is still a conflict");
   });
 });
 
@@ -430,17 +452,34 @@ test("only the owner session reads: a token (any scope set) is 403 with no fact 
   await with_api(async (env) => {
     const src = await make_source(env, "who1");
     grant_access(env, src);
+    const names = names_of(env, src);
     const all = await make_agent(env, "who-all");
     const reader = await make_agent(env, "who-reader", ["context:read"]);
     const ai = await make_agent(env, "who-ai", ["context:read"], "internal_ai");
     for (const agent of [all, reader, ai]) {
       const res = await get(env, { token: agent.token });
       assert.equal(res.status, 403, "a non-human caller is refused");
-      assert.ok(["forbidden", "human_required"].includes(res.json.error.code), `code ${res.json.error.code}`);
-      assert.equal(leaks(res, src), false, "the refusal names no project");
+      assert.equal(res.json.error.code, "human_required", "the documented code, and only that one");
+      assert.equal(leaks(res, src, names), false, "the refusal names no project");
     }
     assert_error(await get(env, "none"), 401, "unauthenticated");
     assert_error(await call(env, { method: "GET", path: "/api/v1/projects/no-such-project" + PATH, auth: "owner" }), 404, "not_found");
+  });
+});
+
+test("a token of another project gets the same 401 for an existing project and for a missing one: no existence leak", async () => {
+  await with_api(async (env) => {
+    const src = await make_source(env, "ex1");
+    grant_access(env, src);
+    const names = names_of(env, src);
+    const other = await other_project_token(env, src, "ex1-other");
+    const existing = await get(env, { token: other });
+    const missing = await call(env, { method: "GET", path: "/api/v1/projects/no-such-project" + PATH, auth: { token: other } });
+    const a = assert_error(existing, 401, "unauthenticated");
+    const b = assert_error(missing, 401, "unauthenticated");
+    assert.deepEqual(a.error, b.error, "the same error object whether the project exists or not");
+    assert.equal(leaks(existing, src, names), false);
+    assert.equal(leaks(missing, src, names), false);
   });
 });
 
@@ -448,6 +487,7 @@ test("a token is refused even when Go is OFF on every side (fail closed), and th
   await with_api(async (env) => {
     const src = await make_source(env, "who2");
     grant_access(env, src);
+    const names = names_of(env, src);
     const reader = await make_agent(env, "who2-reader", ["context:read"]);
     const on = await get(env, { token: reader.token });
     await source_go(env, src, false, "who2-src-off");
@@ -455,8 +495,9 @@ test("a token is refused even when Go is OFF on every side (fail closed), and th
     const off = await get(env, { token: reader.token });
     assert.equal(on.status, 403);
     assert.equal(off.status, 403);
+    assert.equal(on.json.error.code, "human_required");
     assert.equal(off.json.error.code, on.json.error.code);
-    assert.equal(leaks(off, src), false);
+    assert.equal(leaks(off, src, names), false);
   });
 });
 
