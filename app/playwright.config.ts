@@ -48,8 +48,11 @@ export default defineConfig({
   reporter: [["list"]],
   webServer: {
     command: "npm run build -- --mode e2e --outDir dist-e2e && npm run preview -- --outDir dist-e2e",
-    url: `${origin}/`,
-    reuseExistingServer: false,
+    // 준비 완료는 URL 응답이 아니라 "이번에 띄운 vite preview 가 이 포트에 바인딩했다고 찍는 줄"로만 판단한다(SEL-96 최종 리뷰 1/2).
+    // URL 응답을 쓰면 빌드 중에 다른 프로세스가 그 포트를 잡았을 때 그 서버의 200 을 받아 엉뚱한 서버를 시험하고 성공한다.
+    // vite preview 는 strictPort 라 포트가 이미 쓰이면 바인딩에 실패하고 종료하므로 Playwright 가 "not able to start" 로 실패한다.
+    // (url 이 없으면 시작 전 포트 점검도 없다 — 이미 쓰는 포트는 위 바인딩 실패가 같은 결과로 잡는다.)
+    wait: { stdout: new RegExp(`Local:\\s+http://127\\.0\\.0\\.1:${port}/`) },
     timeout: 240_000,
     env: { HOME: home, USERPROFILE: home, PES_HOME: join(home, "pes-projects"), PES_E2E_PORT: port },
   },
