@@ -657,7 +657,8 @@ function run_upload(runtime: CommandRuntime): CommandResult {
 
   const known_policy = access_state_of_blob(runtime.db, scope.project_id, blob_id);
   const file_policy_id = known_policy?.policy_id ?? runtime.new_id();
-  const ai_access = known_policy?.effective ?? "allow";
+  // the human's view is the one decision (as in GET /materials): a text extracted from a closed file shows as closed too
+  const ai_access = file_ai_denied(runtime.db, scope.project_id, blob_id) ? "deny" : "allow";
   const object_id = object?.id ?? runtime.new_id();
   const version_id = runtime.new_id();
   // `ai_access` is the human's view of the switch; an AI caller never gets the key (MaterialDto). The receipt stores what this

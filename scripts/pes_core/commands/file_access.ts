@@ -81,22 +81,28 @@ export function access_state_of_policy(db: ReadDb, project_id: string, policy_id
   return row === undefined ? undefined : state_of(row);
 }
 
+// The blob and every blob it was (transitively) extracted from, each with the policy in force. UNION (not UNION ALL) drops a blob
+// already visited, so a self-edge or a cycle in file_extractions ends the walk. One statement whatever the number of ancestors.
+const CLOSED_ANCESTOR_SQL = `WITH RECURSIVE family(blob_id) AS (
+    SELECT ?
+    UNION
+    SELECT e.blob_id FROM file_extractions e JOIN family f ON e.text_blob_id = f.blob_id WHERE e.project_id = ?
+  )
+  SELECT 1 AS closed
+    FROM family f
+    JOIN file_policies p ON p.project_id = ? AND p.blob_id = f.blob_id
+   WHERE p.ai_access <> 'allow'
+      OR COALESCE((SELECT a.ai_access FROM file_ai_access_versions a
+                    WHERE a.project_id = p.project_id AND a.file_policy_id = p.id ORDER BY a.rev DESC LIMIT 1), 'allow') <> 'allow'
+   LIMIT 1`;
+
 /**
- * THE decision: is this blob closed to AI? True for a deny in the policy row or the newest history row.
- * A blob without a policy row has no recorded deny (it is not attached to anything yet), so it is not denied.
+ * THE decision: is this blob closed to AI? True for a deny in the policy row or the newest history row of the blob itself or of ANY
+ * file it was extracted from, however many extraction steps away (SEL-116: an extracted text can be pasted back as a material and
+ * extracted again; strict side wins, whatever the text's own policy says). A blob without a policy row has no recorded deny.
  */
 export function file_ai_denied(db: ReadDb, project_id: string, blob_id: string): boolean {
-  if (access_state_of_blob(db, project_id, blob_id)?.effective === "deny") return true;
-  // SEL-116: an extracted text blob is closed to AI when the policy of any file it was extracted from is closed (strict side wins),
-  // whatever its own policy says. One level: a source's own policy is its own row.
-  return db
-    .all<{ blob_id: string }>(
-      "SELECT DISTINCT blob_id FROM file_extractions WHERE project_id = ? AND text_blob_id = ? AND blob_id <> ?",
-      project_id,
-      blob_id,
-      blob_id,
-    )
-    .some((source) => access_state_of_blob(db, project_id, source.blob_id)?.effective === "deny");
+  return db.get<{ closed: bigint }>(CLOSED_ANCESTOR_SQL, blob_id, project_id, project_id) !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +179,12 @@ export function event_denied(db: ReadDb, project_id: string, event: EventFacts):
   if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
     const named = payload as Record<string, unknown>;
     if (typeof named.blob_id === "string" && file_ai_denied(db, project_id, named.blob_id)) return true;
-    if (typeof named.file_policy_id === "string" && access_state_of_policy(db, project_id, named.file_policy_id)?.effective === "deny") return true;
+    // A policy id names the blob it belongs to; that blob is judged by the one decision (its own policy and its extraction ancestors').
+    // An extraction event carries only the SOURCE policy id, and that source may itself be the text of a closed file.
+    if (typeof named.file_policy_id === "string") {
+      const policy = access_state_of_policy(db, project_id, named.file_policy_id);
+      if (policy !== undefined && file_ai_denied(db, project_id, policy.blob_id)) return true;
+    }
   }
   const versions = [event.before_version_id, event.after_version_id].filter((id): id is string => id !== null);
   if (versions.some((id) => material_version_denied(db, project_id, id))) return true;
