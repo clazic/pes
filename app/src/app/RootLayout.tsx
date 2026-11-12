@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, ScrollRestoration, useMatch } from "react-router";
 import { useLiveChanges } from "@/api/live";
 import { ClientContext } from "@/api/queries";
+import { createHttpClient } from "@/api/http-client";
 import { selectClient } from "@/api/select-client";
 import type { PesClient } from "@/api/types";
 import { readSidebarOpen, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -48,7 +49,11 @@ function LiveChanges() {
 export function RootLayout({ client: given }: { client?: PesClient } = {}) {
   const [queryClient] = React.useState(makeQueryClient);
   // 시험 심(U1c): createRoutes({ client }) 가 준 클라이언트가 있으면 그것을 쓰고, 없으면 selectClient(U1b)
-  const [client] = React.useState(() => given ?? selectClient(window));
+  const [selected] = React.useState(() => given ?? selectClient(window));
+  // /new 는 세션이 없어도 화면을 그린다(SEL-130 — 주소로 직접 열었을 때): 빈 세션의 실제 클라이언트라 요청 0 이고, 만들기는 권한 안내로 막힌다. 다른 화면은 그대로 pes open 안내
+  const onNew = useMatch("/new") !== null;
+  const [noSession] = React.useState(() => (selected === null ? createHttpClient({ session: "", projects: {} }) : null));
+  const client = selected ?? (onNew ? noSession : null);
   const arrival = useArrivalRoot();
   const [sidebarOpen] = React.useState(initialSidebarOpen);
   // production 빌드에서 열어 준 쪽이 넘긴 설정이 없으면 가짜 자료 대신 안내만 그린다(요청 0)

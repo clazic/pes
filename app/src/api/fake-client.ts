@@ -1,6 +1,6 @@
 import { createFakeReferences } from "./fake-references";
 import { DEMO_HUMAN, demoMaterials, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView, type AnnotationThreadView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView, type AnnotationThreadView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
@@ -197,6 +197,8 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
     ...createFakeReferences({ known: (slug, edition) => find(slug, edition) !== null, committed: (tx_id) => void txLog.push({ tx_id, touched: ["workspace"] }) }),
     capabilities: { questionTools: true },
     listProjects: () => copy([{ slug: workspace.slug, edition: workspace.edition, current: workspace.current }]),
+    // 합성 자료 앱은 새 프로젝트를 만들지 못한다 — 서버에 이어진 앱(pes list 로 연 것)만 만든다
+    createProject: () => Promise.reject(new NotConnectedError("프로젝트 만들기")),
     getWorkspace: (slug, edition) => copy(find(slug, edition)),
     getRound(slug, edition, stage, round) {
       if (!find(slug, edition)) return copy(null);

@@ -265,7 +265,7 @@ export async function cmd_hub(args: string[]): Promise<void> {
 /**
  * `pes hub --open` / `pes list --open` (SEL-128): opens the first page (the project list) with a ONE-TIME CODE for an empty `projects` ({}) in the URL fragment —
  * the same SEL-85 code mechanism as `pes open <slug> --app`, nothing new in the server. The page trades the code for the owner session (its "프로젝트 시작" button
- * needs one to create a project) and clears the fragment before drawing. The code is never printed when the browser is started (it is only in the browser
+ * hands it to the app's /new screen, which creates the project) and clears the fragment before drawing. The code is never printed when the browser is started (it is only in the browser
  * command's argument); with PES_NO_BROWSER=1 the one address line is printed. The code is asked for BEFORE anything is printed, so a refusal leaves no output.
  */
 async function open_first_page(port: number, hub: boolean): Promise<void> {

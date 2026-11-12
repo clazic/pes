@@ -788,8 +788,20 @@ export interface MaterialsMethods {
 }
 
 /** 가짜 클라이언트와 (U1b) HTTP 클라이언트가 같이 지키는 모양 */
+/** 새 프로젝트 만들기(SEL-130) — 서버 POST /api/v1/projects 의 본문 그대로 */
+export interface CreateProjectInput {
+  slug: string;
+  topic: string;
+  owner_display_name: string;
+}
+
 export interface PesClient extends MaterialsMethods, ReferencesMethods {
   listProjects(): Promise<ProjectRef[]>;
+  /**
+   * 새 프로젝트를 만든다(SEL-130 · /new 화면) — 멱등 키 필수(없으면 요청 0 으로 invalid_payload). 세션이 비어 있으면 요청 0 으로 unauthenticated.
+   * 같은 키·같은 본문은 서버가 처음 결과를 돌려준다. 성공하면 클라이언트가 그 slug 를 알게 되어(다음 읽기에서 찾는다) 프로젝트 id 를 돌려준다. 거절은 PesApiError.
+   */
+  createProject(input: CreateProjectInput, idempotencyKey: string | undefined): Promise<{ slug: string; project_id: string }>;
   /** 없으면 null(모르는 slug 에 자료를 지어내지 않는다) */
   getWorkspace(slug: string, edition: number): Promise<WorkspaceView | null>;
   /** round: 숫자 또는 "start"(단계 시작). 없으면 null */

@@ -1064,6 +1064,28 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       return { cursor: data.next_cursor, txs };
     },
 
+    /** POST /api/v1/projects (SEL-130) — 프로젝트가 아직 없는 전역 쓰기라 P 경로가 아니다. 성공하면 slug → id 를 이 클라이언트의 지도에 더해 이어지는 읽기가 찾는다 */
+    async createProject(input, key) {
+      if (!key) throw invalid("$.headers.idempotency-key");
+      if (options.session === "") throw new PesApiError(fallbackBody(401));
+      const id = await timed(async (signal) => {
+        const res = await sendWrite(`${base}/api/v1/projects`, {
+          method: "POST",
+          headers: headers({ "content-type": "application/json", "idempotency-key": key }),
+          credentials: "omit",
+          body: JSON.stringify({ slug: input.slug, topic: input.topic, owner_display_name: input.owner_display_name }),
+          signal,
+        });
+        if (!res.ok) throw await toApiError(res);
+        const parsed: unknown = await jsonAfterSend(res);
+        const made = isRecord(parsed) && isRecord(parsed.data) ? parsed.data.project_id : undefined;
+        if (typeof made !== "string" || made === "") throw new PesApiError(fallbackBody(500));
+        return made;
+      });
+      options.projects[input.slug] = id;
+      return { slug: input.slug, project_id: id };
+    },
+
     async listProjects(): Promise<ProjectRef[]> {
       const found = await Promise.all(Object.keys(options.projects).map((slug) => readWorkspace(slug)));
       return found.flatMap((w) => (w ? [{ slug: w.slug, edition: w.edition, current: w.current }] : []));

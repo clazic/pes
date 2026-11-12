@@ -109,3 +109,16 @@ export async function exchangeHandoff(win: Window, fetchImpl?: typeof fetch): Pr
   if (config) (win as unknown as { __PES_APP__?: HandoffConfig }).__PES_APP__ = config;
   return config;
 }
+
+/**
+ * 이 탭이 새로 만든 프로젝트(slug → id)를 세션 설정에 더한다(SEL-130 · /new 화면) — 같은 탭에서 새로 고치거나 다른 화면으로 가도 그 프로젝트를 찾는다.
+ * 설정(window.__PES_APP__)이 없으면(세션 없이 연 /new) 아무것도 하지 않는다. 세션·id 는 같은 탭 sessionStorage 에만 쓴다.
+ */
+export function rememberProject(win: Window, slug: string, id: string): void {
+  const holder = win as unknown as { __PES_APP__?: HandoffConfig };
+  const config = holder.__PES_APP__;
+  if (!config) return;
+  const next: HandoffConfig = { ...config, projects: { ...config.projects, [slug]: id } };
+  holder.__PES_APP__ = next;
+  store(win, next);
+}

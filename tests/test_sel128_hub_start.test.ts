@@ -179,7 +179,9 @@ test("3 첫 페이지 HTML: '프로젝트 시작' 버튼이 있고(빈 홈 포�
     assert.ok(replace_at >= 0 && exchange_at > replace_at, "replaceState 가 교환 요청보다 앞");
     assert.ok(script.includes("pes-app-handoff") && script.includes("sessionStorage"));
     assert.ok(/credentials:\s*['"]omit['"]/.test(script), "교환은 credentials omit");
-    assert.ok(/idempotency-key/i.test(script) && script.includes("/api/v1/projects"));
+    // SEL-130: 프로젝트를 만드는 길은 앱의 /new 하나 — 첫 페이지에는 만들기 요청 코드도 대화 상자도 없다(첫 페이지는 세션을 넘겨 /new 로 보낼 뿐)
+    assert.ok(!/idempotency-key/i.test(html) && !html.includes("/api/v1/projects") && !/<dialog/i.test(html) && !html.includes("pes-start-dlg"), "첫 페이지에 만들기 요청·대화 상자 코드 없음");
+    assert.ok(script.includes("location.assign('/new')"), "버튼은 같은 탭을 /new 로 보낸다");
   });
 });
 

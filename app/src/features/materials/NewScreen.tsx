@@ -6,6 +6,7 @@ import { AiSwitch } from "./AiSwitch";
 import { FilePicker } from "./FilePicker";
 import { formatWord, sizeWord } from "./format";
 import { NewReferencesSection } from "../references/NewReferences";
+import { NewProjectForm } from "./NewProjectForm";
 import { DenyNotice } from "./notice";
 
 interface Staged {
@@ -16,8 +17,8 @@ interface Staged {
 }
 
 /**
- * 새 프로젝트 화면의 “내 자료” 칸(MAT1c · 설계 마법사 4번째 칸)과 그 아래 “참고 프로젝트” 칸(REF1b · NewReferencesSection) — **아직 올리지 않고 담기만** 한다.
- * 프로젝트가 아직 없어 서버에 아무것도 올리지 않는다(자료 올리기 · AI 참조 호출 0, 목록 읽기도 없음). 프로젝트 만들기와 묶는 일은 이어지는 작업이다.
+ * 새 프로젝트 화면(SEL-130: 프로젝트를 만드는 길은 여기 하나) — 맨 위 폼이 주제(필수)·이름(선택)으로 프로젝트를 만들고(NewProjectForm), 그 아래에 “내 자료” 칸(MAT1c · 설계 마법사 4번째 칸)과 그 아래 “참고 프로젝트” 칸(REF1b · NewReferencesSection) — **아직 올리지 않고 담기만** 한다.
+ * 프로젝트가 아직 없어 서버에 아무것도 올리지 않는다(자료 올리기 · AI 참조 호출 0, 목록 읽기도 없음). 담은 자료를 프로젝트 만들기와 묶는 일은 이어지는 작업이다.
  * 담은 파일은 이 탭의 메모리에만 있다(새로고침하면 다시 골라야 한다). 파일별 AI 참조는 기본 허용이고, 아직 나간 것이 없으니 확인 대화 상자 없이 “올릴 때부터 금지”로 바꿀 수 있다.
  */
 export function NewScreen() {
@@ -35,9 +36,10 @@ export function NewScreen() {
         <h1 data-screen-title="" tabIndex={-1} className="text-page text-ink">
           새 프로젝트
         </h1>
-        <p className="mt-1 text-meta text-muted-foreground">프로젝트를 만드는 칸은 이어서 붙습니다. 지금은 올릴 자료와 참고할 이전 프로젝트를 담아 두는 칸만 있어요.</p>
+        <p className="mt-1 text-meta text-muted-foreground">아래 자료와 참고 프로젝트 칸은 아직 담아 두기만 해요. 프로젝트를 만들 때 함께 붙지는 않아요.</p>
       </div>
       <div className="flex w-full max-w-3xl flex-col gap-8 px-4 pt-5 pb-16 tab:px-6">
+        <NewProjectForm />
         <section aria-labelledby={headingId}>
           <h2 id={headingId} className="text-title text-ink">
             내 자료
