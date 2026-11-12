@@ -1,0 +1,42 @@
+{
+  "name": "workspace_ai_ok",
+  "description": "SEL-87: 작업 공간 읽기에 AI 연결 정책·전송 목록·run 목록이 실린다(합성 새 프로젝트: 정책 allowed, 전송 0건, run 0건). 과거 승인은 승인한 단계에만 붙고, run_permissions 는 서버에 저장소가 없어 칸이 없다.",
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/${project}/workspace",
+        "auth": "owner"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "format_version": "1.0",
+          "request_id": "$string",
+          "data": {
+            "slug": "$string",
+            "title": "$string",
+            "edition": "$int",
+            "mode": "$string",
+            "ai_connection": {
+              "policy": "allowed",
+              "dispatches": []
+            },
+            "runs": [],
+            "stages": {
+              "$array_of": {
+                "key": "$string",
+                "view": "$string",
+                "rounds": "$any",
+                "$absent": ["past_approval"]
+              },
+              "min": 6,
+              "max": 6
+            },
+            "$absent": ["run_permissions"]
+          }
+        }
+      }
+    }
+  ]
+}
