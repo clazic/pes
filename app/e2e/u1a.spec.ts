@@ -289,13 +289,13 @@ test.describe("모바일 폭 — 읽기·답·의견 응답·오류 확인·인�
 });
 
 test.describe("네트워크 요청 0 (가짜 클라이언트 외)", () => {
-  test("화면을 열고 만지는 동안 fetch·XHR·WebSocket·EventSource·ping 0, 다른 출처 0", async ({ page }) => {
+  test("화면을 열고 만지는 동안 fetch·XHR·WebSocket·EventSource·ping 0, 다른 출처 0", async ({ page, baseURL }) => {
     const bad: string[] = [];
-    const origin = "http://127.0.0.1:4173";
+    const origin = new URL(baseURL!).origin;
     page.on("request", (req) => {
       const type = req.resourceType();
       if (["fetch", "xhr", "websocket", "eventsource", "ping", "other"].includes(type) && !req.url().startsWith(`${origin}/@`)) bad.push(`${type} ${req.url()}`);
-      if (!req.url().startsWith(origin) && !req.url().startsWith("data:") && !req.url().startsWith("blob:")) bad.push(`외부 ${req.url()}`);
+      if (!req.url().startsWith(`${origin}/`) && !req.url().startsWith("data:") && !req.url().startsWith("blob:")) bad.push(`외부 ${req.url()}`);
     });
     page.on("websocket", (ws) => bad.push(`websocket ${ws.url()}`));
     for (const path of [CURRENT, PAST, STAGE_START, `${CURRENT}?view=ask&peek=q-21`, `${CURRENT}?print=1`]) {

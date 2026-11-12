@@ -14,7 +14,7 @@
     "lint": "oxlint src e2e",
     "test": "vitest run",
     "test:e2e": "playwright test -c playwright.config.ts",
-    "preview": "vite preview --port 4173 --strictPort"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tanstack/react-query": "5.106.0",
