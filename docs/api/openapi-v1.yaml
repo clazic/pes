@@ -502,12 +502,44 @@ components:
         form_key: { type: string, minLength: 1 }
         direction:
           type: string
-          const: agent_to_human
-          description: "The core stores every published question as agent_to_human; any other value is 400"
+          enum: [agent_to_human, human_to_agent]
+          description: "agent_to_human (default). human_to_agent is the owner session's question to one AI (needs intended_actor_id; a token is 403 human_required). Filing it only records the question: no run, no waiting_human. It lives in its own form (form_key ask_ai unless one is given), not in the human's main form."
+        intended_actor_id:
+          type: string
+          minLength: 1
+          description: "Required for human_to_agent: an enabled non-human actor of the project (404 not_found when it is none). Any value with agent_to_human is 400."
         question: { $ref: "#/components/schemas/QuestionSpec" }
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    PromptBuildBody:
+      type: object
+      required: [question, selection]
+      additionalProperties: false
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        question: { type: string, minLength: 1, maxLength: 20000, description: The question the human asks the AI }
+        selection:
+          type: object
+          required: [version_id]
+          additionalProperties: false
+          properties:
+            version_id: { type: string, minLength: 1, description: The exact object version the question is about }
+            quote: { type: string, maxLength: 20000, description: The selected text }
+        drafts:
+          type: array
+          maxItems: 20
+          description: "Drafts the human has not submitted (they exist only in the browser, so the client sends them); each is marked as unsubmitted in the text"
+          items:
+            type: object
+            required: [text]
+            additionalProperties: false
+            properties:
+              text: { type: string, maxLength: 20000 }
+        target:
+          type: string
+          enum: [A, B]
+          description: "B (default) is a prompt the human pastes by hand; A is a text the built-in runner (Go) would send"
     QuestionReviseBody:
       type: object
       required: [base_version_id, question]
@@ -1882,6 +1914,86 @@ paths:
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: A question or answer breaks the rules }
         "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/prompt-builds:
+    post:
+      x-pes-read-only: true
+      summary: Assemble the prompt of a question about one exact version (a read; nothing is written)
+      description: |
+        A READ that uses POST only because an unsubmitted draft exists in the client alone and arrives in the body. It writes no row,
+        needs no Idempotency-Key, makes no run, no waiting_human and no event, and the same input gives the same text. Copying the text
+        is not starting anything: there is no run_id, status or "copied" in the answer.
+        data = {target, prompt_text, selection {object_id, version_id, version_no, quote|null},
+        included [{kind, id|null, version_id|null, label}], excluded [{kind, id|null, version_id|null, reason}],
+        warnings [{code, message}], constraints [{code, text}], return_link} (exactly these eight keys).
+        included.kind is selection | version | assumption | decision | draft | file | constraint | return_link;
+        excluded.reason is ai_access_denied | send_off | secret | local_path; warnings.code includes send_off, redacted,
+        unsubmitted_draft, truncated.
+        The text carries the selection, the exact version, the assumptions and decisions of the version's edition (project-wide
+        decisions too), the constraints and an app-relative return link (no host, no local path). A draft is marked "미제출 초안".
+        The assumptions and decisions are all of the version's edition (up to 50 of each kind), not only those that bear on the question.
+        A file with file_policies.ai_access = deny is excluded (ai_access_denied) for the human owner session; for any other caller
+        (a token) it is left out of every list, so its id never leaves (the version read hides it the same way). An allowed file is
+        listed by role and name, never its content, storage key or path. When the selected version is a file material closed to AI
+        (any of its versions holds a denied file: commands/file_access.ts material_object_denied, the version read's unit), the human
+        gets the build with the version text and the quote excluded (ai_access_denied, A and B) and any other caller gets 403. A token, the session secret, an API key or a local path in
+        any input is erased and announced with the warning "redacted": values after names that end in token, secret, password,
+        api key, secret/private/access key, session id, credential or signature, Korean labels (비밀번호, 암호, 토큰, 비밀키) followed by a value, Authorization and Cookie headers, credentials inside a URL, ?key= and ?sig=, private key
+        blocks, long letter-and-digit runs of an unknown shape, and home, file: and drive paths. A blank draft is skipped.
+        SEND OFF (allow_opencode_go = false): both targets get the warning send_off. Target A (the text Go would send) drops every
+        item but the question (assumptions, decisions, files, the version text, the quote, drafts: excluded with reason send_off, and
+        not in the text); target B (the human pastes it by hand) keeps the items and only warns.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PromptBuildBody" }
+      responses:
+        "200":
+          description: The prompt and its preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: "Missing or blank question, missing selection.version_id, unknown key, bad target or draft" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "Missing context:read scope, Go policy denied, or (a caller that is not the human) the selected version is a file material closed to AI — the same refusal as the version read" }
+        "404": { description: "The version is not in this project (another project's version included)" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/question-statuses:
+    get:
+      summary: Read the state of the human -> AI questions (accepted, externally received, read, answered)
+      description: |
+        data = {items:[{question_id, version_id, text, intended_actor_id, state, accepted_at, external_received_at, read_at,
+        answered_at, elapsed_ms}]}, only questions with direction human_to_agent, oldest accepted first. The stamps are epoch ms or null:
+        a stamp has a value only when there is evidence for it, and nothing is invented (there is no "copied" and no "answering").
+        accepted_at = the first version of the question was written; external_received_at = a run reported the question version as seen
+        (POST runs/{r}/input-receipts); an applied receipt alone also counts as received (applying happens after receiving: with no
+        seen receipt external_received_at is the applied time, with both it is the earlier one); read_at = a run reported it as applied; answered_at = a submitted answer version exists for it.
+        state is the furthest of accepted < external_received < read < answered that has evidence. elapsed_ms = answered_at (or the
+        server's now) minus accepted_at. ?question_id= narrows to one question (404 not_found for an unknown, another project's, or
+        agent_to_human question). Reading writes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: question_id
+          in: query
+          required: false
+          schema: { type: string, minLength: 1 }
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: question_id is empty }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project, or question_id is not a human -> AI question of it }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/threads:
     post:
