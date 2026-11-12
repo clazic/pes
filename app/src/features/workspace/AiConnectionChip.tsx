@@ -35,7 +35,7 @@ const EXPLAIN: Record<ChipState, string> = {
   on: "AI 연결이 켜져 있어 이 프로젝트 자료를 AI가 읽을 수 있습니다.",
   blocked: "AI 연결이 막혀 있어 이 프로젝트 자료를 AI로 보내지 않습니다. 정책을 확인할 수 없을 때도 허용으로 보지 않습니다.",
   changing: "AI 연결 설정을 바꾸는 중입니다. 확정 전에는 새로 보내지 않습니다.",
-  unknown: "서버가 AI 연결 정보를 보내지 않아 상태를 알 수 없음으로 표시합니다. 켜짐으로 보지 않습니다.",
+  unknown: "서버가 AI 연결 정보를 보내지 않아 상태를 알 수 없음으로 표시합니다. 켜짐으로 보지 않습니다. 이미 나간 자료가 있는지도 알 수 없습니다.",
 };
 
 const CHIP_TONE: Record<ChipState, string> = {
@@ -67,8 +67,16 @@ export function AiConnectionChip({ ai, mode }: { ai?: AiConnectionView; mode: Mo
   const state = chipStateOf(ai?.policy);
   const def = lookup("ai", state);
   const dispatches = ai?.dispatches ?? [];
-  /** 차단 중이거나 이미 보낸 자료가 있으면 회수·재시작 안내를 숨기지 않는다 */
-  const warn = state === "blocked" || dispatches.length > 0;
+  /** 켜짐이 아니거나(차단 중 · 변경 중 · 알 수 없음) 이미 보낸 자료가 있으면 회수·재시작 안내를 숨기지 않는다 — 모르면 나간 자료가 없다고 단정하지 않는다(설계 P4) */
+  const warn = state !== "on" || dispatches.length > 0;
+  /** 화면 읽기 알림 — 처음 그릴 때는 비우고, 상태가 바뀐 뒤에만 한 줄을 넣는다(polite) */
+  const [announce, setAnnounce] = React.useState("");
+  const prevState = React.useRef(state);
+  React.useEffect(() => {
+    if (prevState.current === state) return;
+    prevState.current = state;
+    setAnnounce(`AI 연결 ${def.label}`);
+  }, [state, def.label]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -77,7 +85,10 @@ export function AiConnectionChip({ ai, mode }: { ai?: AiConnectionView; mode: Mo
       if (e.key !== "Escape" || e.isComposing || e.defaultPrevented) return;
       e.preventDefault();
       setOpen(false);
-      chip.current?.focus();
+      // 초점이 칩이나 이 칸 안에 있을 때만 칩으로 돌려준다 — 답 칸 같은 다른 곳에서 글을 쓰던 중이면 입력 초점을 빼앗지 않는다
+      const active = document.activeElement;
+      const panel = document.getElementById(PANEL_ID);
+      if (active === chip.current || (active && panel?.contains(active))) chip.current?.focus();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -89,12 +100,13 @@ export function AiConnectionChip({ ai, mode }: { ai?: AiConnectionView; mode: Mo
         ref={chip}
         type="button"
         data-state={state}
+        data-print="hide"
         aria-label={`AI 연결 ${def.label}`}
         aria-expanded={open}
         aria-controls={open ? PANEL_ID : undefined}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-full border px-2.5 align-middle text-caption leading-[1.6] font-medium whitespace-nowrap outline-none forced-color-adjust-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "ml-auto inline-flex min-h-8 coarse:min-h-[44px] coarse:min-w-[44px] items-center gap-1.5 rounded-full border px-2.5 align-middle text-caption leading-[1.6] font-medium whitespace-nowrap outline-none forced-color-adjust-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
           CHIP_TONE[state],
         )}
       >
@@ -102,8 +114,11 @@ export function AiConnectionChip({ ai, mode }: { ai?: AiConnectionView; mode: Mo
         <span>AI 연결</span>
         <span>{def.label}</span>
       </button>
+      <span role="status" aria-live="polite" className="sr-only" data-print="hide">
+        {announce}
+      </span>
       {open ? (
-        <section id={PANEL_ID} aria-label="AI 연결 상태" className="order-last w-full basis-full rounded-lg border bg-surface-soft px-3 py-2.5 text-left">
+        <section id={PANEL_ID} aria-label="AI 연결 상태" data-print="hide" className="order-last w-full basis-full rounded-lg border bg-surface-soft px-3 py-2.5 text-left">
           <p className="text-meta font-semibold text-ink">
             AI 연결 · <span className={TONE_TEXT[def.tone]}>{def.label}</span>
           </p>

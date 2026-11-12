@@ -1,4 +1,4 @@
-// SEL-84 U1d — 가짜 클라이언트와 HTTP 클라이언트가 같은 값에서 같은 표시를 한다 (Vitest, jsdom). 구현 전이라 실패가 정상.
+// SEL-84 U1d — 가짜 클라이언트와 HTTP 클라이언트가 같은 값에서 같은 표시를 한다 (Vitest, jsdom).
 // 오늘 서버 작업 공간 읽기에는 ai_connection · past_approval · runs · run_permissions 가 없다(보고서 참고) → 그 모양도 시험한다.
 import { cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";

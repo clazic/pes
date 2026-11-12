@@ -1,4 +1,4 @@
-// SEL-84 U1d — 과거 승인 · stale · 중단/취소/인계 · 실행 권한 · 기록 없음 (Vitest, jsdom). 구현 전이라 실패가 정상. 계약: src/test/u1d.ts 머리말.
+// SEL-84 U1d — 과거 승인 · stale · 중단/취소/인계 · 실행 권한 · 기록 없음 (Vitest, jsdom). 계약: src/test/u1d.ts 머리말.
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { PERMISSIONS, RUNS, UNKNOWN, fakeBoot, httpBoot, migratedSynthetic, recordPanel, runPanel, stageLink, staleAfterApproval, unstubServer, withAi, ws } from "@/test/u1d";

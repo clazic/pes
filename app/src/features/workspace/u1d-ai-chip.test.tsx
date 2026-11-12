@@ -1,4 +1,4 @@
-// SEL-84 U1d — AI 연결 칩 (Vitest, jsdom). 구현 전이라 실패가 정상. 계약: src/test/u1d.ts 머리말.
+// SEL-84 U1d — AI 연결 칩 (Vitest, jsdom). 계약: src/test/u1d.ts 머리말.
 import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";

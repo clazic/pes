@@ -63,8 +63,9 @@ function ResearchFlow({ ws }: { ws: WorkspaceView }) {
             const here = viewStage === s.key;
             const expanded = s.rounds.length > 0 && (here || ws.current.stage === s.key);
             const reasonId = `sidebar-stage-${s.key}-reason`;
-            // 과거 승인은 stale 이어도 남는 사실이다. 이전된 프로젝트의 승인은 “검증 안 됨”을 붙인다(U1d · F06)
-            const pastNote = s.past_approval ? (s.past_approval.origin === "legacy_unverified" ? "검증 안 됨" : "과거 승인") : null;
+            // 과거 승인은 앞 단계 변경으로 stale 이 된 단계에만 붙인다(지금 승인된 단계에 서버가 past_approval 을 같이 실어도 “승인됨”만).
+            // 이전된 프로젝트의 승인은 stale 과 무관하게 “검증 안 됨”을 붙인다(U1d · F06)
+            const pastNote = s.past_approval ? (s.past_approval.origin === "legacy_unverified" ? "검증 안 됨" : s.view === "stale" ? "과거 승인" : null) : null;
             return (
               <SidebarMenuItem key={s.key}>
                 <SidebarMenuButton asChild isActive={here} tooltip={`${STAGE_LABEL[s.key]} · ${def.label}${pastNote ? ` · ${pastNote}` : ""}`}>

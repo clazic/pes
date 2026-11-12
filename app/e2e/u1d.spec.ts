@@ -1,4 +1,4 @@
-// SEL-84 U1d — AI 연결 칩 · 실행 패널 e2e (Playwright, 빌드한 앱 + vite preview, 가짜 클라이언트 합성 fixture). 구현 전이므로 실패가 정상.
+// SEL-84 U1d — AI 연결 칩 · 실행 패널 e2e (Playwright, 빌드한 앱 + vite preview, 가짜 클라이언트 합성 fixture).
 // 이름에 keyboard 가 든 시험은 Windows CI 필수 묶음. 계약: src/test/u1d.ts 머리말.
 import { expect, test, type Page } from "@playwright/test";
 import { CURRENT, WIDTHS } from "../src/test/contract";
@@ -55,4 +55,37 @@ test("휴대폰 폭에서도 칩이 열린다(읽기 허용)", async ({ page }) 
   await expect(chip(page)).toHaveCount(1);
   await chip(page).click();
   await expect(page.getByRole("region", { name: "AI 연결 상태" })).toBeVisible();
+});
+
+test.describe("휴대폰(390, 터치) — 칩 누르는 곳 44px", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test("칩 높이·너비가 44px 이상이다", async ({ page }) => {
+    await page.goto(CURRENT);
+    await expect(page.locator("main [data-screen-title]")).toBeVisible();
+    const box = await chip(page).boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(43.5);
+    expect(box!.width).toBeGreaterThanOrEqual(43.5);
+  });
+});
+
+test("인쇄에서는 칩 · 실행 · 기록 패널이 숨는다", async ({ page }) => {
+  await open(page);
+  await chip(page).click();
+  await expect(page.getByRole("region", { name: "AI 연결 상태" })).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(chip(page)).toBeHidden();
+  await expect(page.getByRole("region", { name: "AI 연결 상태" })).toBeHidden();
+  await expect(page.getByRole("region", { name: "실행" })).toBeHidden();
+  await expect(page.getByRole("region", { name: "기록" })).toBeHidden();
+});
+
+test("keyboard: 답 칸에 초점이 있을 때 Esc 로 칸을 닫아도 초점은 답 칸에 남는다", async ({ page }) => {
+  await open(page);
+  await chip(page).click();
+  await expect(page.getByRole("region", { name: "AI 연결 상태" })).toBeVisible();
+  const answer = page.getByRole("complementary", { name: "질문" }).getByRole("textbox").first();
+  await answer.focus();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("region", { name: "AI 연결 상태" })).toBeHidden();
+  await expect(answer).toBeFocused();
 });

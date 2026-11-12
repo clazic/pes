@@ -49,7 +49,7 @@ function PermissionRow({ permission }: { permission: RunPermissionView }) {
 export function RunPanel({ ws }: { ws: WorkspaceView }) {
   const permissions = ws.run_permissions;
   return (
-    <section aria-label="실행" className="mt-8 rounded-lg border bg-surface-soft px-3 py-3">
+    <section aria-label="실행" data-print="hide" className="mt-8 rounded-lg border bg-surface-soft px-3 py-3">
       <h2 className="text-title text-ink">실행</h2>
       {ws.runs === undefined ? (
         <p className="mt-1 text-meta text-ink-2">정보 없음 — 서버가 실행 정보를 아직 보내지 않았습니다.</p>
@@ -85,7 +85,7 @@ const RECORD_LABEL = { assumptions: "가정", decisions: "결정", comments: "�
 export function RecordsPanel({ ws }: { ws: WorkspaceView }) {
   const records = ws.records;
   return (
-    <section aria-label="기록" className="mt-4 rounded-lg border bg-surface-soft px-3 py-3">
+    <section aria-label="기록" data-print="hide" className="mt-4 rounded-lg border bg-surface-soft px-3 py-3">
       <h2 className="text-title text-ink">기록</h2>
       {records ? (
         <dl className="mt-1.5 space-y-1">
