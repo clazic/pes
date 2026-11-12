@@ -390,6 +390,17 @@ describe("쓰기 — 답글 · 해결 · 다시 붙이기 · 후속 제안/채�
     expect(s2.writes()[0]!.json).toEqual({ format_version: "1.0", start_cp: 1, end_cp: 2 });
   });
 
+  it("reanchorAnnotation: basis_version_id(구간을 고른 글 버전)를 그대로 싣고, 409 basis_changed 는 PesApiError 로 — target · details 보존, 영수증 읽기 없음", async () => {
+    const s = server(done("/threads/th-2/reanchor", { thread_id: "th-2", anchor: { id: "anc-2", status: "moved", start_cp: 40, end_cp: 53, candidates: [], evaluated_version_id: "ver-3", resolution_id: "ar-6", confirmed_by_actor_id: "act-h1" } }, "key-b", "annotation.reanchor"));
+    await (await make(s)).reanchorAnnotation(SLUG, ED, "th-2", { version_id: "ver-3", basis_version_id: "ver-3", start_cp: 40, end_cp: 53 }, "key-b");
+    expect(s.writes()[0]!.json).toEqual({ format_version: "1.0", version_id: "ver-3", basis_version_id: "ver-3", start_cp: 40, end_cp: 53 });
+    const s2 = server({ "POST /threads/th-2/reanchor": { status: 409, body: fail("basis_changed", { expected: "ver-2", current: "ver-3" }, "$.body.basis_version_id", "reread_thread") } });
+    const err = await (await make(s2)).reanchorAnnotation(SLUG, ED, "th-2", { version_id: "ver-2", basis_version_id: "ver-2", start_cp: 40, end_cp: 53 }, "key-c").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PesApiError);
+    expect((err as PesApiError).body.error).toMatchObject({ code: "basis_changed", target: "$.body.basis_version_id", next_action: "reread_thread", details: { expected: "ver-2", current: "ver-3" } });
+    expect(s2.seen.some((r) => r.url.pathname.includes("/requests/"))).toBe(false);
+  });
+
   it("proposeFollowup: POST P/followups {origin_thread_id, kind, description}", async () => {
     const s = server(done("/followups", { followup: { id: "fu-8", kind: "next_round_task", state: "proposed", version_no: "1", base_version_id: null } }, "key-p", "followup.propose"));
     const out = await (await make(s)).proposeFollowup(SLUG, ED, { origin_thread_id: "th-1", kind: "next_round_task", description: "근거 자료 더 찾기" }, "key-p");

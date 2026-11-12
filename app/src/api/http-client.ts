@@ -876,7 +876,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     },
 
     async reanchorAnnotation(slug, _edition, threadId, input, key) {
-      const w = await write(slug, key, `/threads/${q(threadId)}/reanchor`, { ...(input.version_id ? { version_id: input.version_id } : {}), start_cp: input.start_cp, end_cp: input.end_cp });
+      const w = await write(slug, key, `/threads/${q(threadId)}/reanchor`, { ...(input.version_id ? { version_id: input.version_id } : {}), ...(input.basis_version_id ? { basis_version_id: input.basis_version_id } : {}), start_cp: input.start_cp, end_cp: input.end_cp });
       const status = objectAt(w.data, "anchor").status;
       return result(w, { thread_id: text(w.data.thread_id) || threadId, anchor_status: (typeof status === "string" && STATUSES.includes(status) ? status : "moved") as AnchorStatus });
     },

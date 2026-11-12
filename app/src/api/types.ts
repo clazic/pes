@@ -742,8 +742,8 @@ export interface PesClient extends MaterialsMethods {
   replyAnnotation(slug: string, edition: number, threadId: string, input: { body_md: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; message_id: string }>>;
   /** 해결 ≠ 반영: 결과의 applied 는 늘 false 다(글은 해결로 바뀌지 않는다) */
   resolveAnnotation(slug: string, edition: number, threadId: string, input: { resolution: FollowupKind; reason: string; target_stage?: StageKey; base_version_id?: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; state: "resolved"; followup_id: string | null; applied: false }>>;
-  /** 다시 붙이기(사람만) — 구간은 code point. version_id 를 주면 그 글 버전 기준 */
-  reanchorAnnotation(slug: string, edition: number, threadId: string, input: { version_id?: string } & CpRange, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; anchor_status: AnchorStatus }>>;
+  /** 다시 붙이기(사람만) — 구간은 code point. version_id 를 주면 그 글 버전 기준. basis_version_id = 구간을 고른 글 버전(글의 현재 버전이 아니면 서버가 409 basis_changed, 아무것도 안 쓴다) */
+  reanchorAnnotation(slug: string, edition: number, threadId: string, input: { version_id?: string; basis_version_id?: string } & CpRange, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; anchor_status: AnchorStatus }>>;
   /** 후속 제안(적용하지 않는다). target_stage = 단계 키 — next_round_task · reopen_stage 는 서버가 그 단계 id 를 요구한다 */
   proposeFollowup(slug: string, edition: number, input: { origin_thread_id: string; kind: FollowupKind; description: string; target_stage?: StageKey }, idempotencyKey: string | undefined): Promise<CommandResult<{ followup_id: string; state: "proposed" }>>;
   /** 후속 채택(사람만) — base_version_id = 후속이 제안된 기반 글 버전 · expected_rev = FollowupDetail.version_no(문자열 그대로) */

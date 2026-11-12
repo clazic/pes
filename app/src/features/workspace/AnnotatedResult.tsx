@@ -2,7 +2,7 @@ import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bot, ListTodo, MessageSquarePlus, Paperclip } from "lucide-react";
 import { useAnnotations, useClient } from "@/api/queries";
-import type { AnnotationInput, ResultView, WorkspaceView, RoundView } from "@/api/types";
+import { PesApiError, type AnnotationInput, type ResultView, type WorkspaceView, type RoundView } from "@/api/types";
 import { Kbd } from "@/components/pes/kbd";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,8 +21,9 @@ export const isAnnotatable = (r: ResultView | null | undefined): r is Annotatabl
 /** prefix · suffix 로 싣는 앞뒤 글의 길이(code point) */
 const CONTEXT_CP = 40;
 
-/** 글에서 고른 한 구간 — 위치는 body_md 기준 code point */
+/** 글에서 고른 한 구간 — 위치는 body_md 기준 code point, version_id 는 그 구간을 고른 글 버전(다른 버전에 그 좌표를 쓰지 않는다) */
 interface Picked {
+  version_id: string;
   start_cp: number;
   end_cp: number;
   quote: string;
@@ -46,7 +47,7 @@ function offsetIn(block: HTMLElement, container: Node, offset: number): number {
  * 지금 DOM 선택 → 글 위치. 접힌 선택 · 결과 글 밖은 none, 블록(문단 · 표 칸)을 넘나들면 cross.
  * 서로게이트 쌍 한가운데에서 시작/끝난 선택은 쌍 바깥으로 넓힌다(서버가 외톨이 서로게이트를 거절한다).
  */
-function readSelection(article: HTMLElement, body: string): Read {
+function readSelection(article: HTMLElement, body: string, versionId: string): Read {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return { kind: "none" };
   const range = sel.getRangeAt(0);
@@ -83,14 +84,17 @@ function readSelection(article: HTMLElement, body: string): Read {
     const total = cpLength(body);
     return {
       kind: "ok",
-      picked: { start_cp, end_cp, quote, prefix: sliceCp(body, Math.max(0, start_cp - CONTEXT_CP), start_cp), suffix: sliceCp(body, end_cp, Math.min(total, end_cp + CONTEXT_CP)) },
+      picked: { version_id: versionId, start_cp, end_cp, quote, prefix: sliceCp(body, Math.max(0, start_cp - CONTEXT_CP), start_cp), suffix: sliceCp(body, end_cp, Math.min(total, end_cp + CONTEXT_CP)) },
     };
   } catch {
     return { kind: "none" };
   }
 }
 
-const samePicked = (x: Picked | null, y: Picked | null) => (x === null || y === null ? x === y : x.start_cp === y.start_cp && x.end_cp === y.end_cp);
+const samePicked = (x: Picked | null, y: Picked | null) => (x === null || y === null ? x === y : x.version_id === y.version_id && x.start_cp === y.start_cp && x.end_cp === y.end_cp);
+
+/** 고른 구간이 지금 글과 다른 버전에서 나온 것일 때(본문이 그사이 바뀜) */
+const STALE_PICK = "본문이 바뀌었어요 — 고른 구간은 쓰지 않았어요. 새 본문에서 구간을 다시 골라 주세요.";
 
 const MARK_CLASS = {
   open: "rounded-xs bg-primary-soft text-ink underline decoration-primary decoration-2 underline-offset-[3px]",
@@ -248,7 +252,8 @@ function TextCommandDialog({
 function annotationInput(ctx: AnnotationCtx, picked: Picked, text: string): AnnotationInput {
   return {
     target_object_id: ctx.objectId,
-    target_version_id: ctx.versionId,
+    // 구간을 고른 그 버전(지금 글 버전과 다르면 보내기 전에 막는다)
+    target_version_id: picked.version_id,
     anchor: { exact_quote: picked.quote, prefix: picked.prefix, suffix: picked.suffix, start_cp: picked.start_cp, end_cp: picked.end_cp },
     body_md: text,
   };
@@ -258,7 +263,7 @@ function annotationInput(ctx: AnnotationCtx, picked: Picked, text: string): Anno
 function keptBody(keep: unknown, ctx: AnnotationCtx, picked: Picked): string {
   if (!keep || typeof keep !== "object") return "";
   const k = keep as Partial<AnnotationInput>;
-  const same = k.target_object_id === ctx.objectId && k.target_version_id === ctx.versionId && k.anchor?.start_cp === picked.start_cp && k.anchor?.end_cp === picked.end_cp;
+  const same = k.target_object_id === ctx.objectId && k.target_version_id === picked.version_id && k.anchor?.start_cp === picked.start_cp && k.anchor?.end_cp === picked.end_cp;
   return same && typeof k.body_md === "string" ? k.body_md : "";
 }
 
@@ -269,6 +274,7 @@ function AnnotateDialog({ ctx, picked, doneRef, onDone, onCancel }: { ctx: Annot
   // 시간 초과 뒤 닫았다 다시 연 같은 구간이면, 확인 중인 첨언 글을 되살린다
   const [initial] = React.useState(() => keptBody(pendingKeep(scope), ctx, picked));
   const submit = async (text: string) => {
+    if (picked.version_id !== ctx.versionId) return;
     const input = annotationInput(ctx, picked, text);
     const r = await write.run(JSON.stringify(input), (key) => client.createAnnotation(ctx.slug, ctx.edition, input, key), "첨언을 남겼어요.", input);
     if (r.ok) onDone();
@@ -298,13 +304,14 @@ function TaskDialog({ ctx, picked, doneRef, onDone, onCancel }: { ctx: Annotatio
   const progressScope = annotationScope(ctx, "task-thread");
   const create = useAnnotationWrite(ctx, createScope);
   const propose = useAnnotationWrite(ctx, annotationScope(ctx, "task-propose"));
-  const anchor = `${ctx.versionId}|${picked.start_cp}|${picked.end_cp}`;
+  const anchor = `${picked.version_id}|${picked.start_cp}|${picked.end_cp}`;
   // 스레드는 만들어졌는데 제안이 막혔을 때, 다시 눌러도 · 닫았다 다시 열어도 스레드를 또 만들지 않는다(진행은 대화 상자 밖에 둔다)
   const [initial] = React.useState(() => {
     const p = loadTaskProgress(progressScope);
     return p && p.anchor === anchor ? p.text : keptBody(pendingKeep(createScope), ctx, picked);
   });
   const submit = async (text: string) => {
+    if (picked.version_id !== ctx.versionId) return;
     const progress = loadTaskProgress(progressScope);
     let origin = progress && progress.anchor === anchor ? progress.thread_id : null;
     if (origin === null) {
@@ -420,7 +427,16 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
   const [reanchoringRaw, setReanchoring] = React.useState<string | null>(null);
   const [focusTick, setFocusTick] = React.useState(0);
   // 쓸 수 없게 되면(휴대폰으로 바뀜 · 지난 라운드로 이동) 도구를 거둔다 — 상태를 지우지 않고 보이는 값만 막는다
-  const picked = enabled ? pickedRaw : null;
+  // 다른 글 버전에서 고른 구간은 지금 글에 쓰지 않는다(본문이 바뀐 그 커밋부터 도구 · 대화 상자가 그 좌표를 못 쓴다)
+  const picked = enabled && pickedRaw?.version_id === result.version_id ? pickedRaw : null;
+  // 본문이 새 버전으로 바뀐 렌더에서 옛 버전에서 고른 구간 · 열린 대화 상자를 거두고 다시 고르라고 알린다(다시 붙이기는 이어서 할 수 있다)
+  const [staleTick, setStaleTick] = React.useState(0);
+  if (pickedRaw && pickedRaw.version_id !== result.version_id) {
+    setPicked(null);
+    setDialog(null);
+    setNote({ kind: "hint", text: STALE_PICK });
+    setStaleTick((t) => t + 1);
+  }
   const reanchoring = enabled ? reanchoringRaw : null;
 
   const articleRef = React.useRef<HTMLElement>(null);
@@ -495,7 +511,7 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
     const update = () => {
       // 대화 상자가 열린 동안은 고른 구간(사진)을 그대로 둔다 — 글 입력칸으로 초점이 가며 선택이 풀려도 도구를 잃지 않게
       if (live.current.dialog) return;
-      const r = readSelection(article, result.body_md);
+      const r = readSelection(article, result.body_md, result.version_id);
       if (r.kind === "ok") {
         savedRange.current = window.getSelection()?.getRangeAt(0).cloneRange() ?? null;
         setPicked((prev) => (samePicked(prev, r.picked) ? prev : r.picked));
@@ -527,7 +543,7 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "KeyM" && e.altKey && !e.ctrlKey && !e.metaKey) {
         if (live.current.dialog) return;
-        const r = readSelection(article, result.body_md);
+        const r = readSelection(article, result.body_md, result.version_id);
         if (r.kind !== "ok") return;
         e.preventDefault();
         savedRange.current = window.getSelection()?.getRangeAt(0).cloneRange() ?? null;
@@ -561,7 +577,15 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
       document.removeEventListener("selectionchange", onChange);
       document.removeEventListener("keydown", onKey);
     };
-  }, [enabled, result.body_md]);
+  }, [enabled, result.body_md, result.version_id]);
+
+  // 거둔 뒤: 옛 선택(DOM)을 지우고 초점을 안내가 뜬 상태 줄로
+  React.useEffect(() => {
+    if (staleTick === 0) return;
+    savedRange.current = null;
+    window.getSelection()?.removeAllRanges();
+    statusRef.current?.focus();
+  }, [staleTick]);
 
   // 대화 상자가 닫히는 그 커밋에서 초점을 정한다(닫힌 뒤 한 박자 늦게 body 로 떨어져 있지 않게) — 성공이면 상태 줄(영수증), 취소 · Esc 면 연 단추
   React.useLayoutEffect(() => {
@@ -594,11 +618,29 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setDialog(which);
   };
+  const dropStale = () => {
+    savedRange.current = null;
+    setPicked(null);
+    window.getSelection()?.removeAllRanges();
+    setNote({ kind: "hint", text: STALE_PICK });
+    statusRef.current?.focus();
+  };
   const attach = async () => {
     const thread = reanchoring;
     if (!thread || !picked) return;
-    const input = { version_id: result.version_id, start_cp: picked.start_cp, end_cp: picked.end_cp };
-    const r = await reanchorWrite.run(`reanchor|${thread}|${picked.start_cp}|${picked.end_cp}`, (key) => client.reanchorAnnotation(ws.slug, ws.edition, thread, input, key), "새 구간에 다시 붙였어요.");
+    // 고른 글 버전 = 지금 글 버전 = 서버가 이 스레드를 판정한 버전일 때만 보낸다(아니면 좌표가 다른 글자를 가리킨다)
+    const evaluated = threads.find((t) => t.thread_id === thread)?.anchor.current.evaluated_version_id;
+    if (picked.version_id !== result.version_id || (evaluated !== undefined && evaluated !== picked.version_id)) {
+      dropStale();
+      return;
+    }
+    // 서버도 basis_version_id 로 다시 확인한다(그사이 본문이 바뀌었으면 409 basis_changed, 아무것도 안 쓴다)
+    const input = { version_id: picked.version_id, basis_version_id: picked.version_id, start_cp: picked.start_cp, end_cp: picked.end_cp };
+    const r = await reanchorWrite.run(`reanchor|${thread}|${picked.version_id}|${picked.start_cp}|${picked.end_cp}`, (key) => client.reanchorAnnotation(ws.slug, ws.edition, thread, input, key), "새 구간에 다시 붙였어요.");
+    if (!r.ok && r.error instanceof PesApiError && r.error.body.error.code === "basis_changed") {
+      dropStale();
+      return;
+    }
     if (r.ok) {
       setReanchoring(null);
       setPicked(null);

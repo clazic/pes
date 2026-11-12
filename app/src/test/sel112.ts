@@ -30,7 +30,7 @@ import { ready } from "@/test/ui";
  *     createAnnotation(slug, edition, input: AnnotationInput, key)  → { thread_id, message_id, anchor_id, anchor_status: "exact" | "moved" }
  *     replyAnnotation(slug, edition, threadId, { body_md }, key)    → { thread_id, message_id }
  *     resolveAnnotation(slug, edition, threadId, { resolution, reason, target_stage?, base_version_id? }, key)  → { thread_id, state: "resolved", followup_id: string | null, applied: false }   사람만
- *     reanchorAnnotation(slug, edition, threadId, { version_id?, start_cp, end_cp }, key) → { thread_id, anchor_status }   다시 붙이기(사람만)
+ *     reanchorAnnotation(slug, edition, threadId, { version_id?, basis_version_id?, start_cp, end_cp }, key) → { thread_id, anchor_status }   다시 붙이기(사람만) · 고른 버전 ≠ 지금 버전이면 409 basis_changed
  *     proposeFollowup(slug, edition, input: { origin_thread_id, kind, description, target_stage? }, key) → { followup_id, state: "proposed" }   ("할 일로" 는 next_round_task 제안만 — 바로 적용하지 않는다)
  *     applyFollowup(slug, edition, followupId, { base_version_id, expected_rev }, key) → { followup_id, state, result_version_id: string | null, applied_tx_id: string | null }   사람만
  *       base_version_id = 후속이 제안된 기반 버전(FollowupDetail.base_version_id) · expected_rev = FollowupDetail.version_no (10진 문자열, 서버 그대로)
@@ -320,8 +320,11 @@ export function createU4Client(init: U4Init = {}) {
         t.resolution = { resolution: input.resolution, reason: input.reason, followup_id: followupId };
         return { thread_id: threadId, state: "resolved" as const, followup_id: followupId, applied: false as const };
       }),
-    reanchorAnnotation: (slug: string, _e: number, threadId: string, input: { version_id?: string; start_cp: number; end_cp: number }, key: string | undefined) =>
+    reanchorAnnotation: (slug: string, _e: number, threadId: string, input: { version_id?: string; basis_version_id?: string; start_cp: number; end_cp: number }, key: string | undefined) =>
       command("reanchorAnnotation", slug, threadId, { ...input }, key, () => {
+        // 실제 서버 규칙(SEL-112 최종 2): 구간을 고른 글 버전이 지금 글 버전이 아니면(또는 version_id 와 다르면) 409 basis_changed, 아무것도 안 바꾼다
+        if (input.basis_version_id !== undefined && (input.basis_version_id !== state.version || (input.version_id !== undefined && input.version_id !== input.basis_version_id)))
+          throw apiFail("basis_changed", "후속 조치의 기반 버전이 바뀌었습니다.", { expected: input.basis_version_id, current: state.version });
         const t = findThread(threadId);
         const c = { start_cp: input.start_cp, end_cp: input.end_cp };
         const same = sliceBy(state.body, c) === t.anchor.exact_quote;

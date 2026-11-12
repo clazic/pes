@@ -1,9 +1,11 @@
-// SEL-112 최종 검토 1 필수 2 · 3 · 4 — 실제 화면(Vitest, jsdom). 계약: src/test/sel112.ts 머리말 · 서버 U4a(scripts/pes_core/commands/annotations.ts).
+// SEL-112 최종 검토 1 필수 2 · 3 · 4 · 최종 검토 2 필수 1 — 실제 화면(Vitest, jsdom). 계약: src/test/sel112.ts 머리말 · 서버 U4a(scripts/pes_core/commands/annotations.ts).
 //  2: 다른 사람 · 에이전트가 남긴 답글이 사건(changes)으로 오면 열린 화면의 첨언 목록이 다시 읽힌다(실제 HTTP 사건 매핑을 지난다).
 //  3: 위치 판정(anchor.current)이 지금 보는 글과 다른 버전 기준이면 글 위 표시 · 후보 고르기 · 저장을 막고 다시 읽기를 안내한다(인용 · 메시지는 그대로).
 //  4: 시간 초과 뒤 대화 상자를 닫았다 다시 열어도 같은 요청은 같은 멱등 키 — 서버가 커밋하고 영수증만 잃었으면 재생된다(첨언 · 할 일 두 단계 모두).
+//  F2-1: 옛 본문에서 고른 구간 좌표를 새 본문 버전에 쓰지 않는다 — 본문이 바뀌면 고른 구간 · 열린 대화 상자를 거두고 다시 고르라고 안내,
+//        다시 붙이기는 고른 글 버전(basis_version_id)을 함께 보내고 서버가 409 basis_changed 로 거절하면 같은 안내.
 // 합성 자료뿐(실제 자료·키·경로 없음).
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORKSPACE } from "@/api/fixture";
@@ -18,7 +20,9 @@ import {
   R2,
   VER1,
   VER2,
+  VER3,
   alertText,
+  article,
   blockWith,
   blocks,
   boot,
@@ -28,6 +32,7 @@ import {
   selectText,
   statusTexts,
   thread,
+  threadEl,
   threadOf,
   toolButton,
   toolbar,
@@ -211,5 +216,77 @@ describe("필수 4 — 시간 초과 뒤 닫고 다시 열어도 같은 요청�
     await waitFor(() => expect(u4.callsOf("createAnnotation")).toHaveLength(2));
     const [a, b] = u4.callsOf("createAnnotation");
     expect(b!.key).not.toBe(a!.key);
+  });
+});
+
+/* ───────────── 최종 검토 2 필수 1 ───────────── */
+
+describe("최종 2 필수 1 — 옛 본문에서 고른 좌표를 새 본문 버전에 쓰지 않는다", () => {
+  const INSERTED = "새로 삽입한 문장입니다. ";
+  const BODY_NEW = `${INSERTED}${BODY}`;
+  /** 위치 판정이 다른 버전 기준인 스레드 — 그 '다시 읽기' 단추로 화면이 라운드(본문)를 다시 읽게 한다 */
+  const reader = () => {
+    const t = thread("th-reader", { quote: "중간 설명이다." });
+    t.anchor.current.evaluated_version_id = VER2;
+    return t;
+  };
+  /** 서버 글이 v(VER3)로 바뀌고 화면이 다시 읽는다 — 클릭 사건만(선택을 건드리는 마우스 사건 없이) */
+  async function bumpAndReread(u4: { bumpVersion: (to?: string, body?: string) => void; threads: { thread_id: string; anchor: { current: { evaluated_version_id: string | null } } }[] }) {
+    u4.bumpVersion(VER3, BODY_NEW);
+    for (const t of u4.threads) if (t.thread_id !== "th-reader") t.anchor.current.evaluated_version_id = VER3;
+    // 대화 상자가 열려 있으면 바깥은 aria-hidden 이다 — 단추는 그대로 있다
+    fireEvent.click(within(threadEl("th-reader")!).getByRole("button", { name: "다시 읽기", hidden: true }));
+    await waitFor(() => expect(article().textContent).toContain(INSERTED));
+  }
+
+  it("다시 붙이기: v1 에서 고른 뒤 본문이 v3 로 바뀌면 도구를 거두고 다시 고르라고 안내 — reanchor 호출 0", async () => {
+    const { u4, user } = await boot({ threads: [thread("th-lost", { status: "lost", quote: "지워진 문장입니다." }), reader()] });
+    const el = await threadOf("th-lost");
+    await blocks();
+    await user.click(within(el).getByRole("button", { name: "다시 붙이기" }));
+    selectText(blockWith(QUOTE_A), QUOTE_A);
+    await waitFor(() => expect(toolbar()).not.toBeNull());
+    await bumpAndReread(u4);
+    const stale = toolbar();
+    if (stale) await user.click(within(stale).getByRole("button", { name: "이 구간에 붙이기" }));
+    expect(u4.callsOf("reanchorAnnotation")).toHaveLength(0);
+    expect(toolbar()).toBeNull();
+    await waitFor(() => expect(statusTexts()).toMatch(/본문이 바뀌었어요/));
+    // 다시 붙이기는 이어서 — 새 본문에서 고르면 새 버전 좌표로 보낸다
+    selectText(blockWith(QUOTE_A), QUOTE_A);
+    await waitFor(() => expect(toolbar()).not.toBeNull());
+    await user.click(toolButton("이 구간에 붙이기"));
+    await waitFor(() => expect(u4.callsOf("reanchorAnnotation")).toHaveLength(1));
+    expect(u4.callsOf("reanchorAnnotation")[0]!.input).toMatchObject({ ...cpAt(BODY_NEW, QUOTE_A), version_id: VER3, basis_version_id: VER3 });
+  });
+
+  it("첨언 대화 상자를 v1 선택으로 연 채 본문이 v3 로 바뀌면 대화 상자를 닫고 안내 — createAnnotation 호출 0", async () => {
+    const { u4, user } = await boot({ threads: [reader()] });
+    await blocks();
+    const dialog = await openTool(user, "첨언", "첨언 달기");
+    await user.type(within(dialog).getByRole("textbox", { name: "첨언" }), "근거를 보여 주세요.");
+    await bumpAndReread(u4);
+    const still = screen.queryByRole("dialog", { name: "첨언 달기" });
+    if (still) await user.click(within(still).getByRole("button", { name: "첨언 달기" }));
+    expect(u4.callsOf("createAnnotation")).toHaveLength(0);
+    expect(screen.queryByRole("dialog", { name: "첨언 달기" })).toBeNull();
+    await waitFor(() => expect(statusTexts()).toMatch(/본문이 바뀌었어요/));
+  });
+
+  it("화면이 아직 다시 읽기 전(서버만 v3)에 붙이면 고른 버전(basis_version_id v1)을 보내고 409 basis_changed 를 '본문이 바뀌었어요 — 다시 고르세요'로 안내", async () => {
+    const { u4, user } = await boot({ threads: [thread("th-lost", { status: "lost", quote: "지워진 문장입니다." })] });
+    const el = await threadOf("th-lost");
+    await blocks();
+    await user.click(within(el).getByRole("button", { name: "다시 붙이기" }));
+    selectText(blockWith(QUOTE_A), QUOTE_A);
+    await waitFor(() => expect(toolbar()).not.toBeNull());
+    u4.bumpVersion(VER3, BODY_NEW);
+    await user.click(toolButton("이 구간에 붙이기"));
+    await waitFor(() => expect(u4.callsOf("reanchorAnnotation")).toHaveLength(1));
+    expect(u4.callsOf("reanchorAnnotation")[0]!.input).toMatchObject({ ...cpAt(BODY, QUOTE_A), version_id: VER1, basis_version_id: VER1 });
+    await waitFor(() => expect(statusTexts()).toMatch(/본문이 바뀌었어요.*다시 골라/));
+    expect(statusTexts()).not.toMatch(/접수 \d{4}/);
+    expect(toolbar()).toBeNull();
+    expect(u4.threads.find((t) => t.thread_id === "th-lost")!.anchor.current.status).toBe("lost");
   });
 });
