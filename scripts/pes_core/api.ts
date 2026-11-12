@@ -79,6 +79,7 @@ import { build_prompt, question_statuses, type PromptTarget, type RedactLiterals
 import { publish_set, revise_question, submit_answers } from "./questions.ts";
 import {
   REFERENCE_SCOPE_ITEMS,
+  list_reference_candidates,
   list_references,
   read_reference,
   reference_caller,
@@ -643,6 +644,12 @@ export class ApiApp {
       route("POST", `${P}/references`, "references.create", {
         who: "human",
         act: async (r, project, auth) => this.#reference_attach(r, project, auth),
+      }),
+      // SEL-120 REF1c: the other projects the person may attach, with the snapshots to choose from. A read for the attach
+      // screen, so the owner session only (a token is 403 human_required; no other project's name or snapshot id goes to an AI).
+      route("GET", `${P}/reference-candidates`, "references.candidates", {
+        who: "human",
+        act: async (_r, project, auth) => this.#reference_candidates(project, auth),
       }),
       route("GET", `${P}/references/{ref}`, "references.get", {
         who: "any", scope: "context:read", go: true,
@@ -1513,6 +1520,11 @@ export class ApiApp {
   async #references_list(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const references = read_tx(this.#db, () => list_references(this.#db, project.id, this.#reference_caller(auth)));
     return { status: 200, data: { references } };
+  }
+
+  async #reference_candidates(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const candidates = read_tx(this.#db, () => list_reference_candidates(this.#db, project.id, this.#reference_caller(auth)));
+    return { status: 200, data: { candidates } };
   }
 
   async #reference_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {

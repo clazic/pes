@@ -600,7 +600,8 @@ export interface ReferenceContent {
 export interface ReferenceSnapshot {
   id: string;
   key: string;
-  label: string;
+  /** 서버에는 스냅숏 이름이 없어 null 일 수 있다(지어내지 않는다) — 화면은 key 로 보여 준다 */
+  label: string | null;
   approved: boolean;
   recommended: boolean;
 }
@@ -629,7 +630,7 @@ export interface ReferenceRefreshInput {
 
 /**
  * 참고 프로젝트 읽기 · 쓰기 — 쓰기는 모두 멱등 키 필수(없으면 요청 없이 invalid_payload) · 같은 키·같은 요청은 처음 영수증을 replayed 로 · 거절은 PesApiError.
- * 후보 읽기(getReferenceCandidates)는 서버에 읽는 길이 아직 없어 HTTP 클라이언트가 NotConnectedError 로 답한다(후속 SEL-120). scope=null 은 프로젝트가 아직 없는 생성 화면.
+ * 후보 읽기(getReferenceCandidates)는 작업 중(scope 있음)이면 GET P/reference-candidates(소유자 세션만, SEL-120). scope=null(프로젝트가 아직 없는 생성 화면)은 서버에 길이 없어 HTTP 클라이언트가 NotConnectedError 로 답한다.
  */
 export interface ReferencesMethods {
   /** 모르는 slug · 없는 판 = [] */
