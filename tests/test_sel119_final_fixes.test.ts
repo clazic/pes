@@ -21,7 +21,7 @@ import { CommandService } from "../scripts/pes_core/commands.ts";
 import { add_citation } from "../scripts/pes_core/content.ts";
 import { connect, type Db } from "../scripts/pes_core/db.ts";
 import { get_blob } from "../scripts/pes_core/files.ts";
-import { reference_content, reference_row } from "../scripts/pes_core/references.ts";
+import { reference_caller, reference_content, reference_row, reference_view } from "../scripts/pes_core/references.ts";
 import { assert_ok, call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
 import { blob_row, ctx_for, disk_path, list_files, put_ready, rejects_any, rejects_api, with_env, type Env } from "./helpers/blob_env.ts";
 import { start } from "./helpers/editions_env.ts";
@@ -301,8 +301,10 @@ test("F1-7 a print snapshot is never the 'newest snapshot' a reference pins, and
     assert.deepEqual(content.items_status, { final_report: "ok", sources: "ok" });
     assert.equal(content.items.length, 2);
     // a print alone is not a new version of the source
-    const view = await ok(env, env.ctx("f7-ref"), "reference.refresh", { reference_id: second.reference_id });
-    assert.equal(view.source_snapshot_id, src.snapshot_id);
+    const view = reference_view(env.db, row, reference_caller(env.db, env.p.actor_id, false)) as any;
+    assert.equal(view.new_version_available, false, "printing the source is not a new version");
+    assert.equal(view.latest_snapshot_id, src.snapshot_id);
+    await rejects_api(ok(env, env.ctx("f7-ref"), "reference.refresh", { reference_id: second.reference_id }), "conflict");
 
     await ok(env, env.ctx("f7-det-2"), "reference.detach", { reference_id: second.reference_id });
     await rejects_api(attach("f7-att-3", { source_snapshot_id: printed.snapshot_id }), "not_found");
