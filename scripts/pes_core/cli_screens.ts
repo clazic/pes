@@ -271,6 +271,8 @@ export async function db_dashboard_html(d: string, slug: string): Promise<string
     qlabels: all_qlabels(),
     runs: sc.runs ?? [],
     dispatches: sc.dispatches ?? [],
+    // only when the server sent it: a screen that does not know says "알 수 없음", it never fills in a policy
+    ...(sc.ai_connection !== undefined && sc.ai_connection !== null ? { ai_connection: sc.ai_connection } : {}),
   };
   return with_overlay(fill("dashboard.html", `${String(p.topic ?? "프로젝트")} · PES`, page), "overlay-dashboard.html");
 }
