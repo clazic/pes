@@ -83,7 +83,6 @@ export function extract_text_isolated(original_name: string | null, bytes: Uint8
   const input = new Uint8Array(bytes).buffer; // a private copy that is handed over (transferred), the caller's bytes stay usable
   let supervisor: Worker | null = null;
   let counted = false; // this run raised unfinished_threads and has not lowered it yet
-  let exited = false; // the supervisor thread has really exited (seen on the event loop, i.e. after this call returned)
   try {
     supervisor = new Worker(new URL(SUPERVISOR_URL), {
       workerData: {
@@ -104,7 +103,6 @@ export function extract_text_isolated(original_name: string | null, bytes: Uint8
     // that would end the whole server. The failure is already answered here by the time limit, so the event is only heard.
     supervisor.on("error", () => undefined);
     supervisor.once("exit", () => {
-      exited = true;
       if (counted) {
         counted = false;
         unfinished_threads -= 1;
@@ -123,7 +121,7 @@ export function extract_text_isolated(original_name: string | null, bytes: Uint8
     if (code === FLAG_TIMEOUT || code === FLAG_PENDING) {
       // Did the thread really end? A thread cut off at once reports it within milliseconds; one that is inside a native step does not.
       Atomics.wait(flag, SLOT_ENDED, 0, options.end_grace_ms ?? END_GRACE_MS);
-      if (Atomics.load(flag, SLOT_ENDED) === 0 && !exited) {
+      if (Atomics.load(flag, SLOT_ENDED) === 0) {
         counted = true;
         unfinished_threads += 1;
       }
