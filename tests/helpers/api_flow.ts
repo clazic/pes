@@ -125,8 +125,19 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/decisions",
   "GET /api/v1/projects/{id}/reflections",
   "POST /api/v1/projects/{id}/reflections",
+  // SEL-113 REF1a: reference material from earlier projects
+  "GET /api/v1/projects/{id}/references",
+  "POST /api/v1/projects/{id}/references",
+  "GET /api/v1/projects/{id}/references/{ref}",
+  "POST /api/v1/projects/{id}/references/{ref}/refresh",
+  "POST /api/v1/projects/{id}/references/{ref}/detach",
   "GET /api/v1/projects/{id}/context",
   "GET /api/v1/projects/{id}/files/{b}/content",
+  // SEL-115 MAT1a: my materials, the AI-reference switch, file preview
+  "GET /api/v1/projects/{id}/files/{b}/preview",
+  "GET /api/v1/projects/{id}/materials",
+  "POST /api/v1/projects/{id}/materials",
+  "POST /api/v1/projects/{id}/file-policies/{fp}/ai-access",
   "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
   "GET /api/v1/projects/{id}/operations/{op}",
   "GET /api/v1/projects/{id}/requests/{key}",
@@ -171,6 +182,9 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/uploads",
   "POST /api/v1/projects/{id}/uploads/{b}/complete",
   "PUT /api/v1/projects/{id}/uploads/{b}",
+  // SEL-118 U5a: prompt assembly (a read, POST because unsubmitted drafts only exist in the client) + human->AI question statuses
+  "POST /api/v1/projects/{id}/prompt-builds",
+  "GET /api/v1/projects/{id}/question-statuses",
 ].sort();
 
 /** Routes the closed 2단계 list does NOT have and capabilities must say are unsupported (no fake success). */

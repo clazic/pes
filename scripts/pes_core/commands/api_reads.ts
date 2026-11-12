@@ -4,6 +4,7 @@
 // business rule lives here. Callers wrap multi-read use in read_tx.
 
 import type { Db } from "../db.ts";
+import { event_denied } from "./file_access.ts";
 
 export interface DbMeta {
   database_instance_id: string;
@@ -41,6 +42,7 @@ interface EventRow {
   before_version_id: string | null;
   after_version_id: string | null;
   created_at: bigint;
+  payload: string;
 }
 
 export function max_event_seq(db: Db, project_id: string): bigint {
@@ -55,6 +57,8 @@ export function max_event_seq(db: Db, project_id: string): bigint {
  * Events after `after`, whole transactions only. Events the caller may not see
  * are scanned (the cursor moves past them) but not returned. A page ends after
  * the transaction that reaches `limit` visible events.
+ * `hide_tokens` is true for every non-human caller: it also hides token events and every event about a file closed to AI
+ * (commands/file_access.ts event_denied).
  */
 export function changes_page(
   db: Db,
@@ -78,7 +82,7 @@ export function changes_page(
       break;
     }
     const group = db.all<EventRow>(
-      `SELECT event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at
+      `SELECT event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at, payload
          FROM events WHERE project_id = ? AND tx_id = ? AND event_seq > ? ORDER BY event_seq`,
       project_id,
       head.tx_id,
@@ -87,6 +91,7 @@ export function changes_page(
     for (const row of group) {
       cursor = row.event_seq;
       if (hide_tokens && row.type.startsWith("token.")) continue;
+      if (hide_tokens && event_denied(db, project_id, row)) continue;
       events.push({
         event_seq: row.event_seq.toString(),
         type: row.type,
@@ -227,7 +232,10 @@ export function inputs_page(
   return { items, has_more: rows.length > limit };
 }
 
-/** True when the answer version answers a question the actor asked. */
+/**
+ * True when the version is an input of this actor: an answer to a question the actor asked, or (SEL-118 U5a) a version
+ * of a human -> AI question that names the actor as the AI it is for (the receipt that says "I have the question").
+ */
 export function input_visible(
   db: Db,
   project_id: string,
@@ -242,7 +250,17 @@ export function input_visible(
     input_version_id,
     actor_id,
   );
-  return row !== undefined;
+  if (row !== undefined) return true;
+  const ask = db.get<{ ok: bigint }>(
+    `SELECT 1 AS ok FROM question_versions qv
+       JOIN questions q ON q.project_id = qv.project_id AND q.object_id = qv.object_id
+      WHERE qv.project_id = ? AND qv.version_id = ?
+        AND q.direction = 'human_to_agent' AND q.intended_actor_id = ?`,
+    project_id,
+    input_version_id,
+    actor_id,
+  );
+  return ask !== undefined;
 }
 
 /** Inputs of the run's actor that have no applied/ignored receipt yet. */
