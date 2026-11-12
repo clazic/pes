@@ -91,6 +91,28 @@ export const STATUS = {
     revoked: d("철회", "hsquare", "off", "revoked — 기록은 남음"),
     no_human: d("사람 판단 없음", "dotring", "unk", "adopted 인데 결정자가 없거나 AI — 채택으로 보이지 않음"),
   },
+  // 결과 글 첨언(U4b · SEL-112): 앵커 4상태 — 서버가 글의 지금 버전 기준으로 판정(anchor.current.status). ambiguous · lost 는 추측으로 칠하지 않는다
+  anchor: {
+    exact: d("그대로", "circle", "ok", "anchor.current.status = exact — 인용문이 같은 자리에 있음"),
+    moved: d("위치 바뀜", "tri", "warn", "moved — 글이 고쳐져 인용문이 한 곳으로 정해져 옮겨짐"),
+    ambiguous: d("후보 여럿", "diamond", "you", "ambiguous — 후보만 있고 서버가 하나를 고르지 않음, 사람이 고른다"),
+    lost: d("원문 없음", "square", "bad", "lost — 인용문과 스레드는 남고 사람이 다시 붙인다"),
+  },
+  // 첨언 스레드 · 후속 상태. 해결됨 ≠ 반영: 반영은 후속이 적용될 때만 '적용'이라 쓴다
+  thread: {
+    open: d("열림", "ring", "run", "threads.state = open"),
+    resolved: d("해결됨", "hsquare", "off", "resolved — 닫는 기록일 뿐 글은 바뀌지 않음"),
+    archived: d("보관됨", "dash", "off", "archived"),
+  },
+  followup: {
+    proposed: d("제안", "dotring", "unk", "followups.state = proposed"),
+    accepted: d("수락", "hsquare", "run", "accepted"),
+    running: d("진행 중", "ring", "run", "running"),
+    applied: d("적용", "circle", "ok", "applied — 적용 tx 가 있을 때만"),
+    deferred: d("보류", "pause", "off", "deferred"),
+    rejected: d("거절", "hsquare", "off", "rejected"),
+    cancelled: d("취소", "hsquare", "off", "cancelled"),
+  },
   // 반영 내역: 적용 · 부분은 의미 증거(적용 tx + 결과 버전 또는 적용된 후속)가 있을 때만. 모자라면 증거 없음
   reflection: {
     applied: d("적용", "circle", "ok", "적용 tx + 결과 버전·적용된 후속의 증거"),
