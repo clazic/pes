@@ -196,12 +196,15 @@ test("2 동시에 두 번 보내도 세션을 받는 쪽은 하나뿐이다", { 
 });
 
 test("2 만료: 수명(PES_APP_CODE_TTL_MS)이 지난 코드는 401/410", { timeout: 120_000 }, async () => {
-  const f = await start("pes-sel85-ttl-", { PES_APP_CODE_TTL_MS: "1500" });
+  // 수명은 CLI 두 번(각 1초 남짓)보다 넉넉해야 '수명 안' 단언이 박자에 흔들리지 않는다 — 기다림은 stale 발급이 끝난 시각부터 잰다
+  const TTL = 8000;
+  const f = await start("pes-sel85-ttl-", { PES_APP_CODE_TTL_MS: String(TTL) });
   try {
     const fresh = f.open().code;
     const stale = f.open().code;
+    const after_stale = Date.now(); // stale 은 이 시각 전에 발급됐다
     assert.equal((await f.exchange(fresh)).status, 200, "수명 안의 코드는 통한다");
-    await new Promise((r) => setTimeout(r, 2200));
+    await new Promise((r) => setTimeout(r, Math.max(0, after_stale + TTL + 700 - Date.now())));
     const res = await f.exchange(stale);
     assert.ok([401, 410].includes(res.status), `expired code refused, got ${res.status}`);
     assert.deepEqual(leaks(res.text()), []);
