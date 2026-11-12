@@ -284,6 +284,7 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
         return;
       }
       const [text, focusId] = message(r.status, r.json);
+      // 409 가 이름 충돌(conflict)이 아니면 키를 버린다. 같은 키는 같은 본문에만 쓰이므로(idempotency_key_reuse 는 다른 본문일 때만) 프로젝트가 이미 만들어졌을 때 두 번 만들 수 없다 — 주석만, 동작 변경 없음
       if (r.status === 409 && !(isRec(r.json) && isRec(r.json.error) && r.json.error.code === 'conflict')) attempt = null;
       fail(text, focusId);
     } catch (e) {
