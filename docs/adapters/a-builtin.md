@@ -124,7 +124,8 @@ allowlist(`A_TOOL_ALLOWLIST`)는 8개이고(목록은 얼려 있다), 그중 **�
 | `context.get` | 주제·단계·라운드·현재 객체·질문과 답을 읽는다 |
 | `result.submit` | DB 결과 형식(`op: append_version`, 이미 있는 `object_id`) 전용 — `result.submit` 명령으로 기존 객체에 새 버전을 덧붙인다 |
 | `question.ask` | `question.publish_set` 명령 뒤 `run.wait` — 사람 답을 기다린다 |
-| `assumption.propose` · `decision.propose` · `reflection.write` · `followup.propose` | 이 PR에는 대응하는 전용 PES 명령이 없어 `project.add_note` 명령으로 **"AI 제안" 머리말이 붙은 메모**로 남긴다(`decision.propose`는 사람이 채택해야 한다고 적는다). 채택·승인은 하지 않는다 |
+| `assumption.propose` · `decision.propose` · `reflection.write` | 실제 PES 명령 `assumption.propose`·`decision.propose`·`reflection.create`를 부른다(SEL-93). 결과는 가정·결정 **제안**(`proposed`)과 라운드 반영이고, 채택·확인은 하지 않는다. `reflection.write`는 이 run의 라운드로 고정이다(다른 `target_round_id`는 오류 결과) |
+| `followup.propose` | 짝이 되는 PES 명령이 아직 없어 `project.add_note` 명령으로 **"AI 제안" 머리말이 붙은 메모**로 남긴다. 승인은 하지 않는다 |
 | `thread.reply` | 대응 명령이 아직 없다. allowlist에는 이름을 두되 **모델의 도구 목록에는 싣지 않는다**(항상 오류만 돌려줘 턴·토큰만 낭비하므로). 명령이 생기면 도구 목록에 노출한다. 모델이 이름을 불러도 오류 결과만 돌려준다 |
 
 ## 한계·미확인
@@ -135,7 +136,7 @@ allowlist(`A_TOOL_ALLOWLIST`)는 8개이고(목록은 얼려 있다), 그중 **�
 - 모델 목록 응답도 같은 키 검사를 거친다. 키(어떤 모양이든)가 있으면 목록 전체를 버리고 연결 시험은 `key_in_reply`로 실패한다(등록·변경은 `conflict`, 아무것도 저장하지 않는다).
 - OS 키체인 백엔드 3종은 구현만 했고 실제 호출은 시험하지 않았다.
 - 실제 외부·유료 모델 호출은 시험하지 않았다. 시험은 이 컴퓨터의 가짜 HTTP 서버만 쓴다.
-- `thread.reply`는 아직 연결되지 않았다(allowlist에만 있고 모델에게 노출하지 않는다 — 명령이 생기면 노출). 나머지 제안 도구 4개는 전용 명령이 생길 때까지 메모로 남는다.
+- `thread.reply`는 아직 연결되지 않았다(allowlist에만 있고 모델에게 노출하지 않는다 — 명령이 생기면 노출). `followup.propose`는 짝이 되는 명령이 생길 때까지 메모로 남는다(가정·결정·반영 세 도구는 SEL-93에서 실제 명령이 되었다).
 - OpenAI 호환 본문은 `max_tokens`만 쓴다. `max_completion_tokens`만 받는 모델은 지원하지 않는다(확인 필요, 위 표).
 - 응답 본문은 최대 8MiB까지만 읽는다. 넘으면 읽기를 멈추고 "응답을 잃은 것"과 같이 `unknown`으로 둔다.
 - 호출 중에 실행기 프로세스가 죽으면 그 호출은 `sent`(또는 `prepared`·`authorized`)로 남고, 다음 재개는 이를 정리되지 않은 호출로 보고 막는다. 사람은 `dispatch.resolve_unknown`(그 run의 lease가 끝난 뒤)으로 "청구 안 됨/청구됨"을 골라 정리한다. 정리하기 전까지 그 호출은 한도·상한을 계속 깎는다. 재시작 뒤 자동 이어가기는 PR21의 몫이다.

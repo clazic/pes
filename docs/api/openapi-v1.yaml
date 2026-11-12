@@ -591,8 +591,11 @@ components:
         state "adopted" with decision_id + base_version_id adopts a proposal; state "adopted" with supersedes (the
         adopted decision it replaces) + base_version_id + statement + rationale makes a NEW decision and marks the old
         one superseded; state "revoked" with decision_id + base_version_id + rationale revokes an adopted decision.
-        Everything but a proposal is the owner session only (a token is 403 human_required). A superseded target that
-        is not adopted is 409 supersedes_conflict at $.body.supersedes (next_action reread_decisions).
+        Everything but a proposal is the owner session only (a token is 403 human_required, and a token that names
+        `supersedes` is 403 at once, whatever its state). A superseded target that is not adopted is 409
+        supersedes_conflict at $.body.supersedes (next_action reread_decisions). When adopting or revoking, `scope`
+        must be the decision's own scope (else 422 validation_failed at $.body.scope, reason scope_mismatch). A
+        supersede request has no decision_id (400 invalid_payload).
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         scope: { type: string, enum: [project, edition] }
@@ -630,7 +633,7 @@ components:
               result_version_id: { type: [string, "null"] }
               followup_id: { type: [string, "null"] }
               evidence_tx_id: { type: [string, "null"] }
-              supersedes_entry_id: { type: [string, "null"] }
+              supersedes_entry_id: { type: [string, "null"], description: "An earlier entry of the same round this one replaces. An entry is replaced once: naming one that is already replaced (by an earlier call or by another entry of this request) is 409 conflict." }
     AnswerItem:
       type: object
       required: [question_id]

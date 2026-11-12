@@ -3011,6 +3011,17 @@ export class ApiApp {
     )?.state;
   }
 
+  /** The scope a decision was written with, or undefined when it is not a decision of this project. */
+  #decision_scope(project_id: string, decision_id: string): string | undefined {
+    return this.#db.get<{ scope: string }>(
+      `SELECT d.scope AS scope FROM objects o
+         JOIN decisions d ON d.project_id = o.project_id AND d.object_id = o.id
+        WHERE o.project_id = ? AND o.id = ? AND o.kind = 'decision'`,
+      project_id,
+      decision_id,
+    )?.scope;
+  }
+
   #supersedes_conflict(project_id: string, decision_id: string, target_state: string): Fail {
     return new Fail("supersedes_conflict", {
       target: "$.body.supersedes",
@@ -3036,6 +3047,8 @@ export class ApiApp {
     if (supersedes !== undefined && supersedes !== null && (typeof supersedes !== "string" || supersedes.length === 0 || !supersedes.isWellFormed())) {
       invalid_field("supersedes");
     }
+    // replacing a decision is the owner's act whatever `state` says: a token learns nothing about the target (not its state, not its replacement)
+    if (typeof supersedes === "string" && !auth.session) throw new Fail("human_required");
     const exec = async (command: string, payload: Record<string, unknown>) =>
       this.#exec(
         () => this.#service.execute(this.#ctx(project, auth, key), command, payload),
@@ -3052,6 +3065,7 @@ export class ApiApp {
 
     if (typeof supersedes === "string") {
       if (state === "revoked") validation("$.body.supersedes", { reason: "revoke_has_no_replacement" });
+      if (body.decision_id !== undefined) invalid_field("decision_id");
       // a replacement is only checked against the decision it names; the same answer for a proposal and for an adoption
       const target_state = this.#decision_state(project.id, supersedes);
       if (target_state === undefined) throw new Fail("not_found", { target: "$.body.supersedes" });
@@ -3077,6 +3091,9 @@ export class ApiApp {
 
     const decision_id = this.#needed_id(body, "decision_id");
     const base_version_id = this.#needed_id(body, "base_version_id");
+    // `scope` is required on every write; for an adoption / revocation it must name the scope the decision really has
+    const actual_scope = this.#decision_scope(project.id, decision_id);
+    if (actual_scope !== undefined && actual_scope !== scope) validation("$.body.scope", { reason: "scope_mismatch" });
     if (state === "adopted") {
       const rationale = this.#optional_record_text(body, "rationale");
       const out = await exec("decision.adopt", { decision_id, base_version_id, ...(rationale === undefined ? {} : { rationale }) });

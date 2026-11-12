@@ -642,6 +642,7 @@ function run_reflection_create(runtime: CommandRuntime): CommandResult {
   if (runtime.db.get("SELECT 1 FROM rounds WHERE project_id = ? AND id = ?", scope.project_id, target_round_id) === undefined) {
     throw new ApiError("not_found", "the round is not a round of this project", { field: "target_round_id" });
   }
+  const replaced_here = new Set<string>();
   for (const [index, entry] of entries.entries()) {
     if (runtime.db.get("SELECT 1 FROM object_versions WHERE project_id = ? AND id = ?", scope.project_id, entry.source_version_id) === undefined) {
       throw new ApiError("not_found", "source_version_id is not a version of this project", { index, field: "source_version_id" });
@@ -656,6 +657,14 @@ function run_reflection_create(runtime: CommandRuntime): CommandResult {
       if (older.target_round_id !== target_round_id) {
         throw new ApiError("conflict", "supersedes_entry_id belongs to another round", { reason: "entry_round", index, field: "supersedes_entry_id" });
       }
+      // an entry is replaced once: by an earlier call or by another entry of this call, a second replacement would leave two live entries
+      const replaced_before =
+        replaced_here.has(entry.supersedes_entry_id) ||
+        runtime.db.get("SELECT 1 FROM reflection_entries WHERE project_id = ? AND supersedes_entry_id = ?", scope.project_id, entry.supersedes_entry_id) !== undefined;
+      if (replaced_before) {
+        throw new ApiError("conflict", "supersedes_entry_id is already replaced by another entry", { reason: "entry_replaced", index, field: "supersedes_entry_id" });
+      }
+      replaced_here.add(entry.supersedes_entry_id);
     }
     if (entry.disposition === "applied" || entry.disposition === "partial") check_evidence(runtime, scope.project_id, entry, index);
   }

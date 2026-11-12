@@ -292,8 +292,12 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
         if (env.run.stage_id === null) throw new ApiError("not_found", "this run has no stage");
         const entries = args["entries"];
         if (!Array.isArray(entries)) return refused(call, "entries must be an array");
-        const target = args["target_round_id"] === undefined ? env.run.round_id : args["target_round_id"];
-        if (typeof target !== "string" || target.length === 0) return refused(call, "target_round_id is needed: this run has no round");
+        // the reflection belongs to this run's own round; the tool has no round argument (naming another round is refused)
+        const target = env.run.round_id;
+        if (target === null) return refused(call, "this run has no round");
+        if (args["target_round_id"] !== undefined && args["target_round_id"] !== target) {
+          return refused(call, "the reflection is written to this run's round; leave target_round_id out");
+        }
         const out = (await execute_with_retries(env, "reflection.create", key, { target_round_id: target, entries })) as {
           count: number;
           applied_count: number;
