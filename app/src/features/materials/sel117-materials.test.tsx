@@ -26,6 +26,9 @@ import {
 
 afterEach(cleanup);
 beforeEach(() => {
+  // 확인 중 시도는 sessionStorage 에 남는다 — 앞 시험의 키가 뒤 시험 화면에 새지 않게 매번 비운다
+  window.sessionStorage.clear();
+  window.localStorage.clear();
   // jsdom 에는 blob 주소가 없다 — 이미지 미리보기가 쓸 수 있게 흉내만
   (URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => "blob:synthetic-preview");
   (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();

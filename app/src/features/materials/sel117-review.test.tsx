@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as React from "react";
 import { act, cleanup, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHttpClient } from "@/api/http-client";
 import { WORKSPACE } from "@/api/fixture";
 import { ClientContext } from "@/api/queries";
@@ -11,6 +11,11 @@ import { useUploads } from "./use-uploads";
 import { boot, createMaterialsClient, file, m, main, switchOf, table, waitRows } from "@/test/sel117";
 
 afterEach(cleanup);
+// 확인 중 시도는 sessionStorage 에 남는다 — 앞 시험의 키가 뒤 시험 화면에 새지 않게 매번 비운다
+beforeEach(() => {
+  window.sessionStorage.clear();
+  window.localStorage.clear();
+});
 
 /** 앱 루트 — body 바로 아래에서 main 을 품고 있는 요소 */
 const appRoot = () => {
@@ -75,6 +80,23 @@ describe("리뷰 2 — fetch 호출 전 · 후 실패 분류 (실제 http 클라
     const user = userEvent.setup();
     await user.upload(screen.getByLabelText("자료 파일 고르기", { selector: "input[type=file]" }) as HTMLInputElement, f);
     await waitFor(() => expect(document.body.textContent).toContain("보내지 못했어요"));
+    expect(document.body.textContent).not.toContain("접수 확인 중");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("파일을 읽는 동안(fetch 0 회)은 “올리는 중”만 — 아직 보내지 않았으니 “접수 확인 중”은 없다", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    const mc = createMaterialsClient();
+    const f = file("review2-slow.txt", "느린 읽기");
+    // 해시 계산(파일 읽기)을 붙잡아 둔다 — 이 동안 요청은 나가지 않는다
+    Object.defineProperty(f, "arrayBuffer", { value: () => new Promise<ArrayBuffer>(() => {}) });
+    const c = real(fetchImpl as unknown as typeof fetch);
+    Object.assign(mc.client, { uploadMaterial: c.uploadMaterial });
+    await boot(mc);
+    await waitRows();
+    const user = userEvent.setup();
+    await user.upload(screen.getByLabelText("자료 파일 고르기", { selector: "input[type=file]" }) as HTMLInputElement, f);
+    await waitFor(() => expect(document.body.textContent).toContain("올리는 중"));
     expect(document.body.textContent).not.toContain("접수 확인 중");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
