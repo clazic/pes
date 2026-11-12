@@ -12,10 +12,12 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 
 const REPO = join(import.meta.dirname, "..");
-const RECORDER = join(REPO, "tests", "helpers", "fs_path_recorder.ts");
+// --import takes a URL: a bare Windows path (D:\\…) is read as a "d:" URL scheme (ERR_UNSUPPORTED_ESM_URL_SCHEME, SEL-125).
+const RECORDER = pathToFileURL(join(REPO, "tests", "helpers", "fs_path_recorder.ts")).href;
 const PROBE = join(REPO, "tests", "helpers", "app_guard_probe.ts");
 const VITEST_GUARD = join(REPO, "app", "vitest.global-setup.ts");
 const E2E_GUARD = join(REPO, "app", "e2e", "global-setup.ts");
