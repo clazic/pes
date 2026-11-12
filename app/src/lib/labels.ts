@@ -1,4 +1,4 @@
-import type { Importance, QuestionSource, StageKey } from "@/api/types";
+import type { Importance, QuestionDirection, QuestionKind, QuestionSource, StageKey } from "@/api/types";
 
 /**
  * 화면 이름표 — 서버는 기계 값만 싣고 화면이 이름을 만든다(승인 시안 api/types.ts 의 STAGE_LABEL 과 같은 이름).
@@ -19,6 +19,13 @@ export const roundLabel = (roundId: number | null) => (roundId === null ? "단�
 export const placeLabel = (stage: StageKey, roundId: number | null) => `${STAGE_LABEL[stage]} ${roundLabel(roundId)}`;
 
 export const IMPORTANCE_LABEL: Record<Importance, string> = { high: "높음", normal: "보통", low: "낮음" };
+/** 중요도 말 — 없으면 “미정”(이전된 프로젝트의 중요도를 지어내지 않는다) */
+export const importanceLabel = (i: Importance | undefined) => (i ? IMPORTANCE_LABEL[i] : "미정");
+export const KIND_LABEL: Record<QuestionKind, string> = { single_choice: "하나 고르기", multi_choice: "여러 개 고르기", free_text: "글로 답하기" };
+/** 카드 칩의 방향 말 */
+export const DIRECTION_CHIP: Record<QuestionDirection, string> = { ask_human: "AI가 나에게", ask_ai: "내가 AI에게" };
+/** 고치기 칸의 방향 말 */
+export const DIRECTION_OPTION: Record<QuestionDirection, string> = { ask_human: "AI가 사람에게 묻기", ask_ai: "사람이 AI에게 묻기" };
 export const SOURCE_LABEL: Record<QuestionSource, string> = { ai: "AI 점검", bank: "질문 은행", human: "사람" };
 
 const dateFmt = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" });

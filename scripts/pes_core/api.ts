@@ -253,6 +253,8 @@ const AGENT_REQUESTS_PER_MINUTE = 60;
 const AGENT_CONTROL_REQUESTS_PER_MINUTE = 120;
 const OWNER_REQUESTS_PER_MINUTE = 600;
 const LIST_MAX_ITEMS = 100;
+/** Work-space read: only the newest this many dispatches and runs are sent (SEL-87); older ones are left out. */
+const WORKSPACE_LIST_MAX = 50;
 /** A request refused for its own malformed input was not served: it does not use up the budget. */
 const REFUNDED_CODES: readonly string[] = ["invalid_payload", "validation_failed", "payload_too_large", "cursor_invalid"];
 const MAX_RESULTS_PER_BATCH = 20;
@@ -1623,6 +1625,16 @@ export class ApiApp {
       return "current_you";
     };
 
+    // the newest approval of each stage (U1d past approval): it stays even while the stage is stale. at = the commit time
+    // (mutation_commits.created_at, ms) or null when the old approval has no time (0)
+    const approval_rows = this.#db.all<{ stage_id: string; assurance: string; created_at: bigint }>(
+      `SELECT a.stage_id AS stage_id, a.assurance AS assurance, c.created_at AS created_at
+         FROM approvals a JOIN mutation_commits c ON c.project_id = a.project_id AND c.id = a.tx_id
+        WHERE a.project_id = ? AND a.rowid = (SELECT MAX(a2.rowid) FROM approvals a2 WHERE a2.project_id = a.project_id AND a2.stage_id = a.stage_id)`,
+      project.id,
+    );
+    const approval_of = new Map(approval_rows.map((row) => [row.stage_id, row]));
+
     const stages = stage_rows.map((stage) => {
       const mine = round_rows.filter((round) => round.stage_id === stage.id);
       const open = mine.some((round) => round.state === "open");
@@ -1632,7 +1644,15 @@ export class ApiApp {
         rounds.push({ round_id: null, state: stage.status === "asking" && !open ? "current" : "closed" });
       }
       for (const round of mine) rounds.push({ round_id: Number(round.round_no), state: round.state === "open" ? "current" : "closed" });
-      return { key: stage.key, view: view_of(stage), rounds };
+      const approval = approval_of.get(stage.id);
+      if (approval === undefined) return { key: stage.key, view: view_of(stage), rounds };
+      const ms = Number(approval.created_at);
+      const past_approval = {
+        // a damaged time (not a safe integer, or past the Date range 8.64e15) is shown as unknown, never thrown
+        at: Number.isSafeInteger(ms) && ms > 0 && ms <= 8.64e15 ? new Date(ms).toISOString() : null,
+        origin: approval.assurance === "verified" ? "verified" : "legacy_unverified",
+      };
+      return { key: stage.key, view: view_of(stage), past_approval, rounds };
     });
 
     const open_round = place.open_round;
@@ -1674,6 +1694,54 @@ export class ApiApp {
     const assumptions = count_of("assumption");
     const decisions = count_of("decision");
     const comments = count_of("message");
+
+    // U1d AI connection: the policy is the allow_opencode_go bit alone (null pointer = missing, any other damage = corrupt).
+    // "pending", cancel_state, external_stop and run_permissions are not sent: the DB has no evidence for them.
+    const policy_state = ((): "allowed" | "denied" | "missing" | "corrupt" => {
+      if (project.current_policy_id === null) return "missing";
+      try {
+        return current_policy(this.#db, project.id).allow_opencode_go ? "allowed" : "denied";
+      } catch {
+        return "corrupt";
+      }
+    })();
+    // The newest WORKSPACE_LIST_MAX of each list (largest rowid first), then shown oldest-first.
+    // runs are narrowed to the ACTIVE edition (a run is work of one edition). Dispatches are NOT: what was sent out and
+    // what must be settled (billing, recall) are facts of the whole project and stay true after a new edition, so the
+    // newest 50 dispatches of the project are sent whatever edition their run belongs to. In both lists the inner query
+    // picks the newest rows from one table (ORDER BY rowid DESC LIMIT), and the resolution / stage joins run on those rows only.
+    const dispatches = this.#db
+      .all<{ id: string; run_id: string; state: string; resolution: string | null }>(
+        `SELECT n.id AS id, n.run_id AS run_id, n.state AS state, x.outcome AS resolution
+           FROM (
+             SELECT d.rowid AS rid, d.id AS id, d.run_id AS run_id, d.state AS state
+               FROM outbound_dispatches d WHERE d.project_id = ? ORDER BY d.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
+           ) n LEFT JOIN dispatch_resolutions x ON x.dispatch_id = n.id
+          ORDER BY n.rid ASC`,
+        project.id,
+      )
+      .map((row) => (row.resolution === null ? { id: row.id, run_id: row.run_id, state: row.state } : { id: row.id, run_id: row.run_id, state: row.state, resolution: row.resolution }));
+    const handoff_runtimes: string[] = Object.values(HANDOFF_APPS).map((app) => app.runtime);
+    const runs = this.#db
+      .all<{ id: string; stage: string | null; mode: string; status: string; runtime: string; actor_kind: string | null }>(
+        `SELECT n.id AS id, s.key AS stage, n.mode AS mode, n.status AS status, n.runtime AS runtime, a.kind AS actor_kind
+           FROM (
+             SELECT r.rowid AS rid, r.id AS id, r.project_id AS project_id, r.stage_id AS stage_id, r.mode AS mode, r.status AS status, r.runtime AS runtime, r.actor_id AS actor_id
+               FROM runs r WHERE r.project_id = ? AND r.edition_id = ? ORDER BY r.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
+           ) n LEFT JOIN stages s ON s.project_id = n.project_id AND s.id = n.stage_id
+               LEFT JOIN actors a ON a.id = n.actor_id
+          ORDER BY n.rid ASC`,
+        project.id,
+        edition.id,
+      )
+      .map((row) => ({
+        id: row.id,
+        stage: row.stage,
+        mode: row.mode,
+        // handed_off is only the hand-off import run's shape (commands/handoff_import.ts): runtime *_app_handoff, a human
+        // owner actor, status succeeded. runtime is a free string an agent may send on claim, so the name alone proves nothing.
+        status: handoff_runtimes.includes(row.runtime) && row.status === "succeeded" && row.actor_kind === "human" ? "handed_off" : row.status,
+      }));
     return {
       slug: project.slug,
       title: project.topic,
@@ -1683,6 +1751,8 @@ export class ApiApp {
       stages,
       turn: { side },
       actions,
+      ai_connection: { policy: policy_state, dispatches },
+      runs,
       records: {
         assumptions: { count: assumptions },
         decisions: { count: decisions },

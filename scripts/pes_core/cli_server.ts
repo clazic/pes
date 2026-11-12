@@ -252,10 +252,14 @@ export async function cmd_hub(args: string[]): Promise<void> {
   say((await server_url(root)) ?? `http://127.0.0.1:${(await root_port(root)) ?? ""}/`);
 }
 
+/** The command that opens `url` in the default browser: the address is the ONLY thing passed on (never a session — SEL-85 tests this for every platform). */
+export function browser_command(url: string, platform: NodeJS.Platform = process.platform): [string, string[]] {
+  return platform === "darwin" ? ["open", [url]] : platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : ["xdg-open", [url]];
+}
+
 /** The default browser, started and let go (macOS `open`, Windows `start`, elsewhere `xdg-open`). A failure is not an error: the address is printed anyway. */
 function open_browser(url: string): void {
-  const [cmd, args]: [string, string[]] =
-    process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : ["xdg-open", [url]];
+  const [cmd, args] = browser_command(url);
   try {
     const child = spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true });
     child.on("error", () => undefined);
@@ -266,10 +270,13 @@ function open_browser(url: string): void {
 }
 
 /**
- * `pes open <slug> --app` (SEL-82 U1b): the address of the web app at the project's current place, with the owner's session in the URL
- * FRAGMENT (`#pes=<base64url JSON {session, projects:{slug:id}}>`). A fragment never goes to a server or into a Referer, and another Origin cannot
- * read it; the app takes it out of the address bar before anything is drawn. Nothing is started: the server must already be on.
- * With PES_NO_BROWSER=1 the one address line is printed; otherwise the browser opens it and only the address without the fragment is printed.
+ * `pes open <slug> --app` (SEL-82 U1b, SEL-85): the address of the web app at the project's current place, with a ONE-TIME CODE in the URL fragment
+ * (`#code=<code>`). The session itself is never in the address: the server (already on) makes the code when this command asks with the owner's session
+ * (`POST /api/v1/app-session/codes`, x-pes-session), keeps it in memory for 60 seconds, and gives the session only to the app that trades the code in
+ * (`POST /api/v1/app-session`), once. A fragment never goes to a server or into a Referer; the app takes it out of the address bar before anything is drawn.
+ * A person runs this at a terminal — an agent or skill does not (npm run lint:skills refuses it in their documents).
+ * Nothing is started: the server must already be on. With PES_NO_BROWSER=1 the one address line is printed; otherwise the browser opens it and only the
+ * address without the fragment is printed.
  */
 async function open_app(target: string): Promise<void> {
   const d = pdir(target);
@@ -282,13 +289,36 @@ async function open_app(target: string): Promise<void> {
   const place = await bridge("app_place", slug);
   const round = typeof place.round_id === "number" ? String(place.round_id) : "start";
   const address = `http://127.0.0.1:${port}/p/${encodeURIComponent(slug)}/e/${String(place.edition)}/s/${String(place.stage)}/r/${round}`;
-  const handoff = Buffer.from(JSON.stringify({ session: local_session_secret(env()), projects: { [slug]: place.id } }), "utf8").toString("base64url");
+  const code = await issue_app_code(port, { [slug]: String(place.id) });
   if (process.env.PES_NO_BROWSER === "1") {
-    say(`${address}#pes=${handoff}`);
+    say(`${address}#code=${code}`);
     return;
   }
-  open_browser(`${address}#pes=${handoff}`);
+  open_browser(`${address}#code=${code}`);
   say(`앱을 브라우저로 열었습니다: ${address}`);
+}
+
+/** Asks the server on `port` for a one-time code (owner session in the header). Dies with a short Korean line — never with the session or the answer's text. */
+async function issue_app_code(port: number, projects: Record<string, string>): Promise<string> {
+  let status = 0;
+  let code: unknown;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/app-session/codes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-pes-session": local_session_secret(env()) },
+      body: JSON.stringify({ projects }),
+      redirect: "error",
+      signal: AbortSignal.timeout(5000),
+    });
+    status = response.status;
+    if (status === 201) code = ((await response.json()) as { data?: { code?: unknown } }).data?.code;
+  } catch {
+    die("서버에서 1회용 코드를 받지 못했습니다 — 서버가 응답하지 않습니다. pes serve 로 서버를 다시 켠 뒤 해 보세요", 1);
+  }
+  if (status === 429) die("1회용 코드를 너무 많이 만들었습니다 — 쓰이지 않은 코드가 1분쯤 남아 있습니다. 잠시 뒤 다시 해 보세요", 1);
+  if (status === 401) die("서버가 이 세션을 받아들이지 않았습니다 (서버를 켠 환경과 이 명령의 PES_LOCAL_SESSION_SECRET·HOME 이 같아야 합니다)", 1);
+  if (typeof code !== "string" || !/^[A-Za-z0-9_-]{20,128}$/.test(code)) die(`서버에서 1회용 코드를 받지 못했습니다 (응답 ${status}) — pes serve 로 서버를 다시 켠 뒤 해 보세요`, 1);
+  return code;
 }
 
 export async function cmd_open(args: string[]): Promise<void> {

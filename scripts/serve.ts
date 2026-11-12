@@ -21,7 +21,9 @@
 //      GET /p/<slug>/**  → the app's index.html (the app routes by its own address), GET /_app/<file> → a file of that folder (the app is built with
 //      base "/_app/": a project name cannot start with "_", so no project's page is ever hidden — /app/ and /p/ stay a project's own when it has that name).
 //      The folder is a jail: no `..`, no link that leads out of it. Nothing is added to the page (no session value, no cookie): `pes open <slug> --app`
-//      hands the owner's session to the app in the URL fragment, so it never reaches the server, a Referer or another Origin. Without a build both are a plain 404.
+//      puts a ONE-TIME CODE in the URL fragment (`#code=…`, SEL-85), never the session. The code is made by this process on `POST /api/v1/app-session/codes`
+//      (the CLI, with the owner's session in x-pes-session) and kept in memory only; the app trades it for the session with `POST /api/v1/app-session {code}`
+//      (no credential, same Origin, one time, 60 s — PES_APP_CODE_TTL_MS). Both answers are no-store. Without a build both are a plain 404.
 //      PES_APP_DIR should name a build folder only (an absolute path); a missing one is announced once at start-up.
 //
 // Safety: binds 127.0.0.1 only, never asks DNS for a host name (SEL-33: socket.getfqdn() stalled 30 s on some macOS runners), never
@@ -36,6 +38,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 import type { ApiApp } from "./pes_core/api.ts";
+import { AppCodes, CODE_SHAPE, code_ttl_ms, valid_projects } from "./pes_core/app_session.ts";
 import type { BridgeReply } from "./pes_core/cli_bridge.ts";
 import type { Db } from "./pes_core/db.ts";
 
@@ -52,7 +55,10 @@ const API_ERROR_TEXT: Record<string, [string, string]> = {
   internal_error: ["서버 안에서 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"],
   schema_not_ready: ["PES 데이터베이스가 아직 준비되지 않았습니다.", "migrate_database"],
   unauthenticated: ["인증이 필요합니다. 올바른 자격으로 다시 요청해 주세요.", "authenticate"],
+  rate_limited: ["요청이 너무 많습니다. 잠시 뒤 다시 시도해 주세요.", "retry_later"],
 };
+/** The bodies of the two app-session routes are tiny ({"code": 43 characters}, {"projects": a slug or two}). */
+const MAX_APP_SESSION_BODY = 4096;
 /** A body above MAX_BODY but within this size is read away before the 413 is sent (the sender is not cut off). */
 const DRAIN_LIMIT = 8 * 1024 * 1024;
 const DRAIN_IO_TIMEOUT_MS = 10_000;
@@ -270,6 +276,8 @@ async function start(config: Config): Promise<void> {
   await import("./pes_core/cli_bridge.ts").catch(() => undefined);
   const allowed = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   const db = make_db(root);
+  // one-time app codes (SEL-85): server memory only, gone with this process; PES_APP_CODE_TTL_MS (ms) shortens or lengthens the 60 s life
+  const app_codes = new AppCodes({ ttl_ms: code_ttl_ms(process.env.PES_APP_CODE_TTL_MS) });
   const project_of = (path: string): { dir: string | null; rest: string[] } => {
     const parts = py_unquote(path).split("/").filter((part) => part !== "");
     if (parts[0] !== undefined && SLUG.test(parts[0]) && existsSync(join(root, parts[0], "project.json"))) return { dir: join(root, parts[0]), rest: parts.slice(1) };
@@ -629,13 +637,19 @@ async function start(config: Config): Promise<void> {
   // ---------------------------------------------------------------- /api/v1
   const is_api_path = (path: string): boolean => path === "/api/v1" || path.startsWith("/api/v1/");
 
-  const api_error = (req: IncomingMessage, res: ServerResponse, status: number, code: string, options: { close?: boolean; target?: string | null } = {}): void => {
+  const api_error = (req: IncomingMessage, res: ServerResponse, status: number, code: string, options: { close?: boolean; target?: string | null; retry_after_ms?: number } = {}): void => {
     const [message, next_action] = API_ERROR_TEXT[code] ?? (API_ERROR_TEXT.internal_error as [string, string]);
     const request_id = `serve-${process.hrtime.bigint()}`;
     const body = JSON.stringify({ format_version: "1.0", error: { code, message, retryable: status === 429 || status === 503, target: options.target ?? null, details: null, next_action }, request_id });
     const headers: Record<string, string> = { "Content-Type": "application/json; charset=utf-8", "x-request-id": request_id };
     if (options.close === true) headers.Connection = "close";
+    if (options.retry_after_ms !== undefined) headers["Retry-After"] = String(Math.max(1, Math.ceil(options.retry_after_ms / 1000)));
     send(req, res, status, headers, body);
+  };
+
+  const api_ok = (req: IncomingMessage, res: ServerResponse, status: number, data: unknown): void => {
+    const request_id = `serve-${process.hrtime.bigint()}`;
+    send(req, res, status, { "Content-Type": "application/json; charset=utf-8", "x-request-id": request_id }, JSON.stringify({ format_version: "1.0", request_id, data }));
   };
 
   /** One long-lived API app on its own connection: migrated on the first ACCEPTED API request (a refused cross-origin request never creates the database). */
@@ -672,23 +686,93 @@ async function start(config: Config): Promise<void> {
     return origin === "" || allowed.has(origin) || trusted_origins().has(origin);
   };
 
+  /** The owner's session when the request carries it (constant-time on a digest), else null; never creates the secret. */
+  const presented_owner_session = async (req: IncomingMessage): Promise<string | null> => {
+    try {
+      const { existing_local_session_secret } = await import("./pes_core/api_secret.ts");
+      const secret = existing_local_session_secret(db.env);
+      const presented = header(req, "x-pes-session");
+      if (secret === null || presented === "") return null;
+      const digest = (text: string): Buffer => createHash("sha256").update(text, "utf8").digest();
+      return digest(presented).equals(digest(secret)) && presented.length === secret.length ? secret : null;
+    } catch {
+      return null;
+    }
+  };
+
   /** True when the database exists (not empty), or when the request carries the owner's local session secret (which may create it). */
   const may_create_db = async (req: IncomingMessage): Promise<boolean> => {
     try {
-      const [{ db_path }, { existing_local_session_secret }] = await Promise.all([import("./pes_core/paths.ts"), import("./pes_core/api_secret.ts")]);
+      const { db_path } = await import("./pes_core/paths.ts");
       try {
         if (statSync(db_path(db.env)).size > 0) return true;
       } catch {
         // no database file
       }
-      const secret = existing_local_session_secret(db.env);
-      const presented = header(req, "x-pes-session");
-      if (secret === null || presented === "") return false;
-      const digest = (text: string): Buffer => createHash("sha256").update(text, "utf8").digest();
-      return digest(presented).equals(digest(secret)) && presented.length === secret.length;
+      return (await presented_owner_session(req)) !== null;
     } catch {
       return false;
     }
+  };
+
+  /** The JSON object of a small body (at most MAX_APP_SESSION_BODY bytes), or null after the answer (413/400) has been sent. */
+  const small_json_body = async (req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown> | null> => {
+    const length_text = header(req, "content-length");
+    const length = /^\d+$/.test(length_text) ? Number(length_text) : 0;
+    if (length > MAX_APP_SESSION_BODY) {
+      reject_oversize(req, res, length, () => api_error(req, res, 413, "payload_too_large", { close: true }));
+      return null;
+    }
+    const body = length > 0 ? await read_body(req, length) : Buffer.alloc(0);
+    if (body === null) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+    } catch {
+      api_error(req, res, 400, "invalid_payload");
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      api_error(req, res, 400, "invalid_payload");
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  };
+
+  /**
+   * `POST /api/v1/app-session/codes` (the CLI, `pes open <slug> --app`): with the owner's session in x-pes-session, makes a one-time code that stands for the
+   * SERVER's own session and the {slug: id} the body names. The session is checked before the body is read; without it nothing is made (401).
+   */
+  const handle_app_code_issue = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const session = await presented_owner_session(req);
+    if (session === null) return api_error(req, res, 401, "unauthenticated");
+    const wait = app_codes.issue_wait();
+    if (wait !== null) return api_error(req, res, 429, "rate_limited", { retry_after_ms: wait });
+    const body = await small_json_body(req, res);
+    if (body === null) return;
+    const projects = valid_projects(body.projects);
+    if (projects === null || Object.keys(body).some((key) => key !== "projects")) return api_error(req, res, 400, "invalid_payload", { target: "$.body.projects" });
+    const made = app_codes.issue({ session, projects });
+    if ("retry_after_ms" in made) return api_error(req, res, 429, "rate_limited", { retry_after_ms: made.retry_after_ms });
+    api_ok(req, res, 201, { code: made.code });
+  };
+
+  /**
+   * `POST /api/v1/app-session {code}` (the web app): no credential — the code is the proof. It is read and removed in one step, so it works once; an
+   * unknown, used or expired code is the same 401. Every answer is no-store (send() adds it), and a refusal carries no session. Only FAILED attempts
+   * (400 for a malformed code, 401) spend the minute's budget — and once it is spent they are 429; a good code is traded even then, so a flood of
+   * bad guesses (256-bit codes: it can only be a nuisance) never keeps the owner's own page from its session.
+   */
+  const handle_app_code_exchange = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const body = await small_json_body(req, res);
+    if (body === null) return;
+    const code = body.code;
+    const handoff = typeof code === "string" && CODE_SHAPE.test(code) && Object.keys(body).every((key) => key === "code") ? app_codes.take(code) : null;
+    if (handoff !== null) return api_ok(req, res, 200, { session: handoff.session, projects: handoff.projects });
+    const wait = app_codes.exchange_failed();
+    if (wait !== null) return api_error(req, res, 429, "rate_limited", { retry_after_ms: wait });
+    if (typeof code !== "string" || !CODE_SHAPE.test(code) || Object.keys(body).some((key) => key !== "code")) return api_error(req, res, 400, "invalid_payload", { target: "$.body.code" });
+    api_error(req, res, 401, "unauthenticated");
   };
 
   const query_refused = (query: string): boolean => {
@@ -706,6 +790,11 @@ async function start(config: Config): Promise<void> {
     const path = raw_path(req.url);
     const query = query_of(req.url).replace(/^\?/, "");
     if (method !== "GET" && method !== "HEAD" && !origin_allowed(req)) return api_error(req, res, 403, "forbidden");
+    // the two app-session routes (SEL-85) are answered here, before the database is looked at: they hold no project data and the exchange has no credential
+    // the exchange is the one call a page makes without a credential, so only the page this server itself serves may make it: exactly the Origin
+    // `pes open --app` prints (127.0.0.1 and this port) — not localhost, not a trusted_origins entry, not a missing Origin
+    if (method === "POST" && path === "/api/v1/app-session") return header(req, "origin") === `http://127.0.0.1:${port}` ? handle_app_code_exchange(req, res) : api_error(req, res, 403, "forbidden");
+    if (method === "POST" && path === "/api/v1/app-session/codes") return handle_app_code_issue(req, res);
     const length_text = header(req, "content-length");
     const length = /^\d+$/.test(length_text) ? Number(length_text) : 0;
     if (length > MAX_API_BODY) return reject_oversize(req, res, length, () => api_error(req, res, 413, "payload_too_large", { close: true }));

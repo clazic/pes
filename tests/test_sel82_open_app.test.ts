@@ -1,10 +1,12 @@
 /**
  * SEL-82 U1b R1 필수 1 — `pes open <slug> --app`: 앱을 여는 쪽이 세션을 URL 조각(fragment)으로 넘긴다 (tester, 작성 모드 2). 구현 전에는 --app 이 없어 실패하는 것이 정상.
  *
+ * SEL-85 로 옮김: 조각은 세션이 아니라 1회용 코드 `#code=<코드>` 이고, 세션은 `POST /api/v1/app-session {code}` 교환으로만 나온다
+ * (계약은 tests/test_sel85_app_code.test.ts 머리말). 아래 '세션이 조각 밖 어디에도 없다' 단언은 그대로이고, 조각 안에도 세션이 없다는 단언으로 더 세졌다.
  * 해석 (leader 결정 "필수 1 = 권장안 A" + R1 로그 — 구현을 추측하지 않음):
  *   - 명령: `pes open <slug> --app`  (기존 `pes open <slug>` = 옛 대시보드 주소 `http://127.0.0.1:<port>/<slug>/` 는 그대로, 조각 없음).
  *     출력 한 줄(PES_NO_BROWSER=1 이면 브라우저 없이 그 주소만, 아니면 브라우저로 같은 주소를 연다):
- *       http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드|start>#pes=<base64url(JSON {"session": "<소유자 세션>", "projects": {"<slug>": "<프로젝트 id>"}})>
+ *       http://127.0.0.1:<port>/p/<slug>/e/<판>/s/<단계>/r/<라운드|start>#code=<1회용 코드>   (SEL-82 원안은 #pes=<세션이 든 JSON> 조각이었다)
  *     경로는 앱 라우터가 그리는 작업 공간 주소(작업 공간 읽기가 알려 주는 현재 판·단계·라운드)다 — `/p/<slug>/` 만 열면 앱이 '없는 화면'이 되기 때문.
  *   - 세션 값은 소유자 세션(PES_LOCAL_SESSION_SECRET > ~/.pes/config.json > 비밀 파일 — api_secret.ts 와 같은 순서). 주소의 조각(# 뒤) 밖 어디에도 나오지 않는다(경로·쿼리·stderr).
  *   - 서버가 꺼져 있으면 서버를 새로 띄우지 않고(open 은 아무것도 시작하지 않는다) 0이 아닌 종료 코드 + 한국어 한두 줄 안내(`pes serve` 를 먼저). 조각·세션 출력 0.
@@ -66,13 +68,16 @@ async function start(prefix: string, serve_on = true): Promise<Fx> {
   };
 }
 
-function decode(fragment: string): any {
-  const m = /^#pes=([A-Za-z0-9_-]+)=*$/.exec(fragment);
-  assert.ok(m, `the fragment is #pes=<base64url>, got ${fragment.slice(0, 40)}`);
-  return JSON.parse(Buffer.from(m[1] as string, "base64url").toString("utf8"));
+/** SEL-85: 조각 = `#code=<코드>`. 코드를 POST /api/v1/app-session 으로 바꾼 {session, projects} 를 돌려준다(한 번 쓰면 무효). */
+async function exchange(f: Fx, fragment: string): Promise<any> {
+  const m = /^#code=([A-Za-z0-9_-]{20,})$/.exec(fragment);
+  assert.ok(m, `the fragment is #code=<code>, got ${fragment.slice(0, 40)}`);
+  const res = await f.server.post("/api/v1/app-session", { code: m[1] }, f.server.origin());
+  assert.equal(res.status, 200, res.text());
+  return res.json().data;
 }
 
-test("pes open <slug> --app prints one app address with #pes=<base64url JSON {session, projects}> and nothing of the session outside the fragment", { timeout: 120_000 }, async () => {
+test("pes open <slug> --app prints one app address with #code=<one-time code> (the exchange gives {session, projects}) and nothing of the session in the address", { timeout: 120_000 }, async () => {
   const f = await start("pes-sel82-open-");
   try {
     const out = f.run(["open", "synthetic", "--app"]);
@@ -84,7 +89,9 @@ test("pes open <slug> --app prints one app address with #pes=<base64url JSON {se
     assert.equal(url.origin, `http://127.0.0.1:${f.server.port}`);
     assert.match(url.pathname, /^\/p\/synthetic\/e\/[1-9][0-9]*\/s\/[a-z][a-z_-]*\/r\/(start|[1-9][0-9]*)$/, "a work-space address the app's router draws");
     assert.equal(url.search, "");
-    const handoff = decode(url.hash);
+    // the fragment itself holds no session at all (only a one-time code); the session comes out of the exchange
+    assert.ok(!url.hash.includes(SECRET) && !url.hash.includes(Buffer.from(SECRET).toString("base64url")) && !url.hash.startsWith("#pes="));
+    const handoff = await exchange(f, url.hash);
     assert.deepEqual(Object.keys(handoff).sort(), ["projects", "session"]);
     assert.equal(handoff.session, SECRET);
     assert.equal(handoff.projects.synthetic, f.project_id);
@@ -115,13 +122,23 @@ test("the address names the project's real current position (the same edition / 
   }
 });
 
-test("the session in the fragment is the one the CLI resolves (PES_LOCAL_SESSION_SECRET here) — never a made-up value", { timeout: 120_000 }, async () => {
+test("the session the exchange gives is the one the owner has (the server's own) — never a made-up value; a CLI holding a session the server does not accept gets no code", { timeout: 120_000 }, async () => {
   const f = await start("pes-sel82-open-src-");
   try {
-    // the CLI reads the session the way api_secret.ts does; a value it is given is the value it hands over (a wrong one shows up as wrong — nothing replaces it)
-    const out = f.run(["open", "synthetic", "--app"], { PES_LOCAL_SESSION_SECRET: "synthetic-other-session-value-9876543210" });
-    assert.equal(out.status, 0, out.stderr);
-    assert.equal(decode(new URL(out.stdout.trim()).hash).session, "synthetic-other-session-value-9876543210");
+    // SEL-85: codes are issued only to a caller that proves the server's own owner session, and a code always points at that session.
+    // So the exchange can only ever give SECRET (the owner's), never a value the CLI made up or was handed.
+    const ok = f.run(["open", "synthetic", "--app"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    const ok_hash = new URL(ok.stdout.trim()).hash;
+    assert.ok(!ok_hash.includes(SECRET));
+    assert.equal((await exchange(f, ok_hash)).session, SECRET, "the owner's session, never a made-up one");
+    // a CLI with another session value cannot get a code: non-zero exit, no fragment, neither value printed
+    const other = "synthetic-other-session-value-9876543210";
+    const out = f.run(["open", "synthetic", "--app"], { PES_LOCAL_SESSION_SECRET: other });
+    assert.notEqual(out.status, 0, "a session the server does not accept issues no code");
+    const all = `${out.stdout}\n${out.stderr}`;
+    assert.ok(!all.includes("#code=") && !all.includes("#pes="), "no fragment printed");
+    assert.ok(!all.includes(other) && !all.includes(SECRET), "neither session value printed");
   } finally {
     await f.cleanup();
   }

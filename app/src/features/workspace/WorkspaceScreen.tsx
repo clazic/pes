@@ -117,9 +117,11 @@ export function WorkspaceScreen() {
     const el = askRef.current;
     if (!el) return;
     const onFocusIn = (e: FocusEvent) => {
-      // 질문 칸(q-…)만 따라간다 — 미리보기 단추 같은 도구는 초점 자리로 남기지 않는다
-      const id = (e.target as HTMLElement).id;
-      if (id.startsWith("q-") && id !== focusParam) setParams({ focus: id }, true);
+      // 질문 칸(q-…)과 질문 항목 자체(J/K 이동)만 따라간다 — 미리보기 단추 같은 도구는 초점 자리로 남기지 않는다
+      const t = e.target as HTMLElement;
+      const id = t.id.startsWith("q-") ? t.id : (t.dataset.question ?? "");
+      // 빠르게 연달아 눌러도 앞 변경을 놓치지 않게, 그려진 주소(focusParam)가 아니라 마지막으로 정한 값(latest)과 견준다
+      if (id && id !== latest.current.get("focus")) setParams({ focus: id }, true);
     };
     el.addEventListener("focusin", onFocusIn);
     return () => el.removeEventListener("focusin", onFocusIn);
@@ -129,7 +131,8 @@ export function WorkspaceScreen() {
   const round = rq.data;
   const title = round ? placeLabel(round.stage, round.round_id) : "";
   const past = !!round && round.state !== "current";
-  const firstOpen = round?.questions.find((q) => !q.sent && q.required) ?? round?.questions.find((q) => !q.sent);
+  const openQs = round?.questions.filter((q) => (q.status ?? "open") === "open") ?? [];
+  const firstOpen = openQs.find((q) => !q.sent && q.required) ?? openQs.find((q) => !q.sent);
 
   const onView = (v: View) => setParams({ view: v }, true);
   const onPeek = (id: string) => {
@@ -140,15 +143,25 @@ export function WorkspaceScreen() {
   const onPagePeek = (id: string) => setParams({ peek: id }, true);
   const onPrint = () => setParams({ print: "1" }, false, () => document.getElementById("print-title"));
   const onClosePrint = () => setParams({ print: null }, true, () => document.getElementById("tool-print"));
+  /** J/K · 이전/다음 — 질문 영역이 CSS 로 숨은 좁은 본문 보기(<1280 이고 view≠ask)면 질문 보기로 바꾼 뒤 그려지면 초점(display:none 인 동안 focus() 는 듣지 않는다) */
+  const goToQuestion = React.useCallback(
+    (id: string) => {
+      const item = () => document.querySelector<HTMLElement>(`[data-question="${CSS.escape(id)}"]`);
+      const wide = window.matchMedia("(min-width: 1280px)").matches;
+      if (wide || latest.current.get("view") === "ask") item()?.focus();
+      else setParams({ view: "ask", focus: id }, true, item);
+    },
+    [setParams],
+  );
   const onGoToQuestions = firstOpen && !past ? () => setParams({ view: "ask", focus: firstOpen.id }, true, () => document.getElementById(firstOpen.id)) : undefined;
   // 동작 목록 하나(명령 메뉴 · 질문 맥락 메뉴가 같이 쓴다). 동작은 실행할 때만 ref(latest)를 읽는다 — 그리는 동안 읽지 않음
   const actions = round
     ? // oxlint-disable-next-line react/refs
       workspaceActions({
-        questions: round.questions,
+        questions: openQs,
         goAsk: () =>
           setParams({ view: "ask" }, true, () =>
-            firstOpen && !past ? document.getElementById(firstOpen.id) : (document.getElementById(`peek-${round.questions[0]?.id}`) ?? document.getElementById("ask-title")),
+            firstOpen && !past ? document.getElementById(firstOpen.id) : (document.getElementById(`peek-${openQs[0]?.id}`) ?? document.getElementById("ask-title")),
           ),
         goBody: () => setParams({ view: null }, true, () => document.querySelector<HTMLElement>("main [data-screen-title]")),
         print: onPrint,
@@ -182,7 +195,7 @@ export function WorkspaceScreen() {
 
   const editBlocked = past ? PAST_REASON.edit : phone ? PHONE_REASON.edit : undefined;
   const annotateBlocked = past ? PAST_REASON.annotate : phone ? PHONE_REASON.annotate : undefined;
-  const peekQ = peekParam ? round.questions.find((q) => q.id === peekParam) : undefined;
+  const peekQ = peekParam ? openQs.find((q) => q.id === peekParam) : undefined;
 
   return (
     <div className="ws-frame">
@@ -196,8 +209,8 @@ export function WorkspaceScreen() {
           </div>
         </main>
         <aside ref={askRef} aria-label="질문" data-area="ask">
-          {peekQ ? <PeekDialog q={peekQ} questions={round.questions} focusToken={peekFocus} onPage={onPagePeek} onClose={closePeek} /> : null}
-          <AskPane round={round} project={w.slug} edition={w.edition} actions={actions} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} />
+          {peekQ ? <PeekDialog q={peekQ} questions={openQs} focusToken={peekFocus} onPage={onPagePeek} onClose={closePeek} /> : null}
+          <AskPane round={round} project={w.slug} edition={w.edition} actions={actions} editBlocked={editBlocked} peekId={peekQ?.id ?? null} onPeek={onPeek} onGoTo={goToQuestion} />
         </aside>
       </div>
     </div>
@@ -209,7 +222,8 @@ export function WorkspaceScreen() {
  * “지금 할 일” 줄: 차례 말(상태 사전 그대로 — “나의 할 일 1건”) · 먼저 할 일 한 줄 · 질문으로 가기.
  */
 function ScreenHead({ ws, round, title, past, onGoToQuestions }: { ws: WorkspaceView; round: RoundView; title: string; past: boolean; onGoToQuestions?: () => void }) {
-  const open = round.questions.filter((q) => !q.sent).length;
+  const asked = round.questions.filter((q) => (q.status ?? "open") === "open");
+  const open = asked.filter((q) => !q.sent).length;
   return (
     <div className="border-b px-4 pt-4 pb-3 tab:px-6">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -217,7 +231,7 @@ function ScreenHead({ ws, round, title, past, onGoToQuestions }: { ws: Workspace
           {title}
         </h1>
         <p className="text-meta text-muted-foreground">
-          {ws.edition}판 · {past ? "지난 라운드" : "현재 진행"} · 질문 {round.questions.length}개{past ? "" : ` · 답할 질문 ${open}개`}
+          {ws.edition}판 · {past ? "지난 라운드" : "현재 진행"} · 질문 {asked.length}개{past ? "" : ` · 답할 질문 ${open}개`}
         </p>
         <AiConnectionChip ai={ws.ai_connection} mode={ws.mode} />
       </div>

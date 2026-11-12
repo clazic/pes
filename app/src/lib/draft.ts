@@ -125,3 +125,26 @@ export function useDraft(key: string): [string, (v: string, options?: DraftSetOp
   );
   return [current.value, set];
 }
+
+/**
+ * 초안 키의 “폼 버전” 칸 — 질문 버전이 처음 이 탭에 보인 때의 폼 버전을 기억해 쓴다(U2b · F04).
+ * 질문을 더하거나 순서를 바꿔 폼 버전이 올라가도 질문 버전이 같으면 같은 초안 키가 되어 쓰던 글이 남는다.
+ * 질문이 새 버전이 되면 키가 바뀌어 옛 초안은 몰래 옮겨 가지 않는다(검토 영역에서 사람이 가져온다).
+ * 기억은 저장소 항목 하나(JSON)에 모은다 — 초안 항목(`pes-draft:`)과 섞이지 않는다. write 가 false 면 기억만 읽는다(없으면 current).
+ */
+const FORMS_KEY = "pes-draft-forms";
+
+export function originForm(parts: { project: string; user: string; edition: number; question: string; version: number }, current: number, write = true): number {
+  const id = `${parts.project}|${parts.user}|${parts.edition}|${parts.question}|${parts.version}`;
+  let map: Record<string, number> = {};
+  try {
+    const parsed: unknown = JSON.parse(readStored(FORMS_KEY) || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) map = parsed as Record<string, number>;
+  } catch {
+    /* 깨진 기억은 없는 것으로 */
+  }
+  const known = map[id];
+  if (typeof known === "number" && Number.isInteger(known) && known > 0) return known;
+  if (write) writeStored(FORMS_KEY, JSON.stringify({ ...map, [id]: current }));
+  return current;
+}
