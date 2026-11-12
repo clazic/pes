@@ -80,7 +80,7 @@ const make = async (s: ReturnType<typeof server>, extra: Partial<Opts> = {}) => 
 
 // ───────────── 서버 쪽 합성 행 ─────────────
 const sList = (o: Record<string, unknown> = {}) => ({ id: "th-1", context_kind: "annotation", state: "open", target_object_id: OBJ, target_version_id: "ver-1", message_count: 2, anchor_status: "exact", summary: "첨언 요약", ...o });
-const sMsg = (o: Record<string, unknown> = {}) => ({ id: "m-1", version_id: "mv-1", body_md: "근거를 더 설명해 주세요.", state: "current", reply_to: null, actor_id: "act-h1", created_at: "2026-11-12T05:00:00Z", ...o });
+const sMsg = (o: Record<string, unknown> = {}) => ({ id: "m-1", version_id: "mv-1", body_md: "근거를 더 설명해 주세요.", state: "published", reply_to: null, actor_id: "act-h1", created_at: "2026-11-12T05:00:00Z", ...o });
 const sAnchor = (status: string, current: Record<string, unknown> = {}, o: Record<string, unknown> = {}) => ({
   id: "anc-1", exact_quote: "정책 대안은 두 가지다.", prefix: "1장 ", suffix: " 첫째는", text_format_version: 1, start_cp: 4, end_cp: 17, target_version_id: "ver-1", status,
   current: { evaluated_version_id: "ver-3", status, start_cp: 4, end_cp: 17, text: "정책 대안은 두 가지다.", candidates: [], confirmed_by_actor_id: null, ...current },

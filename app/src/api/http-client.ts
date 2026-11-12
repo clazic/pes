@@ -72,7 +72,8 @@ export type HttpClient = PesClient;
 function touchedBy(type: string): string[] {
   const touched = ["workspace"];
   if (/^(project\.|edition\.|policy\.changed$)/.test(type)) touched.push("projects");
-  if (/^(round|question|answer|result|stage|run|input)\./.test(type)) touched.push("round:*");
+  // 첨언 · 답글 · 해결 · 후속(U4a: annotation.created/reanchored · thread.replied/resolved · followup.proposed/applied)도 라운드 읽기 아래(첨언 · 의견 목록)를 다시 읽게 한다
+  if (/^(round|question|answer|result|stage|run|input|annotation|thread|followup)\./.test(type)) touched.push("round:*");
   return touched;
 }
 
@@ -572,8 +573,9 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     // current 가 없는 서버라면 처음 판정(anchor.status)과 만든 위치를 그대로 쓴다 — 새로 판정하지 않는다
     const cur = isRecord(a.current) ? a.current : { evaluated_version_id: target_version_id, status: a.status, start_cp, end_cp, text: a.exact_quote, candidates: [], confirmed_by_actor_id: null };
     const status: AnchorStatus = typeof cur.status === "string" && STATUSES.includes(cur.status) ? (cur.status as AnchorStatus) : "lost";
+    // 서버 메시지 상태(message_versions.state): published · edited 는 지금 본문, withdrawn(거둔 메시지)은 본문을 보이지 않는다
     const messages = (Array.isArray(d.messages) ? d.messages : []).flatMap((m): AnnotationThreadView["messages"] =>
-      isRecord(m) && typeof m.id === "string" && typeof m.body_md === "string" && (m.state === undefined || m.state === "current")
+      isRecord(m) && typeof m.id === "string" && typeof m.body_md === "string" && (m.state === undefined || m.state === "published" || m.state === "edited")
         ? [{ message_id: m.id, body_md: m.body_md, at: text(m.created_at), actor_id: text(m.actor_id), by: null }]
         : [],
     );
