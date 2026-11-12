@@ -690,8 +690,17 @@ function compare(res: Awaited<ReturnType<typeof call>>, expected: FixtureCase["r
   } else {
     assert.equal(body.error, undefined, `no error expected: ${where}`);
     same_shape(body.data, expected.body.data, "data");
-    const keys = Object.keys(body).filter((k) => k !== "replayed").sort(); // `replayed` (POST only) is optional in the examples
-    assert.deepEqual(keys, Object.keys(expected.body).sort(), `envelope keys (${method})`);
+    // `replayed` (POST only) is optional in the examples. SEL-98: a 201 write also carries the sibling `receipt` {receipt_no, tx_id, committed_at}
+    // (request-level, not part of `data`); examples may omit it, but a 201 POST body must have it and an example that names it must match its shape.
+    const optional = ["replayed", "receipt"];
+    const keys = Object.keys(body).filter((k) => !optional.includes(k)).sort();
+    assert.deepEqual(keys, Object.keys(expected.body).filter((k) => !optional.includes(k)).sort(), `envelope keys (${method})`);
+    if (res.status === 201 && method === "POST") {
+      assert.ok(body.receipt && typeof body.receipt === "object", `a 201 write carries receipt (${method})`);
+      assert.deepEqual(Object.keys(body.receipt).sort(), ["committed_at", "receipt_no", "tx_id"], "receipt keys");
+    }
+    if ("receipt" in expected.body) same_shape(body.receipt, (expected.body as Record<string, unknown>).receipt, "receipt");
+    else if (res.status !== 201 || method !== "POST") assert.equal("receipt" in body, false, `no receipt outside a 201 write (${method})`);
   }
 }
 
