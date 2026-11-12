@@ -248,7 +248,8 @@ export interface ShowIf {
 /** 옛 버전의 답 — 보존할 뿐 새 버전으로 승계하지 않는다 */
 export interface PreviousAnswer {
   answer: string;
-  version: number;
+  /** 그 답이 가리킨 질문 버전 번호. 서버가 주지 않으면 없다(버전을 지어내지 않는다) */
+  version?: number;
   receipt_no: string;
   committed_at: IsoTime;
 }

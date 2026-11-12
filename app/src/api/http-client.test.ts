@@ -11,8 +11,8 @@
 //       모르는 slug 는 요청 없이 null(지어내지 않음). 서버 404 not_found 도 null. 판(edition)이 다르면 null(자료를 지어내지 않는다).
 //       그 밖의 거절(401·403·410·500 …)과 네트워크 실패는 던진다: 거절은 PesApiError(`.body` 가 ApiError 봉투), 네트워크 실패는 그대로 reject — null 로 삼키지 않는다.
 //   - listProjects(): projects 의 각 slug 에 대해 workspace 를 읽어 {slug, edition, current} 를 돌려준다.
-//   - getRound(slug, edition, stage, round): 라운드 읽기 경로는 계획에 없다(types.ts READS.round "미정"). 해석: 작업 공간 읽기에 그 라운드가 있으면
-//       {stage, round_id, state} 가 맞는 RoundView(questions·alerts 는 배열, result 는 null 또는 객체) 를, 없으면 null. "start" = round_id null 자리.
+//   - getRound(slug, edition, stage, round): (SEL-98 로 옮김) 서버 라운드 경로 GET P/stages/{stage}/rounds/{start|번호} 를 먼저 읽는다(매핑은 sel98-http.test.ts).
+//       그 경로가 404 이면(옛 서버) 작업 공간 읽기로 폴백한다: 작업 공간에 그 라운드가 있으면 {stage, round_id, state} 가 맞는 빈 RoundView(questions·alerts 는 배열, result 는 null), 없으면 null. "start" = round_id null 자리.
 //   - acknowledgeAlert: 멱등 키 없으면 요청 없이 PesApiError(invalid_payload). 키가 있으면 POST `/api/v1/projects/{id}/…`, 헤더 `idempotency-key` = 그 키,
 //       본문 JSON, 응답 봉투의 CommandResult 를 그대로 돌려준다. (경로 이름은 계획에 "(미정)" — 시험은 접두사만 본다.)
 import { describe, expect, it, vi } from "vitest";
@@ -136,6 +136,28 @@ describe("HTTP 클라이언트 — 읽기", () => {
     expect(await client.getRound(SLUG, 1, "research", "0")).toBeNull();
     expect(await client.getRound(SLUG, 1, "write", "1")).toBeNull();
     expect(await client.getRound("no-such-project", 1, "research", "2")).toBeNull();
+  });
+});
+
+describe("HTTP 클라이언트 — getRound 라운드 경로 우선 · workspace 폴백 (SEL-98)", () => {
+  const roundPath = (rest: string) => `/api/v1/projects/${ID}/stages/research/rounds/${rest}`;
+  it("라운드 경로가 200 이면 그 자료(질문 포함)를 쓰고, 경로를 먼저 읽는다", async () => {
+    const { impl, seen } = fakeFetch((s) =>
+      s.url.pathname === roundPath("2")
+        ? { status: 200, body: ok({ stage: "research", round_id: 2, server_round_id: "rnd-2", state: "current", set_id: "qset-9", form_version: 3, questions: [] }) }
+        : workspaceHandler(s),
+    );
+    const client = (await load())({ session: SESSION, projects: { [SLUG]: ID }, fetch: impl });
+    const r = await client.getRound(SLUG, 1, "research", "2");
+    expect(r).toMatchObject({ stage: "research", round_id: 2, state: "current", set_id: "qset-9", form_version: 3 });
+    expect(seen.some((x) => x.url.pathname === roundPath("2") && x.method === "GET" && x.body === null)).toBe(true);
+  });
+
+  it("라운드 경로가 404 이면 작업 공간에 자리가 있을 때만 빈 뷰(옛 서버), 자리가 없으면 null", async () => {
+    const { impl } = fakeFetch(workspaceHandler); // 라운드 경로는 404
+    const client = (await load())({ session: SESSION, projects: { [SLUG]: ID }, fetch: impl });
+    expect(await client.getRound(SLUG, 1, "research", "2")).toMatchObject({ stage: "research", round_id: 2, questions: [] });
+    expect(await client.getRound(SLUG, 1, "research", "7")).toBeNull();
   });
 });
 

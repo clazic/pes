@@ -221,9 +221,21 @@ describe("질문 쓰기 매핑", () => {
     expect(s.seen).toHaveLength(0);
   });
 
-  it("addQuestion: 번호 라운드는 서버 round_id 를 모른다 → NotConnectedError, 쓰기 0", async () => {
+  it("addQuestion: 번호 라운드는 라운드 읽기의 server_round_id 를 round_id 로 보낸다 (SEL-98 — 예전: 모르니 NotConnectedError)", async () => {
+    const s = server({
+      "GET /context": { status: 200, body: CONTEXT },
+      "GET /stages/research/rounds/2": { status: 200, body: ok({ stage: "research", round_id: 2, server_round_id: "rnd-2", state: "current", set_id: "qset-9", form_version: 4, questions: [] }) },
+      "POST /questions": { status: 201, body: ok({ question_set_id: "qset-2", question: { id: "qst-9", version_id: "qvr-9", version_no: "1", state: "open" } }, { receipt: { receipt_no: "0200", tx_id: "tx-77", committed_at: "2026-11-12T09:30:00+09:00" } }) },
+    });
+    const out = await (await make(s)).addQuestion(SLUG, ED, "research", "2", base, "k-n2");
+    expect(s.writes()).toHaveLength(1);
+    expect(s.writes()[0]!.json).toMatchObject({ stage_id: "stg-research", round_id: "rnd-2", direction: "agent_to_human" });
+    expect(out.data).toEqual({ question_id: "qst-9", version: 1 });
+  });
+
+  it("addQuestion: 없는 번호 라운드(서버 404)는 쓰기 0 으로 거절한다 — round_id 를 지어내지 않는다", async () => {
     const s = server({ "GET /context": { status: 200, body: CONTEXT } });
-    await expect((await make(s)).addQuestion(SLUG, ED, "research", "2", base, "k")).rejects.toBeInstanceOf(NotConnectedError);
+    await expect((await make(s)).addQuestion(SLUG, ED, "research", "2", base, "k")).rejects.toBeInstanceOf(Error);
     expect(s.writes()).toHaveLength(0);
   });
 
@@ -303,14 +315,29 @@ describe("질문 쓰기 매핑", () => {
   });
 });
 
-describe("U2a 에 길이 없는 것은 정직하게 거절한다 (요청 0)", () => {
-  it("reorderQuestions · getQuestionVersions · getComments → NotConnectedError, 네트워크 0", async () => {
+describe("서버에 길이 없는 것은 정직하게 거절하고, 길이 생긴 것은 정해진 경로로 보낸다 (SEL-98)", () => {
+  it("getQuestionVersions 는 아직 길이 없다 → NotConnectedError, 네트워크 0 (남은 정직 거절)", async () => {
     const s = server({});
-    const c = await make(s);
-    await expect(c.reorderQuestions(SLUG, ED, "research", "start", ["a", "b"], "k")).rejects.toBeInstanceOf(NotConnectedError);
-    await expect(c.getQuestionVersions(SLUG, ED, "qst-1")).rejects.toBeInstanceOf(NotConnectedError);
-    await expect(c.getComments(SLUG, ED, "research", "start")).rejects.toBeInstanceOf(NotConnectedError);
+    await expect((await make(s)).getQuestionVersions(SLUG, ED, "qst-1")).rejects.toBeInstanceOf(NotConnectedError);
     expect(s.seen).toHaveLength(0);
+  });
+
+  it("reorderQuestions: 라운드 읽기 → POST P/question-sets/{set_id}/order (예전: NotConnectedError)", async () => {
+    const s = server({
+      "GET /stages/research/rounds/start": { status: 200, body: ok({ stage: "research", round_id: null, server_round_id: null, state: "current", set_id: "qset-1", form_version: 1, questions: [] }) },
+      "POST /question-sets/qset-1/order": { status: 201, body: ok({ set: { id: "qset-2", version_no: 2, form_key: "main" }, members: [] }, { receipt: { receipt_no: "0201", tx_id: "tx-78", committed_at: "2026-11-12T09:31:00+09:00" } }) },
+    });
+    const out = await (await make(s)).reorderQuestions(SLUG, ED, "research", "start", ["b", "a"], "k-ord");
+    expect(s.writes()).toHaveLength(1);
+    expect(s.writes()[0]!.json).toMatchObject({ question_ids: ["b", "a"] });
+    expect((out as { data: unknown }).data).toEqual({ form_version: 2 });
+  });
+
+  it("getComments: GET P/stages/{stage}/rounds/{round}/threads (예전: NotConnectedError)", async () => {
+    const s = server({ "GET /stages/research/rounds/start/threads": { status: 200, body: ok({ threads: [] }) } });
+    expect(await (await make(s)).getComments(SLUG, ED, "research", "start")).toEqual([]);
+    expect(s.seen).toHaveLength(1);
+    expect(s.writes()).toHaveLength(0);
   });
 });
 
@@ -334,7 +361,8 @@ describe("답 제출 매핑", () => {
   };
 
   it("묶음: POST P/submissions, set_id · mode · 항목(value 없는 의견만 항목은 value 키 없이)이 U2a 모양으로 간다", async () => {
-    const s = server({ "POST /submissions": { status: 201, body: ok(submitted) }, "GET /requests/k-sub": { status: 200, body: requestsRead("k-sub", "tx-90") } });
+    // 새 계약(SEL-98): 쓰기 201 본문의 receipt 를 그대로 쓰므로 GET P/requests/{key} 는 부르지 않는다(길을 적지 않았다)
+    const s = server({ "POST /submissions": { status: 201, body: ok(submitted, { receipt: { receipt_no: "0090", tx_id: "tx-90", committed_at: "2026-11-12T09:40:00+09:00" } }) } });
     const out = await (await make(s)).submitAnswers(SLUG, ED, "research", "start", body(), "k-sub");
     const w = s.writes();
     expect(w).toHaveLength(1);
@@ -349,7 +377,8 @@ describe("답 제출 매핑", () => {
     expect(JSON.stringify(sent)).not.toContain("question_version\"");
     expect(sent).not.toHaveProperty("form_version");
     expect(out.data).toEqual({ submission_id: "sub-1", answers: [{ question_id: "qst-1", state: "submitted" }], form_complete: false, missing_required: ["qst-5"] });
-    expect(out.receipt).toMatchObject({ tx_id: "tx-90", idempotency_key: "k-sub", replayed: false });
+    expect(out.receipt).toMatchObject({ receipt_no: "0090", tx_id: "tx-90", committed_at: "2026-11-12T09:40:00+09:00", idempotency_key: "k-sub", replayed: false });
+    expect(s.seen.filter((x) => x.method === "GET")).toHaveLength(0);
   });
 
   it("개별: mode single 로 항목 하나, form_complete=false 를 그대로 돌려준다", async () => {

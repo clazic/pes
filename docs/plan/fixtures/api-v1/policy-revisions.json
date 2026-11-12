@@ -37,6 +37,11 @@
             "allow_opencode_go": false,
             "changed_by_user_id": "usr_01J9Z3K7QQ"
           }
+        },
+        "receipt": {
+          "receipt_no": "45",
+          "tx_id": "txn_01J9Z3K7R05",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

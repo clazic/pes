@@ -18,7 +18,7 @@ FIXTURES = HERE / "api-v1"
 API_DOC = HERE.parent / "stage-1-api.md"
 
 FORMAT_VERSION = "1.0"
-DECIMAL_KEYS = {"rev", "control_rev", "fence", "event_seq"}
+DECIMAL_KEYS = {"rev", "control_rev", "fence", "event_seq", "receipt_no"}
 CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DECIMAL_RE = re.compile(r"^[0-9]+$")
 HANGUL_RE = re.compile(r"[가-힣]")
@@ -145,6 +145,13 @@ SPECS = [
         "method": "POST",
         "path": "/api/v1/projects/{project_id}/questions/{question_id}/merge",
         "doc_fragments": ["P/questions/{q}/merge"],
+    },
+    {
+        "file": "question-set-order.json",
+        "operation": "question_sets.order",
+        "method": "POST",
+        "path": "/api/v1/projects/{project_id}/question-sets/{set}/order",
+        "doc_fragments": ["POST P/question-sets/{set}/order"],
     },
     {
         "file": "submissions.json",

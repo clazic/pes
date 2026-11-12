@@ -53,13 +53,23 @@ jobs:
         if: matrix.shard == 1
         run: npm run check:ddl
 
+      # SEL-103: 시험은 임시 HOME 에서 시작해야 한다 — 실제 계정 홈(러너의 홈 포함)에서 시작하면 홈 가드가 아무것도 훑기 전에 --import 진입점이 바로 실패시킨다.
       - name: Run tests (shard ${{ matrix.shard }}/8)
-        run: node --test --test-shard=${{ matrix.shard }}/8 "tests/**/*.test.ts"
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
+        run: |
+          mkdir -p "$HOME"
+          node --test --import ./tests/helpers/require_temp_home.ts --test-shard=${{ matrix.shard }}/8 "tests/**/*.test.ts"
 
   browser:
     name: ${{ matrix.os }} / Playwright (Chromium)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    # SEL-103: 시험 단계는 임시 HOME 에서 돈다 — 브라우저는 HOME 밖에 설치하고 거기서 찾는다.
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
     strategy:
       fail-fast: false
       matrix:
@@ -92,8 +102,15 @@ jobs:
           npm ci
           npm run build
 
+      # SEL-103: 실제 계정 홈(러너의 홈 포함)에서 시작하면 playwright.config.ts 가 파일을 열기 전에 바로 실패시킨다 — 임시 HOME 으로 돈다.
       - name: Run browser smoke
-        run: npx playwright test
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/pes-test-home
+          USERPROFILE: ${{ runner.temp }}/pes-test-home
+        run: |
+          mkdir -p "$HOME"
+          npx playwright test
 
   # 설치·업그레이드 (SEL-74): 한 줄 설치 스크립트를 임시 HOME 에서 실제로 돌린다 — 네트워크 없이(PES_INSTALL_MIRROR = 이 체크아웃의 사본,
   # PES_SKIP_KEYS=1, PES_SKIP_TOOLS=1), 바깥 설치기(claude·curl)는 가짜 명령으로 바꾼다.

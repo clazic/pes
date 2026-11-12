@@ -26,19 +26,22 @@ TypeScript 코어·시험(Node 26, `node:sqlite`). `npm run check:ddl`은 DDL �
 macOS / Linux:
 
 ```sh
-npm ci && npm test && npm run typecheck && npm run check:ddl
+npm ci
+test_home="$(mktemp -d)"
+HOME="$test_home" USERPROFILE="$test_home" npm test && npm run typecheck && npm run check:ddl
 ```
 
 Windows (PowerShell):
 
 ```powershell
 npm ci
+$env:HOME = $env:USERPROFILE = Join-Path $env:TEMP ("pes-test-" + [guid]::NewGuid())
 npm test
 npm run typecheck
 npm run check:ddl
 ```
 
-테스트 격리 원리와 한계는 [tests/README.md](tests/README.md)를 본다.
+**`npm test` 는 임시 `HOME`·`USERPROFILE` 에서 시작한다** — 실제 계정 홈에서 시작하면 `--import` 진입점이 바로 실패시킨다(SEL-103). 테스트 격리 원리와 한계는 [tests/README.md](tests/README.md)를 본다.
 
 ## 금지
 

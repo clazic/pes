@@ -37,6 +37,11 @@
           "actor_id": "act_01J9Z3K7Q7",
           "status": "queued",
           "mode": "A"
+        },
+        "receipt": {
+          "receipt_no": "53",
+          "tx_id": "txn_01J9Z3K7R13",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }
