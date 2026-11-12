@@ -136,7 +136,7 @@ export interface ArtifactFields {
   metadata: Record<string, unknown>;
 }
 
-interface SourceFacts {
+export interface SourceFacts {
   title: string;
   url: string | null;
   locator: Record<string, unknown>;
@@ -396,7 +396,7 @@ export function artifact_digest_fields(fields: ArtifactFields): Record<string, u
   };
 }
 
-function source_digest_fields(facts: SourceFacts): Record<string, unknown> {
+export function source_digest_fields(facts: SourceFacts): Record<string, unknown> {
   return {
     title: facts.title,
     url: facts.url,
@@ -578,7 +578,7 @@ export function write_artifact_version(
   }
 }
 
-function write_source_version(
+export function write_source_version(
   runtime: CommandRuntime,
   input: {
     project_id: string;

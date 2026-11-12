@@ -230,6 +230,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `GET P/changes` | E/H | PR14 | PR4 | 커서 epoch·tx 묶음 |
 | `GET P/workspace` | E/H | 3단계 U1b(SEL-82) | U1b 읽기 모델 | 앱 작업 공간 읽기(현재 단계·라운드·차례·권한별 가능 동작·기록 개수). 읽기 전용·새 표 없음, `context:read` |
 | `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | E/H | PR13 | PR9 | 예약·업로드 완료·ready·hash·Go OFF 정책 검사 읽기 |
+| `GET P/files/{b}/preview`, `POST P/materials`, `GET P/materials`, `POST P/file-policies/{fp}/ai-access` | E/H (스위치는 H만) | 3단계 SEL-115 | PR9 | 내 자료 올리기(`file.upload`)·목록·파일별 AI 참조 스위치(`file.ai_access_set`)·content 와 같은 규칙의 preview — 자세한 규칙은 stage-1-api.md 6절 「내 자료」 행 |
 | `POST P/stages/{s}/rounds`·`POST P/rounds/{r}/seal` | H/E | PR14 | PR6 | 라운드 시작·봉인, 승인과 분리 |
 | `POST P/stages/{s}/approve`·`/reopen` | H | PR14 | PR6 | 사람만, 에이전트 거부 |
 | `POST P/policies/opencode-go/revisions` | H | PR14 | PR10 | 사람만, 정책 이력·재생 전 검사 |
@@ -242,6 +243,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `POST P/assumptions`·`GET P/assumptions` | H/E(제안), H(판단) | 3단계 U3a(SEL-93) | `assumption.propose`·`assumption.assess` | 제안(state `proposed`, `needs_review`)은 소유자·토큰, `confirmed`·`rejected`·`revised` 판단은 소유자 세션만(토큰 403 `human_required`). 판단은 새 버전, 원문 보존. 읽기는 객체마다 현재 버전 한 줄 |
 | `POST P/decisions`·`GET P/decisions` | H/E(제안), H(채택·대체·폐기) | 3단계 U3a(SEL-93) | `decision.propose`·`decision.adopt`·`decision.supersede`·`decision.revoke` | 제안은 채택이 아니다. 채택·대체·폐기는 사람만, 전이표 `proposed→adopted→superseded\|revoked`, 대체는 새 결정+옛 결정의 새 버전, 대체 대상이 adopted 가 아니면 409 `supersedes_conflict` |
 | `POST P/reflections`·`GET P/reflections?round_id=` | H/E | 3단계 U3a(SEL-93) | `reflection.create` | applied·partial 은 의미 증거(`evidence_tx_id`가 결과 버전을 만든 tx, 후속은 applied)가 있어야 한다: 없으면 422 `evidence_required`, 안 맞으면 422 `validation_failed`. 빈 `entries` 는 "0건 제출"이고 "미제출"과 다르다 |
+| `POST P/references`·`GET P/references`·`GET P/references/{ref}`·`POST P/references/{ref}/refresh`·`POST P/references/{ref}/detach` | H(붙임·갱신·떼기), H/E(읽기) | 3단계 REF1a(SEL-113) | `reference.attach`·`reference.refresh`·`reference.detach`·`reference.source_gone`(원본 소유자, HTTP 경로 없음) | 원본 프로젝트의 스냅숏 하나에 고정한 읽기 전용 참조(새 표 없음, `project_references`). 두 프로젝트 모두 구성원이어야 붙인다. 읽기는 권한·Go(엄격한 쪽 우선)·원본 없음을 한 함수로 판정하고 AI 호출자에게는 막힌 본문을 `null` 로 준다. 자세한 값은 `stage-1-api.md` 6절 |
 | export | 미래 | — | — | **capabilities 미지원**, 가짜 성공 없음 |
 
 - **2단계 필수 경로는 위 표가 닫힌 목록**이다. run 시작·wait·정확한 버전 읽기·라운드/정책 읽기와 **파일 HTTP(예약·업로드 완료·정책 검사 읽기)는 PR13**이 맡고, 파일 저장 코어는 PR9다. release·202 operation 조회도 PR14에 포함한다.
