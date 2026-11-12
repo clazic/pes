@@ -389,7 +389,10 @@ export function createU3Client(data: U3Data, workspacePatch?: (w: unknown) => un
         old.state = "superseded";
         old.superseded_by = newId;
         old.version_id = `${id}-v${seq + 1}`;
-        store.decisions.push(d(newId, { statement: input.statement, state: "adopted", scope: old.scope, decided_by: HUMAN, rationale: input.rationale, supersedes: { object_id: id, statement: old.statement } }));
+        const created = d(newId, { statement: input.statement, state: "adopted", scope: old.scope, decided_by: HUMAN, rationale: input.rationale, supersedes: { object_id: id, statement: old.statement } });
+        // 영수증의 version_id(result() 가 ++seq 로 만든다)와 새 저장 행의 version_id 를 맞춘다
+        created.version_id = `${newId}-v${seq + 1}`;
+        store.decisions.push(created);
         return newId;
       }),
     revokeDecision: (_s, _e, id, input, key) =>

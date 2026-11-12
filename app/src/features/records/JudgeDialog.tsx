@@ -56,6 +56,8 @@ export function JudgeDialog({ spec, slug, edition, opener, draft, onClose, onDon
   const [statement, setStatement] = React.useState(draft?.statement ?? (action === "revise" ? spec.row.statement : ""));
   /** 이어 쓰는 초안인데 그 사이 원문이 바뀌었다 — 바뀐 원문과 견주어 보라고 알린다 */
   const sourceChanged = !!draft && draft.baseStatement !== spec.row.statement;
+  /** 칸의 최신 값 — 다시 읽는 동안 이어 쓴 글도 복원 초안에 담으려고 클릭 당시 값 대신 이것을 읽는다 */
+  const latest = React.useRef({ rationale, statement });
   const [invalid, setInvalid] = React.useState<{ rationale?: string; statement?: string }>({});
   const attempt = React.useRef<{ key: string; fingerprint: string } | null>(null);
   const done = React.useRef(false);
@@ -106,7 +108,7 @@ export function JudgeDialog({ spec, slug, edition, opener, draft, onClose, onDon
     }
     done.current = true; // 닫힐 때 초점은 부모가 알림 줄로 옮긴다
     // 쓰던 글은 부모가 들고 있다가 다시 열 때 돌려준다
-    onStale({ rationale, statement, baseStatement: spec.row.statement });
+    onStale({ rationale: latest.current.rationale, statement: latest.current.statement, baseStatement: spec.row.statement });
   };
 
   const submit = (e: React.SyntheticEvent) => {
@@ -164,6 +166,7 @@ export function JudgeDialog({ spec, slug, edition, opener, draft, onClose, onDon
                   rows={3}
                   value={statement}
                   onChange={(e) => {
+                    latest.current.statement = e.target.value;
                     setStatement(e.target.value);
                     setInvalid((v) => ({ ...v, statement: undefined }));
                   }}
@@ -191,6 +194,7 @@ export function JudgeDialog({ spec, slug, edition, opener, draft, onClose, onDon
                 rows={3}
                 value={rationale}
                 onChange={(e) => {
+                  latest.current.rationale = e.target.value;
                   setRationale(e.target.value);
                   setInvalid((v) => ({ ...v, rationale: undefined }));
                 }}
