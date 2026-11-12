@@ -1314,7 +1314,7 @@ paths:
         write nothing (no row, blob, policy, receipt or event). `extract_timeout` and `extract_error` also say something about the moment, not the file: each such attempt is
         recorded (row, receipt, event) but does not answer the next request for the same file - it is tried again (`changed: true`). `too_large`, the damaged-file reasons,
         `extracted`, `partial` and `unsupported` are final. To try again send a NEW Idempotency-Key: the same key replays the first answer (`replayed: true`), also a recorded failure.
-        While an extraction runs, the same server answers no other request (at most 15 s per extraction).
+        While an extraction runs, the same server answers no other request (usually at most about 16 s per extraction; about 21 s in the rare case the supervisor thread cannot answer).
         Data `{extraction_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status: extracted|partial|unsupported|failed,
         reason, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings:[{code,message}], changed}`.
         The text blob has its OWN policy, created `allow` rev 1 (never inherited from the source). AI reads it only when the source policy AND the text policy both allow

@@ -41,7 +41,7 @@ import {
   write_source_version,
   type SourceFacts,
 } from "./content.ts";
-import { access_state_of_blob, access_state_of_policy, material_object_denied } from "./file_access.ts";
+import { access_state_of_blob, access_state_of_policy, file_ai_denied, material_object_denied } from "./file_access.ts";
 import {
   EXTRACTOR,
   EXTRACTOR_VERSION,
@@ -586,11 +586,12 @@ function run_upload(runtime: CommandRuntime): CommandResult {
   const blob = read_blob(runtime, scope.project_id, blob_id);
   if (blob === undefined) throw new ApiError("not_found", "blob not found");
   // SEL-115 review 2 N1: a caller that is not human goes through the same decision as every read exit (file_ai_denied).
-  // A closed blob (or a material object that carries one) answers exactly like an unknown one — before any receipt or write —
-  // so a reserved duplicate (same bytes → blob_id) cannot be turned into the file's name, policy id or deny state.
+  // A closed blob (its own policy, or the policy of a closed source it was extracted from — SEL-116 final M1) or a material
+  // object that carries one answers exactly like an unknown one — before any receipt or write — so a reserved duplicate
+  // (same bytes → blob_id, e.g. a guess of a closed file's extracted text) cannot be turned into the file's name, policy id or deny state.
   const human = is_human_actor(runtime);
   if (!human) {
-    const closed = access_state_of_blob(runtime.db, scope.project_id, blob_id)?.effective === "deny";
+    const closed = file_ai_denied(runtime.db, scope.project_id, blob_id);
     if (closed) throw new ApiError("not_found", "blob not found");
     if (target_object_id !== null && material_object_denied(runtime.db, scope.project_id, target_object_id)) {
       throw new ApiError("not_found", "object not found");

@@ -16,7 +16,7 @@
 import { ApiError } from "../errors.ts";
 import { require_safe_id } from "../files.ts";
 import { EXTRACTOR, EXTRACTOR_VERSION, TRANSIENT_REASONS, type ExtractWarning } from "../file_extract.ts";
-import { access_state_of_blob, file_ai_denied, material_object_denied } from "./file_access.ts";
+import { file_ai_denied, material_object_denied } from "./file_access.ts";
 import type { CommandRuntime } from "./shared.ts";
 
 export type ExtractionApiStatus = "extracted" | "partial" | "unsupported" | "failed";
@@ -165,9 +165,12 @@ export function find_target(
   );
 }
 
-/** True when a caller that is not the human owner must not touch this file (closed blob or a material object that carries one). */
+/**
+ * True when a caller that is not the human owner must not touch this file: the blob is closed to AI (file_ai_denied — its own policy,
+ * or the policy of a closed source it was extracted from), or a material object that carries one is.
+ */
 export function closed_to_ai(db: CommandRuntime["db"], project_id: string, blob_id: string, object_id: string): boolean {
-  return access_state_of_blob(db, project_id, blob_id)?.effective === "deny" || material_object_denied(db, project_id, object_id);
+  return file_ai_denied(db, project_id, blob_id) || material_object_denied(db, project_id, object_id);
 }
 
 /**
