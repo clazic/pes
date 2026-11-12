@@ -202,8 +202,27 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       return result(w, kind === "merge" ? { ...base, merged_into: text(question.merged_into_question_id) } : base);
     });
 
+  /**
+   * 가정 · 결정 · 반영(U3b) — 서버 계약은 SEL-93(U3a)이 정한다. 그 전에는 경로를 지어내지 않고 not_supported 로 거절한다(화면은 “아직 서버에서 읽을 수 없음”을 그대로 보인다).
+   * 서버 요청을 보내지 않는다 — 경로가 생기면 이 자리에서 http 매핑을 채운다.
+   */
+  const notSupported = (what: string): Promise<never> =>
+    Promise.reject(
+      new PesApiError({
+        format_version: FORMAT_VERSION,
+        error: { code: "not_supported", message: `${what}은(는) 서버가 아직 지원하지 않습니다.`, retryable: false, next_action: "reread_context" },
+        request_id: "client",
+      }),
+    );
   return {
     capabilities: { questionTools: true },
+    getAssumptions: () => notSupported("가정 읽기"),
+    getDecisions: () => notSupported("결정 읽기"),
+    getReflections: () => notSupported("반영 내역 읽기"),
+    assessAssumption: () => notSupported("가정 판단 기록"),
+    adoptDecision: () => notSupported("결정 채택 기록"),
+    supersedeDecision: () => notSupported("결정 대체 기록"),
+    revokeDecision: () => notSupported("결정 철회 기록"),
     getQuestionVersions: notConnected("질문 버전 기록 읽기"),
     reorderQuestions: notConnected("질문 순서 바꾸기"),
     getComments: notConnected("의견 읽기"),

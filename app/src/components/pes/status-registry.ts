@@ -75,6 +75,30 @@ export const STATUS = {
     cancel_requested: d("취소 시도", "tri", "warn", "취소를 요청했지만 끝난 것은 아님"),
     cancelled: d("취소됨", "hsquare", "off", "취소가 끝남 — 이미 읽힌 자료의 회수를 뜻하지 않는다"),
   },
+  // 가정 · 결정 · 반영(U3b · F06): 사람 판단이 있어야 확인 · 채택이다. AI 제안(판단 전)은 확인처럼 보이지 않는다
+  assumption: {
+    proposed: d("판단 전", "dotring", "unk", "assumptions.state = proposed — AI·사람이 남긴 제안, 아직 사람이 판단하지 않음"),
+    confirmed: d("확인", "circle", "ok", "confirmed + 사람 판단자"),
+    rejected: d("틀림", "hsquare", "off", "rejected — 기록은 남음"),
+    revised: d("고침", "tri", "warn", "revised — 원문 보존 + 판단자 + 근거"),
+    review: d("재확인 필요", "tri", "warn", "needs_review = true — 새 판 복사본 등, 자동 확인처럼 보이지 않음"),
+    no_human: d("사람 판단 없음", "dotring", "unk", "confirmed 인데 판단자가 없거나 AI — 확인으로 보이지 않음"),
+  },
+  decision: {
+    proposed: d("제안", "dotring", "unk", "decisions.state = proposed"),
+    adopted: d("채택", "circle", "ok", "adopted + 사람 결정자"),
+    superseded: d("대체됨", "dash", "off", "superseded — 새 결정이 이어받음, 문장은 그대로"),
+    revoked: d("철회", "hsquare", "off", "revoked — 기록은 남음"),
+    no_human: d("사람 판단 없음", "dotring", "unk", "adopted 인데 결정자가 없거나 AI — 채택으로 보이지 않음"),
+  },
+  // 반영 내역: 적용 · 부분은 의미 증거(적용 tx + 결과 버전 또는 적용된 후속)가 있을 때만. 모자라면 증거 없음
+  reflection: {
+    applied: d("적용", "circle", "ok", "적용 tx + 결과 버전·적용된 후속의 증거"),
+    partial: d("부분", "tri", "warn", "적용 tx + 적용된 후속의 증거"),
+    deferred: d("유예", "pause", "off", "reflection_entries.disposition = deferred"),
+    rejected: d("거절", "hsquare", "off", "rejected"),
+    missing: d("증거 없음", "square", "bad", "applied·partial 인데 증거가 모자람 — 성공으로 보이지 않음"),
+  },
 } as const satisfies Record<string, Record<string, StatusDef>>;
 
 export type StatusDomain = keyof typeof STATUS;

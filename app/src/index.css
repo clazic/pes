@@ -370,6 +370,13 @@
   .ws-grid {
     display: block;
   }
+  /* 가로 스크롤 표는 찍을 때 잘리지 않게 — 종이 폭에 맞춰 줄바꿈 */
+  [data-table-scroll] {
+    overflow: visible !important;
+  }
+  [data-table-scroll] table {
+    min-width: 0 !important;
+  }
   html,
   body {
     background: #fff;

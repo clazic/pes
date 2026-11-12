@@ -1,5 +1,5 @@
-import { ROUNDS, WORKSPACE } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type CommentThreadView, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView } from "./types";
+import { DEMO_HUMAN, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
@@ -7,6 +7,7 @@ import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type Cha
  * 앱(루트 레이아웃)마다 하나씩 만들어 상태(오류 확인 · 멱등 기록)가 시험 사이에 새지 않는다.
  * 돌려주는 값은 복사본이다(화면이 고쳐도 원본이 바뀌지 않음).
  * workspace 를 주면 그 작업 공간을 쓴다(앱은 U1d 칸이 있는 DEMO_WORKSPACE, 계약 시험은 WORKSPACE).
+ * 가정 · 결정 · 반영(U3b)은 u3 자료를 읽고, 사람 판단 쓰기는 서버처럼 행을 바꾼다(다시 읽으면 반영 · 같은 멱등 키는 처음 영수증을 replayed 로).
  */
 
 /** 오류 문장 — 2단계 코어(scripts/pes_core/api_support.ts)의 문장·다음 할 일과 같다 */
@@ -15,13 +16,25 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   invalid_payload: { message: "요청 내용이 올바르지 않습니다.", next_action: "fix_request" },
   idempotency_key_reuse: { message: "같은 Idempotency-Key로 다른 요청을 보냈습니다.", next_action: "use_new_key" },
   conflict: { message: "현재 상태에서는 처리할 수 없는 요청입니다.", next_action: "reread_context" },
+  rev_conflict: { message: "기준 버전이 현재와 다릅니다.", next_action: "reread_context" },
+  not_supported: { message: "아직 서버에서 지원하지 않습니다.", next_action: "reread_context" },
   question_version_changed: { message: "답변 대상 질문 버전이 바뀌었습니다. 새 버전을 확인해 주세요.", next_action: "reread_question" },
   cursor_expired: { message: "변경 기록이 너무 오래되어 이어 받을 수 없습니다.", next_action: "reread_context" },
   cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
 };
 
-export function createFakeClient(workspace: WorkspaceView = WORKSPACE): PesClient {
+export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U3Data = demoU3()): PesClient {
   const rounds: RoundView[] = structuredClone(ROUNDS);
+  const u3 = structuredClone(u3Data);
+  /** 사람 판단 쓰기의 멱등 기록 */
+  const judged = new Map<string, { request: string; result: JudgeResult }>();
+  /** 판단으로 바뀐 행의 새 version_id 번호 — 낙관적 확인(base_version_id)이 새 버전을 알아보게 한다 */
+  let versionSeq = 100;
+  const bump = (row: { object_id: string; version_id: string; version: number }) => {
+    row.version += 1;
+    row.version_id = `${row.object_id}-v${++versionSeq}`;
+  };
+  let nextDecision = 1 + Math.max(0, ...u3.decisions.map((x) => Number(/^dec-(\d+)$/.exec(x.object_id)?.[1] ?? 0)));
   /** 멱등 기록: 키 → (요청 지문, 처음 결과) */
   const commits = new Map<string, { request: string; result: CommandResult<unknown> }>();
   /** 질문 버전 기록(U2b) — 질문 id → 최신이 먼저 */
@@ -42,6 +55,28 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE): PesClien
     return Promise.reject(new PesApiError(body));
   };
 
+  /** 사람 판단 쓰기 공통 — 순서(API 결정 4): 요청 검사 → 완료 영수증 재생 → 대상 검사 · 변경 */
+  const STALE = Symbol("stale");
+  function judge(name: string, slug: string, edition: number, objectId: string, input: unknown, idempotencyKey: string | undefined, apply: () => string | null | typeof STALE): Promise<JudgeResult> {
+    if (!idempotencyKey) return reject("invalid_payload", "$.headers.idempotency-key");
+    const request = JSON.stringify([name, slug, edition, objectId, input]);
+    const done = judged.get(idempotencyKey);
+    if (done) {
+      if (done.request !== request) return reject("idempotency_key_reuse", "$.headers.idempotency-key");
+      return copy({ ...done.result, request_id: requestId(), receipt: { ...done.result.receipt, replayed: true } });
+    }
+    if (!find(slug, edition)) return reject("not_found", "$.project");
+    const outId = apply();
+    if (outId === STALE) return reject("rev_conflict", "$.body.base_version_id");
+    if (outId === null) return reject("conflict");
+    const out = [...u3.assumptions, ...u3.decisions].find((x) => x.object_id === outId);
+    const n = String(++seq).padStart(4, "0");
+    const receipt: Receipt = { receipt_no: n, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
+    txLog.push({ tx_id: receipt.tx_id, touched: ["workspace"] });
+    const result: JudgeResult = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: { object_id: outId, version_id: out?.version_id ?? `${outId}-v${seq}` } };
+    judged.set(idempotencyKey, { request, result });
+    return copy(result);
+  }
 
   /* ───────────── 질문 쓰기(U2b) — 서버 계약 SEL-90(U2a)의 모양, 메모리 안에서만 ───────────── */
   const ownerOf = (questionId: string) => rounds.find((r) => r.questions.some((q) => q.id === questionId));
@@ -146,6 +181,76 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE): PesClien
       commits.set(idempotencyKey, { request, result });
       return copy(result);
     },
+    getAssumptions: (slug, edition) => copy(find(slug, edition) ? u3.assumptions : []),
+    getDecisions: (slug, edition) => copy(find(slug, edition) ? u3.decisions : []),
+    getReflections: (slug, edition, stage, round) => copy(find(slug, edition) ? (u3.reflections[`${stage}/${round}`] ?? null) : null),
+    assessAssumption: (slug, edition, objectId, input, key) =>
+      judge("assessAssumption", slug, edition, objectId, input, key, () => {
+        const row = u3.assumptions.find((x) => x.object_id === objectId);
+        // 판단 전이거나 다시 봐야 하는 가정만 판단할 수 있다 — 이미 끝난 가정은 거절(덮어쓰지 않음)
+        // 화면 규칙(assumptionNeedsJudging)과 같다 — 판단 전 · 재확인 필요 · 사람 판단 없는 확인
+        if (!row || !(row.state === "proposed" || row.needs_review || (row.state === "confirmed" && row.assessed_by?.kind !== "human"))) return null;
+        if (input.base_version_id !== row.version_id) return STALE;
+        if (input.verdict === "revise") {
+          row.original ??= { version_id: row.version_id, statement: row.statement };
+          row.statement = input.statement ?? row.statement;
+        }
+        row.state = input.verdict === "confirm" ? "confirmed" : input.verdict === "reject" ? "rejected" : "revised";
+        row.assessed_by = DEMO_HUMAN;
+        row.assessed_at = new Date().toISOString();
+        row.needs_review = false;
+        row.rationale = input.rationale;
+        bump(row);
+        return objectId;
+      }),
+    adoptDecision: (slug, edition, objectId, input, key) =>
+      judge("adoptDecision", slug, edition, objectId, input, key, () => {
+        const row = u3.decisions.find((x) => x.object_id === objectId);
+        if (!row || row.state !== "proposed") return null;
+        if (input.base_version_id !== row.version_id) return STALE;
+        row.state = "adopted";
+        row.decided_by = DEMO_HUMAN;
+        row.rationale = input.rationale;
+        bump(row);
+        return objectId;
+      }),
+    supersedeDecision: (slug, edition, objectId, input, key) =>
+      judge("supersedeDecision", slug, edition, objectId, input, key, () => {
+        const old = u3.decisions.find((x) => x.object_id === objectId);
+        if (!old || old.state !== "adopted") return null;
+        if (input.base_version_id !== old.version_id) return STALE;
+        const id = `dec-${nextDecision++}`;
+        old.state = "superseded";
+        old.superseded_by = id;
+        bump(old);
+        u3.decisions.push({
+          object_id: id,
+          version_id: `${id}-v1`,
+          version: 1,
+          statement: input.statement,
+          state: "adopted",
+          scope: old.scope,
+          proposed_by: DEMO_HUMAN,
+          decided_by: DEMO_HUMAN,
+          rationale: input.rationale,
+          supersedes: { object_id: objectId, statement: old.statement },
+          superseded_by: null,
+          originated_from: null,
+          source: null,
+        });
+        return id;
+      }),
+    revokeDecision: (slug, edition, objectId, input, key) =>
+      judge("revokeDecision", slug, edition, objectId, input, key, () => {
+        const row = u3.decisions.find((x) => x.object_id === objectId);
+        if (!row || row.state !== "adopted") return null;
+        if (input.base_version_id !== row.version_id) return STALE;
+        row.state = "revoked";
+        row.decided_by = DEMO_HUMAN;
+        row.rationale = input.rationale;
+        bump(row);
+        return objectId;
+      }),
     async getQuestionVersions(slug, edition, questionId) {
       if (!find(slug, edition)) return null;
       const q = ownerOf(questionId)?.questions.find((x) => x.id === questionId);

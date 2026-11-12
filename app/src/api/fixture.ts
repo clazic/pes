@@ -1,4 +1,4 @@
-import type { RoundView, WorkspaceView } from "./types";
+import type { Actor, AssumptionRow, DecisionRow, ReflectionEntry, ReflectionView, RoundView, WorkspaceView } from "./types";
 
 /**
  * 합성 자료(U1a) — 실제 연구·기관·사람·경로·키가 없다. 시험 계약(src/test/contract.ts)의 최소 fixture:
@@ -214,3 +214,104 @@ export const ROUNDS: RoundView[] = [
       "조사 R2 질문에 답하기 전에 볼 요약(합성 자료)\n- 대출 수 정의가 2021년에 바뀜(전자책 포함)\n- 어린이 대출 회복 빠름, 노년층 방문 회복 느림\n- 지역 통계 표 1건 읽지 못함",
   },
 ];
+
+/**
+ * 가정 · 결정 · 반영 합성 자료(U3b) — 앱 기본 가짜 클라이언트용. 개발 · 시험 전용(production 번들에는 가짜 클라이언트와 함께 들어가지 않는다).
+ * 실제 연구 · 사람 · 경로가 없다. 판단자 이름 “검토자 하늘” 은 합성 이름이다.
+ */
+const AI_ACTOR: Actor = { id: "act-ai", kind: "ai", name: "조사 AI" };
+export const DEMO_HUMAN: Actor = { id: "act-h1", kind: "human", name: "검토자 하늘" };
+const STAMP = "2026-11-05T14:03:00+09:00";
+const R1_RESULT_HREF = "/p/sample-study/e/1/s/research/r/1";
+const R2_RESULT_HREF = "/p/sample-study/e/1/s/research/r/2";
+
+export interface U3Data {
+  assumptions: AssumptionRow[];
+  decisions: DecisionRow[];
+  /** 키 = "<stage>/<round>" */
+  reflections: Record<string, ReflectionView | null>;
+}
+
+const asm = (id: string, over: Partial<AssumptionRow>): AssumptionRow => ({
+  object_id: id,
+  version_id: `${id}-v1`,
+  version: 1,
+  statement: `가정 ${id}`,
+  state: "proposed",
+  proposed_by: AI_ACTOR,
+  assessed_by: null,
+  assessed_at: null,
+  needs_review: false,
+  rationale: "",
+  original: null,
+  copied_from: null,
+  source: null,
+  ...over,
+});
+const dec = (id: string, over: Partial<DecisionRow>): DecisionRow => ({
+  object_id: id,
+  version_id: `${id}-v1`,
+  version: 1,
+  statement: `결정 ${id}`,
+  state: "proposed",
+  scope: "project",
+  proposed_by: AI_ACTOR,
+  decided_by: null,
+  rationale: "",
+  supersedes: null,
+  superseded_by: null,
+  originated_from: null,
+  source: null,
+  ...over,
+});
+const entry = (id: string, over: Partial<ReflectionEntry>): ReflectionEntry => ({
+  id,
+  opinion: `의견 ${id}`,
+  source: null,
+  disposition: "applied",
+  rationale: "",
+  actor: DEMO_HUMAN,
+  applied_tx_id: null,
+  result_version: null,
+  followup: null,
+  ...over,
+});
+
+/** 함수로 둔다 — 호출하지 않는 production 번들에서 합성 자료가 통째로 빠지게(상수로 만들면 호출 부수효과가 남는다) */
+export const demoU3 = (): U3Data => ({
+  assumptions: [
+    asm("as-1", { statement: "도서관 방문 수의 정의는 2019년부터 같다고 본다", source: { label: "조사 R1 결과 글 v1", href: R1_RESULT_HREF } }),
+    asm("as-2", { statement: "공개 통계의 대출 수는 도서 반납분을 뺀 값이다", state: "confirmed", version: 2, assessed_by: DEMO_HUMAN, assessed_at: STAMP, rationale: "공개 통계 정의서와 대조했다" }),
+  ],
+  decisions: [
+    dec("dec-1", { statement: "비교 기간은 2019년부터 지금까지로 한다", state: "superseded", decided_by: DEMO_HUMAN, rationale: "처음 범위", superseded_by: "dec-2" }),
+    dec("dec-2", {
+      statement: "비교 기간은 2021년부터 지금까지로 한다",
+      state: "adopted",
+      decided_by: DEMO_HUMAN,
+      version: 2,
+      rationale: "집계 정의가 2021년에 바뀜",
+      supersedes: { object_id: "dec-1", statement: "비교 기간은 2019년부터 지금까지로 한다" },
+    }),
+    dec("dec-3", { statement: "어린이와 노년층은 따로 묶어 본다", state: "adopted", scope: "edition", decided_by: DEMO_HUMAN, originated_from: { label: "1판 결정", version: 2 } }),
+    dec("dec-4", { statement: "기관 내부 자료는 쓰지 않는다", state: "proposed", source: { label: "조사 R1 결과 글 v1", href: R1_RESULT_HREF } }),
+  ],
+  reflections: {
+    "research/2": {
+      submission: "submitted",
+      sent_count: 3,
+      entries: [
+        entry("rf-1", {
+          opinion: "표에 연도별 합계를 넣어 주세요",
+          disposition: "applied",
+          rationale: "합계 줄을 더했다",
+          applied_tx_id: "tx-0901",
+          result_version: { label: "조사 결과 글 v3", href: R2_RESULT_HREF },
+          source: { label: "첨언 12", href: R1_RESULT_HREF },
+        }),
+        entry("rf-2", { opinion: "시군구별로 나눠 주세요", disposition: "deferred", rationale: "자료가 없어 다음 판으로" }),
+        entry("rf-3", { opinion: "민간 통계를 섞어 주세요", disposition: "rejected", rationale: "연구 범위 밖" }),
+      ],
+    },
+  },
+});
