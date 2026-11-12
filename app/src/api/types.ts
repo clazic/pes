@@ -516,8 +516,79 @@ export interface CommentInput {
   question_version_id?: string;
 }
 
+/* ───────────── 내 자료 · 파일별 AI 참조 · 미리보기 (MAT1c · SEL-117) — 서버 계약은 SEL-115(MAT1a): P/materials · P/uploads · P/file-policies/{fp}/ai-access · P/files/{b}/preview ───────────── */
+
+export type AiAccess = "allow" | "deny";
+
+/** 작업 중 자료 한 줄(각 자료 객체의 현재 버전 파일). 사람 화면이라 금지(deny) 파일도 온다 */
+export interface MaterialRow {
+  object_id: string;
+  version_id: string;
+  version: number;
+  blob_id: string;
+  file_policy_id: string;
+  role: string;
+  title: string;
+  original_name: string;
+  media_type: string;
+  size: number;
+  sha256: string;
+  /** 서버가 주지 않으면 null — 허용으로 간주하지 않는다 */
+  ai_access: AiAccess | null;
+  /** 글자 뽑기 상태는 SEL-116 계약 전이라 항상 null(화면은 “추출 상태 정보 없음”) */
+  extraction: null;
+}
+
+export interface MaterialUploadResult {
+  object_id: string;
+  version_id: string;
+  /** 서버가 주지 않으면 null */
+  version: number | null;
+  blob_id: string;
+  file_policy_id: string;
+  role: string;
+  /** 서버가 주지 않으면 null — 허용으로 지어내지 않는다 */
+  ai_access: AiAccess | null;
+  original_name: string;
+  media_type: string;
+  size: number | null;
+  sha256: string;
+}
+
+export interface MaterialAiAccessResult {
+  file_policy_id: string;
+  blob_id: string;
+  /** 서버가 주지 않으면 null (화면: 정보 없음) */
+  ai_access: AiAccess | null;
+  rev: number | null;
+  /** false = 이미 그 값이었다(서버가 기록·rev 를 바꾸지 않음) */
+  changed: boolean;
+}
+
+/** 미리보기 바이트 — 클라이언트가 세션 헤더로 받는다(주소 링크로는 세션이 안 간다) */
+export interface MaterialPreview {
+  blob_id: string;
+  content_type: string;
+  /** content-disposition 이 inline 인가(아니면 attachment · 모르면 false) */
+  inline: boolean;
+  /** content-security-policy 헤더 값(sandbox 가 필요한 형식) · 없으면 null */
+  sandbox: string | null;
+  bytes: Uint8Array;
+}
+
+export interface MaterialsMethods {
+  /** 모르는 slug · 없는 판 = []. 읽기 실패는 PesApiError(빈 목록으로 삼키지 않음) */
+  getMaterials(slug: string, edition: number): Promise<MaterialRow[]>;
+  /** 예약 → 올리기 → 완료 → 자료 등록을 묶는다. object_id 가 있으면 그 자료의 새 버전(원본을 덮어쓰지 않음). 멱등 키 필수 */
+  uploadMaterial(slug: string, edition: number, input: { file: File; title?: string; object_id?: string }, idempotencyKey: string | undefined): Promise<CommandResult<MaterialUploadResult>>;
+  /** 파일별 AI 참조 바꾸기(소유자만). 같은 값이면 changed:false. 멱등 키 필수 */
+  setMaterialAiAccess(slug: string, edition: number, filePolicyId: string, input: { ai_access: AiAccess; reason?: string }, idempotencyKey: string | undefined): Promise<CommandResult<MaterialAiAccessResult>>;
+  /** 이 blob 의 미리보기 바이트. 거절은 PesApiError */
+  getMaterialPreview(slug: string, edition: number, blobId: string): Promise<MaterialPreview>;
+}
+
 /** 가짜 클라이언트와 (U1b) HTTP 클라이언트가 같이 지키는 모양 */
-export interface PesClient {
+export interface PesClient extends MaterialsMethods {
   listProjects(): Promise<ProjectRef[]>;
   /** 없으면 null(모르는 slug 에 자료를 지어내지 않는다) */
   getWorkspace(slug: string, edition: number): Promise<WorkspaceView | null>;
