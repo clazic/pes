@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type PesClient, type ProjectRef, type QuestionInput, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -317,6 +317,62 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   };
   const given = (v: string): Json => (v ? { rationale: v } : {});
 
+
+  /* ───────────── 내 자료 (MAT1c · SEL-117) — 서버 계약은 SEL-115(MAT1a). 서버가 안 주는 값(ai_access · 추출 상태)은 null 로 두고 지어내지 않는다 ───────────── */
+
+  const aiAccessOf = (v: unknown): AiAccess | null => (v === "allow" || v === "deny" ? v : null);
+  const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+  function materialRow(r: Json): MaterialRow {
+    return {
+      object_id: text(r.object_id),
+      version_id: text(r.version_id),
+      version: Number(r.version_no),
+      blob_id: text(r.blob_id),
+      file_policy_id: text(r.file_policy_id),
+      role: text(r.role),
+      title: text(r.title),
+      original_name: text(r.original_name),
+      media_type: text(r.media_type),
+      size: Number(r.size),
+      sha256: text(r.sha256),
+      ai_access: aiAccessOf(r.ai_access),
+      extraction: null,
+    };
+  }
+
+  /** 쓰기 길의 한 단계(예약 · 올리기 · 완료) — 시간 제한 안에서 보내고, 거절은 서버 봉투 그대로 던진다. 멱등 키는 마지막 POST P/materials 에만 의미가 있다 */
+  async function uploadStep(id: string, method: "POST" | "PUT", rest: string, init: { json?: Json; body?: Uint8Array; contentType?: string }): Promise<Json> {
+    return timed(async (signal) => {
+      const res = await send(projectUrl(id, rest), {
+        method,
+        headers: headers({ "content-type": init.contentType ?? "application/json" }),
+        credentials: "omit",
+        body: init.body ? (init.body as BodyInit) : JSON.stringify(init.json ?? {}),
+        signal,
+      });
+      if (!res.ok) throw await toApiError(res);
+      const parsed: unknown = await res.json();
+      if (!isRecord(parsed) || !isRecord(parsed.data)) throw new PesApiError(fallbackBody(500));
+      return parsed.data;
+    });
+  }
+
+  /** 파일 바이트를 서버에 올려 ready 인 blob 을 만든다: 예약(지문 · 크기) → (ready 가 아니면) PUT → 완료. 같은 바이트가 이미 ready 면 올리기를 건너뛴다 */
+  const stageBlob = (file: File) => async (id: string): Promise<Json> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const sha256 = hex(await globalThis.crypto.subtle.digest("SHA-256", bytes));
+    const media_type = file.type || "application/octet-stream";
+    const reserved = await uploadStep(id, "POST", "/uploads", { json: { sha256, size: bytes.byteLength, media_type, original_name: file.name } });
+    const blob_id = text(reserved.blob_id);
+    if (!blob_id) throw new PesApiError(fallbackBody(500));
+    if (reserved.state !== "ready") {
+      await uploadStep(id, "PUT", `/uploads/${q(blob_id)}`, { body: bytes, contentType: media_type });
+      await uploadStep(id, "POST", `/uploads/${q(blob_id)}/complete`, {});
+    }
+    return { blob_id };
+  };
+
   return {
     capabilities: { questionTools: true },
     async getAssumptions(slug, edition) {
@@ -356,6 +412,52 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const w = await write(slug, key, "/decisions", { state: "revoked", decision_id: objectId, base_version_id: input.base_version_id, rationale: input.rationale }, decisionScope(edition, objectId));
       return judged(w, "decision");
     },
+    async getMaterials(slug, _edition) {
+      return listOf(await readData(slug, "/materials"), "materials").map(materialRow);
+    },
+
+    async uploadMaterial(slug, _edition, input, key) {
+      const w = await write(slug, key, "/materials", { ...(input.title ? { title: input.title } : {}), ...(input.object_id ? { object_id: input.object_id } : {}) }, stageBlob(input.file));
+      const d = w.data;
+      return result(w, {
+        object_id: text(d.object_id),
+        version_id: text(d.version_id),
+        version: Number(d.version_no),
+        blob_id: text(d.blob_id),
+        file_policy_id: text(d.file_policy_id),
+        role: text(d.role),
+        ai_access: aiAccessOf(d.ai_access) ?? "allow",
+        original_name: text(d.original_name),
+        media_type: text(d.media_type),
+        size: Number(d.size),
+        sha256: text(d.sha256),
+      });
+    },
+
+    async setMaterialAiAccess(slug, _edition, filePolicyId, input, key) {
+      const w = await write(slug, key, `/file-policies/${q(filePolicyId)}/ai-access`, { ai_access: input.ai_access, ...(input.reason ? { reason: input.reason } : {}) });
+      const d = w.data;
+      return result(w, { file_policy_id: text(d.file_policy_id), blob_id: text(d.blob_id), ai_access: aiAccessOf(d.ai_access) ?? input.ai_access, rev: Number(d.rev), changed: d.changed === true });
+    },
+
+    /** GET P/files/{blob}/preview — 세션 헤더가 필요해 주소 링크로는 열 수 없다. 바이트를 그대로 읽어(글로 바꾸지 않음) 화면이 형식에 맞게 그린다. 모르면 inline 으로 간주하지 않는다 */
+    async getMaterialPreview(slug, _edition, blobId) {
+      const id = idOf(slug);
+      if (id === undefined) throw new PesApiError(fallbackBody(404));
+      return timed(async (signal) => {
+        const res = await send(projectUrl(id, `/files/${q(blobId)}/preview`), { method: "GET", headers: headers(), credentials: "omit", signal });
+        if (!res.ok) throw await toApiError(res);
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        return {
+          blob_id: blobId,
+          content_type: res.headers.get("content-type") ?? "",
+          inline: /^\s*inline\b/i.test(res.headers.get("content-disposition") ?? ""),
+          sandbox: res.headers.get("content-security-policy"),
+          bytes,
+        };
+      });
+    },
+
     getQuestionVersions: notConnected("질문 버전 기록 읽기"),
     reorderQuestions: notConnected("질문 순서 바꾸기"),
     getComments: notConnected("의견 읽기"),
