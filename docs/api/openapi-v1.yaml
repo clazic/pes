@@ -1768,7 +1768,17 @@ paths:
         stage-scope snapshot of a legacy import, which keeps no contents), so "none" cannot be claimed. A and B give the same
         content except that A bounds it: A keeps the whole tool reply within 60000 JSON characters by adding items one at a
         time, cutting any text field at 12000 characters (the item then lists it in `truncated_fields`) and leaving out the
-        items that do not fit (content.truncated = true, content.omitted_items = their number). B and HTTP do not cut. Each item is
+        items that do not fit (content.truncated = true, content.omitted_items = their number). B and HTTP do not cut. A's
+        `context.get` without reference_id (the list) is bounded the same way, never by cutting text: the whole reply (topic,
+        stage, round, questions, objects and the reference rows) is built entry by entry within 4000 JSON characters; it always
+        carries context.references_page = {offset, returned, total, next_offset}, and when anything is left out
+        context.truncated = true, context.omitted = {questions, objects, references} and context.next names the next call
+        (`context.get {references_offset: next_offset}`, which returns the next page of reference rows only; giving it with
+        reference_id is an error). A label longer than 300 characters is cut in the list and the row lists it in
+        `truncated_fields`. A also decides again, with the same function, before EVERY model request: a reference read kept in
+        the run's history whose source access or Go switch was withdrawn since is replaced by {ok:false, withdrawn:true,
+        reference_id, reason} and the model's later messages written after it lose their text and call arguments, so neither is
+        sent again. What was already sent to the provider before the withdrawal cannot be called back. Each item is
         {item (final_report|sources), object_id, version_id, kind, title, ... , citation: {reference_id, project_id,
         project_label, snapshot_id, object_id, version_id}}: final_report carries title, summary, body_md of the report;
         sources carries title, url, quote. Only the items in `scope` appear. The content is the version the pinned snapshot

@@ -66,7 +66,7 @@ import {
   is_supported_format,
   type RequestFormat,
 } from "./spec.ts";
-import { SaveFailedError, TOOL_SPECS, question_context, run_tool, type RunHandle, type ToolEffect } from "./tools.ts";
+import { SaveFailedError, TOOL_SPECS, question_context, recheck_reference, run_tool, withdrawn_result, type RunHandle, type ToolEffect } from "./tools.ts";
 import {
   current_run_settings,
   read_connection_facts,
@@ -136,6 +136,14 @@ function integer_in(value: unknown, field: string, min: number, max: number): nu
     return bad(`${field} must be an integer between ${min} and ${max}`);
   }
   return value;
+}
+
+/** A reference read kept in the runner's history: where its result sits, and whether it was withdrawn. */
+interface ReferenceRead {
+  turn_index: number;
+  result_index: number;
+  reference_id: string;
+  withdrawn: boolean;
 }
 
 export class BuiltinExecutor {
@@ -540,6 +548,8 @@ export class BuiltinExecutor {
   async #drive(drive: Drive, resumed: boolean): Promise<ExecResult> {
     const { handle } = drive;
     const turns: Turn[] = [this.#opening(handle, resumed)];
+    // reference reads kept in turns: decided again before every request (a read is never sent on an old decision)
+    const reads: ReferenceRead[] = [];
 
     for (let turn_no = 0; turn_no < drive.max_turns; turn_no += 1) {
       if (!this.#live(handle)) return this.#result_of(handle.project_id, handle.run_id);
@@ -559,6 +569,10 @@ export class BuiltinExecutor {
         return this.#block(handle, "manual_hold", null);
       }
       const { connection, key } = snapshot;
+
+      // 3b. reference content kept from earlier reads: decided again now, after the awaits above, with the same decide()
+      //     as every other exit. Withdrawn text (and what the model wrote after reading it) is not sent again.
+      this.#withdraw_references(handle, turns, reads);
 
       // 4. the gate
       const request = this.#request_for(handle, drive.settings, turns, drive.max_output_tokens);
@@ -748,6 +762,7 @@ export class BuiltinExecutor {
 
       // tools
       const results = [];
+      const read_now: Array<{ result_index: number; reference_id: string }> = [];
       let version_id: string | null = null;
       let wait: ToolEffect | null = null;
       try {
@@ -764,6 +779,7 @@ export class BuiltinExecutor {
             index,
           );
           results.push(done.result);
+          if (done.reference_read !== undefined) read_now.push({ result_index: results.length - 1, reference_id: done.reference_read.reference_id });
           if (done.effect.kind === "version" && version_id === null) version_id = done.effect.version_id;
           if (done.effect.kind === "wait") wait = done.effect;
         }
@@ -790,10 +806,39 @@ export class BuiltinExecutor {
 
       turns.push({ role: "assistant", text: reply.text, calls: reply.calls });
       turns.push({ role: "tool_results", results });
+      for (const read of read_now) reads.push({ turn_index: turns.length - 1, ...read, withdrawn: false });
     }
 
     this.#log(`run ${handle.run_id}: the turn cap was reached`);
     return this.#fail(handle);
+  }
+
+  /**
+   * Decide every kept reference read again. A read that may no longer go is replaced by a "withdrawn" result (reason given,
+   * nothing invented), and every later assistant turn — written by the model after it read that text — loses its text and
+   * its call arguments, so nothing derived from it is sent again either. What already went out cannot be called back.
+   */
+  #withdraw_references(handle: RunHandle, turns: Turn[], reads: ReferenceRead[]): void {
+    for (const read of reads) {
+      if (read.withdrawn) continue;
+      const reason = recheck_reference(this.#db, handle, read.reference_id);
+      if (reason === null) continue;
+      read.withdrawn = true;
+      const turn = turns[read.turn_index];
+      if (turn === undefined || turn.role !== "tool_results") continue;
+      const result = turn.results[read.result_index];
+      if (result !== undefined) turn.results[read.result_index] = withdrawn_result(result, read.reference_id, reason);
+      for (let i = read.turn_index + 1; i < turns.length; i += 1) {
+        const later = turns[i]!;
+        if (later.role !== "assistant") continue;
+        turns[i] = {
+          role: "assistant",
+          text: "[withdrawn: written after reading reference content that is no longer given]",
+          calls: later.calls.map((c) => ({ id: c.id, name: c.name, args: {} })),
+        };
+      }
+      this.#log(`run ${handle.run_id}: reference ${read.reference_id} read earlier is withdrawn (${reason}); it is not sent again`);
+    }
   }
 
   #cost_of(settings: RunSettings, usage: { input_tokens: number; output_tokens: number }): { currency: string; amount_micros: number } | null {

@@ -7,7 +7,7 @@
 import type { CommandService, MutationContext } from "../commands.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
-import { list_references, read_reference, reference_caller, type ReferenceContent } from "../references.ts";
+import { decide, list_references, read_reference, reference_caller, reference_row, type ReferenceContent } from "../references.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
 
 export const A_TOOL_ALLOWLIST: readonly string[] = Object.freeze([
@@ -31,8 +31,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
   {
     name: "context.get",
     description:
-      "Read the project, stage, round, current objects, questions and the list of reference material from earlier projects. Give reference_id to read one reference (its pinned content with citations) instead.",
-    parameters: { type: "object", properties: { reference_id: { type: "string" } } },
+      "Read the project, stage, round, current objects, questions and the list of reference material from earlier projects. Give reference_id to read one reference (its pinned content with citations) instead. When the list says next_offset, give references_offset to read the next page of the reference list.",
+    parameters: { type: "object", properties: { reference_id: { type: "string" }, references_offset: { type: "integer", minimum: 0 } } },
   },
   {
     name: "result.submit",
@@ -66,6 +66,14 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
 ]);
 
 const RESULT_TEXT_MAX = 4000;
+/**
+ * The context reply (context.get with no reference_id) is built object by object inside this JSON budget — topic, stage,
+ * round, then questions, objects and the reference rows — so it is always whole JSON: what does not fit is counted in
+ * context.omitted, and the rest of the reference list is read with references_offset (context.references_page.next_offset).
+ */
+const CONTEXT_TEXT_MAX = RESULT_TEXT_MAX;
+/** A text field of the context frame (the topic) or of a row (a reference label) longer than this is cut, never the JSON. */
+const CONTEXT_FIELD_MAX = 300;
 /**
  * A reference read is the point of its call: it gets a larger reply. The reply is built item by item inside this length
  * budget (JSON characters), so it is always valid JSON: a long text field is cut at REFERENCE_FIELD_MAX and named in the
@@ -105,6 +113,11 @@ export type ToolEffect =
 export interface ToolOutcome {
   result: ToolResult;
   effect: ToolEffect;
+  /**
+   * Set when the result carries the content of a reference. The runner keeps the result in its history and sends it again
+   * with every later request, so it must decide again (recheck_reference) before each request whether it may still go.
+   */
+  reference_read?: { reference_id: string };
 }
 
 /** The answer could not be saved after every retry; the model call it came from must be kept as unknown. */
@@ -165,7 +178,46 @@ function bounded_reference_content(reference: unknown, content: ReferenceContent
 function reference_ok(call: ToolCall, read: { reference: unknown; content: ReferenceContent | null }): ToolOutcome {
   const text = JSON.stringify({ ok: true, reference: read.reference, content: bounded_reference_content(read.reference, read.content) });
   if (text.length > REFERENCE_TEXT_MAX) return refused(call, "the reference reply is too large to give; read fewer items");
-  return { result: { call_id: call.id, name: call.name, content: text, is_error: false }, effect: { kind: "none" } };
+  const id = (read.reference as { id?: unknown }).id;
+  return {
+    result: { call_id: call.id, name: call.name, content: text, is_error: false },
+    effect: { kind: "none" },
+    ...(read.content !== null && typeof id === "string" ? { reference_read: { reference_id: id } } : {}),
+  };
+}
+
+/** Why a reference read may no longer be given to the model: decide()'s withheld reason, or no permission / gone. */
+export type WithdrawnReason = "no_permission" | "detached" | "actor_forbidden" | "source_missing" | "source_go_off" | "project_go_off";
+
+/**
+ * Decide again, with the same decide() as every other exit, whether a reference read earlier in this run may still be sent
+ * to the model. null = it may; otherwise the reason it is withdrawn. Pure reads.
+ */
+export function recheck_reference(db: Pick<Db, "get" | "all">, run: RunHandle, reference_id: string): WithdrawnReason | null {
+  const row = reference_row(db, run.project_id, reference_id);
+  if (row === undefined) return "detached";
+  let caller;
+  try {
+    caller = reference_caller(db, run.actor_id, true);
+  } catch {
+    return "actor_forbidden";
+  }
+  const d = decide(db, row, caller);
+  if (!d.has_access) return "no_permission";
+  if (d.content_allowed) return null;
+  return d.delivery.withheld_reason ?? "source_missing";
+}
+
+/** The text that replaces a withdrawn reference read in the runner's history. It says what happened; it invents nothing. */
+export function withdrawn_result(result: ToolResult, reference_id: string, reason: WithdrawnReason): ToolResult {
+  const content = JSON.stringify({
+    ok: false,
+    withdrawn: true,
+    reference_id,
+    reason,
+    error: `the content of this reference was withdrawn (${reason}) and is no longer given; do not use or repeat it`,
+  });
+  return { call_id: result.call_id, name: result.name, content, is_error: true };
 }
 
 function refused(call: ToolCall, message: string): ToolOutcome {
@@ -230,6 +282,80 @@ export function build_context(db: Pick<Db, "get" | "all">, run: RunHandle): Reco
     // reference material: rows only (name, pinned snapshot, items, whether the text may be given to an AI) — the text is read with reference_id
     references: list_references(db, run.project_id, reference_caller(db, run.actor_id, true)),
   };
+}
+
+function cut_text(value: unknown): unknown {
+  return typeof value === "string" && value.length > CONTEXT_FIELD_MAX ? value.slice(0, CONTEXT_FIELD_MAX) : value;
+}
+
+/** A reference row in the context list: a label longer than CONTEXT_FIELD_MAX is cut and named, so one row always fits a page. */
+function context_reference_row(row: Record<string, unknown>): Record<string, unknown> {
+  const label = row["source_label"];
+  if (typeof label !== "string" || label.length <= CONTEXT_FIELD_MAX) return row;
+  return { ...row, source_label: label.slice(0, CONTEXT_FIELD_MAX), truncated_fields: ["source_label"] };
+}
+
+/**
+ * context.get without reference_id. offset === null: the whole context (frame, questions, objects, the reference list from
+ * the start). offset = n: the next page of the reference list only. Built object by object inside CONTEXT_TEXT_MAX; the JSON
+ * is never cut. context.references_page = {offset, returned, total, next_offset}; when anything is left out,
+ * context.truncated = true, context.omitted = {questions, objects, references} and context.next says how to read on.
+ */
+function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle, offset: number | null): ToolOutcome {
+  const full = build_context(db, run);
+  const all_refs = (full["references"] as Array<Record<string, unknown>>).map(context_reference_row);
+  const start = offset ?? 0;
+  const questions = offset === null ? (full["questions"] as unknown[]) : [];
+  const objects = offset === null ? (full["objects"] as unknown[]) : [];
+  const frame: Record<string, unknown> =
+    offset === null ? { topic: cut_text(full["topic"]), stage: full["stage"], round_no: full["round_no"] } : {};
+  const kept = { questions: [] as unknown[], objects: [] as unknown[], references: [] as unknown[] };
+  // the cost of the reply before any list entry, with every mark at its widest
+  const total = all_refs.length;
+  const marks = {
+    truncated: true,
+    omitted: { questions: questions.length, objects: objects.length, references: total },
+    next: `call context.get with references_offset: ${total} for the next page of references`,
+    references_page: { offset: start, returned: total, total, next_offset: total },
+  };
+  let left = CONTEXT_TEXT_MAX - JSON.stringify({ ok: true, context: { ...frame, questions: [], objects: [], references: [], ...marks } }).length;
+  let full_stop = false;
+  const fill = (list: unknown[], into: unknown[]): void => {
+    for (const entry of list) {
+      if (full_stop) return;
+      const cost = JSON.stringify(entry).length + 1; // + the comma
+      if (cost > left) {
+        full_stop = true;
+        return;
+      }
+      left -= cost;
+      into.push(entry);
+    }
+  };
+  fill(questions, kept.questions);
+  fill(objects, kept.objects);
+  fill(start >= total ? [] : all_refs.slice(start), kept.references);
+  const returned = kept.references.length;
+  const after = Math.min(start, total) + returned;
+  const next_offset = after < total ? after : null;
+  const omitted = { questions: questions.length - kept.questions.length, objects: objects.length - kept.objects.length, references: total - after };
+  const cut = omitted.questions > 0 || omitted.objects > 0 || next_offset !== null;
+  const context: Record<string, unknown> = {
+    ...frame,
+    ...(offset === null ? { questions: kept.questions, objects: kept.objects } : {}),
+    references: kept.references,
+    references_page: { offset: start, returned, total, next_offset },
+    ...(cut
+      ? {
+          truncated: true,
+          omitted,
+          ...(next_offset === null ? {} : { next: `call context.get with references_offset: ${next_offset} for the next page of references` }),
+        }
+      : {}),
+  };
+  const text = JSON.stringify({ ok: true, context });
+  if (text.length > CONTEXT_TEXT_MAX) return refused(call, "the context reply is too large to give");
+  return { result: { call_id: call.id, name: call.name, content: text, is_error: false }, effect: { kind: "none" } };
 }
 
 /** Questions of this stage/round with the people's answers (what a resumed run must see again). */
@@ -304,13 +430,19 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
     switch (call.name) {
       case "context.get": {
         const reference_id = args["reference_id"];
+        const offset = args["references_offset"];
+        if (reference_id !== undefined && offset !== undefined) return refused(call, "give reference_id or references_offset, not both");
+        if (offset !== undefined) {
+          if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) return refused(call, "references_offset must be a whole number of 0 or more");
+          return context_ok(call, env.db, env.run, offset);
+        }
         if (reference_id !== undefined) {
           if (typeof reference_id !== "string" || reference_id.length === 0) return refused(call, "reference_id must be a non-empty string");
           // the same decision as the HTTP read: permission to the source, the stricter Go switch, original gone
           const read = read_reference(env.db, env.run.project_id, reference_id, reference_caller(env.db, env.run.actor_id, true));
           return reference_ok(call, read);
         }
-        return ok(call, { context: build_context(env.db, env.run) });
+        return context_ok(call, env.db, env.run, null);
       }
       case "result.submit": {
         const results = args["results"];
