@@ -123,6 +123,7 @@ function PageButton({ label, target, onPage, children }: { label: string; target
  */
 export function PrintPreview({ round, title, onClose }: { round: RoundView; title: string; onClose: () => void }) {
   const sent = round.questions.filter((q) => q.sent);
+  const resultMeta = round.result ? resultMetaText({ ...round.result, updated_at: null }) : null;
   return (
     <section aria-label="인쇄 미리보기" data-print-preview="" className="border-b bg-surface-soft px-4 py-4 tab:px-6">
       <div className="flex flex-wrap items-center gap-2" data-print="hide">
@@ -158,7 +159,7 @@ export function PrintPreview({ round, title, onClose }: { round: RoundView; titl
           <>
             <h3 className="mt-4 text-meta font-semibold text-ink">
               {round.result.title}
-              {resultMetaText({ ...round.result, updated_at: null }) !== null ? <span className="font-normal text-muted-foreground"> {resultMetaText({ ...round.result, updated_at: null })}</span> : null}
+              {resultMeta !== null ? <span className="font-normal text-muted-foreground"> {resultMeta}</span> : null}
             </h3>
             {round.result.paragraphs.map((p) => (
               <p key={p} className="mt-1 text-meta text-ink">
