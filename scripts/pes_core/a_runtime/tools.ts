@@ -56,27 +56,20 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
   },
   {
     name: "thread.reply",
-    description: "Reply in a comment thread (a selection comment or a question comment). A resolved thread takes no reply. Only a person resolves a thread.",
-    parameters: {
-      type: "object",
-      properties: { thread_id: { type: "string" }, text: { type: "string" }, reply_to: { type: "string" } },
-      required: ["thread_id", "text"],
-    },
+    description: "Reply in a comment thread.",
+    parameters: { type: "object", properties: { thread_id: { type: "string" }, text: { type: "string" }, reply_to: { type: "string" } }, required: ["thread_id", "text"] },
   },
   {
     name: "followup.propose",
-    description:
-      "Propose a follow-up for a person. With thread_id it is a real follow-up of that comment thread: kind edit_text needs proposed_body_md (the new text, a proposal only: the text does not change), next_round_task and reopen_stage need target_stage_id, none is a note. Only a person adopts it. Without thread_id it is a plain note.",
+    description: "Propose a follow-up (a note, or with thread_id a follow-up of that thread). edit_text needs proposed_body_md; next_round_task and reopen_stage need target_stage_id.",
     parameters: {
       type: "object",
       properties: {
         thread_id: { type: "string" },
         text: { type: "string" },
-        title: { type: "string" },
         kind: { type: "string", enum: ["edit_text", "next_round_task", "reopen_stage", "none"] },
         proposed_body_md: { type: "string" },
         target_stage_id: { type: "string" },
-        target_round_id: { type: "string" },
       },
       required: ["text"],
     },
