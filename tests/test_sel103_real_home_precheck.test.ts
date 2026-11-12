@@ -22,6 +22,7 @@ import { after, test } from "node:test";
 
 import { assert_temp_home_env, default_account_homes, real_home_problem } from "./helpers/temp_home_check.ts";
 import { use_home_guard } from "./helpers/home_guard.ts";
+import { import_url } from "./helpers/import_url.ts";
 
 use_home_guard();
 
@@ -129,7 +130,7 @@ function run_child(fx: Fixture, options: { entry: boolean; inject: boolean }): {
   };
   for (const key of ["SystemRoot", "TMPDIR", "TEMP", "TMP"]) if (process.env[key] !== undefined) env[key] = process.env[key] as string;
   if (options.inject) env.PES_TEST_ACCOUNT_HOME = fx.acct;
-  const argv = ["--disable-warning=ExperimentalWarning", "--import", RECORDER, ...(options.entry ? ["--import", ENTRY] : []), "--test", PROBE];
+  const argv = ["--disable-warning=ExperimentalWarning", "--import", import_url(RECORDER), ...(options.entry ? ["--import", import_url(ENTRY)] : []), "--test", PROBE];
   const run = spawnSync(process.execPath, argv, { cwd: REPO, env, encoding: "utf8", timeout: 60_000 });
   assert.equal(run.error, undefined, `the child started (${String(run.error)})`);
   const calls = existsSync(fx.log) ? readFileSync(fx.log, "utf8").split("\n").filter((line) => line !== "") : [];

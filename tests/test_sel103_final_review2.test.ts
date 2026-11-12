@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 
 import { guard_process_fs, use_home_guard } from "./helpers/home_guard.ts";
+import { import_url } from "./helpers/import_url.ts";
 import { is_account_home, real_home_problem } from "./helpers/temp_home_check.ts";
 
 use_home_guard();
@@ -76,7 +77,7 @@ test("${action} of the account home", () => {
   );
   const run = spawnSync(
     process.execPath,
-    ["--disable-warning=ExperimentalWarning", "--import", join(HELPERS, "fake_account_home.ts"), "--import", join(HELPERS, "require_temp_home.ts"), "--test", file],
+    ["--disable-warning=ExperimentalWarning", "--import", import_url(join(HELPERS, "fake_account_home.ts")), "--import", import_url(join(HELPERS, "require_temp_home.ts")), "--test", file],
     { cwd: REPO, env: child_env(fx.home, { PES_FAKE_ACCOUNT_HOME: fx.acct }), encoding: "utf8", timeout: 60_000 },
   );
   assert.equal(run.error, undefined, String(run.error));
