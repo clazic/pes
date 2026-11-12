@@ -1379,7 +1379,7 @@ paths:
         stages [{stage_id, stage_key, round_id|null, round_no|null, basis sealed|approved|open|none, basis_snapshot_id|null}]}], items
         [{category, object_id, version_id, stage_id|null, position}; a footnote also has cited_by_version_id and citation_no; a reflection
         has entry_id, source_version_id and round_id instead of object_id], excluded [{category, reason, object_id?, version_id?}] (a
-        category not chosen: not_selected; an unsubmitted draft: unsubmitted_draft/unsubmitted; the token stream: token_stream/default_excluded,
+        category not chosen: not_selected, which comes first; a removed or archived artifact, assumption or decision in a chosen category: its category with reason removed or archived and its object_id/version_id; an unsubmitted draft: unsubmitted_draft/unsubmitted; the token stream: token_stream/default_excluded,
         always one line), comments {included, items []} (a reserved place; U4 fills it), output}. A seal, approval or edition snapshot is
         not a print: 404 not_found, as are an unknown id, a print of another scope and a scope nothing was printed for yet. Nothing is
         built or written; a print is made by POST print/commit.

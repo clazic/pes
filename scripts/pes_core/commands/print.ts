@@ -232,6 +232,8 @@ interface Candidate {
   body_md: string | null;
   body_blob_id: string | null;
   status: string;
+  /** the object's archived time (open basis only; a pinned round content has none). */
+  archived_at: bigint | null;
 }
 
 /** Deterministic JSON (sorted keys) used for the selection hash. */
@@ -352,23 +354,25 @@ function resolve_targets(db: Db, project_id: string, request: PrintRequest): Tar
 }
 
 const CANDIDATE_COLUMNS = `a.kind AS kind, av.title AS title, av.body_md AS body_md, av.body_blob_id AS body_blob_id, av.status AS status`;
+const CANDIDATE_OPEN_COLUMNS = `${CANDIDATE_COLUMNS}, o.archived_at AS archived_at`;
+const CANDIDATE_PINNED_COLUMNS = `${CANDIDATE_COLUMNS}, NULL AS archived_at`;
 
 function candidates_of(db: Db, project_id: string, entry: StageEntry): Candidate[] {
   if (entry.round_id === null) return [];
   if (entry.basis === "open") {
     return db.all<Candidate>(
-      `SELECT o.id AS object_id, o.current_version_id AS version_id, ${CANDIDATE_COLUMNS}
+      `SELECT o.id AS object_id, o.current_version_id AS version_id, ${CANDIDATE_OPEN_COLUMNS}
          FROM artifacts a
          JOIN objects o ON o.project_id = a.project_id AND o.id = a.object_id
          JOIN artifact_versions av ON av.project_id = o.project_id AND av.version_id = o.current_version_id
-        WHERE a.project_id = ? AND a.stage_id = ? AND o.archived_at IS NULL
+        WHERE a.project_id = ? AND a.stage_id = ?
         ORDER BY o.display_no`,
       project_id,
       entry.stage_id,
     );
   }
   return db.all<Candidate>(
-    `SELECT rc.object_id AS object_id, rc.version_id AS version_id, ${CANDIDATE_COLUMNS}
+    `SELECT rc.object_id AS object_id, rc.version_id AS version_id, ${CANDIDATE_PINNED_COLUMNS}
        FROM round_contents rc
        JOIN artifacts a ON a.project_id = rc.project_id AND a.object_id = rc.object_id
        JOIN artifact_versions av ON av.project_id = rc.project_id AND av.version_id = rc.version_id
@@ -405,6 +409,7 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
   const footnotes: Item[] = [];
   const reflections: Item[] = [];
   const drafts: Array<Record<string, string>> = [];
+  const dropped: Array<Record<string, string>> = [];
   const stages: StageView[] = [];
   let bytes = 0;
 
@@ -414,12 +419,19 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
       stages.push(view);
       let position = 0;
       for (const candidate of candidates_of(db, project_id, entry)) {
-        if (candidate.status === "removed" || candidate.status === "archived") continue;
+        const category = candidate.kind === "table" ? "table" : "body";
+        // removed / archived: recorded with the reason, unless the whole category was not chosen (not_selected comes first)
+        const dropped_reason = candidate.status === "removed" ? "removed" : candidate.status === "archived" || candidate.archived_at !== null ? "archived" : null;
+        if (dropped_reason !== null) {
+          if (wants.has(category)) dropped.push({ category, reason: dropped_reason, object_id: candidate.object_id, version_id: candidate.version_id });
+          continue;
+        }
         if (candidate.status === "draft") {
           drafts.push({ category: "unsubmitted_draft", reason: "unsubmitted", object_id: candidate.object_id, version_id: candidate.version_id });
           continue;
         }
-        const category = candidate.kind === "table" ? "table" : "body";
+        // a footnote is printed with its article: no body/table category, no footnote item
+        if (!wants.has(category)) continue;
         const at = position;
         position += 1;
         const notes: Footnote[] = [];
@@ -446,7 +458,6 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
             notes.push({ no: Number(citation.citation_no), title: citation.title, url: citation.url, quote: citation.quote });
           }
         }
-        if (!wants.has(category)) continue;
         const item: Item = { category, object_id: candidate.object_id, version_id: candidate.version_id, stage_id: entry.stage_id, position: at };
         (category === "table" ? tables : bodies).push(item);
         const body = body_text(runtime, project_id, candidate);
@@ -484,15 +495,19 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
   const assumptions: Item[] = [];
   const assumption_views: RecordView[] = [];
   if (wants.has("assumption")) {
-    for (const row of db.all<{ object_id: string; version_id: string; statement: string; state: string; rationale: string }>(
-      `SELECT o.id AS object_id, o.current_version_id AS version_id, av.statement AS statement, av.state AS state, av.rationale AS rationale
+    for (const row of db.all<{ object_id: string; version_id: string; statement: string; state: string; rationale: string; archived_at: bigint | null }>(
+      `SELECT o.id AS object_id, o.current_version_id AS version_id, av.statement AS statement, av.state AS state, av.rationale AS rationale, o.archived_at AS archived_at
          FROM objects o
          JOIN assumption_versions av ON av.project_id = o.project_id AND av.version_id = o.current_version_id
-        WHERE o.project_id = ? AND o.kind = 'assumption' AND o.archived_at IS NULL AND o.edition_id IN (${marks})
+        WHERE o.project_id = ? AND o.kind = 'assumption' AND o.edition_id IN (${marks})
         ORDER BY o.display_no`,
       project_id,
       ...edition_ids,
     )) {
+      if (row.archived_at !== null) {
+        dropped.push({ category: "assumption", reason: "archived", object_id: row.object_id, version_id: row.version_id });
+        continue;
+      }
       assumptions.push({ category: "assumption", object_id: row.object_id, version_id: row.version_id, stage_id: null, position: assumptions.length });
       assumption_views.push({ statement: row.statement, state: row.state, rationale: row.rationale });
       bytes += Buffer.byteLength(row.statement, "utf8");
@@ -501,17 +516,21 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
   const decisions: Item[] = [];
   const decision_views: RecordView[] = [];
   if (wants.has("decision")) {
-    for (const row of db.all<{ object_id: string; version_id: string; statement: string; state: string; rationale: string }>(
-      `SELECT o.id AS object_id, o.current_version_id AS version_id, dv.statement AS statement, dv.state AS state, dv.rationale AS rationale
+    for (const row of db.all<{ object_id: string; version_id: string; statement: string; state: string; rationale: string; archived_at: bigint | null }>(
+      `SELECT o.id AS object_id, o.current_version_id AS version_id, dv.statement AS statement, dv.state AS state, dv.rationale AS rationale, o.archived_at AS archived_at
          FROM objects o
          JOIN decisions d ON d.project_id = o.project_id AND d.object_id = o.id
          JOIN decision_versions dv ON dv.project_id = o.project_id AND dv.version_id = o.current_version_id
-        WHERE o.project_id = ? AND o.kind = 'decision' AND o.archived_at IS NULL
+        WHERE o.project_id = ? AND o.kind = 'decision'
           AND (o.edition_id IN (${marks}) OR d.scope = 'project')
         ORDER BY o.display_no`,
       project_id,
       ...edition_ids,
     )) {
+      if (row.archived_at !== null) {
+        dropped.push({ category: "decision", reason: "archived", object_id: row.object_id, version_id: row.version_id });
+        continue;
+      }
       decisions.push({ category: "decision", object_id: row.object_id, version_id: row.version_id, stage_id: null, position: decisions.length });
       decision_views.push({ statement: row.statement, state: row.state, rationale: row.rationale });
       bytes += Buffer.byteLength(row.statement, "utf8");
@@ -523,6 +542,7 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
   for (const category of PRINT_CATEGORIES) {
     if (!wants.has(category)) excluded.push({ category, reason: "not_selected" });
   }
+  excluded.push(...dropped);
   excluded.push(...drafts);
   excluded.push({ category: "token_stream", reason: "default_excluded" });
 
