@@ -91,7 +91,7 @@ for (const [name, text, secret] of SECRET_CASES) {
     const out = redact_text(`앞 ${text} 뒤`, NONE);
     assert.ok(!out.text.includes(secret), `still there: ${out.text}`);
     assert.ok(out.hits > 0, "the erasure is counted");
-    assert.ok(out.text.includes("앞 ") && out.text.includes(" 뒤") || out.text.startsWith("앞"), "the text around stays");
+    assert.ok(out.text.startsWith("앞 "), "the text before the secret stays");
   });
 }
 
@@ -325,4 +325,95 @@ test("권장10 a blank draft is skipped: no '미제출 초안' line, no unsubmit
     assert.equal(real.included.filter((i: any) => i.kind === "draft").length, 1);
     assert.ok(real.prompt_text.includes("진짜 초안"));
   });
+});
+
+// ---------------------------------------------------------------------------
+// 2회차 필수 N1 — 비밀 지우기는 선형 시간이다 (긴 끊김 없는 덩어리를 넣어도 서버가 멈추지 않는다)
+
+const BUDGET_MS = 300;
+
+/** Long unbroken runs that used to make a pattern rescan the same run from every position (each is ~200 KB or less). */
+const SLOW_SHAPES: ReadonlyArray<[string, string]> = [
+  ["letters", "a".repeat(200_000)],
+  ["digits", "1".repeat(200_000)],
+  ["words joined by hyphens", "ab-".repeat(70_000)],
+  ["words joined by underscores", "ab_".repeat(70_000)],
+  ["dots between letters (scheme-like)", "a.".repeat(100_000)],
+  ["hyphens between letters (scheme-like)", "a-".repeat(100_000)],
+  ["mixed case + digits run", "Aa1_".repeat(50_000)],
+  ["repeated 'cookie:' with no '='", "cookie:".repeat(30_000)],
+  ["repeated JWT head joined by hyphens", "eyJaaaaaaaaaa-".repeat(15_000)],
+  ["repeated 'token '", "token ".repeat(35_000)],
+  ["repeated scheme and user", "http://a:".repeat(25_000)],
+  ["repeated unterminated PEM head", "-----BEGIN A ".repeat(15_000)],
+  ["Bearer then many spaces", "Bearer" + " ".repeat(200_000)],
+  ["repeated 'authorization:'", "authorization:".repeat(14_000)],
+  ["repeated home root", "/Users/".repeat(28_000)],
+];
+
+for (const [name, text] of SLOW_SHAPES) {
+  test(`2회차 N1 redaction stays linear: ${name} (${text.length} chars) is done within ${BUDGET_MS} ms`, () => {
+    const started = performance.now();
+    redact_text(text, NONE);
+    const spent = performance.now() - started;
+    assert.ok(spent < BUDGET_MS, `${spent.toFixed(0)} ms for ${text.length} chars`);
+  });
+}
+
+test("2회차 N1 the same input through the API: a context:read token build with 20k-letter pieces answers fast", async () => {
+  await with_api(async (env) => {
+    const long = "a".repeat(20_000);
+    const v = await artifact_with(env, "n1", "합성 장", long);
+    const reader = await make_agent(env, "n1r", ["context:read"]);
+    const started = performance.now();
+    const out = await post(env, "/prompt-builds", { token: reader.token }, {
+      question: long,
+      selection: { version_id: v.version_id, quote: long },
+      drafts: [{ text: long }, { text: long }, { text: long }],
+      target: "B",
+    });
+    const spent = performance.now() - started;
+    assert_ok(out);
+    assert.ok(spent < 1500, `${spent.toFixed(0)} ms`);
+  });
+});
+
+// The names that the old `[\w-]*` prefix was written for: still erased, the whole name together with its value.
+const NAMED: ReadonlyArray<[string, string, string]> = [
+  ["access_token", "access_token=abc12345xyz", "access_token"],
+  ["refresh_token", "refresh_token=abc12345xyz", "refresh_token"],
+  ["client_secret", "client_secret: abc12345xyz", "client_secret"],
+  ["id_token", `id_token="abc12345xyz"`, "id_token"],
+  ["x-api-key header", "x-api-key: abc12345xyz", "x-api-key"],
+  ["json field", `{"api_key": "abc12345xyz"}`, "api_key"],
+  ["after a dot", "config.client_secret=abc12345xyz", "client_secret"],
+  ["upper case", "AWS_SESSION_TOKEN=abc12345xyz", "SESSION_TOKEN"],
+  ["django SECRET_KEY", "SECRET_KEY=abc12345xyz", "SECRET_KEY"],
+  ["aws secret access key", "AWS_SECRET_ACCESS_KEY=abc12345xyz", "ACCESS_KEY"],
+  ["private_key", "private_key: abc12345xyz", "private_key"],
+  ["session id", "session_id=abc12345xyz", "session_id"],
+  ["PHPSESSID", "sessid=abc12345xyz", "sessid"],
+  ["Korean label: password", "비밀번호: abc12345xyz", "비밀번호"],
+  ["Korean label: token", "토큰=abc12345xyz", "토큰"],
+  ["a name longer than any limit", `${"x".repeat(300)}_password=abc12345xyz`, "_password"],
+];
+
+for (const [name, text, name_part] of NAMED) {
+  test(`2회차 N1 secret name and value are both erased: ${name}`, () => {
+    const out = redact_text(`앞 ${text} 뒤`, NONE);
+    assert.ok(!out.text.includes("abc12345xyz"), `value left: ${out.text}`);
+    assert.ok(!out.text.includes(name_part), `name left: ${out.text}`);
+    assert.equal(out.hits, 1, "one erasure, no leftover mark");
+  });
+}
+
+test("2회차 권장1 a PGP private key block (ends in 'KEY BLOCK') is erased whole", () => {
+  const out = redact_text("앞\n-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF8abc\n-----END PGP PRIVATE KEY BLOCK-----\n뒤", NONE);
+  assert.ok(!out.text.includes("lQOYBF8abc") && !out.text.includes("PGP"), out.text);
+  assert.ok(out.text.startsWith("앞\n") && out.text.endsWith("\n뒤"));
+});
+
+test("2회차 권장1 plain words that only look close are not erased", () => {
+  const text = "the session ends here; a secret key idea; 암호화 방식 설명; 토큰 방식 설명";
+  assert.equal(redact_text(text, NONE).text, text);
 });

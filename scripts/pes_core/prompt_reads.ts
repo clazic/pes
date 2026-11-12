@@ -27,21 +27,28 @@ const VALUE_CHARS = String.raw`[^\s"'\x60,;\[]`;
 const SECRET_PATTERNS: readonly RegExp[] = [
   /x-pes-session\s*[:=]\s*[^\s"'`,;\[]+/gi,
   // PEM private keys: the whole block (an unterminated block is erased to the end of the text)
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|$)/g,
   // Authorization headers with their scheme (Basic / Bearer / Token …), then a bare Bearer
   new RegExp(String.raw`\bauthorization\s*[:=]\s*(?:(?:basic|bearer|token|digest|negotiate)\s+${VALUE_CHARS}+|${VALUE_CHARS}{6,})`, "gi"),
   /\bBearer\s+[^\s"'`,;\[]+/gi,
-  // Cookie headers that carry name=value pairs: the rest of the line
-  /\b(?:set-)?cookie\s*:[^\r\n]*=[^\r\n]*/gi,
+  // Cookie headers that carry name=value pairs: the rest of the line. The name before the first `=` is short, so the
+  // look-ahead is bounded (an unbounded `[^\r\n]*=` rescans the whole line for every `cookie:` on it).
+  /\b(?:set-)?cookie\s*:[^\r\n=]{0,200}=[^\r\n]*/gi,
   // credentials inside a URL: user:pass@host, or a token used as the user name
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@"'`]+:[^\/\s@"'`]+@/gi,
-  /\b[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9_.~%-]{20,}@/gi,
+  // (every pattern below that scans a run of name characters starts only at the start of a run — a `\b` or an unanchored
+  // start inside the run would rescan the same run from every position, which is quadratic on long unbroken text)
+  /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\/\s:@"'`]+:[^\/\s@"'`]+@/gi,
+  /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9_.~%-]{20,}@/gi,
   /\bpes_[A-Za-z0-9_-]{16,}/g,
   /\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{12,}/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-  // name = value where the name ENDS in a secret word (access_token, client_secret, x-api-key …)
-  new RegExp(String.raw`[\w-]*(?:api[_-]?key|secret|passw(?:or)?d|token|credential|signature)["']?\s*[:=]\s*["']?${VALUE_CHARS}{6,}`, "gi"),
+  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  // name = value where the name ENDS in a secret word (access_token, client_secret, x-api-key …). The whole name is erased:
+  // it starts at the start of a word and reaches the secret word lazily — a `[\w-]*` prefix with no such anchor tries every
+  // position of a long word and reads to its end each time (quadratic).
+  new RegExp(String.raw`(?<![\w-])[\w-]*?(?:api[_-]?key|(?:secret|private|access|signing|encryption|master)[_-]?key|session[_-]?id|sessid|secret|passw(?:or)?d|token|credential|signature)["']?\s*[:=]\s*["']?${VALUE_CHARS}{6,}`, "gi"),
+  // Korean labels for a password / token / secret key, followed by a value
+  new RegExp(String.raw`(?:비밀번호|암호|토큰|비밀키)\s*[:=]\s*${VALUE_CHARS}{4,}`, "g"),
   // short query-string names that are secrets by themselves: ?key=… ?sig=… ?sid=…
   /(?<=[?&;\s])(?:key|sig|sid)=[^\s"'`,;&\[]{6,}/gi,
   // a long run of letters and digits with no separator is a key whatever it is called (UUIDs and file names have separators)

@@ -1665,7 +1665,7 @@ paths:
         (a token) it is left out of every list, so its id never leaves (the version read hides it the same way). An allowed file is
         listed by role and name, never its content, storage key or path. A token, the session secret, an API key or a local path in
         any input is erased and announced with the warning "redacted": values after names that end in token, secret, password,
-        api key, credential or signature, Authorization and Cookie headers, credentials inside a URL, ?key= and ?sig=, private key
+        api key, secret/private/access key, session id, credential or signature, Korean labels (비밀번호, 암호, 토큰, 비밀키) followed by a value, Authorization and Cookie headers, credentials inside a URL, ?key= and ?sig=, private key
         blocks, long letter-and-digit runs of an unknown shape, and home, file: and drive paths. A blank draft is skipped.
         SEND OFF (allow_opencode_go = false): both targets get the warning send_off. Target A (the text Go would send) drops every
         item but the question (assumptions, decisions, files, the version text, the quote, drafts: excluded with reason send_off, and
