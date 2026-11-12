@@ -318,7 +318,7 @@ export class TsServeProcess {
     while (Date.now() < deadline) {
       if (this.spawn_error !== undefined || this.proc === undefined || this.proc.exitCode !== null || this.proc.signalCode !== null) return false;
       try {
-        const response = await fetch(`${this.origin()}/whoami`, { signal: AbortSignal.timeout(500) });
+        const response = await fetch(`${this.origin()}/whoami`, { headers: { connection: "close" }, signal: AbortSignal.timeout(500) }); // SEL-95: no idle keep-alive socket left in the pool (see http() in web_env.ts)
         const info = (await response.json()) as { root?: string; single?: boolean };
         if (info.single === true && info.root !== undefined && same_path(info.root, this.options.expected_root ?? this.root)) return true;
       } catch {
@@ -356,7 +356,7 @@ export class TsServeProcess {
     const response = await fetch(`${this.origin()}${path}`, {
       method: init.method ?? "GET",
       body: init.body as any,
-      headers: init.headers,
+      headers: { connection: "close", ...init.headers }, // SEL-95: a fresh connection per request — an idle pooled socket dies while a sync child blocks the loop
       redirect: init.redirect ?? "manual",
       signal: AbortSignal.timeout(30_000),
     });
