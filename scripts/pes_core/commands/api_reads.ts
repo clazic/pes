@@ -4,7 +4,7 @@
 // business rule lives here. Callers wrap multi-read use in read_tx.
 
 import type { Db } from "../db.ts";
-import { event_denied } from "./file_access.ts";
+import { artifact_version_denied, closed_materials, event_denied, type Audience, type ClosedMaterials } from "./file_access.ts";
 
 export interface DbMeta {
   database_instance_id: string;
@@ -57,8 +57,8 @@ export function max_event_seq(db: Db, project_id: string): bigint {
  * Events after `after`, whole transactions only. Events the caller may not see
  * are scanned (the cursor moves past them) but not returned. A page ends after
  * the transaction that reaches `limit` visible events.
- * `hide_tokens` is true for every non-human caller: it also hides token events and every event about a file closed to AI
- * (commands/file_access.ts event_denied).
+ * `hide_tokens` is true for every non-human caller: it also hides token events and every event about a material object closed to
+ * AI (commands/file_access.ts event_denied). The closed set is read once per page (two queries), not once per event.
  */
 export function changes_page(
   db: Db,
@@ -70,40 +70,72 @@ export function changes_page(
   const events: EventDto[] = [];
   let cursor = after;
   let has_more = false;
-  for (;;) {
-    const head = db.get<{ event_seq: bigint; tx_id: string }>(
-      "SELECT event_seq, tx_id FROM events WHERE project_id = ? AND event_seq > ? ORDER BY event_seq LIMIT 1",
+  let closed: ClosedMaterials | undefined;
+  // Events are read in chunks, not one transaction (or one event) per query: the number of queries is proportional to the events
+  // scanned / the chunk size (there is no query per event). A chunk that is full may end inside a transaction — that last group is left to the next chunk.
+  const chunk_size = Math.min(CHANGES_CHUNK_MAX, Math.max(CHANGES_CHUNK_MIN, limit * 4));
+  const event_columns = "event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at, payload";
+  scan: for (;;) {
+    let rows = db.all<EventRow>(
+      `SELECT ${event_columns} FROM events WHERE project_id = ? AND event_seq > ? ORDER BY event_seq LIMIT ?`,
       project_id,
       cursor,
+      chunk_size,
     );
-    if (head === undefined) break;
+    if (rows.length === 0) break;
     if (events.length >= limit) {
       has_more = true;
       break;
     }
-    const group = db.all<EventRow>(
-      `SELECT event_seq, tx_id, type, object_id, before_version_id, after_version_id, created_at, payload
-         FROM events WHERE project_id = ? AND tx_id = ? AND event_seq > ? ORDER BY event_seq`,
-      project_id,
-      head.tx_id,
-      cursor,
-    );
-    for (const row of group) {
-      cursor = row.event_seq;
-      if (hide_tokens && row.type.startsWith("token.")) continue;
-      if (hide_tokens && event_denied(db, project_id, row)) continue;
-      events.push({
-        event_seq: row.event_seq.toString(),
-        type: row.type,
-        object_id: row.object_id,
-        before_version_id: row.before_version_id,
-        after_version_id: row.after_version_id,
-        at: Number(row.created_at),
-      });
+    const full = rows.length === chunk_size;
+    let end = rows.length;
+    if (full) {
+      const last_tx = rows[end - 1].tx_id;
+      while (end > 0 && rows[end - 1].tx_id === last_tx) end -= 1;
+      if (end === 0) {
+        // one transaction fills the whole chunk: read it whole
+        rows = db.all<EventRow>(
+          `SELECT ${event_columns} FROM events WHERE project_id = ? AND tx_id = ? AND event_seq > ? ORDER BY event_seq`,
+          project_id,
+          last_tx,
+          cursor,
+        );
+        end = rows.length;
+      }
     }
+    let at = 0;
+    while (at < end) {
+      if (events.length >= limit) {
+        has_more = true;
+        break scan;
+      }
+      let group_end = at;
+      while (group_end < end && rows[group_end].tx_id === rows[at].tx_id) group_end += 1;
+      for (const row of rows.slice(at, group_end)) {
+        cursor = row.event_seq;
+        if (hide_tokens && row.type.startsWith("token.")) continue;
+        if (hide_tokens) {
+          closed ??= closed_materials(db, project_id);
+          if (event_denied(closed, row)) continue;
+        }
+        events.push({
+          event_seq: row.event_seq.toString(),
+          type: row.type,
+          object_id: row.object_id,
+          before_version_id: row.before_version_id,
+          after_version_id: row.after_version_id,
+          at: Number(row.created_at),
+        });
+      }
+      at = group_end;
+    }
+    if (!full) break;
   }
   return { events, last_seq: cursor, has_more };
 }
+
+const CHANGES_CHUNK_MIN = 50;
+const CHANGES_CHUNK_MAX = 500;
 
 // ---------------------------------------------------------------------------
 // the current place of an edition (SEL-82): the one rule behind GET P/workspace `current` and the address `pes open <slug> --app` prints
@@ -902,6 +934,48 @@ interface RoundQuestionRow {
   answer_used_default: bigint | null;
   answer_state: string | null;
   answer_tx_id: string | null;
+}
+
+/**
+ * SEL-126: the round's result text — the first `result` object the round was sealed with (round_contents, role 'result'), at its CURRENT
+ * version = objects.current_version_id, the SAME version the annotation commands judge (basis_version_id) and the one content.set_current /
+ * an adopted edit_text moves (append_version alone does not). Not the version the seal held. Also its version_no (decimal string, a
+ * Revision), the artifact title and created_at (ISO 8601; null when the stored time is not a time). null = no result: the stage-start
+ * place, an open round, a round sealed without one. For a non-human caller a current version that carries a file closed to AI is null with
+ * no trace (the same rule as every AI read exit). Read only; one query + the denial check.
+ */
+export interface RoundResultDto {
+  object_id: string;
+  version_id: string;
+  version_no: string;
+  title: string;
+  created_at: string | null;
+  body_md: string;
+}
+
+export function round_result_data(db: Db, project_id: string, place: RoundPlace, audience: Audience): RoundResultDto | null {
+  if (place.server_round_id === null) return null;
+  const row = db.get<{ object_id: string; version_id: string; version_no: bigint; created_at: bigint; title: string; body_md: string | null }>(
+    `SELECT c.object_id AS object_id, ov.id AS version_id, ov.version_no AS version_no, ov.created_at AS created_at, av.title AS title, av.body_md AS body_md
+       FROM round_contents c
+       JOIN objects o ON o.project_id = c.project_id AND o.id = c.object_id
+       JOIN object_versions ov ON ov.project_id = o.project_id AND ov.id = o.current_version_id
+       JOIN artifact_versions av ON av.project_id = ov.project_id AND av.version_id = ov.id
+      WHERE c.project_id = ? AND c.round_id = ? AND c.role = 'result'
+      ORDER BY c.position, c.object_id LIMIT 1`,
+    project_id,
+    place.server_round_id,
+  );
+  if (row === undefined || row.body_md === null) return null;
+  if (audience === "ai" && artifact_version_denied(db, project_id, row.version_id)) return null;
+  return {
+    object_id: row.object_id,
+    version_id: row.version_id,
+    version_no: row.version_no.toString(),
+    title: row.title,
+    created_at: iso_of_ms(row.created_at),
+    body_md: row.body_md,
+  };
 }
 
 export function round_form_data(db: Db, project_id: string, place: RoundPlace): Record<string, unknown> {

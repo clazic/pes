@@ -7,6 +7,7 @@ import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
 import { ReflectionSection } from "@/features/records/ReflectionSection";
 import { formatAt, placeLabel } from "@/lib/labels";
+import { ResultMeta } from "./ResultMeta";
 import { AnnotatedResult, isAnnotatable } from "./AnnotatedResult";
 import { roundHref } from "./paths";
 import { RecordsPanel, RunPanel } from "./StatusPanels";
@@ -203,9 +204,7 @@ export function BodyPane({
             <h2 id="result-title" className="text-title text-ink">
               {round.result.title}
             </h2>
-            <p className="mt-0.5 text-caption text-muted-foreground">
-              v{round.result.version} · {round.result.status === "adopted" ? "채택본" : "초안"} · <time dateTime={round.result.updated_at}>{formatAt(round.result.updated_at, false)}</time>
-            </p>
+            <ResultMeta result={round.result} />
             <div className="mt-3 space-y-4">
               {round.result.paragraphs.map((p) => (
                 <p key={p} className="text-body text-ink">

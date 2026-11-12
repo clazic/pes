@@ -46,6 +46,7 @@ import {
   request_receipt,
   receipt_of_tx,
   round_form_data,
+  round_result_data,
   round_place,
   round_threads_data,
   run_info,
@@ -79,6 +80,7 @@ import { build_prompt, question_statuses, type PromptTarget, type RedactLiterals
 import { publish_set, revise_question, submit_answers } from "./questions.ts";
 import {
   REFERENCE_SCOPE_ITEMS,
+  list_reference_candidates,
   list_references,
   read_reference,
   reference_caller,
@@ -644,6 +646,12 @@ export class ApiApp {
         who: "human",
         act: async (r, project, auth) => this.#reference_attach(r, project, auth),
       }),
+      // SEL-120 REF1c: the other projects the person may attach, with the snapshots to choose from. A read for the attach
+      // screen, so the owner session only (a token is 403 human_required; no other project's name or snapshot id goes to an AI).
+      route("GET", `${P}/reference-candidates`, "references.candidates", {
+        who: "human",
+        act: async (_r, project, auth) => this.#reference_candidates(project, auth),
+      }),
       route("GET", `${P}/references/{ref}`, "references.get", {
         who: "any", scope: "context:read", go: true,
         act: async (r, project, auth) => this.#reference_get(r, project, auth),
@@ -744,7 +752,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/stages/{s}/rounds/{rd}`, "rounds.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#round_get(r, project),
+        act: async (r, project, auth) => this.#round_get(r, project, auth),
       }),
       route("GET", `${P}/stages/{s}/rounds/{rd}/threads`, "rounds.threads", {
         who: "any", scope: "context:read", go: true,
@@ -1513,6 +1521,11 @@ export class ApiApp {
   async #references_list(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const references = read_tx(this.#db, () => list_references(this.#db, project.id, this.#reference_caller(auth)));
     return { status: 200, data: { references } };
+  }
+
+  async #reference_candidates(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const candidates = read_tx(this.#db, () => list_reference_candidates(this.#db, project.id, this.#reference_caller(auth)));
+    return { status: 200, data: { candidates } };
   }
 
   async #reference_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
@@ -3272,10 +3285,11 @@ export class ApiApp {
   }
 
   /** SEL-98: GET P/stages/{s}/rounds/{rd} — one place's form: set id, form version, each question's current version and current answer. */
-  async #round_get(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #round_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const data = read_tx(this.#db, () => {
       const place = this.#round_place(request, project);
-      return round_form_data(this.#db, project.id, place);
+      // SEL-126: + the round's result text (current version; null when none, or closed to a non-human caller)
+      return { ...round_form_data(this.#db, project.id, place), result: round_result_data(this.#db, project.id, place, this.#audience(auth)) };
     });
     return { status: 200, data };
   }

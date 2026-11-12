@@ -94,30 +94,58 @@ export function file_ai_denied(db: ReadDb, project_id: string, blob_id: string):
 // A material is a source object of kind file; its title defaults to the file name, so the object, its versions and the
 // events about them name the file. They follow the same decision (file_ai_denied) — no exit keeps its own copy.
 
-const MATERIAL_FILES_SQL = `SELECT vf.blob_id AS blob_id
-  FROM version_files vf
+const MATERIAL_FILES_FROM = `FROM version_files vf
   JOIN object_versions ov ON ov.project_id = vf.project_id AND ov.id = vf.version_id
   JOIN sources s ON s.project_id = ov.project_id AND s.object_id = ov.object_id AND s.kind = 'file'
  WHERE vf.project_id = ?`;
-
-/**
- * True when this version belongs to a file material and carries at least one file closed to AI.
- * Version unit. The AI read exits do NOT use this (they use material_object_denied); it is for facts that name one version.
- */
-export function material_version_denied(db: ReadDb, project_id: string, version_id: string): boolean {
-  return db
-    .all<{ blob_id: string }>(`${MATERIAL_FILES_SQL} AND vf.version_id = ?`, project_id, version_id)
-    .some((row) => file_ai_denied(db, project_id, row.blob_id));
-}
+const MATERIAL_FILES_SQL = `SELECT vf.blob_id AS blob_id ${MATERIAL_FILES_FROM}`;
 
 /**
  * True when any version of this file material carries a file closed to AI. THE unit of every AI-facing exit (materials list,
- * context manifest, version read, A tool, change feed, material upload): a later version inherits the earlier title (the file name).
+ * context manifest, version read, A tool, change feed, material upload, results.submit): a later version inherits the earlier title (the file name).
  */
 export function material_object_denied(db: ReadDb, project_id: string, object_id: string): boolean {
   return db
     .all<{ blob_id: string }>(`${MATERIAL_FILES_SQL} AND ov.object_id = ?`, project_id, object_id)
     .some((row) => file_ai_denied(db, project_id, row.blob_id));
+}
+
+/**
+ * The closed side of a whole project, decided in two queries (one per table family) instead of one per event/row.
+ * It is the set form of the one rule above — a file is closed when file_ai_denied says so, a material OBJECT is closed when any
+ * version of it carries a closed file (material_object_denied) — so the batch exits (change feed, materials list) cost the same
+ * however many events or rows they look at. tests/test_sel127_closed_index.test.ts keeps it equal to the per-object functions.
+ */
+export interface ClosedMaterials {
+  /** blobs whose own policy says deny (file_ai_denied is true) */
+  denied_blobs: ReadonlySet<string>;
+  /** material objects with a closed file in any version (material_object_denied is true) */
+  objects: ReadonlySet<string>;
+  /** every version of a closed material object, allowed ones included */
+  versions: ReadonlySet<string>;
+  /** denied blobs plus every blob attached to a closed material object (an allowed v2 file named in an upload event) */
+  blobs: ReadonlySet<string>;
+  /** the policies of `blobs` */
+  policies: ReadonlySet<string>;
+}
+
+export function closed_materials(db: ReadDb, project_id: string): ClosedMaterials {
+  const states = db.all<AccessRow>(`${STATE_SQL} WHERE p.project_id = ?`, project_id).map(state_of);
+  const denied_blobs = new Set(states.filter((state) => state.effective === "deny").map((state) => state.blob_id));
+  const files = db.all<{ blob_id: string; version_id: string; object_id: string }>(
+    `SELECT vf.blob_id AS blob_id, vf.version_id AS version_id, ov.object_id AS object_id ${MATERIAL_FILES_FROM}`,
+    project_id,
+  );
+  const objects = new Set(files.filter((file) => denied_blobs.has(file.blob_id)).map((file) => file.object_id));
+  const versions = new Set<string>();
+  const blobs = new Set(denied_blobs);
+  for (const file of files) {
+    if (!objects.has(file.object_id)) continue;
+    versions.add(file.version_id);
+    blobs.add(file.blob_id);
+  }
+  const policies = new Set(states.filter((state) => blobs.has(state.blob_id)).map((state) => state.policy_id));
+  return { denied_blobs, objects, versions, blobs, policies };
 }
 
 /** True when this artifact version carries a file closed to AI: its body file, or a file attached to the version. */
@@ -149,11 +177,40 @@ export interface EventFacts {
 }
 
 /**
- * Must this event be left out of a non-human caller's change feed? Yes when it names a closed file (blob_id or
- * file_policy_id in the payload — upload, attach, material upload and the access switch itself) or an object/version of a
- * closed file material. The cursor still moves past it (the caller never learns it was there).
+ * Payload keys that name a material OBJECT or a VERSION, matched against the closed sets. Every event type that names one
+ * of these ids in its payload must be listed here (grep the type in commands/): annotation.created (target_object_id,
+ * target_version_id), content.citation_added (source_version_id, artifact_version_id), content.relation_linked
+ * (from_version_id, to_version_id), followup.proposed (proposed_version_id), dispatch.adopted (adopted_version_id),
+ * run.input_receipt_recorded (input_version_id).
  */
-export function event_denied(db: ReadDb, project_id: string, event: EventFacts): boolean {
+export const CLOSED_OBJECT_PAYLOAD_KEYS = ["object_id", "target_object_id"] as const;
+export const CLOSED_VERSION_PAYLOAD_KEYS = [
+  "version_id",
+  "target_version_id",
+  "source_version_id",
+  "artifact_version_id",
+  "from_version_id",
+  "to_version_id",
+  "proposed_version_id",
+  "adopted_version_id",
+  "input_version_id",
+] as const;
+
+/**
+ * Must this event be left out of a non-human caller's change feed? The unit is the material OBJECT, as at every AI exit:
+ * yes when it names a closed file or a file of a closed material (blob_id or file_policy_id in the payload — upload, attach,
+ * material upload and the access switch itself), or a closed material object or one of its versions (the id keys above in the
+ * payload) — an allowed later version of a closed material hides with it. The cursor still moves past it (the caller never
+ * learns it was there). `closed` comes from closed_materials, built once per page.
+ *
+ * Known limit: only top-level string values are compared. An array or nested value (e.g. edition.snapshotted's versions[])
+ * is not compared — such an event is not a material-only event, so only its type reaches a non-human caller.
+ *
+ * The event COLUMNS (object_id, before/after_version_id) are NULL in every row write_events writes today (commands/shared.ts),
+ * so the payload keys are the only facts this reads in practice. The column check stays for rows that do fill them; filling
+ * the columns is not done here.
+ */
+export function event_denied(closed: ClosedMaterials, event: EventFacts): boolean {
   let payload: unknown = null;
   try {
     payload = JSON.parse(event.payload);
@@ -162,12 +219,19 @@ export function event_denied(db: ReadDb, project_id: string, event: EventFacts):
   }
   if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
     const named = payload as Record<string, unknown>;
-    if (typeof named.blob_id === "string" && file_ai_denied(db, project_id, named.blob_id)) return true;
-    if (typeof named.file_policy_id === "string" && access_state_of_policy(db, project_id, named.file_policy_id)?.effective === "deny") return true;
+    if (typeof named.blob_id === "string" && closed.blobs.has(named.blob_id)) return true;
+    if (typeof named.file_policy_id === "string" && closed.policies.has(named.file_policy_id)) return true;
+    for (const key of CLOSED_OBJECT_PAYLOAD_KEYS) {
+      const id = named[key];
+      if (typeof id === "string" && closed.objects.has(id)) return true;
+    }
+    for (const key of CLOSED_VERSION_PAYLOAD_KEYS) {
+      const id = named[key];
+      if (typeof id === "string" && closed.versions.has(id)) return true;
+    }
   }
-  const versions = [event.before_version_id, event.after_version_id].filter((id): id is string => id !== null);
-  if (versions.some((id) => material_version_denied(db, project_id, id))) return true;
-  return versions.length === 0 && event.object_id !== null && material_object_denied(db, project_id, event.object_id);
+  if (event.object_id !== null && closed.objects.has(event.object_id)) return true;
+  return [event.before_version_id, event.after_version_id].some((id) => id !== null && closed.versions.has(id));
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +249,10 @@ export interface MaterialDto {
   media_type: string;
   size: number;
   sha256: string;
-  /** only for the human owner: the value in force. AI callers never get this key. */
+  /** only for the human owner: the value in force for THIS row's file. AI callers never get this key. */
   ai_access?: AiAccess;
+  /** only for the human owner: the object-unit state — deny when any version of the material carries a closed file (what AI callers are judged by). */
+  object_ai_access?: AiAccess;
 }
 
 interface MaterialRow {
@@ -206,9 +272,10 @@ interface MaterialRow {
 export type Audience = "human" | "ai";
 
 /**
- * The materials a caller may see. `human` = all, each with its `ai_access` (that file's own switch); `ai` = the material objects
- * with no closed file in any version, without the `ai_access` key and with no trace of the closed ones (not even a count).
- * Both go through file_ai_denied; `ai` judges per object (material_object_denied), like every other AI exit.
+ * The materials a caller may see. `human` = all, each with its `ai_access` (that row's file switch) and `object_ai_access` (the
+ * object-unit state AI callers are judged by); `ai` = the material objects with no closed file in any version, without either key
+ * and with no trace of the closed ones (not even a count). Both read the same closed_materials, so the list never disagrees
+ * with the change feed or the other exits.
  */
 export function material_rows(db: ReadDb, project_id: string, audience: Audience): MaterialDto[] {
   const rows = db.all<MaterialRow>(
@@ -226,20 +293,13 @@ export function material_rows(db: ReadDb, project_id: string, audience: Audience
       ORDER BY o.display_no, vf.role, vf.blob_id`,
     project_id,
   );
-  const out: MaterialDto[] = [];
   // An AI caller's unit is the material OBJECT, as at the write exits (run_upload, event_denied): a closed file in any version closes
-  // the whole object, because a later version may inherit the closed file's name as its title. Decided once per object.
-  const object_closed = new Map<string, boolean>();
+  // the whole object, because a later version may inherit the closed file's name as its title.
+  const closed = closed_materials(db, project_id);
+  const out: MaterialDto[] = [];
   for (const row of rows) {
-    const denied = file_ai_denied(db, project_id, row.blob_id);
-    if (audience === "ai") {
-      let closed = object_closed.get(row.object_id);
-      if (closed === undefined) {
-        closed = material_object_denied(db, project_id, row.object_id);
-        object_closed.set(row.object_id, closed);
-      }
-      if (closed) continue;
-    }
+    const object_closed = closed.objects.has(row.object_id);
+    if (audience === "ai" && object_closed) continue;
     const dto: MaterialDto = {
       object_id: row.object_id,
       version_id: row.version_id,
@@ -253,7 +313,10 @@ export function material_rows(db: ReadDb, project_id: string, audience: Audience
       size: Number(row.size),
       sha256: row.sha256,
     };
-    if (audience === "human") dto.ai_access = denied ? "deny" : "allow";
+    if (audience === "human") {
+      dto.ai_access = closed.denied_blobs.has(row.blob_id) ? "deny" : "allow";
+      dto.object_ai_access = object_closed ? "deny" : "allow";
+    }
     out.push(dto);
   }
   return out;

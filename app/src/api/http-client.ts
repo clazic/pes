@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ResultView, type ReferenceCandidate, type ReferenceSnapshot } from "./types";
 import { markAfterSend } from "./send-outcome";
 import { showIfFromWire, showIfToWire } from "./show-if";
 
@@ -247,13 +247,13 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   /* ───────────── 가정 · 결정 · 반영 (U3c · SEL-100) — 서버 계약은 SEL-93(U3a)·SEL-100 읽기 칸 보강. 서버가 안 주는 값은 null · "" 로 두고 지어내지 않는다 ───────────── */
 
   /** GET P/<rest> → data. 모르는 slug 는 요청 없이 null, 서버 404(없는 판 · 라운드)는 null, 그 밖의 거절은 PesApiError */
-  async function readData(slug: string, rest: string): Promise<Json | null> {
+  async function readData(slug: string, rest: string, keepNotFound = false): Promise<Json | null> {
     const id = idOf(slug);
     if (id === undefined) return null;
     const res = await send(projectUrl(id, rest), { method: "GET", headers: headers(), credentials: "omit" });
     if (!res.ok) {
       const error = await toApiError(res);
-      if (isNotFound(error)) return null;
+      if (isNotFound(error) && !keepNotFound) return null;
       throw error;
     }
     const body: unknown = await res.json();
@@ -560,6 +560,28 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return view;
   }
 
+  /**
+   * SEL-126 — 서버 라운드 읽기의 result{object_id, version_id, body_md, version_no?, title?, created_at?}. 세 칸(object_id·version_id·body_md)이 모두
+   * 문자열일 때만 싣는다(아니면 null — 첨언 도구를 켜지 않는다). version_no(10진 글) · created_at(ISO) 은 서버가 준 모양일 때만 쓰고, 아니면 null 로 둔다:
+   * 지어낸 버전 번호 · 채택 여부 · 시각을 보이지 않는다(채택 여부는 라운드 읽기에 없으므로 늘 null). 제목은 서버가 안 주면 화면의 고정 이름 "결과 글".
+   */
+  function resultViewOf(raw: unknown): ResultView | null {
+    if (!isRecord(raw) || typeof raw.object_id !== "string" || typeof raw.version_id !== "string" || typeof raw.body_md !== "string") return null;
+    const body = raw.body_md;
+    const versionNo = typeof raw.version_no === "string" && /^[1-9][0-9]{0,14}$/.test(raw.version_no) ? Number(raw.version_no) : null;
+    const createdAt = typeof raw.created_at === "string" && !Number.isNaN(new Date(raw.created_at).getTime()) ? raw.created_at : null;
+    return {
+      title: typeof raw.title === "string" && raw.title.trim() !== "" ? raw.title : "결과 글",
+      version: versionNo,
+      status: null,
+      updated_at: createdAt,
+      paragraphs: body.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter((p) => p !== ""),
+      object_id: raw.object_id,
+      version_id: raw.version_id,
+      body_md: body,
+    };
+  }
+
   function roundViewOf(data: Json, stage: string): RoundView {
     const questions = (Array.isArray(data.questions) ? data.questions : []).flatMap((raw) => {
       const view = isRecord(raw) ? questionViewOf(raw) : null;
@@ -572,7 +594,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       form_version: typeof data.form_version === "number" ? data.form_version : 0,
       ...(typeof data.set_id === "string" && data.set_id ? { set_id: data.set_id } : {}),
       questions,
-      result: null,
+      result: resultViewOf(data.result),
       alerts: [],
       prompt: "",
     };
@@ -627,6 +649,23 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     ];
   }
 
+  function snapshotRow(r: Json): ReferenceSnapshot[] {
+    if (typeof r.id !== "string" || !r.id) return [];
+    return [{ id: r.id, key: text(r.key) || r.id, label: nullable(r.label), approved: r.approved === true, recommended: r.recommended === true }];
+  }
+  function candidateRow(r: Json): ReferenceCandidate[] {
+    if (typeof r.project_id !== "string" || !r.project_id) return [];
+    return [
+      {
+        project_id: r.project_id,
+        key: text(r.key) || r.project_id,
+        label: text(r.label) || r.project_id,
+        attached: r.attached === true,
+        snapshots: (Array.isArray(r.snapshots) ? r.snapshots : []).flatMap((x) => (isRecord(x) ? snapshotRow(x) : [])),
+      },
+    ];
+  }
+
   const refPath = (ref: string, tail = ""): string => `/references/${q(ref)}${tail}`;
   const referenceOf = (data: Json): ReferenceRow => {
     if (!isRecord(data.reference)) throw new PesApiError(fallbackBody(500));
@@ -645,8 +684,18 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const content: ReferenceContent | null = isRecord(data.content) ? { items: (Array.isArray(data.content.items) ? data.content.items : []).flatMap((i) => (isRecord(i) ? referenceItem(i) : [])) } : null;
       return { reference: referenceOf(data), content };
     },
-    /** 서버에 후보 프로젝트 · 스냅숏을 읽는 길이 없다(후속 SEL-120) — 후보를 지어내지 않고 요청 없이 거절한다. 생성 화면(null)도 작업 중도 같다 */
-    getReferenceCandidates: notConnected("참고 프로젝트 후보 읽기"),
+    /**
+     * GET P/reference-candidates(소유자 세션만) — 작업 중 화면. 서버가 안 주는 칸(스냅숏 이름)은 null 그대로, 알 수 없는 모양은 버린다.
+     * 생성 화면(scope=null)은 프로젝트가 아직 없어 서버에 길이 없다 — 후보를 지어내지 않고 요청 없이 NotConnectedError.
+     * 빈 목록은 200 candidates=[] 뿐이다. 모르는 slug(프로젝트 id 를 모름)는 요청 없이 not_found, 서버 404 도 not_found PesApiError 로 둔다 — 후보 없음으로 바꾸지 않는다.
+     */
+    async getReferenceCandidates(scope) {
+      if (scope === null) throw new NotConnectedError("참고 프로젝트 후보 읽기(생성 화면)");
+      if (idOf(scope.slug) === undefined) throw new PesApiError(fallbackBody(404));
+      const data = await readData(scope.slug, "/reference-candidates", true);
+      if (data === null) throw new PesApiError(fallbackBody(404));
+      return listOf(data, "candidates").flatMap(candidateRow);
+    },
     async attachReference(slug, _edition, input, key) {
       const body: Json = {
         referenced_project_id: input.referenced_project_id,

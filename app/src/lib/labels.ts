@@ -45,3 +45,12 @@ export const FOLLOWUP_KIND_LABEL: Record<"edit_text" | "next_round_task" | "reop
   reopen_stage: "앞 단계 다시 열기",
   none: "그냥 닫기",
 };
+
+/** 결과 글 머리글 아래 한 줄("v3 · 채택본 · 2026. 11. 13.") — 값이 있는 것만 잇고, 하나도 없으면 null(줄을 그리지 않는다). 값을 지어내지 않는다 */
+export function resultMetaText(r: { version: number | null; status: "adopted" | "draft" | null; updated_at: string | null }): string | null {
+  const parts: string[] = [];
+  if (r.version !== null) parts.push(`v${r.version}`);
+  if (r.status !== null) parts.push(r.status === "adopted" ? "채택본" : "초안");
+  if (r.updated_at !== null) parts.push(formatAt(r.updated_at, false));
+  return parts.length === 0 ? null : parts.join(" · ");
+}
