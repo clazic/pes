@@ -161,6 +161,9 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/uploads",
   "POST /api/v1/projects/{id}/uploads/{b}/complete",
   "PUT /api/v1/projects/{id}/uploads/{b}",
+  // SEL-118 U5a: prompt assembly (a read, POST because unsubmitted drafts only exist in the client) + human->AI question statuses
+  "POST /api/v1/projects/{id}/prompt-builds",
+  "GET /api/v1/projects/{id}/question-statuses",
 ].sort();
 
 /** Routes the closed 2단계 list does NOT have and capabilities must say are unsupported (no fake success). */
