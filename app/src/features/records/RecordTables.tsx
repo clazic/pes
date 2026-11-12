@@ -126,7 +126,7 @@ function DecisionLine({ row, all, onJudge }: { row: DecisionRow; all: DecisionRo
             <p className="mt-1">
               대체한 옛 결정:{" "}
               <Link to={{ hash: `#decision-${row.supersedes.object_id}` }} className="text-primary-ink underline underline-offset-2">
-                {row.supersedes.statement}
+                {row.supersedes.statement || row.supersedes.object_id}
               </Link>
             </p>
           ) : null}
