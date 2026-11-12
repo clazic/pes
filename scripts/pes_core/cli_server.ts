@@ -246,7 +246,7 @@ export async function cmd_serve(args: string[]): Promise<void> {
 }
 
 export async function cmd_hub(args: string[]): Promise<void> {
-  const root = projects_root(args);
+  const root = projects_root(args.filter((a) => a !== "--open"));
   mkdirSync(root, { recursive: true });
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;

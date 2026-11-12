@@ -65,6 +65,17 @@ test("1 pes hub --open (PES_NO_BROWSER=1): 빈 홈에서 첫 페이지 주소 �
   });
 });
 
+test("1 pes hub --open <폴더> (--open 이 앞에 와도): 폴더 인자를 잃지 않는다 — 허브 index.html 은 그 폴더에 만들어지고 PES 홈에는 안 생긴다", { timeout: 120_000 }, async () => {
+  await with_empty("pes-sel128-hubfolder-", async (f) => {
+    const alt = join(f.ctx.home_dir, "alt-hub-root");
+    mkdirSync(alt, { recursive: true });
+    // 허브 파일은 서버를 켜기 전에 쓰인다. 시험 권한에서는 자식 프로세스(서버)를 못 켜므로 종료 상태는 보지 않는다
+    f.run(["hub", "--open", alt]);
+    assert.ok(existsSync(join(alt, "index.html")), "허브 index.html 이 인자로 준 폴더에 있다");
+    assert.ok(!existsSync(join(f.root, "index.html")), "PES 홈에는 허브가 생기지 않는다");
+  });
+});
+
 test("1 pes list --open: 목록 줄(빈 홈이면 '프로젝트 없음') 뒤 마지막 줄이 같은 꼴의 첫 페이지 주소 — 코드는 그 한 줄에만", { timeout: 120_000 }, async () => {
   await with_empty("pes-sel128-listopen-", async (f) => {
     const out = f.run(["list", "--open"]);
