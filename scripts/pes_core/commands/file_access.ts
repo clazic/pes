@@ -177,11 +177,32 @@ export interface EventFacts {
 }
 
 /**
+ * Payload keys that name a material OBJECT or a VERSION, matched against the closed sets. Every event type that names one
+ * of these ids in its payload must be listed here (grep the type in commands/): annotation.created (target_object_id,
+ * target_version_id), content.citation_added (source_version_id, artifact_version_id), content.relation_linked
+ * (from_version_id, to_version_id), followup.proposed (proposed_version_id).
+ */
+export const CLOSED_OBJECT_PAYLOAD_KEYS = ["object_id", "target_object_id"] as const;
+export const CLOSED_VERSION_PAYLOAD_KEYS = [
+  "version_id",
+  "target_version_id",
+  "source_version_id",
+  "artifact_version_id",
+  "from_version_id",
+  "to_version_id",
+  "proposed_version_id",
+] as const;
+
+/**
  * Must this event be left out of a non-human caller's change feed? The unit is the material OBJECT, as at every AI exit:
  * yes when it names a closed file or a file of a closed material (blob_id or file_policy_id in the payload — upload, attach,
- * material upload and the access switch itself), or a closed material object or one of its versions (object_id / version_id in
- * the payload or in the event columns) — an allowed later version of a closed material hides with it. The cursor still moves
- * past it (the caller never learns it was there). `closed` comes from closed_materials, built once per page.
+ * material upload and the access switch itself), or a closed material object or one of its versions (the id keys above in the
+ * payload) — an allowed later version of a closed material hides with it. The cursor still moves past it (the caller never
+ * learns it was there). `closed` comes from closed_materials, built once per page.
+ *
+ * The event COLUMNS (object_id, before/after_version_id) are NULL in every row write_events writes today (commands/shared.ts),
+ * so the payload keys are the only facts this reads in practice. The column check stays for rows that do fill them; filling
+ * the columns is not done here.
  */
 export function event_denied(closed: ClosedMaterials, event: EventFacts): boolean {
   let payload: unknown = null;
@@ -194,8 +215,14 @@ export function event_denied(closed: ClosedMaterials, event: EventFacts): boolea
     const named = payload as Record<string, unknown>;
     if (typeof named.blob_id === "string" && closed.blobs.has(named.blob_id)) return true;
     if (typeof named.file_policy_id === "string" && closed.policies.has(named.file_policy_id)) return true;
-    if (typeof named.object_id === "string" && closed.objects.has(named.object_id)) return true;
-    if (typeof named.version_id === "string" && closed.versions.has(named.version_id)) return true;
+    for (const key of CLOSED_OBJECT_PAYLOAD_KEYS) {
+      const id = named[key];
+      if (typeof id === "string" && closed.objects.has(id)) return true;
+    }
+    for (const key of CLOSED_VERSION_PAYLOAD_KEYS) {
+      const id = named[key];
+      if (typeof id === "string" && closed.versions.has(id)) return true;
+    }
   }
   if (event.object_id !== null && closed.objects.has(event.object_id)) return true;
   return [event.before_version_id, event.after_version_id].some((id) => id !== null && closed.versions.has(id));
