@@ -130,7 +130,7 @@ export function NewProjectForm() {
           required
           aria-required="true"
           aria-invalid={problem?.field === "topic" ? "true" : undefined}
-          aria-describedby={problem ? alertId : undefined}
+          aria-describedby={problem?.field === "topic" ? alertId : undefined}
           className={fieldClass}
         />
       </div>
@@ -148,7 +148,7 @@ export function NewProjectForm() {
           autoComplete="off"
           spellCheck={false}
           aria-invalid={problem?.field === "slug" ? "true" : undefined}
-          aria-describedby={hintId}
+          aria-describedby={problem?.field === "slug" ? `${hintId} ${alertId}` : hintId}
           className={fieldClass}
         />
         <p id={hintId} className="mt-1 text-caption text-ink-2">
