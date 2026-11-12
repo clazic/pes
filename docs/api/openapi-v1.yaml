@@ -1293,7 +1293,7 @@ paths:
         ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
         material objects (the human manifest lists them with `ai_access: deny`); `digest` is computed from the manifest the caller gets, so it differs by audience.
         `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` leaves out
-        events about a closed material object (a closed file in any version), by material object: events whose payload names a closed file or one of that object's files, versions or ids (`blob_id`, `file_policy_id`, `object_id`, `version_id`) are left out, a newer allowed version's upload events included (`commands/file_access.ts` event_denied). The hand-off bundle's `base_versions` leave out closed files and materials.
+        events about a closed material object (a closed file in any version), by material object: events whose payload names a closed file or one of that object's files, versions or ids (`blob_id`, `file_policy_id`, `object_id`, `version_id`) are left out, a newer allowed version's upload events included (`commands/file_access.ts` event_denied). A file is closed when its own policy or the policy of any file it was extracted from (however many steps) denies (SEL-116); `closed_materials` and `file_ai_denied` give the same answer. The hand-off bundle's `base_versions` leave out closed files and materials.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:

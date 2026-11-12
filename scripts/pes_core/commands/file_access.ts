@@ -81,20 +81,22 @@ export function access_state_of_policy(db: ReadDb, project_id: string, policy_id
   return row === undefined ? undefined : state_of(row);
 }
 
-// The blob and every blob it was (transitively) extracted from, each with the policy in force. UNION (not UNION ALL) drops a blob
-// already visited, so a self-edge or a cycle in file_extractions ends the walk. One statement whatever the number of ancestors.
-const CLOSED_ANCESTOR_SQL = `WITH RECURSIVE family(blob_id) AS (
-    SELECT ?
+// THE definition of "closed to AI", written once (SEL-116 × SEL-127). A blob is closed when its own policy denies (the policy row or
+// its newest history row says anything but allow) or when it is a text extracted — however many steps away — from a blob that is
+// closed. The walk goes from the denying policies down to the texts made from them. UNION (not UNION ALL) drops a blob already
+// visited, so a self-edge or a cycle in file_extractions ends it. One statement whatever the number of blobs or extraction steps.
+// Both consumers below read this one fragment: file_ai_denied (one blob) and closed_materials (the whole set). Params: project, project.
+const CLOSED_BLOBS_CTE = `WITH RECURSIVE closed(blob_id) AS (
+    SELECT p.blob_id FROM file_policies p
+     WHERE p.project_id = ?
+       AND (p.ai_access <> 'allow'
+         OR COALESCE((SELECT a.ai_access FROM file_ai_access_versions a
+                       WHERE a.project_id = p.project_id AND a.file_policy_id = p.id ORDER BY a.rev DESC LIMIT 1), 'allow') <> 'allow')
     UNION
-    SELECT e.blob_id FROM file_extractions e JOIN family f ON e.text_blob_id = f.blob_id WHERE e.project_id = ?
-  )
-  SELECT 1 AS closed
-    FROM family f
-    JOIN file_policies p ON p.project_id = ? AND p.blob_id = f.blob_id
-   WHERE p.ai_access <> 'allow'
-      OR COALESCE((SELECT a.ai_access FROM file_ai_access_versions a
-                    WHERE a.project_id = p.project_id AND a.file_policy_id = p.id ORDER BY a.rev DESC LIMIT 1), 'allow') <> 'allow'
-   LIMIT 1`;
+    SELECT e.text_blob_id FROM file_extractions e JOIN closed c ON e.blob_id = c.blob_id WHERE e.project_id = ? AND e.text_blob_id IS NOT NULL
+  )`;
+const CLOSED_SET_SQL = `${CLOSED_BLOBS_CTE} SELECT blob_id FROM closed`;
+const CLOSED_ONE_SQL = `${CLOSED_BLOBS_CTE} SELECT 1 AS closed FROM closed WHERE blob_id = ? LIMIT 1`;
 
 /**
  * THE decision: is this blob closed to AI? True for a deny in the policy row or the newest history row of the blob itself or of ANY
@@ -102,7 +104,7 @@ const CLOSED_ANCESTOR_SQL = `WITH RECURSIVE family(blob_id) AS (
  * extracted again; strict side wins, whatever the text's own policy says). A blob without a policy row has no recorded deny.
  */
 export function file_ai_denied(db: ReadDb, project_id: string, blob_id: string): boolean {
-  return db.get<{ closed: bigint }>(CLOSED_ANCESTOR_SQL, blob_id, project_id, project_id) !== undefined;
+  return db.get<{ closed: bigint }>(CLOSED_ONE_SQL, project_id, project_id, blob_id) !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,13 +129,13 @@ export function material_object_denied(db: ReadDb, project_id: string, object_id
 }
 
 /**
- * The closed side of a whole project, decided in two queries (one per table family) instead of one per event/row.
+ * The closed side of a whole project, decided in three queries (closed blobs, policies, material files) instead of one per event/row.
  * It is the set form of the one rule above — a file is closed when file_ai_denied says so, a material OBJECT is closed when any
  * version of it carries a closed file (material_object_denied) — so the batch exits (change feed, materials list) cost the same
  * however many events or rows they look at. tests/test_sel127_closed_index.test.ts keeps it equal to the per-object functions.
  */
 export interface ClosedMaterials {
-  /** blobs whose own policy says deny (file_ai_denied is true) */
+  /** blobs closed to AI: a deny in their own policy or in the policy of any file they were extracted from (file_ai_denied is true) */
   denied_blobs: ReadonlySet<string>;
   /** material objects with a closed file in any version (material_object_denied is true) */
   objects: ReadonlySet<string>;
@@ -146,8 +148,10 @@ export interface ClosedMaterials {
 }
 
 export function closed_materials(db: ReadDb, project_id: string): ClosedMaterials {
-  const states = db.all<AccessRow>(`${STATE_SQL} WHERE p.project_id = ?`, project_id).map(state_of);
-  const denied_blobs = new Set(states.filter((state) => state.effective === "deny").map((state) => state.blob_id));
+  // Query 1: the closed blobs, extraction ancestors included (CLOSED_SET_SQL is the set form of file_ai_denied).
+  const denied_blobs = new Set(db.all<{ blob_id: string }>(CLOSED_SET_SQL, project_id, project_id).map((row) => row.blob_id));
+  // Query 2: the policies (to name a policy id in a payload). Query 3: the files of every material version.
+  const policy_blob = db.all<{ policy_id: string; blob_id: string }>("SELECT id AS policy_id, blob_id FROM file_policies WHERE project_id = ?", project_id);
   const files = db.all<{ blob_id: string; version_id: string; object_id: string }>(
     `SELECT vf.blob_id AS blob_id, vf.version_id AS version_id, ov.object_id AS object_id ${MATERIAL_FILES_FROM}`,
     project_id,
@@ -160,7 +164,7 @@ export function closed_materials(db: ReadDb, project_id: string): ClosedMaterial
     versions.add(file.version_id);
     blobs.add(file.blob_id);
   }
-  const policies = new Set(states.filter((state) => blobs.has(state.blob_id)).map((state) => state.policy_id));
+  const policies = new Set(policy_blob.filter((row) => blobs.has(row.blob_id)).map((row) => row.policy_id));
   return { denied_blobs, objects, versions, blobs, policies };
 }
 
