@@ -371,8 +371,10 @@ test("pay_per_use: the next call's reservation is counted — over the cap means
       await select_model(env, dto.connection_id);
       const o = await plan_round(env);
       set_script(env, [context_turn({ input: 1_000, output: 1_000 }), submit_turn(o.object_id, "합성"), FINISH]);
-      // spent after call 1 = 3,000; reserving 3,600 output tokens x 2 = 7,200 for call 2 passes the 10,000 cap
-      const res = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id, max_output_tokens: 3_600 });
+      // spent after call 1 = 3,000; reserving 3,000 output tokens x 2 = 6,000 (plus the request itself, one token per character of an
+      // English body, so every tool the runner offers counts) for call 2 passes the 10,000 cap — and call 1's own reservation stays under it
+      // (leader 승인: SEL-99 U4a 가 도구 둘을 더해 요청이 커져 3,600 이면 첫 호출의 예약부터 상한을 넘었다 — 준비 숫자만 3,600→3,000)
+      const res = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id, max_output_tokens: 3_000 });
       assert.equal(res.status, "blocked_usage", format);
       assert.equal(res.block_reason, "cost_cap");
       assert.equal(env.fake.calls.length, 1, `${format}: the second request was never sent`);

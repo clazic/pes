@@ -21,7 +21,9 @@ test("is_at_or_below: a Windows long/short, upper/lower, back/forward-slash spel
   assert.ok(is_at_or_below("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pes-compat-e01-abc\\*", root, true), "the `\\*` flag value");
   assert.ok(is_at_or_below("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pes-compat-e01-abc\\work\\x.json", root, true));
   assert.ok(!is_at_or_below("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pes-compat-e01-abcd", root, true), "a name that only starts the same is a sibling");
-  assert.ok(!is_at_or_below("C:\\Users\\runneradmin\\.pes", root, true));
+  // a FAKE account's .pes: is_at_or_below realpaths its arguments, and on CI windows-latest C:\Users\runneradmin IS the account home — a realpath of
+  // its .pes is a look at the real home that the home guard (layer 4) refuses (SEL-125)
+  assert.ok(!is_at_or_below("C:\\Users\\pes-fake-account\\.pes", root, true));
   assert.ok(!is_at_or_below("/Tmp/Pes-X/y", "/tmp/pes-x", false), "POSIX: case matters");
   assert.ok(is_at_or_below("/tmp/pes-x/y/*", "/tmp/pes-x", false));
 });
