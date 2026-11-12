@@ -5,11 +5,15 @@
 // runner adds them, so a model cannot write under someone else's lease.
 
 import type { CommandService, MutationContext } from "../commands.ts";
+import { ai_material_rows } from "../commands/file_access.ts";
 import { thread_reply_route } from "../commands/thread_reads.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { decide, list_references, read_reference, reference_caller, reference_row, type ReferenceContent } from "../references.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
+
+/** At most this many allowed materials are handed to the model by context.get. */
+const MATERIALS_MAX = 50;
 
 export const A_TOOL_ALLOWLIST: readonly string[] = Object.freeze([
   "context.get",
@@ -34,7 +38,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
     description:
       // kept as short as before SEL-113: the spec goes out with every request; how to read a reference is said in the reply
       // itself, and only when there is one (context.references_help)
-      "Read the project, stage, round, current objects and questions.",
+      "Read the project, stage, round, current objects, materials and questions.",
     parameters: { type: "object", properties: { reference_id: { type: "string" }, references_offset: { type: "integer" } } },
   },
   {
@@ -287,6 +291,8 @@ export function build_context(db: Pick<Db, "get" | "all">, run: RunHandle): Reco
     stage: stage?.key ?? null,
     round_no: round === undefined ? null : Number(round.round_no),
     objects: objects.map((row) => ({ object_id: row.object_id, version_id: row.version_id, title: row.title, summary: row.summary })),
+    // SEL-115: the user's own materials, allowed files only — the same rule (commands/file_access.ts) the HTTP API and MCP use.
+    materials: ai_material_rows(db, run.project_id, MATERIALS_MAX),
     questions: question_context(db, run),
     // reference material: rows only (name, pinned snapshot, items, whether the text may be given to an AI) — the text is read with reference_id
     references: list_references(db, run.project_id, reference_caller(db, run.actor_id, true)),
@@ -311,7 +317,7 @@ const REFERENCES_HELP = "call context.get with reference_id to read one referenc
  * context.get without reference_id. offset === null: the whole context (frame, questions, objects, the reference list from
  * the start). offset = n: the next page of the reference list only. Built object by object inside CONTEXT_TEXT_MAX; the JSON
  * is never cut. context.references_page = {offset, returned, total, next_offset} (left out when there is no reference); when anything is left out,
- * context.truncated = true, context.omitted = {questions, objects, references} and context.next says how to read on.
+ * context.truncated = true, context.omitted = {questions, objects, materials (when any), references} and context.next says how to read on.
  */
 function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle, offset: number | null): ToolOutcome {
   const full = build_context(db, run);
@@ -319,19 +325,21 @@ function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle,
   const start = offset ?? 0;
   const questions = offset === null ? (full["questions"] as unknown[]) : [];
   const objects = offset === null ? (full["objects"] as unknown[]) : [];
+  // SEL-115: the allowed materials only (build_context already drops a denied file) — first page only, left out when there is none
+  const materials = offset === null ? (full["materials"] as unknown[]) : [];
   const frame: Record<string, unknown> =
     offset === null ? { topic: cut_text(full["topic"]), stage: full["stage"], round_no: full["round_no"] } : {};
-  const kept = { questions: [] as unknown[], objects: [] as unknown[], references: [] as unknown[] };
+  const kept = { questions: [] as unknown[], objects: [] as unknown[], materials: [] as unknown[], references: [] as unknown[] };
   // the cost of the reply before any list entry, with every mark at its widest
   const total = all_refs.length;
   const marks = {
     truncated: true,
-    omitted: { questions: questions.length, objects: objects.length, references: total },
+    omitted: { questions: questions.length, objects: objects.length, materials: materials.length, references: total },
     next: `call context.get with references_offset: ${total} for the next page of references`,
     references_page: { offset: start, returned: total, total, next_offset: total },
     references_help: REFERENCES_HELP,
   };
-  let left = CONTEXT_TEXT_MAX - JSON.stringify({ ok: true, context: { ...frame, questions: [], objects: [], references: [], ...marks } }).length;
+  let left = CONTEXT_TEXT_MAX - JSON.stringify({ ok: true, context: { ...frame, questions: [], objects: [], materials: [], references: [], ...marks } }).length;
   let full_stop = false;
   const fill = (list: unknown[], into: unknown[]): void => {
     for (const entry of list) {
@@ -347,15 +355,22 @@ function context_ok(call: ToolCall, db: Pick<Db, "get" | "all">, run: RunHandle,
   };
   fill(questions, kept.questions);
   fill(objects, kept.objects);
+  fill(materials, kept.materials);
   fill(start >= total ? [] : all_refs.slice(start), kept.references);
   const returned = kept.references.length;
   const after = Math.min(start, total) + returned;
   const next_offset = after < total ? after : null;
-  const omitted = { questions: questions.length - kept.questions.length, objects: objects.length - kept.objects.length, references: total - after };
-  const cut = omitted.questions > 0 || omitted.objects > 0 || next_offset !== null;
+  const omitted = {
+    questions: questions.length - kept.questions.length,
+    objects: objects.length - kept.objects.length,
+    ...(materials.length === 0 ? {} : { materials: materials.length - kept.materials.length }),
+    references: total - after,
+  };
+  const cut = omitted.questions > 0 || omitted.objects > 0 || (omitted.materials ?? 0) > 0 || next_offset !== null;
   const context: Record<string, unknown> = {
     ...frame,
     ...(offset === null ? { questions: kept.questions, objects: kept.objects } : {}),
+    ...(materials.length === 0 ? {} : { materials: kept.materials }),
     // no reference at all: neither the empty list nor the page line is given (they would only add length to every later request)
     ...(total === 0 && start === 0
       ? {}
