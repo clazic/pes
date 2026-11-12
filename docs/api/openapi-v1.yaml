@@ -40,6 +40,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ReferenceId:
+      name: ref
+      in: path
+      required: true
+      schema: { type: string }
     VersionId:
       name: v
       in: path
@@ -876,7 +881,10 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/context:
     get:
-      summary: Read the project's consistency boundary, policy, stages, manifest, and lease
+      summary: Read the project's consistency boundary, policy, stages, manifest, materials, lease and reference-material list
+      description: |
+        data also carries `references`: the list of the project's reference material from earlier projects, rows only
+        (never a body) in the same shape as GET /references. Read a body with GET /references/{ref}.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:
@@ -1148,6 +1156,143 @@ paths:
         "404": { description: Unknown blob in this project }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
         "409": { description: Blob is not ready or stored bytes do not match }
+  /api/v1/projects/{id}/files/{b}/preview:
+    get:
+      summary: Preview a ready blob (SEL-115) - the same bytes, safety headers and AI-access rule as content, plus a content-disposition
+      description: |
+        Same checks as `files/{b}/content` (file:read, Go gate, a denied file is 403 for every non-human caller; the owner session always reads).
+        Always `X-Content-Type-Options: nosniff`; a type outside the short safe list also gets the document sandbox (`Content-Security-Policy: sandbox ...`,
+        never `allow-same-origin`) - the one judgement of `document_sandbox.ts`. `Content-Disposition` is `inline` only for `text/plain`, `image/png`
+        and `application/pdf`; every other type is `attachment`. The content type is the stored one when it is a plain MIME type, else `application/octet-stream`.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/BlobId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Raw bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:read scope, Go policy denied, or the file is closed to AI (ai_access deny) }
+        "404": { description: Unknown blob in this project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "409": { description: Blob is not ready or stored bytes do not match }
+  /api/v1/projects/{id}/materials:
+    post:
+      summary: Add a user's own material (SEL-115) - a ready blob becomes a file source object, or a new version of one
+      description: |
+        Body `{blob_id, title?, object_id?, role?}` (role defaults to `attachment`). Without `object_id` a new material (a `source` object of kind `file`) and
+        its first version are made; with `object_id` the blob becomes the next version of that material and the current pointer moves to it.
+        The blob has ONE file policy shared by every use: the first attach creates it as `allow` (rev 1); the same bytes uploaded again reuse it, so a
+        re-upload never resets a `deny`. Data: `{object_id, version_id, version_no, blob_id, file_policy_id, role, ai_access, original_name, media_type, size, sha256}`;
+        `ai_access` is given to a human caller only (an AI caller never gets the key). A caller that is not human who names a blob closed to AI, or a material
+        object that carries a closed file, gets the same 404 as for an unknown blob or object, before anything is written. Known limit: `POST uploads` returns
+        `blob_id` and `deduplicated: true` for bytes the project already holds, so whoever has the same bytes can learn that the file exists and whether it is
+        closed to AI (`GET files/{b}/content` is 403 for a closed file; `POST materials` is 404); no name, policy id or text goes with it. The unit of every
+        AI-facing read is the material object: a closed file in any version closes every version of it (a later version inherits the earlier title, the file name).
+        Writes through the command `file.upload` (receipt and event `file.material_uploaded`). The same key and body replay the first answer;
+        the same key with another body is 409 `idempotency_key_reuse`.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [blob_id]
+              properties:
+                blob_id: { type: string }
+                title: { type: string, maxLength: 300 }
+                object_id: { type: string }
+                role: { type: string, enum: [attachment, image, source, rendered, manifest] }
+      responses:
+        "201":
+          description: Material added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Unknown field, bad role or title }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope }
+        "404": { description: Unknown blob (or a blob of another project) or unknown object; for a caller that is not human also a blob closed to AI or an object that carries one }
+        "409": { description: The blob is not ready, the object is not a material, the object already has this blob in this role, or the key was used for another body (idempotency_key_reuse) }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: List the user's own materials (SEL-115) - the file of each material's current version
+      description: |
+        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?}]}`.
+        The owner session sees every material and each one's `ai_access` (the value in force: `deny` when the policy row or its newest history row says deny).
+        Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` key and with no trace of a closed file - not its name,
+        ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
+        material objects (the human manifest lists them with `ai_access: deny`); `digest` is computed from the manifest the caller gets, so it differs by audience.
+        `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` leaves out
+        events whose payload names a closed file (`blob_id` or `file_policy_id`), by file and not by material object: a newer allowed version's upload events still show (`commands/file_access.ts` event_denied; `commands/shared.ts` write_events leaves `object_id` and version columns NULL). The hand-off bundle's `base_versions` leave out closed files and materials.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security:
+        - agentToken: []
+        - localSession: []
+      responses:
+        "200":
+          description: Materials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/file-policies/{fp}/ai-access:
+    post:
+      summary: Switch whether AI may reference one file (SEL-115) - the owner session only
+      description: |
+        Body `{ai_access: "allow"|"deny", reason?}`. A change appends one row to the file's history (rev = newest rev + 1) and puts the same value and
+        rev on the policy row; nothing is overwritten. Setting the value already in force writes nothing and answers `changed:false`.
+        A deny in the policy row or in the newest history row is a deny (the strict side wins). The same blob is one policy, so every material,
+        version and role of the same bytes is closed together. Data `{file_policy_id, blob_id, ai_access, rev, changed}`.
+        Writes through the command `file.ai_access_set` (receipt and event `file.ai_access_changed`; a no-op leaves the event `file.ai_access_confirmed`).
+        This closes the PES API, the MCP tools and the built-in runner; it does not control a local folder a user's own tool reads directly.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: fp
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ai_access]
+              properties:
+                ai_access: { type: string, enum: [allow, deny] }
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: Done (or unchanged)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Bad value, unknown field or bad reason }
+        "401": { description: Missing or invalid credential }
+        "403": { description: An agent token (whatever its scopes) - the switch is the owner's }
+        "404": { description: Unknown file policy in this project }
+        "409": { description: The key was used for another body (idempotency_key_reuse) }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/project-registrations:
     post:
       summary: First registration of a project by device approval (owner session only); returns the first token once (a replay has no token and says token_issued_before true)
@@ -1174,7 +1319,7 @@ paths:
   /api/v1/projects/{id}/changes:
     get:
       summary: Change feed after an opaque cursor (whole transactions, ascending event_seq)
-      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after."
+      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after. For a caller that is not human, events that name a closed file (payload `blob_id` or `file_policy_id`) are left out and the cursor moves past them; the unit is the file, not the material object."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security: [{ agentToken: [] }, { localSession: [] }]
@@ -1980,6 +2125,187 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
         "404": { description: Unknown project or edition number }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references:
+    post:
+      summary: Pin a snapshot of an earlier project as reference material (owner session only)
+      description: |
+        Body {referenced_project_id, source_snapshot_id?, scope?, source_label?}. source_snapshot_id omitted = the source's
+        newest snapshot; scope = a non-empty list without duplicates of final_report|stage_report|sources|decisions|
+        questions_answers|files (omitted = ["final_report","sources"]); source_label omitted = the source's topic. The person
+        must be a member of BOTH projects (no membership in the source reads as 404 and tells nothing about it). The same
+        source cannot be attached twice (409 conflict; a different version is a refresh); a detached one can be attached
+        again. The source project is never written. 201 data = {reference: <row>}; the row has the sixteen keys of GET
+        /references. A token is 403 human_required. Errors: 400 invalid_payload (unknown field, no Idempotency-Key),
+        422 validation_failed (target $.body.referenced_project_id when missing or the project itself, $.body.scope,
+        $.body.source_snapshot_id, $.body.source_label), 404 not_found (unknown source or snapshot, or another project's
+        snapshot), 409 conflict / idempotency_key_reuse.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201":
+          description: Attached
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "human_required (a token tried it)" }
+        "404": { description: Unknown project, source or snapshot }
+        "409": { description: Already attached, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A field breaks the rules (validation_failed) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: List the project's reference material (rows only, no body)
+      description: |
+        data = {references:[row]} in the order they were attached. A row has sixteen keys: access ("ok"), ai_delivery
+        {allowed, withheld_reason: source_missing|source_go_off|project_go_off|null}, attached_at (ISO 8601),
+        attached_by_actor_id, id, latest_snapshot_id (the source's newest snapshot now, null when the original is gone),
+        new_version_available (bool; computed on the read, nothing is written), referenced_project_id|null,
+        referenced_project_key, refreshed_at (ISO 8601|null), rev (decimal string), scope [string], source_label,
+        source_snapshot_id|null, source_snapshot_key|null, state (pinned|new_version|source_missing|source_archived).
+        A row the caller has no permission for (not a member of the source project) has exactly three keys
+        {id, access: "no_permission", state: "no_permission"}: no name, key, label or version id.
+        ai_delivery says whether the text may go to an AI: false when the original is gone or when the source project OR this
+        project has OpenCode Go turned off (the stricter side wins).
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references/{ref}:
+    get:
+      summary: Read one reference with the pinned content and citations
+      description: |
+        data = {reference: <row>, content}. content = {items:[...], items_status:{<scope item>: ok|none|not_supported|
+        snapshot_content_unavailable}} or null. items_status has one entry per item in `scope` and is the same object for the
+        owner, a token, A `context.get` and B `pes_context`: ok = the snapshot holds such items; none = the item is supported
+        and the snapshot was read, but holds none ("not in the original"); not_supported = this item is not delivered yet (REF1a
+        delivers final_report and sources; stage_report, decisions, questions_answers and files can be attached for later and
+        read as not_supported); snapshot_content_unavailable = the snapshot's contents cannot be read (for example a
+        stage-scope snapshot of a legacy import, which keeps no contents), so "none" cannot be claimed. A and B give the same
+        content except that A bounds it: A keeps the whole tool reply within 60000 JSON characters by adding items one at a
+        time, cutting any text field at 12000 characters (the item then lists it in `truncated_fields`) and leaving out the
+        items that do not fit (content.truncated = true, content.omitted_items = their number). B and HTTP do not cut. A's
+        `context.get` without reference_id (the list) is bounded the same way, never by cutting text: the whole reply (topic,
+        stage, round, questions, objects and the reference rows) is built entry by entry within 4000 JSON characters; when the
+        project has a reference it carries context.references, context.references_page = {offset, returned, total,
+        next_offset} and context.references_help (how to read one; the tool spec stays short because it goes with every
+        request), with no reference all three are left out, and when anything is left out
+        context.truncated = true, context.omitted = {questions, objects, references} and context.next names the next call
+        (`context.get {references_offset: next_offset}`, which returns the next page of reference rows only; giving it with
+        reference_id is an error). A label longer than 300 characters is cut in the list and the row lists it in
+        `truncated_fields`. A also decides again, with the same function, for every reference whose content the run has read
+        (source access, both Go switches, detach): before EVERY model request (after the key read) and once more at the last
+        boundary right before the HTTP call (after the heartbeat and dispatch.prepare/authorize; dispatch.mark_sent and the
+        call then follow with no await in between). If any one may no longer go, that request is NOT sent and the run stops:
+        status interrupted, the run.interrupted event carries reason reference_withdrawn; a dispatch already authorized for
+        it becomes blocked (never sent; its reservation no longer counts), and no dispatch is written when the stop comes
+        before the request is built. Nothing is scrubbed or invented, and the stop covers every copy of the text (tool
+        results, tool errors that echo it, the model's later messages and arguments). A resumed run starts from a fresh
+        history. What was already sent to the provider before the withdrawal cannot be called back. Each item is
+        {item (final_report|sources), object_id, version_id, kind, title, ... , citation: {reference_id, project_id,
+        project_label, snapshot_id, object_id, version_id}}: final_report carries title, summary, body_md of the report;
+        sources carries title, url, quote. Only the items in `scope` appear. The content is the version the pinned snapshot
+        holds: a newer version in the source does not change it until a person refreshes. content is null when the original
+        is gone (state source_missing), and, for a token, when ai_delivery.allowed is false (Go off on either side). The
+        owner session still reads it. No permission to the source is 403 forbidden with no content. An unknown id, or an id
+        of another project, is 404. A GET writes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReferenceId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The reference
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope, Go policy denied, or no permission to the source project }
+        "404": { description: Unknown project or reference }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references/{ref}/refresh:
+    post:
+      summary: Move the pin to another snapshot of the same source (owner session only)
+      description: |
+        Body {source_snapshot_id?, base_rev?} (decimal string). source_snapshot_id omitted = the source's newest snapshot;
+        a person may also go back to an older one. rev + 1, refreshed_at = now; scope, attach time and person are kept; the
+        source is not written. 200 data = {reference: <row>}. Errors: 404 (unknown reference, or a snapshot that is not the
+        source's), 403/404 (the person lost access to the source), 409 conflict (already pinned there, or the original is
+        gone), 409 rev_conflict (stale base_rev), 403 human_required for a token.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReferenceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Refreshed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "human_required (a token tried it), or no access to the source" }
+        "404": { description: Unknown project, reference or snapshot }
+        "409": { description: Already pinned there, original gone, stale base_rev (rev_conflict), or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: A field breaks the rules (validation_failed) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/references/{ref}/detach:
+    post:
+      summary: Remove a reference (owner session only)
+      description: |
+        Body {}. The row is deleted (the history stays in the receipt and the event); the source and its snapshots are not
+        touched. A tombstone (original gone) can be detached too. 200 data = {reference_id, detached: true}. 404 for an
+        unknown id or another project's reference; 403 human_required for a token.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReferenceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Detached
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "human_required (a token tried it)" }
+        "404": { description: Unknown project or reference }
+        "409": { description: Idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/reflections:
     post:

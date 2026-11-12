@@ -33,6 +33,7 @@ import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
 import { make_register_command, type BuildHooks, type Created } from "./commands/projects.ts";
 import { QUESTION_COMMAND_ENTRIES } from "./commands/questions.ts";
 import { RECORD_COMMAND_ENTRIES } from "./commands/records.ts";
+import { REFERENCE_COMMAND_ENTRIES } from "./commands/references.ts";
 import { RUN_COMMAND_ENTRIES, RUN_PRE_REPLAY_ENTRIES } from "./commands/runs.ts";
 import {
   insert_receipt,
@@ -533,6 +534,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...QUESTION_COMMAND_ENTRIES,
   ...RECORD_COMMAND_ENTRIES,
   ...JUDGEMENT_COMMAND_ENTRIES,
+  ...REFERENCE_COMMAND_ENTRIES,
   ...ANNOTATION_COMMAND_ENTRIES,
   ...AI_COMMAND_ENTRIES,
 ]);
