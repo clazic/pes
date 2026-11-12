@@ -64,8 +64,11 @@ export function useKeyedCommand(scope?: string) {
     else keyRef.current = { sig, key };
     try {
       const value = await call(key);
-      if (scope) savePending(scope, null);
-      else keyRef.current = null;
+      // 내 시도의 기록일 때만 지운다 — 접었다 편 뒤 새로 보낸 다른 시도(sig · key 가 다름)의 재시도 정보를 늦게 온 옛 응답이 지우지 않게
+      if (scope) {
+        const now = loadPending(scope);
+        if (now && now.sig === sig && now.key === key) savePending(scope, null);
+      } else if (keyRef.current?.sig === sig && keyRef.current.key === key) keyRef.current = null;
       return { ok: true, value };
     } catch (e) {
       setError(describeError(e));

@@ -350,6 +350,8 @@ export function QuestionCard(p: CardProps) {
   const editId = `tool-edit-${q.id}`;
   const ans = p.answering;
   const canAnswer = !!ans && !q.sent;
+  /** 보낸 질문인데 칸에 글이 남아 있다(보내는 사이 쓴 글 · 조합 중인 글) — 입력 칸을 없애지 않는다 */
+  const keepFields = !!q.sent && (answer[0] !== "" || opinion[0] !== "");
   const reasonId = `${q.id}-send-reason`;
   const sendOff = !ans || ans.blockedReason !== null || ans.busy;
   const useDefault = () => {
@@ -493,55 +495,56 @@ export function QuestionCard(p: CardProps) {
                 보냄 · <time dateTime={q.sent.committed_at}>{formatAt(q.sent.committed_at)}</time> · 접수 {q.sent.receipt_no}
               </p>
             </div>
-          ) : (
-            <>
-              {review ? <DraftReview qid={q.id} version={q.version} review={review} onImport={() => closeReview(true)} onDismiss={() => closeReview(false)} /> : null}
-              {/* 글 칸의 길게 누르기(터치)는 글 고르기 — 맥락 메뉴가 가로채지 않게 */}
-              <div className="mt-3 space-y-3" onPointerDown={(e) => e.pointerType !== "mouse" && e.stopPropagation()}>
-                {isChoice(kind) ? (
-                  <ChoiceAnswer q={q} draft={answer} head={head} />
-                ) : (
-                  <div>
-                    <label className="block text-meta font-medium text-ink" htmlFor={q.id}>
-                      <span className="sr-only">{head} </span>답{q.required ? " (필수)" : ""}
-                    </label>
-                    <DraftTextarea id={q.id} rows={3} draft={answer} />
-                  </div>
-                )}
-                <div data-field-kind="opinion">
-                  <label className="block text-meta font-medium text-ink" htmlFor={`${q.id}-opinion`}>
-                    <span className="sr-only">{head} </span>의견 <span className="font-normal text-muted-foreground">(선택)</span>
+          ) : null}
+          {!q.sent && review ? <DraftReview qid={q.id} version={q.version} review={review} onImport={() => closeReview(true)} onDismiss={() => closeReview(false)} /> : null}
+          {/* 입력 칸은 보낸 뒤에도 같은 자리에 둔다 — 보내는 사이 쓰던 글(한글 조합 중 포함)이 있으면 영수증이 와도 그 칸을 없애지 않는다.
+              보낸 답(위, 영수증 스냅숏)과 그 뒤 쓴 글(이 칸의 초안)은 따로 남고, 조합이 끝난 글은 저장된다. 보낸 그대로면(초안이 비면) 칸도 사라진다 */}
+          {!q.sent || keepFields ? (
+            <div className="mt-3 space-y-3" onPointerDown={(e) => e.pointerType !== "mouse" && e.stopPropagation()}>
+              {q.sent ? <p className="text-caption text-muted-foreground">보낸 뒤에 더 쓴 글이에요 — 아직 보내지 않았어요.</p> : null}
+              {isChoice(kind) ? (
+                <ChoiceAnswer q={q} draft={answer} head={head} />
+              ) : (
+                <div>
+                  <label className="block text-meta font-medium text-ink" htmlFor={q.id}>
+                    <span className="sr-only">{head} </span>답{q.required ? " (필수)" : ""}
                   </label>
-                  <DraftTextarea id={`${q.id}-opinion`} rows={2} draft={opinion} />
+                  <DraftTextarea id={q.id} rows={3} draft={answer} />
                 </div>
+              )}
+              <div data-field-kind="opinion">
+                <label className="block text-meta font-medium text-ink" htmlFor={`${q.id}-opinion`}>
+                  <span className="sr-only">{head} </span>의견 <span className="font-normal text-muted-foreground">(선택)</span>
+                </label>
+                <DraftTextarea id={`${q.id}-opinion`} rows={2} draft={opinion} />
               </div>
-              {ans ? (
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <Button
-                    id={`send-${q.id}`}
-                    variant="outline"
-                    size="sm"
-                    className="coarse:min-h-[44px]"
-                    aria-label={`${head} 이 답만 보내기`}
-                    aria-disabled={sendOff ? true : undefined}
-                    aria-describedby={ans.blockedReason ? reasonId : undefined}
-                    onClick={(e) => {
-                      if (sendOff) return void e.preventDefault();
-                      ans.onSend();
-                    }}
-                  >
-                    <Send aria-hidden="true" />
-                    이 답만 보내기
-                  </Button>
-                  {ans.blockedReason ? (
-                    <span id={reasonId} className="text-caption text-muted-foreground">
-                      {ans.blockedReason}
-                    </span>
-                  ) : null}
-                </div>
+            </div>
+          ) : null}
+          {!q.sent && ans ? (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Button
+                id={`send-${q.id}`}
+                variant="outline"
+                size="sm"
+                className="coarse:min-h-[44px]"
+                aria-label={`${head} 이 답만 보내기`}
+                aria-disabled={sendOff ? true : undefined}
+                aria-describedby={ans.blockedReason ? reasonId : undefined}
+                onClick={(e) => {
+                  if (sendOff) return void e.preventDefault();
+                  ans.onSend();
+                }}
+              >
+                <Send aria-hidden="true" />
+                이 답만 보내기
+              </Button>
+              {ans.blockedReason ? (
+                <span id={reasonId} className="text-caption text-muted-foreground">
+                  {ans.blockedReason}
+                </span>
               ) : null}
-            </>
-          )}
+            </div>
+          ) : null}
           <div className="mt-2">
             <Button id={`thread-toggle-${q.id}`} variant="ghost" size="sm" className="coarse:min-h-[44px]" aria-label={`${head} 의견 스레드`} aria-expanded={threadOpen} aria-controls={threadOpen ? `${q.id}-thread` : undefined} onClick={() => setThreadOpen((v) => !v)}>
               <MessageSquare aria-hidden="true" />

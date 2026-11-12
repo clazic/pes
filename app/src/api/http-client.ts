@@ -187,7 +187,8 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       required: q.required,
       ...(q.importance ? { importance: q.importance } : {}),
       ...(q.default_value !== null && q.default_value !== undefined ? { default_value: q.default_value } : revise ? { default_value: null } : {}),
-      ...(choice ? { options: q.options.map((o) => ({ value: o.id, label: o.label })) } : {}),
+      // 수정은 부분 수정이라 options 키가 없으면 서버의 옛 선택지가 남는다 — 글로 바꿀 때는 빈 배열을 명시해 지운다(생성은 싣지 않는다)
+      ...(choice ? { options: q.options.map((o) => ({ value: o.id, label: o.label })) } : revise ? { options: [] } : {}),
       ...(q.show_if ? { show_if: { id: q.show_if.question_id, in: [q.show_if.equals] } } : revise ? { show_if: null } : {}),
       ...(q.help ? { help: q.help } : revise ? { help: null } : {}),
     };
