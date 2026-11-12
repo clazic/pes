@@ -1648,7 +1648,8 @@ export class ApiApp {
       if (approval === undefined) return { key: stage.key, view: view_of(stage), rounds };
       const ms = Number(approval.created_at);
       const past_approval = {
-        at: ms > 0 ? new Date(ms).toISOString() : null,
+        // a damaged time (not a safe integer, or past the Date range 8.64e15) is shown as unknown, never thrown
+        at: Number.isSafeInteger(ms) && ms > 0 && ms <= 8.64e15 ? new Date(ms).toISOString() : null,
         origin: approval.assurance === "verified" ? "verified" : "legacy_unverified",
       };
       return { key: stage.key, view: view_of(stage), past_approval, rounds };
@@ -1704,26 +1705,34 @@ export class ApiApp {
         return "corrupt";
       }
     })();
-    // the newest WORKSPACE_LIST_MAX of each list (largest rowid first), then shown oldest-first
+    // The newest WORKSPACE_LIST_MAX of each list of the ACTIVE edition (largest rowid first), then shown oldest-first.
+    // A dispatch has no edition column; it belongs to its run (outbound_dispatches.run_id -> runs.edition_id, both NOT NULL),
+    // so both lists are narrowed to the active edition's runs. The inner query picks the newest rows from the one table
+    // (ORDER BY rowid DESC LIMIT), and the resolution / stage joins run on those rows only, never on every row of the project.
     const dispatches = this.#db
       .all<{ id: string; run_id: string; state: string; resolution: string | null }>(
-        `SELECT * FROM (
-           SELECT d.rowid AS rid, d.id AS id, d.run_id AS run_id, d.state AS state, r.outcome AS resolution
-             FROM outbound_dispatches d LEFT JOIN dispatch_resolutions r ON r.dispatch_id = d.id
-            WHERE d.project_id = ? ORDER BY d.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
-         ) ORDER BY rid ASC`,
+        `SELECT n.id AS id, n.run_id AS run_id, n.state AS state, x.outcome AS resolution
+           FROM (
+             SELECT d.rowid AS rid, d.id AS id, d.run_id AS run_id, d.state AS state
+               FROM outbound_dispatches d JOIN runs r ON r.project_id = d.project_id AND r.id = d.run_id
+              WHERE d.project_id = ? AND r.edition_id = ? ORDER BY d.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
+           ) n LEFT JOIN dispatch_resolutions x ON x.dispatch_id = n.id
+          ORDER BY n.rid ASC`,
         project.id,
+        edition.id,
       )
       .map((row) => (row.resolution === null ? { id: row.id, run_id: row.run_id, state: row.state } : { id: row.id, run_id: row.run_id, state: row.state, resolution: row.resolution }));
     const handoff_runtimes: string[] = Object.values(HANDOFF_APPS).map((app) => app.runtime);
     const runs = this.#db
       .all<{ id: string; stage: string | null; mode: string; status: string; runtime: string }>(
-        `SELECT * FROM (
-           SELECT r.rowid AS rid, r.id AS id, s.key AS stage, r.mode AS mode, r.status AS status, r.runtime AS runtime
-             FROM runs r LEFT JOIN stages s ON s.project_id = r.project_id AND s.id = r.stage_id
-            WHERE r.project_id = ? ORDER BY r.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
-         ) ORDER BY rid ASC`,
+        `SELECT n.id AS id, s.key AS stage, n.mode AS mode, n.status AS status, n.runtime AS runtime
+           FROM (
+             SELECT r.rowid AS rid, r.id AS id, r.project_id AS project_id, r.stage_id AS stage_id, r.mode AS mode, r.status AS status, r.runtime AS runtime
+               FROM runs r WHERE r.project_id = ? AND r.edition_id = ? ORDER BY r.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
+           ) n LEFT JOIN stages s ON s.project_id = n.project_id AND s.id = n.stage_id
+          ORDER BY n.rid ASC`,
         project.id,
+        edition.id,
       )
       .map((row) => ({
         id: row.id,
