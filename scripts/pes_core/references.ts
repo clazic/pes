@@ -17,10 +17,14 @@
 //   original    status 'source_missing' (tombstone): no content for anyone; ai_delivery.withheld_reason = 'source_missing'.
 //   content     content.items_status tells, per scope item, ok | none | not_supported | snapshot_content_unavailable (see
 //               ReferenceItemStatus): an empty list is never silent about why it is empty.
+//   AI files    an item of the source project (a report version, a source version) that the SOURCE project's own AI decision closes
+//               (version_ai_denied, the same function every other AI exit uses, asked about the source project id) is left out of
+//               content.items for an AI caller — whole, with no placeholder and no count. Judged at read time; a person is not affected.
 //   new version a GET computes it (the source's newest snapshot differs from the pinned one); nothing is written.
 
 import { read_credential_actor } from "./actors.ts";
 import type { Db } from "./db.ts";
+import { version_ai_denied } from "./commands/file_access.ts";
 import { ApiError } from "./errors.ts";
 import { current_policy } from "./policy.ts";
 
@@ -252,8 +256,11 @@ function snapshot_versions(db: ReadDb, project_id: string, snapshot_id: string):
  * The pinned content: the chosen items of the pinned snapshot, each with its citation (which project, label, snapshot,
  * object, version). It is the version the snapshot holds — a newer version in the source does not change it.
  * items_status says, per scope item, why there are (or are no) items of it.
+ *
+ * For an AI caller (ai=true) an item that the source project closes to AI (version_ai_denied on the source project id) is skipped
+ * as if it were not in the snapshot: items_status counts only what the AI may see, and nothing says something was held back.
  */
-export function reference_content(db: ReadDb, row: ReferenceRow): ReferenceContent {
+export function reference_content(db: ReadDb, row: ReferenceRow, ai: boolean = true): ReferenceContent {
   const project_id = row.referenced_project_id as string;
   const snapshot_id = row.source_snapshot_id as string;
   const scope = parse_scope(row.scope_json);
@@ -279,8 +286,11 @@ export function reference_content(db: ReadDb, row: ReferenceRow): ReferenceConte
       continue;
     }
     let found = 0;
+    // read-time AI decision of the source project, per item (a closed file material is closed by object, a report by its version)
+    const closed = (v: VersionRef): boolean => ai && version_ai_denied(db, project_id, v.version_id);
     if (item === "final_report") {
       for (const v of versions) {
+        if (closed(v)) continue;
         const a = db.get<{ kind: string; title: string; summary: string; body_md: string | null }>(
           `SELECT a.kind AS kind, av.title AS title, av.summary AS summary, av.body_md AS body_md
              FROM artifact_versions av JOIN artifacts a ON a.project_id = av.project_id AND a.object_id = av.object_id
@@ -295,6 +305,7 @@ export function reference_content(db: ReadDb, row: ReferenceRow): ReferenceConte
       }
     } else if (item === "sources") {
       for (const v of versions) {
+        if (closed(v)) continue;
         const s = db.get<{ kind: string; title: string; url: string | null; quote: string | null }>(
           `SELECT s.kind AS kind, sv.title AS title, sv.url AS url, sv.quote AS quote
              FROM source_versions sv JOIN sources s ON s.project_id = sv.project_id AND s.object_id = sv.object_id
@@ -324,6 +335,6 @@ export function read_reference(db: ReadDb, project_id: string, reference_id: str
   if (!decision.has_access) throw new ApiError("forbidden", "no permission for this reference");
   return {
     reference: reference_view(db, row, caller, decision),
-    content: decision.content_allowed ? reference_content(db, row) : null,
+    content: decision.content_allowed ? reference_content(db, row, caller.ai) : null,
   };
 }
