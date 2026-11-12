@@ -14,6 +14,8 @@
 //   이름이 run_tests.ts 인데 진입으로 판정되지 않으면 시험을 돌리지 못한 것으로 보고 1 로 실패한다.
 // 자식은 저장소 루트를 cwd 로 시작하고(어느 폴더에서 불러도 glob 이 같다), POSIX 에서는 자기 프로세스 그룹으로 띄워
 //   SIGINT·SIGTERM·SIGHUP 를 받으면 그룹 전체(node --test 와 시험 파일 프로세스)에 전달하고 남은 것은 정리한다 — hc-heavy 취소 뒤 고아가 과부하를 만들지 않게.
+//   신호를 무시하는 자식이 있어도 끝나도록, 첫 신호 뒤 KILL_AFTER_MS(10초) 안에 안 끝나거나 두 번째 신호가 오면 SIGKILL 로 올린다.
+// 한계: POSIX 에서 실행기 자체가 SIGKILL 되면(핸들러로 막을 수 없다) 별도 그룹의 시험 자식은 남는다. Windows 에는 그룹 전달이 없다(직접 자식에만 보낸다).
 // CI 는 이 스크립트를 쓰지 않고 `node --test --test-shard=N/8` 을 직접 부른다(조각 나누기와 겹치지 않는다).
 
 import { spawn } from "node:child_process";
@@ -61,13 +63,20 @@ export function is_entry(module_url: string, argv1: string | undefined): boolean
 }
 
 const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+/** 첫 신호를 전달한 뒤 자식이 이 시간 안에 안 끝나면 SIGKILL 로 올린다. */
+export const KILL_AFTER_MS = 10_000;
 
-/** exe 를 셸 없이 REPO_ROOT 에서 돌리고 종료 코드를 돌려준다. 신호를 받으면 자식 그룹 전체에 전달하고 128+번호로 끝난다. */
-export function run_node(exe: string, args: readonly string[]): Promise<number> {
+/**
+ * exe 를 셸 없이 REPO_ROOT 에서 돌리고 종료 코드를 돌려준다. 신호를 받으면 자식 그룹 전체에 전달하고 128+번호로 끝난다.
+ * 첫 신호 뒤 kill_after_ms 가 지나거나 두 번째 신호가 오면 그룹에 SIGKILL 을 보낸다(신호를 무시하는 자식 때문에 끝없이 기다리지 않게).
+ */
+export function run_node(exe: string, args: readonly string[], options: { kill_after_ms?: number } = {}): Promise<number> {
+  const kill_after_ms = options.kill_after_ms ?? KILL_AFTER_MS;
   return new Promise((resolve_code) => {
     const group = process.platform !== "win32";
     const child = spawn(exe, [...args], { stdio: "inherit", cwd: REPO_ROOT, detached: group });
     let got: NodeJS.Signals | undefined;
+    let escalate: NodeJS.Timeout | undefined;
     const send = (signal: NodeJS.Signals): void => {
       try {
         if (group && child.pid !== undefined) process.kill(-child.pid, signal);
@@ -78,13 +87,21 @@ export function run_node(exe: string, args: readonly string[]): Promise<number> 
     };
     const handlers = FORWARDED.map((signal) => {
       const handler = (): void => {
+        const again = got !== undefined;
         got = signal;
+        if (again) {
+          send("SIGKILL"); // 두 번째 신호 — 기다리지 않고 강제 종료
+          return;
+        }
         send(signal);
+        escalate = setTimeout(() => send("SIGKILL"), kill_after_ms);
+        escalate.unref(); // 자식이 먼저 끝나면 이 타이머가 실행기를 붙잡지 않는다
       };
       process.on(signal, handler);
       return [signal, handler] as const;
     });
     const finish = (code: number): void => {
+      if (escalate) clearTimeout(escalate);
       for (const [signal, handler] of handlers) process.off(signal, handler);
       if (got && group) send("SIGKILL"); // 신호를 받은 경우 그룹에 남은 것(신호를 무시하는 시험 프로세스)을 정리한다
       resolve_code(code);

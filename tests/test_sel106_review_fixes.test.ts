@@ -6,10 +6,11 @@
 //   R5  (권장 4) tests/README.md 가 `npm test -- <파일>` 은 전체 glob 과 합집합이라 전체가 돈다고 적는다
 // 전체 시험은 여기서 시작하지 않는다(가짜 자식·가짜 실행기만 쓴다).
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { use_home_guard } from "./helpers/home_guard.ts";
 import { isolated_home } from "./helpers/isolated_home.ts";
@@ -21,6 +22,30 @@ const REPO = join(import.meta.dirname, "..");
 const RUNNER = join(REPO, "scripts", "run_tests.ts");
 const home = isolated_home("pes-sel106-fix-");
 after(() => home.cleanup());
+
+/** 생성 모듈 import 에 넣을 지정자(따옴표 포함) — 경로가 아니라 file URL. Windows 의 `D:\\…` 를 그대로 넣으면 'd:' 스킴으로 읽혀 ERR_UNSUPPORTED_ESM_URL_SCHEME. */
+function module_specifier(path: string): string {
+  return JSON.stringify(pathToFileURL(path).href);
+}
+
+/** 기한 안에 끝나면 종료 결과, 아니면 undefined. */
+function exit_within(proc: ChildProcess, ms: number): Promise<{ code: number | null; signal: NodeJS.Signals | null } | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    proc.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    });
+  });
+}
+
+function kill_quietly(target: number): void {
+  try {
+    process.kill(target, "SIGKILL");
+  } catch {
+    /* already gone */
+  }
+}
 
 function alive(pid: number): boolean {
   try {
@@ -64,7 +89,7 @@ test("R1b symlinked DIRECTORY holding the repo: bad value still exits 2", { skip
 });
 
 test("R1c is_entry: realpath equal → true; a different file, undefined or a vanished path → false", () => {
-  const url = new URL("file://" + RUNNER).href;
+  const url = pathToFileURL(RUNNER).href;
   assert.equal(is_entry(url, RUNNER), true);
   assert.equal(is_entry(url, undefined), false);
   assert.equal(is_entry(url, join(REPO, "scripts", "no_such_file.ts")), false);
@@ -79,7 +104,7 @@ test("R1c is_entry: realpath equal → true; a different file, undefined or a va
   }
 });
 
-test("R2 SIGTERM to the runner takes the node child AND its grandchild down (no orphans)", { skip: process.platform === "win32" }, async () => {
+test("R2 SIGTERM to the runner takes the node child AND its grandchild down (no orphans)", { skip: process.platform === "win32", timeout: 60000 }, async (t) => {
   const dir = join(home.root, "r2");
   mkdirSync(dir, { recursive: true });
   const pid_file = join(dir, "grand.pid");
@@ -99,27 +124,30 @@ test("R2 SIGTERM to the runner takes the node child AND its grandchild down (no 
   writeFileSync(
     join(dir, "driver.ts"),
     [
-      `import { run_node } from ${JSON.stringify(RUNNER)};`,
+      `import { run_node } from ${module_specifier(RUNNER)};`,
       `process.exit(await run_node(process.execPath, [${JSON.stringify(join(dir, "fake_child.mjs"))}]));`,
     ].join("\n"),
   );
   const driver = spawn(process.execPath, [join(dir, "driver.ts")], { cwd: dir, env: home.env, stdio: ["ignore", "ignore", "pipe"] });
-  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => driver.on("close", (code, signal) => resolve({ code, signal })));
+  // 정리는 단언보다 먼저 등록한다 — 시작·생존·종료 단언이 실패해도 가짜 자식·손자·driver 를 남기지 않는다
+  let grand: number | undefined;
+  let child: number | undefined;
+  t.after(() => {
+    if (child !== undefined) kill_quietly(-child); // 자식 그룹(POSIX: 자식 pid = 그룹 id)
+    for (const pid of [child, grand, driver.pid]) if (pid !== undefined) kill_quietly(pid);
+  });
+  const exited = exit_within(driver, 20000);
   assert.ok(await wait_for(() => existsSync(pid_file) && existsSync(child_pid_file), 15000), "fake child did not start");
-  const grand = Number(readFileSync(pid_file, "utf8"));
-  const child = Number(readFileSync(child_pid_file, "utf8"));
+  grand = Number(readFileSync(pid_file, "utf8"));
+  child = Number(readFileSync(child_pid_file, "utf8"));
   assert.ok(alive(grand) && alive(child), "both alive before the signal");
   driver.kill("SIGTERM");
   const result = await exited;
+  assert.ok(result, "runner did not end within 20s of SIGTERM");
   assert.ok(result.code !== 0, `runner must not end with 0 after a signal (got ${JSON.stringify(result)})`);
-  assert.ok(await wait_for(() => !alive(child) && !alive(grand), 10000), `orphan left: child alive=${alive(child)} grandchild alive=${alive(grand)}`);
-  for (const pid of [child, grand]) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone */
-    }
-  }
+  assert.equal(result.code, 143, `SIGTERM → 128 + 15 (got ${JSON.stringify(result)})`);
+  const [c, g] = [child, grand];
+  assert.ok(await wait_for(() => !alive(c) && !alive(g), 10000), `orphan left: child alive=${alive(c)} grandchild alive=${alive(g)}`);
 });
 
 test("R3 the child starts with the repo root as cwd, whatever the caller's cwd", async () => {
@@ -129,7 +157,7 @@ test("R3 the child starts with the repo root as cwd, whatever the caller's cwd",
   writeFileSync(join(dir, "fake_child.mjs"), `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(out)}, process.cwd());`);
   writeFileSync(
     join(dir, "driver.ts"),
-    [`import { run_node } from ${JSON.stringify(RUNNER)};`, `process.exit(await run_node(process.execPath, [${JSON.stringify(join(dir, "fake_child.mjs"))}]));`].join("\n"),
+    [`import { run_node } from ${module_specifier(RUNNER)};`, `process.exit(await run_node(process.execPath, [${JSON.stringify(join(dir, "fake_child.mjs"))}]));`].join("\n"),
   );
   const run = spawnSync(process.execPath, [join(dir, "driver.ts")], { cwd: dir, env: home.env, encoding: "utf8", timeout: 20000 });
   assert.equal(run.status, 0, run.stderr);
