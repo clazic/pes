@@ -40,12 +40,14 @@ function useCrumbs(): Crumb[] {
   const m = useMatch("/p/:slug/e/:edition/s/:stage/r/:round");
   const pm = useMatch("/p/:slug/e/:edition/*");
   const rec = useMatch("/p/:slug/e/:edition/records");
+  const refs = useMatch("/p/:slug/e/:edition/references");
   const edition = Number(pm?.params.edition ?? 0);
   const ws = useWorkspace(pm?.params.slug, edition).data;
   if (!pm) return [{ label: "PES" }];
   if (!ws) return [{ label: "연구 공간" }];
   const home = { label: ws.title, to: roundHref(ws.slug, ws.edition, ws.current.stage, ws.current.round_id) };
   if (rec) return [home, { label: "가정·결정·반영" }];
+  if (refs) return [home, { label: "참고 프로젝트" }];
   const stage = ws.stages.find((s) => s.key === m?.params.stage);
   const round = m?.params.round === "start" ? null : Number(m?.params.round);
   if (!stage || (round !== null && !stage.rounds.some((r) => r.round_id === round))) return [home, { label: "없는 주소" }];

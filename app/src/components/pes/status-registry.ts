@@ -99,6 +99,20 @@ export const STATUS = {
     rejected: d("거절", "hsquare", "off", "rejected"),
     missing: d("증거 없음", "square", "bad", "applied·partial 인데 증거가 모자람 — 성공으로 보이지 않음"),
   },
+  // 이전 프로젝트 참고(REF1b · SEL-114): 고정한 버전은 저절로 바뀌지 않는다. 원본 없음 · 보관됨 · 권한 없음은 서로 다른 말
+  reference: {
+    pinned: d("고정됨", "circle", "ok", "project_references.status = active + 최신 스냅숏 = 고정한 스냅숏"),
+    new_version: d("새 버전 있음", "tri", "warn", "latest_snapshot_id ≠ source_snapshot_id — 저절로 바뀌지 않음, 사람이 고름"),
+    source_archived: d("원본 보관됨", "hsquare", "off", "status = source_archived"),
+    source_missing: d("원본 없음", "hsquare", "off", "status = source_missing (tombstone)"),
+    no_permission: d("권한 없음", "hsquare", "off", "access = no_permission — 내용 비공개"),
+  },
+  // 참고 프로젝트가 AI 에게 가는가(ai_delivery) — 서버가 안 주면 전달 가능으로 읽지 않는다
+  reference_ai: {
+    allowed: d("AI 전달 가능", "circle", "ok", "ai_delivery.allowed = true"),
+    withheld: d("AI 전달 안 됨", "square", "warn", "ai_delivery.allowed = false"),
+    unknown: d("AI 전달 정보 없음", "dotring", "unk", "ai_delivery 칸 없음 — 허용으로 해석하지 않음"),
+  },
 } as const satisfies Record<string, Record<string, StatusDef>>;
 
 export type StatusDomain = keyof typeof STATUS;
