@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useMatch } from "react-router";
-import { ArrowLeftIcon, FolderOpenIcon, ScrollTextIcon } from "lucide-react";
+import { ArrowLeftIcon, BookMarkedIcon, FolderOpenIcon, ScrollTextIcon } from "lucide-react";
 import { useWorkspace } from "@/api/queries";
 import type { WorkspaceView } from "@/api/types";
 import { StatusMark, TONE_TEXT, turnLabel } from "@/components/pes/status";
@@ -174,6 +174,29 @@ function MaterialsLink({ ws }: { ws: WorkspaceView }) {
   );
 }
 
+/** 참고 — 이전 프로젝트 참고자료 화면으로 가는 입구(REF1b). 연구 흐름 나무와 따로 둔다 */
+function ReferencesLink({ ws }: { ws: WorkspaceView }) {
+  const { setOpenMobile } = useSidebar();
+  const here = !!useMatch("/p/:slug/e/:edition/references");
+  return (
+    <nav aria-label="프로젝트 참고">
+      <SidebarGroup>
+        <SidebarGroupLabel>참고</SidebarGroupLabel>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={here} tooltip="참고 프로젝트">
+              <Link to={`/p/${ws.slug}/e/${ws.edition}/references`} aria-current={here ? "page" : undefined} onClick={() => setOpenMobile(false)} className="no-underline">
+                <BookMarkedIcon aria-hidden="true" />
+                <span className="min-w-0 truncate font-medium">참고 프로젝트</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    </nav>
+  );
+}
+
 /**
  * 앱 셸 사이드바 — 승인 시안의 shadcn sidebar-07 블록(아이콘으로 접힘, collapsible="icon") 연구 공간판(설계 16.2).
  * 머리: “← 모든 프로젝트” · 프로젝트 자리 / 몸: 연구 흐름(단계 아래 라운드 나무). 900px 미만은 같은 내용이 왼쪽 판(Sheet)으로 열린다.
@@ -205,6 +228,7 @@ export function AppSidebar() {
       <SidebarContent>
         {ws ? <ResearchFlow ws={ws} /> : null}
         {ws ? <MaterialsLink ws={ws} /> : null}
+        {ws ? <ReferencesLink ws={ws} /> : null}
         {ws ? <RecordsLink ws={ws} /> : null}
       </SidebarContent>
     </Sidebar>

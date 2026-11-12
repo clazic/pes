@@ -19,6 +19,11 @@ export const keys = {
   records: (slug: string, edition: number) => ["records", slug, edition] as const,
   assumptions: (slug: string, edition: number) => ["records", slug, edition, "assumptions"] as const,
   decisions: (slug: string, edition: number) => ["records", slug, edition, "decisions"] as const,
+  /** 참고 프로젝트(REF1b) — 기록 읽기와 같은 앞부분이라 판의 변경분(workspace)을 받으면 같이 다시 읽힌다. 내용 읽기(detail)는 목록 키 아래라 목록을 다시 읽으면 같이 무효화된다 */
+  references: (slug: string, edition: number) => ["records", slug, edition, "references"] as const,
+  referenceDetail: (slug: string, edition: number, refId: string) => ["records", slug, edition, "references", "detail", refId] as const,
+  /** 붙일 후보 — 열 때마다 새로 읽는다(gcTime 0). scope null = 생성 화면 */
+  referenceCandidates: (scope: { slug: string; edition: number } | null) => ["reference-candidates", scope?.slug ?? "", scope?.edition ?? 0] as const,
   /** 내 자료(MAT1c) — 기록 읽기와 같은 앞부분이라 판의 변경분(workspace)을 받으면 같이 다시 읽힌다 */
   materials: (slug: string, edition: number) => ["records", slug, edition, "materials"] as const,
   reflections: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, stage, round, "reflections"] as const,
@@ -106,6 +111,24 @@ export function useDecisions(slug: string, edition: number) {
 export function useReflections(slug: string, edition: number, stage: string, round: string) {
   const client = useClient();
   return useQuery({ queryKey: keys.reflections(slug, edition, stage, round), queryFn: () => client.getReflections(slug, edition, stage, round), enabled: !!slug && edition > 0 && !!stage && !!round });
+}
+
+/** 참고 프로젝트 목록(REF1b). 읽기 실패는 오류로 남는다(빈 목록으로 위장하지 않음) */
+export function useReferences(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.references(slug, edition), queryFn: () => client.getReferences(slug, edition), enabled: !!slug && edition > 0 });
+}
+
+/** 참고 프로젝트 내용 하나 — 사람 화면이라 AI 전달이 안 되는 것도 읽힌다 */
+export function useReferenceDetail(slug: string, edition: number, refId: string) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.referenceDetail(slug, edition, refId), queryFn: () => client.getReference(slug, edition, refId) });
+}
+
+/** 붙일 수 있는 프로젝트와 스냅숏. 대화 상자를 열 때마다 한 번 읽는다(남은 캐시 없음). 읽는 길이 없으면 NotConnectedError 가 오류로 남는다 */
+export function useReferenceCandidates(scope: { slug: string; edition: number } | null) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.referenceCandidates(scope), queryFn: () => client.getReferenceCandidates(scope), gcTime: 0, staleTime: 0, refetchOnMount: "always" });
 }
 
 /** useAnnotations 가 돌려주는 모양 — failed 면 읽다가 실패(빈 목록으로 단정하지 않는다) */

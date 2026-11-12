@@ -82,13 +82,8 @@ test("/new: 담기만 하고 서버에는 아무것도 올리지 않는다 — �
   page.on("request", (r) => {
     if (r.method() !== "GET") posts.push(`${r.method()} ${r.url()}`);
   });
-  // 서버가 /new 를 앱 주소로 내주지 않는다(앱 화면 주소는 /p/<slug>/…) — 앱 안 이동(pushState + popstate)으로 연다
-  await page.goto(FILES);
-  await expect(page.locator("main [data-screen-title]")).toBeVisible();
-  await page.evaluate(() => {
-    history.pushState({}, "", "/new");
-    dispatchEvent(new PopStateEvent("popstate"));
-  });
+  // 서버가 /new 를 /p/… 와 같은 규칙으로 앱 index.html 로 내준다(SEL-114) — 주소창에 바로 쳐서 연다
+  await page.goto("/new");
   const region = page.getByRole("region", { name: "내 자료" });
   await expect(region).toBeVisible();
   await region.getByLabel("자료 파일 고르기").setInputFiles({ name: "staged-e2e-synthetic.csv", mimeType: "text/csv", buffer: Buffer.from("a,b\n1,2") });

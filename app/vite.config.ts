@@ -8,11 +8,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * 서버(scripts/serve.ts)는 앱 화면 주소 `/p/<slug>/…` 에서 앱의 index.html 을 내주고, 빌드 파일은 `/_app/…` 에서 내준다 → base "/_app/"(프로젝트 이름은 `_` 로 시작할 수 없어 어떤 프로젝트 쪽도 가리지 않는다).
- * 개발·미리보기 서버도 같게 `/p/…` 를 앱 index.html 로 되돌린다(주소창의 `/p/…` 는 그대로 — 앱 라우터가 읽는다).
+ * 새 프로젝트 화면 `/new`(끝 / 있든 없든, 그 아래는 아님)도 같다(SEL-114 — 서버는 `new` 프로젝트가 따로 있으면 그쪽을 우선한다).
+ * 개발·미리보기 서버도 같게 `/p/…` · `/new` 를 앱 index.html 로 되돌린다(주소창의 주소는 그대로 — 앱 라우터가 읽는다).
  */
 const appAddress = (): Plugin => {
   const rewrite = (req: { url?: string; method?: string }, _res: unknown, next: () => void) => {
-    if ((req.method === "GET" || req.method === "HEAD") && /^\/p\//.test(req.url ?? "")) req.url = "/_app/index.html";
+    if ((req.method === "GET" || req.method === "HEAD") && /^(\/p\/|\/new\/?(\?|#|$))/.test(req.url ?? "")) req.url = "/_app/index.html";
     next();
   };
   return {

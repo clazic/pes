@@ -1,3 +1,4 @@
+import { createFakeReferences } from "./fake-references";
 import { DEMO_HUMAN, demoMaterials, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
 import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView, type AnnotationThreadView } from "./types";
 
@@ -192,6 +193,8 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
   };
 
   return {
+    // 이전 프로젝트 참고자료(REF1b) — 이 작업 공간(slug · 판)만 안다
+    ...createFakeReferences({ known: (slug, edition) => find(slug, edition) !== null, committed: (tx_id) => void txLog.push({ tx_id, touched: ["workspace"] }) }),
     capabilities: { questionTools: true },
     listProjects: () => copy([{ slug: workspace.slug, edition: workspace.edition, current: workspace.current }]),
     getWorkspace: (slug, edition) => copy(find(slug, edition)),
