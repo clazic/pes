@@ -43,6 +43,14 @@ const MAX_BODY = 256 * 1024;
 const MAX_API_BODY = 2 * MAX_BODY;
 /** Query string limit of the API (a signed cursor, limit and wait_ms fit; the request stays small). */
 const MAX_API_QUERY = 2048;
+/**
+ * SEL-86: a report / output page (text/html under /<slug>/reports/… and /<slug>/out/…) is a document with its own scripts (print button, eli5), served from the
+ * app's origin. `sandbox` makes it an opaque origin — it cannot read the app's sessionStorage or call the same-origin API — while its own scripts, print(),
+ * dialogs, pop-ups and downloads keep working. No allow-same-origin / allow-top-navigation / allow-forms. Never on PDF / images (Chromium's PDF viewer is blocked by it).
+ */
+const REPORT_HTML_CSP = "sandbox allow-scripts allow-popups allow-modals allow-downloads";
+/** SEL-86: the app's index.html runs only scripts of its own origin (the build has no inline script). No sandbox — the app needs its same-origin sessionStorage. */
+const APP_INDEX_CSP = "script-src 'self'";
 const REPORT_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8" };
 /** The API error texts the server itself gives (the envelope of ApiApp: Korean message, retryable only for 429/503, next_action a string). */
 const API_ERROR_TEXT: Record<string, [string, string]> = {
@@ -408,7 +416,9 @@ async function start(config: Config): Promise<void> {
     } catch {
       return not_found(req, res);
     }
-    const headers = { "Content-Type": guess_type(target), "Content-Length": stat.size, "Last-Modified": new Date(stat.mtimeMs).toUTCString(), "Cache-Control": "no-store" };
+    const content_type = guess_type(target);
+    const headers: Record<string, string | number> = { "Content-Type": content_type, "Content-Length": stat.size, "Last-Modified": new Date(stat.mtimeMs).toUTCString(), "Cache-Control": "no-store" };
+    if (/^text\/html/i.test(content_type)) headers["Content-Security-Policy"] = APP_INDEX_CSP;
     if (req.method === "HEAD") {
       res.writeHead(200, headers);
       res.end();
@@ -584,7 +594,10 @@ async function start(config: Config): Promise<void> {
         return true;
       }
       const data = reply.data as { name: string; bytes_b64: string };
-      send(req, res, 200, { "Content-Type": REPORT_TYPES[extname(data.name).toLowerCase()] ?? "application/octet-stream" }, Buffer.from(data.bytes_b64, "base64"));
+      const report_type = REPORT_TYPES[extname(data.name).toLowerCase()] ?? "application/octet-stream";
+      const report_headers: Record<string, string> = { "Content-Type": report_type };
+      if (/^text\/html/i.test(report_type)) report_headers["Content-Security-Policy"] = REPORT_HTML_CSP;
+      send(req, res, 200, report_headers, Buffer.from(data.bytes_b64, "base64"));
       return true;
     } catch (error) {
       if (error instanceof Die) {
