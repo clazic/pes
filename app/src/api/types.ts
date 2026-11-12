@@ -31,6 +31,8 @@ export interface ApiError {
     /** 문제 필드의 JSON 경로 */
     target?: string;
     next_action?: string;
+    /** 거절 사유 상세(서버 봉투가 이미 갖는다) — 답 제출은 { reason: "required_missing" | "not_applicable" | "single_requires_one_item" | "stale_question_version", question_ids? } */
+    details?: Record<string, unknown> | null;
   };
   request_id: string;
 }
@@ -278,6 +280,12 @@ export interface QuestionView {
   /** 질문이 바뀌어 답을 다시 확인해야 함 */
   needs_recheck?: boolean;
   previous_answer?: PreviousAnswer | null;
+  /** U2c — 의견(value 없음 + comment)만으로 필수를 채울 수 있는 질문. 없으면 false */
+  allow_comment_as_answer?: boolean;
+  /** U2c — 서버 질문 버전 id. 있으면 답 제출이 그대로 싣는다 */
+  version_id?: string;
+  /** U2c — 보낸 답이 기본값 채택이었음(읽기 전용) */
+  used_default?: boolean;
 }
 
 /** 질문 하나를 만들거나 고칠 때 보내는 값 */
@@ -296,6 +304,8 @@ export interface QuestionInput {
 /** base_version = 지금 보는 질문 버전 — 어긋나면 conflict */
 export interface QuestionRevision extends QuestionInput {
   base_version: number;
+  /** U2c — 서버 버전 id(QuestionView.version_id). HTTP 클라이언트가 revisions 에 싣는다 */
+  base_version_id?: string;
 }
 
 /** 질문 버전 기록 한 줄(최신이 먼저) */
@@ -333,6 +343,8 @@ export interface RoundView {
   round_id: number | null;
   state: "closed" | "current";
   form_version: number;
+  /** U2c — 서버 폼 세트 id(답 제출에 쓴다). 서버가 아직 주지 않으면 없다 */
+  set_id?: string;
   questions: QuestionView[];
   result: ResultView | null;
   alerts: AlertView[];
@@ -361,6 +373,61 @@ export interface ChangesRead {
   txs: ChangeTx[];
 }
 
+/* ───────────── 답 제출 · 질문별 의견(U2c · SEL-92) — 서버 계약은 SEL-90(U2a): POST P/submissions · P/threads ───────────── */
+
+export interface AnswerItemInput {
+  question_id: string;
+  /** 이 답이 가리키는 질문 버전(화면이 보고 있던 버전) — 어긋나면 conflict(부분 접수 0) */
+  question_version: number;
+  /** 서버 버전 id(QuestionView.version_id 가 있을 때만) */
+  question_version_id?: string;
+  /** 하나 고르기 = 선택지 id · 여러 개 = 선택지 id 배열 · 글 = 글 · 의견만 있으면 null */
+  value: string | string[] | null;
+  /** 그 질문의 “의견 칸” 글(제출에 붙는 의견; 스레드 의견과 다르다) */
+  comment?: string | null;
+  /** 기본값 쓰기로 채운 뒤 바꾸지 않은 답일 때만 true */
+  used_default?: boolean;
+}
+
+export interface SubmitInput {
+  /** bundle = 이 제출 + 이미 낸 답으로 적용 필수 질문이 모두 채워져야 한다 · single = 항목 정확히 1개 */
+  mode: "bundle" | "single";
+  form_version: number;
+  set_id?: string;
+  answers: AnswerItemInput[];
+}
+
+export interface SubmitResult {
+  submission_id: string;
+  answers: { question_id: string; state: "submitted" }[];
+  form_complete: boolean;
+  missing_required: string[];
+}
+
+export interface CommentMessageView {
+  message_id: string;
+  body_md: string;
+  at: IsoTime;
+  by: "human" | "ai";
+  receipt_no?: string;
+}
+
+/** question_id "__other" = 이전된 프로젝트의 질문에 묶이지 않은 의견 */
+export interface CommentThreadView {
+  thread_id: string;
+  question_id: string | "__other";
+  question_version?: number;
+  messages: CommentMessageView[];
+}
+
+export interface CommentInput {
+  body_md: string;
+  /** 있으면 그 스레드에 메시지만 더한다 */
+  thread_id?: string;
+  question_version?: number;
+  question_version_id?: string;
+}
+
 /** 가짜 클라이언트와 (U1b) HTTP 클라이언트가 같이 지키는 모양 */
 export interface PesClient {
   listProjects(): Promise<ProjectRef[]>;
@@ -377,7 +444,7 @@ export interface PesClient {
    * 질문 쓰기(U2b) — 서버 계약은 SEL-90(U2a): POST P/questions · P/questions/{q}/revisions · P/questions/{q}/withdraw|defer|merge.
    * 모두 멱등 키 필수(없으면 invalid_payload) · 같은 키·같은 요청은 영수증 재생 · 거절은 PesApiError. 삭제(hard delete) 명령은 없다.
    * 추가 · 철회 · 보류 · 합치기 · 순서 바꾸기 · 고치기는 모두 새 폼 버전을 만든다. 성공하면 화면은 getRound 를 다시 읽는다.
-   * HTTP 클라이언트는 아직 이어지지 않았다(capabilities.questionTools === false) — U2a 병합 뒤 U2c 에서 매핑한다.
+   * HTTP 클라이언트는 U2c 에서 매핑했다. 서버에 길이 없는 것(순서 바꾸기 · 버전 기록 읽기 · 의견 읽기)은 NotConnectedError.
    */
   getQuestionVersions(slug: string, edition: number, questionId: string): Promise<QuestionVersionView[] | null>;
   reviseQuestion(slug: string, edition: number, questionId: string, body: QuestionRevision, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>>;
@@ -387,6 +454,16 @@ export interface PesClient {
   mergeQuestion(slug: string, edition: number, questionId: string, intoQuestionId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ question_id: string; status: "merged"; merged_into: string }>>;
   /** orderedIds = 상태 open 질문 전부의 새 순서(닫힌 질문은 제외) */
   reorderQuestions(slug: string, edition: number, stage: string, round: string, orderedIds: string[], idempotencyKey: string | undefined): Promise<CommandResult<{ form_version: number }>>;
+
+  /**
+   * 답 제출(U2c) — 멱등 키 필수(없으면 invalid_payload) · 같은 키·같은 요청은 영수증 재생 · 거절은 PesApiError 이고 아무것도 접수되지 않는다(부분 접수 0).
+   * 거절 details: { reason: "required_missing" | "not_applicable", question_ids } | { reason: "single_requires_one_item" } · 질문 버전이 어긋나면 conflict.
+   */
+  submitAnswers(slug: string, edition: number, stage: string, round: string, input: SubmitInput, idempotencyKey: string | undefined): Promise<CommandResult<SubmitResult>>;
+  /** 이 라운드의 모든 의견 스레드. 읽는 길이 없으면 NotConnectedError */
+  getComments(slug: string, edition: number, stage: string, round: string): Promise<CommentThreadView[]>;
+  /** 질문별 의견 — thread_id 없으면 새 스레드 + 첫 메시지, 있으면 메시지만. 답·제출은 만들지 않는다. 멱등 키 필수 */
+  addComment(slug: string, edition: number, questionId: string, input: CommentInput, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; message_id: string; thread_created: boolean }>>;
 
   /** 이 클라이언트가 못 하는 일(정직하게 알린다). 없으면 모두 된다 */
   readonly capabilities?: { questionTools?: boolean };

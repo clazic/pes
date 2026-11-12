@@ -19,12 +19,15 @@ export function useKeyedCommand() {
   const busy = React.useRef(false);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  /** 마지막 실패의 원래 오류(U2c) — 거절 사유 details · 시간 초과를 화면이 구분해서 쓴다 */
+  const [failure, setFailure] = React.useState<unknown>(null);
 
-  const run = React.useCallback(async <T,>(sig: string, call: (key: string) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => {
+  const run = React.useCallback(async <T,>(sig: string, call: (key: string) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error?: unknown }> => {
     if (busy.current) return { ok: false };
     busy.current = true;
     setPending(true);
     setError(null);
+    setFailure(null);
     const key = keyRef.current?.sig === sig ? keyRef.current.key : newIdempotencyKey();
     keyRef.current = { sig, key };
     try {
@@ -33,12 +36,13 @@ export function useKeyedCommand() {
       return { ok: true, value };
     } catch (e) {
       setError(describeError(e));
-      return { ok: false };
+      setFailure(e);
+      return { ok: false, error: e };
     } finally {
       busy.current = false;
       setPending(false);
     }
   }, []);
 
-  return { run, pending, error };
+  return { run, pending, error, failure };
 }

@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type PesClient, type ProjectRef, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type ApiError, type ChangesRead, type ChangeTx, type CommandResult, type PesClient, type ProjectRef, type QuestionInput, type Receipt, type RoundView, type WorkspaceView } from "./types";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -84,18 +84,153 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return w && w.edition === edition ? w : null;
   }
 
-  /** 질문 쓰기·버전 기록은 서버 계약(SEL-90 U2a) 병합 뒤 U2c 에서 이을 때까지 이어지지 않았다 — 경로를 지어내지 않고 정직하게 거절한다 */
-  const notConnected = () => Promise.reject(new NotConnectedError("질문 바꾸기"));
+  /** 서버(SEL-90 U2a)에 읽을·쓸 길이 없는 것 — 경로를 지어내지 않고 요청 없이 정직하게 거절한다 */
+  const notConnected = (what: string) => () => Promise.reject(new NotConnectedError(what));
+
+  const invalid = (target: string, message = "요청 내용이 올바르지 않습니다."): PesApiError =>
+    new PesApiError({
+      format_version: FORMAT_VERSION,
+      error: { code: "invalid_payload", message, retryable: false, target, next_action: "fix_request" },
+      request_id: "client",
+    });
+
+  /** 쓰기 공통: 멱등 키 확인 → 프로젝트 확인 → POST → (성공 뒤) GET P/requests/{key} 로 영수증. 순서 규칙(API 결정 4)은 서버가 같은 키로 재생한다 */
+  async function write(slug: string, key: string | undefined, rest: string, body: Json, ready?: (id: string) => Promise<Json | void>) {
+    if (!key) throw invalid("$.headers.idempotency-key");
+    const id = idOf(slug);
+    if (id === undefined) throw new PesApiError(fallbackBody(404));
+    const extra = (await ready?.(id)) ?? {};
+    const res = await send(projectUrl(id, rest), {
+      method: "POST",
+      headers: headers({ "content-type": "application/json", "idempotency-key": key }),
+      credentials: "omit",
+      body: JSON.stringify({ format_version: FORMAT_VERSION, ...extra, ...body }),
+    });
+    if (!res.ok) throw await toApiError(res);
+    const json: unknown = await res.json();
+    if (!isRecord(json) || !isRecord(json.data)) throw new PesApiError(fallbackBody(500));
+    const receipt = await readReceipt(id, key, json.replayed === true, typeof json.request_id === "string" ? json.request_id : "");
+    return { data: json.data, receipt, request_id: typeof json.request_id === "string" ? json.request_id : "client" };
+  }
+
+  /** 서버 본문에는 영수증이 없다 — 쓰기 성공 뒤 GET P/requests/{key} 로 tx 를 받아 만든다. 못 읽어도 쓰기는 이미 됐으니 던지지 않고 받은 만큼으로 만든다 */
+  async function readReceipt(id: string, key: string, replayed: boolean, requestId: string): Promise<Receipt> {
+    let txId = requestId || "client";
+    try {
+      const res = await send(projectUrl(id, `/requests/${encodeURIComponent(key)}`), { method: "GET", headers: headers(), credentials: "omit" });
+      if (res.ok) {
+        const json: unknown = await res.json();
+        const tx = isRecord(json) && isRecord(json.data) ? json.data.tx_id : undefined;
+        if (typeof tx === "string" && tx) txId = tx;
+      }
+    } catch {
+      /* 영수증 조회만 실패 — 쓰기는 성공했다 */
+    }
+    const digits = /(\d+)$/.exec(txId)?.[1];
+    return { receipt_no: digits ? digits.padStart(4, "0") : txId, tx_id: txId, committed_at: new Date().toISOString(), idempotency_key: key, replayed };
+  }
+
+  const result = <T,>(w: { data: Json; receipt: Receipt; request_id: string }, data: T): CommandResult<T> => ({ format_version: FORMAT_VERSION, request_id: w.request_id, receipt: w.receipt, data });
+  const objectAt = (data: Json, name: string): Json => (isRecord(data[name]) ? data[name] : {});
+  const text = (v: unknown): string => (typeof v === "string" ? v : "");
+
+  /** 질문 입력 → 서버 spec. 못 담는 칸은 키를 보내지 않는다 */
+  function spec(q: QuestionInput): Json {
+    const choice = q.kind !== "free_text";
+    return {
+      text: q.text,
+      type: q.kind === "single_choice" ? "single" : q.kind === "multi_choice" ? "multi" : "text",
+      required: q.required,
+      ...(q.importance ? { importance: q.importance } : {}),
+      ...(q.default_value !== null && q.default_value !== undefined ? { default_value: q.default_value } : {}),
+      ...(choice ? { options: q.options.map((o) => ({ value: o.id, label: o.label })) } : {}),
+      ...(q.show_if ? { show_if: { id: q.show_if.question_id, in: [q.show_if.equals] } } : {}),
+      ...(q.help ? { help: q.help } : {}),
+    };
+  }
+
+  const q = (id: string) => encodeURIComponent(id);
+  const changeOf = (kind: "withdraw" | "defer" | "merge", slug: string, qid: string, key: string | undefined, body: Json = {}) =>
+    write(slug, key, `/questions/${q(qid)}/${kind}`, body).then((w) => {
+      const question = objectAt(w.data, "question");
+      const base = { question_id: text(question.id), status: text(question.state) };
+      return result(w, kind === "merge" ? { ...base, merged_into: text(question.merged_into_question_id) } : base);
+    });
 
   return {
-    capabilities: { questionTools: false },
-    getQuestionVersions: notConnected,
-    reviseQuestion: notConnected,
-    addQuestion: notConnected,
-    withdrawQuestion: notConnected,
-    deferQuestion: notConnected,
-    mergeQuestion: notConnected,
-    reorderQuestions: notConnected,
+    capabilities: { questionTools: true },
+    getQuestionVersions: notConnected("질문 버전 기록 읽기"),
+    reorderQuestions: notConnected("질문 순서 바꾸기"),
+    getComments: notConnected("의견 읽기"),
+
+    async addQuestion(slug, _edition, stage, round, body, key) {
+      if (!key) throw invalid("$.headers.idempotency-key");
+      if (idOf(slug) === undefined) throw new PesApiError(fallbackBody(404));
+      if (body.direction === "ask_ai") throw new NotConnectedError("사람이 AI에게 묻는 질문 더하기");
+      if (round !== "start") throw new NotConnectedError("번호 라운드에 질문 더하기");
+      const w = await write(slug, key, "/questions", { purpose: "stage_start", form_key: "main", direction: "agent_to_human", round_id: null, question: spec(body) }, async (id) => {
+        const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit" });
+        if (!res.ok) throw await toApiError(res);
+        const json: unknown = await res.json();
+        const stages = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.stages) ? json.data.stages : [];
+        const found = stages.find((s) => isRecord(s) && s.key === stage);
+        if (!isRecord(found) || typeof found.stage_id !== "string") throw new PesApiError({ ...fallbackBody(404) });
+        return { stage_id: found.stage_id };
+      });
+      const question = objectAt(w.data, "question");
+      return result(w, { question_id: text(question.id), version: Number(question.version_no) });
+    },
+
+    async reviseQuestion(slug, _edition, qid, body, key) {
+      if (!key) throw invalid("$.headers.idempotency-key");
+      if (!body.base_version_id) throw invalid("$.base_version_id", "질문의 서버 버전을 알 수 없어 고칠 수 없습니다.");
+      const w = await write(slug, key, `/questions/${q(qid)}/revisions`, { base_version_id: body.base_version_id, question: spec(body) });
+      const question = objectAt(w.data, "question");
+      return result(w, { question_id: text(question.id), version: Number(question.version_no), needs_recheck: w.data.recheck_required === true });
+    },
+
+    withdrawQuestion: (slug, _edition, qid, key) => changeOf("withdraw", slug, qid, key) as ReturnType<PesClient["withdrawQuestion"]>,
+    deferQuestion: (slug, _edition, qid, key) => changeOf("defer", slug, qid, key) as ReturnType<PesClient["deferQuestion"]>,
+    mergeQuestion: (slug, _edition, qid, into, key) => changeOf("merge", slug, qid, key, { merged_into_question_id: into }) as ReturnType<PesClient["mergeQuestion"]>,
+
+    /** POST P/submissions — 서버 폼 세트 id(set_id)가 없으면 지어내지 않고 거절한다. 앱 쪽 값(question_version 숫자 · form_version)은 보내지 않는다 */
+    async submitAnswers(slug, _edition, _stage, _round, input, key) {
+      if (!key) throw invalid("$.headers.idempotency-key");
+      if (!input.set_id) throw invalid("$.set_id", "서버 폼 세트를 알 수 없어 답을 보낼 수 없습니다.");
+      const answers = input.answers.map((a) => ({
+        question_id: a.question_id,
+        ...(a.question_version_id ? { question_version_id: a.question_version_id } : {}),
+        ...(a.value !== null && a.value !== undefined ? { value: a.value } : {}),
+        ...(a.comment ? { comment: a.comment } : {}),
+        ...(a.used_default !== undefined ? { used_default: a.used_default } : {}),
+      }));
+      const w = await write(slug, key, "/submissions", { set_id: input.set_id, mode: input.mode, answers });
+      const submission = objectAt(w.data, "submission");
+      const rows = Array.isArray(w.data.answers) ? w.data.answers : [];
+      return result(w, {
+        submission_id: text(submission.id),
+        answers: rows.flatMap((r) => (isRecord(r) && typeof r.question_id === "string" ? [{ question_id: r.question_id, state: "submitted" as const }] : [])),
+        form_complete: w.data.form_complete === true,
+        missing_required: Array.isArray(w.data.missing_required) ? w.data.missing_required.filter((x): x is string => typeof x === "string") : [],
+      });
+    },
+
+    /** 질문별 의견 — 의견은 답이 아니다: submissions 로 가지 않고 항상 question_comment 스레드로 간다 */
+    async addComment(slug, _edition, qid, input, key) {
+      if (!key) throw invalid("$.headers.idempotency-key");
+      if (!input.body_md.trim()) throw invalid("$.body_md", "의견이 비었습니다.");
+      if (input.thread_id) {
+        const w = await write(slug, key, `/threads/${q(input.thread_id)}/messages`, { body_md: input.body_md });
+        return result(w, { thread_id: input.thread_id, message_id: text(objectAt(w.data, "message").id), thread_created: false });
+      }
+      const w = await write(slug, key, "/threads", {
+        target_object_id: qid,
+        ...(input.question_version_id ? { target_version_id: input.question_version_id } : {}),
+        context_kind: "question_comment",
+        initial_message: { body_md: input.body_md },
+      });
+      return result(w, { thread_id: text(objectAt(w.data, "thread").id), message_id: text(objectAt(w.data, "message").id), thread_created: true });
+    },
 
     /** GET P/changes — 한 번만 부른다(has_more 여도 한 쪽). 400 cursor_invalid · 410 cursor_expired 는 PesApiError 로 나온다 */
     async getChanges(slug, _edition, cursor): Promise<ChangesRead> {

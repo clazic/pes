@@ -10,7 +10,7 @@ import * as React from "react";
  */
 const PREFIX = "pes-draft:";
 
-export type DraftField = "answer" | "opinion";
+export type DraftField = "answer" | "opinion" | "comment";
 export interface DraftParts {
   project: string;
   user: string;
@@ -79,6 +79,22 @@ function notify(storageKey: string) {
   listeners.get(storageKey)?.forEach((fn) => fn());
 }
 
+/**
+ * 초안이 하나라도 바뀌었음을 알리는 전체 구독(U2c) — 묶음 제출이 모든 질문의 초안을 한꺼번에 읽어야 해서 쓴다.
+ * 저장하는 쓰기(useDraft.set · clearDraft)만 올린다. 폼 버전 기억(originForm) 같은 내부 기록은 올리지 않는다.
+ */
+let draftVersion = 0;
+const anyListeners = new Set<() => void>();
+function bumpAll() {
+  draftVersion += 1;
+  anyListeners.forEach((fn) => fn());
+}
+export const subscribeDrafts = (fn: () => void) => {
+  anyListeners.add(fn);
+  return () => void anyListeners.delete(fn);
+};
+export const draftsVersion = () => draftVersion;
+
 /** 논리 키의 저장된 초안(없으면 빈 글) — 화면 밖에서 옛 버전 초안을 들여다볼 때 */
 export function readDraft(key: string): string {
   return readStored(`${PREFIX}${key}`);
@@ -90,6 +106,7 @@ export function clearDraft(key: string): void {
   memory.delete(storageKey);
   writeStored(storageKey, "");
   notify(storageKey);
+  bumpAll();
 }
 
 export interface DraftSetOptions {
@@ -119,7 +136,10 @@ export function useDraft(key: string): [string, (v: string, options?: DraftSetOp
   const set = React.useCallback(
     (v: string, options?: DraftSetOptions) => {
       setState({ key: storageKey, value: v });
-      if (options?.store !== false) writeStored(storageKey, v);
+      if (options?.store !== false) {
+        writeStored(storageKey, v);
+        bumpAll();
+      }
     },
     [storageKey],
   );
