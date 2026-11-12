@@ -52,7 +52,7 @@ import {
   type ReceiptRow,
 } from "./commands/api_reads.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
-import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_rows } from "./commands/thread_reads.ts";
+import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
@@ -3550,13 +3550,10 @@ export class ApiApp {
     const body_md = this.#comment_body(body.body_md, "$.body.body_md");
     const reply_to = optional_text(body, "reply_to");
     const guard = this.#guard_fields(body);
-    const thread = this.#db.get<{ target_object_id: string; context_kind: string }>(
-      "SELECT target_object_id, context_kind FROM threads WHERE project_id = ? AND object_id = ?",
-      project.id,
-      thread_id,
-    );
-    if (thread === undefined) throw new Fail("not_found");
-    if (thread.context_kind !== "question_comment") {
+    // the same route the A thread.reply tool takes (thread_reply_route): one command per kind of thread
+    const route = thread_reply_route(this.#db, project.id, thread_id);
+    if (route === undefined) throw new Fail("not_found");
+    if (route.command === "thread.reply") {
       const payload: Record<string, unknown> = { thread_id, body_md };
       if (reply_to !== undefined) payload.reply_to = reply_to;
       if (guard !== null && !auth.session) Object.assign(payload, guard);
@@ -3571,10 +3568,13 @@ export class ApiApp {
         replayed: out.replayed,
       };
     }
-    const payload: Record<string, unknown> = { question_id: thread.target_object_id, thread_id, body_md };
+    const payload: Record<string, unknown> = { question_id: route.question_id, thread_id, body_md };
     if (reply_to !== undefined) payload.reply_to = reply_to;
     if (guard !== null && !auth.session) Object.assign(payload, guard);
-    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload));
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload),
+      (error) => this.#thread_failure(error),
+    );
     const result = result_record(out.result);
     return {
       status: 201,

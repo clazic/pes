@@ -45,8 +45,8 @@ export interface CurrentAnchor {
 
 /**
  * Where an anchor stands in the CURRENT version of its text, without writing anything.
- * - the version the anchor was made on: where it stood (exact)
- * - another version whose latest stored judgement was confirmed by a person: that choice
+ * - a version a person has re-attached the anchor on (the latest row confirmed by a person, on any version, the origin included): that choice
+ * - otherwise the version the anchor was made on: where it stood (exact)
  * - otherwise judged fresh from the text (moved / ambiguous / lost are shown as they are, never hidden)
  */
 export function current_anchor(db: Db, project_id: string, anchor: Pick<AnchorRaw, "id" | "exact_quote" | "prefix" | "suffix" | "start_cp" | "target_object_id" | "target_version_id">): CurrentAnchor {
@@ -59,27 +59,29 @@ export function current_anchor(db: Db, project_id: string, anchor: Pick<AnchorRa
   const facts = { exact_quote: anchor.exact_quote, prefix: anchor.prefix, suffix: anchor.suffix, start_cp: num_or_null(anchor.start_cp) };
   let judgement: Judgement;
   let confirmed_by_actor_id: string | null = null;
-  if (version_id === anchor.target_version_id) {
+  // A person's choice for this version wins over any automatic judgement, whenever it was made and on whichever version
+  // (also the origin version: a person may move an anchor to another repeat of its quote). A later automatic re-judgement
+  // (annotation.reanchor without a range, open to a leased agent) adds its row but never hides the person's choice.
+  const confirmed =
+    version_id === null
+      ? undefined
+      : db.get<{ status: AnchorStatus; start_cp: bigint | null; end_cp: bigint | null; confirmed_by_actor_id: string }>(
+          `SELECT status, start_cp, end_cp, confirmed_by_actor_id FROM anchor_resolutions
+            WHERE project_id = ? AND anchor_id = ? AND evaluated_version_id = ? AND confirmed_by_actor_id IS NOT NULL
+            ORDER BY rowid DESC LIMIT 1`,
+          project_id,
+          anchor.id,
+          version_id,
+        );
+  if (confirmed !== undefined) {
+    judgement = { status: confirmed.status, start_cp: num_or_null(confirmed.start_cp), end_cp: num_or_null(confirmed.end_cp), candidates: [] };
+    confirmed_by_actor_id = confirmed.confirmed_by_actor_id;
+  } else if (version_id === anchor.target_version_id) {
     judgement = judge_on_origin(facts);
+  } else if (body === null) {
+    judgement = { status: "lost", start_cp: null, end_cp: null, candidates: [] };
   } else {
-    const last =
-      version_id === null
-        ? undefined
-        : db.get<{ status: AnchorStatus; start_cp: bigint | null; end_cp: bigint | null; confirmed_by_actor_id: string | null }>(
-            `SELECT status, start_cp, end_cp, confirmed_by_actor_id FROM anchor_resolutions
-              WHERE project_id = ? AND anchor_id = ? AND evaluated_version_id = ? ORDER BY rowid DESC LIMIT 1`,
-            project_id,
-            anchor.id,
-            version_id,
-          );
-    if (last !== undefined && last.confirmed_by_actor_id !== null) {
-      judgement = { status: last.status, start_cp: num_or_null(last.start_cp), end_cp: num_or_null(last.end_cp), candidates: [] };
-      confirmed_by_actor_id = last.confirmed_by_actor_id;
-    } else if (body === null) {
-      judgement = { status: "lost", start_cp: null, end_cp: null, candidates: [] };
-    } else {
-      judgement = judge_anchor(body, facts);
-    }
+    judgement = judge_anchor(body, facts);
   }
   const text = judgement.start_cp !== null && judgement.end_cp !== null && body !== null ? cp_slice(body, judgement.start_cp, judgement.end_cp) : null;
   return {
@@ -345,4 +347,24 @@ export function thread_state_of(db: Db, project_id: string, thread_id: string | 
       thread_id,
     )?.state ?? null
   );
+}
+
+/**
+ * The one command a reply to a thread goes through, for every entry (A thread.reply tool, B pes_thread_reply via
+ * POST P/threads/{t}/messages): a question comment thread takes question.comment_add (the SEL-90 contract, receipt
+ * 'question.commented'), any other thread thread.reply. Both refuse a closed thread (conflict, reason thread_closed).
+ * undefined: no such thread in this project.
+ */
+export function thread_reply_route(
+  db: Db,
+  project_id: string,
+  thread_id: string,
+): { command: "question.comment_add"; question_id: string } | { command: "thread.reply" } | undefined {
+  const thread = db.get<{ target_object_id: string; context_kind: string }>(
+    "SELECT target_object_id, context_kind FROM threads WHERE project_id = ? AND object_id = ?",
+    project_id,
+    thread_id,
+  );
+  if (thread === undefined) return undefined;
+  return thread.context_kind === "question_comment" ? { command: "question.comment_add", question_id: thread.target_object_id } : { command: "thread.reply" };
 }

@@ -5,6 +5,7 @@
 // runner adds them, so a model cannot write under someone else's lease.
 
 import type { CommandService, MutationContext } from "../commands.ts";
+import { thread_reply_route } from "../commands/thread_reads.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
@@ -314,7 +315,10 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
         if (typeof text !== "string") return refused(call, "text must be a string");
         const reply_to = args["reply_to"];
         if (reply_to !== undefined && reply_to !== null && typeof reply_to !== "string") return refused(call, "reply_to must be a string");
-        const out = (await execute_with_retries(env, "thread.reply", key, {
+        // the same route as B (POST P/threads/{t}/messages): a question comment thread takes question.comment_add
+        const route = thread_reply_route(env.db, env.run.project_id, thread_id);
+        const out = (await execute_with_retries(env, route?.command ?? "thread.reply", key, {
+          ...(route?.command === "question.comment_add" ? { question_id: route.question_id } : {}),
           thread_id,
           body_md: text,
           ...(typeof reply_to === "string" ? { reply_to } : {}),
