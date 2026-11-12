@@ -4,10 +4,13 @@ import { RecordsScreen } from "@/features/records/RecordsScreen";
 import { WorkspaceScreen } from "@/features/workspace/WorkspaceScreen";
 import { HomeRedirect } from "./HomeRedirect";
 import { NotFound } from "./NotFound";
+import { ProjectRedirect } from "./ProjectRedirect";
 import { RootLayout } from "./RootLayout";
 
 /**
- * 라우트(설계 12.3) — 주소가 상태다. 공급자는 RootLayout 이 만들어 routes 만으로 앱이 완결된다.
+ * 라우트(설계 12.3) — 주소가 상태다.
+ *  /  · /_app/(vite base 의 첫 주소)  첫 프로젝트의 현재 위치로 · /p/:slug(끝 / 있든 없든)  그 프로젝트의 현재 위치로 — 모두 replace
+ * 공급자는 RootLayout 이 만들어 routes 만으로 앱이 완결된다.
  *  /p/:slug/e/:edition/records  가정·결정·반영(U3b) — 표 셋 + 사람 판단 단추
  *  /p/:slug/e/:edition/s/:stage/r/:round  작업 공간(round = 1·2… 또는 start = 단계 시작, round_id NULL)
  *    ?view=body|ask  좁은 화면 보기 · ?focus=<요소 id>  초점 복원 · ?peek=<질문 id>  미리보기 · ?print=1  인쇄 미리보기
@@ -20,6 +23,8 @@ export function createRoutes(options: { client?: PesClient } = {}): RouteObject[
       element: <RootLayout client={options.client} />,
       children: [
         { index: true, element: <HomeRedirect /> },
+        { path: "_app", element: <HomeRedirect /> },
+        { path: "p/:slug", element: <ProjectRedirect /> },
         { path: "p/:slug/e/:edition/s/:stage/r/:round", element: <WorkspaceScreen /> },
         { path: "p/:slug/e/:edition/records", element: <RecordsScreen /> },
         { path: "*", element: <NotFound /> },
