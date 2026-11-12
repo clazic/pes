@@ -135,6 +135,8 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "GET /api/v1/projects/{id}/references/{ref}",
   "POST /api/v1/projects/{id}/references/{ref}/refresh",
   "POST /api/v1/projects/{id}/references/{ref}/detach",
+  // SEL-120 REF1c: candidate projects and their snapshots for attaching (a read, owner session only)
+  "GET /api/v1/projects/{id}/reference-candidates",
   "GET /api/v1/projects/{id}/context",
   "GET /api/v1/projects/{id}/files/{b}/content",
   // SEL-115 MAT1a: my materials, the AI-reference switch, file preview
