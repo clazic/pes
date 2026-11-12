@@ -17,7 +17,7 @@ import { make_docx } from "./helpers/sel116_env.ts";
 const HOSTILE = new URL("./helpers/sel116_hostile_worker.ts", import.meta.url).href;
 const BYTES = new TextEncoder().encode("hello");
 
-function hostile(name: string, options: { heap_mb?: number; timeout_ms?: number } = {}) {
+function hostile(name: string, options: { heap_mb?: number; timeout_ms?: number; end_grace_ms?: number } = {}) {
   const start = performance.now();
   const out = extract_text_isolated(name, BYTES, { worker_url: HOSTILE, ...options });
   return { out, ms: performance.now() - start };
