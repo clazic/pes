@@ -26,7 +26,8 @@
  *   GET P/stages/{stage_key}/rounds/{place}/threads      같은 권한·같은 404 규칙
  *     data = { threads: [{ thread_id, question_id: <질문 id> | "__other", question_version_id: string|null, question_version: number|null,
  *                          messages: [{ message_id, body_md, at: ISO 8601, by: "human"|"ai", receipt_no?: string }] }] }
- *     질문 의견 스레드(context_kind question_comment)는 대상 질문 id 로, 질문에 묶이지 않은 스레드(context_kind general = 이전된 프로젝트의 낱개 의견)는 "__other" 로.
+ *     질문 의견 스레드(context_kind question_comment)는 대상 질문 id 로, 이 자리 질문에 달린 context_kind general 스레드는 "__other" 로.
+ *     (이전된 프로젝트의 낱개 의견·제안 노트는 질문이 아닌 노트가 대상이라 이 자리와 이을 근거가 없어 싣지 않는다 — 1차 리뷰 권장 2.)
  *     메시지는 쓴 순서. 이 자리(단계·라운드)의 폼에 든 적 없는 질문의 스레드는 싣지 않는다. 답·제출은 만들지 않는다(읽기만).
  */
 
@@ -335,5 +336,35 @@ test("[신규] 판 번호: 라운드 읽기와 의견 읽기 응답이 작업 �
     // start 자리도 같다
     const start = await owner_get(env, round_path("start"));
     if (start.status === 200) assert.equal(start.json.data.edition, ws.edition);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 영수증 번호 한 번에 계산 — 1차 리뷰 권장 3: 읽기 한 번이 답·메시지마다 커밋을 세지 않는다. 번호는 쓰기 응답의 영수증과 같아야 한다(회귀 가드).
+
+test("[회귀] 영수증 번호: 여러 답·여러 메시지를 한 번에 읽어도 번호가 각 쓰기 응답의 영수증과 같다", async () => {
+  await with_api(async (env) => {
+    const f = await make_form(env, [single_spec("가"), single_spec("나"), text_spec("다")]);
+    const [q1, q2, q3] = f.ids;
+    const receipts: Record<string, any> = {};
+    for (const [q, v] of [[q1, "a"], [q2, "c"], [q3, "글"]] as const) {
+      const res = await owner_post(env, "/submissions", { mode: "single", set_id: f.set.set_id, answers: [{ question_id: q, value: v }] });
+      receipts[q!] = assert_ok(res, 201) && res.json.receipt;
+    }
+    const msgs: string[] = [];
+    for (const body of ["첫째", "둘째", "셋째"]) {
+      const res = await owner_post(env, "/threads", { target_object_id: q1, context_kind: "question_comment", initial_message: { body_md: body } });
+      assert_ok(res, 201);
+      msgs.push(res.json.receipt.receipt_no);
+    }
+    const round = assert_ok(await owner_get(env, round_path("1")));
+    for (const q of round.questions) {
+      assert.equal(q.answer.receipt_no, receipts[q.id].receipt_no, `질문 ${q.id} 답 영수증 번호`);
+      assert.equal(q.answer.tx_id, receipts[q.id].tx_id);
+      assert.equal(q.answer.committed_at, receipts[q.id].committed_at);
+    }
+    assert.equal(new Set(round.questions.map((q: any) => q.answer.receipt_no)).size, 3, "번호는 서로 다르다");
+    const threads = assert_ok(await owner_get(env, round_path("1", "/threads"))).threads;
+    assert.deepEqual(threads.flatMap((t: any) => t.messages.map((m: any) => m.receipt_no)), msgs, "메시지 영수증 번호 = 각 쓰기 응답의 번호");
   });
 });

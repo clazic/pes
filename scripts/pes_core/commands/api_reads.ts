@@ -617,6 +617,26 @@ export function receipt_of_tx(db: Db, project_id: string, tx_id: string): Receip
   return { receipt_no: row.n.toString(), tx_id, committed_at: iso_of_ms(row.created_at) };
 }
 
+/**
+ * The receipts of many commits with ONE pass over the project's commits (a read that shows many answers or messages would otherwise
+ * count the commits once per receipt). Same numbers as receipt_of_tx: the rank of the commit in rowid order. A tx that is not there
+ * is missing from the map.
+ */
+export function receipts_of_txs(db: Db, project_id: string, tx_ids: ReadonlyArray<string>): Map<string, ReceiptDto> {
+  const out = new Map<string, ReceiptDto>();
+  const wanted = [...new Set(tx_ids)];
+  if (wanted.length === 0) return out;
+  const rows = db.all<{ id: string; n: bigint; created_at: bigint }>(
+    `SELECT id, n, created_at FROM (
+        SELECT id, created_at, ROW_NUMBER() OVER (ORDER BY rowid) AS n FROM mutation_commits WHERE project_id = ?)
+      WHERE id IN (SELECT value FROM json_each(?))`,
+    project_id,
+    JSON.stringify(wanted),
+  );
+  for (const row of rows) out.set(row.id, { receipt_no: row.n.toString(), tx_id: row.id, committed_at: iso_of_ms(row.created_at) });
+  return out;
+}
+
 function json_or_null(text: string | null): unknown {
   if (text === null) return null;
   try {
@@ -739,10 +759,11 @@ export function round_form_data(db: Db, project_id: string, place: RoundPlace): 
           project_id,
           set.id,
         );
+  const receipts = receipts_of_txs(db, project_id, rows.flatMap((row) => (row.answer_tx_id === null ? [] : [row.answer_tx_id])));
   const questions = rows.map((row) => {
     let answer: Record<string, unknown> | null = null;
     if (row.answer_version_id !== null) {
-      const receipt = row.answer_tx_id === null ? null : receipt_of_tx(db, project_id, row.answer_tx_id);
+      const receipt = row.answer_tx_id === null ? null : (receipts.get(row.answer_tx_id) ?? null);
       answer = {
         version_id: row.answer_version_id,
         value: json_or_null(row.answer_value),
@@ -806,7 +827,9 @@ interface ThreadMessageRow {
 
 /**
  * The comment threads of the questions that ever stood in the place's form (not only those in its newest set), each with its messages in
- * the order they were written. A thread tied to a question reports that question; a "general" thread reports "__other".
+ * the order they were written. A thread tied to a question reports that question; a "general" thread (context_kind general) that
+ * is about one of those questions reports "__other". The free-form notes a migrated project kept (legacy "이전 의견/제안": a general thread whose
+ * target is a note, not a question) are NOT in this read — nothing ties such a note to a place of the form.
  */
 export function round_threads_data(db: Db, project_id: string, place: RoundPlace): Record<string, unknown> {
   const threads = db.all<ThreadRow>(
@@ -825,32 +848,35 @@ export function round_threads_data(db: Db, project_id: string, place: RoundPlace
     place.stage_id,
     place.server_round_id,
   );
-  const out = threads.map((thread) => {
-    const messages = db
-      .all<ThreadMessageRow>(
-        `SELECT m.thread_id AS thread_id, m.object_id AS message_id, mv.body_md AS body_md, first.created_at AS created_at,
-                a.kind AS actor_kind, cur.tx_id AS tx_id
-           FROM messages m
-           JOIN objects mo ON mo.project_id = m.project_id AND mo.id = m.object_id
-           JOIN message_versions mv ON mv.project_id = mo.project_id AND mv.version_id = mo.current_version_id
-           JOIN object_versions cur ON cur.project_id = mv.project_id AND cur.id = mv.version_id
-           JOIN object_versions first ON first.project_id = m.project_id AND first.object_id = m.object_id AND first.version_no = 1
-           JOIN actors a ON a.id = first.actor_id
-          WHERE m.project_id = ? AND m.thread_id = ? AND mv.state <> 'withdrawn'
-          ORDER BY m.rowid`,
-        project_id,
-        thread.thread_id,
-      )
-      .map((message) => {
-        const first = receipt_of_tx(db, project_id, message.tx_id);
-        return {
-          message_id: message.message_id,
-          body_md: message.body_md,
-          at: iso_of_ms(message.created_at),
-          by: message.actor_kind === "human" ? "human" : "ai",
-          ...(first === null ? {} : { receipt_no: first.receipt_no }),
-        };
-      });
+  const message_rows = threads.map((thread) =>
+    db.all<ThreadMessageRow>(
+      `SELECT m.thread_id AS thread_id, m.object_id AS message_id, mv.body_md AS body_md, first.created_at AS created_at,
+              a.kind AS actor_kind, cur.tx_id AS tx_id
+         FROM messages m
+         JOIN objects mo ON mo.project_id = m.project_id AND mo.id = m.object_id
+         JOIN message_versions mv ON mv.project_id = mo.project_id AND mv.version_id = mo.current_version_id
+         JOIN object_versions cur ON cur.project_id = mv.project_id AND cur.id = mv.version_id
+         JOIN object_versions first ON first.project_id = m.project_id AND first.object_id = m.object_id AND first.version_no = 1
+         JOIN actors a ON a.id = first.actor_id
+        WHERE m.project_id = ? AND m.thread_id = ? AND mv.state <> 'withdrawn'
+        ORDER BY m.rowid`,
+      project_id,
+      thread.thread_id,
+    ),
+  );
+  // one pass over the project's commits for every message of every thread
+  const receipts = receipts_of_txs(db, project_id, message_rows.flatMap((rows) => rows.map((message) => message.tx_id)));
+  const out = threads.map((thread, index) => {
+    const messages = (message_rows[index] ?? []).map((message) => {
+      const first = receipts.get(message.tx_id);
+      return {
+        message_id: message.message_id,
+        body_md: message.body_md,
+        at: iso_of_ms(message.created_at),
+        by: message.actor_kind === "human" ? "human" : "ai",
+        ...(first === undefined ? {} : { receipt_no: first.receipt_no }),
+      };
+    });
     return {
       thread_id: thread.thread_id,
       question_id: thread.context_kind === "question_comment" ? thread.target_object_id : "__other",

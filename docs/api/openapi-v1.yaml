@@ -1757,7 +1757,7 @@ paths:
   /api/v1/projects/{id}/stages/{s}/rounds/{rd}/threads:
     get:
       summary: "The comment threads of that place's questions (SEL-98 U2d). Read-only; a comment is never an answer"
-      description: "Same place, same permission and same 404 rule as the round read. data = { edition (the active edition's number, as in the round read), threads [{ thread_id, question_id (the question the thread is about; \"__other\" for a thread not tied to a question: context_kind general), question_version_id|null, question_version|null, messages [{ message_id, body_md, at (ISO 8601), by (human|ai), receipt_no? }] }] } with messages in the order they were written. Threads of questions that never stood in this place's form are not sent."
+      description: "Same place, same permission and same 404 rule as the round read. data = { edition (the active edition's number, as in the round read), threads [{ thread_id, question_id (the question the thread is about; \"__other\" for a context_kind general thread that is about one of this place's questions; the free-form notes a migrated project kept are not sent), question_version_id|null, question_version|null, messages [{ message_id, body_md, at (ISO 8601), by (human|ai), receipt_no? }] }] } with messages in the order they were written. Threads of questions that never stood in this place's form are not sent."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/StageId"
