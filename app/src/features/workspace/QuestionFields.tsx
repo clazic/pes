@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DIRECTION_OPTION, IMPORTANCE_LABEL, KIND_LABEL } from "@/lib/labels";
 import { controlClass, Field } from "./fields";
-import { isChoice, kindOf, newOptionId, SHOW_IF_UNSUPPORTED_LINE, type EditorValue } from "./question-model";
+import { isChoice, keepsEmptyCondition, kindOf, newOptionId, SHOW_IF_UNSUPPORTED_LINE, type EditorValue } from "./question-model";
 
 const KINDS: QuestionKind[] = ["single_choice", "multi_choice", "free_text"];
 const IMPORTANCES: Importance[] = ["high", "normal", "low"];
@@ -37,6 +37,8 @@ export function QuestionFields({
   const choice = isChoice(value.kind);
   const named = value.options.filter((o) => o.label.trim());
   const cond = others.find((q) => q.id === value.show_question);
+  // 이 목록에 없는 질문을 가리키는 조건(예: `pes ask` 가 폼 안의 이름으로 붙인 것) — 번호를 알 수 없다고 말하고 그대로 둔다
+  const unresolved = value.show_question !== "" && !cond && !value.show_unsupported;
   const condOptions = cond && isChoice(kindOf(cond)) ? (cond.options ?? []) : null;
 
   const changeKind = (kind: QuestionKind) => {
@@ -133,8 +135,16 @@ export function QuestionFields({
           </Field>
           <div className="grid gap-3 min-[26rem]:grid-cols-2">
             <Field id={`${prefix}-cond`} label="조건 질문">
-              <select id={`${prefix}-cond`} className={controlClass} disabled={value.show_unsupported} value={value.show_question} onChange={(e) => set({ show_question: e.target.value, show_in: [] })}>
-                <option value="">항상 보임</option>
+              <select
+                id={`${prefix}-cond`}
+                className={controlClass}
+                disabled={value.show_unsupported}
+                aria-describedby={value.show_unsupported ? `${prefix}-cond-note` : undefined}
+                value={value.show_question}
+                onChange={(e) => set({ show_question: e.target.value, show_in: [] })}
+              >
+                <option value="">{value.show_unsupported ? "지원하지 않는 조건" : "항상 보임"}</option>
+                {unresolved ? <option value={value.show_question}>목록에 없는 질문 ({value.show_question})</option> : null}
                 {others.map((q) => (
                   <option key={q.id} value={q.id}>
                     질문 {q.number}
@@ -142,13 +152,17 @@ export function QuestionFields({
                 ))}
               </select>
             </Field>
-            {cond && !value.show_unsupported ? (
+            {value.show_question && !value.show_unsupported ? (
               <CondAnswers prefix={prefix} options={condOptions} picked={value.show_in} onChange={(show_in) => set({ show_in })} />
             ) : null}
           </div>
           {value.show_unsupported ? (
-            <p role="status" className="text-meta text-ink-2">
+            <p id={`${prefix}-cond-note`} role="status" className="text-meta text-ink-2">
               {SHOW_IF_UNSUPPORTED_LINE}. 다른 칸만 고쳐 저장해도 서버의 조건은 그대로 남아요.
+            </p>
+          ) : keepsEmptyCondition(value) ? (
+            <p role="status" className="text-meta text-ink-2">
+              조건 답이 비어 있어 이 질문은 항상 숨겨져요. 조건 답을 고르거나 조건 질문을 “항상 보임”으로 바꾸면 달라져요.
             </p>
           ) : null}
         </>

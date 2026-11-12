@@ -241,6 +241,8 @@ export interface SentAnswer {
   tx_id: string;
   committed_at: IsoTime;
   idempotency_key?: string;
+  /** 서버가 가진 답 값 그대로(JSON: 글 · 선택지 id · 여러 개는 배열 · 숫자 …) — 조건 판정에 쓴다. 없으면 answer(화면 글)에서 되찾는다 */
+  value?: unknown;
 }
 
 /* ───────────── 질문 칸(U2b · SEL-91) — 서버 계약은 SEL-90(U2a). 이전된 합성 프로젝트는 아래 칸이 하나도 없어도 깨지지 않는다 ───────────── */
@@ -259,6 +261,8 @@ export interface QuestionOption {
 export interface ShowIf {
   question_id: string;
   in: string[];
+  /** 앱이 모르는 서버 키(예: `pes ask` 가 붙이는 position) — 고치기에서 조건 질문을 바꾸지 않는 한 그대로 되돌려 보낸다 */
+  extra?: Record<string, unknown>;
 }
 
 /** 옛 버전의 답 — 보존할 뿐 새 버전으로 승계하지 않는다 */
@@ -290,6 +294,8 @@ export interface QuestionView {
   /** AI 추천 — 기본값과 다르고 답도 아니다 */
   recommendation?: { value: string; reason: string } | null;
   show_if?: ShowIf | null;
+  /** 조건 값에 문자열이 아닌 것(숫자 …)이 있을 때만: 서버처럼 값 그대로 판정하려고 원래 조건을 둔다(고치기에는 쓰지 않는다) */
+  show_if_judge?: { question_id: string; in: readonly unknown[] };
   /** 서버 조건이 앱이 다루지 못하는 모양이다(show_if 는 null 이거나 읽을 수 있는 만큼만) — '조건 없음'처럼 감추지 않고 말한다 */
   show_if_unsupported?: boolean;
   /** 없으면 ask_human */

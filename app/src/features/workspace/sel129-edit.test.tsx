@@ -193,3 +193,38 @@ describe("[SEL-129] 인라인 고치기 — 지원하지 않는 조건은 정직
     await waitFor(() => expect(item("q-23").querySelector('[data-show-if="unsupported"]')).not.toBeNull());
   });
 });
+
+describe("[F1] 빈 조건 · CLI 모양 조건 — 편집에서 유지", () => {
+  it("빈 in:[] 조건: 문장만 바꿔도 저장할 수 있고 in:[] 이 그대로 간다 · 카드는 항상 숨김이라고 말한다", async () => {
+    const { user, calls } = await boot({ questions: withQ23({ show_if: { question_id: "q-21", in: [] } }) });
+    expect(item("q-23").textContent).toMatch(/질문 21의 조건 답이 비어 있어 항상 숨김/);
+    const form = await openEditor(user, 23);
+    await user.selectOptions(within(form).getByLabelText("중요도"), "높음");
+    expect(save(form)).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(save(form));
+    await waitFor(() => expect(calls("reviseQuestion")).toHaveLength(1));
+    expect(sent(calls).show_if).toEqual({ question_id: "q-21", in: [] });
+  });
+
+  it("CLI 모양 {id, in, position}: 지원하는 조건으로 고칠 수 있고 값만 바꾸면 position 이 그대로 간다", async () => {
+    const cli = { question_id: "scope", in: ["a", "b"], extra: { position: 0 } };
+    const { user, calls } = await boot({ questions: withQ23({ show_if: cli }) });
+    expect(item("q-23").querySelector('[data-show-if="unsupported"]')).toBeNull();
+    const form = await openEditor(user, 23);
+    expect(within(form).getByLabelText("조건 질문")).toBeEnabled();
+    await user.click(within(group(form)).getByRole("checkbox", { name: "b" }));
+    await user.click(save(form));
+    await waitFor(() => expect(calls("reviseQuestion")).toHaveLength(1));
+    expect(sent(calls).show_if).toEqual({ question_id: "scope", in: ["a"], extra: { position: 0 } });
+  });
+
+  it("CLI 모양: 문장만 바꿔 저장해도 조건이 그대로 간다", async () => {
+    const cli = { question_id: "scope", in: ["a", "b"], extra: { position: 0 } };
+    const { user, calls } = await boot({ questions: withQ23({ show_if: cli }) });
+    const form = await openEditor(user, 23);
+    await user.selectOptions(within(form).getByLabelText("중요도"), "높음");
+    await user.click(save(form));
+    await waitFor(() => expect(calls("reviseQuestion")).toHaveLength(1));
+    expect(sent(calls).show_if).toEqual(cli);
+  });
+});

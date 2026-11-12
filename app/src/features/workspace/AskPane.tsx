@@ -92,6 +92,7 @@ const SEND_REASON = {
   inapplicable: "지금은 답하지 않는 질문이에요.",
   opinion_only: "이 질문은 답이 있어야 보낼 수 있어요.",
 } as const;
+const SINGLE_BLOCKED_REASON = "조건이 되는 질문의 답이 아직 보내기 전이에요. 묶음으로 같이 보내 주세요.";
 
 /**
  * 질문 영역(설계 4.7 질문·답 · 4.16 · U2b). 위에서 아래: 제목 · 도구 → 거르기 · 이동 → 열린 질문 → 정리된 질문 → 보내기.
@@ -231,6 +232,7 @@ export function AskPane({
   };
   const reasonFor = (q: QuestionView): string | null => {
     if (plan.single.has(q.id)) return null;
+    if (plan.singleBlocked.has(q.id)) return SINGLE_BLOCKED_REASON;
     const skip = plan.skipped.find((x) => x.q.id === q.id);
     return skip ? SEND_REASON[skip.reason] : "";
   };

@@ -536,6 +536,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       default_value: typeof raw.default_value === "string" ? raw.default_value : null,
       show_if: cond.show_if,
       ...(cond.unsupported ? { show_if_unsupported: true } : {}),
+      ...(cond.judge ? { show_if_judge: cond.judge } : {}),
       direction: "ask_human",
       status,
       allow_comment_as_answer: raw.allow_comment_as_answer === true,
@@ -550,7 +551,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const receipt_no = text(a.receipt_no);
       const committed_at = text(a.committed_at);
       if (a.question_version_id === raw.version_id) {
-        view.sent = { answer, receipt_no, tx_id: text(a.tx_id), committed_at };
+        view.sent = { answer, receipt_no, tx_id: text(a.tx_id), committed_at, value: a.value };
         view.used_default = a.used_default === true;
       } else {
         view.needs_recheck = true;

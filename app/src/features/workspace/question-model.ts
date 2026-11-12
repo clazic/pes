@@ -38,6 +38,8 @@ export function showIfLine(q: QuestionView, all: QuestionView[]): string | null 
   if (!s) return null;
   const from = all.find((x) => x.id === s.question_id);
   const number = from ? from.number : s.question_id.replace(/^q-/, "");
+  // 빈 조건 답: 서버는 어떤 답에도 숨긴다(항상 숨김) — 깨진 문장 대신 그대로 말한다
+  if (s.in.length === 0) return `질문 ${number}의 조건 답이 비어 있어 항상 숨김`;
   const labels = s.in.map((v) => `‘${optionLabel(from?.options, v)}’`);
   const last = labels[labels.length - 1] ?? "";
   const joined = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} 또는 ${last}` : last;
@@ -56,6 +58,10 @@ export interface EditorValue {
   show_question: string;
   /** 조건 답 — 고른 선택지 id(조건 질문의 선택지 순서). 하나라도 고르면 보인다 */
   show_in: string[];
+  /** 읽은 조건의 조건 질문 · 모르는 서버 키 · 빈 조건 여부 — 조건 질문을 바꾸지 않으면 그대로 되돌려 보낸다 */
+  show_origin?: string;
+  show_extra?: Record<string, unknown>;
+  show_was_empty?: boolean;
   /** 서버 조건이 앱이 다루지 못하는 모양 — 조건 칸은 잠기고 보낼 때 show_if 를 싣지 않는다 */
   show_unsupported: boolean;
   help: string;
@@ -74,11 +80,16 @@ export function editorValueOf(q: QuestionView): EditorValue {
     // 지원 안 하는 조건은 읽은 만큼도 칸에 올리지 않는다 — 고칠 수 없고, 보낼 때도 싣지 않는다
     show_question: q.show_if_unsupported ? "" : (q.show_if?.question_id ?? ""),
     show_in: q.show_if && !q.show_if_unsupported ? [...q.show_if.in] : [],
+    ...(q.show_if && !q.show_if_unsupported ? { show_origin: q.show_if.question_id, show_was_empty: q.show_if.in.length === 0, ...(q.show_if.extra ? { show_extra: q.show_if.extra } : {}) } : {}),
     show_unsupported: q.show_if_unsupported === true,
     help: q.help ?? "",
     direction: directionOf(q),
   };
 }
+
+/** 읽어 온 빈 조건(in:[])을 그대로 두는가 — 조건 질문을 바꾸지 않았고 값을 하나도 고르지 않았다. 새 조건에서 전부 해제하는 것과 구별한다 */
+export const keepsEmptyCondition = (v: EditorValue): boolean =>
+  !v.show_unsupported && v.show_was_empty === true && v.show_question !== "" && v.show_question === v.show_origin && v.show_in.length === 0;
 
 /** 보낼 값. 선택지는 글이 있는 것만, 유형이 글이면 선택지 · 가리키는 기본값이 없다 */
 export function toInput(v: EditorValue): QuestionInput {
@@ -87,7 +98,11 @@ export function toInput(v: EditorValue): QuestionInput {
   let def: string | null = v.default_value.trim() ? v.default_value : null;
   if (choice && def !== null && !options.some((o) => o.id === def)) def = null;
   const showIn = [...new Set(v.show_in)];
-  const showIf: ShowIf | null = !v.show_unsupported && v.show_question && showIn.length ? { question_id: v.show_question, in: showIn } : null;
+  const sameQuestion = v.show_question !== "" && v.show_question === v.show_origin;
+  const showIf: ShowIf | null =
+    !v.show_unsupported && v.show_question && (showIn.length || keepsEmptyCondition(v))
+      ? { question_id: v.show_question, in: showIn, ...(sameQuestion && v.show_extra ? { extra: v.show_extra } : {}) }
+      : null;
   return {
     text: v.text.trim(),
     kind: v.kind,
@@ -122,7 +137,7 @@ export function newOptionId(options: QuestionOption[]): string {
 export function blockReason(input: QuestionInput, value: EditorValue, changed: boolean): string | null {
   if (!input.text) return "질문 문장을 적어 주세요.";
   if (isChoice(input.kind) && input.options.length < 2) return "선택지를 2개 이상 적어 주세요.";
-  if (value.show_question && !value.show_in.length) return "조건 답을 골라 주세요.";
+  if (value.show_question && !value.show_in.length && !keepsEmptyCondition(value)) return "조건 답을 골라 주세요.";
   if (!changed) return "바꾼 것이 없어요.";
   return null;
 }

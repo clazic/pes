@@ -112,10 +112,27 @@ describe("[SEL-129] getRound — 서버 조건의 모든 값을 읽는다", () =
     expect(q!.show_if_unsupported).toBe(true);
   });
 
-  it("모르는 키가 더 있어도 id · in 은 읽고 지원 안 함으로 표시한다", async () => {
+  it("모르는 키가 더 있어도 id · in 은 읽고 지원한다 — 모르는 키는 보존한다 (F1 필수 3)", async () => {
     const [q] = await read([qraw("qst-2", 22, { id: "qst-1", in: ["a"], not: ["b"] })]);
-    expect(q!.show_if).toEqual({ question_id: "qst-1", in: ["a"] });
+    expect(q!.show_if).toEqual({ question_id: "qst-1", in: ["a"], extra: { not: ["b"] } });
+    expect(q!.show_if_unsupported).toBeUndefined();
+  });
+
+  it("F1: 숫자 답은 서버의 JSON 값 그대로 sent.value 에 둔다 (화면 글 \"1\" 로 바꿔 비교하지 않는다)", async () => {
+    const [q] = await read([qraw("qst-5", 25, null, { type: "number", options: [], answer: { state: "submitted", value: 1, question_version_id: "qvr-qst-5", receipt_no: "0001", tx_id: "tx-1", committed_at: "2026-11-13T09:00:00+09:00" } })]);
+    expect(q!.sent.answer).toBe("1");
+    expect(q!.sent.value).toBe(1);
+  });
+
+  it("F1: in 에 숫자가 있으면 원래 조건을 show_if_judge 로 둔다 (편집은 잠그고 판정은 값 그대로)", async () => {
+    const [q] = await read([qraw("qst-2", 22, { id: "qst-1", in: [1, "x"] })]);
     expect(q!.show_if_unsupported).toBe(true);
+    expect(q!.show_if_judge).toEqual({ question_id: "qst-1", in: [1, "x"] });
+  });
+
+  it("F1: 문자열 조건에는 show_if_judge 를 두지 않는다", async () => {
+    const [q] = await read([qraw("qst-2", 22, { id: "qst-1", in: ["a"], position: 0 })]);
+    expect(q!.show_if_judge).toBeUndefined();
   });
 
   it("한 라운드 안에서 질문마다 따로 판단한다 (하나가 지원 안 해도 다른 질문은 그대로)", async () => {
@@ -152,6 +169,11 @@ describe("[SEL-129] 쓰기 — 모든 값을 {id, in} 으로 보낸다", () => {
     await (await make(s)).reviseQuestion(SLUG, ED, "qst-2", { ...BASE, base_version: 1, base_version_id: "qvr-2a", ...body }, "k-rev");
     return s.writes()[0]!.json!.question as Record<string, unknown>;
   };
+
+  it("F1: 보존한 모르는 키(position)를 {id, in, position} 으로 되돌려 보낸다 · 빈 in:[] 도 그대로", async () => {
+    expect((await revise({ show_if: { question_id: "scope", in: ["a"], extra: { position: 0 } } })).show_if).toEqual({ id: "scope", in: ["a"], position: 0 });
+    expect((await revise({ show_if: { question_id: "qst-1", in: [] } })).show_if).toEqual({ id: "qst-1", in: [] });
+  });
 
   it("reviseQuestion: 여러 값 조건이 그대로 간다", async () => {
     expect((await revise({ show_if: { question_id: "qst-1", in: ["a", "b", "c"] } })).show_if).toEqual({ id: "qst-1", in: ["a", "b", "c"] });

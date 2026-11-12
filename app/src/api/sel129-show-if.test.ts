@@ -61,12 +61,13 @@ describe("[SEL-129] showIfFromWire — 서버 {id, in:[…]} 를 모든 값으�
 
   it("in 에 문자열 아닌 값이 섞이면 문자열 항목만 남기고 지원 안 함으로 표시한다", async () => {
     const m = await load();
-    expect(m.showIfFromWire({ id: "qst-1", in: ["a", 1, null, "b"] })).toEqual({ show_if: { question_id: "qst-1", in: ["a", "b"] }, unsupported: true });
+    // 판정은 서버처럼 값 그대로 하려고 원래 조건(judge)도 돌려준다 (F1 필수 2)
+    expect(m.showIfFromWire({ id: "qst-1", in: ["a", 1, null, "b"] })).toEqual({ show_if: { question_id: "qst-1", in: ["a", "b"] }, unsupported: true, judge: { question_id: "qst-1", in: ["a", 1, null, "b"] } });
   });
 
-  it("모르는 키가 더 있으면 id · in 은 서버처럼 읽되 지원 안 함으로 표시한다", async () => {
+  it("모르는 키가 더 있어도 id · in 은 읽고 지원한다 — 모르는 키는 extra 로 보존한다 (F1 필수 3: `pes ask` 의 position)", async () => {
     const m = await load();
-    expect(m.showIfFromWire({ id: "qst-1", in: ["a"], not: ["b"] })).toEqual({ show_if: { question_id: "qst-1", in: ["a"] }, unsupported: true });
+    expect(m.showIfFromWire({ id: "qst-1", in: ["a"], not: ["b"] })).toEqual({ show_if: { question_id: "qst-1", in: ["a"], extra: { not: ["b"] } }, unsupported: false });
   });
 
   it.each([
