@@ -37,7 +37,7 @@ export function NewScreen() {
         </h1>
         <p className="mt-1 text-meta text-muted-foreground">프로젝트를 만드는 칸은 이어서 붙습니다. 지금은 올릴 자료와 참고할 이전 프로젝트를 담아 두는 칸만 있어요.</p>
       </div>
-      <div className="w-full max-w-3xl px-4 pt-5 pb-16 tab:px-6">
+      <div className="flex w-full max-w-3xl flex-col gap-8 px-4 pt-5 pb-16 tab:px-6">
         <section aria-labelledby={headingId}>
           <h2 id={headingId} className="text-title text-ink">
             내 자료
