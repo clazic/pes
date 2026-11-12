@@ -574,6 +574,7 @@ components:
         the owner session or an agent token. state "confirmed" | "rejected" | "revised" judges one (assumption_id and
         base_version_id required; "rejected" and "revised" need a rationale; "revised" also needs the new statement):
         the owner session only, a token is 403 human_required. A judgement is always a NEW version; the proposal is kept.
+        An assumption of a past edition (completed or archived) cannot be judged: 409 conflict, details.reason edition_closed.
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         state: { type: string, enum: [proposed, confirmed, rejected, revised] }
@@ -595,7 +596,12 @@ components:
         `supersedes` is 403 at once, whatever its state). A superseded target that is not adopted is 409
         supersedes_conflict at $.body.supersedes (next_action reread_decisions). When adopting or revoking, `scope`
         must be the decision's own scope (else 422 validation_failed at $.body.scope, reason scope_mismatch). A
-        supersede request has no decision_id (400 invalid_payload).
+        supersede request has no decision_id (400 invalid_payload). Adopting, superseding or revoking an edition-scope
+        decision of a past edition (completed or archived) is 409 conflict, details.reason edition_closed; a draft
+        edition is open, and a project-scope decision is not bound to an edition. The new decision of a supersede is
+        written into the edition of the decision it replaces. Repeating a supersede request with the same
+        Idempotency-Key and body replays the first 201 (replayed true); the same key with another body is
+        409 idempotency_key_reuse.
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         scope: { type: string, enum: [project, edition] }
@@ -633,7 +639,7 @@ components:
               result_version_id: { type: [string, "null"] }
               followup_id: { type: [string, "null"] }
               evidence_tx_id: { type: [string, "null"] }
-              supersedes_entry_id: { type: [string, "null"], description: "An earlier entry of the same round this one replaces. An entry is replaced once: naming one that is already replaced (by an earlier call or by another entry of this request) is 409 conflict." }
+              supersedes_entry_id: { type: [string, "null"], description: "An earlier entry of the same round this one replaces. An entry is replaced once: naming one that is already replaced (by an earlier call or by another entry of this request) is 409 conflict, details.reason entry_replaced." }
     AnswerItem:
       type: object
       required: [question_id]

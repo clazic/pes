@@ -3067,9 +3067,13 @@ export class ApiApp {
       if (state === "revoked") validation("$.body.supersedes", { reason: "revoke_has_no_replacement" });
       if (body.decision_id !== undefined) invalid_field("decision_id");
       // a replacement is only checked against the decision it names; the same answer for a proposal and for an adoption
-      const target_state = this.#decision_state(project.id, supersedes);
-      if (target_state === undefined) throw new Fail("not_found", { target: "$.body.supersedes" });
-      if (target_state !== "adopted") throw this.#supersedes_conflict(project.id, supersedes, target_state);
+      // order of API decision 4: a receipt this key already left is replayed (or refused as a key reuse) by the command layer, before the
+      // target is looked at - the first request made the target `superseded`, so the preview would turn its own retry into a 409
+      if (receipt_of_request(this.#db, project.id, auth.actor_id, key) === undefined) {
+        const target_state = this.#decision_state(project.id, supersedes);
+        if (target_state === undefined) throw new Fail("not_found", { target: "$.body.supersedes" });
+        if (target_state !== "adopted") throw this.#supersedes_conflict(project.id, supersedes, target_state);
+      }
       if (state === "proposed") validation("$.body.state", { reason: "supersede_with_adopted" });
       const statement = this.#record_text(body, "statement");
       const base_version_id = this.#needed_id(body, "base_version_id");

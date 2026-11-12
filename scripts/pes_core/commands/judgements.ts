@@ -492,7 +492,10 @@ function run_decision_supersede(runtime: CommandRuntime): CommandResult {
       target_state: head.state,
     });
   }
-  const edition_id = active_edition_id(runtime, scope.project_id);
+  // an edition-scope replacement of an edition-scope decision stays in the edition of the decision it replaces (a draft copy's replacement
+  // must not appear in the active edition); a project-scope replacement, or a decision without an edition, goes to the active edition
+  const resulting_scope = new_scope ?? head.scope;
+  const edition_id = head.scope === "edition" && resulting_scope === "edition" && current.edition_id !== null ? current.edition_id : active_edition_id(runtime, scope.project_id);
   const decision_id = runtime.new_id();
   const version_id = runtime.new_id();
   const superseded_version_id = runtime.new_id();
