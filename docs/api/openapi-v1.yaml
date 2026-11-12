@@ -2068,8 +2068,10 @@ paths:
         time, cutting any text field at 12000 characters (the item then lists it in `truncated_fields`) and leaving out the
         items that do not fit (content.truncated = true, content.omitted_items = their number). B and HTTP do not cut. A's
         `context.get` without reference_id (the list) is bounded the same way, never by cutting text: the whole reply (topic,
-        stage, round, questions, objects and the reference rows) is built entry by entry within 4000 JSON characters; it always
-        carries context.references_page = {offset, returned, total, next_offset}, and when anything is left out
+        stage, round, questions, objects and the reference rows) is built entry by entry within 4000 JSON characters; when the
+        project has a reference it carries context.references, context.references_page = {offset, returned, total,
+        next_offset} and context.references_help (how to read one; the tool spec stays short because it goes with every
+        request), with no reference all three are left out, and when anything is left out
         context.truncated = true, context.omitted = {questions, objects, references} and context.next names the next call
         (`context.get {references_offset: next_offset}`, which returns the next page of reference rows only; giving it with
         reference_id is an error). A label longer than 300 characters is cut in the list and the row lists it in
