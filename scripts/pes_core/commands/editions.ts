@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 
 import { read_credential_actor, type CredentialActor } from "../actors.ts";
 import { ApiError } from "../errors.ts";
+import { copy_records_to_edition } from "./judgements.ts";
 import {
   insert_receipt,
   is_record,
@@ -497,6 +498,10 @@ function run_edition_create(runtime: CommandRuntime): CommandResult {
   );
   if (pointer.changes !== 1n) {
     throw new Error("the new edition current stage was not set");
+  }
+  // SEL-93: a new edition made from a parent inherits its assumptions (unconfirmed again) and edition decisions
+  if (parent_edition_id !== null) {
+    copy_records_to_edition(runtime, project.id, command_actor(runtime).actor_id, parent_edition_id, edition_id);
   }
 
   return {

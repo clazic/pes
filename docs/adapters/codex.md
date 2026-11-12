@@ -1,6 +1,6 @@
 # 어댑터 노트 — Codex CLI (방식 B)
 
-사람이 터미널에서 직접 켠 **Codex CLI**가 PES의 로컬 API로 일하게 하는 길이다. 공통 계약(도구 11개, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 Codex CLI만의 부분을 적는다. Codex CLI는 PES가 띄우지 않는다 — 사람이 켠 세션이 MCP 도구를 부를 뿐이다.
+사람이 터미널에서 직접 켠 **Codex CLI**가 PES의 로컬 API로 일하게 하는 길이다. 공통 계약(도구 14개, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 Codex CLI만의 부분을 적는다. Codex CLI는 PES가 띄우지 않는다 — 사람이 켠 세션이 MCP 도구를 부를 뿐이다.
 
 ## 무엇이 아닌가
 

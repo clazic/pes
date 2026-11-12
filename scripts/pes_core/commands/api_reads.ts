@@ -401,3 +401,186 @@ export function snapshot_through_seq(db: Db, project_id: string, snapshot_id: st
     )?.through_event_seq ?? null
   );
 }
+
+// ---------------------------------------------------------------------------
+// assumptions, decisions, reflections (SEL-93 U3a): one current row per object; older versions stay in the tables
+
+function iso_of(ms: bigint | number | null): string | null {
+  return ms === null ? null : new Date(Number(ms)).toISOString();
+}
+
+export interface AssumptionDto {
+  id: string;
+  version_id: string;
+  version_no: string;
+  statement: string;
+  state: string;
+  needs_review: boolean;
+  proposed_by_actor_id: string;
+  assessed_by_actor_id: string | null;
+  assessed_at: string | null;
+  rationale: string;
+}
+
+/** The assumptions of one edition, each as its current version (a judged one shows the judgement, not the proposal). */
+export function assumption_rows(db: Db, project_id: string, edition_id: string): AssumptionDto[] {
+  return db
+    .all<{
+      id: string;
+      version_id: string;
+      version_no: bigint;
+      statement: string;
+      state: string;
+      needs_review: bigint;
+      proposed_by_actor_id: string;
+      assessment_actor_id: string | null;
+      assessed_at: bigint | null;
+      rationale: string;
+    }>(
+      `SELECT o.id AS id, o.current_version_id AS version_id, ov.version_no AS version_no, av.statement AS statement,
+              av.state AS state, av.needs_review AS needs_review, a.proposed_by_actor_id AS proposed_by_actor_id,
+              av.assessment_actor_id AS assessment_actor_id, av.assessed_at AS assessed_at, av.rationale AS rationale
+         FROM objects o
+         JOIN assumptions a ON a.project_id = o.project_id AND a.object_id = o.id
+         JOIN object_versions ov ON ov.project_id = o.project_id AND ov.id = o.current_version_id
+         JOIN assumption_versions av ON av.project_id = o.project_id AND av.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.edition_id = ? AND o.kind = 'assumption' AND o.archived_at IS NULL
+        ORDER BY o.display_no`,
+      project_id,
+      edition_id,
+    )
+    .map((row) => ({
+      id: row.id,
+      version_id: row.version_id,
+      version_no: row.version_no.toString(),
+      statement: row.statement,
+      state: row.state,
+      needs_review: row.needs_review === 1n,
+      proposed_by_actor_id: row.proposed_by_actor_id,
+      assessed_by_actor_id: row.assessment_actor_id,
+      assessed_at: iso_of(row.assessed_at),
+      rationale: row.rationale,
+    }));
+}
+
+export interface DecisionDto {
+  id: string;
+  version_id: string;
+  version_no: string;
+  statement: string;
+  state: string;
+  scope: string;
+  decided_by_actor_id: string | null;
+  rationale: string;
+  supersedes_decision_id: string | null;
+}
+
+/** The decisions of one edition plus the project-wide ones, each as its current version (superseded and revoked ones stay as lines). */
+export function decision_rows(db: Db, project_id: string, edition_id: string): DecisionDto[] {
+  return db
+    .all<{
+      id: string;
+      version_id: string;
+      version_no: bigint;
+      statement: string;
+      state: string;
+      scope: string;
+      decided_by: string | null;
+      rationale: string;
+      supersedes_decision_id: string | null;
+    }>(
+      `SELECT o.id AS id, o.current_version_id AS version_id, ov.version_no AS version_no, dv.statement AS statement,
+              dv.state AS state, d.scope AS scope, dv.decided_by AS decided_by, dv.rationale AS rationale,
+              dv.supersedes_decision_id AS supersedes_decision_id
+         FROM objects o
+         JOIN decisions d ON d.project_id = o.project_id AND d.object_id = o.id
+         JOIN object_versions ov ON ov.project_id = o.project_id AND ov.id = o.current_version_id
+         JOIN decision_versions dv ON dv.project_id = o.project_id AND dv.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.kind = 'decision' AND o.archived_at IS NULL
+          AND (o.edition_id = ? OR d.scope = 'project')
+        ORDER BY o.display_no`,
+      project_id,
+      edition_id,
+    )
+    .map((row) => ({
+      id: row.id,
+      version_id: row.version_id,
+      version_no: row.version_no.toString(),
+      statement: row.statement,
+      state: row.state,
+      scope: row.scope,
+      decided_by_actor_id: row.decided_by,
+      rationale: row.rationale,
+      supersedes_decision_id: row.supersedes_decision_id,
+    }));
+}
+
+/** The decision that replaced `decision_id` (it names it as the one it supersedes), or null. */
+export function replacing_decision_id(db: Db, project_id: string, decision_id: string): string | null {
+  const row = db.get<{ object_id: string }>(
+    "SELECT object_id FROM decision_versions WHERE project_id = ? AND supersedes_decision_id = ? ORDER BY rowid LIMIT 1",
+    project_id,
+    decision_id,
+  );
+  return row?.object_id ?? null;
+}
+
+export interface ReflectionEntryDto {
+  id: string;
+  source_version_id: string;
+  disposition: string;
+  rationale: string;
+  result_version_id: string | null;
+  followup_id: string | null;
+  applied_tx_id: string | null;
+  actor_id: string;
+}
+
+export interface ReflectionRoundDto {
+  round_id: string;
+  submitted: boolean;
+  counts: { applied: number; partial: number; rejected: number; deferred: number };
+  entries: ReflectionEntryDto[];
+}
+
+/** Whether a reflection was submitted for the round: a receipt of reflection.create exists (an empty list is a submission: "0건"). */
+export function reflection_submitted(db: Db, project_id: string, round_id: string): boolean {
+  return (
+    db.get(
+      `SELECT 1 FROM mutation_commits
+        WHERE project_id = ? AND action = 'reflection.created' AND json_extract(result_json, '$.target_round_id') = ? LIMIT 1`,
+      project_id,
+      round_id,
+    ) !== undefined
+  );
+}
+
+/** One round's reflection: the entries still standing (a corrected entry is replaced by the one that supersedes it) and the counts. */
+export function reflection_round(db: Db, project_id: string, round_id: string): ReflectionRoundDto {
+  const entries = db.all<ReflectionEntryDto>(
+    `SELECT e.id AS id, e.source_version_id AS source_version_id, e.disposition AS disposition, e.rationale AS rationale,
+            e.result_version_id AS result_version_id, e.followup_id AS followup_id, e.applied_tx_id AS applied_tx_id,
+            e.actor_id AS actor_id
+       FROM reflection_entries e
+      WHERE e.project_id = ? AND e.target_round_id = ?
+        AND NOT EXISTS (SELECT 1 FROM reflection_entries n WHERE n.project_id = e.project_id AND n.supersedes_entry_id = e.id)
+      ORDER BY e.rowid`,
+    project_id,
+    round_id,
+  );
+  const counts = { applied: 0, partial: 0, rejected: 0, deferred: 0 };
+  for (const entry of entries) counts[entry.disposition as keyof typeof counts] += 1;
+  return { round_id, submitted: reflection_submitted(db, project_id, round_id), counts, entries };
+}
+
+/** The rounds that have a reflection submission, oldest first (no submission yet: an empty list). */
+export function reflection_round_ids(db: Db, project_id: string): string[] {
+  return db
+    .all<{ round_id: string }>(
+      `SELECT json_extract(result_json, '$.target_round_id') AS round_id
+         FROM mutation_commits WHERE project_id = ? AND action = 'reflection.created'
+        GROUP BY round_id ORDER BY min(rowid)`,
+      project_id,
+    )
+    .map((row) => row.round_id);
+}

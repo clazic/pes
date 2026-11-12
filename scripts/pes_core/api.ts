@@ -19,7 +19,9 @@ import type { Clock } from "./clock.ts";
 import { COMMANDS, CommandService, type CommandOutcome, type MutationContext } from "./commands.ts";
 import {
   approval_row,
+  assumption_rows,
   changes_page,
+  decision_rows,
   db_meta,
   input_visible,
   inputs_page,
@@ -32,6 +34,9 @@ import {
   pending_input_count,
   question_state,
   receipt_of_request,
+  reflection_round,
+  reflection_round_ids,
+  replacing_decision_id,
   request_receipt,
   run_info,
   snapshot_through_seq,
@@ -308,6 +313,13 @@ const CREATED_ACTIONS = new Set([
   "answer.submitted",
   "round.started",
   "policy.changed",
+  "assumption.proposed",
+  "assumption.assessed",
+  "decision.proposed",
+  "decision.adopted",
+  "decision.superseded",
+  "decision.revoked",
+  "reflection.created",
 ]);
 const ACCEPTED_ACTIONS = new Set(["run.interrupted", "run.cancelled"]);
 
@@ -674,6 +686,32 @@ export class ApiApp {
         who: "human",
         act: async (r, project, auth) => this.#submissions(r, project, auth),
       }),
+      // SEL-93 U3a: assumptions / decisions / reflections. A token may only propose or write a reflection; judging,
+      // adopting, superseding and revoking are the owner session's (403 human_required for a token).
+      route("POST", `${P}/assumptions`, "assumptions.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#assumption_write(r, project, auth),
+      }),
+      route("GET", `${P}/assumptions`, "assumptions.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (_r, project) => this.#assumptions_read(project),
+      }),
+      route("POST", `${P}/decisions`, "decisions.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#decision_write(r, project, auth),
+      }),
+      route("GET", `${P}/decisions`, "decisions.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (_r, project) => this.#decisions_read(project),
+      }),
+      route("POST", `${P}/reflections`, "reflections.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#reflection_write(r, project, auth),
+      }),
+      route("GET", `${P}/reflections`, "reflections.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#reflections_read(r, project),
+      }),
       route("POST", `${P}/stages/{s}/rounds`, "rounds.create", {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#round_start(r, project, auth),
@@ -712,9 +750,6 @@ export class ApiApp {
       }),
       unsupported("POST", `${P}/exports`, "exports.create"),
       unsupported("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create"),
-      unsupported("POST", `${P}/assumptions`, "assumptions.create"),
-      unsupported("POST", `${P}/decisions`, "decisions.create"),
-      unsupported("POST", `${P}/reflections`, "reflections.create"),
       unsupported("POST", `${P}/editions`, "editions.create"),
       unsupported("POST", `${P}/agent-tokens`, "agent_tokens.create"),
       unsupported("POST", `${P}/followups/{f}/apply`, "followups.apply"),
@@ -1664,11 +1699,18 @@ export class ApiApp {
       "SELECT mode FROM runs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1",
       project.id,
     );
+    // SEL-93: assumptions of this edition, decisions of this edition and the project-wide ones, and every comment message
     const counts = this.#db.all<{ kind: string; n: bigint }>(
-      `SELECT kind, COUNT(*) AS n FROM objects
-        WHERE project_id = ? AND archived_at IS NULL AND kind IN ('assumption', 'decision', 'message')
-        GROUP BY kind`,
+      `SELECT o.kind AS kind, COUNT(*) AS n
+         FROM objects o LEFT JOIN decisions d ON d.project_id = o.project_id AND d.object_id = o.id
+        WHERE o.project_id = ? AND o.archived_at IS NULL
+          AND (o.kind = 'message'
+               OR (o.kind = 'assumption' AND o.edition_id = ?)
+               OR (o.kind = 'decision' AND (o.edition_id = ? OR d.scope = 'project')))
+        GROUP BY o.kind`,
       project.id,
+      edition.id,
+      edition.id,
     );
     const count_of = (kind: string): number => Number(counts.find((row) => row.kind === kind)?.n ?? 0n);
 
@@ -2827,6 +2869,301 @@ export class ApiApp {
       data: { question, previous_answers_preserved: true },
       replayed: out.replayed,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // SEL-93 U3a: assumptions, decisions, reflections
+
+  /** The active edition id of a project row (the records routes read and write that edition). */
+  #edition_of(project: ProjectRow): string {
+    const current = this.#project(project.id);
+    if (current.active_edition_id === null) throw new ApiError("conflict", "the project has no active edition");
+    return current.active_edition_id;
+  }
+
+  /** A required text of a record body: a string (else 400), not blank (else 422 with the documented reason). */
+  #record_text(body: Record<string, unknown>, field: string): string {
+    const value = body[field];
+    if (typeof value !== "string" || !value.isWellFormed()) invalid_field(field);
+    if (value.trim().length === 0) validation(`$.body.${field}`, { reason: "empty", min_length: 1 });
+    return value;
+  }
+
+  /** An optional text of a record body: absent or null reads as none; a string may be blank. */
+  #optional_record_text(body: Record<string, unknown>, field: string): string | undefined {
+    const value = body[field];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string" || !value.isWellFormed()) invalid_field(field);
+    return value;
+  }
+
+  /** A text that a state needs (the reason of a judgement): absent or blank is a content problem (422). */
+  #needed_text(body: Record<string, unknown>, field: string, why: string): string {
+    const value = body[field];
+    if (value === undefined || value === null) validation(`$.body.${field}`, { reason: why });
+    if (typeof value !== "string" || !value.isWellFormed()) invalid_field(field);
+    if (value.trim().length === 0) validation(`$.body.${field}`, { reason: why });
+    return value;
+  }
+
+  #needed_id(body: Record<string, unknown>, field: string): string {
+    const value = body[field];
+    if (value === undefined || value === null) validation(`$.body.${field}`, { reason: "required" });
+    if (typeof value !== "string" || value.length === 0 || !value.isWellFormed()) invalid_field(field);
+    return value;
+  }
+
+  /** The reasons a core refusal carries (reason, index, field) become the documented API error. */
+  #record_failure(error: unknown, fields: Record<string, string> = {}): Fail {
+    if (error instanceof ApiError) {
+      const info = is_record(error.details) ? error.details : {};
+      const index = typeof info.index === "number" ? info.index : null;
+      const field = typeof info.field === "string" ? info.field : null;
+      const at = (name: string): string => (index === null ? `$.body.${name}` : `$.body.entries[${index}].${name}`);
+      if (error.code === "invalid_payload" && info.reason === "evidence_required") {
+        return new Fail("evidence_required", {
+          target: at("result_version_id"),
+          details: { disposition: String(info.disposition ?? ""), required: "result_version_id or evidence_tx_id" },
+          next_action: "add_evidence",
+        });
+      }
+      if (error.code === "invalid_payload" && info.reason === "evidence_not_allowed") {
+        return new Fail("validation_failed", { target: at(field ?? "result_version_id"), details: { reason: "evidence_not_allowed" } });
+      }
+      if (error.code === "conflict" && info.reason === "evidence_mismatch") {
+        return new Fail("validation_failed", { target: at(field ?? "evidence_tx_id"), details: { reason: "evidence_mismatch" } });
+      }
+      if (error.code === "not_found" && field !== null) {
+        return new Fail("not_found", { target: fields[field] ?? at(field) });
+      }
+      if (error.code === "rev_conflict") return new Fail("rev_conflict", { target: "$.body.base_version_id", next_action: "reread_context" });
+    }
+    return fail_from(error);
+  }
+
+  /** POST P/assumptions — state "proposed" proposes (session or token); confirmed / rejected / revised judge (the owner session only). */
+  async #assumption_write(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["statement", "state", "rationale", "scope", "assumption_id", "base_version_id"]);
+    const state = body.state;
+    if (typeof state !== "string" || !["proposed", "confirmed", "rejected", "revised"].includes(state)) validation("$.body.state");
+    if (body.scope !== undefined && body.scope !== null && body.scope !== "edition" && body.scope !== "project") validation("$.body.scope");
+    if (state !== "proposed" && !auth.session) throw new Fail("human_required");
+    if (state === "proposed") {
+      if (body.assumption_id !== undefined) invalid_field("assumption_id");
+      if (body.base_version_id !== undefined) invalid_field("base_version_id");
+      const statement = this.#record_text(body, "statement");
+      const rationale = this.#optional_record_text(body, "rationale");
+      const out = await this.#exec(
+        () => this.#service.execute(this.#ctx(project, auth, key), "assumption.propose", { statement, ...(rationale === undefined ? {} : { rationale }) }),
+        (error) => this.#record_failure(error),
+      );
+      const result = result_record(out.result);
+      return {
+        status: 201,
+        data: { assumption: { id: result.object_id, version_id: result.version_id, state: result.state, needs_review: true, assessed_by_actor_id: null } },
+        replayed: out.replayed,
+      };
+    }
+    const assumption_id = this.#needed_id(body, "assumption_id");
+    const base_version_id = this.#needed_id(body, "base_version_id");
+    const payload: Record<string, unknown> = { assumption_id, base_version_id, state };
+    if (state === "revised") {
+      payload.statement = this.#needed_text(body, "statement", "required");
+      payload.rationale = this.#needed_text(body, "rationale", "required");
+    } else {
+      if (body.statement !== undefined && body.statement !== null) validation("$.body.statement", { reason: "revised_only" });
+      if (state === "rejected") payload.rationale = this.#needed_text(body, "rationale", "required");
+      else {
+        const rationale = this.#optional_record_text(body, "rationale");
+        if (rationale !== undefined) payload.rationale = rationale;
+      }
+    }
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "assumption.assess", payload),
+      (error) => this.#record_failure(error, { assumption_id: "$.body.assumption_id" }),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        assumption: {
+          id: result.assumption_id,
+          version_id: result.version_id,
+          state: result.state,
+          needs_review: false,
+          assessed_by_actor_id: result.assessment_actor_id,
+        },
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** The state of a decision's current version, or undefined when it is not a decision of this project. */
+  #decision_state(project_id: string, decision_id: string): string | undefined {
+    return this.#db.get<{ state: string }>(
+      `SELECT v.state AS state FROM objects o
+         JOIN decision_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.id = ? AND o.kind = 'decision'`,
+      project_id,
+      decision_id,
+    )?.state;
+  }
+
+  #supersedes_conflict(project_id: string, decision_id: string, target_state: string): Fail {
+    return new Fail("supersedes_conflict", {
+      target: "$.body.supersedes",
+      details: { target_state, current_decision_id: replacing_decision_id(this.#db, project_id, decision_id) },
+      next_action: "reread_decisions",
+    });
+  }
+
+  /**
+   * POST P/decisions — state "proposed" proposes (session or token); "adopted" adopts a proposal, or, with `supersedes`,
+   * replaces an adopted decision; "revoked" revokes. Everything but a proposal is the owner session's.
+   */
+  async #decision_write(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["scope", "statement", "state", "supersedes", "rationale", "decision_id", "base_version_id"]);
+    const state = body.state;
+    if (typeof state !== "string" || !["proposed", "adopted", "revoked"].includes(state)) validation("$.body.state");
+    const scope = body.scope;
+    if (scope !== "project" && scope !== "edition") validation("$.body.scope");
+    if (state !== "proposed" && !auth.session) throw new Fail("human_required");
+    const supersedes = body.supersedes;
+    if (supersedes !== undefined && supersedes !== null && (typeof supersedes !== "string" || supersedes.length === 0 || !supersedes.isWellFormed())) {
+      invalid_field("supersedes");
+    }
+    const exec = async (command: string, payload: Record<string, unknown>) =>
+      this.#exec(
+        () => this.#service.execute(this.#ctx(project, auth, key), command, payload),
+        (error) => {
+          if (error instanceof ApiError && error.code === "conflict" && is_record(error.details) && error.details.reason === "supersedes_conflict") {
+            return this.#supersedes_conflict(project.id, String(supersedes), String(error.details.target_state));
+          }
+          return this.#record_failure(error, { decision_id: "$.body.decision_id" });
+        },
+      );
+    const shape = (result: Record<string, unknown>, id: unknown, version_id: unknown, decision_state: string): Record<string, unknown> => ({
+      decision: { id, version_id, state: decision_state, scope: result.scope ?? scope },
+    });
+
+    if (typeof supersedes === "string") {
+      if (state === "revoked") validation("$.body.supersedes", { reason: "revoke_has_no_replacement" });
+      // a replacement is only checked against the decision it names; the same answer for a proposal and for an adoption
+      const target_state = this.#decision_state(project.id, supersedes);
+      if (target_state === undefined) throw new Fail("not_found", { target: "$.body.supersedes" });
+      if (target_state !== "adopted") throw this.#supersedes_conflict(project.id, supersedes, target_state);
+      if (state === "proposed") validation("$.body.state", { reason: "supersede_with_adopted" });
+      const statement = this.#record_text(body, "statement");
+      const base_version_id = this.#needed_id(body, "base_version_id");
+      const rationale = this.#needed_text(body, "rationale", "required");
+      const out = await exec("decision.supersede", { decision_id: supersedes, base_version_id, statement, rationale, scope });
+      const result = result_record(out.result);
+      return { status: 201, data: shape(result, result.decision_id, result.version_id, "adopted"), replayed: out.replayed };
+    }
+
+    if (state === "proposed") {
+      if (body.decision_id !== undefined) invalid_field("decision_id");
+      if (body.base_version_id !== undefined) invalid_field("base_version_id");
+      const statement = this.#record_text(body, "statement");
+      const rationale = this.#optional_record_text(body, "rationale");
+      const out = await exec("decision.propose", { statement, scope, ...(rationale === undefined ? {} : { rationale }) });
+      const result = result_record(out.result);
+      return { status: 201, data: shape(result, result.object_id, result.version_id, "proposed"), replayed: out.replayed };
+    }
+
+    const decision_id = this.#needed_id(body, "decision_id");
+    const base_version_id = this.#needed_id(body, "base_version_id");
+    if (state === "adopted") {
+      const rationale = this.#optional_record_text(body, "rationale");
+      const out = await exec("decision.adopt", { decision_id, base_version_id, ...(rationale === undefined ? {} : { rationale }) });
+      const result = result_record(out.result);
+      return { status: 201, data: shape(result, result.decision_id, result.version_id, "adopted"), replayed: out.replayed };
+    }
+    const rationale = this.#needed_text(body, "rationale", "required");
+    const out = await exec("decision.revoke", { decision_id, base_version_id, rationale });
+    const result = result_record(out.result);
+    return { status: 201, data: shape(result, result.decision_id, result.version_id, "revoked"), replayed: out.replayed };
+  }
+
+  /** POST P/reflections — the reflection of a round. The shape is checked here (422 with the entry's path); the evidence's meaning is the core's. */
+  async #reflection_write(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["target_round_id", "entries"]);
+    const target_round_id = require_text(body, "target_round_id");
+    if (!Array.isArray(body.entries)) invalid_field("entries");
+    if (body.entries.length > 200) invalid_field("entries");
+    const entries = body.entries.map((raw, index): Record<string, unknown> => {
+      const at = `$.body.entries[${index}]`;
+      if (!is_record(raw)) invalid(at);
+      for (const field of Object.keys(raw)) {
+        if (!["source_version_id", "disposition", "rationale", "result_version_id", "followup_id", "evidence_tx_id", "supersedes_entry_id"].includes(field)) {
+          invalid(`${at}.${field}`);
+        }
+      }
+      require_text(raw, "source_version_id", at);
+      if (typeof raw.disposition !== "string" || !["applied", "partial", "rejected", "deferred"].includes(raw.disposition)) {
+        validation(`${at}.disposition`);
+      }
+      if (typeof raw.rationale !== "string" || !raw.rationale.isWellFormed()) invalid(`${at}.rationale`);
+      if (raw.rationale.trim().length === 0) validation(`${at}.rationale`, { reason: "empty" });
+      for (const field of ["result_version_id", "followup_id", "evidence_tx_id", "supersedes_entry_id"]) {
+        const value = raw[field];
+        if (value !== undefined && value !== null && (typeof value !== "string" || value.length === 0 || !value.isWellFormed())) invalid(`${at}.${field}`);
+      }
+      if (raw.disposition === "rejected" || raw.disposition === "deferred") {
+        for (const field of ["result_version_id", "followup_id", "evidence_tx_id"]) {
+          if (raw[field] !== undefined && raw[field] !== null) validation(`${at}.${field}`, { reason: "evidence_not_allowed" });
+        }
+      }
+      return raw;
+    });
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "reflection.create", { target_round_id, entries }),
+      (error) => this.#record_failure(error, { target_round_id: "$.body.target_round_id" }),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        reflection: {
+          id: result.reflection_id,
+          target_round_id: result.target_round_id,
+          applied_count: result.applied_count,
+          partial_count: result.partial_count,
+        },
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  async #assumptions_read(project: ProjectRow): Promise<HandlerResult> {
+    return { status: 200, data: { assumptions: read_tx(this.#db, () => assumption_rows(this.#db, project.id, this.#edition_of(project))) } };
+  }
+
+  async #decisions_read(project: ProjectRow): Promise<HandlerResult> {
+    return { status: 200, data: { decisions: read_tx(this.#db, () => decision_rows(this.#db, project.id, this.#edition_of(project))) } };
+  }
+
+  /** GET P/reflections?round_id= — one round's reflection ("not submitted" and "0 entries" are different answers); without a round, the rounds that have one. */
+  async #reflections_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const round_id = request.query.get("round_id");
+    if (round_id === null) {
+      const reflections = read_tx(this.#db, () => reflection_round_ids(this.#db, project.id).map((id) => reflection_round(this.#db, project.id, id)));
+      return { status: 200, data: { reflections } };
+    }
+    if (round_id.length === 0) invalid("$.query.round_id");
+    const round = read_tx(this.#db, () =>
+      this.#db.get("SELECT 1 FROM rounds WHERE project_id = ? AND id = ?", project.id, round_id) === undefined
+        ? null
+        : reflection_round(this.#db, project.id, round_id),
+    );
+    if (round === null) throw new Fail("not_found", { target: "$.query.round_id" });
+    return { status: 200, data: round };
   }
 
   /** The text of a comment body: a string; blank is a content problem (422), not a shape problem. */

@@ -565,6 +565,72 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    AssumptionBody:
+      type: object
+      required: [state]
+      additionalProperties: false
+      description: |
+        state "proposed" proposes an assumption (statement required; rationale optional; scope is accepted and ignored):
+        the owner session or an agent token. state "confirmed" | "rejected" | "revised" judges one (assumption_id and
+        base_version_id required; "rejected" and "revised" need a rationale; "revised" also needs the new statement):
+        the owner session only, a token is 403 human_required. A judgement is always a NEW version; the proposal is kept.
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        state: { type: string, enum: [proposed, confirmed, rejected, revised] }
+        statement: { type: string, minLength: 1 }
+        rationale: { type: string }
+        scope: { type: string, enum: [project, edition] }
+        assumption_id: { type: string, minLength: 1 }
+        base_version_id: { type: string, minLength: 1 }
+    DecisionBody:
+      type: object
+      required: [scope, state]
+      additionalProperties: false
+      description: |
+        state "proposed" proposes a decision (statement and scope required; the owner session or an agent token).
+        state "adopted" with decision_id + base_version_id adopts a proposal; state "adopted" with supersedes (the
+        adopted decision it replaces) + base_version_id + statement + rationale makes a NEW decision and marks the old
+        one superseded; state "revoked" with decision_id + base_version_id + rationale revokes an adopted decision.
+        Everything but a proposal is the owner session only (a token is 403 human_required). A superseded target that
+        is not adopted is 409 supersedes_conflict at $.body.supersedes (next_action reread_decisions).
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        scope: { type: string, enum: [project, edition] }
+        statement: { type: string, minLength: 1 }
+        state: { type: string, enum: [proposed, adopted, revoked] }
+        supersedes: { type: [string, "null"] }
+        rationale: { type: string }
+        decision_id: { type: string, minLength: 1 }
+        base_version_id: { type: string, minLength: 1 }
+    ReflectionBody:
+      type: object
+      required: [target_round_id, entries]
+      additionalProperties: false
+      description: |
+        The reflection of one round. entries may be empty: that is a submission of "0 items", not "not submitted".
+        applied | partial need evidence: evidence_tx_id plus result_version_id and/or followup_id. The commit must be
+        the one that made the result version (and not the source version), and a follow-up must be applied by that
+        commit. Missing evidence is 422 evidence_required at $.body.entries[i].result_version_id (next_action
+        add_evidence); evidence that does not fit together is 422 validation_failed at $.body.entries[i].evidence_tx_id.
+        rejected | deferred need only a rationale and take no evidence fields.
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        target_round_id: { type: string, minLength: 1 }
+        entries:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [source_version_id, disposition, rationale]
+            additionalProperties: false
+            properties:
+              source_version_id: { type: string, minLength: 1 }
+              disposition: { type: string, enum: [applied, partial, rejected, deferred] }
+              rationale: { type: string, minLength: 1 }
+              result_version_id: { type: [string, "null"] }
+              followup_id: { type: [string, "null"] }
+              evidence_tx_id: { type: [string, "null"] }
+              supersedes_entry_id: { type: [string, "null"] }
     AnswerItem:
       type: object
       required: [question_id]
@@ -1432,6 +1498,149 @@ paths:
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: A question or answer breaks the rules }
         "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/assumptions:
+    post:
+      summary: Propose an assumption (token or owner), or judge one (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssumptionBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "Not allowed for this caller or scope (human_required: a token tried a judgement)" }
+        "404": { description: Unknown project or target }
+        "409": { description: "State conflict, stale base_version_id (rev_conflict), or idempotency key reuse" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: "A field breaks the rules (validation_failed)" }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: Read the assumptions of the active edition (one current row each)
+      description: |
+        data = {assumptions:[{id, version_id, version_no (decimal string), statement, state, needs_review (bool),
+        proposed_by_actor_id, assessed_by_actor_id|null, assessed_at|null (ISO 8601), rationale}]}. An object shows its
+        CURRENT version, so a judged assumption shows the judgement; the proposal stays in its older version. An empty
+        list is "no records", never a made-up row.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/decisions:
+    post:
+      summary: Propose a decision (token or owner), or adopt, supersede or revoke one (owner session only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecisionBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "Not allowed for this caller or scope (human_required: a token tried a judgement)" }
+        "404": { description: Unknown project or target }
+        "409": { description: "supersedes_conflict (the decision it replaces is not adopted), a transition the table does not allow, stale base_version_id (rev_conflict), or idempotency key reuse" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: "A field breaks the rules (validation_failed)" }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: Read the decisions of the active edition and the project-wide ones (one current row each)
+      description: |
+        data = {decisions:[{id, version_id, version_no (decimal string), statement, state, scope, decided_by_actor_id|null,
+        rationale, supersedes_decision_id|null}]}. A superseded or revoked decision stays as a line with that state.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/reflections:
+    post:
+      summary: Write the reflection of a round (token or owner)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReflectionBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller or scope }
+        "404": { description: Unknown project or target }
+        "409": { description: "State conflict or idempotency key reuse" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: "A field breaks the rules (validation_failed, evidence_required)" }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      summary: Read one round's reflection, or list the rounds that have one
+      description: |
+        With ?round_id=: data = {round_id, submitted (bool), counts:{applied, partial, rejected, deferred}, entries:[{id,
+        source_version_id, disposition, rationale, result_version_id|null, followup_id|null, applied_tx_id|null,
+        actor_id}]}. submitted is false before any submission and true after one, even when it had no entries ("0 items").
+        Without round_id: data = {reflections:[<the same object>]} for the rounds that have a submission.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: round_id
+          in: query
+          required: false
+          schema: { type: string }
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project or round }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/submissions:
     post:

@@ -78,7 +78,7 @@
           "target": "$.body.supersedes",
           "details": {
             "target_state": "revoked",
-            "current_decision_id": "dec_01J9Z3K7Q2"
+            "current_decision_id": null
           },
           "next_action": "reread_decisions"
         }
