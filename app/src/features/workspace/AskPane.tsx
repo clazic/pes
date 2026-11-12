@@ -1,264 +1,52 @@
 import * as React from "react";
-import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
-import { Eye, Import, PenLine } from "lucide-react";
-import type { QuestionView, RoundView } from "@/api/types";
-import { questionActions, type PesAction } from "@/app/actions";
+import { useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronUp, PenLine, Plus } from "lucide-react";
+import { useClient } from "@/api/queries";
+import type { CommandResult, QuestionInput, QuestionRevision, QuestionView, RoundView } from "@/api/types";
+import { type PesAction } from "@/app/actions";
 import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
-import { draftKey, readDraft, useDraft, type DraftField, type DraftSetOptions } from "@/lib/draft";
-import { formatAt, IMPORTANCE_LABEL, SOURCE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
+import { ClosedCard, QuestionCard, type CardTools } from "./QuestionCard";
+import { AddQuestionDialog, TidyDialog, type TidyKind } from "./QuestionDialogs";
+import { useKeyedCommand } from "./question-command";
+import { FILTERS, isOpen, matchesFilter, type QuestionFilter } from "./question-model";
 
-const fieldClass =
-  "mt-1 block w-full resize-y rounded-md border border-control bg-background px-2.5 py-2 text-body text-ink shadow-xs outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+export { DRAFT_USER } from "./QuestionCard";
 
-function Chip({ children, tone = "plain" }: { children: React.ReactNode; tone?: "plain" | "strong" }) {
+const rect = (el: Element | null) => (el instanceof HTMLElement ? el : null);
+
+/** 질문 항목 하나를 가리킨다(초점을 받는 li) */
+const itemEl = (id: string) => rect(document.querySelector(`[data-question="${id}"]`));
+
+/** J/K 를 글자로 써야 하는 자리 — 글 입력 · 선택 · 열린 대화 상자 · 메뉴 안 */
+function typingTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof Element)) return false;
+  if (t.closest('input:not([type="radio"]):not([type="checkbox"]), textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"], [role="menu"], [role="listbox"]')) return true;
+  // 모달 대화 상자(radix) 안이거나 밖에 열려 있는 동안. 비모달 미리보기(aria-modal=false)는 질문 이동을 막지 않는다
+  return !!t.closest('[role="dialog"]:not([aria-modal="false"])') || !!document.querySelector('[role="dialog"][data-state="open"]');
+}
+
+/** 거르기 라디오 하나 — 라디오 자체가 누르는 곳 전체(굵은 포인터 44px)를 덮고, 글은 그 아래에 깔린다 */
+function FilterRadio({ value, label, count, checked, onChange }: { value: QuestionFilter; label: string; count: number; checked: boolean; onChange: (v: QuestionFilter) => void }) {
   return (
-    <span
+    <label
       className={cn(
-        "rounded-sm border px-1.5 text-caption",
-        tone === "strong" ? "border-primary-line bg-primary-soft font-medium text-primary-ink" : "border-line text-muted-foreground",
+        "relative inline-flex min-h-8 min-w-[44px] items-center justify-center rounded-md border px-2.5 text-meta whitespace-nowrap tabular-nums coarse:min-h-[44px]",
+        checked ? "border-line-strong bg-background font-semibold text-ink shadow-xs" : "border-transparent text-ink-2 hover:text-ink",
+        "has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring",
       )}
     >
-      {children}
-    </span>
-  );
-}
-
-/** 로그인 없는 이 컴퓨터 화면의 사용자 칸(초안 키) — 로그인이 생기면 사용자 id 로 바뀐다 */
-export const DRAFT_USER = "local";
-
-type DraftScope = { project: string; edition: number; form: number };
-const keyFor = (scope: DraftScope, question: string, version: number, field: DraftField) =>
-  draftKey({ ...scope, user: DRAFT_USER, question, version, field });
-
-/** 이어 붙이기 — 새 칸에 이미 쓴 글이 있으면 그 뒤에 옛 글을 붙인다(덮어쓰지 않음) */
-const merge = (now: string, old: string) => (!old ? now : !now ? old : `${now}\n${old}`);
-
-/**
- * 초안 칸 — 같은 DOM 노드를 유지한다(갱신이 와도 다시 만들지 않음 → 초점 · 선택 범위 · 값 그대로).
- * 한글 조합 중(compositionstart ~ end)에는 화면 값만 바꾸고 저장하지 않으며, 조합이 끝나면 확정된 값을 저장한다.
- */
-function DraftTextarea({ id, rows, draft }: { id: string; rows: number; draft: [string, (v: string, o?: DraftSetOptions) => void] }) {
-  const [value, setValue] = draft;
-  const composing = React.useRef(false);
-  return (
-    <textarea
-      id={id}
-      rows={rows}
-      className={fieldClass}
-      value={value}
-      onCompositionStart={() => {
-        composing.current = true;
-      }}
-      onCompositionEnd={(e) => {
-        composing.current = false;
-        setValue(e.currentTarget.value);
-      }}
-      onChange={(e) => setValue(e.target.value, { store: !composing.current })}
-    />
-  );
-}
-
-type Review = { from: number; answer: string; opinion: string };
-
-/**
- * 새 버전 질문의 옛 초안 검토(U1c · 설계 12.5-6) — 옛 버전 초안을 새 칸으로 몰래 옮기지 않는다.
- * 안내(role=status) · 옛 초안(읽기 전용) · "이전 초안 가져오기"(사람이 눈으로 본 뒤 새 칸에 채움). 옛 키 저장값은 지우지 않는다.
- */
-function DraftReview({ qid, version, review, onImport, onDismiss }: { qid: string; version: number; review: Review; onImport: () => void; onDismiss: () => void }) {
-  return (
-    <div data-draft-review={qid} className="mt-3 rounded-md border border-warn-line bg-warn-soft px-3 py-2.5">
-      <p role="status" className="text-meta font-medium text-ink">
-        질문이 새 버전(버전 {version})으로 바뀌었어요. 버전 {review.from}에 쓴 초안은 옮기지 않았습니다 — 읽어 보고 필요하면 가져오세요.
-      </p>
-      <dl className="mt-2 space-y-1.5">
-        {review.answer ? (
-          <div>
-            <dt className="text-caption text-ink-2">이전 답 초안</dt>
-            <dd className="ml-0 text-meta whitespace-pre-wrap text-ink">{review.answer}</dd>
-          </div>
-        ) : null}
-        {review.opinion ? (
-          <div>
-            <dt className="text-caption text-ink-2">이전 의견 초안</dt>
-            <dd className="ml-0 text-meta whitespace-pre-wrap text-ink">{review.opinion}</dd>
-          </div>
-        ) : null}
-      </dl>
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" className="bg-background" onClick={onImport}>
-          <Import aria-hidden="true" />
-          이전 초안 가져오기
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onDismiss}>
-          새로 쓰기
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** 키보드로 맥락 메뉴 열기(ContextMenu 키 · Shift+F10) — 초점 요소 자리에서 contextmenu 를 일으킨다 */
-function openContextFromKeyboard(e: React.KeyboardEvent) {
-  if (!(e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey))) return;
-  if (e.nativeEvent.isComposing) return;
-  e.preventDefault();
-  const el = e.target as HTMLElement;
-  const r = el.getBoundingClientRect();
-  el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 12, clientY: r.top + Math.min(r.height, 24) }));
-}
-
-/**
- * 질문 동작(맥락 메뉴) — 질문 항목 안에서 오른쪽 단추 · ContextMenu 키 · Shift+F10. 동작은 명령 메뉴와 같은 목록의 부분 집합.
- * Shift 를 누른 오른쪽 단추는 브라우저 메뉴(붙여넣기 · 맞춤법)를 그대로 쓴다. 글 칸의 길게 누르기(터치)는 글 고르기에 양보한다.
- * 닫히면 열기 전 요소로 초점이 돌아가고, 동작을 골랐으면 그 동작이 초점을 맡는다.
- */
-function QuestionContextMenu({ q, actions, children }: { q: QuestionView; actions: PesAction[]; children: React.ReactNode }) {
-  const chosen = React.useRef<PesAction | null>(null);
-  const returnTo = React.useRef<HTMLElement | null>(null);
-  return (
-    <ContextMenuPrimitive.Root>
-      <ContextMenuPrimitive.Trigger asChild>
-        {/* 키보드 처리는 ContextMenu 키 · Shift+F10 을 맥락 메뉴로 넘기는 것뿐 — 안의 칸 · 단추가 실제 조작 대상이다 */}
-        {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
-        <div
-          role="group"
-          aria-labelledby={`${q.id}-head`}
-          onKeyDown={openContextFromKeyboard}
-          onContextMenuCapture={(e) => {
-            if (e.shiftKey) return void e.stopPropagation(); // 브라우저 메뉴
-            returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          }}
-        >
-          {children}
-        </div>
-      </ContextMenuPrimitive.Trigger>
-      <ContextMenuPrimitive.Portal>
-        <ContextMenuPrimitive.Content
-          aria-label="질문 동작"
-          className="z-50 min-w-52 rounded-md border bg-popover p-1 text-popover-foreground shadow-[0_8px_24px_-8px_rgb(0_0_0/0.25)] data-open:animate-in data-open:fade-in-0 data-open:zoom-in-[0.98]"
-          onCloseAutoFocus={(e) => {
-            e.preventDefault();
-            const a = chosen.current;
-            chosen.current = null;
-            if (a) a.run();
-            else returnTo.current?.focus();
-          }}
-        >
-          {actions.map((a) => (
-            <ContextMenuPrimitive.Item
-              key={a.id}
-              aria-keyshortcuts={a.keys}
-              onSelect={() => {
-                chosen.current = a;
-              }}
-              className="flex min-h-8 cursor-default items-center rounded-sm px-2 text-meta text-ink outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
-            >
-              {a.label}
-            </ContextMenuPrimitive.Item>
-          ))}
-        </ContextMenuPrimitive.Content>
-      </ContextMenuPrimitive.Portal>
-    </ContextMenuPrimitive.Root>
-  );
-}
-
-function findReview(scope: DraftScope, q: QuestionView): Review | null {
-  if (q.sent) return null;
-  if (readDraft(keyFor(scope, q.id, q.version, "answer")) || readDraft(keyFor(scope, q.id, q.version, "opinion"))) return null;
-  for (let v = q.version - 1; v >= 1; v--) {
-    const answer = readDraft(keyFor(scope, q.id, v, "answer"));
-    const opinion = readDraft(keyFor(scope, q.id, v, "opinion"));
-    if (answer || opinion) return { from: v, answer, opinion };
-  }
-  return null;
-}
-
-function QuestionItem({ q, scope, actions, open, onPeek }: { q: QuestionView; scope: DraftScope; actions: PesAction[]; open: boolean; onPeek: (id: string) => void }) {
-  const answer = useDraft(keyFor(scope, q.id, q.version, "answer"));
-  const opinion = useDraft(keyFor(scope, q.id, q.version, "opinion"));
-  // 새 버전이 되었거나 처음 그릴 때(그 그림에서 바로): 앞 버전 초안이 있고 새 칸이 비었으면 검토 영역을 연다
-  const reviewFor = `${keyFor(scope, q.id, q.version, "answer")}|${q.sent ? "sent" : ""}`;
-  const [rv, setRv] = React.useState(() => ({ for: reviewFor, review: findReview(scope, q) }));
-  const current = rv.for === reviewFor ? rv : { for: reviewFor, review: findReview(scope, q) };
-  if (current !== rv) setRv(current);
-  const review = current.review;
-  const setReview = (r: Review | null) => setRv({ for: reviewFor, review: r });
-
-  const closeReview = (bring: boolean) => {
-    if (bring && review) {
-      answer[1](merge(answer[0], review.answer));
-      opinion[1](merge(opinion[0], review.opinion));
-    }
-    setReview(null);
-    document.getElementById(q.id)?.focus();
-  };
-
-  const head = `질문 ${q.number}`;
-  return (
-    <li className="border-t py-4 first:border-t-0 first:pt-1">
-      <QuestionContextMenu q={q} actions={questionActions(actions, q.id)}>
-        <div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <h3 id={`${q.id}-head`} className="text-meta font-semibold text-ink">
-              {head}
-            </h3>
-            {q.required ? <Chip tone="strong">필수</Chip> : null}
-            <Chip>중요도 {IMPORTANCE_LABEL[q.importance]}</Chip>
-            <span className="text-caption text-muted-foreground">{SOURCE_LABEL[q.source]}</span>
-            <Button
-              id={`peek-${q.id}`}
-              variant="ghost"
-              size="xs"
-              className="ml-auto"
-              aria-label={`${head} 미리보기`}
-              aria-haspopup="dialog"
-              aria-expanded={open}
-              onClick={() => onPeek(q.id)}
-            >
-              <Eye aria-hidden="true" />
-              미리보기
-            </Button>
-          </div>
-          <p className="mt-1.5 text-body text-ink">{q.text}</p>
-          {q.help ? <p className="mt-1 text-meta text-muted-foreground">{q.help}</p> : null}
-          {q.sent ? (
-            <div className="mt-3 rounded-md bg-surface-sunk px-3 py-2">
-              <p className="text-body text-ink">{q.sent.answer}</p>
-              <p className="mt-1 text-caption text-muted-foreground">
-                보냄 · <time dateTime={q.sent.committed_at}>{formatAt(q.sent.committed_at)}</time> · 접수 {q.sent.receipt_no}
-              </p>
-            </div>
-          ) : (
-            <>
-              {review ? <DraftReview qid={q.id} version={q.version} review={review} onImport={() => closeReview(true)} onDismiss={() => closeReview(false)} /> : null}
-              {/* 글 칸의 길게 누르기(터치)는 글 고르기 — 맥락 메뉴가 가로채지 않게 */}
-              <div className="mt-3 space-y-3" onPointerDown={(e) => e.pointerType !== "mouse" && e.stopPropagation()}>
-                <div>
-                  <label className="block text-meta font-medium text-ink" htmlFor={q.id}>
-                    <span className="sr-only">{head} </span>답{q.required ? " (필수)" : ""}
-                  </label>
-                  <DraftTextarea id={q.id} rows={3} draft={answer} />
-                </div>
-                <div>
-                  <label className="block text-meta font-medium text-ink" htmlFor={`${q.id}-opinion`}>
-                    <span className="sr-only">{head} </span>의견 <span className="font-normal text-muted-foreground">(선택)</span>
-                  </label>
-                  <DraftTextarea id={`${q.id}-opinion`} rows={2} draft={opinion} />
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </QuestionContextMenu>
-    </li>
+      <input type="radio" name="ask-filter" value={value} checked={checked} onChange={() => onChange(value)} className="absolute -inset-px m-0 h-[calc(100%+2px)] w-[calc(100%+2px)] cursor-pointer opacity-0" />
+      {`${label} ${count}`}
+    </label>
   );
 }
 
 /**
- * 질문 영역(설계 4.7 질문·답 · 4.16). 휴대폰에서도 답 · 의견은 켜져 있고, 질문 고치기는 데스크톱으로 안내한다.
- * 지난 라운드는 읽기 전용 — 보낸 답만 보인다.
+ * 질문 영역(설계 4.7 질문·답 · 4.16 · U2b). 위에서 아래: 제목 · 도구 → 거르기 · 이동 → 열린 질문 → 정리된 질문 → 보내기.
+ * 휴대폰에서도 답 · 의견 · 거르기 · 이동은 켜져 있고, 질문을 바꾸는 도구는 데스크톱으로 안내한다. 지난 라운드는 읽기 전용 — 도구가 없다.
+ * 질문을 바꾸는 명령은 모두 멱등 키 하나로 한 번만 가고, 성공하면 라운드를 다시 읽는다(내 화면이 서버 답을 앞지르지 않는다).
  */
 export function AskPane({
   round,
@@ -274,51 +62,262 @@ export function AskPane({
   edition: number;
   /** 동작 목록 하나(명령 메뉴와 같은 것) — 질문 맥락 메뉴가 부분 집합을 쓴다 */
   actions: PesAction[];
+  /** 질문 도구를 못 쓰는 이유(지난 라운드 · 휴대폰). 있으면 도구는 aria-disabled */
   editBlocked?: string;
   peekId: string | null;
   onPeek: (id: string) => void;
 }) {
-  const [editNote, setEditNote] = React.useState(false);
+  const client = useClient();
+  const qc = useQueryClient();
   const past = round.state !== "current";
-  const total = round.questions.length;
-  const open = round.questions.filter((q) => !q.sent);
-  const requiredLeft = open.filter((q) => q.required).length;
+  const all = round.questions;
+  const openQs = all.filter(isOpen);
+  const closedQs = all.filter((q) => !isOpen(q));
+  const [filter, setFilter] = React.useState<QuestionFilter>("all");
+  const visible = openQs.filter((q) => matchesFilter(q, filter));
+  const counts: Record<QuestionFilter, number> = {
+    all: openQs.length,
+    high: openQs.filter((q) => matchesFilter(q, "high")).length,
+    recheck: openQs.filter((q) => matchesFilter(q, "recheck")).length,
+    ask_ai: openQs.filter((q) => matchesFilter(q, "ask_ai")).length,
+  };
+  const unanswered = openQs.filter((q) => !q.sent);
+  const requiredLeft = unanswered.filter((q) => q.required).length;
   const scope = React.useMemo(() => ({ project, edition, form: round.form_version }), [project, edition, round.form_version]);
+  const roundKey = round.round_id === null ? "start" : String(round.round_id);
+  const blocked = editBlocked ?? (client.capabilities?.questionTools === false ? "서버와 아직 이어지지 않아 질문을 바꿀 수 없어요." : undefined);
+
+  /* ── 명령 뒤 처리: 라운드를 다시 읽고, 알림 글을 남기고, 초점을 되돌린다 ── */
+  const refresh = React.useCallback(() => qc.invalidateQueries({ queryKey: ["round", project, edition] }), [qc, project, edition]);
+  const [note, setNote] = React.useState<string | null>(null);
+  /** 그려진 다음 초점을 둘 자리 — 찾을 때까지 다음 그림들에서 다시 시도하고(남은 횟수), 끝내 없으면 버린다 */
+  const after = React.useRef<{ get: () => HTMLElement | null; left: number } | null>(null);
+  const focusLater = (get: () => HTMLElement | null) => {
+    after.current = { get, left: 30 };
+  };
+  React.useEffect(() => {
+    const a = after.current;
+    if (!a) return;
+    const el = a.get();
+    if (el) {
+      after.current = null;
+      el.focus();
+    } else if (--a.left <= 0) after.current = null;
+  });
+  const receiptNo = (r: CommandResult<unknown>) => r.receipt.receipt_no;
+
+  /* ── 질문 고치기 ── */
+  const [editing, setEditing] = React.useState<string[]>([]);
+  const setEditingFor = (id: string, on: boolean) => setEditing((list) => (on ? (list.includes(id) ? list : [...list, id]) : list.filter((x) => x !== id)));
+  const save = async (id: string, body: QuestionRevision, key: string) => {
+    const r = await client.reviseQuestion(project, edition, id, body, key);
+    await refresh();
+    return r;
+  };
+  const onSaved = (q: QuestionView, r: CommandResult<{ question_id: string; version: number; needs_recheck: boolean }>) =>
+    setNote(`질문 ${q.number}을 새 버전으로 저장했어요 · 버전 ${r.data.version} · 접수 ${receiptNo(r)}. 옛 답은 지우지 않고 보존해요.`);
+
+  /* ── 순서 바꾸기 ── */
+  const reorder = useKeyedCommand();
+  const move = async (id: string, dir: "up" | "down") => {
+    const ids = openQs.map((q) => q.id);
+    const i = ids.indexOf(id);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    setNote(null);
+    const r = await reorder.run(JSON.stringify(ids), async (key) => {
+      const res = await client.reorderQuestions(project, edition, round.stage, roundKey, ids, key);
+      await refresh();
+      return res;
+    });
+    if (r.ok) {
+      // 자리가 바뀌며 초점이 빠질 수 있다 — 같은 단추로 되돌려 연달아 옮길 수 있게
+      focusLater(() => document.getElementById(`tool-${dir}-${id}`));
+      setNote(`질문 ${openQs[i]!.number}의 자리를 바꿨어요 · 접수 ${receiptNo(r.value)}.`);
+    }
+  };
+
+  /* ── 철회 · 보류 · 합치기 ── */
+  const [tidy, setTidy] = React.useState<{ kind: TidyKind; q: QuestionView } | null>(null);
+  const runTidy = async (kind: TidyKind, id: string, into: string, key: string) => {
+    const r = kind === "withdraw" ? await client.withdrawQuestion(project, edition, id, key) : kind === "defer" ? await client.deferQuestion(project, edition, id, key) : await client.mergeQuestion(project, edition, id, into, key);
+    await refresh();
+    return r;
+  };
+
+  /* ── 질문 더하기 ── */
+  const [adding, setAdding] = React.useState(false);
+  const add = async (body: QuestionInput, key: string) => {
+    const r = await client.addQuestion(project, edition, round.stage, roundKey, body, key);
+    await refresh();
+    return r;
+  };
+
+  /* ── 이동: n/m · 이전 · 다음 · J/K ── */
+  const [cur, setCur] = React.useState<string | null>(null);
+  const curRef = React.useRef<string | null>(null);
+  const visibleIds = React.useRef<string[]>([]);
+  React.useEffect(() => {
+    visibleIds.current = visible.map((q) => q.id);
+  });
+  const at = cur ? visible.findIndex((q) => q.id === cur) : -1;
+  const index = at; // -1 = 아직 어느 질문에도 초점이 없었다
+  const pos = visible.length === 0 ? 0 : (index < 0 ? 0 : index) + 1;
+  const goTo = React.useCallback((id: string) => {
+    curRef.current = id;
+    setCur(id);
+    itemEl(id)?.focus();
+  }, []);
+  /** step: 한 칸. fromKey 이고 초점이 질문에 한 번도 없었으면 첫 질문으로(단추는 1/m 에서 한 칸) */
+  const step = React.useCallback(
+    (dir: 1 | -1, fromKey: boolean) => {
+      const ids = visibleIds.current;
+      if (!ids.length) return;
+      const i = curRef.current ? ids.indexOf(curRef.current) : -1;
+      const next = i < 0 ? (fromKey ? 0 : dir === 1 ? Math.min(1, ids.length - 1) : 0) : Math.min(ids.length - 1, Math.max(0, i + dir));
+      goTo(ids[next]!);
+    },
+    [goTo],
+  );
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k !== "j" && k !== "k") return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (typingTarget(e.target)) return;
+      e.preventDefault();
+      step(k === "j" ? 1 : -1, true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [step]);
+  const onFocusCapture = (e: React.FocusEvent) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>("[data-question]")?.dataset.question;
+    if (id && openQs.some((q) => q.id === id)) {
+      curRef.current = id;
+      setCur(id);
+    }
+  };
+  const prevOff = visible.length === 0 || pos <= 1;
+  const nextOff = visible.length === 0 || pos >= visible.length;
+
+  const toolsFor = (i: number): CardTools | null => (past ? null : { ...(blocked ? { blocked } : {}), first: i === 0, last: i === openQs.length - 1 });
+  const editTarget = visible.find((q) => q.id === cur) ?? visible[0];
+
   return (
-    <div className="px-4 pt-5 pb-16">
-      <div className="flex flex-wrap items-start justify-between gap-2">
+    <div className="px-4 pt-5 pb-16" onFocus={onFocusCapture}>
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
         <div>
           <h2 id="ask-title" tabIndex={-1} className="text-title text-ink outline-none">
             질문
           </h2>
           <p className="text-caption text-muted-foreground">
-            {past ? `보낸 답 ${total - open.length}개 · 읽기 전용` : `답할 질문 ${open.length} / 전체 ${total} · 필수 남음 ${requiredLeft}`}
+            {past ? `보낸 답 ${openQs.length - unanswered.length}개 · 읽기 전용` : `답할 질문 ${unanswered.length} / 전체 ${openQs.length} · 필수 남음 ${requiredLeft}`}
           </p>
         </div>
-        <ActionButton
-          variant="outline"
-          size="sm"
-          blockedReason={editBlocked}
-          reasonId="edit-reason"
-          reasonClassName="max-w-48"
-          aria-expanded={editBlocked ? undefined : editNote}
-          aria-controls={!editBlocked && editNote ? "edit-note" : undefined}
-          onClick={() => setEditNote((v) => !v)}
-        >
-          <PenLine aria-hidden="true" />
-          질문 고치기
-        </ActionButton>
+        <div className="flex flex-wrap items-start gap-2">
+          <Button
+            id="add-question"
+            variant="outline"
+            size="sm"
+            aria-disabled={blocked ? true : undefined}
+            aria-describedby={blocked ? "edit-reason" : undefined}
+            onClick={(e) => {
+              if (blocked) return void e.preventDefault();
+              setAdding(true);
+            }}
+          >
+            <Plus aria-hidden="true" />
+            질문 더하기
+          </Button>
+          <ActionButton
+            variant="outline"
+            size="sm"
+            blockedReason={blocked}
+            reasonId="edit-reason"
+            reasonClassName="max-w-48"
+            onClick={() => {
+              if (editTarget) setEditingFor(editTarget.id, true);
+            }}
+          >
+            <PenLine aria-hidden="true" />
+            질문 고치기
+          </ActionButton>
+        </div>
       </div>
-      {!editBlocked && editNote ? (
-        <p id="edit-note" className="mt-3 rounded-md border bg-surface-soft px-3 py-2 text-meta text-ink-2">
-          질문 문구 고치기 · 더하기 · 빼기는 다음 작업(U2)에서 연결됩니다. 지금은 합성 자료라 바꾸지 않습니다.
+      <p role="status" className={cn("text-meta text-ink", note && "mt-3")}>
+        {note}
+      </p>
+      {reorder.error ? (
+        <p role="alert" className="mt-3 rounded-md border border-bad-line bg-bad-soft px-3 py-2 text-meta text-bad">
+          {reorder.error}
         </p>
       ) : null}
-      <ol className="mt-4">
-        {round.questions.map((q) => (
-          <QuestionItem key={q.id} q={q} scope={scope} actions={actions} open={peekId === q.id} onPeek={onPeek} />
-        ))}
-      </ol>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div role="radiogroup" aria-label="질문 거르기" className="flex flex-wrap gap-1 rounded-lg bg-muted p-1">
+          {FILTERS.map((f) => (
+            <FilterRadio key={f.value} value={f.value} label={f.label} count={counts[f.value]} checked={filter === f.value} onChange={setFilter} />
+          ))}
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" aria-label="이전 질문" aria-keyshortcuts="K" aria-disabled={prevOff ? true : undefined} onClick={(e) => (prevOff ? e.preventDefault() : step(-1, false))}>
+            <ChevronUp aria-hidden="true" />
+            이전
+          </Button>
+          <span className="min-w-11 text-center text-meta text-ink tabular-nums">
+            <span className="sr-only">질문 위치 </span>
+            <span data-position="">{`${pos}/${visible.length}`}</span>
+          </span>
+          <Button variant="outline" size="sm" aria-label="다음 질문" aria-keyshortcuts="J" aria-disabled={nextOff ? true : undefined} onClick={(e) => (nextOff ? e.preventDefault() : step(1, false))}>
+            <ChevronDown aria-hidden="true" />
+            다음
+          </Button>
+        </div>
+      </div>
+
+      {visible.length ? (
+        <ol className="mt-3">
+          {visible.map((q) => (
+            <QuestionCard
+              key={q.id}
+              q={q}
+              all={all}
+              others={openQs.filter((x) => x.id !== q.id)}
+              scope={scope}
+              actions={actions}
+              open={peekId === q.id}
+              onPeek={onPeek}
+              tools={toolsFor(openQs.indexOf(q))}
+              editing={editing.includes(q.id)}
+              onEditing={(on) => setEditingFor(q.id, on)}
+              save={save}
+              onSaved={onSaved}
+              onMove={move}
+              onTidy={(id, kind) => setTidy({ q: all.find((x) => x.id === id)!, kind })}
+            />
+          ))}
+        </ol>
+      ) : (
+        <p className="mt-4 rounded-md bg-surface-soft px-3 py-3 text-meta text-ink-2">
+          {openQs.length ? "해당하는 질문이 없어요. ‘전체’로 돌아가면 모두 보여요." : "열린 질문이 없어요."}
+        </p>
+      )}
+
+      {closedQs.length ? (
+        <section aria-label="정리된 질문" data-region="closed" className="mt-6 border-t pt-4">
+          <h3 className="text-meta font-semibold text-ink">정리된 질문 {closedQs.length}</h3>
+          <p className="text-caption text-muted-foreground">지우지 않아요. 보낸 답은 그대로 남아요.</p>
+          <ul className="mt-2">
+            {closedQs.map((q) => (
+              <ClosedCard key={q.id} q={q} all={all} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {!past ? (
         <div className="mt-2 space-y-3 border-t pt-4">
           <p className="text-caption text-muted-foreground">초안은 이 탭에만 있어요. 탭을 닫거나 다른 기기로 옮기면 남지 않습니다.</p>
@@ -326,6 +325,43 @@ export function AskPane({
             답 검토 후 보내기
           </ActionButton>
         </div>
+      ) : null}
+
+      <AddQuestionDialog
+        open={adding}
+        onOpenChange={(o) => {
+          setAdding(o);
+          if (!o) focusLater(() => document.getElementById("add-question"));
+        }}
+        add={add}
+        onAdded={(id) => {
+          setNote("질문을 더했어요. 사람이 더한 질문으로 보여요.");
+          setCur(id);
+          curRef.current = id;
+          focusLater(() => itemEl(id));
+        }}
+      />
+      {tidy ? (
+        <TidyDialog
+          kind={tidy.kind}
+          q={tidy.q}
+          targets={openQs.filter((x) => x.id !== tidy.q.id)}
+          onClose={() => {
+            // 취소 · Esc: 연 단추로
+            const { kind, q } = tidy;
+            setTidy(null);
+            focusLater(() => document.getElementById(`tidy-${kind}-${q.id}`));
+          }}
+          run={(into, key) => runTidy(tidy.kind, tidy.q.id, into, key)}
+          onDone={() => {
+            const n = tidy.q.number;
+            const name = { withdraw: "철회했어요", defer: "보류했어요", merge: "합쳤어요" }[tidy.kind];
+            setNote(`질문 ${n}을 ${name}. ‘정리된 질문’에 남아 있어요.`);
+            const next = visible.find((x) => x.id !== tidy.q.id && x.number > n) ?? visible.find((x) => x.id !== tidy.q.id);
+            setTidy(null);
+            focusLater(() => (next ? itemEl(next.id) : document.getElementById("ask-title")));
+          }}
+        />
       ) : null}
     </div>
   );
