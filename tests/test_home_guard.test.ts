@@ -2,14 +2,14 @@
 // Everything uses a *fake* "real home" under a temp folder, so the guard is tested without touching the real ~/.pes.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, promises as fsp, readdirSync, readFileSync, rmSync, stat as stat_cb, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { make_ctx, run_pes } from "./helpers/compat_env.ts";
-import { account_home, assert_isolated_env, assert_no_real_path, protected_paths, real_homes, take_home_snapshot, touches_protected, use_home_guard } from "./helpers/home_guard.ts";
+import { account_home, assert_isolated_env, assert_no_real_path, guard_process_fs, protected_paths, real_homes, take_home_snapshot, touches_protected, unguarded, use_home_guard } from "./helpers/home_guard.ts";
 
 use_home_guard();
 
@@ -18,6 +18,8 @@ function fake_real_home(): { dir: string; cleanup(): void } {
   mkdirSync(join(dir, ".pes"), { recursive: true });
   writeFileSync(join(dir, ".pes", "config.json"), '{"home": "synthetic"}', "utf8");
   mkdirSync(join(dir, "pes-projects", "p"), { recursive: true });
+  mkdirSync(join(dir, ".claude", "plugins"), { recursive: true });
+  writeFileSync(join(dir, ".claude", "settings.json"), '{"theme": "synthetic"}', "utf8");
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -197,4 +199,107 @@ test("'real home' means both os.homedir() and the account's home; a snapshot and
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// layer 4 (SEL-95): the test process's own fs calls — D13 stat()ed the real ~/.claude and compared mtimes; other Claude sessions made it flaky
+
+test(".claude is a protected folder of a real home (names, children, aliases of the path), look-alikes are not", () => {
+  const fake = fake_real_home();
+  try {
+    assert.ok(touches_protected(join(fake.dir, ".claude"), fake.dir));
+    assert.ok(touches_protected(join(fake.dir, ".claude", "settings.json"), fake.dir));
+    assert.ok(touches_protected(join(fake.dir, ".claude", "plugins", "x", "y.json"), fake.dir));
+    assert.ok(!touches_protected(join(fake.dir, ".claude-other", "settings.json"), fake.dir));
+    assert.ok(!touches_protected(join(fake.dir, "claude", "settings.json"), fake.dir));
+    assert.throws(() => assert_isolated_env({ HOME: join(fake.dir, ".claude"), USERPROFILE: join(fake.dir, ".claude"), PES_HOME: join(fake.dir, ".claude", "x") }, fake.dir), /home guard/);
+    assert.ok(protected_paths(fake.dir).some((p) => p.endsWith(".claude")));
+  } finally {
+    fake.cleanup();
+  }
+});
+
+test("guard_process_fs denies stat · lstat · exists · read · readdir · write on the real home's .pes · pes-projects · .claude, in every spelling and API (sync, callback, promises)", async () => {
+  const fake = fake_real_home();
+  const guard = guard_process_fs(fake.dir);
+  const seen: string[] = [];
+  try {
+    const attempts: Array<[string, () => unknown]> = [];
+    for (const folder of [".claude", ".pes", "pes-projects"]) {
+      const dir = join(fake.dir, folder);
+      const file = join(dir, folder === ".claude" ? "settings.json" : folder === ".pes" ? "config.json" : join("p", "project.json"));
+      attempts.push(
+        [`statSync ${folder}`, () => statSync(dir)],
+        [`lstatSync ${folder}`, () => lstatSync(dir)],
+        [`existsSync ${folder}`, () => existsSync(file)],
+        [`readdirSync ${folder}`, () => readdirSync(dir)],
+        [`readFileSync ${folder}`, () => readFileSync(file)],
+        [`writeFileSync ${folder}`, () => writeFileSync(join(dir, "new.json"), "{}")],
+        [`relative path spelled through ..`, () => lstatSync(join(dir, "..", folder, "x"))],
+        [`file URL ${folder}`, () => statSync(new URL(`file://${dir}`))],
+        [`Buffer path ${folder}`, () => statSync(Buffer.from(dir))],
+      );
+    }
+    for (const [what, run] of attempts) assert.throws(run, /PESHomeAccessViolation/, what);
+    await assert.rejects(fsp.stat(join(fake.dir, ".claude")), /PESHomeAccessViolation/, "promises.stat");
+    await assert.rejects(fsp.readFile(join(fake.dir, ".claude", "settings.json")), /PESHomeAccessViolation/, "promises.readFile");
+    assert.throws(() => stat_cb(join(fake.dir, ".claude"), () => undefined), /PESHomeAccessViolation/, "callback stat (refused at once)");
+    seen.push(...guard.violations);
+    assert.ok(seen.length >= attempts.length + 3, `every refusal is recorded (${seen.length})`);
+    // what is not the real home's protected folders works as ever
+    const safe = mkdtempSync(join(tmpdir(), "pes-guard-safe-"));
+    try {
+      writeFileSync(join(safe, "a.txt"), "ok");
+      assert.equal(readFileSync(join(safe, "a.txt"), "utf8"), "ok");
+      assert.ok(existsSync(join(fake.dir, ".claude-other")) === false);
+      assert.ok(existsSync(fake.dir), "the home itself is not protected");
+      assert.ok(touches_protected(join(fake.dir, ".claude", "x"), fake.dir), "touches_protected (realpath) still works while the guard is on");
+    } finally {
+      rmSync(safe, { recursive: true, force: true });
+    }
+    // the guard's own listing is allowed
+    assert.doesNotThrow(() => take_home_snapshot(fake.dir));
+    assert.doesNotThrow(() => unguarded(() => statSync(join(fake.dir, ".claude"))));
+    // swallowing the throw does not hide the access: release() fails (a test that wrapped the stat in try/catch "absent" is still caught)
+    assert.throws(() => guard.release(), /home guard/);
+  } finally {
+    fake.cleanup();
+  }
+  // released: the originals are back
+  const fresh = fake_real_home();
+  try {
+    assert.doesNotThrow(() => statSync(join(fresh.dir, ".claude")));
+  } finally {
+    fresh.cleanup();
+  }
+});
+
+test("guard_process_fs without an access releases cleanly and puts the real fs functions back", () => {
+  const fake = fake_real_home();
+  const before_stat = statSync;
+  const guard = guard_process_fs(fake.dir);
+  try {
+    assert.notEqual(statSync, before_stat, "wrapped while the guard is on");
+    assert.ok(statSync(fake.dir).isDirectory());
+  } finally {
+    assert.doesNotThrow(() => guard.release());
+    assert.equal(statSync, before_stat, "restored");
+    fake.cleanup();
+  }
+});
+
+test("use_home_guard denies the real ~/.claude in this very process (the D13 pattern): a swallowed lstat of the account's .claude is still a violation", () => {
+  const child_source = `
+    const guard = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "helpers", "home_guard.ts")).href)});
+    const fs = await import("node:fs");
+    const g = guard.guard_process_fs();
+    let outcome = "no throw";
+    try { fs.lstatSync(guard.account_home() + "/.claude"); } catch (error) { outcome = String(error.message).split(" ")[0]; }
+    let released = "released";
+    try { g.release(); } catch (error) { released = "release failed"; }
+    console.log(JSON.stringify({ outcome, released }));
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", child_source], { encoding: "utf8", env: process.env });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout.trim().split("\n").pop() as string), { outcome: "PESHomeAccessViolation:", released: "release failed" });
 });

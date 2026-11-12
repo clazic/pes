@@ -9,7 +9,8 @@
 //   PES_SKIP_KEYS=1, PES_SKIP_TOOLS=1  — no key screen, no kosis/vworld/korean-law/ego install
 //   HOME · USERPROFILE · PES_HOME · TMPDIR = temporary folders; `curl` is a fake that fails (a call to it = a network attempt); `python3` ·
 //   `python` · `py` are decoys that log and fail (a call to them = the scripts still want Python)
-// The real ~/.claude · ~/.pes · ~/pes-projects are snapshot before and after (names · sizes · mtimes only — never read).
+// The real ~/.pes · ~/pes-projects are snapshot before and after (names · sizes · mtimes only — never read); the real ~/.claude is not looked at at
+// all (use_home_guard denies it) — the stand-in .claude of the temporary HOME is what the install must leave alone.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -18,7 +19,7 @@ import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 
 import { free_port, make_ctx, type CompatCtx } from "./helpers/compat_env.ts";
-import { account_home, real_homes, use_home_guard } from "./helpers/home_guard.ts";
+import { real_homes, use_home_guard } from "./helpers/home_guard.ts";
 import { REPO } from "./helpers/sel74_env.ts";
 
 use_home_guard();
@@ -29,21 +30,35 @@ const SH_ONLY = WIN ? "install.sh 는 macOS·Linux 용이다 — Windows 는 ins
 const PS_ONLY = WIN ? false : "install.ps1 은 Windows 전용이다 — macOS·Linux 는 install.sh 시험이 같은 계약을 맡는다";
 
 // ---------------------------------------------------------------------------
-// the real account's .claude (the guard of use_home_guard covers .pes and pes-projects): stat only, never read
+// the user's settings, as a stand-in: SEL-95 — the test never looks at the real ~/.claude (other Claude sessions write there, so comparing its
+// mtimes flaked, and use_home_guard() now denies the look). "An install does not touch the user's settings" is checked on a fake .claude seeded in
+// the scene's temporary HOME: names, sizes, mtimes and contents before and after.
 
-function claude_snapshot(): string {
-  const base = join(account_home(), ".claude");
-  const names = [base, join(base, "settings.json"), join(base, "plugins")];
-  return JSON.stringify(
-    names.map((p) => {
-      try {
-        const st = lstatSync(p);
-        return [p, st.size, st.mtimeMs, st.isDirectory() ? readdirSync(p).length : 0];
-      } catch {
-        return [p, "absent"];
-      }
-    }),
-  );
+function seed_claude(s: Scene): () => string {
+  const base = join(s.home, ".claude");
+  mkdirSync(join(base, "plugins"), { recursive: true });
+  const old = new Date("2026-01-01T00:00:00Z");
+  const files = [
+    [join(base, "settings.json"), JSON.stringify({ theme: "synthetic", permissions: { allow: ["Bash(ls:*)"] } }, null, 2)],
+    [join(base, "plugins", "installed_plugins.json"), JSON.stringify({ version: 1, plugins: {} })],
+  ] as const;
+  for (const [file, text] of files) {
+    writeFileSync(file, text, "utf8");
+    utimesSync(file, old, old);
+  }
+  utimesSync(join(base, "plugins"), old, old);
+  utimesSync(base, old, old);
+  return () =>
+    JSON.stringify(
+      [base, join(base, "plugins"), ...files.map(([file]) => file)].map((p) => {
+        try {
+          const st = lstatSync(p);
+          return [p.slice(s.home.length), st.size, st.mtimeMs, st.isDirectory() ? readdirSync(p).sort() : readFileSync(p, "utf8")];
+        } catch {
+          return [p.slice(s.home.length), "absent"];
+        }
+      }),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -220,16 +235,17 @@ function node_needed_ok(s: Scene): void {
 // install.sh
 
 test("D13: install.sh (macOS/Linux) — a clean temporary HOME installs with Node only: six steps, plugin registered, ~/.pes/src from the mirror, no Python, no network", { skip: SH_ONLY, timeout: 600_000 }, async () => {
-  const before = claude_snapshot();
   const s = await scene("pes-sel74-d13-");
+  const claude_now = seed_claude(s);
+  const before = claude_now();
   try {
     const ran = run_script(s, "install");
     assert_installed(s, ran, "install.sh");
     node_needed_ok(s);
+    assert.equal(claude_now(), before, "the user's ~/.claude (a stand-in in the temporary HOME) is as it was");
   } finally {
     s.cleanup();
   }
-  assert.equal(claude_snapshot(), before, "the real ~/.claude is as it was");
 });
 
 test("D14: install.sh upgrades over a 0.15 install (old ~/.pes/src with Python tools + an old completion mark): passes, new TypeScript tools in place, the mark rewritten", { skip: SH_ONLY, timeout: 600_000 }, async () => {
