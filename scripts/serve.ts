@@ -52,7 +52,7 @@ const REPORT_HTML_CSP = "sandbox allow-scripts allow-popups allow-modals allow-d
 /** SEL-86: the app's index.html runs only scripts of its own origin (the build has no inline script). No sandbox — the app needs its same-origin sessionStorage. */
 const APP_INDEX_CSP = "script-src 'self'";
 /** SEL-86: SVG opened as a page runs its scripts like HTML does, so it gets the same sandbox (an <img> of it is not a page — it still shows). Raster images and PDF never do. */
-const needs_report_csp = (content_type: string): boolean => /^(text\/html|image\/svg\+xml)\b/i.test(content_type);
+const needs_report_csp = (content_type: string): boolean => /^(text\/html|image\/svg\+xml|(?:text|application)\/(?:xml|xhtml\+xml))\b/i.test(content_type);
 const REPORT_TYPES: Record<string, string> = { ".svg": "image/svg+xml; charset=utf-8", ".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8" };
 /** The API error texts the server itself gives (the envelope of ApiApp: Korean message, retryable only for 429/503, next_action a string). */
 const API_ERROR_TEXT: Record<string, [string, string]> = {
@@ -343,7 +343,7 @@ async function start(config: Config): Promise<void> {
   };
 
   /**
-   * SEL-86: is `file` inside a project's reports/ or out/ folder (the first word under the slug, or under the home itself when the home is one project)?
+   * SEL-86: is `file` inside a project's reports/ or out/ folder (the first word under the slug — any project folder, DB or legacy, with or without project.json; or under the home itself when the home is one project)?
    * The AI's HTML lives there, so its text/html gets the sandbox. Judged on the translated path AND on the real path (a link whose real place is reports/ or
    * out/ counts), words compared lower-case (a case-insensitive disk opens `Reports/`).
    */
@@ -354,7 +354,7 @@ async function start(config: Config): Promise<void> {
       const words = rel.split(sep).filter((word) => word !== "");
       const first_under = (name: string | undefined): boolean => name !== undefined && (name.toLowerCase() === "reports" || name.toLowerCase() === "out");
       if (existsSync(join(root, "project.json")) && first_under(words[0])) return true;
-      return words[0] !== undefined && SLUG.test(words[0]) && existsSync(join(base, words[0], "project.json")) && first_under(words[1]);
+      return words[0] !== undefined && SLUG.test(words[0]) && first_under(words[1]);
     };
     if (zone(file, root)) return true;
     try {
