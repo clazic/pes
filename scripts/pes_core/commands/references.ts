@@ -239,13 +239,14 @@ function run_source_gone(runtime: CommandRuntime): CommandResult {
   // only the source's own owner may say the source is going away: this project is the one named
   if (referenced_project_id !== me.project_id) throw new ApiError("forbidden", "only the owner of the source project can release references to it");
 
-  // A named snapshot must be one of THIS (source) project's, and one that may go away: a sealed round snapshot (scope other than
-  // 'edition') or an approved one is permanent (stage-1-db.md "승인·봉인 스냅숏은 영구 보존"). Releasing the whole project has no such condition.
+  // A named snapshot must be one of THIS (source) project's, and one that may go away. Permanent (stage-1-db.md "승인·봉인 스냅숏은
+  // 영구 보존"): a snapshot sealed by a round (scope 'round') and any approved one. Everything else is a draft — an edition snapshot, or
+  // a stage snapshot made without a round and not approved — and may be released. Releasing the whole project has no such condition.
   if (snapshot_id !== undefined) {
     const snapshot = runtime.db.get<{ scope: string }>("SELECT scope FROM snapshots WHERE project_id = ? AND id = ?", me.project_id, snapshot_id);
     if (snapshot === undefined) throw new ApiError("not_found", "snapshot not found");
     const approved = runtime.db.get("SELECT 1 AS ok FROM approvals WHERE project_id = ? AND snapshot_id = ?", me.project_id, snapshot_id) !== undefined;
-    if (snapshot.scope !== "edition" || approved) throw new ApiError("conflict", "a sealed or approved snapshot is permanent and cannot be released");
+    if (snapshot.scope === "round" || approved) throw new ApiError("conflict", "a round-sealed or approved snapshot is permanent and cannot be released");
   }
 
   const rows =

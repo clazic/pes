@@ -10,9 +10,9 @@
  *  reference.source_gone {referenced_project_id, snapshot_id?}   (ctx = 원본 프로젝트의 사람 소유자 — 그대로)
  *   소속 검증   snapshot_id 를 주면 그것이 **이 원본 프로젝트(referenced_project_id)의 스냅숏**이어야 한다.
  *              모르는 id · 다른 프로젝트의 스냅숏 id → ApiError not_found, **쓰기 0**(state_signature 불변: 영수증·사건·참조 줄 모두 그대로).
- *   삭제 가능 조건  snapshot_id 를 준 해제는 "삭제 가능한 스냅숏"만 된다 = 봉인되지 않았고(scope 'round' 가 아님 — round.sealed 로 생긴 것)
- *              승인되지 않았다(approvals 가 가리키지 않음). 편집판 스냅숏(scope 'edition', edition.snapshotted)은 삭제 가능(초안).
- *              봉인 또는 승인된 스냅숏 → ApiError conflict, 쓰기 0. 프로젝트 전체 해제(snapshot_id 생략)는 프로젝트가 사라지는 일이라 이 조건을 안 건다.
+ *   삭제 가능 조건  snapshot_id 를 준 해제는 "삭제 가능한 스냅숏"만 된다 = 라운드를 봉인해 생긴 것(scope 'round')이 아니고
+ *              승인되지 않았다(approvals 가 가리키지 않음). 편집판(scope 'edition')과 라운드 없이 만든 단계 스냅숏(scope 'stage', 승인 안 됨)은 삭제 가능(초안).
+ *              봉인 라운드 스냅숏 또는 승인된 스냅숏 → ApiError conflict, 쓰기 0. 프로젝트 전체 해제(snapshot_id 생략)는 프로젝트가 사라지는 일이라 이 조건을 안 건다.
  *   결과·영수증  {released_count: 정수}. **다른 프로젝트의 id 를 싣지 않는다** — 원본 프로젝트의 영수증(mutation_commits.result_json)과
  *              원본 프로젝트의 사건(events.payload) 어디에도 참조하는 프로젝트의 id(project_references.project_id)가 글자로 없다.
  *              (reference_id 는 있어도 된다. released 배열의 project_id 칸은 없어진다.)
@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { add_artifact, create_object } from "../scripts/pes_core/content.ts";
-import { approve_stage, seal_round, start_round } from "../scripts/pes_core/editions.ts";
+import { approve_stage, seal_round, snapshot as edition_snapshot, start_round } from "../scripts/pes_core/editions.ts";
 import { ctx_for, put_ready, with_env, type Env } from "./helpers/blob_env.ts";
 import { stage_ids } from "./helpers/editions_env.ts";
 import { add_new_version, attached, ref_row, type Source } from "./helpers/sel113_env.ts";
@@ -34,6 +34,39 @@ import { ok, refused } from "./helpers/sel93_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
 
 const owner_of = (src: Source, key: string) => ({ project_id: src.p.project_id, actor_id: src.p.actor_id, via: "cli" as const, client_request_id: key });
+
+/** 라운드 없이 edition.snapshot {scope:"stage"} 로 만든 스냅숏(옵션: 승인)의 id 를 돌려준다. */
+async function stage_snapshot(env: Env, src: Source, tag: string, approve: boolean): Promise<string> {
+  const stage_id = stage_ids(env.db, src.p.edition_id).plan;
+  const obj = ((await create_object(env.service, ctx_for(src.p, `${tag}-o`), { kind: "artifact", edition_id: src.p.edition_id })).result as { object_id: string }).object_id;
+  const v = (await add_artifact(env.service, ctx_for(src.p, `${tag}-v`), { object_id: obj, artifact_kind: "chapter", title: `단계 ${tag}`, summary: "합성" })).result as {
+    object_id: string;
+    version_id: string;
+  };
+  const versions = [{ object_id: v.object_id, version_id: v.version_id }];
+  const blob = await put_ready(env, new TextEncoder().encode(JSON.stringify({ versions })), `${tag}-mf`, src.p);
+  const snap = (await edition_snapshot(env.service, ctx_for(src.p, `${tag}-snap`), { scope: "stage", stage_id, manifest_blob_id: blob.blob_id, versions })).result as {
+    snapshot_id: string;
+  };
+  // stage.approve 는 라운드 스냅숏만 받으므로, 라운드 없는 승인 스냅숏은 승인 행을 직접 넣어 만든다(행의 제약은 실제 행위자·커밋을 가리킨다).
+  if (approve) {
+    const actor = env.db.get<{ kind: string; user_id: string | null }>("SELECT kind, user_id FROM actors WHERE id = ?", src.p.actor_id)!;
+    const tx = env.db.get<{ id: string }>("SELECT id FROM mutation_commits WHERE project_id = ? ORDER BY rowid DESC LIMIT 1", src.p.project_id)!;
+    env.db.run(
+      `INSERT INTO approvals (id, project_id, stage_id, snapshot_id, actor_id, actor_kind, human_user_id, origin, assurance, tx_id, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'new', 'verified', ?, NULL)`,
+      `appr-${tag}`,
+      src.p.project_id,
+      stage_id,
+      snap.snapshot_id,
+      src.p.actor_id,
+      actor.kind,
+      actor.user_id,
+      tx.id,
+    );
+  }
+  return snap.snapshot_id;
+}
 
 /** 원본 프로젝트의 plan 단계에 라운드를 열어 봉인하고(옵션: 승인) 그 스냅숏 id 를 돌려준다. */
 async function sealed_snapshot(env: Env, src: Source, tag: string, approve: boolean): Promise<string> {
@@ -106,6 +139,30 @@ test("source_gone: an approved snapshot is permanent too — conflict, nothing w
     const before = state_signature(env.db);
     await refused(env, owner_of(src, "g4-gone"), "reference.source_gone", { referenced_project_id: src.p.project_id, snapshot_id: approved }, "conflict");
     assert.equal(state_signature(env.db), before, "zero writes");
+  });
+});
+
+test("source_gone: an unapproved stage snapshot made without a round is a draft — released, the row goes source_missing", async () => {
+  await with_env(async (env) => {
+    const { src, ref } = await attached(env, "g7");
+    const stage = await stage_snapshot(env, src, "g7s", false);
+    await ok(env, env.ctx("g7-refresh"), "reference.refresh", { reference_id: ref.reference_id, source_snapshot_id: stage });
+    const out = await ok(env, owner_of(src, "g7-gone"), "reference.source_gone", { referenced_project_id: src.p.project_id, snapshot_id: stage });
+    assert.equal(out.released_count, 1);
+    assert.equal(ref_row(env.db, ref.reference_id)!.status, "source_missing");
+    assert.equal(ref_row(env.db, ref.reference_id)!.source_snapshot_id, null);
+  });
+});
+
+test("source_gone: an approved stage snapshot made without a round is permanent — conflict, nothing written", async () => {
+  await with_env(async (env) => {
+    const { src, ref } = await attached(env, "g8");
+    const approved = await stage_snapshot(env, src, "g8s", true);
+    await ok(env, env.ctx("g8-refresh"), "reference.refresh", { reference_id: ref.reference_id, source_snapshot_id: approved });
+    const before = state_signature(env.db);
+    await refused(env, owner_of(src, "g8-gone"), "reference.source_gone", { referenced_project_id: src.p.project_id, snapshot_id: approved }, "conflict");
+    assert.equal(state_signature(env.db), before, "zero writes");
+    assert.equal(ref_row(env.db, ref.reference_id)!.status, "active");
   });
 });
 
