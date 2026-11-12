@@ -378,7 +378,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
    * 쓰기 길의 한 단계(예약 · 올리기 · 완료) — 시간 제한 안에서 보내고, 거절은 서버 봉투 그대로 던진다.
    * 서버는 예약(POST P/uploads)과 완료(POST P/uploads/{blob}/complete)에도 멱등 키를 요구한다(없으면 400) — `key` 로 보낸다. 올리기(PUT)는 키가 없다.
    */
-  async function uploadStep(id: string, method: "POST" | "PUT", rest: string, init: { json?: Json; body?: Uint8Array; contentType?: string; key?: string }): Promise<Json> {
+  async function uploadStep(id: string, method: "POST" | "PUT", rest: string, init: { json?: Json; body?: Uint8Array; contentType?: string; key?: string }): Promise<{ data: Json; replayed: boolean }> {
     return timed(async (signal) => {
       const res = await sendWrite(projectUrl(id, rest), {
         method,
@@ -390,7 +390,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       if (!res.ok) throw await toApiError(res);
       const parsed: unknown = await jsonAfterSend(res);
       if (!isRecord(parsed) || !isRecord(parsed.data)) throw new PesApiError(fallbackBody(500));
-      return parsed.data;
+      return { data: parsed.data, replayed: parsed.replayed === true };
     });
   }
 
@@ -398,16 +398,23 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
    * 파일 바이트를 서버에 올려 ready 인 blob 을 만든다: 예약(지문 · 크기) → (ready 가 아니면) PUT → 완료. 같은 바이트가 이미 ready 면 올리기를 건너뛴다.
    * 예약 · 완료의 멱등 키는 자료 등록 키(`key`)에서 이어 만든다 — 서버는 한 키를 다른 명령에 다시 쓰면 409 로 거절하므로 명령마다 달라야 하고,
    * 같은 `key` 로 다시 올리면 같은 키가 나가 단계를 서버가 재생한다(응답 유실 뒤 다시 보내도 중복이 없다).
+   * 재생된 예약 응답(`replayed`)의 state 는 처음 예약 때의 것이라 지금 blob 상태가 아닐 수 있다 — 이미 올리거나 완료한 blob 이면 서버는 PUT 을 409(ready blob 은 불변)로 막는다.
+   * 그때는 올릴 것이 없다는 뜻이므로 PUT 만 건너뛰고 완료(같은 키 → 서버가 재생하거나 처음 실행)로 이어 간다. 바이트가 아직 없으면 PUT 이 되므로 건너뛰지 않는다.
    */
   const stageBlob = (file: File, key: string) => async (id: string): Promise<Json> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const sha256 = hex(await globalThis.crypto.subtle.digest("SHA-256", bytes));
     const media_type = file.type || "application/octet-stream";
-    const reserved = await uploadStep(id, "POST", "/uploads", { json: { sha256, size: bytes.byteLength, media_type, original_name: file.name }, key: `${key}:upload-reserve` });
+    const { data: reserved, replayed } = await uploadStep(id, "POST", "/uploads", { json: { sha256, size: bytes.byteLength, media_type, original_name: file.name }, key: `${key}:upload-reserve` });
     const blob_id = text(reserved.blob_id);
     if (!blob_id) throw new PesApiError(fallbackBody(500));
     if (reserved.state !== "ready") {
-      await uploadStep(id, "PUT", `/uploads/${q(blob_id)}`, { body: bytes, contentType: media_type });
+      try {
+        await uploadStep(id, "PUT", `/uploads/${q(blob_id)}`, { body: bytes, contentType: media_type });
+      } catch (e) {
+        // 재생된 예약만: 옛 staging 을 보고 이미 끝난 blob 에 다시 올리려 한 409 는 “이미 올렸다”로 보고 완료로 이어 간다
+        if (!(replayed && e instanceof PesApiError && e.body.error.code === "conflict")) throw e;
+      }
       await uploadStep(id, "POST", `/uploads/${q(blob_id)}/complete`, { key: `${key}:upload-complete` });
     }
     return { blob_id };

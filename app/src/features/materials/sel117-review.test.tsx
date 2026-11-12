@@ -8,7 +8,7 @@ import { createHttpClient } from "@/api/http-client";
 import { WORKSPACE } from "@/api/fixture";
 import { ClientContext } from "@/api/queries";
 import { useUploads } from "./use-uploads";
-import { boot, createMaterialsClient, file, main, switchOf, table, waitRows } from "@/test/sel117";
+import { boot, createMaterialsClient, file, m, main, switchOf, table, waitRows } from "@/test/sel117";
 
 afterEach(cleanup);
 
@@ -288,5 +288,172 @@ describe("최종 리뷰 1/2 권장 3 — 프로젝트 · 판이 바뀌면 이전
     // 판 1 로 돌아오면 끝난 시도는 보관에서 지워져 있다(영수증을 받았다)
     view.rerender({ ed: 1 });
     await waitFor(() => expect(view.result.current.items).toEqual([]));
+  });
+});
+
+/* ───────────── 최종 리뷰 2/2 ───────────── */
+
+describe("최종 리뷰 2/2 필수 1 — 같은 키 전체 재시도는 서버의 재생 응답(옛 staging)을 보고도 수렴한다 (상태를 지키는 서버 모형)", () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const err = (code: string, status: number, reason?: string) => json({ error: { code, message: `합성 ${code}`, retryable: false, ...(reason ? { details: { reason } } : {}) } }, status);
+  /** 응답 본문이 끊겨 읽기 실패 — 서버는 이미 처리했다 */
+  const torn = () => ({ ok: true, status: 201, json: () => Promise.reject(new TypeError("terminated")) }) as unknown as Response;
+
+  /**
+   * 실제 서버(SEL-115)의 성질: 명령(예약 · 완료 · 자료)은 키별로 첫 응답을 저장해 `replayed: true` 로 그대로 재생한다(옛 state 도 그대로).
+   * ready blob 은 불변이라 PUT 은 409 conflict(retryable:false). 같은 sha256+크기는 blob 하나로 합친다(ready 면 deduplicated). 자료는 새 키마다 새 행.
+   */
+  function stateful(dropAt: string | null) {
+    const stored = new Map<string, { status: number; body: Record<string, unknown> }>();
+    const blobs = new Map<string, { id: string; state: "staging" | "staged" | "ready" }>();
+    const materials: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    let drop = dropAt;
+    let seq = 0;
+    const reply = (stage: string, status: number, body: Record<string, unknown>) => {
+      if (drop === stage) {
+        drop = null;
+        return torn();
+      }
+      return json(body, status);
+    };
+    const impl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url), "http://app.invalid").pathname.replace(/^.*\/projects\/[^/]+/, "");
+      const method = (init?.method ?? "GET").toUpperCase();
+      const key = new Headers(init?.headers).get("idempotency-key");
+      calls.push(`${method} ${path}`);
+      if (method === "GET" && path === "/materials") return json({ data: { materials } });
+      if (method === "POST" && path === "/uploads") {
+        const hit = stored.get(key!);
+        if (hit) return reply("reserve", hit.status, { ...hit.body, replayed: true });
+        const req = JSON.parse(String(init!.body)) as { sha256: string; size: number };
+        const known = blobs.get(`${req.sha256}:${req.size}`);
+        const blob = known ?? { id: `blob-${++seq}`, state: "staging" as const };
+        blobs.set(`${req.sha256}:${req.size}`, blob);
+        const dedup = known?.state === "ready";
+        const out = { status: dedup ? 200 : 201, body: { data: { blob_id: blob.id, state: blob.state, ...(dedup ? { deduplicated: true } : {}) } } };
+        stored.set(key!, out);
+        return reply("reserve", out.status, out.body);
+      }
+      const put = /^\/uploads\/([^/]+)$/.exec(path);
+      if (method === "PUT" && put) {
+        const blob = [...blobs.values()].find((b) => b.id === put[1])!;
+        if (blob.state === "ready") return err("conflict", 409);
+        blob.state = "staged";
+        return reply("put", 200, { data: { blob_id: blob.id, state: "staged" } });
+      }
+      const done = /^\/uploads\/([^/]+)\/complete$/.exec(path);
+      if (method === "POST" && done) {
+        const hit = stored.get(key!);
+        if (hit) return reply("complete", hit.status, { ...hit.body, replayed: true });
+        const blob = [...blobs.values()].find((b) => b.id === done[1])!;
+        if (blob.state !== "staged" && blob.state !== "ready") return err("conflict", 409, "blob_not_ready");
+        blob.state = "ready";
+        const out = { status: 200, body: { data: { blob_id: blob.id, state: "ready" } } };
+        stored.set(key!, out);
+        return reply("complete", 200, out.body);
+      }
+      if (method === "POST" && path === "/materials") {
+        const hit = stored.get(key!);
+        if (hit) return reply("material", hit.status, { ...hit.body, replayed: true });
+        const blob_id = (JSON.parse(String(init!.body)) as { blob_id: string }).blob_id;
+        const row = { object_id: `mat-s${materials.length + 1}`, version_id: `mv-s${materials.length + 1}`, version_no: 1, blob_id, file_policy_id: "fp-s", role: "attachment", title: "s.txt", original_name: "s.txt", media_type: "text/plain", size: 3, sha256: "a".repeat(64), ai_access: "allow" };
+        materials.push(row);
+        const out = { status: 201, body: { data: row, receipt: { receipt_no: `R-${materials.length}`, tx_id: `tx-${materials.length}`, committed_at: new Date().toISOString() } } };
+        stored.set(key!, out);
+        return reply("material", 201, out.body);
+      }
+      return err("not_found", 404);
+    });
+    return { impl: impl as unknown as typeof fetch, materials, calls };
+  }
+  const real = (impl: typeof fetch) => createHttpClient({ session: "synthetic-session-final2", projects: { [WORKSPACE.slug]: "pj-synthetic-9" }, fetch: impl });
+  const up = (c: ReturnType<typeof real>, key: string) => c.uploadMaterial(WORKSPACE.slug, WORKSPACE.edition, { file: file("s.txt", "abc") }, key);
+
+  for (const stage of ["reserve", "put", "complete", "material"]) {
+    it(`${stage} 단계의 응답을 잃어도 같은 키로 다시 보내면 영수증을 받고 자료는 1개`, async () => {
+      const s = stateful(stage);
+      const c = real(s.impl);
+      await expect(up(c, "k-final2")).rejects.toBeInstanceOf(Error);
+      const r = await up(c, "k-final2");
+      expect(r.receipt.receipt_no).toMatch(/^R-/);
+      expect(s.materials).toHaveLength(1);
+    });
+  }
+
+  it("자료 등록 응답을 잃은 뒤 재시도의 영수증은 처음 것이다 (재생) — 두 번째 자료가 생기지 않는다", async () => {
+    const s = stateful("material");
+    const c = real(s.impl);
+    await expect(up(c, "k-final2b")).rejects.toBeInstanceOf(Error);
+    const r = await up(c, "k-final2b");
+    expect(r.receipt.replayed).toBe(true);
+    expect(r.receipt.receipt_no).toBe("R-1");
+    expect(s.materials).toHaveLength(1);
+  });
+
+  it("PUT 이 없던 예약 재생(PUT 응답 유실 전)은 PUT 을 건너뛰지 않는다 — 바이트가 아직 없으면 올려야 완료된다", async () => {
+    const s = stateful("reserve");
+    const c = real(s.impl);
+    await expect(up(c, "k-final2c")).rejects.toBeInstanceOf(Error);
+    const r = await up(c, "k-final2c");
+    expect(r.receipt.receipt_no).toBe("R-1");
+    expect(s.calls.filter((x) => x.startsWith("PUT"))).toHaveLength(1);
+  });
+});
+
+describe("최종 리뷰 2/2 필수 2 — 진행 중 요청의 늦은 영수증은 돌아온 화면에도 닿고, 영수증 전에는 같은 파일을 또 올리지 않는다", () => {
+  const input = () => screen.getByLabelText("자료 파일 고르기", { selector: "input[type=file]" }) as HTMLInputElement;
+  async function leaveAndReturn(view: Awaited<ReturnType<typeof boot>>) {
+    const files = view.router.state.location.pathname;
+    await view.router.navigate(files.replace(/\/files$/, "/records"));
+    await waitFor(() => expect(screen.queryByRole("table", { name: "내 자료" })).toBeNull());
+    await view.router.navigate(files);
+    await waitRows();
+  }
+
+  it("진행 중에 화면을 떠났다 돌아온 뒤 이전 요청이 끝나면 “접수 확인 중”이 영수증 줄로 바뀐다", async () => {
+    const mc = createMaterialsClient();
+    const view = await boot(mc);
+    await waitRows();
+    const release = mc.hold();
+    const f = file("late-synthetic.txt", "늦은 영수증");
+    await userEvent.setup().upload(input(), f);
+    await waitFor(() => expect(mc.uploads).toHaveLength(1));
+    await leaveAndReturn(view);
+    await waitFor(() => expect(document.body.textContent).toContain("접수 확인 중"));
+    release();
+    await waitFor(() => expect(document.body.textContent).toMatch(/접수\s*\d/));
+    expect(document.body.textContent).not.toContain("접수 확인 중");
+  });
+
+  it("영수증이 오기 전에는 같은 파일을 다시 골라도 새 업로드를 시작하지 않는다 — 끝난 뒤 자료는 하나만 늘어난다", async () => {
+    const mc = createMaterialsClient();
+    const view = await boot(mc);
+    await waitRows();
+    const before = table().querySelectorAll("[data-material]").length;
+    const release = mc.hold();
+    const f = file("twice-synthetic.txt", "두 번");
+    const user = userEvent.setup();
+    await user.upload(input(), f);
+    await waitFor(() => expect(mc.uploads).toHaveLength(1));
+    await leaveAndReturn(view);
+    await user.upload(input(), f);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mc.uploads).toHaveLength(1);
+    release();
+    await waitFor(() => expect(table().querySelectorAll("[data-material]").length).toBe(before + 1));
+    expect(mc.uploads).toHaveLength(1);
+  });
+});
+
+describe("최종 리뷰 2/2 — 같은 파일이 중복 등록돼도 자료 목록에는 한 줄만 보인다 (서버는 같은 바이트의 blob·파일 정책을 하나로 합친다)", () => {
+  it("blob · 원래 이름이 같은 두 자료 행은 한 줄 — 다른 파일은 그대로", async () => {
+    const dup = m(5, { blob_id: "blob-1", file_policy_id: "fp-1", sha256: m(1).sha256, original_name: m(1).original_name, title: m(1).title });
+    const mc = createMaterialsClient([m(1), dup, m(3)]);
+    await boot(mc);
+    await waitRows();
+    expect(table().querySelectorAll("[data-material]")).toHaveLength(2);
+    expect(table().querySelector('[data-material="mat-1"]')).not.toBeNull();
+    expect(table().querySelector('[data-material="mat-3"]')).not.toBeNull();
   });
 });

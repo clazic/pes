@@ -31,3 +31,18 @@ export const ACCESS_WORD: Record<AiAccess, string> = { allow: "AI 참조 허용"
 
 /** 행의 data-ai-access 값 — 서버가 안 주면 unknown (허용으로 간주하지 않는다) */
 export const accessState = (a: AiAccess | null): AiAccess | "unknown" => a ?? "unknown";
+
+/**
+ * 같은 파일이 두 번 등록돼도(서버는 같은 바이트의 blob · 파일 정책을 하나로 합치지만 자료 등록은 새 키마다 새 행이다) 목록에는 한 줄만 둔다.
+ * 같은 blob 이고 원래 파일 이름도 같은 행은 같은 파일 — 먼저 나온 행을 남긴다. blob 을 모르는 행은 합치지 않는다. AI 참조 스위치는 blob 의 파일 정책 하나라 어느 줄이든 같은 값이다.
+ */
+export function collapseSameFile(rows: MaterialRow[]): MaterialRow[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    if (r.blob_id === "") return true;
+    const k = JSON.stringify([r.blob_id, r.original_name]);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}

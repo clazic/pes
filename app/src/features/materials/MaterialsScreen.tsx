@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { AccessDialog, switchId, type AccessDone } from "./AccessDialog";
 import { AiSwitch } from "./AiSwitch";
 import { FilePicker } from "./FilePicker";
-import { ACCESS_WORD, accessState, formatWord, sizeWord } from "./format";
+import { ACCESS_WORD, accessState, collapseSameFile, formatWord, sizeWord } from "./format";
 import { DenyNotice } from "./notice";
 import { PreviewPane } from "./PreviewPane";
 import { useUploads, type UploadItem } from "./use-uploads";
@@ -160,7 +160,7 @@ export function MaterialsScreen() {
   }
   if (!w) return <NotFound />;
 
-  const rows = list.data ?? [];
+  const rows = collapseSameFile(list.data ?? []);
   return (
     <main id="main" tabIndex={-1} className="min-w-0">
       <div className="border-b px-4 pt-4 pb-3 tab:px-6">

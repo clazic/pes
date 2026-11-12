@@ -13,6 +13,8 @@ import { PesApiError } from "@/api/types";
  *  - 끝나지 않은 시도의 키 · 이름 · 단계는 화면보다 오래 사는 sessionStorage 에 프로젝트 · 판 · 파일 지문별로 둔다(세션 비밀은 넣지 않는다). 화면을 옮기거나 새로 고친 뒤 돌아오면
  *    “접수 확인 중”으로 다시 보이고, 같은 파일을 다시 고르면 같은 키를 쓴다. 영수증을 받았거나 서버가 끝까지 거절했을 때만 지운다.
  *  - 프로젝트 · 판이 바뀌면 이전 범위의 줄 · 진행 중 요청은 새 범위의 화면에 섞이지 않는다.
+ *  - 진행 중인 요청과 그 결과는 화면(훅)보다 오래 산다 — 요청이 도는 동안 화면을 떠났다 돌아와도, 늦게 온 영수증 · 거절이 돌아온 화면의 같은 줄(“접수 확인 중”)을 바꾼다.
+ *    그 요청의 영수증을 받기 전에는 같은 파일 지문의 새 업로드를 시작하지 않는다(재선택은 기다리는 줄로 합쳐진다) — 서버는 같은 바이트의 blob 은 합쳐도 자료 등록은 새 키마다 새 행이라서다.
  */
 export type UploadItem =
   | { id: string; name: string; phase: "sending" }
@@ -22,6 +24,12 @@ export type UploadItem =
 
 /** 영수증 뒤 목록을 다시 읽기까지 모으는 시간, 밀리초 */
 export const REREAD_MS = 250;
+
+/** 지금 돌고 있는 요청(보관 키로 구분) — 훅이 아니라 모듈이 들고 있어서 화면을 떠났다 돌아온 새 훅도 본다 */
+const active = new Set<string>();
+/** 요청 결과를 지금 열려 있는 화면들에 알린다 — [범위, 줄]. 화면은 자기 범위의 줄만 받는다 */
+type Listener = (scope: string, item: UploadItem) => void;
+const listeners = new Set<Listener>();
 
 const isFinalRejection = (e: unknown): e is PesApiError => e instanceof PesApiError && !e.body.error.retryable;
 
@@ -129,20 +137,22 @@ export function useUploads(slug: string, edition: number) {
   const qc = useQueryClient();
   const scope = JSON.stringify([slug, edition]);
   const [items, setItems] = React.useState<UploadItem[]>(() => restored(slug, edition));
-  /** 지금 이 화면이 보여 주는 범위(프로젝트 · 판). 화면을 떠나면 null — 늦게 끝난 요청이 다른 범위 · 닫힌 화면을 건드리지 않는다 */
-  const current = React.useRef<string | null>(scope);
-  const inFlight = React.useRef(new Set<string>());
   const reread = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   React.useEffect(() => {
-    current.current = scope;
+    const listener: Listener = (from, item) => {
+      if (from === scope) setItems((cur) => [...cur.filter((x) => x.id !== item.id), item]);
+    };
     // 범위가 바뀌었으면 이전 범위의 줄을 치우고 새 범위에 남은 시도를 다시 보인다
-    setItems((cur) => {
-      const next = restored(slug, edition);
-      const keep = cur.filter((x) => x.phase === "sending" && inFlight.current.has(attemptKey(slug, edition, x.id)));
-      return [...next.filter((x) => !keep.some((k) => k.id === x.id)), ...keep];
-    });
+    const resync = () =>
+      setItems((cur) => {
+        const next = restored(slug, edition);
+        const keep = cur.filter((x) => x.phase === "sending" && active.has(attemptKey(slug, edition, x.id)));
+        return [...next.filter((x) => !keep.some((k) => k.id === x.id)), ...keep];
+      });
+    listeners.add(listener);
+    resync();
     return () => {
-      current.current = null;
+      listeners.delete(listener);
       // 화면을 떠나면 모아 둔 다시 읽기를 낡음 표시로 바꾼다 — 다음에 이 화면을 열 때 읽는다
       if (reread.current !== undefined) {
         clearTimeout(reread.current);
@@ -155,10 +165,14 @@ export function useUploads(slug: string, edition: number) {
     async (file: File, objectId?: string) => {
       const fp = fingerprint(file, objectId);
       const stored = attemptKey(slug, edition, fp);
-      // 이 요청을 시작한 범위 — 끝났을 때 화면이 같은 범위일 때만 줄을 바꾼다
-      const put = (item: UploadItem) => current.current === scope && setItems((cur) => [...cur.filter((x) => x.id !== item.id), item]);
-      if (inFlight.current.has(stored)) return;
-      inFlight.current.add(stored);
+      // 이 요청을 시작한 범위 — 결과는 같은 범위를 보여 주는 열린 화면에만 간다(화면이 바뀌었어도 그 화면이 받는다)
+      const put = (item: UploadItem) => listeners.forEach((l) => l(scope, item));
+      if (active.has(stored)) {
+        // 이미 도는 요청이 있다(떠났다 돌아온 화면 포함) — 새로 보내지 않고 그 영수증을 기다리는 줄로 합친다
+        put({ id: fp, name: file.name, phase: "sending" });
+        return;
+      }
+      active.add(stored);
       const key = storeRead(stored)?.key ?? newIdempotencyKey();
       storeWrite(stored, { key, name: file.name, phase: "sending" });
       put({ id: fp, name: file.name, phase: "sending" });
@@ -185,7 +199,7 @@ export function useUploads(slug: string, edition: number) {
           put({ id: fp, name: file.name, phase: "rejected", message: `파일을 보내지 못했어요. ${e instanceof Error && e.message ? e.message : "브라우저에서 파일을 준비하지 못했어요."} 다시 골라 올려 주세요.` });
         }
       } finally {
-        inFlight.current.delete(stored);
+        active.delete(stored);
       }
     },
     [client, qc, slug, edition, scope],
