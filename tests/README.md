@@ -64,6 +64,20 @@ Playwright 도 `npm test` 처럼 **임시 HOME 이 아니면 시작하자마자 
 
 합성 작업 공간은 `tests/e2e/helpers/seed_workspace.ts`(일반 Node 로 실행)가 임시 HOME·USERPROFILE·PES_HOME 에 만든다. `PES_E2E_V015=1` 로 돌리면 같은 시험을 v0.15 동작에 대고 돌려, 선택자·흐름이 옛 동작과 맞는지(구현 전 자체 점검) 볼 수 있다.
 
+### 앱(app/) Vitest·Playwright 실행 (SEL-122)
+
+앱 Vitest(`app/vitest.config.ts`)와 앱 Playwright(`app/playwright.config.ts`)도 **설정을 읽는 즉시** 실제 계정 홈이면 거절한다(시험 파일을 찾기 전). 그래서 HOME·USERPROFILE 을 임시 폴더로 바꾸고, 브라우저 캐시는 HOME 밖 폴더로 넘긴다. `<브라우저 폴더>` 는 실제 홈 밖의 고정 폴더 경로로 바꾼다:
+
+```sh
+cd app
+export PLAYWRIGHT_BROWSERS_PATH="<브라우저 폴더>"    # HOME 밖, 처음 한 번: npx playwright install chromium
+tmp_home="$(mktemp -d)"
+HOME="$tmp_home" USERPROFILE="$tmp_home" npx vitest run                 # 앱 단위 시험
+HOME="$tmp_home" USERPROFILE="$tmp_home" npm run test:e2e               # 앱 e2e
+```
+
+`test_sel122_app_home_guard` 가 Vitest CLI 를 가짜 계정 홈으로 띄워 거절과 `pes-projects` 를 열지 않음을 본다(`app/node_modules` 가 있어야 한다).
+
 ## 0.15 동등성 하네스와 옛 Python 시험 자산의 TS 이전 (SEL-70, PR26a — SEL-74 로 Python 쪽은 사라지고 고정 기록만 남는다)
 
 PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **현재 동작**을 TS 시험으로 고정하고 같은 입력을 두 대상에 넣어 견주는 도구를 만들었다. **SEL-74(5단계 시험 쪽)부터 Python 대상은 없다** — 기준값 `baseline/*.json` 이 0.15 의 고정 기록이고(`baseline.sha256.json` 이 불변을 지킨다), 하네스는 ts 만 돌려 그것과 견준다. 설계는 [migration-ts-equivalence.md](../docs/plan/migration-ts-equivalence.md) 7·8절.

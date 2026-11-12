@@ -107,3 +107,41 @@ test("B3 the CI app job runs its test steps with a temporary HOME and USERPROFIL
     assert.match(step, /USERPROFILE: \$\{\{ runner\.temp \}\}\/pes-test-home/, "USERPROFILE is the temporary folder");
   }
 });
+
+test("C1 the app's real Vitest CLI refuses a start in the (fake) account home before it globs or loads any test file — zero fs calls under its pes-projects", () => {
+  // The review (SEL-122 final 1/2) reproduced the gap: the guard ran as globalSetup, after Vitest had already read <home>/pes-projects/src (a readdir).
+  // Here the real runner gets HOME · USERPROFILE · PES_TEST_ACCOUNT_HOME = the fake home and --dir = its pes-projects; a probe spec there throws if loaded.
+  // The recorder watches only pes-projects: Vitest writes its own token under HOME/Library at start, which is not what this test is about.
+  const app = join(REPO, "app");
+  const vitest_bin = join(app, "node_modules", "vitest", "vitest.mjs");
+  assert.ok(existsSync(vitest_bin), "app dependencies are needed for this test (cd app && npm ci)");
+  const root = mkdtempSync(join(tmpdir(), "pes-sel122-cli-"));
+  roots.push(root);
+  const acct = join(root, "acct");
+  const projects = join(acct, "pes-projects");
+  mkdirSync(join(projects, "src"), { recursive: true });
+  writeFileSync(join(projects, "src", "probe.test.ts"), 'throw new Error("SPEC-SHOULD-NOT-LOAD");\n');
+  const log = join(root, "fs-calls.log"); // outside the watched folder
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: acct,
+    USERPROFILE: acct,
+    PES_TEST_ACCOUNT_HOME: acct,
+    PES_FS_LOG: log,
+    PES_FS_WATCH: projects,
+  };
+  for (const key of ["SystemRoot", "TMPDIR", "TEMP", "TMP"]) if (process.env[key] !== undefined) env[key] = process.env[key] as string;
+  const run = spawnSync(process.execPath, ["--import", RECORDER, vitest_bin, "run", "--dir", projects], {
+    cwd: app,
+    env,
+    encoding: "utf8",
+    timeout: 120_000,
+  });
+  assert.equal(run.error, undefined, `the child started (${String(run.error)})`);
+  const out = `${run.stdout}\n${run.stderr}`;
+  assert.notEqual(run.status, 0, out);
+  assert.match(out, /임시 HOME/, out);
+  assert.doesNotMatch(out, /SPEC-SHOULD-NOT-LOAD/, "the probe spec was not loaded");
+  const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line !== "") : [];
+  assert.deepEqual(calls, [], `not one fs call under the account's pes-projects:\n${calls.join("\n")}`);
+});

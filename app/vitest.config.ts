@@ -1,13 +1,17 @@
+// SEL-122: 설정 평가 단계에서 거절한다 — globalSetup 은 시험 파일 탐색 뒤라 늦다(리뷰 필수 1). 루트 판정을 그대로 쓴다(문자열만 비교).
+import { assert_temp_home_env } from "../tests/helpers/temp_home_check.ts";
 import { mergeConfig } from "vite";
 import { defineConfig } from "vitest/config";
 import viteConfig from "./vite.config";
+
+assert_temp_home_env();
 
 export default mergeConfig(
   viteConfig,
   defineConfig({
     test: {
       environment: "jsdom",
-      // SEL-122: 실제 계정 홈에서 시작하면 시험 전에 거절(루트와 같은 판정)
+      // 이중 안전: 설정 평가 때 이미 거절했다
       globalSetup: ["./vitest.global-setup.ts"],
       setupFiles: ["./vitest.setup.ts"],
       include: ["src/**/*.test.{ts,tsx}"],
