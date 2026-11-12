@@ -18,7 +18,23 @@ export type IsoTime = string;
 /* ───────────── 봉투 · 오류 · 영수증 (API 결정 4 · 3절 오류 봉투) ───────────── */
 
 /** 2단계 코어(api_support.ts)의 닫힌 오류 코드 중 U1a 가짜 클라이언트가 쓰는 것 */
-export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "rev_conflict" | "question_version_changed" | "cursor_expired" | "cursor_invalid" | "not_supported";
+export type ApiErrorCode =
+  | "not_found"
+  | "invalid_payload"
+  | "idempotency_key_reuse"
+  | "conflict"
+  | "rev_conflict"
+  | "question_version_changed"
+  | "cursor_expired"
+  | "cursor_invalid"
+  | "not_supported"
+  // U4b(SEL-112) — 서버 첨언·후속(SEL-99 U4a)의 닫힌 목록 중 화면이 알아보는 것
+  | "basis_changed"
+  | "thread_closed"
+  | "already_resolved"
+  | "human_required"
+  | "forbidden"
+  | "validation_failed";
 
 export interface ApiError {
   format_version: typeof FORMAT_VERSION;
@@ -339,6 +355,13 @@ export interface ResultView {
   status: "adopted" | "draft";
   updated_at: IsoTime;
   paragraphs: string[];
+  /**
+   * U4b(SEL-112) — 결과 글 선택 도구(첨언)의 기준. 셋이 모두 있어야 선택 도구가 켜진다(서버가 안 주면 없다 — 지어내지 않는다).
+   * object_id = 결과 글 객체 · version_id = 지금 보는 글 버전 · body_md = 그 버전 본문 그대로(앵커 위치의 기준, 정규화 없음).
+   */
+  object_id?: string;
+  version_id?: string;
+  body_md?: string;
 }
 
 export interface RoundView {
@@ -619,6 +642,79 @@ export interface ReferencesMethods {
   detachReference(slug: string, edition: number, refId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ reference_id: string; detached: true }>>;
 }
 
+/* ───────────── 결과 글 첨언 · 후속(U4b · SEL-112) — 서버 계약은 SEL-99(U4a): P/threads(context_kind annotation) · P/followups ───────────── */
+
+/** 위치는 서버와 같은 code point(유니코드 스칼라) — `@/lib/anchor-text` */
+export interface CpRange {
+  start_cp: number;
+  end_cp: number;
+}
+/** 글의 지금 버전에서 인용문이 어떻게 보이는가(서버 판정) — 상태 사전 anchor 의 키 */
+export type AnchorStatus = "exact" | "moved" | "ambiguous" | "lost";
+export type FollowupKind = "edit_text" | "next_round_task" | "reopen_stage" | "none";
+export type FollowupState = "proposed" | "accepted" | "running" | "applied" | "deferred" | "rejected" | "cancelled";
+
+/** 후속 상세(GET P/followups 한 줄) — version_no 는 서버 그대로의 10진 문자열(expected_rev 로 되돌려 보낸다) */
+export interface FollowupDetail {
+  id: string;
+  kind: FollowupKind;
+  state: FollowupState;
+  description: string;
+  version_no: string;
+  origin_thread_id: string;
+  base_version_id: string | null;
+  proposed_body_md: string | null;
+  proposed_version_id: string | null;
+  result_version_id: string | null;
+  applied_tx_id: string | null;
+  confirmed_by_actor_id: string | null;
+}
+
+export interface AnnotationAnchorView {
+  exact_quote: string;
+  prefix: string;
+  suffix: string;
+  start_cp: number;
+  end_cp: number;
+  target_version_id: string;
+  /** 글의 현재 버전 기준 판정 — 화면의 표시 상태. ambiguous · lost 는 위치가 null(서버가 하나를 고르지 않았으니 앱도 고르지 않는다) */
+  current: {
+    evaluated_version_id: string;
+    status: AnchorStatus;
+    start_cp: number | null;
+    end_cp: number | null;
+    text: string | null;
+    candidates: CpRange[];
+    confirmed_by_actor_id: string | null;
+  };
+}
+
+export interface AnnotationMessageView {
+  message_id: string;
+  body_md: string;
+  at: IsoTime;
+  actor_id: string;
+  /** 서버가 행위자 종류를 주지 않으면 null — 화면은 사람/AI 라고 쓰지 않는다 */
+  by: "human" | "ai" | null;
+}
+
+export interface AnnotationThreadView {
+  thread_id: string;
+  state: "open" | "resolved" | "archived";
+  target_object_id: string;
+  target_version_id: string;
+  anchor: AnnotationAnchorView;
+  messages: AnnotationMessageView[];
+  resolution: { resolution: FollowupKind; reason: string; followup_id: string | null } | null;
+  followups: FollowupDetail[];
+}
+
+export interface AnnotationInput {
+  target_object_id: string;
+  target_version_id: string;
+  anchor: { exact_quote: string; prefix: string; suffix: string; start_cp: number; end_cp: number };
+  body_md: string;
+}
 
 /* ───────────── 내 자료 · 파일별 AI 참조 · 미리보기 (MAT1c · SEL-117) — 서버 계약은 SEL-115(MAT1a): P/materials · P/uploads · P/file-policies/{fp}/ai-access · P/files/{b}/preview ───────────── */
 
@@ -738,6 +834,23 @@ export interface PesClient extends MaterialsMethods, ReferencesMethods {
   getComments(slug: string, edition: number, stage: string, round: string): Promise<CommentThreadView[]>;
   /** 질문별 의견 — thread_id 없으면 새 스레드 + 첫 메시지, 있으면 메시지만. 답·제출은 만들지 않는다. 멱등 키 필수 */
   addComment(slug: string, edition: number, questionId: string, input: CommentInput, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; message_id: string; thread_created: boolean }>>;
+
+  /**
+   * 결과 글 첨언 · 후속(U4b · SEL-112) — 서버 계약은 SEL-99(U4a). 읽기: 그 글(object)의 첨언 스레드 전부(열림 · 해결됨 · 후속 상세 포함), 없으면 [] · 모르는 판 [].
+   * 쓰기는 멱등 키 필수(없으면 invalid_payload) · 거절은 PesApiError(409 basis_changed · thread_closed · already_resolved · 403 human_required …) · 모두 사람만 하는 일이다(소유자 세션).
+   * 성공 표시는 영수증 뒤에만 — 화면은 영수증을 받은 뒤 읽기를 다시 한다(낙관적 갱신 없음).
+   */
+  getAnnotations(slug: string, edition: number, objectId: string): Promise<AnnotationThreadView[]>;
+  createAnnotation(slug: string, edition: number, input: AnnotationInput, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; message_id: string; anchor_id: string; anchor_status: "exact" | "moved" }>>;
+  replyAnnotation(slug: string, edition: number, threadId: string, input: { body_md: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; message_id: string }>>;
+  /** 해결 ≠ 반영: 결과의 applied 는 늘 false 다(글은 해결로 바뀌지 않는다) */
+  resolveAnnotation(slug: string, edition: number, threadId: string, input: { resolution: FollowupKind; reason: string; target_stage?: StageKey; base_version_id?: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; state: "resolved"; followup_id: string | null; applied: false }>>;
+  /** 다시 붙이기(사람만) — 구간은 code point. version_id 를 주면 그 글 버전 기준. basis_version_id = 구간을 고른 글 버전(글의 현재 버전이 아니면 서버가 409 basis_changed, 아무것도 안 쓴다) */
+  reanchorAnnotation(slug: string, edition: number, threadId: string, input: { version_id?: string; basis_version_id?: string } & CpRange, idempotencyKey: string | undefined): Promise<CommandResult<{ thread_id: string; anchor_status: AnchorStatus }>>;
+  /** 후속 제안(적용하지 않는다). target_stage = 단계 키 — next_round_task · reopen_stage 는 서버가 그 단계 id 를 요구한다 */
+  proposeFollowup(slug: string, edition: number, input: { origin_thread_id: string; kind: FollowupKind; description: string; target_stage?: StageKey }, idempotencyKey: string | undefined): Promise<CommandResult<{ followup_id: string; state: "proposed" }>>;
+  /** 후속 채택(사람만) — base_version_id = 후속이 제안된 기반 글 버전 · expected_rev = FollowupDetail.version_no(문자열 그대로) */
+  applyFollowup(slug: string, edition: number, followupId: string, input: { base_version_id: string; expected_rev: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ followup_id: string; state: FollowupState; result_version_id: string | null; applied_tx_id: string | null }>>;
 
   /** 이 클라이언트가 못 하는 일(정직하게 알린다). 없으면 모두 된다 */
   readonly capabilities?: { questionTools?: boolean };
