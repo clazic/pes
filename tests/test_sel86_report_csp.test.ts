@@ -82,8 +82,11 @@ function assert_app_script_policy(headers: Headers, html: string, what: string):
   const d = directives([...header_policies(headers), ...meta_policies(html)]);
   const src = d.get("script-src") ?? d.get("default-src");
   assert.ok(src !== undefined, `${what}: 헤더나 meta CSP 에 script-src 가 있다`);
-  assert.ok(src.includes("'self'"), `${what}: script-src 가 'self' 를 허용한다 (${src.join(" ")})`);
-  for (const bad of ["'unsafe-inline'", "'unsafe-eval'", "*", "data:", "blob:", "http:", "https:"]) assert.ok(!src.includes(bad), `${what}: script-src 에 ${bad} 가 없다`);
+  // SEL-102: 'self'(출처 전체) 대신 /_app/ 경로 출처만 — 폴더의 아무 .js 도 싣지 못한다
+  assert.ok(src.length > 0 && src.every((x) => /\/_app\/$/.test(x)), `${what}: script-src 는 /_app/ 경로 출처만 (${src.join(" ")})`);
+  for (const bad of ["'self'", "'unsafe-inline'", "'unsafe-eval'", "*", "data:", "blob:", "http:", "https:"]) assert.ok(!src.includes(bad), `${what}: script-src 에 ${bad} 가 없다`);
+  assert.deepEqual(d.get("base-uri"), ["'none'"], `${what}: base-uri 'none'`);
+  assert.deepEqual(d.get("object-src"), ["'none'"], `${what}: object-src 'none'`);
   assert.ok(!d.has("sandbox"), `${what}: 앱에는 sandbox 가 없다 (앱은 같은 출처 sessionStorage 가 필요)`);
 }
 

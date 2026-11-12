@@ -67,6 +67,7 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "question.merge",
   "question.prepare_draft",
   "question.publish_set",
+  "question.reorder",
   "question.revise",
   "question.withdraw",
   "reflection.create",

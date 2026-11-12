@@ -557,6 +557,23 @@ const SCENES: Record<string, { normal: Builder; error?: Builder }> = {
       return { subst: { [PH.question]: q.question_id, [PH.qversion]: q.version_id, qst_01J9Z3K7QE: t.question_id } };
     },
   },
+  // SEL-98 U2d: the reorder of the form's newest set (two questions, one new set)
+  "question_sets.order": {
+    normal: async (env) => {
+      const round = await open_round(env);
+      const first = await ask(env, round.stage_id, round.round_id);
+      const second = await ask(env, round.stage_id, round.round_id);
+      return { subst: { [PH.qset]: second.set_id, [PH.question]: first.question_id, qst_01J9Z3K7QE: second.question_id } };
+    },
+    error: async (env) => {
+      const round = await open_round(env);
+      const first = await ask(env, round.stage_id, round.round_id);
+      const second = await ask(env, round.stage_id, round.round_id);
+      // the error case: a newer order of the form makes the old set stale (409 conflict, details.reason stale_set)
+      assert_ok(await call(env, { method: "POST", path: P(env, `/question-sets/${second.set_id}/order`), auth: "owner", key: "idem_ord_seed_01J9Z3K7Q2", body: { question_ids: [second.question_id, first.question_id] } }), 201);
+      return { subst: { [PH.qset]: second.set_id, [PH.question]: first.question_id, qst_01J9Z3K7QE: second.question_id } };
+    },
+  },
   "submissions.create": {
     normal: async (env) => {
       const round = await open_round(env);
@@ -777,8 +794,17 @@ function compare(res: Awaited<ReturnType<typeof call>>, expected: FixtureCase["r
   } else {
     assert.equal(body.error, undefined, `no error expected: ${where}`);
     same_shape(body.data, expected.body.data, "data");
-    const keys = Object.keys(body).filter((k) => k !== "replayed").sort(); // `replayed` (POST only) is optional in the examples
-    assert.deepEqual(keys, Object.keys(expected.body).sort(), `envelope keys (${method})`);
+    // `replayed` (POST only) is optional in the examples. SEL-98: a 201 write also carries the sibling `receipt` {receipt_no, tx_id, committed_at}
+    // (request-level, not part of `data`); examples may omit it, but a 201 POST body must have it and an example that names it must match its shape.
+    const optional = ["replayed", "receipt"];
+    const keys = Object.keys(body).filter((k) => !optional.includes(k)).sort();
+    assert.deepEqual(keys, Object.keys(expected.body).filter((k) => !optional.includes(k)).sort(), `envelope keys (${method})`);
+    if (res.status === 201 && method === "POST") {
+      assert.ok(body.receipt && typeof body.receipt === "object", `a 201 write carries receipt (${method})`);
+      assert.deepEqual(Object.keys(body.receipt).sort(), ["committed_at", "receipt_no", "tx_id"], "receipt keys");
+    }
+    if ("receipt" in expected.body) same_shape(body.receipt, (expected.body as Record<string, unknown>).receipt, "receipt");
+    else if (res.status !== 201 || method !== "POST") assert.equal("receipt" in body, false, `no receipt outside a 201 write (${method})`);
   }
 }
 
@@ -920,3 +946,37 @@ for (const spec of EXTRA) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// SEL-98 F1: question_sets.order 의 정상 응답 — set.version_no 는 숫자, members.position 은 0부터 연속,
+// members 의 순서는 요청한 순서와 같다. 픽스처의 예시와 실제 앱 응답이 같은 규칙을 지키는지 본다.
+
+function assert_order_data(data: any, requested: string[], where: string): void {
+  assert.equal(typeof data.set.version_no, "number", `${where}: set.version_no is a number`);
+  assert.deepEqual(
+    data.members.map((m: { position: number }) => m.position),
+    data.members.map((_: unknown, i: number) => i),
+    `${where}: members.position runs 0..n-1`,
+  );
+  assert.deepEqual(
+    data.members.map((m: { question_id: string }) => m.question_id),
+    requested,
+    `${where}: members follow the requested order`,
+  );
+}
+
+test("contract question_sets.order: the fixture's example body follows the same version_no and position rules", () => {
+  const c = (JSON.parse(readFileSync(new URL("question-set-order.json", FIXTURE_DIR), "utf8")) as Fixture).normal!;
+  assert_order_data(c.response.body.data, (c.request.body as { question_ids: string[] }).question_ids, "fixture normal");
+});
+
+test("contract question_sets.order: the real answer follows the same version_no and position rules", async () => {
+  await with_api(async (env) => {
+    const round = await open_round(env);
+    const first = await ask(env, round.stage_id, round.round_id);
+    const second = await ask(env, round.stage_id, round.round_id);
+    const requested = [second.question_id, first.question_id];
+    const data = assert_ok(await call(env, { method: "POST", path: P(env, `/question-sets/${second.set_id}/order`), auth: "owner", key: "idem_ord_real_01J9Z3K7Q2", body: { question_ids: requested } }), 201);
+    assert_order_data(data, requested, "real answer");
+  });
+});

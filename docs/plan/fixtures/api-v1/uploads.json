@@ -34,6 +34,11 @@
           "blob_id": "blb_01J9Z3K7QG",
           "state": "staging",
           "deduplicated": false
+        },
+        "receipt": {
+          "receipt_no": "58",
+          "tx_id": "txn_01J9Z3K7R18",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

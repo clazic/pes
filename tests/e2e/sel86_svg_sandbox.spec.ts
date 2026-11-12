@@ -2,7 +2,7 @@
 //
 // 옛 project.json 폴더(정적 서빙) 하나를 합성 DB 작업 공간 옆에 놓고(같은 PES_HOME) serve.ts 를 띄운다. 임시 HOME·USERPROFILE·PES_HOME.
 //  E1 같은 탭에서 같은 출처 sessionStorage 에 값을 넣은 뒤 reports/·out/ 의 SVG 를 직접 연다 → SVG 안의 스크립트가 돌지만 sessionStorage 를 읽지 못한다(SecurityError).
-//     대조: reports/·out/ 밖(notes/)의 SVG 는 같은 값을 읽는다 — 스크립트가 실제로 도는 시험이라는 증거.
+//     대조: SEL-102 로 notes/ 의 SVG 도 sandbox — 같은 값을 읽지 못한다(스크립트가 도는 것은 data-r 로 증명). 값은 sandbox 없는 같은 출처 /ping 에서 심는다.
 //  E2 같은 SVG 를 <img> 로 넣은 페이지(notes/embed.html)는 그림이 그대로 뜬다(naturalWidth > 0, 로드 오류 없음).
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -93,7 +93,9 @@ const attr = (page: any, name: string): Promise<string | null> => page.evaluate(
 
 for (const path of ["reports/plan/d.svg", "out/d.svg"]) {
   test(`E1 같은 탭에서 sessionStorage 를 둔 뒤 ${path} 를 직접 열면 SVG 스크립트가 sessionStorage 를 읽지 못한다 (불투명 출처)`, async ({ page }) => {
-    await page.goto(`${base}/${LEGACY}/notes/set.html`);
+    // 같은 출처이면서 sandbox 가 없는 문서(/ping, text/plain)에서 값을 심는다 — SEL-102 뒤로 notes/*.html 도 sandbox 라 쓸 수 없다
+    await page.goto(`${base}/ping`);
+    await page.evaluate((v) => sessionStorage.setItem("k", v), SECRET);
     expect(await page.evaluate(() => sessionStorage.getItem("k"))).toBe(SECRET);
     const res = await page.goto(`${base}/${LEGACY}/${path}`);
     expect(res?.headers()["content-security-policy"] ?? "").toMatch(/\bsandbox\b/);
@@ -104,10 +106,14 @@ for (const path of ["reports/plan/d.svg", "out/d.svg"]) {
   });
 }
 
-test("E1 대조: reports/·out/ 밖(notes/)의 SVG 는 같은 출처라 같은 값을 읽는다 (그래서 위 시험이 스크립트 실행을 증명한다)", async ({ page }) => {
-  await page.goto(`${base}/${LEGACY}/notes/set.html`);
-  await page.goto(`${base}/${LEGACY}/notes/d.svg`);
-  await expect.poll(() => attr(page, "data-r")).toBe(`read:${SECRET}`);
+test("E1 대조(SEL-102 로 바뀜): reports/·out/ 밖(notes/)의 SVG 도 이제 sandbox — 스크립트는 돌지만(data-r 이 생김) 같은 값을 읽지 못한다", async ({ page }) => {
+  await page.goto(`${base}/ping`);
+  await page.evaluate((v) => sessionStorage.setItem("k", v), SECRET);
+  expect(await page.evaluate(() => sessionStorage.getItem("k"))).toBe(SECRET);
+  const res = await page.goto(`${base}/${LEGACY}/notes/d.svg`);
+  expect(res?.headers()["content-security-policy"] ?? "").toMatch(/\bsandbox\b/);
+  await expect.poll(() => attr(page, "data-r"), { message: "SVG 안의 스크립트가 돈다" }).not.toBeNull();
+  expect(await attr(page, "data-r")).toBe("throw:SecurityError");
 });
 
 test("E2 <img> 로 넣은 reports/·out/ SVG 는 그대로 뜬다 (sandbox 는 문서에만 걸린다)", async ({ page }) => {

@@ -43,6 +43,11 @@
             "applied_count": 1,
             "partial_count": 0
           }
+        },
+        "receipt": {
+          "receipt_no": "51",
+          "tx_id": "txn_01J9Z3K7R11",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

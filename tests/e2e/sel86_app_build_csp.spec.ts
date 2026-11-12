@@ -61,8 +61,11 @@ function expect_app_script_policy(headers: Headers, html: string, what: string):
   const d = directives([...header_policies(headers), ...meta_policies(html)]);
   const src = d.get("script-src") ?? d.get("default-src");
   expect(src, `${what}: 헤더나 meta CSP 에 script-src 가 있다`).toBeDefined();
-  expect(src, `${what}: script-src 가 'self' 를 허용한다 (${(src ?? []).join(" ")})`).toContain("'self'");
-  for (const bad of ["'unsafe-inline'", "'unsafe-eval'", "*", "data:", "blob:", "http:", "https:"]) expect(src, `${what}: script-src 에 ${bad} 가 없다`).not.toContain(bad);
+  // SEL-102: 'self'(출처 전체) 대신 /_app/ 경로 출처만 — 폴더의 아무 .js 도 싣지 못한다
+  expect((src ?? []).length > 0 && (src ?? []).every((x) => /\/_app\/$/.test(x)), `${what}: script-src 는 /_app/ 경로 출처만 (${(src ?? []).join(" ")})`).toBe(true);
+  for (const bad of ["'self'", "'unsafe-inline'", "'unsafe-eval'", "*", "data:", "blob:", "http:", "https:"]) expect(src, `${what}: script-src 에 ${bad} 가 없다`).not.toContain(bad);
+  expect(d.get("base-uri"), `${what}: base-uri 'none'`).toEqual(["'none'"]);
+  expect(d.get("object-src"), `${what}: object-src 'none'`).toEqual(["'none'"]);
   expect(d.has("sandbox"), `${what}: 앱에는 sandbox 가 없다 (앱은 같은 출처 sessionStorage 가 필요)`).toBe(false);
 }
 
