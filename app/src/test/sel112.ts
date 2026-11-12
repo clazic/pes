@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FORMAT_VERSION, PesApiError, type CommandResult, type PesClient, type RoundView } from "@/api/types";
+import { FORMAT_VERSION, PesApiError, type CommandResult, type PesClient, type RoundView, type StageKey } from "@/api/types";
 import { renderApp, type Env } from "@/test/render-app";
 import { createScriptedClient } from "@/test/scripted-client";
 import { url } from "@/test/contract";
@@ -29,7 +29,7 @@ import { ready } from "@/test/ui";
  *   쓰기(멱등 키 필수, 거절은 PesApiError, 모두 CommandResult):
  *     createAnnotation(slug, edition, input: AnnotationInput, key)  → { thread_id, message_id, anchor_id, anchor_status: "exact" | "moved" }
  *     replyAnnotation(slug, edition, threadId, { body_md }, key)    → { thread_id, message_id }
- *     resolveAnnotation(slug, edition, threadId, { resolution, reason }, key)  → { thread_id, state: "resolved", followup_id: string | null, applied: false }   사람만
+ *     resolveAnnotation(slug, edition, threadId, { resolution, reason, target_stage?, base_version_id? }, key)  → { thread_id, state: "resolved", followup_id: string | null, applied: false }   사람만
  *     reanchorAnnotation(slug, edition, threadId, { version_id?, start_cp, end_cp }, key) → { thread_id, anchor_status }   다시 붙이기(사람만)
  *     proposeFollowup(slug, edition, input: { origin_thread_id, kind, description, target_stage? }, key) → { followup_id, state: "proposed" }   ("할 일로" 는 next_round_task 제안만 — 바로 적용하지 않는다)
  *     applyFollowup(slug, edition, followupId, { base_version_id, expected_rev }, key) → { followup_id, state, result_version_id: string | null, applied_tx_id: string | null }   사람만
@@ -304,13 +304,21 @@ export function createU4Client(init: U4Init = {}) {
         t.messages.push(m);
         return { thread_id: threadId, message_id: m.message_id };
       }),
-    resolveAnnotation: (slug: string, _e: number, threadId: string, input: { resolution: FollowupKind; reason: string }, key: string | undefined) =>
+    resolveAnnotation: (slug: string, _e: number, threadId: string, input: { resolution: FollowupKind; reason: string; target_stage?: StageKey; base_version_id?: string }, key: string | undefined) =>
       command("resolveAnnotation", slug, threadId, { ...input }, key, () => {
         const t = findThread(threadId);
         if (t.state !== "open") throw apiFail("already_resolved", "이미 해결된 첨언입니다.", { thread_id: threadId, state: t.state });
+        // 실제 서버 규칙: 단계가 필요한 갈래(next_round_task · reopen_stage)는 followup.target_stage_id 없이는 거절, none 이 아니면 후속이 같이 만들어진다
+        if ((input.resolution === "next_round_task" || input.resolution === "reopen_stage") && !input.target_stage) throw apiFail("invalid_payload", "단계를 알 수 없어 해결을 보낼 수 없습니다.", { reason: "target_stage_required" });
+        let followupId: string | null = null;
+        if (input.resolution !== "none") {
+          const f = followup(`fu-new-${next++}`, t.thread_id, { kind: input.resolution, description: input.reason, proposed_body_md: null, proposed_version_id: null, base_version_id: null });
+          t.followups.push(f);
+          followupId = f.id;
+        }
         t.state = "resolved";
-        t.resolution = { resolution: input.resolution, reason: input.reason, followup_id: null };
-        return { thread_id: threadId, state: "resolved" as const, followup_id: null, applied: false as const };
+        t.resolution = { resolution: input.resolution, reason: input.reason, followup_id: followupId };
+        return { thread_id: threadId, state: "resolved" as const, followup_id: followupId, applied: false as const };
       }),
     reanchorAnnotation: (slug: string, _e: number, threadId: string, input: { version_id?: string; start_cp: number; end_cp: number }, key: string | undefined) =>
       command("reanchorAnnotation", slug, threadId, { ...input }, key, () => {

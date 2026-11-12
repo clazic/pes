@@ -3,17 +3,21 @@ import { Link } from "react-router";
 import { ChevronDown } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useClient } from "@/api/queries";
-import type { AnnotationThreadView, FollowupDetail, FollowupKind } from "@/api/types";
+import type { AnnotationThreadView, FollowupDetail, FollowupKind, StageKey } from "@/api/types";
 import { ActionButton } from "@/components/pes/action-button";
 import { Status } from "@/components/pes/status";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { sliceCp } from "@/lib/anchor-text";
-import { FOLLOWUP_KIND_LABEL, formatAt } from "@/lib/labels";
+import { FOLLOWUP_KIND_LABEL, STAGE_LABEL, formatAt } from "@/lib/labels";
 import { ErrorLine, Quote, StatusLine, shortId, useAnnotationCtx, useAnnotationWrite, type Note } from "./annotation-kit";
 import { controlClass, Field } from "./fields";
 
 const MENU_ORDER: FollowupKind[] = ["edit_text", "next_round_task", "reopen_stage", "none"];
+
+const STAGE_ORDER = Object.keys(STAGE_LABEL) as StageKey[];
+/** 앞 단계 다시 열기로 고를 수 있는 단계 — 지금 단계보다 앞선 것만(가까운 앞 단계가 먼저) */
+const earlierStages = (stage: StageKey): StageKey[] => STAGE_ORDER.slice(0, STAGE_ORDER.indexOf(stage)).reverse();
 
 const itemClass =
   "flex min-h-8 cursor-pointer items-center rounded-md px-2 py-1 text-meta outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground";
@@ -26,19 +30,35 @@ function ResolveDialog({ thread, kind, triggerRef, onClose }: { thread: Annotati
   const write = useAnnotationWrite(ctx);
   const [reason, setReason] = React.useState("");
   const [tried, setTried] = React.useState(false);
+  const earlier = earlierStages(ctx.stage);
+  const [reopenStage, setReopenStage] = React.useState<StageKey | undefined>(earlier[0]);
   const box = React.useRef<HTMLTextAreaElement>(null);
   const done = React.useRef(false);
   const empty = reason.trim() === "";
+  // 서버는 후속의 단계(다음 라운드 할 일 · 앞 단계 다시 열기)와 글 수정의 기반 버전을 요구한다: 할 일은 지금 단계, 다시 열기는 고른 앞 단계, 글 수정은 지금 보는 글 버전
+  const stage: StageKey | undefined = kind === "next_round_task" ? ctx.stage : kind === "reopen_stage" ? reopenStage : undefined;
+  const noStage = (kind === "next_round_task" || kind === "reopen_stage") && !stage;
   const invalid = tried && empty;
   const confirm = async (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (write.pending) return;
+    if (write.pending || noStage) return;
     if (empty) {
       setTried(true);
       return;
     }
     const text = reason.trim();
-    const r = await write.run(`resolve|${thread.thread_id}|${kind}|${text}`, (key) => client.resolveAnnotation(ctx.slug, ctx.edition, thread.thread_id, { resolution: kind, reason: text }, key), "첨언을 해결로 기록했어요.");
+    const r = await write.run(
+      `resolve|${thread.thread_id}|${kind}|${stage ?? ""}|${text}`,
+      (key) =>
+        client.resolveAnnotation(
+          ctx.slug,
+          ctx.edition,
+          thread.thread_id,
+          { resolution: kind, reason: text, ...(stage ? { target_stage: stage } : {}), ...(kind === "edit_text" ? { base_version_id: ctx.versionId } : {}) },
+          key,
+        ),
+      "첨언을 해결로 기록했어요.",
+    );
     if (r.ok) {
       done.current = true;
       onClose();
@@ -63,6 +83,19 @@ function ResolveDialog({ thread, kind, triggerRef, onClose }: { thread: Annotati
             <DialogDescription>해결 방식: {FOLLOWUP_KIND_LABEL[kind]}. 해결은 이 첨언을 닫는 기록이에요. 글은 이것만으로 바뀌지 않아요.</DialogDescription>
           </DialogHeader>
           <Quote>{thread.anchor.exact_quote}</Quote>
+          {kind === "edit_text" ? <p className="text-meta text-ink-2">해결하면 글 수정 후속이 ‘제안’으로 남아요. 제안 글은 아직 쓰지 않아서, 제안 글이 생기기 전에는 채택할 수 없어요.</p> : null}
+          {kind === "next_round_task" ? <p className="text-meta text-ink-2">해결하면 다음 라운드 할 일이 ‘제안’으로 남아요. 대상 단계: {STAGE_LABEL[ctx.stage]}.</p> : null}
+          {kind === "reopen_stage" ? (
+            <Field id={`${thread.thread_id}-resolve-stage`} label="다시 열 단계">
+              <select id={`${thread.thread_id}-resolve-stage`} value={reopenStage ?? ""} onChange={(e) => setReopenStage(e.target.value as StageKey)} className={controlClass}>
+                {earlier.map((k) => (
+                  <option key={k} value={k}>
+                    {STAGE_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
           <Field id={`${thread.thread_id}-resolve-reason`} label="해결 이유">
             <textarea
               ref={box}
@@ -368,7 +401,7 @@ function ThreadCard({ t, index, currentVersionId, body }: { t: AnnotationThreadV
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content align="start" sideOffset={6} className="z-50 min-w-48 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
-                  {MENU_ORDER.map((k) => (
+                  {MENU_ORDER.filter((k) => k !== "reopen_stage" || earlierStages(ctx.stage).length > 0).map((k) => (
                     <DropdownMenu.Item key={k} className={itemClass} onSelect={() => setResolving(k)}>
                       {FOLLOWUP_KIND_LABEL[k]}
                     </DropdownMenu.Item>

@@ -454,9 +454,16 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
         const t = annotationOf(threadId);
         if (t.state !== "open") return rejectNow("already_resolved", "$.path.thread_id");
         if (!input.reason.trim()) return rejectNow("invalid_payload", "$.body.reason");
+        // 실제 서버처럼: none 이 아니면 후속이 같이 만들어지고, 단계가 필요한 갈래는 단계 없이는 거절한다(followup.target_stage_id 필수)
+        if ((input.resolution === "next_round_task" || input.resolution === "reopen_stage") && !input.target_stage) return rejectNow("invalid_payload", "$.target_stage");
+        let followupId: string | null = null;
+        if (input.resolution !== "none") {
+          followupId = `afu-${annotations.reduce((n, x) => n + x.followups.length, 0) + 1}`;
+          t.followups.push({ id: followupId, kind: input.resolution, state: "proposed", description: input.reason, version_no: "1", origin_thread_id: t.thread_id, base_version_id: null, proposed_body_md: null, proposed_version_id: null, result_version_id: null, applied_tx_id: null, confirmed_by_actor_id: null });
+        }
         t.state = "resolved";
-        t.resolution = { resolution: input.resolution, reason: input.reason, followup_id: null };
-        return { round: annotationRound(), data: { thread_id: threadId, state: "resolved" as const, followup_id: null, applied: false as const } };
+        t.resolution = { resolution: input.resolution, reason: input.reason, followup_id: followupId };
+        return { round: annotationRound(), data: { thread_id: threadId, state: "resolved" as const, followup_id: followupId, applied: false as const } };
       });
     },
     reanchorAnnotation(slug, edition, threadId, input, key) {

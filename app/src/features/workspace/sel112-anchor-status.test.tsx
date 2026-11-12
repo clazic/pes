@@ -295,6 +295,49 @@ describe("해결 ≠ 반영", () => {
     expect(u4.callsOf("resolveAnnotation")[0]!.id).toBe("th-1");
   });
 
+  it("'글 수정' 해결 → 지금 보는 글 버전(base_version_id)을 싣고, 후속이 '제안' 으로 남는다는 안내가 있다 — 서버는 followup 없는 글 수정 해결을 거절한다", async () => {
+    const { u4, user } = await boot({ threads: [thread("th-1")] });
+    const el = await threadOf("th-1");
+    await user.click(within(el).getByRole("button", { name: /^해결/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "글 수정" }));
+    const dialog = await screen.findByRole("dialog", { name: "첨언 해결" });
+    expect(within(dialog).getByText(/제안 글이 생기기 전에는 채택할 수 없어요/)).toBeTruthy();
+    await user.type(within(dialog).getByRole("textbox", { name: "해결 이유" }), "근거를 한 문장 더한다");
+    await user.click(within(dialog).getByRole("button", { name: "해결 기록" }));
+    await waitFor(() => expect(u4.callsOf("resolveAnnotation")).toHaveLength(1));
+    const input = u4.callsOf("resolveAnnotation")[0]!.input as Record<string, unknown>;
+    expect(input).toMatchObject({ resolution: "edit_text", reason: "근거를 한 문장 더한다", base_version_id: VER1 });
+    expect(input).not.toHaveProperty("target_stage");
+  });
+
+  it("'다음 라운드 할 일' 해결 → 대상 단계(지금 단계)를 안내하고 target_stage 를 싣는다", async () => {
+    const { u4, user } = await boot({ threads: [thread("th-1")] });
+    const el = await threadOf("th-1");
+    await user.click(within(el).getByRole("button", { name: /^해결/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "다음 라운드 할 일" }));
+    const dialog = await screen.findByRole("dialog", { name: "첨언 해결" });
+    expect(within(dialog).getByText(/대상 단계: 조사/)).toBeTruthy();
+    await user.type(within(dialog).getByRole("textbox", { name: "해결 이유" }), "다음 라운드에서 다룬다");
+    await user.click(within(dialog).getByRole("button", { name: "해결 기록" }));
+    await waitFor(() => expect(u4.callsOf("resolveAnnotation")).toHaveLength(1));
+    expect(u4.callsOf("resolveAnnotation")[0]!.input).toMatchObject({ resolution: "next_round_task", reason: "다음 라운드에서 다룬다", target_stage: "research" });
+  });
+
+  it("'앞 단계 다시 열기' 해결 → '다시 열 단계' 고르기(지금 단계보다 앞선 단계만, 기본 = 바로 앞) → 고른 단계를 target_stage 로 싣는다", async () => {
+    const { u4, user } = await boot({ threads: [thread("th-1")] });
+    const el = await threadOf("th-1");
+    await user.click(within(el).getByRole("button", { name: /^해결/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "앞 단계 다시 열기" }));
+    const dialog = await screen.findByRole("dialog", { name: "첨언 해결" });
+    const pick = within(dialog).getByRole("combobox", { name: "다시 열 단계" }) as HTMLSelectElement;
+    expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["기획"]);
+    expect(pick.value).toBe("plan");
+    await user.type(within(dialog).getByRole("textbox", { name: "해결 이유" }), "기획 전제를 다시 본다");
+    await user.click(within(dialog).getByRole("button", { name: "해결 기록" }));
+    await waitFor(() => expect(u4.callsOf("resolveAnnotation")).toHaveLength(1));
+    expect(u4.callsOf("resolveAnnotation")[0]!.input).toMatchObject({ resolution: "reopen_stage", target_stage: "plan" });
+  });
+
   it("해결만 한 스레드: '해결됨' 이라 쓰고 '반영됨' 이라 쓰지 않으며, 글 본문은 그대로, 후속 적용 호출 0", async () => {
     const { u4, user } = await boot({ threads: [thread("th-1")] });
     const el = await threadOf("th-1");

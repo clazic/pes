@@ -713,8 +713,25 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       return result(w, { thread_id: text(w.data.thread_id) || threadId, message_id: text(objectAt(w.data, "message").id) });
     },
 
+    /**
+     * POST P/threads/{t}/resolutions — 서버 규칙(run_thread_resolve): none 은 followup 없이, 그 밖은 followup:{kind(=resolution), description} 필수.
+     * edit_text 는 target_version_id(보던 글 버전, 있을 때만), next_round_task · reopen_stage 는 target_stage_id(GET P/context 로 target_stage 키 → 서버 단계 id) 필수 —
+     * 단계를 모르면 서버가 거절할 요청을 보내지 않고 요청 0 으로 거절한다.
+     */
     async resolveAnnotation(slug, _edition, threadId, input, key) {
-      const w = await write(slug, key, `/threads/${q(threadId)}/resolutions`, { resolution: input.resolution, reason: input.reason });
+      const needsStage = input.resolution === "next_round_task" || input.resolution === "reopen_stage";
+      if (needsStage && !input.target_stage) throw invalid("$.target_stage", "후속을 만들 단계를 알 수 없어 해결을 보낼 수 없습니다.");
+      const stage = input.target_stage;
+      const followup = (extra: Json): Json => ({ followup: { kind: input.resolution, description: input.reason, ...extra } });
+      const w = await write(
+        slug,
+        key,
+        `/threads/${q(threadId)}/resolutions`,
+        { resolution: input.resolution, reason: input.reason },
+        input.resolution === "none"
+          ? undefined
+          : async (id) => followup(needsStage && stage ? { target_stage_id: await contextStageId(id, stage) } : input.base_version_id ? { target_version_id: input.base_version_id } : {}),
+      );
       return result(w, { thread_id: text(objectAt(w.data, "thread").id) || threadId, state: "resolved" as const, followup_id: nullable(objectAt(w.data, "followup").id), applied: false as const });
     },
 

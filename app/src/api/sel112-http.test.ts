@@ -8,8 +8,8 @@
 //  createAnnotation(slug, ed, input, key)             POST P/threads                                                {target_object_id, target_version_id, context_kind:"annotation", anchor:{exact_quote, prefix, suffix, start_cp, end_cp}, initial_message:{body_md}}
 //                                                     결과 data ← {thread_id: data.thread.id, message_id: data.message.id, anchor_id: data.thread.anchor_id, anchor_status: data.thread.anchor_status}
 //  replyAnnotation(slug, ed, t, {body_md}, key)       POST P/threads/{t}/messages                                   {body_md}               결과 {thread_id: data.thread_id, message_id: data.message.id}
-//  resolveAnnotation(slug, ed, t, {resolution, reason}, key)
-//                                                     POST P/threads/{t}/resolutions                                {resolution, reason}    결과 {thread_id: data.thread.id, state: data.thread.state, followup_id: data.followup?.id ?? null, applied: data.applied}
+//  resolveAnnotation(slug, ed, t, {resolution, reason, target_stage?, base_version_id?}, key)
+//                                                     POST P/threads/{t}/resolutions                                {resolution, reason, followup?: {kind, description, target_version_id? | target_stage_id?}} — none 은 followup 없음, 그 밖은 필수   결과 {thread_id: data.thread.id, state: data.thread.state, followup_id: data.followup?.id ?? null, applied: data.applied}
 //  reanchorAnnotation(slug, ed, t, {version_id?, start_cp, end_cp}, key)
 //                                                     POST P/threads/{t}/reanchor                                   {version_id?(있을 때만), start_cp, end_cp}   결과 {thread_id: data.thread_id, anchor_status: data.anchor.status}
 //  proposeFollowup(slug, ed, {origin_thread_id, kind, description}, key)
@@ -219,6 +219,26 @@ const done = (route: string, data: unknown, key: string, action: string, status 
   [`POST ${route}`]: { status, body: ok(data, extra) },
   [`GET /requests/${key}`]: { status: 200, body: requestsRead(key, action) },
 });
+// 실제 서버 run_thread_resolve 의 요청 모양 규칙(annotations.ts:838-853 · parse_followup_spec)을 흉내 낸 가짜 응답
+const strictResolve = (s: Seen): { status: number; body: unknown } => {
+  const b = s.json ?? {};
+  const bad = (reason: string) => ({ status: 400, body: fail("invalid_payload", { reason }, "$.body") });
+  const okBody = (followup: unknown) => ({ status: 201, body: ok({ thread: { id: "th-1", state: "resolved" }, followup, applied: false }) });
+  if (Object.keys(b).some((k) => !["format_version", "thread_id", "resolution", "reason", "followup"].includes(k))) return bad("unknown_field");
+  const resolution = b.resolution;
+  if (typeof resolution !== "string" || !["edit_text", "next_round_task", "reopen_stage", "none"].includes(resolution)) return bad("resolution");
+  if (typeof b.reason !== "string" || !b.reason.trim()) return bad("reason");
+  const f = b.followup;
+  if (resolution === "none") return f !== undefined && f !== null ? bad("followup_not_allowed") : okBody(null);
+  if (typeof f !== "object" || f === null || Array.isArray(f)) return bad("followup_required");
+  const fu = f as Record<string, unknown>;
+  if (Object.keys(fu).some((k) => !["kind", "description", "proposed_body_md", "target_version_id", "target_stage_id", "target_round_id"].includes(k))) return bad("unknown_field");
+  if (fu.kind !== resolution) return bad("followup_kind");
+  if (resolution === "edit_text") return fu.target_stage_id !== undefined || fu.target_round_id !== undefined ? bad("stage_not_allowed") : okBody({ id: "fu-7", state: "proposed" });
+  if (fu.target_version_id !== undefined || fu.proposed_body_md !== undefined) return bad("edit_text_only");
+  if (typeof fu.target_stage_id !== "string" || !fu.target_stage_id) return bad("target_stage_required");
+  return okBody({ id: "fu-7", state: "proposed" });
+};
 const commonWrite = (w: Seen, key: string) => {
   expect(w.headers.get("x-pes-session")).toBe(SESSION);
   expect(w.headers.get("idempotency-key")).toBe(key);
@@ -289,8 +309,8 @@ describe("쓰기 — 답글 · 해결 · 다시 붙이기 · 후속 제안/채�
     expect(err.body.error).toMatchObject({ code: "thread_closed", details: { thread_id: "th-1", state: "resolved" }, next_action: "open_new_thread" });
   });
 
-  it("resolveAnnotation: POST P/threads/{t}/resolutions {resolution, reason} — 결과에 applied:false 가 그대로(해결됨 ≠ 반영됨)", async () => {
-    const s = server(done("/threads/th-1/resolutions", { thread: { id: "th-1", state: "resolved" }, followup: null, applied: false, note: "해결됨과 반영됨은 다릅니다." }, "key-r", "thread.resolve"));
+  it("resolveAnnotation(none): POST P/threads/{t}/resolutions {resolution, reason} — followup 키 없음 · 결과에 applied:false 가 그대로(해결됨 ≠ 반영됨)", async () => {
+    const s = server({ ...done("/threads/th-1/resolutions", { thread: { id: "th-1", state: "resolved" }, followup: null, applied: false, note: "해결됨과 반영됨은 다릅니다." }, "key-r", "thread.resolve"), "POST /threads/th-1/resolutions": strictResolve });
     const out = await (await make(s)).resolveAnnotation(SLUG, ED, "th-1", { resolution: "none", reason: "닫는다" }, "key-r");
     const w = s.writes()[0]!;
     expect(w.url.pathname).toBe(`${P}/threads/th-1/resolutions`);
@@ -300,10 +320,55 @@ describe("쓰기 — 답글 · 해결 · 다시 붙이기 · 후속 제안/채�
     receiptOk(out, "key-r");
   });
 
-  it("resolveAnnotation: 후속이 같이 만들어지면 followup_id 를 싣는다 · 409 already_resolved 는 details 보존", async () => {
-    const s = server(done("/threads/th-1/resolutions", { thread: { id: "th-1", state: "resolved" }, followup: { id: "fu-7", state: "proposed" }, applied: false }, "key-r2", "thread.resolve"));
-    const out = await (await make(s)).resolveAnnotation(SLUG, ED, "th-1", { resolution: "next_round_task", reason: "다음 라운드" }, "key-r2");
+  // 실제 서버(scripts/pes_core/commands/annotations.ts run_thread_resolve · OpenAPI ThreadResolutionBody)와 같은 규칙으로 거절하는 가짜 서버(strictResolve):
+  // none 이 아니면 followup 객체 필수(followup_required) · kind 는 resolution 과 같아야 · next_round_task/reopen_stage 는 target_stage_id 필수 · edit_text 는 stage/round 금지 · none 은 followup 금지.
+  it("resolveAnnotation(edit_text): body 에 followup:{kind, description:이유, target_version_id}를 싣는다 — 서버 followup_required 규칙을 통과한다", async () => {
+    const s = server({ ...done("/threads/th-1/resolutions", { thread: { id: "th-1", state: "resolved" }, followup: { id: "fu-7", state: "proposed" }, applied: false }, "key-e", "thread.resolve"), "POST /threads/th-1/resolutions": strictResolve });
+    const out = await (await make(s)).resolveAnnotation(SLUG, ED, "th-1", { resolution: "edit_text", reason: "근거를 더한다", base_version_id: "ver-3" }, "key-e");
+    expect(s.writes()[0]!.json).toEqual({ format_version: "1.0", resolution: "edit_text", reason: "근거를 더한다", followup: { kind: "edit_text", description: "근거를 더한다", target_version_id: "ver-3" } });
     expect(out.data).toEqual({ thread_id: "th-1", state: "resolved", followup_id: "fu-7", applied: false });
+  });
+
+  it("resolveAnnotation(edit_text): base_version_id 가 없으면 target_version_id 키를 뺀다(서버가 현재 버전을 쓴다)", async () => {
+    const s = server({ ...done("/threads/th-1/resolutions", { thread: { id: "th-1", state: "resolved" }, followup: { id: "fu-7", state: "proposed" }, applied: false }, "key-e2", "thread.resolve"), "POST /threads/th-1/resolutions": strictResolve });
+    await (await make(s)).resolveAnnotation(SLUG, ED, "th-1", { resolution: "edit_text", reason: "고친다" }, "key-e2");
+    expect(s.writes()[0]!.json).toEqual({ format_version: "1.0", resolution: "edit_text", reason: "고친다", followup: { kind: "edit_text", description: "고친다" } });
+  });
+
+  it.each([
+    ["next_round_task", "research", "st-research"],
+    ["reopen_stage", "plan", "st-plan"],
+  ] as const)("resolveAnnotation(%s): GET P/context 로 단계 키 %s → 서버 단계 id 를 알아 followup.target_stage_id 로 싣는다", async (kind, stage, stageId) => {
+    const s = server({
+      ...done("/threads/th-1/resolutions", { thread: { id: "th-1", state: "resolved" }, followup: { id: "fu-7", state: "proposed" }, applied: false }, "key-s", "thread.resolve"),
+      "POST /threads/th-1/resolutions": strictResolve,
+      "GET /context": { status: 200, body: ok({ stages: [{ key: "plan", stage_id: "st-plan" }, { key: "research", stage_id: "st-research" }] }) },
+    });
+    const out = await (await make(s)).resolveAnnotation(SLUG, ED, "th-1", { resolution: kind, reason: "이유", target_stage: stage }, "key-s");
+    commonWrite(s.writes()[0]!, "key-s");
+    expect(s.writes()[0]!.json).toEqual({ format_version: "1.0", resolution: kind, reason: "이유", followup: { kind, description: "이유", target_stage_id: stageId } });
+    expect(out.data).toEqual({ thread_id: "th-1", state: "resolved", followup_id: "fu-7", applied: false });
+    receiptOk(out, "key-s");
+  });
+
+  it("resolveAnnotation(next_round_task · reopen_stage): 단계(target_stage)를 모르면 지어내지 않고 요청 0 으로 거절한다", async () => {
+    for (const kind of ["next_round_task", "reopen_stage"] as const) {
+      const s = server({ "POST /threads/th-1/resolutions": strictResolve });
+      const err = await (await make(s)).resolveAnnotation(SLUG, ED, "th-1", { resolution: kind, reason: "이유" }, "key-n").catch((e) => e);
+      expect(err).toBeInstanceOf(PesApiError);
+      expect(err.body.error).toMatchObject({ code: "invalid_payload", target: "$.target_stage" });
+      expect(s.seen).toHaveLength(0);
+    }
+  });
+
+  it("가짜 서버 점검: followup 없는 옛 모양({resolution, reason}만)은 followup_required 로 거절된다 — 실제 서버와 같은 규칙", async () => {
+    const s = server({ "POST /threads/th-1/resolutions": strictResolve });
+    const res = await s.impl(`http://app.invalid${P}/threads/th-1/resolutions`, { method: "POST", body: JSON.stringify({ format_version: "1.0", resolution: "edit_text", reason: "x" }) });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { details: unknown } }).error.details).toEqual({ reason: "followup_required" });
+  });
+
+  it("resolveAnnotation: 409 already_resolved 는 details 보존", async () => {
     const dup = server({ "POST /threads/th-1/resolutions": { status: 409, body: fail("already_resolved", { thread_id: "th-1", state: "resolved", resolution_id: "r-1" }, "$.path.thread_id", "reread_thread") } });
     const err = await (await make(dup)).resolveAnnotation(SLUG, ED, "th-1", { resolution: "none", reason: "x" }, "key-r3").catch((e) => e);
     expect(err.body.error.code).toBe("already_resolved");
