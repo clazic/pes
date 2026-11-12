@@ -17,6 +17,8 @@ export const STORE_KEY = "pes-app-handoff";
 export interface EmptyHome {
   base: string;
   port: number;
+  /** the isolated PES home folder (temporary) */
+  pes_home: string;
   session: string;
   /** `pes hub --open` (PES_NO_BROWSER=1): the first-page address with #code=<one-time code> (a new code every call) */
   open_hub(): string;
@@ -97,6 +99,7 @@ export async function open_empty_home(): Promise<EmptyHome> {
   return {
     base,
     port,
+    pes_home,
     session: SESSION,
     open_hub() {
       const r = pes(["hub", "--open"]);

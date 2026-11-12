@@ -158,7 +158,18 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
     return { session: v.session, projects };
   };
   const readStored = () => { try { const t = sessionStorage.getItem(KEY); return t === null ? null : shape(JSON.parse(t)); } catch (e) { return null; } };
-  const store = h => { try { sessionStorage.setItem(KEY, JSON.stringify({ session: h.session, projects: h.projects })); } catch (e) {} };
+  // 같은 탭 sessionStorage 에는 '만들기 성공 → 새 앱으로 이동' 바로 직전에만 쓴다(앱이 CSP 로 지켜지는 곳). 이미 앱이 둔 같은 세션 값이 있으면 합친다
+  const store = h => {
+    try {
+      const prev = readStored();
+      const merged = prev !== null && prev.session === h.session ? { ...prev.projects, ...h.projects } : h.projects;
+      sessionStorage.setItem(KEY, JSON.stringify({ session: h.session, projects: merged }));
+      return true;
+    } catch (e) { return false; }
+  };
+  // 첫 페이지를 떠날 때(옛 화면 링크 등) 남아 있는 값은 지운다 — 새 앱으로 넘어가는 경우만 남긴다
+  let leaving = false;
+  addEventListener('pagehide', () => { if (!leaving) { try { sessionStorage.removeItem(KEY); } catch (e) {} } });
   // 1회용 코드는 주소 조각으로 온다 — 조각은 서버·Referer 로 가지 않지만, 요청도 그리기도 하기 전에 주소창에서 지운다(쓰였든 깨졌든)
   let code = '';
   const frag = location.hash.slice(1);
@@ -166,8 +177,8 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
     history.replaceState(history.state, '', location.pathname + location.search);
     if (frag.startsWith('code=')) code = frag.slice(5);
   }
-  // 세션은 이 함수 안에만 둔다: 전역·콘솔·쿠키·HTML 에 두지 않고, 같은 탭 sessionStorage(앱과 같은 키)에만 남긴다
-  let handoff = readStored();
+  // 세션은 이 함수 안(메모리)에만 둔다: 전역·콘솔·쿠키·HTML·sessionStorage 에 두지 않는다. 새로 고치면 사라진다(다시 터미널에서 pes list 로 연다)
+  let handoff = null;
   const call = async (url, init, ms) => {
     const ac = new AbortController(), timer = setTimeout(() => ac.abort(), ms);
     try {
@@ -183,10 +194,7 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
     try {
       const r = await call('/api/v1/app-session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: c }) }, 5000);
       const fresh = r.status === 200 && isRec(r.json) ? shape(r.json.data) : null;
-      if (fresh) {
-        handoff = handoff && handoff.session === fresh.session ? { session: fresh.session, projects: { ...handoff.projects, ...fresh.projects } } : fresh;
-        store(handoff);
-      }
+      if (fresh) handoff = fresh;
     } catch (e) {}
   })();
 
@@ -256,6 +264,7 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
       const id = r.status >= 200 && r.status < 300 && isRec(r.json) && isRec(r.json.data) ? r.json.data.project_id : null;
       if (typeof id === 'string' && id !== '') {
         handoff = { session: handoff.session, projects: { ...handoff.projects, [slug]: id } };
+        leaving = true;
         store(handoff);
         location.assign(`/p/${encodeURIComponent(slug)}/`);
         return;

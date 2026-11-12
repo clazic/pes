@@ -13,7 +13,7 @@
 //     (모양 ^[a-z0-9][a-z0-9-]{0,63}$). 같은 제출(두 번 누름·Enter 두 번)은 같은 Idempotency-Key 라 프로젝트 1개. 성공하면 같은 탭에서
 //     /p/<slug>/ → 앱이 기획 단계 시작 자리(/p/<slug>/e/<n>/s/plan/r/start)를 연다(세션은 sessionStorage 로 이어받음; projects 에 {slug: project_id} 가 더해져 있다).
 // 앞 조건: `cd app && npm ci && npm run build` (app/dist). 없으면 건너뛰지 않고 실패한다. 실제 홈 0 — 전부 임시 HOME 의 합성 홈.
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -51,13 +51,14 @@ const slug_input = (page: Page) => dialog(page).getByLabel(/slug/i);
 const submit = (page: Page) => dialog(page).getByRole("button", { name: "만들기" });
 
 async function open_with_code(page: Page, home: EmptyHome): Promise<void> {
+  const exchanged = page.waitForResponse((r) => new URL(r.url()).pathname === EXCHANGE);
   await page.goto(home.open_hub());
   await expect(start_button(page)).toBeVisible();
-  // 교환이 끝나 세션이 같은 탭 sessionStorage 에 들어올 때까지
-  await expect.poll(() => page.evaluate((k) => sessionStorage.getItem(k) !== null, STORE_KEY)).toBe(true);
+  // 교환이 끝나 세션이 첫 페이지 메모리에 들어올 때까지(세션은 sessionStorage 에 두지 않는다 — 버튼은 교환이 끝난 뒤에야 열린다)
+  expect((await exchanged).status()).toBe(200);
 }
 
-test("1 빈 홈: 코드로 연 첫 페이지에 버튼이 보이고 — 조각은 지워지고, 교환은 한 번(세션 헤더·조각 없이), 세션은 sessionStorage 에만", async ({ page, context }) => {
+test("1 빈 홈: 코드로 연 첫 페이지에 버튼이 보이고 — 조각은 지워지고, 교환은 한 번(세션 헤더·조각 없이), 세션은 메모리에만(sessionStorage 에도 없다)", async ({ page, context }) => {
   ws = await open_empty_home();
   expect(ws.slugs()).toBeNull();
   const address = ws.open_hub();
@@ -76,15 +77,18 @@ test("1 빈 홈: 코드로 연 첫 페이지에 버튼이 보이고 — 조각�
       // no body
     }
   });
+  const exchanged = page.waitForResponse((r) => new URL(r.url()).pathname === EXCHANGE);
   await page.goto(address);
   await expect(page.getByRole("heading", { name: "프로젝트", level: 1 })).toBeVisible();
   await expect(start_button(page)).toBeVisible();
   await expect(page.getByText("해당하는 프로젝트가 없습니다.")).toBeVisible();
   await expect.poll(() => new URL(page.url()).hash).toBe("");
   expect(page.url()).toBe(`${ws.base}/`);
-  await expect.poll(() => page.evaluate((k) => sessionStorage.getItem(k) !== null, STORE_KEY)).toBe(true);
-  const stored = JSON.parse(await page.evaluate((k) => sessionStorage.getItem(k) as string, STORE_KEY));
-  expect(stored).toEqual({ session: ws.session, projects: {} });
+  expect((await exchanged).status()).toBe(200);
+  // 세션은 첫 페이지 JS 메모리에만 있다: 버튼이 열리고(= 세션을 받았다) 그래도 sessionStorage 에는 없다(R1-1)
+  await start_button(page).click();
+  await expect(dialog(page)).toBeVisible();
+  expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY)).toBeNull();
   const all = await seen.done();
   const ex = all.filter((r) => r.url.pathname === EXCHANGE);
   expect(ex, "교환 요청은 정확히 한 번").toHaveLength(1);
@@ -242,10 +246,10 @@ test("5 이름 중복: 한국어 한 줄('이미' 또는 '중복')로 알리고 
 
 test("5 권한 없음: 서버가 세션을 받아들이지 않으면 한국어 한 줄('권한')로 알리고 아무것도 만들지 않는다", async ({ page }) => {
   ws = await open_empty_home();
+  // 교환 응답을 서버가 모르는 세션으로 바꿔 돌려준다 — 첫 페이지는 그 세션으로 만들기를 요청하고, 서버는 받아들이지 않는다
+  await page.route(`**${EXCHANGE}`, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { session: "synthetic-wrong-session-000000000", projects: {} } }) }));
   await open_with_code(page, ws);
-  await page.evaluate((k) => sessionStorage.setItem(k, JSON.stringify({ session: "synthetic-wrong-session-000000000", projects: {} })), STORE_KEY);
   const tree = ws.tree();
-  await page.reload();
   await start_button(page).click();
   await topic_input(page).fill("합성 권한 없음 주제");
   await submit(page).click();
@@ -281,9 +285,10 @@ test("6 코드 없이 연 첫 페이지(북마크·다른 탭): 버튼은 보이
 test("6 쓴 코드·다른 출처: 같은 주소를 다시 열면(쓴 코드) 세션이 없어 안내만 — 그리고 localhost 로 열면 교환이 거절돼 안내만, 만들어지지 않는다", async ({ page, browser }) => {
   ws = await open_empty_home();
   const address = ws.open_hub();
+  const exchanged = page.waitForResponse((r) => new URL(r.url()).pathname === EXCHANGE);
   await page.goto(address);
   await expect(start_button(page)).toBeVisible();
-  await expect.poll(() => page.evaluate((k) => sessionStorage.getItem(k) !== null, STORE_KEY)).toBe(true);
+  expect((await exchanged).status()).toBe(200);
   // 쓴 코드: 새 맥락(= 새 탭·세션 저장소 비어 있음)에서 같은 주소
   const again = await browser.newContext({ locale: "ko-KR", timezoneId: "Asia/Seoul" });
   try {
@@ -318,17 +323,17 @@ test("6 쓴 코드·다른 출처: 같은 주소를 다시 열면(쓴 코드) �
   expect(ws.slugs()).toBeNull();
 });
 
-test("7 새로 고침해도 같은 탭이면 세션이 남아 만들 수 있다(sessionStorage) — 쿠키·localStorage 에는 없다", async ({ page, context }) => {
+test("7 새로 고침하면 세션이 없다(메모리에만 있었다): 안내 한 줄만 — sessionStorage·쿠키·localStorage 에 세션 없음, 만들어지지 않는다", async ({ page, context }) => {
   ws = await open_empty_home();
   await open_with_code(page, ws);
   await page.reload();
   await expect(start_button(page)).toBeVisible();
   await start_button(page).click();
-  await topic_input(page).fill("합성 새로 고침 뒤 주제");
-  await slug_input(page).fill("synthetic-reload");
-  await submit(page).click();
-  await expect(page).toHaveURL(/\/p\/synthetic-reload\/e\/[0-9]+\/s\/plan\/r\/start$/);
-  expect(ws.slugs()).toEqual(["synthetic-reload"]);
+  await expect(page.getByText(/터미널에서 pes list 로 여세요/).first()).toBeVisible();
+  await expect(topic_input(page)).toHaveCount(0);
+  expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY)).toBeNull();
+  expect(String(await page.evaluate("JSON.stringify({ ...localStorage })"))).not.toContain(ws.session);
+  expect(ws.slugs()).toBeNull();
   expect(await context.cookies()).toEqual([]);
 });
 
@@ -348,4 +353,55 @@ test("8 첫 페이지 디자인 불변: 프로젝트가 있는 홈의 목록(제
   await expect(row.getByRole("link", { name: /열기/ })).toHaveAttribute("href", "synthetic-existing/index.html");
   await expect(page.locator(".foot")).toContainText("진행 상태는 단계 이름 아래에 표시됩니다.");
   await expect(start_button(page)).toBeVisible();
+});
+
+// SEL-128 1차 리뷰 R1-1: 교환한 세션이 첫 페이지 탭의 sessionStorage 에 남으면, 같은 탭으로 연 sandbox 없는 옛 화면(<slug>/index.html)이 읽는다.
+// 세션은 첫 페이지 JS 메모리에만 두고, sessionStorage 에는 '만들기 성공 → 앱으로 이동' 직전에만 쓴다.
+const LEGACY_PAGE = `<!doctype html><meta charset="utf-8"><title>legacy</title><script>document.title = 'STOLEN:' + String(sessionStorage.getItem('${STORE_KEY}'));</script>`;
+function seed_legacy_folder(home: EmptyHome): void {
+  const dir = join(home.pes_home, "legacy-y");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "project.json"), "{}");
+  writeFileSync(join(dir, "index.html"), LEGACY_PAGE);
+}
+
+test("9 교환한 세션은 첫 페이지 메모리에만 — 교환 직후 sessionStorage 에 없고, 같은 탭으로 옛 화면(sandbox 없음)에 가도 읽히지 않는다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  const exchanged = page.waitForResponse((r) => new URL(r.url()).pathname === EXCHANGE);
+  await page.goto(ws.open_hub());
+  expect((await exchanged).status()).toBe(200);
+  await expect(start_button(page)).toBeVisible();
+  // 버튼은 교환이 끝난 뒤에야 열린다 — 열렸다는 것은 세션이 메모리에 들어왔다는 뜻이다
+  await start_button(page).click();
+  await expect(dialog(page)).toBeVisible();
+  expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY), "교환 직후 sessionStorage 에 세션이 없다").toBeNull();
+  // 같은 탭으로 옛 화면에 간다(= 리뷰 재현)
+  await page.goto(`${ws.base}/legacy-y/index.html`);
+  await expect(page).toHaveTitle("STOLEN:null");
+  expect(await page.evaluate((k) => sessionStorage.getItem(k), STORE_KEY)).toBeNull();
+});
+
+test("9 첫 페이지를 떠나기 전(pagehide)에 남아 있는 값은 지워진다 — 앱이 두고 간 값이 첫 페이지에서 옛 화면으로 새지 않는다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await page.goto(ws.plain_hub());
+  await expect(start_button(page)).toBeVisible();
+  await page.evaluate((k) => sessionStorage.setItem(k, JSON.stringify({ session: "synthetic-left-behind-session-00000", projects: {} })), STORE_KEY);
+  await page.goto(`${ws.base}/legacy-y/index.html`);
+  await expect(page).toHaveTitle("STOLEN:null");
+});
+
+test("9 만들기 성공 직전에만 sessionStorage 에 쓴다 — 새 앱 주소에서는 앱이 이어받을 세션이 있다", async ({ page }) => {
+  ws = await open_empty_home();
+  seed_legacy_folder(ws);
+  await open_with_code(page, ws);
+  await start_button(page).click();
+  await topic_input(page).fill("합성 직전에만 쓰는 주제");
+  await slug_input(page).fill("synthetic-late-store");
+  await submit(page).click();
+  await expect(page).toHaveURL(/\/p\/synthetic-late-store\/e\/[0-9]+\/s\/plan\/r\/start$/);
+  const stored = JSON.parse(await page.evaluate((k) => sessionStorage.getItem(k) as string, STORE_KEY));
+  expect(stored.session).toBe(ws.session);
+  expect(Object.keys(stored.projects)).toEqual(["synthetic-late-store"]);
 });
