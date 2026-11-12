@@ -34,7 +34,9 @@ npm run typecheck
 ## TypeScript 테스트 (Node 26)
 
 ```sh
-npm ci && npm test && npm run typecheck
+npm ci
+test_home="$(mktemp -d)"
+HOME="$test_home" USERPROFILE="$test_home" npm test && npm run typecheck
 ```
 
 `npm test`는 `node --import ./tests/helpers/require_temp_home.ts --test "tests/**/*.test.ts"`로 돈다(진입점 설명: 아래 「실제 홈에서 시작 거절」). `tests/helpers/isolated_home.ts`가 임시 `HOME`·`USERPROFILE`·`PES_HOME`을 만들고, 시험은 그 env 객체를 경로 함수와 자식 프로세스에만 넘긴다. `process.env`는 바꾸지 않으며 실제 `~/.pes`·`~/pes-projects`를 열거나 stat 하지 않는다. 임시 폴더와 그 안의 DB 파일은 각 시험의 `cleanup()`이 지운다.
@@ -154,7 +156,7 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 ### 실제 홈에서 시작 거절 (SEL-103)
 
-`HOME`·`USERPROFILE` 이 계정의 실제 홈이면(`os.userInfo().homedir`·`/Users/x`·`/home/x`·`/root`·`C:\\Users\\x` 모양·그 부모·그 안의 `.pes`·`pes-projects`·`.claude`) 시험 파일 프로세스는 시작하자마자 던진다. 비교는 **문자열뿐**(`tests/helpers/temp_home_check.ts`) — 실제 홈 경로에 lstat·readdir·realpath 를 부르지 않는다. 자리는 둘이다: ① `--import ./tests/helpers/require_temp_home.ts`(`npm test`·CI 시험 단계·d1-smoke), ② `home_guard.ts` 의 첫 import(진입점 없이 `node --test 파일.ts` 로 직접 돌려도 스냅샷 전에 막힌다). 가짜 계정 홈은 `PES_TEST_ACCOUNT_HOME`(`path.delimiter` 로 여럿)으로 주입한다 — 거절할 홈을 **더할 뿐** 거절된 홈을 허용으로 바꾸지 못한다. `test_sel103_real_home_precheck` 가 `tests/helpers/fs_path_recorder.ts`(`--import`)로 그 폴더에 fs 호출이 0 번임을 단언하고(대조: 주입 없이 돌리면 lstat 이 기록됨), `package.json`·`ci.yml` 이 진입점을 거치는지 본다. 한계: 임시 폴더가 실제 홈의 심볼릭 링크인 경우는 철자로 못 본다(뒤 겹이 맡는다).
+`HOME`·`USERPROFILE` 이 계정의 실제 홈이면(`os.userInfo().homedir`·`/Users/x`·`/home/x`·`/root`·`C:\\Users\\x` 모양·그 부모·그 안의 `.pes`·`pes-projects`·`.claude`) 시험 파일 프로세스는 시작하자마자 던진다. 계정 홈 **모양**(`/Users/x`·`/home/x`·`/root`·`C:\\Users\\x`)에도 부모(`/`·`/Users`·`/home`·`C:\`)와 그 안의 `.pes`·`pes-projects`·`.claude` 거절이 같이 적용된다. 절대 경로가 아닌 값도 거절한다 — 상대 경로, `D:`·`D:foo` 같은 드라이브 상대 경로(그 드라이브의 현재 폴더에 따라 뜻이 달라진다), 읽을 수 없는 `\\?\Volume{…}` 네임스페이스. Windows 네임스페이스 표기(`\\?\C:\…`·`\\.\C:\…`·`\??\C:\…`·UNC 관리 공유 `\\localhost\c$\…`)는 먼저 평범한 드라이브 경로로 고쳐 쓴 뒤 견준다. 드라이브 없는 루트 상대 경로(`\srv\…`)는 드라이브를 떼고 견준다. 비교는 **문자열뿐**(`tests/helpers/temp_home_check.ts`) — 실제 홈 경로에 lstat·readdir·realpath 를 부르지 않는다. 자리는 둘이다: ① `--import ./tests/helpers/require_temp_home.ts`(`npm test`·CI 시험 단계·d1-smoke), ② `home_guard.ts` 의 첫 import(진입점 없이 `node --test 파일.ts` 로 직접 돌려도 스냅샷 전에 막힌다). 가짜 계정 홈은 `PES_TEST_ACCOUNT_HOME`(`path.delimiter` 로 여럿)으로 주입한다 — 거절할 홈을 **더할 뿐** 거절된 홈을 허용으로 바꾸지 못한다. `test_sel103_real_home_precheck` 가 `tests/helpers/fs_path_recorder.ts`(`--import`)로 그 폴더에 fs 호출이 0 번임을 단언하고(대조: 주입 없이 돌리면 lstat 이 기록됨), `package.json`·`ci.yml` 이 진입점을 거치는지 본다. 한계: 임시 폴더가 실제 홈의 심볼릭 링크인 경우는 철자로 못 본다(뒤 겹이 맡는다).
 
 ### home_guard 가 막는 것
 
