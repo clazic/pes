@@ -86,9 +86,9 @@ describe("리뷰 2 — fetch 호출 전 · 후 실패 분류 (실제 http 클라
     });
     const mc = createMaterialsClient();
     await pick(mc, fetchImpl as unknown as typeof fetch);
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     await waitFor(() => expect(document.body.textContent).toContain("접수 확인 중"));
     expect(document.body.textContent).not.toContain("보내지 못했어요");
-    expect(fetchImpl).toHaveBeenCalled();
   });
 });
 
