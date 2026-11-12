@@ -68,6 +68,18 @@ test("거짓 양성 0: 일반 pes open, 다른 명령의 --app, 산문 설명은
   ok("commands/start.md", doc("`--app` 옵션은 사람 전용이다.", "", fence("sh", "echo --app", "pes open demo --apple")));
 });
 
+// SEL-128 최종 리뷰 1 F1-2: 첫 페이지 여는 `pes hub|list --open` 도 소유자 세션을 1회 코드로 바꿔 주소에 싣는 사람 전용 호출이다 — 같은 가드로 거절한다.
+test("SEL-128: 코드 예제의 pes hub|list --open 도 거절한다 — 옵션 위치·node 경로·폴더 인자 불문", () => {
+  const calls = ["pes hub --open", "pes list --open", "node scripts/pes.ts hub --open", "pes hub --open ./hub-folder", "PES_NO_BROWSER=1 pes list --open demo"];
+  for (const call of calls) bad("skills/core/SKILL.md", doc(fence("sh", call)));
+  bad("commands/hub.md", doc("`pes list --open` 으로 첫 페이지를 연다."));
+});
+
+test("SEL-128 거짓 양성 0: --open 없는 pes hub·pes list, 산문의 hub·list 설명은 막지 않는다", () => {
+  ok("skills/core/SKILL.md", doc(fence("sh", "pes hub", "pes list", "pes list demo", "pes hub ./hub-folder")));
+  ok("skills/core/SKILL.md", doc("첫 페이지는 사람이 터미널에서 pes hub --open 으로 연다. 에이전트는 부르지 않는다."));
+});
+
 test("저장소의 실제 문서는 lint 를 통과한다 (npm run lint:skills 와 같은 검사)", () => {
   const res = run_lint(REPO);
   assert.equal(res.status, 0, res.out);
