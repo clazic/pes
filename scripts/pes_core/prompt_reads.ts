@@ -5,6 +5,7 @@
 
 import { assumption_rows, decision_rows } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied } from "./commands/file_access.ts";
+import { prints_using_blob } from "./commands/print.ts";
 import type { Db } from "./db.ts";
 import { check_go_allowed } from "./policy.ts";
 
@@ -230,7 +231,21 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
   );
   if (version === undefined) return null;
   // A closed file material's own text names the file (its title defaults to the file name, later versions inherit it).
-  const material_closed = version.kind === "source" && material_object_denied(db, ctx.project_id, version.object_id);
+  // SEL-119: a print is a human's document, so a print's output or manifest blob counts as closed here too (the same rule that
+  // makes GET files/{b}/content and preview 403 for a non-human caller), whether it rides a material or a plain version file.
+  const print_blob = (blob_id: string): boolean => prints_using_blob(db, ctx.project_id, blob_id).length > 0;
+  const material_closed =
+    version.kind === "source" &&
+    (material_object_denied(db, ctx.project_id, version.object_id) ||
+      db
+        .all<{ blob_id: string }>(
+          `SELECT vf.blob_id AS blob_id FROM version_files vf
+             JOIN object_versions ov ON ov.project_id = vf.project_id AND ov.id = vf.version_id
+            WHERE vf.project_id = ? AND ov.object_id = ?`,
+          ctx.project_id,
+          version.object_id,
+        )
+        .some((row) => print_blob(row.blob_id)));
   if (material_closed && ctx.audience !== "human") return "forbidden";
 
   let redactions = 0;
@@ -318,7 +333,7 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
   );
   const file_lines: string[] = [];
   for (const file of files) {
-    const denied = file_ai_denied(db, ctx.project_id, file.blob_id);
+    const denied = file_ai_denied(db, ctx.project_id, file.blob_id) || print_blob(file.blob_id);
     // The version read hides a closed file from a non-human caller; so does the build, in every list (also the send_off one).
     if (denied && ctx.audience !== "human") continue;
     if (hold_back) {

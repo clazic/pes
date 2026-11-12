@@ -1,6 +1,6 @@
 import * as React from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { NotConnectedError, type CommentThreadView, type PesClient } from "./types";
+import { NotConnectedError, type AnnotationThreadView, type CommentThreadView, type PesClient } from "./types";
 
 /** 읽기·쓰기는 이 클라이언트 하나를 지난다(U1a 는 가짜, U1b 는 HTTP). 루트 레이아웃이 공급한다. */
 export const ClientContext = React.createContext<PesClient | null>(null);
@@ -19,9 +19,18 @@ export const keys = {
   records: (slug: string, edition: number) => ["records", slug, edition] as const,
   assumptions: (slug: string, edition: number) => ["records", slug, edition, "assumptions"] as const,
   decisions: (slug: string, edition: number) => ["records", slug, edition, "decisions"] as const,
+  /** 참고 프로젝트(REF1b) — 기록 읽기와 같은 앞부분이라 판의 변경분(workspace)을 받으면 같이 다시 읽힌다. 내용 읽기(detail)는 목록 키 아래라 목록을 다시 읽으면 같이 무효화된다 */
+  references: (slug: string, edition: number) => ["records", slug, edition, "references"] as const,
+  referenceDetail: (slug: string, edition: number, refId: string) => ["records", slug, edition, "references", "detail", refId] as const,
+  /** 붙일 후보 — 열 때마다 새로 읽는다(gcTime 0). scope null = 생성 화면 */
+  referenceCandidates: (scope: { slug: string; edition: number } | null) => ["reference-candidates", scope?.slug ?? "", scope?.edition ?? 0] as const,
+  /** 내 자료(MAT1c) — 기록 읽기와 같은 앞부분이라 판의 변경분(workspace)을 받으면 같이 다시 읽힌다 */
+  materials: (slug: string, edition: number) => ["records", slug, edition, "materials"] as const,
   reflections: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, stage, round, "reflections"] as const,
   /** 라운드 읽기와 같은 앞부분(["round", slug, edition]) — 라운드를 다시 읽을 때 같이 다시 읽힌다 */
   comments: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, "comments", stage, round] as const,
+  /** 결과 글 첨언(U4b) — 라운드 읽기와 같은 앞부분이라 라운드를 다시 읽을 때(영수증 뒤 · 409 뒤) 같이 다시 읽힌다 */
+  annotations: (slug: string, edition: number, objectId: string) => ["round", slug, edition, "annotations", objectId] as const,
 };
 
 export function useProjects() {
@@ -102,4 +111,51 @@ export function useDecisions(slug: string, edition: number) {
 export function useReflections(slug: string, edition: number, stage: string, round: string) {
   const client = useClient();
   return useQuery({ queryKey: keys.reflections(slug, edition, stage, round), queryFn: () => client.getReflections(slug, edition, stage, round), enabled: !!slug && edition > 0 && !!stage && !!round });
+}
+
+/** 참고 프로젝트 목록(REF1b). 읽기 실패는 오류로 남는다(빈 목록으로 위장하지 않음) */
+export function useReferences(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.references(slug, edition), queryFn: () => client.getReferences(slug, edition), enabled: !!slug && edition > 0 });
+}
+
+/** 참고 프로젝트 내용 하나 — 사람 화면이라 AI 전달이 안 되는 것도 읽힌다 */
+export function useReferenceDetail(slug: string, edition: number, refId: string) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.referenceDetail(slug, edition, refId), queryFn: () => client.getReference(slug, edition, refId) });
+}
+
+/** 붙일 수 있는 프로젝트와 스냅숏. 대화 상자를 열 때마다 한 번 읽는다(남은 캐시 없음). 읽는 길이 없으면 NotConnectedError 가 오류로 남는다 */
+export function useReferenceCandidates(scope: { slug: string; edition: number } | null) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.referenceCandidates(scope), queryFn: () => client.getReferenceCandidates(scope), gcTime: 0, staleTime: 0, refetchOnMount: "always" });
+}
+
+/** useAnnotations 가 돌려주는 모양 — failed 면 읽다가 실패(빈 목록으로 단정하지 않는다) */
+export interface AnnotationsRead {
+  threads: AnnotationThreadView[];
+  failed: boolean;
+}
+
+/** 결과 글(object)의 첨언 스레드(U4b). 읽지 못해도 오류 쿼리로 두지 않고 failed 로 알린다 — 화면이 이유를 말하고, 다시 읽기는 영수증 뒤 · 409 뒤에 일어난다 */
+export function useAnnotations(slug: string, edition: number, objectId: string | undefined) {
+  const client = useClient();
+  return useQuery({
+    queryKey: keys.annotations(slug, edition, objectId ?? ""),
+    queryFn: async (): Promise<AnnotationsRead> => {
+      try {
+        return { threads: await client.getAnnotations(slug, edition, objectId ?? ""), failed: false };
+      } catch {
+        return { threads: [], failed: true };
+      }
+    },
+    enabled: !!objectId,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** 내 자료 목록(MAT1c) — 사람 화면이라 금지(deny) 파일도 온다. 읽기 실패는 오류로 남는다(빈 목록으로 위장하지 않음) */
+export function useMaterials(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.materials(slug, edition), queryFn: () => client.getMaterials(slug, edition), enabled: !!slug && edition > 0 });
 }

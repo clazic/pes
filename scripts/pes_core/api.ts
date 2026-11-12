@@ -56,6 +56,7 @@ import {
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
+import { find_print_snapshot, is_print_scope, print_output_of, prints_using_blob } from "./commands/print.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
@@ -358,6 +359,7 @@ const CREATED_ACTIONS = new Set([
   "decision.superseded",
   "decision.revoked",
   "reflection.created",
+  "print.committed",
   "reference.attached",
   "file.material_uploaded",
   "annotation.create",
@@ -666,6 +668,20 @@ export class ApiApp {
         who: "any", scope: "context:read", go: true,
         act: async (_r, project, auth) => this.#workspace(project, auth),
       }),
+      // SEL-119 U6a: range print. A print is a human's document: all three routes are the owner session's (an agent token is 403 forbidden,
+      // nothing told about the print). GET reads a stored print only.
+      route("GET", `${P}/print`, "print.get", {
+        who: "session",
+        act: async (r, project) => this.#print_read(r, project),
+      }),
+      route("POST", `${P}/print/prepare`, "print.prepare", {
+        who: "session",
+        act: async (r, project, auth) => this.#print_write(r, project, auth, "print.prepare", 200),
+      }),
+      route("POST", `${P}/print/commit`, "print.commit", {
+        who: "session",
+        act: async (r, project, auth) => this.#print_write(r, project, auth, "print.commit", 201),
+      }),
       route("POST", `${P}/runs`, "runs.create", {
         who: "session",
         act: async (r, project, auth) => this.#runs_create(r, project, auth),
@@ -780,7 +796,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/threads/{t}`, "threads.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#thread_read(r, project),
+        act: async (r, project, auth) => this.#thread_read(r, project, auth),
       }),
       route("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create", {
         who: "human",
@@ -3708,6 +3724,63 @@ export class ApiApp {
     return { status: 200, data: round };
   }
 
+  // -------------------------------------------------------------------------
+  // SEL-119 U6a: range print
+
+  /** POST P/print/prepare (200) and P/print/commit (201): the body is the command's input; the command checks every field. */
+  async #print_write(request: RouteRequest, project: ProjectRow, auth: AuthInfo, command: string, status: number): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), command, body));
+    return { status, data: result_record(out.result), replayed: out.replayed };
+  }
+
+  /**
+   * GET P/print?scope=&snapshot= — a pure read of a print that was already committed: the snapshot row, its manifest blob and its
+   * output blob. Nothing is built or written here. Without `snapshot` it is the newest print of the current round / stage / edition.
+   * A print is a human's fixed document: the route is the owner session's (the route table refuses every other caller before this
+   * runs), and the print is given exactly as it was fixed.
+   */
+  async #print_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const scope = request.query.get("scope");
+    if (!is_print_scope(scope)) invalid("$.query.scope");
+    const snapshot = request.query.get("snapshot");
+    if (snapshot !== null && (snapshot.length === 0 || !snapshot.isWellFormed())) invalid("$.query.snapshot");
+    const row = read_tx(this.#db, () => find_print_snapshot(this.#db, project.id, scope, snapshot));
+    if (row === undefined) throw new Fail("not_found", { target: snapshot === null ? "$.query.scope" : "$.query.snapshot" });
+    const store = { db: this.#db, objects_dir: this.#objects_dir };
+    const read = async (blob_id: string) => this.#exec(async () => ({ result: await get_blob(store, project.id, blob_id), replayed: false }));
+    const stored = (await read(row.manifest_blob_id)).result;
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.bytes));
+    } catch {
+      throw new Fail("conflict", { details: { reason: "print_manifest_unreadable" } });
+    }
+    const output = print_output_of(manifest);
+    if (output === null) throw new Fail("not_found", { target: "$.query.snapshot" });
+    const document = (await read(output.blob_id)).result;
+    if (document.sha256 !== output.sha256 || document.size !== output.size) {
+      throw new Fail("conflict", { details: { reason: "print_output_mismatch" } });
+    }
+    return {
+      status: 200,
+      data: {
+        snapshot: {
+          id: row.id,
+          scope: row.scope,
+          edition_id: row.edition_id,
+          stage_id: row.stage_id,
+          round_id: row.round_id,
+          content_hash: row.content_hash,
+        },
+        manifest,
+        output,
+        document: new TextDecoder("utf-8").decode(document.bytes),
+      },
+    };
+  }
+
   /** The text of a comment body: a string; blank is a content problem (422), not a shape problem. */
   #comment_body(value: unknown, target: string): string {
     if (typeof value !== "string" || !value.isWellFormed()) invalid(target);
@@ -3934,7 +4007,7 @@ export class ApiApp {
   async #thread_reanchor(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    reject_unknown(body, ["version_id", "start_cp", "end_cp", "run_id", "lease_id", "fence"]);
+    reject_unknown(body, ["version_id", "basis_version_id", "start_cp", "end_cp", "run_id", "lease_id", "fence"]);
     const thread_id = request.params[1] as string;
     const given = (field: string): boolean => body[field] !== undefined && body[field] !== null;
     if ((given("start_cp") || given("end_cp")) && !auth.session) {
@@ -3943,6 +4016,8 @@ export class ApiApp {
     const payload: Record<string, unknown> = { thread_id };
     const version_id = optional_text(body, "version_id");
     if (version_id !== undefined) payload.version_id = version_id;
+    const basis_version_id = optional_text(body, "basis_version_id");
+    if (basis_version_id !== undefined) payload.basis_version_id = basis_version_id;
     for (const field of ["start_cp", "end_cp"]) {
       if (!given(field)) continue;
       const value = body[field];
@@ -3953,7 +4028,11 @@ export class ApiApp {
     if (guard !== null && !auth.session) Object.assign(payload, guard);
     const out = await this.#exec(
       () => this.#service.execute(this.#ctx(project, auth, key), "annotation.reanchor", payload),
-      (error) => this.#thread_failure(error, "$.body.version_id"),
+      (error) => {
+        const failure = this.#thread_failure(error, "$.body.version_id");
+        // the reanchor's basis is the version the stretch was chosen on, not a follow-up's base
+        return failure.code === "basis_changed" ? new Fail("basis_changed", { target: "$.body.basis_version_id", details: failure.details, next_action: "reread_thread" }) : failure;
+      },
     );
     const result = result_record(out.result);
     return {
@@ -4069,9 +4148,10 @@ export class ApiApp {
   }
 
   /** GET P/threads/{t} */
-  async #thread_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #thread_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const thread_id = request.params[1] as string;
-    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id));
+    const audience = this.#audience(auth);
+    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id, audience));
     if (detail === undefined) throw new Fail("not_found", { target: "$.path.thread_id" });
     return { status: 200, data: detail };
   }
@@ -4346,8 +4426,10 @@ export class ApiApp {
 
   /** `preview` = the same bytes and the same safety headers as content, plus a content-disposition: inline only for the few types a browser shows safely. */
   async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo, preview: boolean): Promise<HandlerResult> {
+    // SEL-119: a print is a human's document, so the output and manifest blobs a print made are closed to a non-human caller
+    // (403 forbidden, the answer of a closed file) whatever the file policies say now; a closed file is 403 as before.
     read_tx(this.#db, () => {
-      if (auth.kind !== "human" && this.#blob_denied(project.id, request.params[1] as string)) {
+      if (auth.kind !== "human" && (this.#blob_denied(project.id, request.params[1] as string) || prints_using_blob(this.#db, project.id, request.params[1] as string).length > 0)) {
         throw new Fail("forbidden", { target: "$.path.blob_id" });
       }
     });

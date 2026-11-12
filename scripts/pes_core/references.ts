@@ -107,9 +107,20 @@ export function is_member(db: ReadDb, project_id: string, user_id: string): bool
   return db.get("SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?", project_id, user_id) !== undefined;
 }
 
-/** The newest snapshot of a project (by the order they were taken), or null. */
+/**
+ * A print (SEL-119 U6a) is stored as a snapshot too, told apart by its print.committed event. It is a human's fixed document,
+ * not a version selection a reference can pin: it is never the newest snapshot, and naming one is refused.
+ */
+const IS_PRINT_SNAPSHOT = `EXISTS (SELECT 1 FROM events e WHERE e.project_id = s.project_id AND e.type = 'print.committed' AND json_extract(e.payload, '$.snapshot_id') = s.id)`;
+
+/** A snapshot of this project that a reference may pin (not a print), or undefined. */
+export function pinnable_snapshot_id(db: ReadDb, project_id: string, snapshot_id: string): string | undefined {
+  return db.get<{ id: string }>(`SELECT s.id AS id FROM snapshots s WHERE s.project_id = ? AND s.id = ? AND NOT ${IS_PRINT_SNAPSHOT}`, project_id, snapshot_id)?.id;
+}
+
+/** The newest snapshot of a project (by the order they were taken) that is not a print, or null. */
 export function newest_snapshot_id(db: ReadDb, project_id: string): string | null {
-  return db.get<{ id: string }>("SELECT id FROM snapshots WHERE project_id = ? ORDER BY rowid DESC LIMIT 1", project_id)?.id ?? null;
+  return db.get<{ id: string }>(`SELECT s.id AS id FROM snapshots s WHERE s.project_id = ? AND NOT ${IS_PRINT_SNAPSHOT} ORDER BY s.rowid DESC LIMIT 1`, project_id)?.id ?? null;
 }
 
 /** Go switch of a project. A missing or damaged policy reads as OFF (fail closed). */
