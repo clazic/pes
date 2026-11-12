@@ -72,7 +72,7 @@ import {
   set_policy,
   type PolicySnapshot,
 } from "./policy.ts";
-import { build_prompt, blob_ai_denied, question_statuses, type PromptTarget, type RedactLiterals } from "./prompt_reads.ts";
+import { build_prompt, file_ai_denied, question_statuses, type PromptTarget, type RedactLiterals } from "./prompt_reads.ts";
 import { publish_set, revise_question, submit_answers } from "./questions.ts";
 import {
   cancel as run_cancel,
@@ -714,7 +714,7 @@ export class ApiApp {
       // and the state of the human -> AI questions. Neither writes; A starts "ask the AI" with the runs + claims above.
       route("POST", `${P}/prompt-builds`, "prompts.build", {
         who: "any", scope: "context:read", go: true,
-        act: async (r, project) => this.#prompt_build(r, project),
+        act: async (r, project, auth) => this.#prompt_build(r, project, auth),
       }),
       route("GET", `${P}/question-statuses`, "question_statuses.list", {
         who: "any", scope: "context:read", go: true,
@@ -2705,7 +2705,7 @@ export class ApiApp {
   // questions and answers
 
   /** POST P/prompt-builds — the prompt of one question about one exact version. A read: nothing is written, no key is needed. */
-  async #prompt_build(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+  async #prompt_build(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const body = this.#json_body(request);
     reject_unknown(body, ["question", "selection", "drafts", "target"]);
     const piece = (value: unknown, target: string): string => {
@@ -2713,7 +2713,7 @@ export class ApiApp {
       return value;
     };
     const question = require_text(body, "question");
-    piece(question, "$.body.question");
+    if (!question.isWellFormed() || question.length > PROMPT_MAX_CHARS) invalid("$.body.question");
     const selection = body.selection;
     if (!is_record(selection)) invalid_field("selection");
     for (const key of Object.keys(selection)) {
@@ -2732,7 +2732,8 @@ export class ApiApp {
         const at = `$.body.drafts[${i}]`;
         if (!is_record(entry)) invalid(at);
         for (const key of Object.keys(entry)) if (key !== "text") invalid(`${at}.${key}`);
-        drafts.push(piece(entry.text, `${at}.text`));
+        const text = piece(entry.text, `${at}.text`);
+        if (text.trim().length > 0) drafts.push(text); // a blank draft says nothing: it is not listed or warned about
       });
     }
     let target: PromptTarget = "B";
@@ -2764,6 +2765,8 @@ export class ApiApp {
           slug: this.#project(project.id).slug,
           project_id: project.id,
           literals,
+          // like the version read: a caller that is not the human never learns that a file is closed to AI
+          audience: auth.kind === "human" ? "human" : "ai",
           content_of: (kind, id) => this.#version_content(project.id, kind, id),
         },
         { question, version_id, quote, drafts, target },
@@ -2804,6 +2807,8 @@ export class ApiApp {
       invalid_field("intended_actor_id");
     }
     const form_key = body.form_key === undefined ? (human_to_agent ? ASK_AI_FORM_KEY : "main") : require_text(body, "form_key");
+    // "main" is the human's input form: a question for an AI never goes into it
+    if (human_to_agent && form_key === "main") invalid_field("form_key");
     const guard = this.#guard_fields(body);
     const question = check_question(body.question, false);
     // SEL-90: adding a question to a form keeps the form's earlier open questions, in order, and puts the new one
@@ -3764,7 +3769,7 @@ export class ApiApp {
 
   /** A deny in the current policy or in the latest history row blocks AI access. */
   #blob_denied(project_id: string, blob_id: string): boolean {
-    return blob_ai_denied(this.#db, project_id, blob_id);
+    return file_ai_denied(this.#db, project_id, blob_id);
   }
 
   async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {

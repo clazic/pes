@@ -1562,9 +1562,13 @@ paths:
         unsubmitted_draft, truncated.
         The text carries the selection, the exact version, the assumptions and decisions of the version's edition (project-wide
         decisions too), the constraints and an app-relative return link (no host, no local path). A draft is marked "미제출 초안".
-        A file with file_policies.ai_access = deny is excluded (ai_access_denied); an allowed file is listed by role and name, never
-        its content, storage key or path. A token, the session secret, an API key or a local path in any input is erased and
-        announced with the warning "redacted".
+        The assumptions and decisions are all of the version's edition (up to 50 of each kind), not only those that bear on the question.
+        A file with file_policies.ai_access = deny is excluded (ai_access_denied) for the human owner session; for any other caller
+        (a token) it is left out of every list, so its id never leaves (the version read hides it the same way). An allowed file is
+        listed by role and name, never its content, storage key or path. A token, the session secret, an API key or a local path in
+        any input is erased and announced with the warning "redacted": values after names that end in token, secret, password,
+        api key, credential or signature, Authorization and Cookie headers, credentials inside a URL, ?key= and ?sig=, private key
+        blocks, long letter-and-digit runs of an unknown shape, and home, file: and drive paths. A blank draft is skipped.
         SEND OFF (allow_opencode_go = false): both targets get the warning send_off. Target A (the text Go would send) drops every
         item but the question (assumptions, decisions, files, the version text, the quote, drafts: excluded with reason send_off, and
         not in the text); target B (the human pastes it by hand) keeps the items and only warns.
@@ -1597,7 +1601,8 @@ paths:
         answered_at, elapsed_ms}]}, only questions with direction human_to_agent, oldest accepted first. The stamps are epoch ms or null:
         a stamp has a value only when there is evidence for it, and nothing is invented (there is no "copied" and no "answering").
         accepted_at = the first version of the question was written; external_received_at = a run reported the question version as seen
-        (POST runs/{r}/input-receipts); read_at = a run reported it as applied; answered_at = a submitted answer version exists for it.
+        (POST runs/{r}/input-receipts); an applied receipt alone also counts as received (applying happens after receiving: with no
+        seen receipt external_received_at is the applied time, with both it is the earlier one); read_at = a run reported it as applied; answered_at = a submitted answer version exists for it.
         state is the furthest of accepted < external_received < read < answered that has evidence. elapsed_ms = answered_at (or the
         server's now) minus accepted_at. ?question_id= narrows to one question (404 not_found for an unknown, another project's, or
         agent_to_human question). Reading writes nothing.

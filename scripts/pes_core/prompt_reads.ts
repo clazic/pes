@@ -21,20 +21,46 @@ const MAX_RECORDS_PER_KIND = 50;
 // ---------------------------------------------------------------------------
 // redaction: a secret or a local path never reaches the prompt (it is erased, and the erasure is announced)
 
+// A value that follows a secret-looking name. `[` is left out of the value so a mark that was already written
+// (`[지움: 비밀]`) is never eaten again and leaves no leftover.
+const VALUE_CHARS = String.raw`[^\s"'\x60,;\[]`;
 const SECRET_PATTERNS: readonly RegExp[] = [
-  /x-pes-session\s*[:=]\s*[^\s"'`,;]+/gi,
-  /Bearer\s+[^\s"'`,;]+/gi,
+  /x-pes-session\s*[:=]\s*[^\s"'`,;\[]+/gi,
+  // PEM private keys: the whole block (an unterminated block is erased to the end of the text)
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+  // Authorization headers with their scheme (Basic / Bearer / Token …), then a bare Bearer
+  new RegExp(String.raw`\bauthorization\s*[:=]\s*(?:(?:basic|bearer|token|digest|negotiate)\s+${VALUE_CHARS}+|${VALUE_CHARS}{6,})`, "gi"),
+  /\bBearer\s+[^\s"'`,;\[]+/gi,
+  // Cookie headers that carry name=value pairs: the rest of the line
+  /\b(?:set-)?cookie\s*:[^\r\n]*=[^\r\n]*/gi,
+  // credentials inside a URL: user:pass@host, or a token used as the user name
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@"'`]+:[^\/\s@"'`]+@/gi,
+  /\b[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9_.~%-]{20,}@/gi,
   /\bpes_[A-Za-z0-9_-]{16,}/g,
   /\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{12,}/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-  /\b(?:api[_-]?key|secret|passw(?:or)?d|token|authorization)\s*[:=]\s*[^\s"'`,;]{6,}/gi,
+  // name = value where the name ENDS in a secret word (access_token, client_secret, x-api-key …)
+  new RegExp(String.raw`[\w-]*(?:api[_-]?key|secret|passw(?:or)?d|token|credential|signature)["']?\s*[:=]\s*["']?${VALUE_CHARS}{6,}`, "gi"),
+  // short query-string names that are secrets by themselves: ?key=… ?sig=… ?sid=…
+  /(?<=[?&;\s])(?:key|sig|sid)=[^\s"'`,;&\[]{6,}/gi,
+  // a long run of letters and digits with no separator is a key whatever it is called (UUIDs and file names have separators)
+  /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{32,}(?![A-Za-z0-9_-])/g,
+  // base64url-ish: 40+ characters that mix upper case, lower case and digits (a file name or sentence does not)
+  /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{40,}(?![A-Za-z0-9_-])/g,
 ];
 
 const PATH_PATTERNS: readonly RegExp[] = [
+  // file: URLs and percent-encoded home roots go whole
+  /\bfile:\/\/[^\s"'<>|`]*/gi,
+  /%2F(?:Users|home)%2F[^\s"'<>|`&]*/gi,
   // Windows drive paths and UNC paths (the JSON-escaped form with doubled backslashes is the same shape)
   /\b[A-Za-z]:[\\/][^\s"'<>|`]*/g,
   /\\\\[\w.$-]+\\[^\s"'<>|`]*/g,
+  // Git Bash / Cygwin drives (/c/<home root>/…, /cygdrive/c/…) and a root-less backslash home root or ~\…
+  /(?<![\w.\-/:])\/(?:cygdrive\/)?[A-Za-z]\/(?:Users|Documents and Settings)\/[^\s"'<>|`]*/g,
+  /(?<![\w.\-\\])\\(?:Users|home)\\[^\s"'<>|`]*/g,
+  /(?<!\w)~\\[^\s"'<>|`]*/g,
   // POSIX paths that start at a system or home root; "/p/<slug>/…" app links do not
   /(?<![\w.\-/])\/(?:Users|home|root|var|private|tmp|opt|etc|mnt|Volumes|usr|srv|Library|Applications|proc|dev|run)\b(?:\/[^\s"'<>|`)\]}]*)?/g,
   /(?<!\w)~\/[^\s"'<>|`]*/g,
@@ -60,16 +86,18 @@ function replace_literal(text: string, literal: string, mark: string): Redacted 
 export function redact_text(input: string, literals: RedactLiterals): Redacted {
   let text = input;
   let hits = 0;
-  for (const secret of literals.secrets) {
-    const out = replace_literal(text, secret, SECRET_MARK);
-    text = out.text;
-    hits += out.hits;
-  }
+  // Patterns first: a header such as `x-pes-session: <secret>` goes whole, so no half-erased mark is left behind.
+  // The literals (the session secret, this machine's own folders) then catch what no pattern named.
   for (const pattern of SECRET_PATTERNS) {
     text = text.replace(pattern, () => {
       hits += 1;
       return SECRET_MARK;
     });
+  }
+  for (const secret of literals.secrets) {
+    const out = replace_literal(text, secret, SECRET_MARK);
+    text = out.text;
+    hits += out.hits;
   }
   for (const path of [...literals.paths].sort((a, b) => b.length - a.length)) {
     const out = replace_literal(text, path, PATH_MARK);
@@ -88,8 +116,13 @@ export function redact_text(input: string, literals: RedactLiterals): Redacted {
 // ---------------------------------------------------------------------------
 // files
 
-/** A deny in the current policy or in the latest history row blocks AI access (one rule for the version read and the prompt). */
-export function blob_ai_denied(db: Db, project_id: string, blob_id: string): boolean {
+/**
+ * THE decision hook: is this blob closed to AI? A deny in the current policy or in the latest history row blocks AI access
+ * (one rule for the version read, the file read and the prompt).
+ * SEL-115 owns the real decision under the same name (`file_ai_denied` in commands/file_access.ts): when that lands on main,
+ * delete this body and import that function — callers (api.ts, build_prompt) already use the final name.
+ */
+export function file_ai_denied(db: Db, project_id: string, blob_id: string): boolean {
   const row = db.get<{ current: string; latest: string | null }>(
     `SELECT p.ai_access AS current,
             (SELECT a.ai_access FROM file_ai_access_versions a
@@ -119,6 +152,8 @@ export interface PromptContext {
   slug: string;
   project_id: string;
   literals: RedactLiterals;
+  /** who reads the build: a caller that is not the human never learns that a file is closed to AI (not even its id) */
+  audience: "human" | "ai";
   /** the content of one version as the version read gives it (the caller owns that read) */
   content_of: (kind: string, version_id: string) => unknown;
 }
@@ -239,7 +274,7 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
     if (lines.length > 0) sections.push(`## 이 버전의 내용\n${clip(clean(lines.join("\n")))}`);
   }
 
-  // assumptions and decisions of the version's edition (decisions with scope project included)
+  // every assumption and decision of the version's edition, not only those that bear on this question (decisions with scope project included)
   const edition_id = version.edition_id ?? (db.get<{ id: string }>("SELECT active_edition_id AS id FROM projects WHERE id = ?", ctx.project_id)?.id ?? null);
   const assumptions = edition_id === null ? [] : assumption_rows(db, ctx.project_id, edition_id).filter((row) => row.state !== "rejected");
   const decisions = edition_id === null ? [] : decision_rows(db, ctx.project_id, edition_id).filter((row) => row.state === "proposed" || row.state === "adopted");
@@ -253,14 +288,14 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
       included.push({ kind: "assumption", id: row.id, version_id: row.version_id, label: `가정 ${row.id}` });
       lines.push(`- 가정 ${row.id} (버전 ${row.version_id}, ${ASSUMPTION_STATE[row.state] ?? row.state}): ${clean(row.statement)}`);
     }
-    if (lines.length > 0) sections.push(`## 관련 가정\n${lines.join("\n")}`);
+    if (lines.length > 0) sections.push(`## 이 판의 가정\n${lines.join("\n")}`);
     const decision_lines: string[] = [];
     for (const row of decisions.slice(0, MAX_RECORDS_PER_KIND)) {
       included.push({ kind: "decision", id: row.id, version_id: row.version_id, label: `결정 ${row.id}` });
       const where = row.scope === "project" ? "프로젝트 전체" : "이 판";
       decision_lines.push(`- 결정 ${row.id} (버전 ${row.version_id}, ${where}, ${DECISION_STATE[row.state] ?? row.state}): ${clean(row.statement)}`);
     }
-    if (decision_lines.length > 0) sections.push(`## 관련 결정\n${decision_lines.join("\n")}`);
+    if (decision_lines.length > 0) sections.push(`## 이 판의 결정\n${decision_lines.join("\n")}`);
   }
 
   // files attached to this exact version: a file the AI may not read is listed as excluded, never described
@@ -274,9 +309,12 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
   );
   const file_lines: string[] = [];
   for (const file of files) {
+    const denied = file_ai_denied(db, ctx.project_id, file.blob_id);
+    // The version read hides a closed file from a non-human caller; so does the build, in every list (also the send_off one).
+    if (denied && ctx.audience !== "human") continue;
     if (hold_back) {
       excluded.push({ kind: "file", id: file.blob_id, version_id: input.version_id, reason: "send_off" });
-    } else if (blob_ai_denied(db, ctx.project_id, file.blob_id)) {
+    } else if (denied) {
       excluded.push({ kind: "file", id: file.blob_id, version_id: input.version_id, reason: "ai_access_denied" });
     } else {
       const base = file.original_name === null ? "" : (file.original_name.split(/[\\/]/).pop() ?? "");
@@ -288,7 +326,7 @@ export function build_prompt(db: Db, ctx: PromptContext, input: PromptInput): Pr
   if (file_lines.length > 0) sections.push(`## 붙은 파일\n${file_lines.join("\n")}`);
 
   // drafts the human has not submitted: the client sends them (they live only in the browser), and they are marked
-  const draft_texts = input.drafts.map((text) => clip(clean(text)));
+  const draft_texts = input.drafts.filter((text) => text.trim().length > 0).map((text) => clip(clean(text)));
   if (draft_texts.length > 0) {
     if (hold_back) {
       for (let i = 0; i < draft_texts.length; i += 1) excluded.push({ kind: "draft", id: null, version_id: null, reason: "send_off" });
