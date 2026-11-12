@@ -33,6 +33,11 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   // Authorization headers with their scheme (Basic / Bearer / Token …), then a bare Bearer
   new RegExp(String.raw`\bauthorization["']?\s*[:=]\s*["']?(?:(?:basic|bearer|token|digest|negotiate)\s+${VALUE_CHARS}+|${VALUE_CHARS}{6,})`, "gi"),
   /\bBearer\s+[^\s"'`,;\[]+/gi,
+  // a Basic credential whatever the header name is (HAR, escaped JSON, Go, Node): `Basic <base64>`, any letter case, any
+  // white space (a line break too) before the value. The value must look like base64 — 8+ characters with a digit, `+`, `/`
+  // or `=`, or 12+ characters in mixed case — so an ordinary sentence with the word "basic" is left alone. Every look-ahead
+  // scans one run once, and the value run is read once: linear on long input.
+  new RegExp(String.raw`\b[Bb][Aa][Ss][Ii][Cc]\s+(?=[A-Za-z0-9+/]{8})(?:(?=[A-Za-z0-9+/]*[0-9+/=])|(?=[A-Za-z0-9+/]{12})(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/][A-Za-z0-9+/]*[A-Z]))[A-Za-z0-9+/]+={0,2}`, "g"),
   // Cookie headers that carry name=value pairs: the rest of the line. The name before the first `=` is short, so the
   // look-ahead is bounded (an unbounded `[^\r\n]*=` rescans the whole line for every `cookie:` on it).
   /\b(?:set-)?cookie["']?\s*:[^\r\n=]{0,200}=[^\r\n]*/gi,

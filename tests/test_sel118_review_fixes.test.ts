@@ -505,3 +505,70 @@ test("4회차 F1-1 question statuses: owner, AI A and AI B see no session secret
     }
   });
 });
+
+// ===========================================================================
+// 5회차 F2-1 — 헤더 이름과 무관한 `Basic <base64 값>` 모양을 지운다 (대소문자·여러 공백·줄바꿈 뒤 값 포함).
+// 정상 글의 `basic` 단어(뒤에 base64 모양 값이 없는 것)는 지우지 않는다.
+
+const BASIC_VALUES: Array<[string, string, string]> = [
+  // [이름, 글, 남으면 안 되는 값]
+  ["HAR value, one space", "값 Basic dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["upper case BASIC", "값 BASIC dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["lower case basic", "값 basic dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["mixed case bAsIc", "값 bAsIc dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["several spaces", "값 Basic    dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["tab and spaces", "값 Basic \t  dXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["newline then value", "값 Basic\ndXNlcjpwYXNzd29yZDEyMw== 끝", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["newline and indent then value", "값 Basic\r\n      dXNlcjpwYXNzd29yZDEyMw== 끝", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["upper case BASIC then newline", "값 BASIC\n\ndXNlcjpwYXNz 끝", "dXNlcjpwYXNz"],
+  ["digits and padding", "값 Basic dXNlcjpwYXNzd29yZDEyMw== 끝", "dXNlcjpwYXNzd29yZDEyMw"],
+  ["lower-case value with a digit", "값 basic abc12345 끝", "abc12345"],
+];
+
+for (const [name, text, value] of BASIC_VALUES) {
+  test(`5회차 F2-1 Basic value is erased: ${name}`, () => {
+    const out = redact_text(text, NONE);
+    assert.ok(!out.text.includes(value), `value left: ${out.text}`);
+    assert.ok(out.hits >= 1, "the erasure is counted");
+    assert.ok(out.text.startsWith("값 ") && out.text.endsWith(" 끝"), `the text around stays: ${out.text}`);
+  });
+}
+
+const BASIC_WORDS: string[] = [
+  // 정상 글: `basic` 뒤에 base64 모양 값이 없으면 한 글자도 지우지 않는다
+  "basic settings",
+  "Basic settings",
+  "BASIC SETTINGS",
+  "Basic Settings",
+  "Basic 개념",
+  "basic 설정은 간단하다",
+  "The basic settings page is here.",
+  "a basic concept of 기본 설정",
+  "Basic Concept",
+  "basic-auth 설명",
+  "basic plan",
+];
+
+for (const text of BASIC_WORDS) {
+  test(`5회차 F2-1 a normal sentence with the word basic is not erased: ${text}`, () => {
+    assert.equal(redact_text(text, NONE).text, text);
+  });
+}
+
+const BASIC_SLOW: Array<[string, string]> = [
+  ["repeated 'Basic '", "Basic ".repeat(40_000)],
+  ["'Basic' then long spaces", "Basic" + " ".repeat(200_000)],
+  ["'Basic ' then a long lower-case run", "Basic " + "a".repeat(200_000)],
+  ["'basic ' then a long mixed-case run", "basic " + "aB".repeat(100_000)],
+  ["'Basic ' then a long digit run", "Basic " + "1".repeat(200_000)],
+  ["repeated 'basic' and newline", "basic\n".repeat(40_000)],
+];
+
+for (const [name, text] of BASIC_SLOW) {
+  test(`5회차 F2-1 Basic stays linear: ${name} (${text.length} chars) is done within ${BUDGET_MS} ms`, () => {
+    const started = performance.now();
+    redact_text(text, NONE);
+    const spent = performance.now() - started;
+    assert.ok(spent < BUDGET_MS, `${spent.toFixed(0)} ms for ${text.length} chars`);
+  });
+}
