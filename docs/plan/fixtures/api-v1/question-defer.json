@@ -39,6 +39,11 @@
             "state": "deferred"
           },
           "previous_answers_preserved": true
+        },
+        "receipt": {
+          "receipt_no": "46",
+          "tx_id": "txn_01J9Z3K7R06",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

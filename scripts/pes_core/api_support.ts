@@ -60,6 +60,9 @@ export const ERROR_STATUS: Readonly<Record<string, number>> = Object.freeze({
   stale_stage: 409,
   stage_not_active: 409,
   already_sealed: 409,
+  thread_closed: 409,
+  already_resolved: 409,
+  basis_changed: 409,
   cursor_expired: 410,
   rate_limited: 429,
   not_supported: 501,
@@ -93,6 +96,9 @@ const MESSAGE: Readonly<Record<string, string>> = Object.freeze({
   stale_stage: "단계가 그사이 바뀌었습니다. 다시 읽어 주세요.",
   stage_not_active: "진행 중이 아닌 단계입니다.",
   already_sealed: "이미 봉인된 라운드입니다.",
+  thread_closed: "닫힌 스레드에는 답글을 남길 수 없습니다.",
+  already_resolved: "이미 처리된 스레드입니다.",
+  basis_changed: "후속 조치의 기반 버전이 바뀌었습니다.",
   cursor_expired: "변경분 커서가 만료되었습니다. 전체 읽기 모델을 다시 받아야 합니다.",
   rate_limited: "요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.",
   not_supported: "2단계에서 지원하지 않는 기능입니다.",
@@ -124,6 +130,9 @@ export const NEXT_ACTION: Readonly<Record<string, string>> = Object.freeze({
   stale_stage: "reread_stage",
   stage_not_active: "reread_stage",
   already_sealed: "reread_round",
+  thread_closed: "open_new_thread",
+  already_resolved: "reread_thread",
+  basis_changed: "reread_followup",
   cursor_expired: "resync",
   rate_limited: "retry_after",
   not_supported: "see_capabilities",
@@ -166,6 +175,8 @@ const VALIDATION_REASONS: ReadonlySet<string> = new Set([
   "not_applicable",
   "single_requires_one_item",
   "self_merge",
+  "not_a_permutation",
+  "no_change",
 ]);
 
 /** Map a core ApiError (or anything else) to a Fail. Route code may refine it afterwards. */
@@ -178,7 +189,7 @@ export function fail_from(error: unknown): Fail {
   if (code === "unknown_command") code = "invalid_payload";
   if (code === "conflict" && details !== null && typeof details.reason === "string") {
     const { reason, ...rest } = details;
-    if (["stale_stage", "stage_not_active", "already_sealed", "question_version_changed", "run_terminal"].includes(reason as string)) {
+    if (["stale_stage", "stage_not_active", "already_sealed", "question_version_changed", "run_terminal", "thread_closed", "already_resolved", "basis_changed"].includes(reason as string)) {
       return new Fail(reason as string, { details: rest });
     }
   }

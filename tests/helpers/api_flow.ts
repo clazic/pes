@@ -127,6 +127,11 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/reflections",
   "GET /api/v1/projects/{id}/context",
   "GET /api/v1/projects/{id}/files/{b}/content",
+  // SEL-115 MAT1a: my materials, the AI-reference switch, file preview
+  "GET /api/v1/projects/{id}/files/{b}/preview",
+  "GET /api/v1/projects/{id}/materials",
+  "POST /api/v1/projects/{id}/materials",
+  "POST /api/v1/projects/{id}/file-policies/{fp}/ai-access",
   "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
   "GET /api/v1/projects/{id}/operations/{op}",
   "GET /api/v1/projects/{id}/requests/{key}",
@@ -138,6 +143,9 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/questions",
   "POST /api/v1/projects/{id}/questions/{q}/defer",
   "POST /api/v1/projects/{id}/questions/{q}/merge",
+  "POST /api/v1/projects/{id}/question-sets/{set}/order",
+  "GET /api/v1/projects/{id}/stages/{s}/rounds/{rd}",
+  "GET /api/v1/projects/{id}/stages/{s}/rounds/{rd}/threads",
   "POST /api/v1/projects/{id}/questions/{q}/revisions",
   "POST /api/v1/projects/{id}/questions/{q}/withdraw",
   "POST /api/v1/projects/{id}/rounds/{rd}/seal",
@@ -155,9 +163,16 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/stages/{s}/reopen",
   "POST /api/v1/projects/{id}/stages/{s}/rounds",
   "POST /api/v1/projects/{id}/submissions",
-  // SEL-90 U2a: question comments (annotation context stays 501 until U4a)
+  // SEL-90 U2a: question comments; SEL-99 U4a (leader 승인: 미지원→지원): selection comments, resolutions, reanchor, follow-ups
   "POST /api/v1/projects/{id}/threads",
+  "GET /api/v1/projects/{id}/threads",
+  "GET /api/v1/projects/{id}/threads/{t}",
   "POST /api/v1/projects/{id}/threads/{t}/messages",
+  "POST /api/v1/projects/{id}/threads/{t}/resolutions",
+  "POST /api/v1/projects/{id}/threads/{t}/reanchor",
+  "GET /api/v1/projects/{id}/followups",
+  "POST /api/v1/projects/{id}/followups",
+  "POST /api/v1/projects/{id}/followups/{f}/apply",
   "POST /api/v1/projects/{id}/uploads",
   "POST /api/v1/projects/{id}/uploads/{b}/complete",
   "PUT /api/v1/projects/{id}/uploads/{b}",
@@ -166,7 +181,6 @@ export const EXPECTED_ROUTES: readonly string[] = [
 /** Routes the closed 2단계 list does NOT have and capabilities must say are unsupported (no fake success). */
 export const EXPECTED_UNSUPPORTED: readonly string[] = [
   "POST /api/v1/projects/{id}/exports",
-  "POST /api/v1/projects/{id}/threads/{t}/resolutions",
 ];
 
 /**

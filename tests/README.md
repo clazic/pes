@@ -4,16 +4,21 @@ Node 26 이상이 필요하다 (Python 은 필요 없다 — SEL-74 로 0.15 Pyt
 
 ## 실행
 
+**시험은 임시 HOME 에서 시작한다(SEL-103).** 실제 계정 홈(`os.userInfo().homedir`, `/Users/x`·`/home/x`·`C:\\Users\\x` 모양)에서 시작하면 홈 가드가 아무것도 훑기 전에 `--import` 진입점이 `임시 HOME 으로 실행하라`로 바로 실패시킨다.
+
 macOS / Linux (POSIX):
 
 ```sh
-npm ci && npm test && npm run typecheck
+npm ci
+test_home="$(mktemp -d)"
+HOME="$test_home" USERPROFILE="$test_home" npm test && npm run typecheck
 ```
 
 Windows (PowerShell):
 
 ```powershell
 npm ci
+$env:HOME = $env:USERPROFILE = Join-Path $env:TEMP ("pes-test-" + [guid]::NewGuid())
 npm test
 npm run typecheck
 ```
@@ -29,10 +34,12 @@ npm run typecheck
 ## TypeScript 테스트 (Node 26)
 
 ```sh
-npm ci && npm test && npm run typecheck
+npm ci
+test_home="$(mktemp -d)"
+HOME="$test_home" USERPROFILE="$test_home" npm test && npm run typecheck
 ```
 
-`npm test`는 `node --test "tests/**/*.test.ts"`로 돈다. `tests/helpers/isolated_home.ts`가 임시 `HOME`·`USERPROFILE`·`PES_HOME`을 만들고, 시험은 그 env 객체를 경로 함수와 자식 프로세스에만 넘긴다. `process.env`는 바꾸지 않으며 실제 `~/.pes`·`~/pes-projects`를 열거나 stat 하지 않는다. 임시 폴더와 그 안의 DB 파일은 각 시험의 `cleanup()`이 지운다.
+`npm test`는 `node scripts/run_tests.ts`(SEL-106)로 돌고, 이 실행기가 `node --import ./tests/helpers/require_temp_home.ts --test --test-concurrency=<N> "tests/**/*.test.ts"`를 부른다(진입점 설명: 아래 「실제 홈에서 시작 거절」). 동시 실행 수 `<N>`은 환경변수 `PES_TEST_CONCURRENCY`(1 이상 정수, 예: `PES_TEST_CONCURRENCY=3 npm test`)이고, 없으면 코어 수의 절반(최소 2)이다. 잘못된 값은 종료 코드 2 로 거절하며, `npm test -- <파일>` 같은 추가 인자는 glob 앞에 그대로 전달되지만, 실행기는 항상 전체 glob(`tests/**/*.test.ts`)도 함께 넘기므로 **`npm test -- <파일>` 은 그 파일과 전체 glob 의 합집합, 곧 전체가 돈다**(파일 하나만 돌리려면 `node --test --import ./tests/helpers/require_temp_home.ts <파일>`). 실행기는 저장소 루트를 cwd 로 자식을 띄우고 SIGINT·SIGTERM·SIGHUP 를 자식 그룹 전체에 전달한다. 첫 신호 뒤 10초 안에 안 끝나거나 두 번째 신호가 오면 그룹에 SIGKILL 을 보낸다(신호를 무시하는 시험 때문에 끝없이 기다리지 않게). 한계: POSIX 에서 실행기 자체가 SIGKILL 되면(핸들러로 막을 수 없다) 별도 그룹의 시험 자식은 남고, Windows 는 그룹 전달 없이 직접 자식에만 보낸다. CI 는 실행기를 쓰지 않고 `node --test --test-shard=N/8`을 직접 부른다. `tests/helpers/isolated_home.ts`가 임시 `HOME`·`USERPROFILE`·`PES_HOME`을 만들고, 시험은 그 env 객체를 경로 함수와 자식 프로세스에만 넘긴다. `process.env`는 바꾸지 않으며 실제 `~/.pes`·`~/pes-projects`를 열거나 stat 하지 않는다. 임시 폴더와 그 안의 DB 파일은 각 시험의 `cleanup()`이 지운다.
 
 ## 화면 시험 (PR18)
 
@@ -51,9 +58,25 @@ tmp_home="$(mktemp -d)"
 HOME="$tmp_home" PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" npx playwright test
 ```
 
-`tests/e2e/helpers/home_guard.ts`(globalSetup)가 실행 전후로 `os.homedir()` 의 `.pes`·`pes-projects` 의 이름·크기·mtime(깊이 3, 내용은 열지 않음)을 견주어 달라졌으면 실패시킨다. 없으면 없는 그대로여야 한다. CI 에서도 같이 돈다.
+`tests/e2e/helpers/home_guard.ts`(globalSetup)가 실행 전후로 `os.homedir()`(= 위처럼 바꾼 **임시** HOME)의 `.pes`·`pes-projects` 의 이름·크기·mtime(깊이 3, 내용은 열지 않음)을 견주어 달라졌으면 실패시킨다. 없으면 없는 그대로여야 한다. CI 에서도 같이 돈다.
+
+Playwright 도 `npm test` 처럼 **임시 HOME 이 아니면 시작하자마자 거절**한다(SEL-103): `playwright.config.ts` 맨 위와 globalSetup 첫 줄이 `HOME`·`USERPROFILE` 을 계정의 실제 홈과 **문자열로** 견준다(파일 시스템 호출 없음). 실제 계정 홈은 목록도 하지 않는다 — `snapshot_of()` 는 계정 홈이면 `(not listed: account home)` 만 돌려준다. CI 의 브라우저 잡도 임시 HOME 으로 돌고 브라우저는 `PLAYWRIGHT_BROWSERS_PATH`(HOME 밖)에 설치한다.
 
 합성 작업 공간은 `tests/e2e/helpers/seed_workspace.ts`(일반 Node 로 실행)가 임시 HOME·USERPROFILE·PES_HOME 에 만든다. `PES_E2E_V015=1` 로 돌리면 같은 시험을 v0.15 동작에 대고 돌려, 선택자·흐름이 옛 동작과 맞는지(구현 전 자체 점검) 볼 수 있다.
+
+### 앱(app/) Vitest·Playwright 실행 (SEL-122)
+
+앱 Vitest(`app/vitest.config.ts`)와 앱 Playwright(`app/playwright.config.ts`)도 **설정을 읽는 즉시** 실제 계정 홈이면 거절한다(시험 파일을 찾기 전). 그래서 HOME·USERPROFILE 을 임시 폴더로 바꾸고, 브라우저 캐시는 HOME 밖 폴더로 넘긴다. `<브라우저 폴더>` 는 실제 홈 밖의 고정 폴더 경로로 바꾼다:
+
+```sh
+cd app
+export PLAYWRIGHT_BROWSERS_PATH="<브라우저 폴더>"    # HOME 밖, 처음 한 번: npx playwright install chromium
+tmp_home="$(mktemp -d)"
+HOME="$tmp_home" USERPROFILE="$tmp_home" npx vitest run                 # 앱 단위 시험
+HOME="$tmp_home" USERPROFILE="$tmp_home" npm run test:e2e               # 앱 e2e
+```
+
+`test_sel122_app_home_guard` 가 Vitest CLI 를 가짜 계정 홈으로 띄워 거절과 `pes-projects` 를 열지 않음을 본다(`app/node_modules` 가 있어야 한다).
 
 ## 0.15 동등성 하네스와 옛 Python 시험 자산의 TS 이전 (SEL-70, PR26a — SEL-74 로 Python 쪽은 사라지고 고정 기록만 남는다)
 
@@ -147,9 +170,15 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 **옮기지 않은 것(Python 내부 계약, CLI 로 볼 수 없음):** `pes.CMDS` 를 monkeypatch 하는 `main` 분기·argv 불변 시험, `pes.pes_home()`/`pes.CONFIG` 속성 직접 확인, 감사 훅 자체의 단위 시험(→ `test_home_guard`·`test_pes_ts_guard` 가 TS 가드를 같은 관점에서 시험), `test_start_failure_terminates_child_and_closes_log` 의 '로그 파일 핸들이 닫힘' 단언. 이들은 Python 과 함께 사라졌다.
 
+### 실제 홈에서 시작 거절 (SEL-103)
+
+`HOME`·`USERPROFILE` 이 계정의 실제 홈이면(`os.userInfo().homedir`·`/Users/x`·`/home/x`·`/root`·`C:\\Users\\x` 모양·그 부모·그 안의 `.pes`·`pes-projects`·`.claude`) 시험 파일 프로세스는 시작하자마자 던진다. 계정 홈 **모양**(`/Users/x`·`/home/x`·`/root`·`C:\\Users\\x`)에도 부모(`/`·`/Users`·`/home`·`C:\`)와 그 안의 `.pes`·`pes-projects`·`.claude` 거절이 같이 적용된다. 절대 경로가 아닌 값도 거절한다 — 상대 경로, `D:`·`D:foo` 같은 드라이브 상대 경로(그 드라이브의 현재 폴더에 따라 뜻이 달라진다), 읽을 수 없는 `\\?\Volume{…}` 네임스페이스. Windows 네임스페이스 표기(`\\?\C:\…`·`\\.\C:\…`·`\??\C:\…`·UNC 관리 공유 `\\localhost\c$\…`)는 먼저 평범한 드라이브 경로로 고쳐 쓴 뒤 견준다. 드라이브 없는 루트 상대 경로(`\srv\…`)는 드라이브를 떼고 견준다. 비교는 **문자열뿐**(`tests/helpers/temp_home_check.ts`) — 실제 홈 경로에 lstat·readdir·realpath 를 부르지 않는다. 자리는 둘이다: ① `--import ./tests/helpers/require_temp_home.ts`(`npm test`·CI 시험 단계·d1-smoke), ② `home_guard.ts` 의 첫 import(진입점 없이 `node --test 파일.ts` 로 직접 돌려도 스냅샷 전에 막힌다). 가짜 계정 홈은 `PES_TEST_ACCOUNT_HOME`(`path.delimiter` 로 여럿)으로 주입한다 — 거절할 홈을 **더할 뿐** 거절된 홈을 허용으로 바꾸지 못한다. `test_sel103_real_home_precheck` 가 `tests/helpers/fs_path_recorder.ts`(`--import`)로 그 폴더에 fs 호출이 0 번임을 단언하고(대조: 주입 없이 돌리면 lstat 이 기록됨), `package.json`·`ci.yml` 이 진입점을 거치는지 본다. 한계: 임시 폴더가 실제 홈의 심볼릭 링크인 경우는 철자로 못 본다(뒤 겹이 맡는다).
+
+**계정 홈을 목록하지 않는다 (SEL-103, `test_sel103_no_account_listing`).** `os.userInfo()` 를 가짜 계정 홈으로 바꾸는 `--import tests/helpers/fake_account_home.ts` 와 fs 기록기(`fs_path_recorder.ts`)를 함께 써서, ① `use_home_guard()`(인자 없음)·② Playwright globalSetup 이 그 폴더에 fs 호출 **0 번**(lstat·readdir 은 물론 홈 자신의 `realpath` 도)임을 단언한다. 대조로 같은 실행이 임시 HOME 의 `.pes` 는 lstat 함을 보인다. 계정 홈에서 시작한 globalSetup·`playwright test --list` 는 `임시 HOME` 메시지로 거절되고 역시 0 번이다.
+
 ### home_guard 가 막는 것
 
-"실제 `~/.pes`·`~/pes-projects` 접근 0" 을 자식 종류별로 이렇게 지킨다. 실제 홈은 `os.homedir()`(= `$HOME`을 따라감)와 `os.userInfo().homedir`(계정의 홈) **둘 다**다 — 임시 HOME 으로 `npm test` 를 돌려도 계정의 실제 홈을 본다.
+"실제 `~/.pes`·`~/pes-projects` 접근 0" 을 자식 종류별로 이렇게 지킨다. **보호**하는 실제 홈은 `os.homedir()`(= `$HOME`을 따라감)와 `os.userInfo().homedir`(계정의 홈) **둘 다**다 — 임시 HOME 으로 `npm test` 를 돌려도 계정의 실제 홈 경로는 막는다. 그러나 전후 **목록**(②)은 임시 HOME 과 시험이 넘긴 가짜 홈만 훑는다(SEL-103: 계정의 실제 홈은 목록도 lstat·readdir 도 하지 않는다 — `listed_homes()`).
 
 | 자식 | 읽기 | 쓰기·생성·삭제 | 출력에 실경로 |
 |---|---|---|---|
@@ -164,9 +193,16 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 - **손자 프로세스.** 예: `doctor` 의 `find_tool` 이 PATH 밖(`/opt/homebrew/bin` 등)의 vworld·kosis 를 띄운다. 자식 안 훅은 손자에게 이어지지 않는다. HOME 은 임시 폴더로 격리되어 있고, 시험은 `narrow_path`·임시 `LOCALAPPDATA` 로 도구를 좁힌다.
 - **`PES_TEST_GUARD`.** 사례·옵션의 `env` 가 이 값을 바꾸지 못한다(`child_env` 가 합친 뒤 `"1"` 을 단언; 가드 자기 시험은 `PES_TEST_REAL_HOME` 만 바꾼다).
 
-공통 3겹: ① 자식 시작 전 `HOME`·`USERPROFILE`·`PES_HOME` 이 임시 폴더인지 검사(`assert_isolated_env`), ② 파일 전후 이름·크기·mtime 비교(`use_home_guard`, 깊이 3 — 읽기는 흔적이 없고 깊이 4 이하의 내용 수정은 상위 폴더 mtime 이 안 변하면 놓친다), ③ 출력·산출 파일에 보호 경로 문자열이 없는지(`assert_no_real_path` — 경로 **이름**이 아닌 프로젝트 이름만 새는 경우는 못 본다). 가드 자체는 합성 '가짜 실제 홈'(`PES_TEST_REAL_HOME`)으로 시험한다(`test_home_guard`): 자식이 그 아래를 **읽기만** 해도 실패한다.
+공통 3겹: ① 자식 시작 전 `HOME`·`USERPROFILE`·`PES_HOME` 이 임시 폴더인지 검사(`assert_isolated_env`), ② 파일 전후 이름·크기·mtime 비교(`use_home_guard`, 깊이 3 — 읽기는 흔적이 없고 깊이 4 이하의 내용 수정은 상위 폴더 mtime 이 안 변하면 놓친다. **임시 HOME·가짜 홈만** 목록 대상이다 — 계정의 실제 홈은 0층(실제 홈에서 시작 거절)·4층(보호 폴더 fs 호출 차단)이 맡고 목록하지 않는다), ③ 출력·산출 파일에 보호 경로 문자열이 없는지(`assert_no_real_path` — 경로 **이름**이 아닌 프로젝트 이름만 새는 경우는 못 본다). 가드 자체는 합성 '가짜 실제 홈'(`PES_TEST_REAL_HOME`)으로 시험한다(`test_home_guard`): 자식이 그 아래를 **읽기만** 해도 실패한다.
 
-경로 판정(`touches_protected`)은 보호 폴더처럼 보이는 경로를 철자만으로 결정한다(파일 시스템을 건드리지 않는다). 보호 폴더처럼 안 보이는 경로만 `realpath` 로 풀어 심볼릭 링크·junction 별칭을 본다. 스냅샷은 두 보호 폴더의 이름·크기·mtime 만 `lstat` 으로 읽고 내용은 열지 않는다.
+경로 판정(`touches_protected`)은 보호 폴더처럼 보이는 경로를 철자만으로 결정한다(파일 시스템을 건드리지 않는다). 보호 폴더처럼 안 보이는 경로만 `realpath` 로 풀어 심볼릭 링크·junction 별칭을 본다. 스냅샷은 두 보호 폴더의 이름·크기·mtime 만 `lstat` 으로 읽고 내용은 열지 않는다(임시·가짜 홈에서만 — 계정 홈 경로는 `realpath` 도 하지 않고 철자 그대로 비교한다).
+
+**④ 시험 프로세스 자신의 fs 호출 (SEL-95·SEL-103, `guard_process_fs`·`use_home_guard`).** 실제 홈(`os.homedir()`·계정 홈)의 `.pes`·`pes-projects`·`.claude` 안쪽 경로를 받는 `node:fs` 호출은 동기·콜백·`promises` 모두 `PESHomeAccessViolation: <함수> <경로>` 로 던지고(또는 reject) 기록하며, 시험이 그 오류를 삼켜도 파일 끝에서 실패한다. 막는 것: stat·read·readdir·open·write·rm·rename·copy·symlink 류 전부 + `realpath`(+`.native`)·`statfs`·`glob`(`cwd` 와 패턴 철자)·`mkdtemp`(접두 경로)·`chown`·`lchown`·`lutimes`·`lchmod`·`watch`·`watchFile`·`openAsBlob`. `use_home_guard(real_home?)` 는 가짜 '실제 홈'(폴더 하나 또는 배열)을 받아 가드를 그 아래에서 시험할 수 있다 — 실제 홈은 어떤 시험도 건드리지 않는다.
+
+- **순서.** 가드 해제와 마지막 스냅샷은 파일이 `use_home_guard()` *뒤에* 등록한 모든 `after` 훅보다 나중에 돈다(파일 로딩이 끝난 마이크로태스크에서 `after` 를 등록한다). 정리 훅의 보호 경로 접근도 잡힌다. 한계: 최상위 `await` 뒤나 시험 도중에 등록한 `after` 는 그보다 늦을 수 있다. 훅이 던지면 러너가 남은 `after` 를 건너뛰므로 프로세스 종료 때 한 번 더 마무리하고 종료 코드를 1 로 둔다(맨 `node 파일.ts` 실행은 루트 `after` 실패를 종료 코드에 반영하지 않는다).
+- **이름 판정.** `..cache` 처럼 점 두 개로 *시작하는* 이름은 보통 하위 이름이다. `..` 자신(또는 `../`)만 폴더를 벗어난다. 자식 가드(`helpers/ts_child_guard.ts`)도 같은 규칙이다(`<홈>/.pes/..cache/x` 는 막고 `<홈>/.pes/../other` 는 통과 — `test_sel103_home_guard_gaps` C1).
+- **가드 내부 판정.** `touches_protected`·`assert_isolated_env`·스냅샷은 가드가 켜져 있어도 동작한다 — 모듈 로드 때 잡아 둔 래핑 전 원본 `realpathSync.native` 를 쓴다.
+- **일부러 막지 않는 것(한계).** ① 파일 디스크립터 호출(`fstatSync(fd)`·`readSync(fd)` …) — fd 는 경로 호출로 열렸고 그 호출이 가드를 지났다. ② 보호 폴더 *밖* 철자의 심볼릭 링크·junction 별칭 — fs 가드는 철자만 보며(호출마다 realpath 하지 않는다), 별칭은 `touches_protected`·자식 가드·② 전후 스냅샷의 몫이다. ③ 보호 폴더의 상위(홈)에서 와일드카드가 안으로 펼쳐지는 `glob`(`globSync("*/x", { cwd: 홈 })`) — `cwd` 와 패턴 철자만 본다. `*` 뿐 아니라 `{.pes,x}/*`·`.p*`·`[.]pes`·`?` 처럼 패턴 문자(`{}`·`[]`·`?`·`*`)가 철자 밖에서 보호 폴더로 펼쳐지는 경우도 같다. ④ 자식 프로세스, `node:sqlite` 의 `new DatabaseSync(경로)`, 네이티브 애드온, `process.binding`. 시험에서 이런 경로로 실제 홈을 열지 않는다.
 
 ## serve.ts·setup.ts 시험 (SEL-72, PR26c)
 

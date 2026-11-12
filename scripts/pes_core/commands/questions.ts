@@ -1116,7 +1116,7 @@ interface SetWithoutPlan {
  * The new sets that take a question out of every form it is still in. Only the
  * latest set of a (stage, form_key) is a form the human sees, so only those
  * are republished (without the question, in the same order, each remaining
- * member keeping the version the form pinned). A form of a stage outside the
+ * member at its question's current version). A form of a stage outside the
  * active edition, or of a round that is no longer open, takes no new set: it
  * cannot be answered any more and a closed round must not gain a form version.
  */
@@ -1157,10 +1157,14 @@ function plan_sets_without(
       );
       if (round === undefined || round.state !== "open") continue;
     }
+    // SEL-98: one rule for every new set (extend_latest, taking a question out, reordering): a member stands at its question's
+    // CURRENT version, not at the version the older set pinned.
     const members = runtime.db
       .all<SetMemberRow>(
-        `SELECT question_id, question_version_id FROM question_set_members
-          WHERE project_id = ? AND set_id = ? ORDER BY position`,
+        `SELECT m.question_id AS question_id, COALESCE(o.current_version_id, m.question_version_id) AS question_version_id
+           FROM question_set_members m
+           LEFT JOIN objects o ON o.project_id = m.project_id AND o.id = m.question_id AND o.kind = 'question'
+          WHERE m.project_id = ? AND m.set_id = ? ORDER BY m.position`,
         project_id,
         set.id,
       )
@@ -1389,6 +1393,193 @@ function run_state_change(runtime: CommandRuntime, kind: StateKind): CommandResu
 }
 
 // ---------------------------------------------------------------------------
+// question.reorder (SEL-98 U2d): the same questions in a new order, as ONE new set of the form
+
+const REORDER_FIELDS = ["set_id", "question_ids", "run_id", "lease_id", "fence"] as const;
+
+function not_a_permutation(message: string, details: Record<string, unknown>): never {
+  throw new ApiError("invalid_payload", message, { reason: "not_a_permutation", ...details });
+}
+
+/**
+ * Reorder the form of `set_id`: a new set (version_no + 1, same stage, round, purpose and form_key) whose members are the
+ * old set's questions in the given order. No new question, no new question version, no answer; each member stands at its
+ * question's current version (the one rule of every new set). Only the form's NEWEST set can be reordered (an older one is
+ * `conflict`, reason `stale_set`), only while its round is open and its edition active. `question_ids` must be a permutation
+ * of the set's members: a missing, repeated or unknown id is `invalid_payload` (reason `not_a_permutation`) and writes nothing;
+ * the set's own current order is `invalid_payload` (reason `no_change`) and writes nothing either.
+ */
+function run_reorder(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, REORDER_FIELDS);
+
+  const set_id = require_non_empty_string(payload, "set_id");
+  const raw_ids = payload.question_ids;
+  if (!Array.isArray(raw_ids)) return invalid_payload("question_ids must be an array");
+  const question_ids: string[] = [];
+  for (const raw of raw_ids) {
+    if (typeof raw !== "string" || raw.length === 0 || !raw.isWellFormed()) {
+      return invalid_payload("question_ids must be non-empty strings");
+    }
+    question_ids.push(raw);
+  }
+
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) {
+    throw new Error("question.reorder must resolve a project and actor first");
+  }
+  const { guard } = member_actor_with_guard(runtime, payload);
+
+  const set = runtime.db.get<{
+    id: string;
+    stage_id: string;
+    round_id: string | null;
+    purpose: string;
+    form_key: string;
+    version_no: bigint;
+  }>(
+    `SELECT id, stage_id, round_id, purpose, form_key, version_no
+       FROM question_sets WHERE project_id = ? AND id = ?`,
+    project.id,
+    set_id,
+  );
+  if (set === undefined) throw new ApiError("not_found", "question set not found");
+  const newest = runtime.db.get<{ n: bigint }>(
+    "SELECT MAX(version_no) AS n FROM question_sets WHERE project_id = ? AND stage_id = ? AND form_key = ?",
+    project.id,
+    set.stage_id,
+    set.form_key,
+  );
+  if (newest === undefined || newest.n !== set.version_no) {
+    throw new ApiError("conflict", "the question set is not the newest of its form", {
+      reason: "stale_set",
+      set_id,
+    });
+  }
+  require_publish_stage(runtime, project.id, set.stage_id);
+  if (set.round_id !== null) {
+    require_publish_round(runtime, project.id, set.stage_id, set.round_id);
+  }
+
+  const old_members = runtime.db.all<{ question_id: string; question_version_id: string }>(
+    `SELECT m.question_id AS question_id, COALESCE(o.current_version_id, m.question_version_id) AS question_version_id
+       FROM question_set_members m
+       LEFT JOIN objects o ON o.project_id = m.project_id AND o.id = m.question_id AND o.kind = 'question'
+      WHERE m.project_id = ? AND m.set_id = ? ORDER BY m.position`,
+    project.id,
+    set_id,
+  );
+  const version_of = new Map(old_members.map((member) => [member.question_id, member.question_version_id]));
+  const seen = new Set<string>();
+  for (const id of question_ids) {
+    if (!version_of.has(id)) {
+      not_a_permutation("a question of the order is not a member of the set", { question_id: id });
+    }
+    if (seen.has(id)) {
+      not_a_permutation("a question appears twice in the order", { question_id: id });
+    }
+    seen.add(id);
+  }
+  if (question_ids.length !== old_members.length) {
+    not_a_permutation("the order must name every member of the set", {
+      expected: old_members.length,
+      given: question_ids.length,
+    });
+  }
+
+  // the same order as now is not a change: no new set, no event (a write that only bumps the form version)
+  if (question_ids.every((id, index) => id === old_members[index]?.question_id)) {
+    throw new ApiError("invalid_payload", "the order is the set's current order", { reason: "no_change" });
+  }
+
+  const set_version_no = Number(set.version_no) + 1;
+  if (!Number.isSafeInteger(set_version_no) || set_version_no < 1) {
+    throw new Error("the question set version number is out of range");
+  }
+  const new_set_id = runtime.new_id();
+  const members = question_ids.map((question_id, position) => ({
+    question_id,
+    question_version_id: version_of.get(question_id) as string,
+    position,
+  }));
+  const result = {
+    project_id: project.id,
+    set_id: new_set_id,
+    set_version_no,
+    stage_id: set.stage_id,
+    round_id: set.round_id,
+    form_key: set.form_key,
+    previous_set_id: set_id,
+    members,
+  };
+
+  insert_receipt(runtime, {
+    project_id: project.id,
+    actor_id,
+    action: "question.reordered",
+    base_control_rev: null,
+    result,
+    ...guard_fields(guard),
+  });
+
+  const written_set = runtime.db.run(
+    `INSERT INTO question_sets
+       (id, project_id, stage_id, round_id, purpose, form_key, version_no,
+        previous_set_id, published_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    new_set_id,
+    project.id,
+    set.stage_id,
+    set.round_id,
+    set.purpose,
+    set.form_key,
+    set_version_no,
+    set_id,
+    runtime.now_ms,
+  );
+  if (written_set.changes !== 1n) {
+    throw new Error("the question set was not written");
+  }
+  for (const member of members) {
+    const written = runtime.db.run(
+      `INSERT INTO question_set_members
+         (project_id, set_id, question_id, question_version_id, position)
+       VALUES (?, ?, ?, ?, ?)`,
+      project.id,
+      new_set_id,
+      member.question_id,
+      member.question_version_id,
+      member.position,
+    );
+    if (written.changes !== 1n) {
+      throw new Error("the question set member was not written");
+    }
+  }
+
+  return {
+    result,
+    events: [
+      {
+        // the form changed: the screen that shows the round reloads it, as for any new set
+        type: "question.set_published",
+        run_id: guard === null ? null : guard.run_id,
+        payload: {
+          set_id: new_set_id,
+          stage_id: set.stage_id,
+          round_id: set.round_id,
+          purpose: set.purpose,
+          form_key: set.form_key,
+          version_no: set_version_no,
+          members,
+          reordered_from: set_id,
+        },
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // question.comment_add (SEL-90 U2a): a comment on a question, outside any answer
 
 function run_comment_add(runtime: CommandRuntime): CommandResult {
@@ -1446,6 +1637,17 @@ function run_comment_add(runtime: CommandRuntime): CommandResult {
       throw new ApiError("not_found", "comment thread not found");
     }
     thread_id = thread.object_id;
+    // SEL-99: a resolved / archived thread takes no more messages (the same rule as thread.reply)
+    const state = runtime.db.get<{ state: string }>(
+      `SELECT tv.state AS state FROM objects o
+         JOIN thread_versions tv ON tv.project_id = o.project_id AND tv.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.id = ?`,
+      project.id,
+      thread_id,
+    )?.state;
+    if (state !== undefined && state !== "open") {
+      throw new ApiError("conflict", "a closed thread takes no more messages; open a new thread", { reason: "thread_closed", thread_id, state });
+    }
     if (reply_to !== null) {
       const parent = runtime.db.get<{ object_id: string }>(
         "SELECT object_id FROM messages WHERE project_id = ? AND thread_id = ? AND object_id = ?",
@@ -1942,7 +2144,8 @@ export function prepare_submission(
   }
 
   const status = form_status(db, project_id, set_id, items);
-  if (mode === "bundle") {
+  // SEL-98: a question hidden by its show_if takes no answer, in a bundle or alone (single)
+  if (mode === "bundle" || mode === "single") {
     for (const item of items) {
       if (status.hidden.has(item.question_id)) {
         return problem(item.question_id, "invalid_payload", {
@@ -1951,6 +2154,8 @@ export function prepare_submission(
         });
       }
     }
+  }
+  if (mode === "bundle") {
     if (status.missing.length > 0) {
       return problem(null, "invalid_payload", {
         reason: "required_missing",
@@ -2495,6 +2700,7 @@ const QUESTION_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition
   ["question.defer", definition(STATE_ACTION.defer, (runtime) => run_state_change(runtime, "defer"))],
   ["question.merge", definition(STATE_ACTION.merge, (runtime) => run_state_change(runtime, "merge"))],
   ["question.comment_add", definition("question.commented", run_comment_add)],
+  ["question.reorder", definition("question.reordered", run_reorder)],
   ["answer.submit", definition("answer.submitted", run_submit_answers)],
 ];
 

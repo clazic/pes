@@ -6,6 +6,12 @@
 //   npx playwright test
 import { defineConfig } from "@playwright/test";
 
+import { assert_temp_home_env } from "./tests/helpers/temp_home_check.ts";
+
+// SEL-103: a run that starts in the real account home is refused before any spec is loaded (and before the globalSetup lists anything) — strings only, no fs
+// call on the home. Run it with a temporary HOME / USERPROFILE (see tests/README.md); the browser cache then needs PLAYWRIGHT_BROWSERS_PATH.
+assert_temp_home_env();
+
 export default defineConfig({
   testDir: "tests/e2e",
   globalSetup: "./tests/e2e/helpers/home_guard.ts",

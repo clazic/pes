@@ -193,7 +193,8 @@ export class ClaudeAppAdapter {
     const manifest = Array.isArray(context.manifest) ? context.manifest : [];
     const base_versions: BundleBaseVersion[] = [];
     for (const entry of manifest) {
-      if (is_record(entry) && typeof entry.kind === "string" && APPENDABLE_KINDS.has(entry.kind)) {
+      // A material the owner closed to AI (ai_access "deny") is not named in a bundle that leaves for an AI app.
+      if (is_record(entry) && typeof entry.kind === "string" && APPENDABLE_KINDS.has(entry.kind) && entry.ai_access !== "deny") {
         base_versions.push({ object_id: String(entry.object_id), version_id: String(entry.version_id) });
       }
     }

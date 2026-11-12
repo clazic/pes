@@ -22,6 +22,7 @@ import { new_id } from "./ids.ts";
 import { read_credential_actor } from "./actors.ts";
 import { ACTOR_COMMAND_ENTRIES } from "./commands/actors.ts";
 import { AI_COMMAND_ENTRIES } from "./commands/ai.ts";
+import { ANNOTATION_COMMAND_ENTRIES } from "./commands/annotations.ts";
 import { CONTENT_COMMAND_ENTRIES, RESULT_COMMAND_ENTRIES } from "./commands/content.ts";
 import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
@@ -532,6 +533,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...QUESTION_COMMAND_ENTRIES,
   ...RECORD_COMMAND_ENTRIES,
   ...JUDGEMENT_COMMAND_ENTRIES,
+  ...ANNOTATION_COMMAND_ENTRIES,
   ...AI_COMMAND_ENTRIES,
 ]);
 

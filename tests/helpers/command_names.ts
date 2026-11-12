@@ -1,5 +1,6 @@
 /**
  * 등록된 명령 이름의 기대 목록 (정렬된 명시 배열).
+ * (SEL-99 U4a: annotation.* · thread.* · followup.* 6개를 더했다 — leader 승인)
  * 뒤 PR(PR7 content.* 등)이 명령을 더하면 이 배열에 이름만 더하고 정렬을 유지한다.
  * COMMANDS 자신에서 기대값을 뽑지 않는다(그러면 시험이 약해진다).
  */
@@ -12,6 +13,8 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "ai_connection.set_price",
   "ai_connection.test",
   "ai_connection.update",
+  "annotation.create",
+  "annotation.reanchor",
   "answer.submit",
   "assumption.assess",
   "assumption.propose",
@@ -37,11 +40,15 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "edition.create",
   "edition.release_completion",
   "edition.snapshot",
+  "file.ai_access_set",
   "file.attach_version",
   "file.complete_upload",
   "file.gc_orphans",
   "file.quarantine",
   "file.reserve_upload",
+  "file.upload",
+  "followup.apply",
+  "followup.propose",
   "input.mark_processed",
   "input.record_chat",
   "legacy.activate_import",
@@ -62,6 +69,7 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "question.merge",
   "question.prepare_draft",
   "question.publish_set",
+  "question.reorder",
   "question.revise",
   "question.withdraw",
   "reflection.create",
@@ -81,6 +89,8 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "run.wait",
   "stage.approve",
   "stage.reopen",
+  "thread.reply",
+  "thread.resolve",
   "token.issue",
   "token.revoke",
 ];
