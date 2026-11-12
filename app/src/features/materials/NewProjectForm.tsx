@@ -112,7 +112,7 @@ export function NewProjectForm() {
   return (
     <form onSubmit={(e) => void submit(e)} noValidate aria-labelledby={`${ids}-title`}>
       <h2 id={`${ids}-title`} className="text-title text-ink">
-        프로젝트
+        기본 정보
       </h2>
       <p className="mt-1 text-meta text-ink-2">주제를 적고 만들면 기획 단계의 시작 화면이 열려요.</p>
 
