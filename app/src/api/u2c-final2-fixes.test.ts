@@ -72,11 +72,12 @@ describe("질문 고치기 — 선택형을 글로 바꾸면 옛 선택지를 �
 
   it("질문을 새로 더할 때(addQuestion)는 글 질문에 options 키를 싣지 않는다(기존 동작 그대로)", async () => {
     const f = setup();
-    const ctx = ok({ stages: [{ key: "plan", stage_id: "stg-1" }] });
+    const ctx = ok({ edition: { edition_no: String(ED) }, stages: [{ key: "plan", stage_id: "stg-1" }] });
     const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://app.invalid");
       const method = (init?.method ?? "GET").toUpperCase();
       if (method === "GET" && url.pathname.endsWith("/context")) return json(200, ctx);
+      if (method === "GET" && url.pathname.endsWith("/workspace")) return json(200, ok({ edition: ED }));
       return f.impl(input, init);
     });
     const client = (await load())({ session: "s", projects: { [SLUG]: ID }, fetch: impl as unknown as typeof fetch });
