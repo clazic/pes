@@ -23,6 +23,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { make_ctx } from "./helpers/compat_env.ts";
+import { import_url } from "./helpers/import_url.ts";
 import { assert_isolated_env, guard_process_fs, take_home_snapshot, touches_protected, use_home_guard, type ProcessFsGuard } from "./helpers/home_guard.ts";
 
 use_home_guard();
@@ -443,7 +444,7 @@ function child_reads(fake_dir: string, work: string, target: string): { verdict:
   const env: Record<string, string | undefined> = { ...process.env, HOME: work, USERPROFILE: work, PES_TEST_GUARD: "1", PES_TEST_REAL_HOME: fake_dir };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_OPTIONS;
-  const run = spawnSync(process.execPath, ["--import", CHILD_GUARD, "-e", probe], { encoding: "utf8", env: env as NodeJS.ProcessEnv, cwd: work, timeout: 60_000 });
+  const run = spawnSync(process.execPath, ["--import", import_url(CHILD_GUARD), "-e", probe], { encoding: "utf8", env: env as NodeJS.ProcessEnv, cwd: work, timeout: 60_000 });
   assert.equal(run.error, undefined, `the child started (${String(run.error)})`);
   assert.equal(run.status, 0, `the child ended cleanly: ${run.stderr}`);
   return { verdict: run.stdout.trim(), stderr: run.stderr };
