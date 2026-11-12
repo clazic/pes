@@ -23,6 +23,8 @@ import {
   changes_page,
   decision_rows,
   db_meta,
+  edition_id_by_no,
+  edition_no_of,
   input_visible,
   inputs_page,
   latest_approval_id,
@@ -37,6 +39,7 @@ import {
   reflection_round,
   reflection_round_ids,
   replacing_decision_id,
+  round_id_by_number,
   request_receipt,
   run_info,
   snapshot_through_seq,
@@ -694,7 +697,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/assumptions`, "assumptions.list", {
         who: "any", scope: "context:read", go: true,
-        act: async (_r, project) => this.#assumptions_read(project),
+        act: async (r, project) => this.#assumptions_read(r, project),
       }),
       route("POST", `${P}/decisions`, "decisions.create", {
         who: "any", scope: "run:submit",
@@ -702,7 +705,7 @@ export class ApiApp {
       }),
       route("GET", `${P}/decisions`, "decisions.list", {
         who: "any", scope: "context:read", go: true,
-        act: async (_r, project) => this.#decisions_read(project),
+        act: async (r, project) => this.#decisions_read(r, project),
       }),
       route("POST", `${P}/reflections`, "reflections.create", {
         who: "any", scope: "run:submit",
@@ -2937,6 +2940,9 @@ export class ApiApp {
         return new Fail("not_found", { target: fields[field] ?? at(field) });
       }
       if (error.code === "rev_conflict") return new Fail("rev_conflict", { target: "$.body.base_version_id", next_action: "reread_context" });
+      if (error.code === "conflict" && info.reason === "edition_not_active") {
+        return new Fail("conflict", { target: "$.body.scope", details: { reason: "edition_not_active" }, next_action: "reread_decisions" });
+      }
     }
     return fail_from(error);
   }
@@ -3009,6 +3015,17 @@ export class ApiApp {
       project_id,
       decision_id,
     )?.state;
+  }
+
+  /** The sentence of a decision's current version, or undefined when it is not a decision of this project. */
+  #decision_statement(project_id: string, decision_id: string): string | undefined {
+    return this.#db.get<{ statement: string }>(
+      `SELECT v.statement AS statement FROM objects o
+         JOIN decision_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
+        WHERE o.project_id = ? AND o.id = ? AND o.kind = 'decision'`,
+      project_id,
+      decision_id,
+    )?.statement;
   }
 
   /** The scope a decision was written with, or undefined when it is not a decision of this project. */
@@ -3098,6 +3115,13 @@ export class ApiApp {
     // `scope` is required on every write; for an adoption / revocation it must name the scope the decision really has
     const actual_scope = this.#decision_scope(project.id, decision_id);
     if (actual_scope !== undefined && actual_scope !== scope) validation("$.body.scope", { reason: "scope_mismatch" });
+    // adopting or revoking does not change the sentence (to change it, replace the decision): a different statement is refused,
+    // the same sentence or none passes
+    if (body.statement !== undefined && body.statement !== null) {
+      if (typeof body.statement !== "string" || !body.statement.isWellFormed()) invalid_field("statement");
+      const current_statement = this.#decision_statement(project.id, decision_id);
+      if (current_statement !== undefined && body.statement !== current_statement) validation("$.body.statement", { reason: "statement_changed" });
+    }
     if (state === "adopted") {
       const rationale = this.#optional_record_text(body, "rationale");
       const out = await exec("decision.adopt", { decision_id, base_version_id, ...(rationale === undefined ? {} : { rationale }) });
@@ -3162,28 +3186,68 @@ export class ApiApp {
     };
   }
 
-  async #assumptions_read(project: ProjectRow): Promise<HandlerResult> {
-    return { status: 200, data: { assumptions: read_tx(this.#db, () => assumption_rows(this.#db, project.id, this.#edition_of(project))) } };
+  /**
+   * The edition a records read is about: `?edition=<edition_no>` names one (any status), no `edition` is the active one.
+   * A number that is not a positive integer is 400, a number this project does not have is 404.
+   */
+  #read_edition(request: RouteRequest, project: ProjectRow): { edition_id: string; edition: number } {
+    if (!request.query.has("edition")) {
+      const edition_id = this.#edition_of(project);
+      return { edition_id, edition: read_tx(this.#db, () => edition_no_of(this.#db, project.id, edition_id)) ?? 0 };
+    }
+    const text = request.query.get("edition") as string;
+    if (!/^[0-9]+$/.test(text)) invalid("$.query.edition");
+    const edition = Number(text);
+    if (!Number.isSafeInteger(edition) || edition < 1) invalid("$.query.edition");
+    const edition_id = read_tx(this.#db, () => edition_id_by_no(this.#db, project.id, edition));
+    if (edition_id === null) throw new Fail("not_found", { target: "$.query.edition" });
+    return { edition_id, edition };
   }
 
-  async #decisions_read(project: ProjectRow): Promise<HandlerResult> {
-    return { status: 200, data: { decisions: read_tx(this.#db, () => decision_rows(this.#db, project.id, this.#edition_of(project))) } };
+  async #assumptions_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const { edition_id, edition } = this.#read_edition(request, project);
+    return { status: 200, data: { edition, assumptions: read_tx(this.#db, () => assumption_rows(this.#db, project.id, edition_id)) } };
   }
 
-  /** GET P/reflections?round_id= — one round's reflection ("not submitted" and "0 entries" are different answers); without a round, the rounds that have one. */
+  async #decisions_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const { edition_id, edition } = this.#read_edition(request, project);
+    return { status: 200, data: { edition, decisions: read_tx(this.#db, () => decision_rows(this.#db, project.id, edition_id)) } };
+  }
+
+  /**
+   * GET P/reflections — by `round_id`, or by `?edition=&stage=&round_no=` (edition optional: the active one), or with neither the rounds
+   * that have a reflection. "Not submitted" and "0 entries" are different answers. Giving both ways is 400.
+   */
   async #reflections_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
     const round_id = request.query.get("round_id");
-    if (round_id === null) {
+    const by_number = request.query.has("stage") || request.query.has("round_no") || request.query.has("edition");
+    if (round_id !== null && by_number) invalid("$.query.round_id");
+    if (round_id === null && !by_number) {
       const reflections = read_tx(this.#db, () => reflection_round_ids(this.#db, project.id).map((id) => reflection_round(this.#db, project.id, id)));
       return { status: 200, data: { reflections } };
     }
-    if (round_id.length === 0) invalid("$.query.round_id");
-    const round = read_tx(this.#db, () =>
-      this.#db.get("SELECT 1 FROM rounds WHERE project_id = ? AND id = ?", project.id, round_id) === undefined
-        ? null
-        : reflection_round(this.#db, project.id, round_id),
-    );
-    if (round === null) throw new Fail("not_found", { target: "$.query.round_id" });
+    if (round_id !== null) {
+      if (round_id.length === 0) invalid("$.query.round_id");
+      const round = read_tx(this.#db, () =>
+        this.#db.get("SELECT 1 FROM rounds WHERE project_id = ? AND id = ?", project.id, round_id) === undefined
+          ? null
+          : reflection_round(this.#db, project.id, round_id),
+      );
+      if (round === null) throw new Fail("not_found", { target: "$.query.round_id" });
+      return { status: 200, data: round };
+    }
+    const stage = request.query.get("stage");
+    if (stage === null || stage.length === 0) invalid("$.query.stage");
+    const round_text = request.query.get("round_no");
+    if (round_text === null || !/^[0-9]+$/.test(round_text)) invalid("$.query.round_no");
+    const round_no = Number(round_text);
+    if (!Number.isSafeInteger(round_no) || round_no < 1) invalid("$.query.round_no");
+    const { edition_id } = this.#read_edition(request, project);
+    const round = read_tx(this.#db, () => {
+      const id = round_id_by_number(this.#db, project.id, edition_id, stage, round_no);
+      return id === null ? null : reflection_round(this.#db, project.id, id);
+    });
+    if (round === null) throw new Fail("not_found", { target: "$.query.round_no" });
     return { status: 200, data: round };
   }
 

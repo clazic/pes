@@ -177,6 +177,9 @@ test("a follow-up is evidence only when it is applied by the evidence tx; propos
     }
     // an applied follow-up with a DIFFERENT tx than its own applied_tx_id is a mismatch
     await refused(env, env.ctx("f-mismatch"), "reflection.create", { target_round_id: s.round_id, entries: [entry(s, { followup_id: applied.object_id, evidence_tx_id: s.result_tx })] }, "conflict", "invalid_payload", "validation_failed");
+    // SEL-100: a follow-up with no origin is not linked to any opinion, so it is no evidence; one that came from this entry's source passes
+    await refused(env, env.ctx("f-null-origin"), "reflection.create", { target_round_id: s.round_id, entries: [entry(s, { followup_id: applied.object_id, evidence_tx_id: applied_tx })] }, "conflict", "invalid_payload", "validation_failed");
+    env.db.run("UPDATE followups SET origin_version_id = ? WHERE object_id = ?", s.source.version_id, applied.object_id);
     // the applied follow-up with its own tx passes
     const followups_before = count(env.db, "followups");
     const versions_before = count(env.db, "followup_versions");

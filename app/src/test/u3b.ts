@@ -129,7 +129,7 @@ export interface ReflectionEntry {
 export interface ReflectionView {
   /** none = 지난 라운드에 보낸 반영 의견 자체가 없음(미제출) · submitted = 보냄 */
   submission: "none" | "submitted";
-  sent_count: number;
+  sent_count: number | null;
   entries: ReflectionEntry[];
 }
 

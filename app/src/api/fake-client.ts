@@ -71,7 +71,7 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
     if (outId === null) return reject("conflict");
     const out = [...u3.assumptions, ...u3.decisions].find((x) => x.object_id === outId);
     const n = String(++seq).padStart(4, "0");
-    const receipt: Receipt = { receipt_no: n, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
+    const receipt: Receipt = { receipt_no: n, numbered: true, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
     txLog.push({ tx_id: receipt.tx_id, touched: ["workspace"] });
     const result: JudgeResult = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: { object_id: outId, version_id: out?.version_id ?? `${outId}-v${seq}` } };
     judged.set(idempotencyKey, { request, result });
@@ -105,7 +105,7 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
       throw e;
     }
     const n = String(++seq).padStart(4, "0");
-    const receipt: Receipt = { receipt_no: n, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: key, replayed: false };
+    const receipt: Receipt = { receipt_no: n, numbered: true, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: key, replayed: false };
     txLog.push({ tx_id: receipt.tx_id, touched: [`round:${out.round.stage}/${out.round.round_id ?? "start"}`] });
     const result: CommandResult<T> = { format_version: FORMAT_VERSION, request_id: requestId(), receipt, data: out.data };
     commits.set(key, { request, result });
@@ -173,7 +173,7 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
       const alert = find(slug, edition) ? rounds.flatMap((r) => r.alerts).find((a) => a.id === alertId) : undefined;
       if (!alert) return reject("not_found", "$.alert_id");
       const n = String(++seq).padStart(4, "0");
-      const receipt: Receipt = { receipt_no: n, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
+      const receipt: Receipt = { receipt_no: n, numbered: true, tx_id: `tx-${n}`, committed_at: new Date().toISOString(), idempotency_key: idempotencyKey, replayed: false };
       alert.acknowledged ??= { receipt_no: receipt.receipt_no, tx_id: receipt.tx_id, committed_at: receipt.committed_at };
       const owner = rounds.find((r) => r.alerts.includes(alert));
       txLog.push({ tx_id: receipt.tx_id, touched: owner ? [`round:${owner.stage}/${owner.round_id ?? "start"}`] : [] });

@@ -379,7 +379,7 @@ export interface ChangesRead {
 
 /**
  * 기계 값만 싣는다 — 화면 글자(상태 낱말 · 범위 이름 · 처리 낱말)는 앱이 만든다(상태 사전 status-registry.ts).
- * 서버 계약은 SEL-93(U3a)이 정한다. 그 전까지 HTTP 클라이언트는 이 읽기·쓰기를 지어내지 않고 not_supported 로 거절한다.
+ * 서버 계약은 SEL-93(U3a)이 정하고 SEL-100(U3c)이 읽기 칸을 보강했다. HTTP 클라이언트는 서버가 주는 것만 싣고, 못 주는 칸(복사 원본 판 · 근거 링크)은 null 로 둔다.
  */
 export interface Actor {
   id: string;
@@ -426,8 +426,8 @@ export interface DecisionRow {
 }
 export interface FollowupView {
   id: string;
-  kind: "edit_text" | "next_round_task" | "reopen_stage";
-  state: "proposed" | "accepted" | "applied" | "deferred" | "rejected";
+  kind: "edit_text" | "next_round_task" | "reopen_stage" | "none";
+  state: "proposed" | "accepted" | "running" | "applied" | "deferred" | "rejected" | "cancelled";
   label: string;
   result_version: Link | null;
 }
@@ -445,7 +445,8 @@ export interface ReflectionEntry {
 export interface ReflectionView {
   /** none = 지난 라운드에 보낸 반영 의견 자체가 없음(미제출) · submitted = 보냄 */
   submission: "none" | "submitted";
-  sent_count: number;
+  /** 보낸 의견 수. 서버는 이 값을 주지 않으므로 http 클라이언트는 null(처리된 줄 수로 지어내지 않는다). 화면은 쓰지 않는다 */
+  sent_count: number | null;
   entries: ReflectionEntry[];
 }
 /** 판단 입력 공통 — 사람이 본 버전(= 행의 version_id). 그 사이 바뀌었으면 서버가 rev_conflict 로 거절한다 */
@@ -525,7 +526,7 @@ export interface PesClient {
   acknowledgeAlert(slug: string, edition: number, alertId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ alert_id: string }>>;
   /** 변경분 읽기 — 커서 다음의 공개 tx 묶음. 거절은 PesApiError(cursor_expired · cursor_invalid) */
   getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>;
-  /** 가정 · 결정 읽기(U3b). 서버가 아직 못 주면 PesApiError(not_supported) */
+  /** 가정 · 결정 읽기(U3b · U3c 에서 서버에 연결). 없는 판은 [] */
   getAssumptions(slug: string, edition: number): Promise<AssumptionRow[]>;
   getDecisions(slug: string, edition: number): Promise<DecisionRow[]>;
   /** round: 숫자 문자열 또는 "start". null = 서버가 반영 자료를 주지 않음(이전된 프로젝트) */

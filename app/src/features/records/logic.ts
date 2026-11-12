@@ -65,6 +65,6 @@ export function reflectionCase(view: ReflectionView | null): ReflectionCase {
   return view.submission === "none" ? "not_submitted" : "none_processed";
 }
 
-export const FOLLOWUP_KIND: Record<FollowupView["kind"], string> = { edit_text: "글 수정", next_round_task: "다음 라운드 할 일", reopen_stage: "앞 단계 다시 열기" };
-export const FOLLOWUP_STATE: Record<FollowupView["state"], string> = { proposed: "제안", accepted: "받아들임", applied: "적용", deferred: "유예", rejected: "거절" };
+export const FOLLOWUP_KIND: Record<FollowupView["kind"], string> = { edit_text: "글 수정", next_round_task: "다음 라운드 할 일", reopen_stage: "앞 단계 다시 열기", none: "할 일 없음" };
+export const FOLLOWUP_STATE: Record<FollowupView["state"], string> = { proposed: "제안", accepted: "받아들임", running: "진행 중", applied: "적용", deferred: "유예", rejected: "거절", cancelled: "취소" };
 export const SCOPE_LABEL = { project: "프로젝트", edition: "이 판" } as const;
