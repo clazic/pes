@@ -77,6 +77,7 @@ describe("질문 고치기 — 선택형을 글로 바꾸면 옛 선택지를 �
       const url = new URL(String(input), "http://app.invalid");
       const method = (init?.method ?? "GET").toUpperCase();
       if (method === "GET" && url.pathname.endsWith("/context")) return json(200, ctx);
+      if (method === "GET" && url.pathname.endsWith("/workspace")) return json(200, ok({ edition: ED }));
       return f.impl(input, init);
     });
     const client = (await load())({ session: "s", projects: { [SLUG]: ID }, fetch: impl as unknown as typeof fetch });

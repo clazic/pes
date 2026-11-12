@@ -341,7 +341,7 @@ describe("1차 리뷰 권장 — 질문 더하기 purpose · 순서 바꾸기 �
     const numbered = server({ "GET /stages/research/rounds/2": { status: 200, body: ok(roundData()) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
     await (await make(numbered)).addQuestion(SLUG, ED, "research", "2", spec, "k-p1");
     expect(numbered.writes()[0]!.json).toMatchObject({ purpose: "review", round_id: "rnd-2" });
-    const start = server({ "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
+    const start = server({ "GET /workspace": { status: 200, body: ok({ edition: ED }) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": added });
     await (await make(start)).addQuestion(SLUG, ED, "research", "start", spec, "k-p2");
     expect(start.writes()[0]!.json).toMatchObject({ purpose: "stage_start", round_id: null });
   });

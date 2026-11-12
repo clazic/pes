@@ -50,8 +50,8 @@ async function toApiError(res: Response): Promise<PesApiError> {
   return error;
 }
 
-/** 서버가 요청을 확정적으로 거절한 상태(4xx). 429(잠시 막힘)는 처리 여부가 불명이니 뺀다 — 5xx 와 함께 “확인 중”에 든다 */
-const isDefiniteRejection = (status: number): boolean => status >= 400 && status < 500 && status !== 429;
+/** 서버가 요청을 확정적으로 거절한 상태(4xx). 429(잠시 막힘)·408(요청 시간 초과 — 중간 프록시가 낼 수 있다)은 처리 여부가 불명이니 뺀다 — 5xx 와 함께 “확인 중”에 든다 */
+const isDefiniteRejection = (status: number): boolean => status >= 400 && status < 500 && status !== 429 && status !== 408;
 
 /** toApiError 가 확정 거절로 판정한 오류들 — 메모를 지울지 정할 때 상태 코드를 다시 쓰지 않으려고 모아 둔다 */
 const definiteRejections = new WeakSet<PesApiError>();
@@ -100,10 +100,10 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   const idOf = (slug: string): string | undefined => (Object.hasOwn(options.projects, slug) ? options.projects[slug] : undefined);
 
   /** GET P/workspace → data. 서버 404 는 null */
-  async function readWorkspace(slug: string): Promise<WorkspaceView | null> {
+  async function readWorkspace(slug: string, signal?: AbortSignal): Promise<WorkspaceView | null> {
     const id = idOf(slug);
     if (id === undefined) return null;
-    const res = await send(projectUrl(id, "/workspace"), { method: "GET", headers: headers(), credentials: "omit" });
+    const res = await send(projectUrl(id, "/workspace"), { method: "GET", headers: headers(), credentials: "omit", ...(signal ? { signal } : {}) });
     if (!res.ok) {
       const error = await toApiError(res);
       if (isNotFound(error)) return null;
@@ -362,19 +362,22 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   }
 
   /**
-   * 시작 자리(start) 읽기로 활성 판을 확인한다: 응답 판이 앱이 보는 판과 다르면 true. 시작 자리 읽기가 404 면 판을 가릴 자료가 없어 false(그대로 쓴다) —
-   * 시작 질문은 round_id 를 보내지 않으므로 지어내는 값은 없다.
+   * 시작 자리(start) 쓰기 전에 서버 활성 판이 앱이 보는 판(`edition`)과 같은지 확인한다. 같다고 확인되면 true, 다르거나 확인할 수 없으면 false(쓰기 0).
+   * 1) 시작 자리 읽기 응답이 판 번호를 싣고 있으면 그것으로 가린다(판 번호를 싣지 않은 옛 응답은 확인 불가라 그대로 둔다).
+   * 2) 시작 자리 읽기가 404 면 — 새 판의 pending 단계(라운드·게시 폼 없음)도 404 라서 — 판을 가릴 자료가 없다. 작업 공간 읽기(GET P/workspace)의 활성 판 번호로 가린다.
+   *    작업 공간 읽기가 404 이거나 판 번호가 없으면 확인할 수 없는 것이니 쓰지 않는다(번호 라운드의 404 와 같은 거절).
    */
-  async function startRoundOtherEdition(id: string, stage: string, edition: number, signal: AbortSignal): Promise<boolean> {
+  async function startRoundSameEdition(id: string, slug: string, stage: string, edition: number, signal: AbortSignal): Promise<boolean> {
     const res = await send(projectUrl(id, roundPath(stage, "start")), { method: "GET", headers: headers(), credentials: "omit", signal });
     if (!res.ok) {
       const error = await toApiError(res);
-      if (isNotFound(error)) return false;
-      throw error;
+      if (!isNotFound(error)) throw error;
+      const w = await readWorkspace(slug, signal);
+      return w !== null && w.edition === edition;
     }
     const body: unknown = await res.json();
     if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
-    return !sameEdition(body.data, edition);
+    return sameEdition(body.data, edition);
   }
 
   /** 순서 바꾸기를 같은 멱등 키로 다시 보낼 때 같은 폼 세트 id 로 보내려고 처음 알아낸 값을 둔다(이 클라이언트의 수명 동안) */
@@ -555,8 +558,8 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
           const data = await timed((signal) => readRound(id, stage, round, edition, signal));
           if (data === null || typeof data.server_round_id !== "string" || !data.server_round_id) throw new PesApiError(fallbackBody(404));
           round_id = data.server_round_id;
-        } else if (await timed((signal) => startRoundOtherEdition(id, stage, edition, signal))) {
-          // 시작 자리도 활성 판을 확인한다 — 다른 판이면 쓰기 0 으로 거절(번호 라운드와 같은 404)
+        } else if (!(await timed((signal) => startRoundSameEdition(id, slug, stage, edition, signal)))) {
+          // 시작 자리도 활성 판을 확인한다 — 다른 판이거나 확인할 수 없으면 쓰기 0 으로 거절(번호 라운드와 같은 404)
           throw new PesApiError(fallbackBody(404));
         }
         const json = await timed(async (signal) => {

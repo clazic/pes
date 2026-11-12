@@ -166,6 +166,7 @@ describe("공통: 헤더 · 키 · 오류", () => {
 describe("질문 쓰기 매핑", () => {
   it("addQuestion(start): GET P/context 로 stage_id 를 풀고 POST P/questions 로 spec 을 보낸다", async () => {
     const s = server({
+      "GET /workspace": { status: 200, body: ok({ edition: ED }) },
       "GET /context": { status: 200, body: CONTEXT },
       "POST /questions": { status: 201, body: ok({ question_set_id: "qset-2", question: { id: "qst-9", version_id: "qvr-9", version_no: "1", state: "open" } }) },
       "GET /requests/k-add": { status: 200, body: requestsRead("k-add") },
@@ -202,6 +203,7 @@ describe("질문 쓰기 매핑", () => {
     ["multi_choice", "multi"],
   ])("유형 %s → 서버 type %s, 중요도 null · 기본값 null · 조건 없음은 키를 보내지 않는다", async (kind, type) => {
     const s = server({
+      "GET /workspace": { status: 200, body: ok({ edition: ED }) },
       "GET /context": { status: 200, body: CONTEXT },
       "POST /questions": { status: 201, body: ok({ question_set_id: "qset-2", question: { id: "qst-9", version_id: "v", version_no: "1", state: "open" } }) },
       "GET /requests/k-t": { status: 200, body: requestsRead("k-t") },

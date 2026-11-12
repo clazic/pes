@@ -84,10 +84,46 @@ describe("[SEL-121 1] addQuestion 시작 자리 — 판(edition) 확인 (번호 
     expect(s.writes()[0]!.json).toMatchObject({ purpose: "stage_start", round_id: null, stage_id: "stg-research" });
   });
 
-  it("시작 자리 읽기가 404 면 판을 가릴 자료가 없으니 예전처럼 쓴다 (round_id 는 보내지 않으므로 지어내는 값이 없다)", async () => {
-    const s = server({ "GET /context": { status: 200, body: CONTEXT }, "POST /questions": ADDED });
+  it("시작 자리 읽기가 404 여도 작업 공간 판이 같으면 쓴다 (round_id 는 보내지 않으므로 지어내는 값이 없다)", async () => {
+    const s = server({ "GET /workspace": { status: 200, body: ok({ edition: ED }) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": ADDED });
     await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-404");
     expect(s.writes()).toHaveLength(1);
+  });
+
+  it("시작 자리 읽기가 404 이고 작업 공간 판이 다르면 PesApiError 404, 쓰기 0 (새 판 pending 단계에 지난 판 화면 질문을 붙이지 않는다)", async () => {
+    const s = server({ "GET /workspace": { status: 200, body: ok({ edition: NEXT }) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": ADDED });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-404-other").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("not_found");
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it("시작 자리 읽기가 판 번호를 싣지 않은 옛 서버 응답이면 확인할 수 없어 그대로 쓴다", async () => {
+    const s = server({
+      "GET /stages/research/rounds/start": { status: 200, body: ok(roundData({ round_id: null, server_round_id: null, set_id: null })) },
+      "GET /context": { status: 200, body: CONTEXT },
+      "POST /questions": ADDED,
+    });
+    await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-old");
+    expect(s.writes()).toHaveLength(1);
+  });
+
+  it("시작 자리 읽기가 5xx 면 같은 오류로 끝나고 쓰기 0", async () => {
+    const s = server({ "GET /stages/research/rounds/start": { status: 500, body: fail("internal_error", true) }, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": ADDED });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-5xx").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect((e as PesApiError).body.error.code).toBe("internal_error");
+    expect(s.writes()).toHaveLength(0);
+  });
+
+  it.each([
+    ["작업 공간 읽기도 404", { status: 404, body: fail("not_found") }],
+    ["작업 공간 응답에 판 번호가 없음", { status: 200, body: ok({}) }],
+  ])("시작 자리 읽기가 404 이고 %s 이면 판을 확인할 수 없으니 쓰기 0", async (_name, workspace) => {
+    const s = server({ "GET /workspace": workspace, "GET /context": { status: 200, body: CONTEXT }, "POST /questions": ADDED });
+    const e = await (await make(s)).addQuestion(SLUG, ED, "research", "start", SPEC, "k-start-404-unknown").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(PesApiError);
+    expect(s.writes()).toHaveLength(0);
   });
 });
 
@@ -114,6 +150,54 @@ describe("[SEL-121 2] reorderQuestions 메모 — 확정 거절만 지우고, �
     await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-keep");
     expect(s.writes().map((w) => w.url.pathname.replace(P, ""))).toEqual(["/question-sets/qset-old/order", "/question-sets/qset-old/order"]);
     expect(s.gets("/rounds/2")).toHaveLength(1);
+  });
+
+  it("끊김(fetch 거절)이면 같은 키 재시도가 처음 알아낸 세트 id(qset-old)를 그대로 쓴다", async () => {
+    let reads = 0;
+    let posts = 0;
+    const s = server({
+      ...roundRoute(() => (reads++ === 0 ? "qset-old" : "qset-new")),
+      "POST /question-sets/qset-old/order": () => {
+        if (posts++ === 0) throw new TypeError("fetch failed");
+        return ORDER_OK;
+      },
+      "POST /question-sets/qset-new/order": ORDER_OK,
+    });
+    const c = await make(s);
+    await expect(c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-cut")).rejects.toBeInstanceOf(TypeError);
+    await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-cut");
+    expect(s.writes().map((w) => w.url.pathname.replace(P, ""))).toEqual(["/question-sets/qset-old/order", "/question-sets/qset-old/order"]);
+    expect(s.gets("/rounds/2")).toHaveLength(1);
+  });
+
+  it("408 요청 시간 초과는 처리 여부 불명이니 메모를 보존한다", async () => {
+    let reads = 0;
+    let posts = 0;
+    const s = server({
+      ...roundRoute(() => (reads++ === 0 ? "qset-old" : "qset-new")),
+      "POST /question-sets/qset-old/order": () => (posts++ === 0 ? { status: 408, body: fail("request_timeout") } : ORDER_OK),
+      "POST /question-sets/qset-new/order": ORDER_OK,
+    });
+    const c = await make(s);
+    await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-408").catch(() => undefined);
+    await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-408");
+    expect(s.writes().map((w) => w.url.pathname.replace(P, ""))).toEqual(["/question-sets/qset-old/order", "/question-sets/qset-old/order"]);
+  });
+
+  it.each([
+    ["404", 404, fail("not_found")],
+    ["422", 422, fail("invalid_payload")],
+  ])("%s 확정 거절이면 메모를 지워, 같은 키로 다시 누르면 세트 id 를 새로 읽는다", async (_name, status, body) => {
+    let reads = 0;
+    const s = server({
+      ...roundRoute(() => (reads++ === 0 ? "qset-old" : "qset-new")),
+      "POST /question-sets/qset-old/order": { status, body },
+      "POST /question-sets/qset-new/order": ORDER_OK,
+    });
+    const c = await make(s);
+    await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-clear2").catch(() => undefined);
+    await c.reorderQuestions(SLUG, ED, "research", "2", ["qst-1"], "k-clear2");
+    expect(s.writes().map((w) => w.url.pathname.replace(P, ""))).toEqual(["/question-sets/qset-old/order", "/question-sets/qset-new/order"]);
   });
 
   it("409 확정 거절이면 메모를 지워, 같은 키로 다시 누르면 세트 id 를 새로 읽는다 (기존 동작 그대로)", async () => {
