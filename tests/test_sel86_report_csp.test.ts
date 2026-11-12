@@ -18,7 +18,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -29,7 +29,6 @@ import { seed, write_json } from "./helpers/cli_read_env.ts";
 import { ASK_SPEC, step, with_server, write_spec } from "./helpers/web_env.ts";
 
 const REPO = join(import.meta.dirname, "..");
-const DIST = join(REPO, "app", "dist");
 
 const WANTED_TOKENS = ["allow-downloads", "allow-modals", "allow-popups", "allow-scripts"];
 
@@ -197,14 +196,24 @@ test("S2b 이전한 PDF·이미지 보고서: 바이트·Content-Type 그대로,
   });
 });
 
-test("S3 앱 index: /p/<slug>/… 와 /_app/index.html 의 script-src 'self'(헤더나 meta), 인라인 스크립트 없음, sandbox 없음 — 원본과 빌드 모두", { timeout: 180_000 }, async () => {
+test("S3 앱 index: /p/<slug>/… 와 /_app/index.html 의 script-src 'self'(헤더나 meta), 인라인 스크립트 없음, sandbox 없음 — 원본(app/index.html)과 합성 빌드", { timeout: 180_000 }, async () => {
+  // 실제 빌드(app/dist)는 Node 시험 잡에 없다 — 그것은 tests/e2e/sel86_app_build_csp.spec.ts (Playwright 잡이 앱을 빌드한다)가 같은 단언으로 본다.
   const source = readFileSync(join(REPO, "app", "index.html"), "utf8");
   assert_no_inline_script(source, "app/index.html 원본");
-  assert.ok(existsSync(join(DIST, "index.html")), "앱 빌드가 없다 — cd app && npm ci && npm run build 를 먼저 한다(app/dist/index.html)");
-  const built = readFileSync(join(DIST, "index.html"), "utf8");
-  assert_no_inline_script(built, "app/dist/index.html 빌드");
   await with_reports(async (c, slug) => {
-    await with_server(c, { extra: { PES_APP_DIR: DIST } }, async (s) => {
+    // 서버 자식은 --permission 으로 저장소와 이 시험의 임시 루트만 읽는다 — 합성 빌드는 그 루트 아래에 둔다
+    const dist = join(c.env.home.root, "synthetic-app-dist");
+    mkdirSync(join(dist, "assets"), { recursive: true });
+    writeFileSync(join(dist, "assets", "x.js"), "export {};\n", "utf8");
+    writeFileSync(join(dist, "assets", "x.css"), "body{margin:0}\n", "utf8");
+    writeFileSync(
+      join(dist, "index.html"),
+      '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>합성 앱</title><script type="module" crossorigin src="/_app/assets/x.js"></script><link rel="stylesheet" crossorigin href="/_app/assets/x.css"></head><body><div id="root"></div></body></html>\n',
+      "utf8",
+    );
+    const built = readFileSync(join(dist, "index.html"), "utf8");
+    assert_no_inline_script(built, "합성 빌드 index.html");
+    await with_server(c, { extra: { PES_APP_DIR: dist } }, async (s) => {
       for (const path of [`/p/${slug}/e/1/s/plan/r/1`, `/p/${slug}/`, `/p/${slug}/e/1/s/plan/r/start?print=1`, "/_app/index.html"]) {
         const res = await fetch(`${s.url}${path}`);
         assert.equal(res.status, 200, path);
