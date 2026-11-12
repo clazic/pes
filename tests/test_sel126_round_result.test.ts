@@ -25,10 +25,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { add_artifact, append_version, create_object, set_current } from "../scripts/pes_core/content.ts";
+import { add_artifact, add_source, append_version, create_object, set_current } from "../scripts/pes_core/content.ts";
 import { assert_error, assert_ok, call, make_agent, OPENAPI_PATH, with_api, type ApiEnv, type Auth } from "./helpers/api_env.ts";
 import { P } from "./helpers/api_flow.ts";
-import { attach, put_ready } from "./helpers/blob_env.ts";
+import { attach, new_artifact, put_ready } from "./helpers/blob_env.ts";
 import { seal, start } from "./helpers/editions_env.ts";
 import { make_form, owner_get, single_spec } from "./helpers/sel90_env.ts";
 import { set_access } from "./helpers/sel115_env.ts";
@@ -332,6 +332,38 @@ test("[회귀] 결과를 싣는 읽기는 아무것도 쓰지 않는다(사람 �
     assert_ok(await owner_get(env, round_path("1")));
     assert_ok(await get_as(env, "1", { token: reader.token }));
     assert.equal(state_signature(env.db), sig);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (4) 여러 객체가 담긴 라운드: 글 아닌 객체는 건너뛰고, 첫 글의 현재 버전에 본문이 없으면 다음 글로 넘어가지 않는다
+
+test("[신규] 결과는 봉인 순서(position)에서 처음 나오는 '글' 객체다 — 글이 아닌 객체(출처)는 건너뛴다", async () => {
+  await with_api(async (env) => {
+    const form = await make_form(env, [single_spec("질문")], "c1");
+    const src_obj = (await create_object(env.service, env.ctx("c1-so"), { kind: "source", edition_id: env.p.edition_id })).result as { object_id: string };
+    const src = (await add_source(env.service, env.ctx("c1-sv"), { object_id: src_obj.object_id, source_kind: "web", title: "합성 출처", url: "https://example.invalid/c1", method: "fetch", verification_state: "unverified" })).result as { object_id: string; version_id: string };
+    const art = await new_result(env, "c1-art", BODY_1);
+    // 봉인 순서: 출처(position 0) → 글(position 1). 출처가 앞이어도 결과는 글이다.
+    await seal(env, form.round_id, [{ object_id: src.object_id, version_id: src.version_id }, { object_id: art.object_id, version_id: art.version_id }], "c1-seal");
+    const data = assert_ok(await owner_get(env, round_path("1")));
+    assert.ok(data.result, "글이 결과로 실린다");
+    assert.equal(data.result.object_id, art.object_id);
+    assert.equal(data.result.version_id, art.version_id);
+    assert.equal(data.result.body_md, BODY_1);
+  });
+});
+
+test("[신규] 첫 글의 현재 버전에 본문(body_md)이 없으면 result:null — 뒤의 글 본문으로 넘어가지 않는다", async () => {
+  await with_api(async (env) => {
+    const form = await make_form(env, [single_spec("질문")], "c2");
+    const empty = await new_artifact(env, "c2-empty"); // 본문 없는 글(본문이 파일 blob 인 경우와 같은 자리)
+    const later = await new_result(env, "c2-later", BODY_2);
+    await seal(env, form.round_id, [{ object_id: empty.object_id, version_id: empty.version_id }, later], "c2-seal");
+    const data = assert_ok(await owner_get(env, round_path("1")));
+    assert.ok("result" in data);
+    assert.equal(data.result, null, "첫 글이 본문 없이 결과가 되고, 뒤 글은 쓰이지 않는다");
+    assert.ok(!JSON.stringify(data).includes("MARK-R126-V2"), "뒤 글의 본문이 새지 않는다");
   });
 });
 
