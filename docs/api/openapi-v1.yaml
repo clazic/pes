@@ -1085,7 +1085,7 @@ paths:
         "400": { description: Invalid payload or closed result list }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing scope or Go policy denied }
-        "404": { description: Unknown object or run }
+        "404": { description: "Unknown run, or unknown object - and the same 404 (same error.code) for a material object closed to AI (a closed file in any version), which refuses the whole bundle before any receipt, event or version is written" }
         "409": { description: Lease is not current, stale revision, or idempotency key reuse }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
@@ -1286,13 +1286,13 @@ paths:
     get:
       summary: List the user's own materials (SEL-115) - the file of each material's current version
       description: |
-        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?}]}`.
-        The owner session sees every material and each one's `ai_access` (the value in force: `deny` when the policy row or its newest history row says deny).
-        Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` key and with no trace of a closed file - not its name,
+        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?, object_ai_access?}]}`.
+        The owner session sees every material and each one's `ai_access` (the value in force for that row's file: `deny` when the policy row or its newest history row says deny) and `object_ai_access` (`deny` when any version of the material object carries a closed file, else `allow` - the state AI callers are judged by).
+        Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` and `object_ai_access` keys and with no trace of a closed file - not its name,
         ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
         material objects (the human manifest lists them with `ai_access: deny`); `digest` is computed from the manifest the caller gets, so it differs by audience.
         `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` leaves out
-        events whose payload names a closed file (`blob_id` or `file_policy_id`), by file and not by material object: a newer allowed version's upload events still show (`commands/file_access.ts` event_denied; `commands/shared.ts` write_events leaves `object_id` and version columns NULL). The hand-off bundle's `base_versions` leave out closed files and materials.
+        events about a closed material object (a closed file in any version), by material object: events whose payload names a closed file or one of that object's files, versions or ids (`blob_id`, `file_policy_id`, `object_id`, `version_id`) are left out, a newer allowed version's upload events included (`commands/file_access.ts` event_denied). The hand-off bundle's `base_versions` leave out closed files and materials.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:
@@ -1376,7 +1376,7 @@ paths:
   /api/v1/projects/{id}/changes:
     get:
       summary: Change feed after an opaque cursor (whole transactions, ascending event_seq)
-      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after. For a caller that is not human, events that name a closed file (payload `blob_id` or `file_policy_id`) are left out and the cursor moves past them; the unit is the file, not the material object."
+      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after. For a caller that is not human, events about a closed material object (a closed file in any version) are left out and the cursor moves past them; the unit is the material object, so a newer allowed version's upload events are left out too. A human (owner session) sees every event."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security: [{ agentToken: [] }, { localSession: [] }]
@@ -2435,6 +2435,35 @@ paths:
               schema: { $ref: "#/components/schemas/Success" }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
+        "404": { description: Unknown project }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/reference-candidates:
+    get:
+      summary: List the other projects the person could attach as reference material, with their snapshots (owner session only)
+      description: |
+        A read for the attach screen. data = {candidates:[{project_id, key, label, attached, snapshots:[{id, key, label,
+        approved, recommended}]}]}. A candidate has exactly these five keys: project_id, key (= project_id, the same value as
+        a reference's referenced_project_key), label (the project's topic, else its slug: the default source_label of
+        POST /references), attached (this project already holds a reference line for it) and snapshots. Candidates come in
+        the order the projects were made. A snapshot has exactly five keys: id, key (= id), label (always null: the server
+        keeps no snapshot name), approved (some stage approval points at it) and recommended. Snapshots are newest first, a
+        print is left out (a reference cannot pin one), and exactly one snapshot per project is recommended: the newest
+        approved one, else the newest. A project with no snapshot stays with snapshots: [].
+        Who is offered: the projects the person is a member of (any role) other than this one, archived ones left out. A project
+        the person is not a member of is absent and leaves no trace anywhere in the answer. This is the same membership rule
+        as POST /references; OpenCode Go does not hide a project from a person. A token is 403 human_required whatever its
+        scopes: no other project's name or snapshot id goes to an AI. A read: no receipt, no event, nothing written.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      security: [{ localSession: [] }]
+      responses:
+        "200":
+          description: The candidates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: A token (human_required) }
         "404": { description: Unknown project }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/references/{ref}:

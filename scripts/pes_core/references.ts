@@ -338,3 +338,58 @@ export function read_reference(db: ReadDb, project_id: string, reference_id: str
     content: decision.content_allowed ? reference_content(db, row, caller.ai) : null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// candidates (SEL-120 REF1c): which other projects the person may attach, and which snapshots of each
+
+export interface ReferenceCandidateSnapshot {
+  id: string;
+  key: string;
+  /** the server keeps no snapshot name: null, never made up (the app shows the key) */
+  label: null;
+  /** some stage approval points at this snapshot */
+  approved: boolean;
+  /** exactly one per project: the newest approved snapshot, else the newest */
+  recommended: boolean;
+}
+
+export interface ReferenceCandidate {
+  project_id: string;
+  key: string;
+  label: string;
+  /** this project already holds a reference line for it (the key stays after a tombstone) */
+  attached: boolean;
+  snapshots: ReferenceCandidateSnapshot[];
+}
+
+/**
+ * The projects the person could attach as reference material from `project_id`, each with the snapshots a reference may pin.
+ * Pure reads. Permission is is_member() — the same rule decide() applies to an attached line — so a project the person is not
+ * in leaves no trace. A person is not held back by Go (decide() treats the owner session the same way). Queries: a constant
+ * number per project, none per snapshot.
+ */
+export function list_reference_candidates(db: ReadDb, project_id: string, caller: ReferenceCaller): ReferenceCandidate[] {
+  const attached = new Set(reference_rows(db, project_id).map((row) => row.referenced_project_key));
+  const projects = db.all<{ id: string; slug: string; topic: string }>(
+    "SELECT id, slug, topic FROM projects WHERE id <> ? AND status <> 'archived' ORDER BY rowid",
+    project_id,
+  );
+  const out: ReferenceCandidate[] = [];
+  for (const p of projects) {
+    if (!is_member(db, p.id, caller.user_id)) continue;
+    const rows = db.all<{ id: string; approved: bigint }>(
+      `SELECT s.id AS id, EXISTS (SELECT 1 FROM approvals a WHERE a.project_id = s.project_id AND a.snapshot_id = s.id) AS approved
+         FROM snapshots s WHERE s.project_id = ? AND NOT ${IS_PRINT_SNAPSHOT} ORDER BY s.rowid DESC`,
+      p.id,
+    );
+    const recommended = rows.find((r) => Number(r.approved) !== 0)?.id ?? rows[0]?.id;
+    out.push({
+      project_id: p.id,
+      key: p.id,
+      label: p.topic.trim().length > 0 ? p.topic : p.slug,
+      attached: attached.has(p.id),
+      snapshots: rows.map((r) => ({ id: r.id, key: r.id, label: null, approved: Number(r.approved) !== 0, recommended: r.id === recommended })),
+    });
+  }
+  return out;
+}
