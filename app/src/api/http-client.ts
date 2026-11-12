@@ -33,6 +33,16 @@ type Json = Record<string, unknown>;
 
 const isRecord = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** 쓰기 응답이 도착한 뒤의 본문 읽기 — 2xx 인데 JSON 이 아니거나 본문이 도중에 끊기면 서버는 이미 처리했을 수 있다. 그래서 “요청을 보낸 뒤”로 표시한다 */
+async function jsonAfterSend(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch (e) {
+    markAfterSend(e);
+    throw e;
+  }
+}
+
 /** 서버 오류 봉투가 아닌 응답(빈 본문·HTML 등)에 붙이는 봉투 — 코드는 상태에서 정한다 */
 function fallbackBody(status: number): ApiError {
   const code = status === 401 ? "unauthenticated" : status === 403 ? "forbidden" : status === 404 ? "not_found" : status >= 500 ? "internal_error" : "invalid_payload";
@@ -150,7 +160,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         signal,
       });
       if (!res.ok) throw await toApiError(res);
-      const parsed: unknown = await res.json();
+      const parsed: unknown = await jsonAfterSend(res);
       if (!isRecord(parsed) || !isRecord(parsed.data)) throw new PesApiError(fallbackBody(500));
       return { json: parsed, requestId: typeof parsed.request_id === "string" ? parsed.request_id : "client" };
     });
@@ -375,7 +385,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         signal,
       });
       if (!res.ok) throw await toApiError(res);
-      const parsed: unknown = await res.json();
+      const parsed: unknown = await jsonAfterSend(res);
       if (!isRecord(parsed) || !isRecord(parsed.data)) throw new PesApiError(fallbackBody(500));
       return parsed.data;
     });

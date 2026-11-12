@@ -87,3 +87,44 @@ describe("리뷰 2 — fetch 호출 전 · 후 실패 분류 (실제 http 클라
     expect(fetchImpl).toHaveBeenCalled();
   });
 });
+
+describe("리뷰 3 — 응답을 받은 뒤 본문 읽기 실패도 “접수 확인 중”(같은 키 유지)", () => {
+  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 201, headers: { "content-type": "application/json" } });
+  /** 올리기 예약은 준비됨으로 답하고, 자료 POST 만 `answer` 로 답한다 */
+  const fetchWith = (answer: () => Response) =>
+    vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => (String(url).endsWith("/uploads") ? ok({ data: { blob_id: "blob-synth-1", state: "ready" } }) : answer()));
+  const materialKeys = (f: ReturnType<typeof fetchWith>) =>
+    f.mock.calls.filter((c) => String(c[0]).endsWith("/materials")).map((c) => (c[1] as RequestInit).headers as Record<string, string>);
+  const run = async (f: ReturnType<typeof fetchWith>) => {
+    const mc = createMaterialsClient();
+    Object.assign(mc.client, { uploadMaterial: real(f as unknown as typeof fetch).uploadMaterial });
+    await boot(mc);
+    await waitRows();
+    const user = userEvent.setup();
+    const input = screen.getByLabelText("자료 파일 고르기", { selector: "input[type=file]" }) as HTMLInputElement;
+    const same = file("review3-synthetic.txt", "리뷰 3");
+    await user.upload(input, same);
+    await waitFor(() => expect(document.body.textContent).toContain("접수 확인 중"));
+    expect(document.body.textContent).not.toContain("보내지 못했어요");
+    await user.upload(input, same);
+    await waitFor(() => expect(materialKeys(f).length).toBe(2));
+  };
+  const real = (fetchImpl: typeof fetch) => createHttpClient({ session: "synthetic-session-review", projects: { [WORKSPACE.slug]: "pj-synthetic-9" }, fetch: fetchImpl });
+
+  it("2xx 인데 JSON 이 아닌 응답 → 접수 확인 중, 다시 올리면 같은 멱등 키", async () => {
+    const f = fetchWith(() => new Response("<html>not json</html>", { status: 200, headers: { "content-type": "text/html" } }));
+    await run(f);
+    const [a, b] = materialKeys(f).map((h) => h["idempotency-key"]);
+    expect(a).toBeTruthy();
+    expect(b).toBe(a);
+  });
+
+  it("응답 본문 스트림이 도중에 끊김(json 이 TypeError) → 접수 확인 중, 다시 올리면 같은 멱등 키", async () => {
+    const broken = { ok: true, status: 201, json: () => Promise.reject(new TypeError("terminated")) } as unknown as Response;
+    const f = fetchWith(() => broken);
+    await run(f);
+    const [a, b] = materialKeys(f).map((h) => h["idempotency-key"]);
+    expect(a).toBeTruthy();
+    expect(b).toBe(a);
+  });
+});

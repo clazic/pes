@@ -1,4 +1,4 @@
-// SEL-117 MAT1c — 내 자료 화면(작업 중 자료 목록 · 생성 화면 “내 자료” 칸) · 파일별 AI 참조 스위치 · 미리보기. 구현 전이라 실패가 정상.
+// SEL-117 MAT1c — 내 자료 화면(작업 중 자료 목록 · 생성 화면 “내 자료” 칸) · 파일별 AI 참조 스위치 · 미리보기. 구현 뒤 통과(MAT1c).
 // 계약(주소 · 이름 · 문구 · 클라이언트 모양)은 src/test/sel117.ts 머리말. 합성 자료뿐, 네트워크 0(가짜 클라이언트).
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
