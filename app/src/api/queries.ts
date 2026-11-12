@@ -15,6 +15,11 @@ export const keys = {
   projects: ["projects"] as const,
   workspace: (slug: string, edition: number) => ["workspace", slug, edition] as const,
   round: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, stage, round] as const,
+  /** 가정 · 결정 · 반영(U3b). 반영은 라운드 읽기 키 아래라 'round:*' 변경에 같이 다시 받는다 */
+  records: (slug: string, edition: number) => ["records", slug, edition] as const,
+  assumptions: (slug: string, edition: number) => ["records", slug, edition, "assumptions"] as const,
+  decisions: (slug: string, edition: number) => ["records", slug, edition, "decisions"] as const,
+  reflections: (slug: string, edition: number, stage: string, round: string) => ["round", slug, edition, stage, round, "reflections"] as const,
 };
 
 export function useProjects() {
@@ -52,4 +57,20 @@ export function useAcknowledgeAlert(slug: string, edition: number) {
     mutationFn: ({ alertId, key }: { alertId: string; key: string }) => client.acknowledgeAlert(slug, edition, alertId, key),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["round", slug, edition] }),
   });
+}
+
+export function useAssumptions(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.assumptions(slug, edition), queryFn: () => client.getAssumptions(slug, edition), enabled: !!slug && edition > 0 });
+}
+
+export function useDecisions(slug: string, edition: number) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.decisions(slug, edition), queryFn: () => client.getDecisions(slug, edition), enabled: !!slug && edition > 0 });
+}
+
+/** round: 숫자 문자열 또는 "start". 결과 null = 서버가 반영 자료를 주지 않음 */
+export function useReflections(slug: string, edition: number, stage: string, round: string) {
+  const client = useClient();
+  return useQuery({ queryKey: keys.reflections(slug, edition, stage, round), queryFn: () => client.getReflections(slug, edition, stage, round), enabled: !!slug && edition > 0 && !!stage && !!round });
 }

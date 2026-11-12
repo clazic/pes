@@ -5,6 +5,7 @@ import { newIdempotencyKey, useAcknowledgeAlert } from "@/api/queries";
 import type { AlertView, RoundView, WorkspaceView } from "@/api/types";
 import { ActionButton } from "@/components/pes/action-button";
 import { Button } from "@/components/ui/button";
+import { ReflectionSection } from "@/features/records/ReflectionSection";
 import { formatAt, placeLabel } from "@/lib/labels";
 import { roundHref } from "./paths";
 import { RecordsPanel, RunPanel } from "./StatusPanels";
@@ -117,6 +118,8 @@ export function BodyPane({
 
   return (
     <div className="mx-auto w-full max-w-[46rem] px-4 pt-5 pb-16 tab:px-6">
+      {/* 다음 라운드 첫머리 — 지난 라운드 의견이 어떻게 반영됐는지(U3b). 본문 맨 위, 기록 영역보다 앞 */}
+      <ReflectionSection slug={ws.slug} edition={ws.edition} stage={round.stage} round={isStart ? "start" : String(round.round_id)} className="mb-6 border-b pb-6" />
       {past ? (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-surface-soft px-3 py-2 text-meta text-ink-2">
           <span className="font-semibold text-ink">{isStart ? "지난 단계 시작" : "지난 라운드"} · 보는 중</span>

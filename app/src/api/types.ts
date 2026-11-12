@@ -18,7 +18,7 @@ export type IsoTime = string;
 /* ───────────── 봉투 · 오류 · 영수증 (API 결정 4 · 3절 오류 봉투) ───────────── */
 
 /** 2단계 코어(api_support.ts)의 닫힌 오류 코드 중 U1a 가짜 클라이언트가 쓰는 것 */
-export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "cursor_expired" | "cursor_invalid";
+export type ApiErrorCode = "not_found" | "invalid_payload" | "idempotency_key_reuse" | "conflict" | "cursor_expired" | "cursor_invalid" | "not_supported";
 
 export interface ApiError {
   format_version: typeof FORMAT_VERSION;
@@ -280,6 +280,86 @@ export interface ChangesRead {
   txs: ChangeTx[];
 }
 
+/* ───────────── 가정 · 결정 · 반영 (U3b · SEL-94) ───────────── */
+
+/**
+ * 기계 값만 싣는다 — 화면 글자(상태 낱말 · 범위 이름 · 처리 낱말)는 앱이 만든다(상태 사전 status-registry.ts).
+ * 서버 계약은 SEL-93(U3a)이 정한다. 그 전까지 HTTP 클라이언트는 이 읽기·쓰기를 지어내지 않고 not_supported 로 거절한다.
+ */
+export interface Actor {
+  id: string;
+  kind: "human" | "ai";
+  name: string;
+}
+export interface Link {
+  label: string;
+  href: string;
+}
+export interface AssumptionRow {
+  object_id: string;
+  version_id: string;
+  version: number;
+  statement: string;
+  state: "proposed" | "confirmed" | "rejected" | "revised";
+  proposed_by: Actor;
+  assessed_by: Actor | null;
+  assessed_at: IsoTime | null;
+  /** 새 판 복사본 등 — 상태가 confirmed 여도 사람이 다시 봐야 한다 */
+  needs_review: boolean;
+  rationale: string;
+  /** 고침이면 고치기 전 문장(원문 보존) */
+  original: { version_id: string; statement: string } | null;
+  copied_from: { edition: number; label: string } | null;
+  source: Link | null;
+}
+export interface DecisionRow {
+  object_id: string;
+  version_id: string;
+  version: number;
+  statement: string;
+  state: "proposed" | "adopted" | "superseded" | "revoked";
+  scope: "project" | "edition";
+  proposed_by: Actor;
+  decided_by: Actor | null;
+  rationale: string;
+  /** 이 결정이 대체한 옛 결정 */
+  supersedes: { object_id: string; statement: string } | null;
+  superseded_by: string | null;
+  /** 판 결정: 새 판으로 복사될 때 고정된 당시 버전 */
+  originated_from: { label: string; version: number } | null;
+  source: Link | null;
+}
+export interface FollowupView {
+  id: string;
+  kind: "edit_text" | "next_round_task" | "reopen_stage";
+  state: "proposed" | "accepted" | "applied" | "deferred" | "rejected";
+  label: string;
+  result_version: Link | null;
+}
+export interface ReflectionEntry {
+  id: string;
+  opinion: string;
+  source: Link | null;
+  disposition: "applied" | "partial" | "deferred" | "rejected";
+  rationale: string;
+  actor: Actor | null;
+  applied_tx_id: string | null;
+  result_version: Link | null;
+  followup: FollowupView | null;
+}
+export interface ReflectionView {
+  /** none = 지난 라운드에 보낸 반영 의견 자체가 없음(미제출) · submitted = 보냄 */
+  submission: "none" | "submitted";
+  sent_count: number;
+  entries: ReflectionEntry[];
+}
+export interface AssessInput {
+  verdict: "confirm" | "reject" | "revise";
+  rationale: string;
+  statement?: string;
+}
+export type JudgeResult = CommandResult<{ object_id: string; version_id: string }>;
+
 /** 가짜 클라이언트와 (U1b) HTTP 클라이언트가 같이 지키는 모양 */
 export interface PesClient {
   listProjects(): Promise<ProjectRef[]>;
@@ -291,4 +371,15 @@ export interface PesClient {
   acknowledgeAlert(slug: string, edition: number, alertId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ alert_id: string }>>;
   /** 변경분 읽기 — 커서 다음의 공개 tx 묶음. 거절은 PesApiError(cursor_expired · cursor_invalid) */
   getChanges(slug: string, edition: number, cursor: string | null): Promise<ChangesRead>;
+  /** 가정 · 결정 읽기(U3b). 서버가 아직 못 주면 PesApiError(not_supported) */
+  getAssumptions(slug: string, edition: number): Promise<AssumptionRow[]>;
+  getDecisions(slug: string, edition: number): Promise<DecisionRow[]>;
+  /** round: 숫자 문자열 또는 "start". null = 서버가 반영 자료를 주지 않음(이전된 프로젝트) */
+  getReflections(slug: string, edition: number, stage: string, round: string): Promise<ReflectionView | null>;
+  /** 사람 판단 쓰기(U3b) — 멱등 키 필수. 거절은 PesApiError */
+  assessAssumption(slug: string, edition: number, objectId: string, input: AssessInput, idempotencyKey: string | undefined): Promise<JudgeResult>;
+  adoptDecision(slug: string, edition: number, objectId: string, input: { rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
+  /** 새 결정을 만든다(옛 결정은 덮어쓰지 않음) */
+  supersedeDecision(slug: string, edition: number, objectId: string, input: { statement: string; rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
+  revokeDecision(slug: string, edition: number, objectId: string, input: { rationale: string }, idempotencyKey: string | undefined): Promise<JudgeResult>;
 }

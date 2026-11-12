@@ -84,7 +84,27 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return w && w.edition === edition ? w : null;
   }
 
+  /**
+   * 가정 · 결정 · 반영(U3b) — 서버 계약은 SEL-93(U3a)이 정한다. 그 전에는 경로를 지어내지 않고 not_supported 로 거절한다(화면은 “아직 서버에서 읽을 수 없음”을 그대로 보인다).
+   * 서버 요청을 보내지 않는다 — 경로가 생기면 이 자리에서 http 매핑을 채운다.
+   */
+  const notSupported = (what: string): Promise<never> =>
+    Promise.reject(
+      new PesApiError({
+        format_version: FORMAT_VERSION,
+        error: { code: "not_supported", message: `${what}은(는) 서버가 아직 지원하지 않습니다.`, retryable: false, next_action: "reread_context" },
+        request_id: "client",
+      }),
+    );
+
   return {
+    getAssumptions: () => notSupported("가정 읽기"),
+    getDecisions: () => notSupported("결정 읽기"),
+    getReflections: () => notSupported("반영 내역 읽기"),
+    assessAssumption: () => notSupported("가정 판단 기록"),
+    adoptDecision: () => notSupported("결정 채택 기록"),
+    supersedeDecision: () => notSupported("결정 대체 기록"),
+    revokeDecision: () => notSupported("결정 철회 기록"),
     /** GET P/changes — 한 번만 부른다(has_more 여도 한 쪽). 400 cursor_invalid · 410 cursor_expired 는 PesApiError 로 나온다 */
     async getChanges(slug, _edition, cursor): Promise<ChangesRead> {
       const id = idOf(slug);
