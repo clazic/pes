@@ -2,13 +2,13 @@
  * SEL-113 REF1a — 최종 리뷰(F1) 필수 2건 수정 시험. 합성 데이터만, 실제 모델·네트워크 호출 없음(로컬 fake AI 만).
  *
  *  F1-1  A 실행기는 읽은 참고자료 본문을 turns 에 보관해 다음 요청에 다시 싣는다. 읽은 뒤(키 읽기 같은 비동기 사이) 원본 Go OFF·
- *        원본 접근 철회가 일어나면, 매 모델 요청 직전에 같은 판정(decide)으로 다시 보고 그 도구 결과를 보내지 않는다
- *        (대체 문구: 회수됨·이유). 이미 보낸 결과도, 그 뒤 모델이 쓴 글(파생)도 이후 요청에 다시 싣지 않는다.
- *        재현: 리뷰의 합성 재현 그대로 — env.keys.get 을 감싸 둘째 요청용 키를 읽는 동안 철회한다.
+ *        원본 접근 철회가 일어나면, 매 모델 요청 직전에 같은 판정(decide)으로 다시 보고 그 요청을 보내지 않는다 — run 은
+ *        interrupted·이유 reference_withdrawn 으로 멈춘다(F2 사용자 결정: 지우기 대신 멈춤). 이미 보낸 결과도, 그 뒤 모델이
+ *        쓴 글(파생)도 다시 나가지 않는다. 재현: 리뷰의 합성 재현 그대로 — env.keys.get 을 감싸 둘째 요청용 키를 읽는 동안 철회한다.
  *  F1-2  인자 없는 context.get 의 references 목록이 기존 4000자 문자열 clip 을 타서 JSON 이 깨진 채 성공으로 가던 것 —
  *        목록도 객체 단위 JSON 예산(objects·questions 와 합친 전체 응답)으로 만들고, 넘치면 truncated·omitted·다음 쪽
  *        읽는 법(references_offset)을 밝힌다. 성공 JSON 은 어디서도 중간에서 잘리지 않는다.
- *  M-99  origin/main(SEL-99 U4a) 합치기 뒤 새 출구 점검: thread.reply·followup.propose(A)의 인자도 철회 뒤 다시 실리지 않고,
+ *  M-99  origin/main(SEL-99 U4a) 합치기 뒤 새 출구 점검: thread.reply·followup.propose(A)의 인자도 철회 뒤 다시 실리지 않고(run 이 멈춘다),
  *        참고자료 원본의 글(다른 프로젝트 객체)은 첨언 대상이 될 수 없다(스레드·후속 읽기는 현재 프로젝트 객체만 본다).
  */
 
@@ -18,6 +18,7 @@ import { test } from "node:test";
 import { add_artifact, create_object } from "../scripts/pes_core/content.ts";
 import { FINISH, context_turn, open_stage, ready_project, start_run, with_a_env, type AEnv, type ScriptedTurn } from "./helpers/a_builtin_env.ts";
 import { rejects_api } from "./helpers/blob_env.ts";
+import { recheck_reference } from "../scripts/pes_core/a_runtime/tools.ts";
 import { attached, revoke_access, source_go, type Source } from "./helpers/sel113_env.ts";
 
 /** the whole outbound request as text */
@@ -48,11 +49,17 @@ async function revoke(env: AEnv, src: Source, how: Revoke, key: string): Promise
 
 const REASON: Record<Revoke, string> = { go_off: "source_go_off", access: "no_permission" };
 
+/** the reason the same decide() gives now for this run's actor (the run stopped on it) */
+function recheck_reason(env: AEnv, reference_id: string): string | null {
+  const run = env.db.get<{ id: string; actor_id: string }>("SELECT id, actor_id FROM runs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1", env.p.project_id)!;
+  return recheck_reference(env.db, { project_id: env.p.project_id, actor_id: run.actor_id } as any, reference_id);
+}
+
 // ---------------------------------------------------------------------------
 // F1-1 — withdrawn between the read and the first delivery
 
 for (const how of ["go_off", "access"] as Revoke[]) {
-  test(`F1-1 (${how}): revoked while the key for the next request is read — the read text is never sent; the tool result says withdrawn with the reason`, async () => {
+  test(`F1-1 (${how}): revoked while the key for the next request is read — the read text is never sent; the run stops with reference_withdrawn`, async () => {
     await with_a_env("openai_compatible", async (env) => {
       await ready_project(env);
       const o = await open_stage(env, "plan");
@@ -70,19 +77,13 @@ for (const how of ["go_off", "access"] as Revoke[]) {
       };
       const result = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
       assert.equal(revoked, true, "the revocation happened between the two requests");
-      assert.equal(env.fake.calls.length - base, 2, JSON.stringify(result));
+      assert.equal(env.fake.calls.length - base, 1, `the second request is not sent: ${JSON.stringify(result)}`);
       const first = request_text(env, base);
-      const second = request_text(env, base + 1);
-      assert.equal(first.includes(src.report_marker), false);
-      assert.equal(second.includes(src.report_marker), false, "the report text is not sent after the revocation");
-      assert.equal(second.includes(src.source_marker), false, "nor the source text");
-      const tools = tool_messages(env, base + 1);
-      const back = JSON.parse(tools[tools.length - 1]!);
-      assert.equal(back.ok, false);
-      assert.equal(back.withdrawn, true);
-      assert.equal(back.reference_id, ref.reference_id);
-      assert.equal(back.reason, REASON[how]);
-      assert.equal(result.status, "succeeded", JSON.stringify(result));
+      assert.equal(first.includes(src.report_marker), false, "the report text is never sent");
+      assert.equal(first.includes(src.source_marker), false, "nor the source text");
+      assert.equal(result.status, "interrupted", JSON.stringify(result));
+      assert.equal(result.interrupt_reason, "reference_withdrawn");
+      assert.equal(recheck_reason(env, ref.reference_id), REASON[how], "the reason decide() gives now");
     });
   });
 }
@@ -91,7 +92,7 @@ for (const how of ["go_off", "access"] as Revoke[]) {
 // F1-1 — already sent once: not sent again, and neither is what the model wrote after reading it
 
 for (const how of ["go_off", "access"] as Revoke[]) {
-  test(`F1-1 (${how}): revoked after the text was sent — later requests carry neither the first read nor the model's text written from it`, async () => {
+  test(`F1-1 (${how}): revoked after the text was sent — no later request goes (neither the first read nor the model's text written from it); the run stops`, async () => {
     await with_a_env("openai_compatible", async (env) => {
       await ready_project(env);
       const o = await open_stage(env, "plan");
@@ -103,19 +104,11 @@ for (const how of ["go_off", "access"] as Revoke[]) {
         if (n - base === 2) await revoke(env, src, how, `f12-${how}-revoke`);
       };
       const result = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
-      assert.equal(env.fake.calls.length - base, 3, JSON.stringify(result));
+      assert.equal(env.fake.calls.length - base, 2, `no third request: ${JSON.stringify(result)}`);
       assert.ok(request_text(env, base + 1).includes(src.report_marker), "the text did go out once (before the revocation)");
-      const third = request_text(env, base + 2);
-      assert.equal(third.includes(src.report_marker), false, "not sent again, not even inside the model's own later text");
-      assert.equal(third.includes(src.source_marker), false);
-      const tools = tool_messages(env, base + 2).map((t) => JSON.parse(t));
-      assert.equal(tools.length, 2, "both reads are still answered (the pairing of calls and results holds)");
-      assert.ok(tools[1].ok === false || tools[1].content === null, "the new read after the revocation gets no content (decide)");
-      assert.equal(tools[0].ok, false);
-      assert.equal(tools[0].reference_id, ref.reference_id);
-      assert.equal(tools[0].withdrawn, true, "the first read is withdrawn");
-      assert.equal(tools[0].reason, REASON[how]);
-      assert.equal(result.status, "succeeded", JSON.stringify(result));
+      assert.equal(result.status, "interrupted", JSON.stringify(result));
+      assert.equal(result.interrupt_reason, "reference_withdrawn");
+      assert.equal(recheck_reason(env, ref.reference_id), REASON[how]);
     });
   });
 }
@@ -259,11 +252,9 @@ test("M-99: thread.reply and followup.propose written after a withdrawn referenc
       if (n - base === 2) await source_go(env, src, false, "m99a-revoke");
     };
     const result = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
-    assert.equal(env.fake.calls.length - base, 3, JSON.stringify(result));
-    const third = request_text(env, base + 2);
-    assert.equal(third.includes(src.report_marker), false, "neither the read nor the reply/follow-up arguments derived from it go out again");
-    for (const t of tool_messages(env, base + 2)) assert.equal(t.includes(src.report_marker), false, "no tool result echoes the text");
-    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    assert.equal(env.fake.calls.length - base, 2, `no third request: neither the read nor the reply/follow-up arguments derived from it go out again: ${JSON.stringify(result)}`);
+    assert.equal(result.status, "interrupted", JSON.stringify(result));
+    assert.equal(result.interrupt_reason, "reference_withdrawn");
   });
 });
 
@@ -286,3 +277,114 @@ test("M-99: a text of the referenced project cannot be annotated from this proje
     assert.equal(Number(threads[0]!.n), 0, "no anchor points at the other project's text");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F2 — the last boundary before the HTTP call, and the run stops on a withdrawal (사용자 결정: 지우기 대신 멈춤)
+//
+//  F2-1  재판정 뒤 heartbeat·dispatch.authorize 의 await 사이에 원본 Go OFF·원본 접근 철회 → 아직 안 보낸 본문이 처음 나가던 것.
+//        리뷰의 합성 재현 그대로: env.service.execute 를 감싸 원래 명령이 끝난 다음(둘째 요청의 heartbeat 또는 authorize 가
+//        반환되기 전) 철회한다. 이제 그 요청은 나가지 않고(HTTP 1회), 그 dispatch 는 blocked(보낸 적 없음), run 은
+//        interrupted·이유 reference_withdrawn 이다.
+//  F2-2  도구 검증 오류(invalid_payload: unknown field: <본문 문구>)가 모델이 보낸 참고 문구를 되돌려 회수에서 빠지던 것.
+//        리뷰의 합성 재현 그대로: 셋째 요청용 env.keys.get 안에서 철회한다. 이제 셋째 요청은 나가지 않는다.
+
+/** what the run left in the DB: its status, the reason on its last run.interrupted event, and its dispatches' states */
+function stopped_state(env: AEnv, run_id: string): { status: string; reason: string | null; dispatches: string[] } {
+  const run = env.db.get<{ status: string }>("SELECT status FROM runs WHERE id = ?", run_id)!;
+  const event = env.db.get<{ payload: string }>(
+    "SELECT payload FROM events WHERE run_id = ? AND type = 'run.interrupted' ORDER BY event_seq DESC LIMIT 1",
+    run_id,
+  );
+  const dispatches = env.db
+    .all<{ state: string }>("SELECT state FROM outbound_dispatches WHERE run_id = ? ORDER BY rowid", run_id)
+    .map((d) => d.state);
+  return { status: run.status, reason: event === undefined ? null : (JSON.parse(event.payload).reason ?? null), dispatches };
+}
+
+for (const [point, how] of [
+  ["run.heartbeat", "go_off"],
+  ["dispatch.authorize", "go_off"],
+  ["dispatch.authorize", "access"],
+] as Array<[string, Revoke]>) {
+  test(`F2-1 (${point}, ${how}): revoked after the recheck while ${point} is awaited — the request is not sent, the dispatch is blocked, the run stops with reference_withdrawn`, async () => {
+    await with_a_env("openai_compatible", async (env) => {
+      await ready_project(env);
+      const o = await open_stage(env, "plan");
+      const { src, ref } = await attached(env, `f21-${point}-${how}`);
+      const base = script_fn(env, (n) => (n === 1 ? reference_turn(ref.reference_id) : FINISH));
+      // the reviewer's reproduction: after the original command has run, before it returns to the runner
+      const execute = env.service.execute.bind(env.service);
+      let revoked = false;
+      (env.service as any).execute = async (ctx: any, command: string, payload: unknown) => {
+        const out = await execute(ctx, command, payload);
+        if (!revoked && command === point && env.fake.calls.length - base === 1) {
+          revoked = true;
+          await revoke(env, src, how, `f21-${point}-${how}-revoke`);
+        }
+        return out;
+      };
+      const result = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
+      assert.equal(revoked, true, "the revocation happened between the recheck and the send");
+      assert.equal(env.fake.calls.length - base, 1, `the second request is never sent: ${JSON.stringify(result)}`);
+      for (let i = base; i < env.fake.calls.length; i += 1) {
+        assert.equal(request_text(env, i).includes(src.report_marker), false);
+        assert.equal(request_text(env, i).includes(src.source_marker), false);
+      }
+      // the run read and the DB say why it stopped; the unsent dispatch is not "sent"
+      assert.equal(result.status, "interrupted", JSON.stringify(result));
+      assert.equal(result.interrupt_reason, "reference_withdrawn");
+      const state = stopped_state(env, result.run_id);
+      assert.equal(state.status, "interrupted");
+      assert.equal(state.reason, "reference_withdrawn");
+      assert.equal(state.dispatches.length, 2, JSON.stringify(state));
+      assert.notEqual(state.dispatches[0], "sent");
+      assert.equal(state.dispatches[1], "blocked", "the second dispatch was authorized, never sent");
+      const lease = env.db.get<{ state: string }>("SELECT state FROM project_leases WHERE project_id = ?", env.p.project_id);
+      assert.equal(lease?.state, "released", "the lease is not left held");
+    });
+  });
+}
+
+for (const how of ["go_off", "access"] as Revoke[]) {
+  test(`F2-2 (${how}): a tool error that echoes the reference text (unknown field) — revoked before the next request, the run stops and the echo is never sent`, async () => {
+    await with_a_env("openai_compatible", async (env) => {
+      await ready_project(env);
+      const o = await open_stage(env, "plan");
+      const { src, ref } = await attached(env, `tool-error-${how}`);
+      const base = script_fn(env, (n) =>
+        n === 1
+          ? reference_turn(ref.reference_id)
+          : n === 2
+            ? {
+                tools: [
+                  {
+                    name: "result.submit",
+                    args: { results: [{ op: "append_version", object_id: o.object_id, title: "합성 글", [src.report_marker]: "합성 부가 칸" }] },
+                  },
+                ],
+              }
+            : FINISH,
+      );
+      const original = env.keys.get.bind(env.keys);
+      let revoked = false;
+      (env.keys as any).get = async (k: string) => {
+        if (!revoked && env.fake.calls.length - base === 2) {
+          revoked = true;
+          await revoke(env, src, how, `f22-${how}-revoke`);
+        }
+        return original(k);
+      };
+      const result = await start_run(env, { stage_id: o.stage_id, round_id: o.round_id });
+      assert.equal(revoked, true);
+      assert.equal(env.fake.calls.length - base, 2, `the third request is never sent: ${JSON.stringify(result)}`);
+      assert.ok(request_text(env, base + 1).includes(src.report_marker), "the text did go out once (before the revocation)");
+      assert.equal(result.status, "interrupted", JSON.stringify(result));
+      assert.equal(result.interrupt_reason, "reference_withdrawn");
+      const state = stopped_state(env, result.run_id);
+      assert.equal(state.status, "interrupted");
+      assert.equal(state.reason, "reference_withdrawn");
+      assert.equal(state.dispatches.length, 2, "no third dispatch is written");
+      for (const d of state.dispatches) assert.ok(!["prepared", "authorized", "sent"].includes(d), JSON.stringify(state));
+    });
+  });
+}

@@ -66,7 +66,7 @@ import {
   is_supported_format,
   type RequestFormat,
 } from "./spec.ts";
-import { SaveFailedError, TOOL_SPECS, question_context, recheck_reference, run_tool, withdrawn_result, type RunHandle, type ToolEffect } from "./tools.ts";
+import { SaveFailedError, TOOL_SPECS, question_context, recheck_reference, run_tool, type RunHandle, type ToolEffect, type WithdrawnReason } from "./tools.ts";
 import {
   current_run_settings,
   read_connection_facts,
@@ -81,6 +81,8 @@ export interface ExecResult {
   run_id: string;
   status: "succeeded" | "waiting_human" | "blocked_usage" | "failed" | "interrupted";
   block_reason: string | null;
+  /** interrupted only: the reason the run.interrupted event recorded (policy_off, reference_withdrawn, ...), else null */
+  interrupt_reason: string | null;
   reset_at: number | null;
   question_set_id: string | null;
 }
@@ -138,13 +140,8 @@ function integer_in(value: unknown, field: string, min: number, max: number): nu
   return value;
 }
 
-/** A reference read kept in the runner's history: where its result sits, and whether it was withdrawn. */
-interface ReferenceRead {
-  turn_index: number;
-  result_index: number;
-  reference_id: string;
-  withdrawn: boolean;
-}
+/** The run stops (run.interrupt, reason reference_withdrawn): a reference this run read may no longer go to the model. */
+const REFERENCE_WITHDRAWN = "reference_withdrawn";
 
 export class BuiltinExecutor {
   readonly #deps: AiDeps;
@@ -428,10 +425,25 @@ export class BuiltinExecutor {
           `ai-${run_id}`,
         )?.id ?? null;
     }
+    let interrupt_reason: string | null = null;
+    if (status === "interrupted") {
+      const event = this.#db.get<{ payload: string }>(
+        "SELECT payload FROM events WHERE project_id = ? AND run_id = ? AND type = 'run.interrupted' ORDER BY event_seq DESC LIMIT 1",
+        project_id,
+        run_id,
+      );
+      try {
+        const reason = event === undefined ? undefined : (JSON.parse(event.payload) as { reason?: unknown }).reason;
+        interrupt_reason = typeof reason === "string" ? reason : null;
+      } catch {
+        interrupt_reason = null;
+      }
+    }
     return {
       run_id,
       status,
       block_reason: status === "blocked_usage" ? row.go_block_reason : null,
+      interrupt_reason,
       reset_at: status === "blocked_usage" && row.go_block_reset_at !== null ? Number(row.go_block_reset_at) : null,
       question_set_id,
     };
@@ -548,8 +560,9 @@ export class BuiltinExecutor {
   async #drive(drive: Drive, resumed: boolean): Promise<ExecResult> {
     const { handle } = drive;
     const turns: Turn[] = [this.#opening(handle, resumed)];
-    // reference reads kept in turns: decided again before every request (a read is never sent on an old decision)
-    const reads: ReferenceRead[] = [];
+    // references whose content this run read (and keeps in turns): decided again before every request and once more at
+    // the last boundary right before the HTTP call. One that may no longer go stops the run; nothing is scrubbed or sent.
+    const reads: string[] = [];
 
     for (let turn_no = 0; turn_no < drive.max_turns; turn_no += 1) {
       if (!this.#live(handle)) return this.#result_of(handle.project_id, handle.run_id);
@@ -571,8 +584,9 @@ export class BuiltinExecutor {
       const { connection, key } = snapshot;
 
       // 3b. reference content kept from earlier reads: decided again now, after the awaits above, with the same decide()
-      //     as every other exit. Withdrawn text (and what the model wrote after reading it) is not sent again.
-      this.#withdraw_references(handle, turns, reads);
+      //     as every other exit. Any withdrawal stops the run before a request is built.
+      const early = this.#withdrawn_reference(handle, reads);
+      if (early !== null) return this.#stop_reference_withdrawn(handle, early);
 
       // 4. the gate
       const request = this.#request_for(handle, drive.settings, turns, drive.max_output_tokens);
@@ -601,6 +615,18 @@ export class BuiltinExecutor {
       // the gate is judged again inside the prepare transaction; a refusal there is a normal block
       if (typeof attempt !== "string") return this.#block(handle, attempt.reason, attempt.reset_at);
       const dispatch_id = attempt;
+
+      // 5b. the last boundary: every await of this turn (key read, heartbeat, prepare, authorize) is behind us. The
+      //     references are decided once more; from here to the HTTP call nothing awaits (mark_sent runs synchronously),
+      //     so nothing can change in between. A withdrawal blocks the authorized dispatch (never "sent") and stops the run.
+      const late = this.#withdrawn_reference(handle, reads);
+      if (late !== null) {
+        await this.#block_unsent(drive, request_key, dispatch_id, late.reason);
+        return this.#stop_reference_withdrawn(handle, late);
+      }
+      const marked = this.#mark_sent(drive, request_key, dispatch_id);
+      if (marked === null) return this.#result_of(handle.project_id, handle.run_id);
+      if (typeof marked !== "string") return this.#block(handle, marked.reason, marked.reset_at);
 
       // 6. sent once
       this.#log(`run ${handle.run_id}: call ${call_no} sent`);
@@ -806,7 +832,7 @@ export class BuiltinExecutor {
 
       turns.push({ role: "assistant", text: reply.text, calls: reply.calls });
       turns.push({ role: "tool_results", results });
-      for (const read of read_now) reads.push({ turn_index: turns.length - 1, ...read, withdrawn: false });
+      for (const read of read_now) if (!reads.includes(read.reference_id)) reads.push(read.reference_id);
     }
 
     this.#log(`run ${handle.run_id}: the turn cap was reached`);
@@ -814,31 +840,35 @@ export class BuiltinExecutor {
   }
 
   /**
-   * Decide every kept reference read again. A read that may no longer go is replaced by a "withdrawn" result (reason given,
-   * nothing invented), and every later assistant turn — written by the model after it read that text — loses its text and
-   * its call arguments, so nothing derived from it is sent again either. What already went out cannot be called back.
+   * Decide every reference this run read again, with the same decide() as every other exit. Returns the first one that may
+   * no longer go (and why), or null. Pure reads: no await, so it can sit right before the HTTP call.
    */
-  #withdraw_references(handle: RunHandle, turns: Turn[], reads: ReferenceRead[]): void {
-    for (const read of reads) {
-      if (read.withdrawn) continue;
-      const reason = recheck_reference(this.#db, handle, read.reference_id);
-      if (reason === null) continue;
-      read.withdrawn = true;
-      const turn = turns[read.turn_index];
-      if (turn === undefined || turn.role !== "tool_results") continue;
-      const result = turn.results[read.result_index];
-      if (result !== undefined) turn.results[read.result_index] = withdrawn_result(result, read.reference_id, reason);
-      for (let i = read.turn_index + 1; i < turns.length; i += 1) {
-        const later = turns[i]!;
-        if (later.role !== "assistant") continue;
-        turns[i] = {
-          role: "assistant",
-          text: "[withdrawn: written after reading reference content that is no longer given]",
-          calls: later.calls.map((c) => ({ id: c.id, name: c.name, args: {} })),
-        };
-      }
-      this.#log(`run ${handle.run_id}: reference ${read.reference_id} read earlier is withdrawn (${reason}); it is not sent again`);
+  #withdrawn_reference(handle: RunHandle, reads: readonly string[]): { reference_id: string; reason: WithdrawnReason } | null {
+    for (const reference_id of reads) {
+      const reason = recheck_reference(this.#db, handle, reference_id);
+      if (reason !== null) return { reference_id, reason };
     }
+    return null;
+  }
+
+  /**
+   * A reference this run read was withdrawn: the run stops before anything more is sent (interrupted, reason
+   * reference_withdrawn on the run.interrupted event). What already went to the provider cannot be called back; nothing
+   * is scrubbed or invented, and a resumed run starts from a fresh history.
+   */
+  async #stop_reference_withdrawn(handle: RunHandle, withdrawn: { reference_id: string; reason: WithdrawnReason }): Promise<ExecResult> {
+    this.#log(`run ${handle.run_id}: reference ${withdrawn.reference_id} read earlier is withdrawn (${withdrawn.reason}); the run is stopped and nothing is sent`);
+    try {
+      await this.#service.execute(this.#ai_ctx(handle.project_id, handle.actor_id, `${handle.run_id}:f${handle.fence}:interrupt`), "run.interrupt", {
+        run_id: handle.run_id,
+        lease_id: handle.lease_id,
+        fence: handle.fence,
+        reason: REFERENCE_WITHDRAWN,
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+    }
+    return this.#result_of(handle.project_id, handle.run_id);
   }
 
   #cost_of(settings: RunSettings, usage: { input_tokens: number; output_tokens: number }): { currency: string; amount_micros: number } | null {
@@ -908,7 +938,7 @@ export class BuiltinExecutor {
     return reserved.blob_id;
   }
 
-  /** prepared -> authorized -> sent. Returns null when the run lost its lease while this was written. */
+  /** prepared -> authorized (sent is #mark_sent, after the last check). Returns null when the run lost its lease while this was written. */
   async #record_attempt(
     drive: Drive,
     request_key: string,
@@ -930,20 +960,57 @@ export class BuiltinExecutor {
       });
       const dispatch_id = (prepared.result as { dispatch_id: string }).dispatch_id;
       await this.#service.execute(ctx("authorize"), "dispatch.authorize", { dispatch_id, ...guard });
-      await this.#service.execute(ctx("send"), "dispatch.mark_sent", { dispatch_id, ...guard });
       return dispatch_id;
     } catch (error) {
-      const detail = error instanceof ApiError ? (error.details as { reason?: unknown; reset_at?: unknown } | undefined) : undefined;
-      if (detail !== undefined && (detail.reason === "usage_limit" || detail.reason === "cost_cap" || detail.reason === "extra_usage_off")) {
-        return { reason: detail.reason, reset_at: typeof detail.reset_at === "number" ? detail.reset_at : null };
-      }
-      // A lease or policy change while the attempt was being written: nothing was sent.
-      if (error instanceof ApiError && (error.code === "conflict" || error.code === "policy_denied")) {
-        this.#log(`run ${handle.run_id}: the attempt was not sent (${error.code})`);
-        return null;
-      }
-      throw error;
+      return this.#attempt_refused(handle, error);
     }
+  }
+
+  /**
+   * authorized -> sent, synchronously (execute_sync): the caller starts the HTTP call in the same tick, so no other work
+   * can run between this record and the send. Refusals read like those of #record_attempt.
+   */
+  #mark_sent(drive: Drive, request_key: string, dispatch_id: string): string | { reason: string; reset_at: number | null } | null {
+    const { handle } = drive;
+    try {
+      this.#service.execute_sync(this.#ai_ctx(handle.project_id, handle.actor_id, `${request_key}:send`), "dispatch.mark_sent", {
+        dispatch_id,
+        run_id: handle.run_id,
+        lease_id: handle.lease_id,
+        fence: handle.fence,
+      });
+      return dispatch_id;
+    } catch (error) {
+      return this.#attempt_refused(handle, error);
+    }
+  }
+
+  /** An authorized dispatch that is not sent after all: blocked (not sent, its reservation no longer counts). */
+  async #block_unsent(drive: Drive, request_key: string, dispatch_id: string, reason: string): Promise<void> {
+    const { handle } = drive;
+    try {
+      await this.#service.execute(this.#ai_ctx(handle.project_id, handle.actor_id, `${request_key}:block`), "dispatch.block", {
+        dispatch_id,
+        reason: `${REFERENCE_WITHDRAWN}: ${reason}`,
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      this.#log(`run ${handle.run_id}: the unsent attempt could not be marked blocked (${error.code})`);
+    }
+  }
+
+  /** A refusal while an attempt is written: a usage stop (block the run), a lease or policy change (null), or a throw. */
+  #attempt_refused(handle: RunHandle, error: unknown): { reason: string; reset_at: number | null } | null {
+    const detail = error instanceof ApiError ? (error.details as { reason?: unknown; reset_at?: unknown } | undefined) : undefined;
+    if (detail !== undefined && (detail.reason === "usage_limit" || detail.reason === "cost_cap" || detail.reason === "extra_usage_off")) {
+      return { reason: detail.reason, reset_at: typeof detail.reset_at === "number" ? detail.reset_at : null };
+    }
+    // A lease or policy change while the attempt was being written: nothing was sent.
+    if (error instanceof ApiError && (error.code === "conflict" || error.code === "policy_denied")) {
+      this.#log(`run ${handle.run_id}: the attempt was not sent (${error.code})`);
+      return null;
+    }
+    throw error;
   }
 
   /**

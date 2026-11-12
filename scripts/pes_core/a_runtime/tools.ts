@@ -135,7 +135,8 @@ export interface ToolOutcome {
   effect: ToolEffect;
   /**
    * Set when the result carries the content of a reference. The runner keeps the result in its history and sends it again
-   * with every later request, so it must decide again (recheck_reference) before each request whether it may still go.
+   * with every later request, so it decides again (recheck_reference) before each request and right before the HTTP call;
+   * a withdrawal stops the run (reference_withdrawn).
    */
   reference_read?: { reference_id: string };
 }
@@ -226,18 +227,6 @@ export function recheck_reference(db: Pick<Db, "get" | "all">, run: RunHandle, r
   if (!d.has_access) return "no_permission";
   if (d.content_allowed) return null;
   return d.delivery.withheld_reason ?? "source_missing";
-}
-
-/** The text that replaces a withdrawn reference read in the runner's history. It says what happened; it invents nothing. */
-export function withdrawn_result(result: ToolResult, reference_id: string, reason: WithdrawnReason): ToolResult {
-  const content = JSON.stringify({
-    ok: false,
-    withdrawn: true,
-    reference_id,
-    reason,
-    error: `the content of this reference was withdrawn (${reason}) and is no longer given; do not use or repeat it`,
-  });
-  return { call_id: result.call_id, name: result.name, content, is_error: true };
 }
 
 function refused(call: ToolCall, message: string): ToolOutcome {
