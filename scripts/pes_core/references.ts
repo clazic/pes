@@ -1,0 +1,277 @@
+// Reference material from earlier projects (stage 3 REF1a, SEL-113): the read side and the one decision function.
+//
+// A reference is a read-only pointer from the current project to ONE snapshot of another project (table
+// project_references, DDL 001; no new table). The write side lives in commands/references.ts (reference.attach /
+// detach / refresh / source_gone). Everything here only reads: it never writes, so a GET has no side effect.
+//
+// ONE function decides what a caller may get out of a reference: decide(). Every exit that can hand reference text to
+// an AI goes through it — the HTTP routes (GET P/references, GET P/references/{ref}, GET P/context, which the B MCP
+// tool reads) and the built-in runner's context.get (A). A new exit must call decide() too; do not copy its rules.
+//
+//   permission  the acting actor's HUMAN user must be a member of the source project (project_members). Without it the
+//               row is three keys — {id, access:'no_permission', state:'no_permission'} — and no content: not the
+//               name, not the key, not a version id.
+//   Go          the stricter side wins. If the source project OR the current project has OpenCode Go OFF (or its policy
+//               is missing/damaged: fail closed), an AI caller (a token, the A tool) gets content = null and
+//               ai_delivery = {allowed:false, withheld_reason}. A person (the owner session) is not affected.
+//   original    status 'source_missing' (tombstone): no content for anyone; ai_delivery.withheld_reason = 'source_missing'.
+//   new version a GET computes it (the source's newest snapshot differs from the pinned one); nothing is written.
+
+import { read_credential_actor } from "./actors.ts";
+import type { Db } from "./db.ts";
+import { ApiError } from "./errors.ts";
+import { current_policy } from "./policy.ts";
+
+type ReadDb = Pick<Db, "get" | "all">;
+
+/** The items a person can choose to attach. REF1a delivers content for final_report and sources; the others are kept in scope for later. */
+export const REFERENCE_SCOPE_ITEMS: readonly string[] = ["final_report", "stage_report", "sources", "decisions", "questions_answers", "files"];
+export const DEFAULT_REFERENCE_SCOPE: readonly string[] = ["final_report", "sources"];
+
+export const REFERENCE_NO_PERMISSION_KEYS: readonly string[] = ["access", "id", "state"];
+
+export type WithheldReason = "source_missing" | "source_go_off" | "project_go_off";
+
+export interface ReferenceDelivery {
+  allowed: boolean;
+  withheld_reason: WithheldReason | null;
+}
+
+/** Who is asking: the actor, the human user behind it, and whether the answer goes to an AI. */
+export interface ReferenceCaller {
+  actor_id: string;
+  user_id: string;
+  /** true for a token or the built-in runner; false for the owner's session. */
+  ai: boolean;
+}
+
+export interface ReferenceRow {
+  id: string;
+  project_id: string;
+  referenced_project_id: string | null;
+  referenced_project_key: string;
+  source_snapshot_id: string | null;
+  source_snapshot_key: string | null;
+  source_label: string;
+  latest_snapshot_id: string | null;
+  scope_json: string;
+  status: string;
+  attached_by_actor_id: string;
+  attached_by_user_id: string;
+  attached_at: bigint;
+  refreshed_at: bigint | null;
+  rev: bigint;
+}
+
+const SELECT_ROW = `SELECT id, project_id, referenced_project_id, referenced_project_key, source_snapshot_id, source_snapshot_key,
+       source_label, latest_snapshot_id, scope_json, status, attached_by_actor_id, attached_by_user_id,
+       attached_at, refreshed_at, rev
+  FROM project_references`;
+
+export function reference_rows(db: ReadDb, project_id: string): ReferenceRow[] {
+  return db.all<ReferenceRow>(`${SELECT_ROW} WHERE project_id = ? ORDER BY rowid`, project_id);
+}
+
+export function reference_row(db: ReadDb, project_id: string, reference_id: string): ReferenceRow | undefined {
+  return db.get<ReferenceRow>(`${SELECT_ROW} WHERE project_id = ? AND id = ?`, project_id, reference_id);
+}
+
+/** The caller behind an actor id. An actor that is gone or disabled is forbidden, like everywhere else. */
+export function reference_caller(db: ReadDb, actor_id: string, ai: boolean): ReferenceCaller {
+  const actor = read_credential_actor(db, actor_id);
+  if (actor === undefined) throw new ApiError("forbidden", "the actor is not allowed in this project");
+  return { actor_id: actor.actor_id, user_id: actor.user_id, ai };
+}
+
+/** Is this user a member (any role) of the project? */
+export function is_member(db: ReadDb, project_id: string, user_id: string): boolean {
+  return db.get("SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?", project_id, user_id) !== undefined;
+}
+
+/** The newest snapshot of a project (by the order they were taken), or null. */
+export function newest_snapshot_id(db: ReadDb, project_id: string): string | null {
+  return db.get<{ id: string }>("SELECT id FROM snapshots WHERE project_id = ? ORDER BY rowid DESC LIMIT 1", project_id)?.id ?? null;
+}
+
+/** Go switch of a project. A missing or damaged policy reads as OFF (fail closed). */
+function go_allowed(db: ReadDb, project_id: string): boolean {
+  try {
+    return current_policy(db, project_id).allow_opencode_go;
+  } catch {
+    return false;
+  }
+}
+
+export interface ReferenceDecision {
+  /** the caller's user is a member of the source (a tombstone with no source project needs no membership) */
+  has_access: boolean;
+  /** what an AI may be given */
+  delivery: ReferenceDelivery;
+  /** the content may be returned to THIS caller */
+  content_allowed: boolean;
+}
+
+/**
+ * The one decision about a reference (permission + Go + original gone). Pure reads; no side effect.
+ * Both Go switches are looked at here and nowhere else.
+ */
+export function decide(db: ReadDb, row: ReferenceRow, caller: ReferenceCaller): ReferenceDecision {
+  const has_access = row.referenced_project_id === null ? true : is_member(db, row.referenced_project_id, caller.user_id);
+  let reason: WithheldReason | null = null;
+  if (row.status === "source_missing" || row.referenced_project_id === null || row.source_snapshot_id === null) reason = "source_missing";
+  else if (!go_allowed(db, row.referenced_project_id)) reason = "source_go_off";
+  else if (!go_allowed(db, row.project_id)) reason = "project_go_off";
+  const delivery: ReferenceDelivery = { allowed: reason === null, withheld_reason: reason };
+  const present = row.status !== "source_missing" && row.referenced_project_id !== null && row.source_snapshot_id !== null;
+  return { has_access, delivery, content_allowed: has_access && present && (!caller.ai || delivery.allowed) };
+}
+
+function iso(ms: bigint | null): string | null {
+  return ms === null ? null : new Date(Number(ms)).toISOString();
+}
+
+function parse_scope(text: string): string[] {
+  try {
+    const value: unknown = JSON.parse(text);
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** One row of the list as the readers see it (sixteen keys, or the three of "no permission"). */
+export function reference_view(db: ReadDb, row: ReferenceRow, caller: ReferenceCaller, decision?: ReferenceDecision): Record<string, unknown> {
+  const d = decision ?? decide(db, row, caller);
+  if (!d.has_access) return { id: row.id, access: "no_permission", state: "no_permission" };
+  const live = row.status !== "source_missing" && row.referenced_project_id !== null;
+  const latest = live ? newest_snapshot_id(db, row.referenced_project_id as string) : null;
+  const new_version = row.status === "active" && latest !== null && latest !== row.source_snapshot_id;
+  const state = row.status === "source_missing" ? "source_missing" : row.status === "source_archived" ? "source_archived" : new_version ? "new_version" : "pinned";
+  return {
+    access: "ok",
+    ai_delivery: { allowed: d.delivery.allowed, withheld_reason: d.delivery.withheld_reason },
+    attached_at: iso(row.attached_at),
+    attached_by_actor_id: row.attached_by_actor_id,
+    id: row.id,
+    latest_snapshot_id: latest,
+    new_version_available: new_version,
+    referenced_project_id: row.referenced_project_id,
+    referenced_project_key: row.referenced_project_key,
+    refreshed_at: iso(row.refreshed_at),
+    rev: row.rev.toString(),
+    scope: parse_scope(row.scope_json),
+    source_label: row.source_label,
+    source_snapshot_id: row.source_snapshot_id,
+    source_snapshot_key: row.source_snapshot_key,
+    state,
+  };
+}
+
+/** The list of a project's references (rows only, never a body). */
+export function list_references(db: ReadDb, project_id: string, caller: ReferenceCaller): Array<Record<string, unknown>> {
+  return reference_rows(db, project_id).map((row) => reference_view(db, row, caller));
+}
+
+// ---------------------------------------------------------------------------
+// content of the pinned snapshot
+
+interface VersionRef {
+  object_id: string;
+  version_id: string;
+}
+
+/** The versions a snapshot holds: the receipt of the command that took it, else the sealed round's contents. */
+function snapshot_versions(db: ReadDb, project_id: string, snapshot_id: string): VersionRef[] {
+  const receipt = db.get<{ result_json: string }>(
+    `SELECT result_json FROM mutation_commits
+      WHERE project_id = ? AND action IN ('edition.snapshotted', 'round.sealed') AND json_extract(result_json, '$.snapshot_id') = ?
+      ORDER BY rowid LIMIT 1`,
+    project_id,
+    snapshot_id,
+  );
+  if (receipt !== undefined) {
+    try {
+      const parsed = JSON.parse(receipt.result_json) as { versions?: unknown };
+      if (Array.isArray(parsed.versions)) {
+        return parsed.versions.flatMap((entry): VersionRef[] => {
+          const e = entry as { object_id?: unknown; version_id?: unknown };
+          return typeof e.object_id === "string" && typeof e.version_id === "string" ? [{ object_id: e.object_id, version_id: e.version_id }] : [];
+        });
+      }
+    } catch {
+      // damaged receipt: fall through to the round contents
+    }
+  }
+  return db.all<VersionRef>(
+    `SELECT rc.object_id AS object_id, rc.version_id AS version_id
+       FROM snapshots s JOIN round_contents rc ON rc.project_id = s.project_id AND rc.round_id = s.round_id
+      WHERE s.project_id = ? AND s.id = ? ORDER BY rc.position`,
+    project_id,
+    snapshot_id,
+  );
+}
+
+/**
+ * The pinned content: the chosen items of the pinned snapshot, each with its citation (which project, label, snapshot,
+ * object, version). It is the version the snapshot holds — a newer version in the source does not change it.
+ */
+export function reference_content(db: ReadDb, row: ReferenceRow): { items: Array<Record<string, unknown>> } {
+  const project_id = row.referenced_project_id as string;
+  const snapshot_id = row.source_snapshot_id as string;
+  const scope = parse_scope(row.scope_json);
+  const versions = snapshot_versions(db, project_id, snapshot_id);
+  const citation = (v: VersionRef): Record<string, unknown> => ({
+    reference_id: row.id,
+    project_id,
+    project_label: row.source_label,
+    snapshot_id,
+    object_id: v.object_id,
+    version_id: v.version_id,
+  });
+  const items: Array<Record<string, unknown>> = [];
+  for (const item of scope) {
+    if (item === "final_report") {
+      for (const v of versions) {
+        const a = db.get<{ kind: string; title: string; summary: string; body_md: string | null }>(
+          `SELECT a.kind AS kind, av.title AS title, av.summary AS summary, av.body_md AS body_md
+             FROM artifact_versions av JOIN artifacts a ON a.project_id = av.project_id AND a.object_id = av.object_id
+            WHERE av.project_id = ? AND av.version_id = ? AND av.object_id = ?`,
+          project_id,
+          v.version_id,
+          v.object_id,
+        );
+        if (a === undefined || a.kind !== "report") continue;
+        items.push({ item, object_id: v.object_id, version_id: v.version_id, kind: a.kind, title: a.title, summary: a.summary, body_md: a.body_md, citation: citation(v) });
+      }
+    } else if (item === "sources") {
+      for (const v of versions) {
+        const s = db.get<{ kind: string; title: string; url: string | null; quote: string | null }>(
+          `SELECT s.kind AS kind, sv.title AS title, sv.url AS url, sv.quote AS quote
+             FROM source_versions sv JOIN sources s ON s.project_id = sv.project_id AND s.object_id = sv.object_id
+            WHERE sv.project_id = ? AND sv.version_id = ? AND sv.object_id = ?`,
+          project_id,
+          v.version_id,
+          v.object_id,
+        );
+        if (s === undefined) continue;
+        items.push({ item, object_id: v.object_id, version_id: v.version_id, kind: s.kind, title: s.title, url: s.url, quote: s.quote, citation: citation(v) });
+      }
+    }
+  }
+  return { items };
+}
+
+/**
+ * The read of ONE reference: {reference, content}. No access → forbidden (nothing about the source). Unknown id, or an id of
+ * another project → not_found. content is null when the original is gone, or when the caller is an AI and Go is OFF on either side.
+ */
+export function read_reference(db: ReadDb, project_id: string, reference_id: string, caller: ReferenceCaller): { reference: Record<string, unknown>; content: { items: Array<Record<string, unknown>> } | null } {
+  const row = reference_row(db, project_id, reference_id);
+  if (row === undefined) throw new ApiError("not_found", "reference not found");
+  const decision = decide(db, row, caller);
+  if (!decision.has_access) throw new ApiError("forbidden", "no permission for this reference");
+  return {
+    reference: reference_view(db, row, caller, decision),
+    content: decision.content_allowed ? reference_content(db, row) : null,
+  };
+}

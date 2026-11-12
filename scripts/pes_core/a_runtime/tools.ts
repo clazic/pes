@@ -7,6 +7,7 @@
 import type { CommandService, MutationContext } from "../commands.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
+import { list_references, read_reference, reference_caller } from "../references.ts";
 import type { ToolCall, ToolResult, ToolSpec } from "./formats.ts";
 
 export const A_TOOL_ALLOWLIST: readonly string[] = Object.freeze([
@@ -27,7 +28,12 @@ const TEXT_ARG = {
 };
 
 export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
-  { name: "context.get", description: "Read the project, stage, round, current objects and questions.", parameters: { type: "object", properties: {} } },
+  {
+    name: "context.get",
+    description:
+      "Read the project, stage, round, current objects, questions and the list of reference material from earlier projects. Give reference_id to read one reference (its pinned content with citations) instead.",
+    parameters: { type: "object", properties: { reference_id: { type: "string" } } },
+  },
   {
     name: "result.submit",
     description: "Append new versions to existing artifact objects. Each item: op=append_version, object_id, title, summary, body_md.",
@@ -60,6 +66,10 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
 ]);
 
 const RESULT_TEXT_MAX = 4000;
+/** A reference read is the point of its call: it gets a larger reply, with each long text cut at a fixed length (valid JSON, never cut mid-way). */
+const REFERENCE_TEXT_MAX = 60_000;
+const REFERENCE_FIELD_MAX = 12_000;
+const REFERENCE_ITEMS_MAX = 40;
 const NOTE_LABEL: Record<string, string> = {
   "followup.propose": "[AI 제안: 후속 작업]",
 };
@@ -101,12 +111,30 @@ export class SaveFailedError extends Error {
   }
 }
 
-function clip(text: string): string {
-  return text.length > RESULT_TEXT_MAX ? `${text.slice(0, RESULT_TEXT_MAX)}…` : text;
+function clip(text: string, max: number = RESULT_TEXT_MAX): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-function ok(call: ToolCall, body: unknown, effect: ToolEffect = { kind: "none" }): ToolOutcome {
-  return { result: { call_id: call.id, name: call.name, content: clip(JSON.stringify({ ok: true, ...(body as object) })), is_error: false }, effect };
+function ok(call: ToolCall, body: unknown, effect: ToolEffect = { kind: "none" }, max: number = RESULT_TEXT_MAX): ToolOutcome {
+  return { result: { call_id: call.id, name: call.name, content: clip(JSON.stringify({ ok: true, ...(body as object) }), max), is_error: false }, effect };
+}
+
+/** Keep a reference's content to a size the model can take: long fields are cut (and say so), the item count is capped. */
+function bounded_reference_content(content: { items: Array<Record<string, unknown>> } | null): unknown {
+  if (content === null) return null;
+  let truncated = content.items.length > REFERENCE_ITEMS_MAX;
+  const items = content.items.slice(0, REFERENCE_ITEMS_MAX).map((item) => {
+    const out: Record<string, unknown> = { ...item };
+    for (const field of ["body_md", "summary", "quote", "title"]) {
+      const value = out[field];
+      if (typeof value === "string" && value.length > REFERENCE_FIELD_MAX) {
+        out[field] = value.slice(0, REFERENCE_FIELD_MAX);
+        truncated = true;
+      }
+    }
+    return out;
+  });
+  return truncated ? { items, truncated: true } : { items };
 }
 
 function refused(call: ToolCall, message: string): ToolOutcome {
@@ -168,6 +196,8 @@ export function build_context(db: Pick<Db, "get" | "all">, run: RunHandle): Reco
     round_no: round === undefined ? null : Number(round.round_no),
     objects: objects.map((row) => ({ object_id: row.object_id, version_id: row.version_id, title: row.title, summary: row.summary })),
     questions: question_context(db, run),
+    // reference material: rows only (name, pinned snapshot, items, whether the text may be given to an AI) — the text is read with reference_id
+    references: list_references(db, run.project_id, reference_caller(db, run.actor_id, true)),
   };
 }
 
@@ -241,8 +271,16 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
 
   try {
     switch (call.name) {
-      case "context.get":
+      case "context.get": {
+        const reference_id = args["reference_id"];
+        if (reference_id !== undefined) {
+          if (typeof reference_id !== "string" || reference_id.length === 0) return refused(call, "reference_id must be a non-empty string");
+          // the same decision as the HTTP read: permission to the source, the stricter Go switch, original gone
+          const read = read_reference(env.db, env.run.project_id, reference_id, reference_caller(env.db, env.run.actor_id, true));
+          return ok(call, { reference: read.reference, content: bounded_reference_content(read.content) }, { kind: "none" }, REFERENCE_TEXT_MAX);
+        }
         return ok(call, { context: build_context(env.db, env.run) });
+      }
       case "result.submit": {
         const results = args["results"];
         if (!Array.isArray(results)) return refused(call, "results must be an array");
