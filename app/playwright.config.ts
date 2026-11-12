@@ -31,7 +31,9 @@ const given = process.env.PES_E2E_PORT;
 if (given !== undefined && given !== "" && !(/^\d+$/.test(given) && Number(given) >= 1 && Number(given) <= 65535)) {
   throw new Error(`PES_E2E_PORT 는 1~65535 정수여야 한다: ${given}`);
 }
-process.env.PES_E2E_PORT = given ? given : pickFreePort();
+// 정수로 정규화한다("056349" → "56349"): vite 는 Number(env) 로 바인딩하고 "Local: http://127.0.0.1:56349/" 로 찍으므로, 앞자리 0 이 있는 문자열을
+// wait.stdout·baseURL·env 에 그대로 쓰면 준비 완료 줄을 영원히 못 찾아 240초 뒤 시간 초과가 난다(SEL-96 최종 리뷰 2/2). 모두 같은 정규화 값을 쓴다.
+process.env.PES_E2E_PORT = given ? String(Number(given)) : pickFreePort();
 const port = process.env.PES_E2E_PORT;
 const origin = `http://127.0.0.1:${port}`;
 
