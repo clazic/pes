@@ -348,7 +348,7 @@ const SLOW_SHAPES: ReadonlyArray<[string, string]> = [
   ["repeated unterminated PEM head", "-----BEGIN A ".repeat(15_000)],
   ["Bearer then many spaces", "Bearer" + " ".repeat(200_000)],
   ["repeated 'authorization:'", "authorization:".repeat(14_000)],
-  ["repeated home root", "/Users/".repeat(28_000)],
+  ["repeated home root", U.repeat(28_000)],
 ];
 
 for (const [name, text] of SLOW_SHAPES) {
