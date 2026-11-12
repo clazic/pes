@@ -317,8 +317,8 @@ test("[신규] OpenAPI 에 새 읽기 경로 둘이 GET 으로 적혀 있다", a
   const { readFileSync } = await import("node:fs");
   const { OPENAPI_PATH } = await import("./helpers/api_env.ts");
   const yaml = readFileSync(OPENAPI_PATH, "utf8");
-  assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/stages\/\{s\}\/rounds\/\{rd\}:\n\s+get:/);
-  assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/stages\/\{s\}\/rounds\/\{rd\}\/threads:\n\s+get:/);
+  assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/stages\/\{s\}\/rounds\/\{rd\}:\r?\n\s+get:/);
+  assert.match(yaml, /\/api\/v1\/projects\/\{id\}\/stages\/\{s\}\/rounds\/\{rd\}\/threads:\r?\n\s+get:/);
 });
 
 // ---------------------------------------------------------------------------
