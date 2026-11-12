@@ -10,7 +10,7 @@
 //                                                    1. POST P/uploads {sha256(파일 바이트 hex), size, media_type, original_name} → data {blob_id, state}
 //                                                    2. state ≠ "ready" 면 PUT P/uploads/{blob_id} (원본 바이트 · content-type = 파일 형식) → POST P/uploads/{blob_id}/complete {}
 //                                                       state 가 이미 "ready"(같은 바이트 dedup)면 2 는 건너뛴다
-//                                                    3. POST P/materials {blob_id, title?(줄 때만), object_id?(줄 때만)} + idempotency-key = key   (Idempotency-Key 는 이 3번에만 의미가 있다)
+//                                                    3. POST P/materials {blob_id, title?(줄 때만), object_id?(줄 때만)} + idempotency-key = key   (최종 리뷰 1/2: 서버는 1 · 2 의 POST 에도 키를 요구한다 — `<key>:upload-reserve` · `<key>:upload-complete`, 3 은 key 그대로. 한 키를 다른 명령에 쓰면 409)
 //                                                    결과: data = 서버 data 그대로의 앱 모양 {object_id, version_id, version←Number(version_no), blob_id, file_policy_id, role, ai_access, original_name, media_type, size, sha256}
 //                                                    receipt ← 성공(201) 뒤 GET P/requests/{key} 로 만든다(SEL-92 · SEL-100 과 같은 방식): {receipt_no(비어 있지 않음), tx_id, committed_at(ISO), idempotency_key, replayed: 본문 replayed === true}
 //  setMaterialAiAccess(slug, ed, fp, {ai_access, reason?}, key)
