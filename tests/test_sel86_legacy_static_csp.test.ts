@@ -111,7 +111,6 @@ test("L1 옛 project.json 폴더: reports/·out/ 의 HTML 만 sandbox, PDF·이�
         `/${LEGACY}/`,
         `/${LEGACY}/index.html`,
         `/${LEGACY}/ask-plan-start.html`,
-        `/${LEGACY}/notes/free.html`,
         `/${LEGACY}/notes/../index.html`,
       ];
       for (const path of plain) {
@@ -120,6 +119,12 @@ test("L1 옛 project.json 폴더: reports/·out/ 의 HTML 만 sandbox, PDF·이�
           assert.equal(res.status, 200, `${method} ${path}`);
           assert.equal(csp_of(res.headers), undefined, `${method} ${path}: CSP 헤더가 없다`);
         }
+      }
+      // SEL-102: 다른 폴더의 HTML 도 sandbox (예외 화면은 index.html·ask-*.html 뿐)
+      for (const method of ["GET", "HEAD"]) {
+        const res = await get(`/${LEGACY}/notes/free.html`, method);
+        assert.equal(res.status, 200, `${method} notes/free.html`);
+        assert_sandbox(csp_of(res.headers), `${method} notes/free.html`);
       }
       const pdf = await get(`/${LEGACY}/reports/plan/report.pdf`);
       assert.ok(pdf.body.equals(PDF), "PDF 바이트 그대로");
@@ -135,7 +140,7 @@ test("L1 옛 project.json 폴더: reports/·out/ 의 HTML 만 sandbox, PDF·이�
       for (const path of [`/${LEGACY}/reports-old/x.html`, `/${LEGACY}/outbox/x.html`]) {
         const res = await get(path);
         assert.equal(res.status, 200, path);
-        assert.equal(csp_of(res.headers), undefined, `${path}: 이름만 비슷한 폴더는 CSP 가 없다`);
+        assert_sandbox(csp_of(res.headers), `${path}: SEL-102 이름만 비슷한 폴더의 HTML 도 sandbox`);
       }
 
       // 4 reports/ 밖의 링크가 reports/ 안으로 들어와도(주소가 reports/) 주소 기준으로 sandbox — 안으로 숨길 수 없다
