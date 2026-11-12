@@ -56,6 +56,20 @@ export function current_anchor(db: Db, project_id: string, anchor: Pick<AnchorRa
     version_id === null
       ? null
       : (db.get<{ body_md: string | null }>("SELECT body_md FROM artifact_versions WHERE project_id = ? AND object_id = ? AND version_id = ?", project_id, anchor.target_object_id, version_id)?.body_md ?? null);
+  return anchor_on_version(db, project_id, anchor, version_id, body);
+}
+
+/**
+ * Where an anchor stands in ONE given version of its text (`body` is that version's text, null when it has none), by the same
+ * rule as current_anchor (which uses it for the current version). The range print (SEL-119) uses it for the printed version.
+ */
+export function anchor_on_version(
+  db: Pick<Db, "get">,
+  project_id: string,
+  anchor: Pick<AnchorRaw, "id" | "exact_quote" | "prefix" | "suffix" | "start_cp" | "target_object_id" | "target_version_id">,
+  version_id: string | null,
+  body: string | null,
+): CurrentAnchor {
   const facts = { exact_quote: anchor.exact_quote, prefix: anchor.prefix, suffix: anchor.suffix, start_cp: num_or_null(anchor.start_cp) };
   let judgement: Judgement;
   let confirmed_by_actor_id: string | null = null;

@@ -23,6 +23,7 @@ import { ApiError } from "../errors.ts";
 import { delete_unclaimed_storage_file, read_ready_blob, sha256_hex, storage_file_is_regular, write_storage_bytes } from "../files.ts";
 import { file_ai_denied, material_object_denied } from "./file_access.ts";
 import { insert_ready_blob } from "./files.ts";
+import { anchor_on_version } from "./thread_reads.ts";
 import {
   insert_receipt,
   is_record,
@@ -55,6 +56,12 @@ const BASIS_LABEL: Readonly<Record<string, string>> = {
   approved: "승인된 단계",
   open: "열린 라운드(출력 시점)",
   none: "라운드 없음",
+};
+const ANCHOR_LABEL: Readonly<Record<string, string>> = {
+  exact: "제자리",
+  moved: "옮겨짐",
+  ambiguous: "위치가 여럿",
+  lost: "위치를 잃음",
 };
 const CATEGORY_LABEL: Readonly<Record<string, string>> = {
   assumption: "가정",
@@ -162,7 +169,8 @@ export interface PrintManifest {
   targets: Target[];
   items: Item[];
   excluded: Array<Record<string, string>>;
-  comments: { included: boolean; items: never[] };
+  /** the comment entries of `items` again (the same objects), and whether comments were chosen */
+  comments: { included: boolean; items: Item[] };
   output: { blob_id: string; sha256: string; size: number; media_type: "text/html" } | null;
 }
 
@@ -172,12 +180,22 @@ interface Footnote {
   url: string | null;
   quote: string | null;
 }
+interface CommentView {
+  thread_id: string;
+  thread_state: string;
+  /** the anchored quote, and where the anchor stands in the printed version (null for a thread without an anchor) */
+  quote: string | null;
+  anchor_status: string | null;
+  body: string;
+  reply: boolean;
+}
 interface Article {
   category: "body" | "table";
   position: number;
   title: string;
   body: string;
   footnotes: Footnote[];
+  comments: CommentView[];
 }
 interface StageView {
   edition_no: number;
@@ -403,6 +421,105 @@ function body_text(runtime: CommandRuntime, project_id: string, candidate: Candi
   }
 }
 
+interface ThreadRow {
+  thread_id: string;
+  thread_version_id: string;
+  context_kind: string;
+  anchor_id: string | null;
+  state: string;
+  archived_at: bigint | null;
+}
+interface MessageRow {
+  message_id: string;
+  message_version_id: string;
+  body_md: string;
+  state: string;
+  reply_to: string | null;
+}
+interface AnchorRow {
+  id: string;
+  exact_quote: string;
+  prefix: string;
+  suffix: string;
+  start_cp: bigint | null;
+  target_object_id: string;
+  target_version_id: string;
+}
+
+/**
+ * The comments (SEL-99 threads and their messages) on one printed article, pinned at print time: each thread's current version
+ * and each message's current version, and where the thread's anchor stands in the PRINTED version (exact / moved / ambiguous /
+ * lost — a lost anchor is shown, never hidden). An archived thread and a withdrawn message are recorded in excluded instead.
+ */
+function article_comments(
+  db: Db,
+  project_id: string,
+  article: { object_id: string; version_id: string; stage_id: string; body: string | null },
+  items: Item[],
+  excluded: Array<Record<string, string>>,
+): CommentView[] {
+  const views: CommentView[] = [];
+  for (const thread of db.all<ThreadRow>(
+    `SELECT t.object_id AS thread_id, o.current_version_id AS thread_version_id, t.context_kind AS context_kind,
+            t.anchor_id AS anchor_id, tv.state AS state, o.archived_at AS archived_at
+       FROM threads t
+       JOIN objects o ON o.project_id = t.project_id AND o.id = t.object_id
+       JOIN thread_versions tv ON tv.project_id = o.project_id AND tv.version_id = o.current_version_id
+      WHERE t.project_id = ? AND t.target_object_id = ?
+      ORDER BY o.display_no, o.id`,
+    project_id,
+    article.object_id,
+  )) {
+    if (thread.state === "archived" || thread.archived_at !== null) {
+      excluded.push({ category: "comment", reason: "archived", object_id: thread.thread_id, version_id: thread.thread_version_id });
+      continue;
+    }
+    const anchor =
+      thread.anchor_id === null
+        ? undefined
+        : db.get<AnchorRow>(
+            "SELECT id, exact_quote, prefix, suffix, start_cp, target_object_id, target_version_id FROM anchors WHERE project_id = ? AND id = ?",
+            project_id,
+            thread.anchor_id,
+          );
+    const anchor_status = anchor === undefined ? null : anchor_on_version(db, project_id, anchor, article.version_id, article.body).status;
+    for (const message of db.all<MessageRow>(
+      `SELECT m.object_id AS message_id, o.current_version_id AS message_version_id, mv.body_md AS body_md, mv.state AS state, m.reply_to AS reply_to
+         FROM messages m
+         JOIN objects o ON o.project_id = m.project_id AND o.id = m.object_id
+         JOIN message_versions mv ON mv.project_id = o.project_id AND mv.version_id = o.current_version_id
+        WHERE m.project_id = ? AND m.thread_id = ?
+        ORDER BY m.rowid`,
+      project_id,
+      thread.thread_id,
+    )) {
+      if (message.state === "withdrawn") {
+        excluded.push({ category: "comment", reason: "withdrawn", object_id: message.message_id, version_id: message.message_version_id });
+        continue;
+      }
+      const reply = views.some((view) => view.thread_id === thread.thread_id);
+      items.push({
+        category: "comment",
+        object_id: message.message_id,
+        version_id: message.message_version_id,
+        thread_id: thread.thread_id,
+        thread_version_id: thread.thread_version_id,
+        thread_state: thread.state,
+        context_kind: thread.context_kind,
+        reply_to: message.reply_to,
+        anchor_id: anchor?.id ?? null,
+        anchor_status,
+        target_object_id: article.object_id,
+        target_version_id: article.version_id,
+        stage_id: article.stage_id,
+        position: items.length,
+      });
+      views.push({ thread_id: thread.thread_id, thread_state: thread.state, quote: anchor?.exact_quote ?? null, anchor_status, body: message.body_md, reply });
+    }
+  }
+  return views;
+}
+
 function build(runtime: CommandRuntime, project_id: string, request: PrintRequest): Built {
   const db = runtime.db;
   const targets = resolve_targets(db, project_id, request);
@@ -412,6 +529,8 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
   const tables: Item[] = [];
   const footnotes: Item[] = [];
   const reflections: Item[] = [];
+  const comments: Item[] = [];
+  const comment_excluded: Array<Record<string, string>> = [];
   const drafts: Array<Record<string, string>> = [];
   const dropped: Array<Record<string, string>> = [];
   const stages: StageView[] = [];
@@ -466,7 +585,17 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
         (category === "table" ? tables : bodies).push(item);
         const body = body_text(runtime, project_id, candidate);
         bytes += Buffer.byteLength(candidate.title, "utf8") + Buffer.byteLength(body, "utf8");
-        view.articles.push({ category, position: at, title: candidate.title, body, footnotes: notes });
+        const article_notes = wants.has("comment")
+          ? article_comments(
+              db,
+              project_id,
+              { object_id: candidate.object_id, version_id: candidate.version_id, stage_id: entry.stage_id, body: candidate.body_md === null && candidate.body_blob_id === null ? null : body },
+              comments,
+              comment_excluded,
+            )
+          : [];
+        for (const note of article_notes) bytes += Buffer.byteLength(note.body, "utf8");
+        view.articles.push({ category, position: at, title: candidate.title, body, footnotes: notes, comments: article_notes });
       }
       if (wants.has("reflection") && entry.round_id !== null) {
         for (const row of db.all<{ id: string; source_version_id: string; disposition: string; rationale: string }>(
@@ -541,12 +670,13 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
     }
   }
 
-  const items = [...bodies, ...tables, ...footnotes, ...assumptions, ...decisions, ...reflections];
+  const items = [...bodies, ...tables, ...footnotes, ...comments, ...assumptions, ...decisions, ...reflections];
   const excluded: Array<Record<string, string>> = [];
   for (const category of PRINT_CATEGORIES) {
     if (!wants.has(category)) excluded.push({ category, reason: "not_selected" });
   }
   excluded.push(...dropped);
+  excluded.push(...comment_excluded);
   excluded.push(...drafts);
   excluded.push({ category: "token_stream", reason: "default_excluded" });
 
@@ -559,7 +689,7 @@ function build(runtime: CommandRuntime, project_id: string, request: PrintReques
     targets,
     items,
     excluded,
-    comments: { included: wants.has("comment"), items: [] },
+    comments: { included: wants.has("comment"), items: comments },
     output: null,
   };
 
@@ -636,10 +766,18 @@ function render_html(built: Built): string {
           return `<li value="${note.no}">${escape_html(note.title)}${link}${quote}</li>`;
         })
         .join("\n");
+      const comments = article.comments
+        .map((comment) => {
+          const where =
+            comment.quote === null ? "" : `<q>${escape_html(comment.quote)}</q> <small>${ANCHOR_LABEL[comment.anchor_status ?? ""] ?? escape_html(comment.anchor_status ?? "")}</small> `;
+          const state = comment.thread_state === "resolved" ? " <small>해결됨</small>" : "";
+          return `<li${comment.reply ? ' class="reply"' : ""}>${comment.reply ? "" : where}${paragraphs(comment.body)}${comment.reply ? "" : state}</li>`;
+        })
+        .join("\n");
       parts.push(
         `<article class="${article.category}"><h3>${escape_html(article.title)}</h3>\n${paragraphs(article.body)}${
           notes.length > 0 ? `\n<ol class="footnotes">\n${notes}\n</ol>` : ""
-        }</article>`,
+        }${comments.length > 0 ? `\n<section class="comments"><h4>첨언</h4>\n<ul>\n${comments}\n</ul></section>` : ""}</article>`,
       );
     }
     if (reflections.length > 0) {

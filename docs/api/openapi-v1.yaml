@@ -1386,9 +1386,9 @@ paths:
         scope, all_editions, include [body|table|footnote|comment|assumption|decision|reflection], targets [{edition_id, edition_no,
         stages [{stage_id, stage_key, round_id|null, round_no|null, basis sealed|approved|open|none, basis_snapshot_id|null}]}], items
         [{category, object_id, version_id, stage_id|null, position}; a footnote also has cited_by_version_id and citation_no; a reflection
-        has entry_id, source_version_id and round_id instead of object_id], excluded [{category, reason, object_id?, version_id?}] (a
+        has entry_id, source_version_id and round_id instead of object_id; a comment is one message of a thread on a printed body or table, object_id/version_id = the message and its version at print time, plus thread_id, thread_version_id, thread_state, context_kind, reply_to|null, anchor_id|null, anchor_status exact|moved|ambiguous|lost|null (where the anchor stands in the PRINTED version; lost is kept, not hidden), target_object_id and target_version_id], excluded [{category, reason, object_id?, version_id?}] (a
         category not chosen: not_selected, which comes first; a removed or archived artifact, assumption or decision in a chosen category: its category with reason removed or archived and its object_id/version_id; an unsubmitted draft: unsubmitted_draft/unsubmitted; the token stream: token_stream/default_excluded,
-        always one line), comments {included, items []} (a reserved place; U4 fills it), output}. A seal, approval or edition snapshot is
+        always one line; an archived thread: comment/archived with the thread id/version; a withdrawn message: comment/withdrawn with the message id/version), comments {included, items} (items = the comment entries of items again), output}. A seal, approval or edition snapshot is
         not a print: 404 not_found, as are an unknown id, a print of another scope and a scope nothing was printed for yet. Nothing is
         built or written; a print is made by POST print/commit.
 
