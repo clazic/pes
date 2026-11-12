@@ -543,7 +543,7 @@ components:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         base_version_id: { type: string, minLength: 1 }
         defer_until:
-          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way)"
+          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way). Left out or null = no time limit (the schema does not list null, but the server accepts it as \"none\")."
           oneOf:
             - { type: integer, minimum: 0 }
             - { type: string, pattern: "^(0|[1-9][0-9]*)$" }
