@@ -58,6 +58,7 @@ import { complete_upload, get_blob, is_safe_media_type, reserve_upload, store_bl
 import { new_id as default_new_id } from "./ids.ts";
 import {
   check_go_allowed,
+  ai_policy_state,
   current_policy,
   DbPolicyChecker,
   set_policy,
@@ -1804,14 +1805,7 @@ export class ApiApp {
 
     // U1d AI connection: the policy is the allow_opencode_go bit alone (null pointer = missing, any other damage = corrupt).
     // "pending", cancel_state, external_stop and run_permissions are not sent: the DB has no evidence for them.
-    const policy_state = ((): "allowed" | "denied" | "missing" | "corrupt" => {
-      if (project.current_policy_id === null) return "missing";
-      try {
-        return current_policy(this.#db, project.id).allow_opencode_go ? "allowed" : "denied";
-      } catch {
-        return "corrupt";
-      }
-    })();
+    const policy_state = ai_policy_state(this.#db, project.id);
     // The newest WORKSPACE_LIST_MAX of each list (largest rowid first), then shown oldest-first.
     // runs are narrowed to the ACTIVE edition (a run is work of one edition). Dispatches are NOT: what was sent out and
     // what must be settled (billing, recall) are facts of the whole project and stay true after a new edition, so the
