@@ -58,7 +58,7 @@ test("adopt / revoke with a scope that is not the decision's own scope: 422 scop
     const a = await adopted(env, "project");
     const sig2 = state_signature(env.db);
     const err2 = assert_final_error(
-      await post(env, "/decisions", "owner", { scope: "edition", statement: "x", state: "revoked", supersedes: null, decision_id: a.id, base_version_id: a.version_id, rationale: "폐기" }),
+      await post(env, "/decisions", "owner", { scope: "edition", statement: "채택한 결정", state: "revoked", supersedes: null, decision_id: a.id, base_version_id: a.version_id, rationale: "폐기" }),
       422,
       "validation_failed",
       { target: "$.body.scope" },
@@ -66,7 +66,7 @@ test("adopt / revoke with a scope that is not the decision's own scope: 422 scop
     assert.equal(err2.details.reason, "scope_mismatch");
     assert.equal(state_signature(env.db), sig2);
     // the matching scope still works
-    assert_ok(await post(env, "/decisions", "owner", { scope: "project", statement: "x", state: "revoked", supersedes: null, decision_id: a.id, base_version_id: a.version_id, rationale: "폐기" }), 201);
+    assert_ok(await post(env, "/decisions", "owner", { scope: "project", statement: "채택한 결정", state: "revoked", supersedes: null, decision_id: a.id, base_version_id: a.version_id, rationale: "폐기" }), 201);
   });
 });
 

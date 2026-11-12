@@ -142,7 +142,7 @@ test("GET assumptions: one current row per object with proposer, judge, ISO time
     assert.equal(data.assumptions.length, 2);
     const by = new Map<string, any>(data.assumptions.map((r: any) => [r.id, r]));
     const ra = by.get(a.id);
-    assert.deepEqual(Object.keys(ra).sort(), ["assessed_at", "assessed_by_actor_id", "id", "needs_review", "proposed_by_actor_id", "rationale", "state", "statement", "version_id", "version_no"]);
+    assert.deepEqual(Object.keys(ra).sort(), ["assessed_at", "assessed_by", "assessed_by_actor_id", "id", "needs_review", "proposed_by", "proposed_by_actor_id", "rationale", "revised_from_statement", "revised_from_version_id", "state", "statement", "version_id", "version_no"]);
     assert.equal(ra.state, "proposed");
     assert.equal(ra.needs_review, true);
     assert.equal(ra.assessed_by_actor_id, null);
@@ -217,7 +217,7 @@ test("owner adopts a proposal, then supersedes it: the old decision stays and li
     assert.equal(rows.length, 2);
     const old = rows.find((r) => r.id === d.id)!;
     const fresh = rows.find((r) => r.id === next.id)!;
-    assert.deepEqual(Object.keys(old).sort(), ["decided_by_actor_id", "id", "rationale", "scope", "state", "statement", "supersedes_decision_id", "version_id", "version_no"]);
+    assert.deepEqual(Object.keys(old).sort(), ["decided_by", "decided_by_actor_id", "id", "originated_from_edition_no", "originated_from_version_id", "originated_from_version_no", "proposed_by", "rationale", "scope", "state", "statement", "superseded_by", "supersedes_decision_id", "version_id", "version_no"]);
     assert.equal(old.state, "superseded");
     assert.equal(old.statement, "1판 결정", "the old text is kept");
     assert.equal(old.decided_by_actor_id, env.p.actor_id);
@@ -362,7 +362,7 @@ test("GET reflections: 'not submitted' and '0 entries' are different answers; en
     assert.deepEqual(full.counts, { applied: 1, partial: 0, rejected: 1, deferred: 0 });
     assert.equal(full.entries.length, 2);
     const applied = full.entries.find((e: any) => e.disposition === "applied");
-    assert.deepEqual(Object.keys(applied).sort(), ["actor_id", "applied_tx_id", "disposition", "followup_id", "id", "rationale", "result_version_id", "source_version_id"]);
+    assert.deepEqual(Object.keys(applied).sort(), ["actor", "actor_id", "applied_tx_id", "disposition", "followup", "followup_id", "id", "rationale", "result_version_id", "source_text", "source_version_id"]);
     assert.equal(applied.result_version_id, s.result.version_id);
     assert.equal(applied.applied_tx_id, s.result_tx);
     assert.equal(applied.followup_id, null);
