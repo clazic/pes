@@ -10,7 +10,8 @@
 //  2. billing safety stays: when the request body DID reach the server (it may have been charged) and the
 //     connection then breaks, the outcome stays "lost" and the server saw the request exactly once (no automatic
 //     retry that could bill twice). Same for a reply cut off after its headers.
-//  3. other users of http_json (a GET such as the model listing, an injected fetch_fn) are not affected.
+//  3. other users of http_json still work: a GET such as the model listing gives a normal reply (since the SEL-79
+//     final review it also sends `connection: close`, see test_sel79_review_fixes), and an injected fetch_fn is used as given.
 //
 // Deterministic: no timer, no sleep, no real race. With `close_reused` on, the server behaves like one that closed
 // its idle keep-alive socket a moment before the client's next request: any request that arrives on a connection
