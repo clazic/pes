@@ -228,6 +228,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `GET P/runs/{r}/inputs?cursor=&wait_ms=`, `POST P/runs/{r}/input-receipts` | E | PR14 | PR5 | long-poll·영수증, tx를 잡지 않음 |
 | `POST P/submissions` | H | PR14 | PR8 | 묶음 답·의견, 당시 폼/질문 버전. 3단계 U2a(SEL-90): 선택 필드 `mode`(`bundle`·`single`)와 응답 `form_complete`·`missing_required` |
 | `GET P/changes` | E/H | PR14 | PR4 | 커서 epoch·tx 묶음 |
+| `GET P/reference-candidates` | H(owner 세션만) | 3단계 REF1c(SEL-120) | (읽기, 명령 없음) | 붙일 수 있는 다른 프로젝트(구성원·보관 제외)와 고를 스냅숏(최신순·인쇄 제외·추천 정확히 1개). 토큰은 403 `human_required`, 읽기라 영수증·사건 0. 새 표 없음 |
 | `GET P/workspace` | E/H | 3단계 U1b(SEL-82) | U1b 읽기 모델 | 앱 작업 공간 읽기(현재 단계·라운드·차례·권한별 가능 동작·기록 개수). 읽기 전용·새 표 없음, `context:read` |
 | `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | E/H | PR13 | PR9 | 예약·업로드 완료·ready·hash·Go OFF 정책 검사 읽기 |
 | `GET P/files/{b}/preview`, `POST P/materials`, `GET P/materials`, `POST P/file-policies/{fp}/ai-access` | E/H (스위치는 H만) | 3단계 SEL-115 | PR9 | 내 자료 올리기(`file.upload`)·목록·파일별 AI 참조 스위치(`file.ai_access_set`)·content 와 같은 규칙의 preview — 자세한 규칙은 stage-1-api.md 6절 「내 자료」 행 |
