@@ -1,5 +1,5 @@
 import { DEMO_HUMAN, demoMaterials, demoU3, ROUNDS, WORKSPACE, type U3Data } from "./fixture";
-import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView } from "./types";
+import { FORMAT_VERSION, PesApiError, type ApiError, type ApiErrorCode, type ChangeTx, type CommandResult, type JudgeResult, type MaterialRow, type MaterialUploadResult, type MaterialAiAccessResult, type PesClient, type QuestionInput, type QuestionRevision, type QuestionView, type QuestionVersionView, type Receipt, type RoundView, type WorkspaceView, type CommentThreadView, type AnnotationThreadView } from "./types";
 
 /**
  * 가짜 클라이언트(U1a) — 앱 안 메모리에서 합성 자료를 돌려준다. 네트워크를 쓰지 않는다.
@@ -21,6 +21,12 @@ const ERRORS: Record<ApiErrorCode, { message: string; next_action: string }> = {
   question_version_changed: { message: "답변 대상 질문 버전이 바뀌었습니다. 새 버전을 확인해 주세요.", next_action: "reread_question" },
   cursor_expired: { message: "변경 기록이 너무 오래되어 이어 받을 수 없습니다.", next_action: "reread_context" },
   cursor_invalid: { message: "변경 커서가 올바르지 않습니다.", next_action: "reread_context" },
+  basis_changed: { message: "그사이 결과 글이 바뀌었습니다. 새 버전 기준으로 다시 확인해 주세요.", next_action: "reread_followup" },
+  thread_closed: { message: "닫힌 스레드에는 답글을 달 수 없습니다. 새 첨언을 열어 주세요.", next_action: "open_new_thread" },
+  already_resolved: { message: "이미 해결된 첨언입니다.", next_action: "reread_thread" },
+  human_required: { message: "이 일은 사람 소유자만 할 수 있습니다.", next_action: "reread_context" },
+  forbidden: { message: "이 일을 할 권한이 없습니다.", next_action: "reread_context" },
+  validation_failed: { message: "입력이 규칙에 맞지 않습니다.", next_action: "fix_request" },
 };
 
 export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U3Data = demoU3()): PesClient {
@@ -163,6 +169,12 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
     ...(q.sent ? { answer: { answer: q.sent.answer, receipt_no: q.sent.receipt_no, committed_at: q.sent.committed_at } } : {}),
   });
   const labels = (options: { label: string }[] | undefined) => (options ?? []).map((o) => o.label);
+
+  /* ───────────── 결과 글 첨언 · 후속(U4b) — 메모리 안 스레드 ───────────── */
+  const annotations: AnnotationThreadView[] = [];
+  const annotationOf = (threadId: string): AnnotationThreadView => annotations.find((t) => t.thread_id === threadId) ?? rejectNow("not_found", "$.path.thread_id");
+  /** 첨언 쓰기의 공개 tx 가 가리킬 라운드(결과 글이 있는 첫 라운드) */
+  const annotationRound = (): RoundView => rounds.find((r) => r.result) ?? rounds[0]!;
 
   /* ───────────── 답 제출 · 질문별 의견(U2c) — 서버 계약 SEL-90(U2a)의 모양, 메모리 안에서만 ───────────── */
   const threads: CommentThreadView[] = [];
@@ -433,6 +445,75 @@ export function createFakeClient(workspace: WorkspaceView = WORKSPACE, u3Data: U
         t.messages.push({ message_id, body_md: input.body_md, at: new Date().toISOString(), by: "human" });
         return { round: r, data: { thread_id: t.thread_id, message_id, thread_created: created } };
       });
+    },
+    /* ───────────── 결과 글 첨언 · 후속(U4b) — 서버 계약 SEL-99(U4a)의 모양, 메모리 안에서만. 합성 결과 글에는 본문(body_md)이 없어 화면이 이 쓰기를 부르지 않는다 ───────────── */
+    async getAnnotations(slug, edition, objectId) {
+      return copy(find(slug, edition) ? annotations.filter((t) => t.target_object_id === objectId) : []);
+    },
+    createAnnotation(slug, edition, input, key) {
+      return command("createAnnotation", slug, edition, key, [input], () => {
+        if (!input.body_md.trim() || !input.anchor.exact_quote) return rejectNow("invalid_payload", "$.body");
+        const id = `ath-${annotations.length + 1}`;
+        const { start_cp, end_cp, exact_quote, prefix, suffix } = input.anchor;
+        annotations.push({
+          thread_id: id,
+          state: "open",
+          target_object_id: input.target_object_id,
+          target_version_id: input.target_version_id,
+          anchor: { exact_quote, prefix, suffix, start_cp, end_cp, target_version_id: input.target_version_id, current: { evaluated_version_id: input.target_version_id, status: "exact", start_cp, end_cp, text: exact_quote, candidates: [], confirmed_by_actor_id: null } },
+          messages: [{ message_id: `${id}-m1`, body_md: input.body_md, at: new Date().toISOString(), actor_id: DEMO_HUMAN.id, by: "human" }],
+          resolution: null,
+          followups: [],
+        });
+        return { round: annotationRound(), data: { thread_id: id, message_id: `${id}-m1`, anchor_id: `${id}-anc`, anchor_status: "exact" as const } };
+      });
+    },
+    replyAnnotation(slug, edition, threadId, input, key) {
+      return command("replyAnnotation", slug, edition, key, [threadId, input], () => {
+        const t = annotationOf(threadId);
+        if (t.state !== "open") return rejectNow("thread_closed", "$.path.thread_id");
+        if (!input.body_md.trim()) return rejectNow("invalid_payload", "$.body_md");
+        const message_id = `${threadId}-m${t.messages.length + 1}`;
+        t.messages.push({ message_id, body_md: input.body_md, at: new Date().toISOString(), actor_id: DEMO_HUMAN.id, by: "human" });
+        return { round: annotationRound(), data: { thread_id: threadId, message_id } };
+      });
+    },
+    resolveAnnotation(slug, edition, threadId, input, key) {
+      return command("resolveAnnotation", slug, edition, key, [threadId, input], () => {
+        const t = annotationOf(threadId);
+        if (t.state !== "open") return rejectNow("already_resolved", "$.path.thread_id");
+        if (!input.reason.trim()) return rejectNow("invalid_payload", "$.body.reason");
+        // 실제 서버처럼: none 이 아니면 후속이 같이 만들어지고, 단계가 필요한 갈래는 단계 없이는 거절한다(followup.target_stage_id 필수)
+        if ((input.resolution === "next_round_task" || input.resolution === "reopen_stage") && !input.target_stage) return rejectNow("invalid_payload", "$.target_stage");
+        let followupId: string | null = null;
+        if (input.resolution !== "none") {
+          followupId = `afu-${annotations.reduce((n, x) => n + x.followups.length, 0) + 1}`;
+          t.followups.push({ id: followupId, kind: input.resolution, state: "proposed", description: input.reason, version_no: "1", origin_thread_id: t.thread_id, base_version_id: null, proposed_body_md: null, proposed_version_id: null, result_version_id: null, applied_tx_id: null, confirmed_by_actor_id: null });
+        }
+        t.state = "resolved";
+        t.resolution = { resolution: input.resolution, reason: input.reason, followup_id: followupId };
+        return { round: annotationRound(), data: { thread_id: threadId, state: "resolved" as const, followup_id: followupId, applied: false as const } };
+      });
+    },
+    reanchorAnnotation(slug, edition, threadId, input, key) {
+      return command("reanchorAnnotation", slug, edition, key, [threadId, input], () => {
+        const t = annotationOf(threadId);
+        t.anchor.current = { evaluated_version_id: input.version_id ?? t.target_version_id, status: "moved", start_cp: input.start_cp, end_cp: input.end_cp, text: null, candidates: [], confirmed_by_actor_id: DEMO_HUMAN.id };
+        return { round: annotationRound(), data: { thread_id: threadId, anchor_status: "moved" as const } };
+      });
+    },
+    proposeFollowup(slug, edition, input, key) {
+      return command("proposeFollowup", slug, edition, key, [input], () => {
+        const t = annotationOf(input.origin_thread_id);
+        const id = `afu-${annotations.reduce((n, x) => n + x.followups.length, 0) + 1}`;
+        t.followups.push({ id, kind: input.kind, state: "proposed", description: input.description, version_no: "1", origin_thread_id: t.thread_id, base_version_id: null, proposed_body_md: null, proposed_version_id: null, result_version_id: null, applied_tx_id: null, confirmed_by_actor_id: null });
+        return { round: annotationRound(), data: { followup_id: id, state: "proposed" as const } };
+      });
+    },
+    applyFollowup: (slug, edition, _followupId, _input, key) => {
+      // 합성 자료에는 글 새 버전을 만드는 길이 없다 — 지어내서 성공시키지 않는다
+      if (!key) return reject("invalid_payload", "$.headers.idempotency-key");
+      return find(slug, edition) ? reject("not_supported", "$.followup") : reject("not_found", "$.project");
     },
     /* ───────────── 내 자료(MAT1c) — 서버(SEL-115)처럼: 같은 값이면 changed:false · 같은 멱등 키는 처음 영수증을 replayed 로 ───────────── */
     async getMaterials(slug, edition) {

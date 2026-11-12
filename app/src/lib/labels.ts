@@ -37,3 +37,11 @@ export function formatAt(iso: string, withTime = true): string {
   if (Number.isNaN(t.getTime())) return "시각 미상";
   return withTime ? `${dateFmt.format(t)} ${timeFmt.format(t)}` : dateFmt.format(t);
 }
+
+/** 첨언 해결 · 후속의 종류 이름(U4b) — 해결 메뉴 · 후속 카드가 같은 말을 쓴다 */
+export const FOLLOWUP_KIND_LABEL: Record<"edit_text" | "next_round_task" | "reopen_stage" | "none", string> = {
+  edit_text: "글 수정",
+  next_round_task: "다음 라운드 할 일",
+  reopen_stage: "앞 단계 다시 열기",
+  none: "그냥 닫기",
+};
