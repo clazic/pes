@@ -20,7 +20,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports, createRequire } from "node:module";
 import net from "node:net";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const orig = {
   writeSync: fs.writeSync.bind(fs),
@@ -51,7 +51,8 @@ const ROOTS = process.env.PES_TEST_GUARD === "1" ? protected_roots() : [];
 
 function inside(path: string, folder: string): boolean {
   const rel = relative(fold(folder), fold(path));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  // only `..` itself (or `..<sep>…`) leaves the folder; `..cache` is an ordinary child name (SEL-103, same rule as home_guard.ts)
+  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
 /**

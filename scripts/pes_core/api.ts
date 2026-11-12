@@ -41,6 +41,10 @@ import {
   replacing_decision_id,
   round_id_by_number,
   request_receipt,
+  receipt_of_tx,
+  round_form_data,
+  round_place,
+  round_threads_data,
   run_info,
   snapshot_through_seq,
   stage_view,
@@ -52,6 +56,7 @@ import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
 import type { Db } from "./db.ts";
+import { needs_document_sandbox } from "./document_sandbox.ts";
 import { ApiError } from "./errors.ts";
 import { approve_stage, reopen_stage, seal_round, start_round } from "./editions.ts";
 import { complete_upload, get_blob, is_safe_media_type, reserve_upload, store_blob } from "./files.ts";
@@ -147,6 +152,8 @@ interface HandlerResult {
   status: number;
   data?: unknown;
   replayed?: boolean;
+  /** SEL-98: the receipt of the write a 201 response reports (a sibling of `data`) */
+  receipt?: { receipt_no: string; tx_id: string; committed_at: string | null };
   bytes?: Uint8Array;
   headers?: Record<string, string>;
 }
@@ -263,6 +270,9 @@ function parse_json_or_null(text: string): unknown {
 }
 
 const FORMAT_VERSION = "1.0";
+/** SEL-102: a stored type outside the short safe list (see document_sandbox.ts — the same judgement as serve.ts static answers) is sent with this sandbox. */
+const FILE_DOCUMENT_CSP = "sandbox allow-scripts allow-popups allow-modals allow-downloads";
+
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_WAIT_MS = 25_000;
 const MIN_POLL_INTERVAL_MS = 1000;
@@ -321,6 +331,7 @@ const CREATED_ACTIONS = new Set([
   "question.retracted",
   "question.deferred",
   "question.merged",
+  "question.reordered",
   "question.commented",
   "answer.submitted",
   "round.started",
@@ -694,6 +705,18 @@ export class ApiApp {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#question_publish(r, project, auth),
       }),
+      route("GET", `${P}/stages/{s}/rounds/{rd}`, "rounds.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#round_get(r, project),
+      }),
+      route("GET", `${P}/stages/{s}/rounds/{rd}/threads`, "rounds.threads", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#round_threads(r, project),
+      }),
+      route("POST", `${P}/question-sets/{set}/order`, "question_sets.order", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#question_order(r, project, auth),
+      }),
       route("POST", `${P}/questions/{q}/revisions`, "questions.revise", {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#question_revise(r, project, auth),
@@ -852,7 +875,7 @@ export class ApiApp {
       const project = this.#project(project_id);
       const auth = this.#bind(project, credential, op);
       if (op.go === true && auth.kind === "internal_ai") this.#require_go(project.id);
-      return await op.act(request, project, auth);
+      return this.#with_receipt(request, project, auth, await op.act(request, project, auth));
     } catch (error) {
       // A request refused for its own malformed input was not served: it does not use up the budget.
       if (error instanceof Fail && REFUNDED_CODES.includes(error.code)) {
@@ -862,12 +885,25 @@ export class ApiApp {
     }
   }
 
+  /**
+   * SEL-98: a 201 write reports the receipt of its commit next to `data` (the same value `GET P/requests/{key}` gives; a replay reports
+   * the first response's receipt because it is the same commit). One place for every write: the commit is found by (actor, key).
+   */
+  #with_receipt(request: RouteRequest, project: ProjectRow, auth: AuthInfo, result: HandlerResult): HandlerResult {
+    if (request.method !== "POST" || result.status !== 201 || request.key === null) return result;
+    const row = request_receipt(this.#db, project.id, request.key, auth.actor_id);
+    if (row === undefined) return result;
+    const receipt = receipt_of_tx(this.#db, project.id, row.id);
+    return receipt === null ? result : { ...result, receipt };
+  }
+
   // -------------------------------------------------------------------------
   // response envelopes
 
   #success(request_id: string, result: HandlerResult): ApiResponse {
     const headers: Record<string, string> = {
       "content-type": "application/json; charset=utf-8",
+      "x-content-type-options": "nosniff",
       "x-request-id": request_id,
       ...(result.headers ?? {}),
     };
@@ -879,6 +915,7 @@ export class ApiApp {
       request_id,
       data: result.data ?? null,
     };
+    if (result.receipt !== undefined) body.receipt = result.receipt;
     if (result.replayed !== undefined) body.replayed = result.replayed;
     return { status: result.status, headers, json: json_safe(body), bytes: null };
   }
@@ -902,6 +939,7 @@ export class ApiApp {
       status,
       headers: {
         "content-type": "application/json; charset=utf-8",
+        "x-content-type-options": "nosniff",
         "x-request-id": request_id,
         ...failure.headers,
       },
@@ -2759,6 +2797,7 @@ export class ApiApp {
       : CREATED_ACTIONS.has(row.action) || (row.action === "file.upload_reserved" && result.deduplicated !== true)
         ? 201
         : 200;
+    const receipt = receipt_of_tx(this.#db, project.id, row.id);
     return {
       status: 200,
       data: {
@@ -2769,6 +2808,9 @@ export class ApiApp {
         operation_id: ACCEPTED_ACTIONS.has(row.action) ? row.id : null,
         tx_id: row.id,
         run_id: row.run_id,
+        // SEL-98: the same receipt a 201 write reports in its body
+        receipt_no: receipt?.receipt_no ?? null,
+        committed_at: receipt?.committed_at ?? null,
       },
     };
   }
@@ -3004,6 +3046,82 @@ export class ApiApp {
     return {
       status: 201,
       data: { question, previous_answers_preserved: true },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-98: GET P/stages/{s}/rounds/{rd} — one place's form: set id, form version, each question's current version and current answer. */
+  async #round_get(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const data = read_tx(this.#db, () => {
+      const place = this.#round_place(request, project);
+      return round_form_data(this.#db, project.id, place);
+    });
+    return { status: 200, data };
+  }
+
+  /** SEL-98: GET P/stages/{s}/rounds/{rd}/threads — the comment threads of that place's questions (read only; a comment is never an answer). */
+  async #round_threads(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const data = read_tx(this.#db, () => {
+      const place = this.#round_place(request, project);
+      return round_threads_data(this.#db, project.id, place);
+    });
+    return { status: 200, data };
+  }
+
+  /** The place a stage-key + "start"|round-number path names; an unknown stage, number or place is 404. */
+  #round_place(request: RouteRequest, project: ProjectRow): ReturnType<typeof round_place> & object {
+    const current = this.#project(project.id);
+    if (current.active_edition_id === null) throw new Fail("not_found");
+    let stage_key: string;
+    let place_text: string;
+    try {
+      stage_key = decodeURIComponent(request.params[1] as string);
+      place_text = decodeURIComponent(request.params[2] as string);
+    } catch {
+      throw new Fail("not_found");
+    }
+    const place = round_place(this.#db, project.id, current.active_edition_id, stage_key, place_text);
+    if (place === null) throw new Fail("not_found");
+    return place;
+  }
+
+  /** SEL-98: POST P/question-sets/{set}/order — the same questions in a new order, as one new set of the form (question.reorder). */
+  async #question_order(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["question_ids", "run_id", "lease_id", "fence"]);
+    const ids = body.question_ids;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || id.length === 0 || !id.isWellFormed())) {
+      invalid_field("question_ids");
+    }
+    const set_id = request.params[1] as string;
+    const guard = this.#guard_fields(body);
+    const payload: Record<string, unknown> = { set_id, question_ids: ids };
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "question.reorder", payload),
+      (error) => {
+        const failure = fail_from(error);
+        if (failure.code === "validation_failed" && (failure.details?.reason === "not_a_permutation" || failure.details?.reason === "no_change")) {
+          return new Fail("validation_failed", { target: "$.body.question_ids", details: failure.details });
+        }
+        if (error instanceof ApiError && error.code === "conflict" && is_record(error.details) && error.details.reason === "stale_set") {
+          return new Fail("conflict", { target: "$.path.set", details: { reason: "stale_set" } });
+        }
+        return failure;
+      },
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        set: { id: result.set_id, version_no: result.set_version_no, form_key: result.form_key },
+        members: (result.members as Array<Record<string, unknown>>).map((member) => ({
+          question_id: member.question_id,
+          version_id: member.question_version_id,
+          position: member.position,
+        })),
+      },
       replayed: out.replayed,
     };
   }
@@ -3699,14 +3817,18 @@ export class ApiApp {
       replayed: false,
     }));
     const found = blob.result;
-    return {
-      status: 200,
-      bytes: found.bytes,
-      headers: {
-        "content-type": is_safe_media_type(found.media_type)
-          ? found.media_type
-          : "application/octet-stream",
-      },
+    const media_type = is_safe_media_type(found.media_type)
+      ? found.media_type
+      : "application/octet-stream";
+    // SEL-102: a stored page / SVG / XML opened from this address runs its scripts on the app's origin — same sandbox as the static answer
+    // (opaque origin, no allow-same-origin); every type says nosniff so a file cannot turn into a page by guessing.
+    const headers: Record<string, string> = {
+      "content-type": media_type,
+      "x-content-type-options": "nosniff",
     };
+    if (needs_document_sandbox(media_type)) {
+      headers["content-security-policy"] = FILE_DOCUMENT_CSP;
+    }
+    return { status: 200, bytes: found.bytes, headers };
   }
 }

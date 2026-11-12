@@ -34,9 +34,10 @@ import {
   closeSync,
   writeSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { tx, type Db, type SqlValue } from "./db.ts";
+import { escapes_parent } from "./rel_path.ts";
 
 export const BACKUP_FORMAT_VERSION = 1;
 
@@ -321,7 +322,7 @@ function read_snapshot(db: Db, project_id: string): ExportSnapshot {
 }
 
 function escapes_root(rel: string): boolean {
-  return isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`);
+  return escapes_parent(rel);
 }
 
 function write_bundle_file(

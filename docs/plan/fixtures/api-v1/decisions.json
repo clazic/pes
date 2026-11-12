@@ -39,6 +39,11 @@
             "state": "proposed",
             "scope": "edition"
           }
+        },
+        "receipt": {
+          "receipt_no": "43",
+          "tx_id": "txn_01J9Z3K7R03",
+          "committed_at": "2026-11-12T03:21:00.000Z"
         }
       }
     }

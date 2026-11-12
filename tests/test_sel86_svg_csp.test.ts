@@ -114,7 +114,13 @@ test("V2 옛 project.json 폴더: reports/·out/ 의 .svg 만 sandbox (변형·�
       }
       const upper = await raw(s, { path: `/${legacy}/Reports/plan/d.svg` });
       if (upper.status === 200) assert_sandbox(csp_of(upper.headers), "대소문자 디스크의 Reports/");
-      for (const path of [`/${legacy}/reports/plan/p.png`, `/${legacy}/out/p.png`, `/${legacy}/notes/d.svg`, `/${legacy}/root.svg`]) {
+      // SEL-102: 다른 폴더·루트의 svg 도 sandbox (PNG 는 계속 CSP 없음)
+      for (const path of [`/${legacy}/notes/d.svg`, `/${legacy}/root.svg`]) {
+        const res = await raw(s, { path });
+        assert.equal(res.status, 200, path);
+        assert_sandbox(csp_of(res.headers), path);
+      }
+      for (const path of [`/${legacy}/reports/plan/p.png`, `/${legacy}/out/p.png`]) {
         const res = await raw(s, { path });
         assert.equal(res.status, 200, path);
         assert.equal(csp_of(res.headers), undefined, `${path}: CSP 가 없다`);

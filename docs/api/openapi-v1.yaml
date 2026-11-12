@@ -7,7 +7,8 @@ info:
     the PES command service; there is no table CRUD, arbitrary SQL, or generic
     command route. Revision and fence values travel as normalized decimal
     strings. A successful body is
-    {format_version, request_id, data, replayed?}; an error body is
+    {format_version, request_id, data, receipt?, replayed?}; a 201 write also carries
+    receipt {receipt_no, tx_id, committed_at}; an error body is
     {format_version, error:{code, message, retryable, target, details,
     next_action}, request_id}. POST writes require Idempotency-Key. Every
     request body may carry format_version "1.0" (any other value is 400).
@@ -66,6 +67,11 @@ components:
       schema: { type: string }
     QuestionId:
       name: q
+      in: path
+      required: true
+      schema: { type: string }
+    QuestionSetId:
+      name: set
       in: path
       required: true
       schema: { type: string }
@@ -188,6 +194,14 @@ components:
         format_version: { type: string, const: "1.0" }
         request_id: { type: string }
         data: {}
+        receipt:
+          description: "SEL-98: only on a 201 write (never on an error or a read). The receipt of the commit the write made: receipt_no is a decimal string that grows with the project's writes in commit order, tx_id is the commit id, committed_at is the commit time (ISO 8601, or null when the stored time is damaged). A replay (replayed true) reports the FIRST response's receipt. GET requests/{key} reports the same receipt_no and committed_at in data."
+          type: object
+          required: [receipt_no, tx_id, committed_at]
+          properties:
+            receipt_no: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+            tx_id: { type: string }
+            committed_at: { type: [string, "null"], format: date-time }
         replayed: { type: boolean }
     Error:
       type: object
@@ -514,6 +528,19 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    QuestionOrderBody:
+      type: object
+      additionalProperties: false
+      required: [question_ids]
+      properties:
+        format_version: { $ref: "#/components/schemas/FormatVersion" }
+        question_ids:
+          description: "Every member of the set, once, in the new order (a permutation). A missing, repeated or unknown id is 422 validation_failed at $.body.question_ids (details.reason not_a_permutation). The current order itself is 422 (details.reason no_change)."
+          type: array
+          items: { type: string, minLength: 1 }
+        run_id: { type: string }
+        lease_id: { type: string }
+        fence: { type: string }
     QuestionDeferBody:
       type: object
       additionalProperties: false
@@ -521,7 +548,7 @@ components:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         base_version_id: { type: string, minLength: 1 }
         defer_until:
-          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way)"
+          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way). Left out or null = no time limit (the schema does not list null, but the server accepts it as \"none\")."
           oneOf:
             - { type: integer, minimum: 0 }
             - { type: string, pattern: "^(0|[1-9][0-9]*)$" }
@@ -1112,7 +1139,7 @@ paths:
   /api/v1/projects/{id}/requests/{key}:
     get:
       summary: Look up a finished request by its Idempotency-Key
-      description: "data carries the receipt: action, tx_id, the original status and run_id (the run the request belonged to, or null when it had none)."
+      description: "data carries the receipt: action, tx_id, the original status and run_id (the run the request belonged to, or null when it had none), and (SEL-98) receipt_no and committed_at, the same values the write reported in its body."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/RequestKey"
@@ -1408,6 +1435,35 @@ paths:
         "409": { description: State conflict (a transition the table does not allow), stale revision, or idempotency key reuse }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/question-sets/{set}/order:
+    post:
+      summary: "Reorder a form (SEL-98 U2d): the same questions in a new order, as ONE new set of the form"
+      description: "Command question.reorder. Writes a new set (version_no + 1, same stage, round, purpose and form_key) whose members are the old set's questions in the given order, each at its question's current version, in one transaction. No new question, no new question version and no answer is made (an order is not an answer). Only the form's newest set can be reordered (an older one is 409 conflict, details.reason stale_set), and only while its round is open and its edition active (else 409 conflict). question_ids must be a permutation of the set's members (else 422 validation_failed at $.body.question_ids, details.reason not_a_permutation, nothing written). The set's own current order is 422 validation_failed at $.body.question_ids with details.reason no_change (no new set, nothing written). 201 data = { set {id, version_no, form_key}, members [{question_id, version_id, position}] }; the 201 body carries the receipt. Same key and body replays (replayed true, no new set); the same key with another body is 409 idempotency_key_reuse. The owner session, or a token with run:submit."
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/QuestionSetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionOrderBody" }
+      responses:
+        "201":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, query, or cursor }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project or question set }
+        "409": { description: The set is not the newest of its form (stale_set), its round is sealed, or idempotency key reuse }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "422": { description: question_ids is not a permutation of the set's members }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/questions/{q}/defer:
@@ -1885,6 +1941,46 @@ paths:
         "409": { description: State conflict, stale revision, or idempotency key reuse }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "422": { description: A question or answer breaks the rules }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/stages/{s}/rounds/{rd}:
+    get:
+      summary: "One place's form with each question's current version and current answer (SEL-98 U2d). Read-only, no new table"
+      description: "{rd} is start (the stage-start questions, round_id null) or a round number (a decimal string of 1 or more). data = { edition (the number of the ACTIVE edition, the same value as the work space read's edition: these paths read the active edition, so a client that shows another edition must not use the data), stage, round_id (the number, null for start), server_round_id (rounds.id of a numbered round; null for start; the round_id a POST P/questions takes), state (current|closed, the same value as the work space), set_id (the newest set of form_key main at that place, null when none was published), form_version (that set's version_no, or null), questions [{ id, version_id (the current version), version_no (decimal string), state, type, text, required, allow_comment_as_answer, importance, help, default_value, options, show_if, merged_into_question_id, display_no, answer }] } in the set's member order. answer is null or { version_id, value, question_version_id, question_version (the version number of the question version it answers, or null), used_default, state, tx_id, receipt_no, committed_at } (the current answer; the three receipt values are those of the write that made it). Number rule of this read: version_no is a decimal string (a Revision, like every version_no); form_version, display_no, round_id and answer.question_version are plain JSON numbers (small counters, not revisions). A place with no form is 200 with set_id null and questions []; an unknown stage, number or place is 404. The owner session, or a token with context:read."
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/RoundId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project, stage or round }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/stages/{s}/rounds/{rd}/threads:
+    get:
+      summary: "The comment threads of that place's questions (SEL-98 U2d). Read-only; a comment is never an answer"
+      description: "Same place, same permission and same 404 rule as the round read. data = { edition (the active edition's number, as in the round read), threads [{ thread_id, question_id (the question the thread is about; \"__other\" for a context_kind general thread that is about one of this place's questions; the free-form notes a migrated project kept are not sent), question_version_id|null, question_version|null, messages [{ message_id, body_md, at (ISO 8601), by (human|ai), receipt_no? }] }] } with messages in the order they were written. Threads of questions that never stood in this place's form are not sent."
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/RoundId"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      responses:
+        "200":
+          description: Accepted or successful answer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Not allowed for this caller, scope, or policy }
+        "404": { description: Unknown project, stage or round }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/stages/{s}/rounds:
