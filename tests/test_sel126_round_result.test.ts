@@ -33,7 +33,7 @@ import { seal, start } from "./helpers/editions_env.ts";
 import { make_form, owner_get, single_spec } from "./helpers/sel90_env.ts";
 import { set_access } from "./helpers/sel115_env.ts";
 import { state_signature } from "./helpers/state_signature.ts";
-import { current_version_of } from "./helpers/sel99_env.ts";
+import { cp_find, current_version_of } from "./helpers/sel99_env.ts";
 
 const BODY_1 = "# 합성 결과 글\n\n첫 판 본문 MARK-R126-V1 입니다.\r\n둘째 줄  끝";
 const BODY_2 = "# 합성 결과 글\n\n고친 본문 MARK-R126-V2 입니다.";
@@ -364,6 +364,63 @@ test("[신규] 첫 글의 현재 버전에 본문(body_md)이 없으면 result:n
     assert.ok("result" in data);
     assert.equal(data.result, null, "첫 글이 본문 없이 결과가 되고, 뒤 글은 쓰이지 않는다");
     assert.ok(!JSON.stringify(data).includes("MARK-R126-V2"), "뒤 글의 본문이 새지 않는다");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (5) 앱이 쓰는 길: 결과의 version_id 를 HTTP 로 첨언 생성 · 제안(edit_text base_version_id) · 채택(apply)에 넣으면 통과한다
+
+test("[신규] 라운드 결과의 version_id 를 HTTP 첨언 생성 · edit_text 제안 base_version_id · 채택(apply)에 넣으면 모두 통과한다", async () => {
+  await with_api(async (env) => {
+    const s = await sealed_round(env, "e1");
+    await s.seal();
+    const result = assert_ok(await owner_get(env, round_path("1"))).result;
+    assert.equal(result.version_id, s.result.version_id);
+    // 1) 첨언 생성: 결과가 준 version_id 를 target_version_id 로
+    const cp = cp_find(BODY_1, "MARK-R126-V1");
+    const made = assert_ok(
+      await call(env, {
+        method: "POST",
+        path: P(env, "/threads"),
+        auth: "owner",
+        body: {
+          target_object_id: result.object_id,
+          target_version_id: result.version_id,
+          context_kind: "annotation",
+          anchor: { exact_quote: "MARK-R126-V1", prefix: "첫 판 본문 ", suffix: " 입니다.", ...cp },
+          initial_message: { body_md: "이 본문의 근거를 설명해 주세요." },
+        },
+      }),
+      201,
+    );
+    assert.equal(made.thread.state, "open");
+    // 2) edit_text 제안: base_version_id 는 결과의 version_id (현재 버전과 같다)
+    const prop = assert_ok(
+      await call(env, {
+        method: "POST",
+        path: P(env, "/followups"),
+        auth: "owner",
+        body: { origin_thread_id: made.thread.id, kind: "edit_text", description: "본문을 고친다.", proposed_body_md: BODY_2, base_version_id: result.version_id },
+      }),
+      201,
+    ).followup;
+    assert.equal(prop.base_version_id, result.version_id);
+    // 3) 채택: base_version_id 와 expected_rev 를 같이 넣어 200, 결과 글의 현재 버전이 새 버전이 된다
+    const applied = assert_ok(
+      await call(env, {
+        method: "POST",
+        path: P(env, `/followups/${prop.id}/apply`),
+        auth: "owner",
+        body: { format_version: "1.0", base_version_id: result.version_id, expected_rev: prop.version_no },
+      }),
+      200,
+    );
+    assert.equal(applied.followup.state, "applied");
+    assert.notEqual(applied.followup.result_version_id, result.version_id);
+    assert.equal(current_version_of(env.db, result.object_id), applied.followup.result_version_id);
+    const after = assert_ok(await owner_get(env, round_path("1"))).result;
+    assert.equal(after.version_id, applied.followup.result_version_id, "결과 읽기도 채택된 현재 버전을 준다");
+    assert.equal(after.body_md, BODY_2);
   });
 });
 
