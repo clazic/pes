@@ -639,18 +639,20 @@ function check_evidence(runtime: CommandRuntime, project_id: string, entry: Refl
     if (made === undefined) throw new ApiError("not_found", "result_version_id is not a version of this project", { index, field: "result_version_id" });
     if (entry.result_version_id === entry.source_version_id) evidence_mismatch(index, "result_version_id", "the source itself is not a result");
     if (made.tx_id !== tx) evidence_mismatch(index, "evidence_tx_id", "that commit did not make the result version");
-    // a proposal is made by anyone, in one step, so "the version that commit made" would always hold for it: only a judged version
-    // (the human owner's confirm / reject / revise / adopt / supersede / revoke) or a text counts as a result
-    const proposal = runtime.db.get(
-      `SELECT 1 FROM assumption_versions WHERE project_id = ? AND version_id = ? AND state = 'proposed'
-       UNION ALL
-       SELECT 1 FROM decision_versions WHERE project_id = ? AND version_id = ? AND state = 'proposed'`,
-      project_id,
-      entry.result_version_id,
+    // Allow list, not a deny list. A version that anyone with a token can make in ONE write (a proposal, a message, a thread, a question, an answer,
+    // a source ...) always satisfies "the commit that made it", so it could be offered as proof of itself. Only what can really be the RESULT of
+    // handling an opinion counts: a text (artifact) version, a judged assumption (confirmed / rejected / revised: the human owner's assess), or a judged
+    // decision (adopted / superseded / revoked: the owner's adopt / supersede / revoke). Everything else is evidence_mismatch.
+    const result = runtime.db.get(
+      `SELECT 1 FROM object_versions ov
+        WHERE ov.project_id = ? AND ov.id = ?
+          AND (ov.kind = 'artifact'
+               OR (ov.kind = 'assumption' AND EXISTS (SELECT 1 FROM assumption_versions av WHERE av.project_id = ov.project_id AND av.version_id = ov.id AND av.state IN ('confirmed', 'rejected', 'revised')))
+               OR (ov.kind = 'decision' AND EXISTS (SELECT 1 FROM decision_versions dv WHERE dv.project_id = ov.project_id AND dv.version_id = ov.id AND dv.state IN ('adopted', 'superseded', 'revoked'))))`,
       project_id,
       entry.result_version_id,
     );
-    if (proposal !== undefined) evidence_mismatch(index, "result_version_id", "a proposal is not a result: it was not judged");
+    if (result === undefined) evidence_mismatch(index, "result_version_id", "that version is not a result: only a text or a judged assumption / decision can be one");
   }
   if (entry.followup_id !== null) {
     const row = runtime.db.get<{ state: string | null; applied_tx_id: string | null; origin_version_id: string | null }>(

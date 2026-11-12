@@ -12,7 +12,8 @@
  *   증거 검사(결과 버전을 만든 tx == evidence_tx_id)를 항상 통과해 의견이 처리된 것처럼 보이게 된다. 반면 판단·채택(assumption.assess · decision.adopt)은
  *   소유자 사람만 만들 수 있어 의견에 대한 사람의 처리 결과로 볼 수 있다.
  *   → 결과 버전이 assumption_versions.state = 'proposed' 또는 decision_versions.state = 'proposed' 인 버전이면 거절한다.
- *   → 그 밖은 지금처럼 허용: 글(artifact) 버전, 가정의 confirmed·rejected·revised 버전, 결정의 adopted·superseded·revoked 버전. (질문·메시지 등 다른 kind 는 이 시험이 정하지 않는다.)
+ *   → (1차 리뷰 수정) 거절 목록이 아니라 **허용 목록**: 글(artifact) 버전, 가정의 confirmed·rejected·revised 버전, 결정의 adopted·superseded·revoked 버전만 결과가 된다.
+ *     message·thread·question·answer·source·followup 버전은 토큰도 한 번의 쓰기로 (버전, 그 버전을 만든 tx) 쌍을 만들 수 있어 모두 거절한다 (tests/test_sel100_review_fixes.test.ts).
  *   거절 모양: API 422 validation_failed, target `$.body.entries[i].result_version_id` 또는 `…evidence_tx_id`(reason evidence_mismatch), 아무것도 쓰지 않는다.
  *
  * 후속 연결 — 이슈 본문은 `followups.source_version_id` 라고 쓰지만 그런 칸은 없다. 후속(followups)의 원문 칸은 **origin_version_id** 다

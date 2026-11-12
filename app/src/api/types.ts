@@ -445,6 +445,7 @@ export interface ReflectionEntry {
 export interface ReflectionView {
   /** none = 지난 라운드에 보낸 반영 의견 자체가 없음(미제출) · submitted = 보냄 */
   submission: "none" | "submitted";
+  /** 화면은 쓰지 않는다 — 서버가 '보낸 의견 수'를 주지 않아, http 클라이언트는 처리된 줄 수를 채울 뿐이다(의견 수가 아니다) */
   sent_count: number;
   entries: ReflectionEntry[];
 }

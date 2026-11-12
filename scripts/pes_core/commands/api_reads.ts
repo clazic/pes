@@ -506,7 +506,7 @@ export interface DecisionDto {
   scope: string;
   decided_by_actor_id: string | null;
   decided_by: ActorDto | null;
-  /** Whoever wrote the first version of the decision. */
+  /** Whoever wrote the first version of the decision; for a copy into a new edition, the original proposer (the chain of parent versions is followed to its first object). */
   proposed_by: ActorDto | null;
   rationale: string;
   supersedes_decision_id: string | null;
@@ -540,7 +540,18 @@ export function decision_rows(db: Db, project_id: string, edition_id: string): D
       `SELECT o.id AS id, o.current_version_id AS version_id, ov.version_no AS version_no, dv.statement AS statement,
               dv.state AS state, d.scope AS scope, dv.decided_by AS decided_by, dv.rationale AS rationale,
               dv.supersedes_decision_id AS supersedes_decision_id,
-              (SELECT fv.actor_id FROM object_versions fv WHERE fv.project_id = o.project_id AND fv.object_id = o.id AND fv.version_no = 1) AS first_actor_id,
+              (WITH RECURSIVE chain(object_id, depth) AS (
+                 SELECT o.id, 0
+                 UNION ALL
+                 SELECT pv2.object_id, chain.depth + 1
+                   FROM chain
+                   JOIN decisions cd ON cd.project_id = o.project_id AND cd.object_id = chain.object_id
+                   JOIN object_versions pv2 ON pv2.project_id = cd.project_id AND pv2.id = cd.originated_from_version_id
+                  WHERE chain.depth < 1000
+               )
+               SELECT fv.actor_id FROM chain
+                 JOIN object_versions fv ON fv.project_id = o.project_id AND fv.object_id = chain.object_id AND fv.version_no = 1
+                ORDER BY chain.depth DESC LIMIT 1) AS first_actor_id,
               (SELECT r.object_id FROM decision_versions r WHERE r.project_id = o.project_id AND r.supersedes_decision_id = o.id ORDER BY r.rowid LIMIT 1) AS superseded_by,
               d.originated_from_version_id AS originated_from_version_id,
               pv.version_no AS originated_from_version_no,

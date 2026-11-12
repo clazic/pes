@@ -621,6 +621,12 @@ components:
         the one that made the result version (and not the source version), and a follow-up must be applied by that
         commit. Missing evidence is 422 evidence_required at $.body.entries[i].result_version_id (next_action
         add_evidence); evidence that does not fit together is 422 validation_failed at $.body.entries[i].evidence_tx_id.
+        The result version must be something that can be the RESULT of handling an opinion (an allow list): a text
+        (artifact) version, a judged assumption (confirmed, rejected, revised) or a judged decision (adopted,
+        superseded, revoked). Any other version (a proposal, a message, a thread, a question, an answer, a source ...)
+        is 422 validation_failed at $.body.entries[i].result_version_id (details.reason evidence_mismatch), because
+        a token can make such a version in one write and so always pair it with the commit that made it. A follow-up
+        must come from the entry's own source (followups.origin_version_id).
         rejected | deferred need only a rationale and take no evidence fields.
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
