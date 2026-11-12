@@ -62,7 +62,8 @@ import {
 } from "./helpers/a_builtin_env.ts";
 
 const FORMATS: Format[] = ["openai_compatible", "anthropic"];
-const INTERNAL_TOOLS = (A_TOOLS as readonly string[]).filter((name) => name !== "thread.reply").sort();
+// leader 승인(SEL-99 U4a): thread.reply 가 명령에 이어져 모델에게도 보인다 — 이제 허용 목록 전부(8개)를 제공한다
+const INTERNAL_TOOLS = (A_TOOLS as readonly string[]).slice().sort();
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -122,7 +123,7 @@ for (const format of FORMATS) {
         assert.equal(wire.length, INTERNAL_TOOLS.length, `request ${index + 1} offers ${INTERNAL_TOOLS.length} tools`);
         for (const name of wire) assert.match(name, PROVIDER_TOOL_NAME, `request ${index + 1}: tool name ${JSON.stringify(name)}`);
         assert.deepEqual(invalid_tool_names(body), [], `request ${index + 1}: offered tools and earlier tool calls`);
-        assert.deepEqual(offered_tools(body), INTERNAL_TOOLS, "the same seven tools, only spelled for the wire");
+        assert.deepEqual(offered_tools(body), INTERNAL_TOOLS, "the same eight tools, only spelled for the wire");
       }
       assert.equal(versions_of_run(env, res.run_id).length, 1, "result.submit ran under its internal name");
 
