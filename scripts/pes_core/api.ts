@@ -51,7 +51,7 @@ import {
   submission_received_at,
   type ReceiptRow,
 } from "./commands/api_reads.ts";
-import { file_ai_denied, material_rows, type Audience } from "./commands/file_access.ts";
+import { file_ai_denied, material_rows, material_version_denied, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
@@ -1591,6 +1591,9 @@ export class ApiApp {
         version_id,
       );
       const visible = auth.kind === "human" ? files : files.filter((f) => !this.#blob_denied(project.id, f.blob_id));
+      // A closed file material's own text (title defaults to the file name) and content_hash (it hashes the file's sha256) name the file:
+      // a non-human caller gets the envelope with no content and a hash of the version id only.
+      const withheld = auth.kind !== "human" && row.kind === "source" && material_version_denied(this.#db, project.id, version_id);
       return {
         project_id: project.id,
         object_id: row.object_id,
@@ -1598,8 +1601,8 @@ export class ApiApp {
         version_id: row.version_id,
         version_no: Number(row.version_no),
         is_current: Number(row.is_current) === 1,
-        content_hash: row.content_hash,
-        content: this.#version_content(project.id, row.kind, version_id),
+        content_hash: withheld ? createHash("sha256").update(`withheld:${row.version_id}`, "utf8").digest("hex") : row.content_hash,
+        content: withheld ? null : this.#version_content(project.id, row.kind, version_id),
         files: visible.map((file) => ({ blob_id: file.blob_id, role: file.role })),
       };
     });
@@ -1625,7 +1628,7 @@ export class ApiApp {
       project.id,
       edition.id,
     );
-    const manifest = this.#db.all<ManifestRow>(
+    const full_manifest = this.#db.all<ManifestRow>(
       `SELECT o.id AS object_id, o.kind AS kind, v.id AS version_id, v.version_no AS version_no
          FROM objects o
          JOIN object_versions v
@@ -1635,6 +1638,12 @@ export class ApiApp {
         ORDER BY o.id`,
       project.id,
     );
+    // File materials closed to AI are not in the AI's manifest at all (object_id, version_id, kind and the count are all identity);
+    // the human sees every object, the closed ones marked so an export to an AI app can leave them out.
+    const closed = new Set(
+      full_manifest.filter((entry) => entry.kind === "source" && material_version_denied(this.#db, project.id, entry.version_id)).map((entry) => entry.object_id),
+    );
+    const manifest = audience === "ai" ? full_manifest.filter((entry) => !closed.has(entry.object_id)) : full_manifest;
     const lease = this.#db.get<LeaseRow>(
       `SELECT lease_id, run_id, fence, expires_at
          FROM project_leases
@@ -1700,6 +1709,7 @@ export class ApiApp {
         kind: entry.kind,
         version_id: entry.version_id,
         version_no: Number(entry.version_no),
+        ...(closed.has(entry.object_id) ? { ai_access: "deny" } : {}),
       })),
       digest,
       materials,

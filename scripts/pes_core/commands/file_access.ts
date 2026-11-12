@@ -90,6 +90,61 @@ export function file_ai_denied(db: ReadDb, project_id: string, blob_id: string):
 }
 
 // ---------------------------------------------------------------------------
+// Exits that carry a material's identity without carrying its file (manifest, version read, change feed).
+// A material is a source object of kind file; its title defaults to the file name, so the object, its versions and the
+// events about them name the file. They follow the same decision (file_ai_denied) — no exit keeps its own copy.
+
+const MATERIAL_FILES_SQL = `SELECT vf.blob_id AS blob_id
+  FROM version_files vf
+  JOIN object_versions ov ON ov.project_id = vf.project_id AND ov.id = vf.version_id
+  JOIN sources s ON s.project_id = ov.project_id AND s.object_id = ov.object_id AND s.kind = 'file'
+ WHERE vf.project_id = ?`;
+
+/** True when this version belongs to a file material and carries at least one file closed to AI. */
+export function material_version_denied(db: ReadDb, project_id: string, version_id: string): boolean {
+  return db
+    .all<{ blob_id: string }>(`${MATERIAL_FILES_SQL} AND vf.version_id = ?`, project_id, version_id)
+    .some((row) => file_ai_denied(db, project_id, row.blob_id));
+}
+
+/** True when any version of this file material carries a file closed to AI (for events that name the object but no version). */
+export function material_object_denied(db: ReadDb, project_id: string, object_id: string): boolean {
+  return db
+    .all<{ blob_id: string }>(`${MATERIAL_FILES_SQL} AND ov.object_id = ?`, project_id, object_id)
+    .some((row) => file_ai_denied(db, project_id, row.blob_id));
+}
+
+export interface EventFacts {
+  object_id: string | null;
+  before_version_id: string | null;
+  after_version_id: string | null;
+  /** the stored payload text (JSON) */
+  payload: string;
+}
+
+/**
+ * Must this event be left out of a non-human caller's change feed? Yes when it names a closed file (blob_id or
+ * file_policy_id in the payload — upload, attach, material upload and the access switch itself) or an object/version of a
+ * closed file material. The cursor still moves past it (the caller never learns it was there).
+ */
+export function event_denied(db: ReadDb, project_id: string, event: EventFacts): boolean {
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(event.payload);
+  } catch {
+    payload = null;
+  }
+  if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const named = payload as Record<string, unknown>;
+    if (typeof named.blob_id === "string" && file_ai_denied(db, project_id, named.blob_id)) return true;
+    if (typeof named.file_policy_id === "string" && access_state_of_policy(db, project_id, named.file_policy_id)?.effective === "deny") return true;
+  }
+  const versions = [event.before_version_id, event.after_version_id].filter((id): id is string => id !== null);
+  if (versions.some((id) => material_version_denied(db, project_id, id))) return true;
+  return versions.length === 0 && event.object_id !== null && material_object_denied(db, project_id, event.object_id);
+}
+
+// ---------------------------------------------------------------------------
 // "My materials": source objects of kind file, each with the file of its current version
 
 export interface MaterialDto {
