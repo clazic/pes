@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { read_credential_actor } from "../actors.ts";
 import type { Db } from "../db.ts";
 import { ApiError } from "../errors.ts";
-import { delete_storage_file, read_storage_bytes, sha256_hex, storage_file_is_regular, write_storage_bytes } from "../files.ts";
+import { delete_unclaimed_storage_file, read_ready_blob, sha256_hex, storage_file_is_regular, write_storage_bytes } from "../files.ts";
 import { file_ai_denied, material_object_denied } from "./file_access.ts";
 import { insert_ready_blob } from "./files.ts";
 import {
@@ -384,19 +384,22 @@ function candidates_of(db: Db, project_id: string, entry: StageEntry): Candidate
   );
 }
 
+/**
+ * The text of a printed body. A body kept as a file (body_blob_id) must be read whole and match its recorded sha256 and size
+ * (the same rule as every other read of a blob, files.ts read_ready_blob). A missing, not ready, unreadable or changed file
+ * refuses the print: a fixed print never stands in an empty or wrong body for one it could not read.
+ */
 function body_text(runtime: CommandRuntime, project_id: string, candidate: Candidate): string {
   if (candidate.body_md !== null) return candidate.body_md;
-  if (candidate.body_blob_id === null || runtime.objects_dir === null) return "";
-  const blob = runtime.db.get<{ storage_key: string; state: string }>(
-    "SELECT storage_key, state FROM blobs WHERE project_id = ? AND id = ?",
-    project_id,
-    candidate.body_blob_id,
-  );
-  if (blob === undefined || blob.state !== "ready") return "";
+  if (candidate.body_blob_id === null) return "";
+  const unreadable = (): never => {
+    throw new ApiError("conflict", "a printed body file cannot be read", { reason: "print_body_unreadable", version_id: candidate.version_id });
+  };
+  if (runtime.objects_dir === null) unreadable();
   try {
-    return new TextDecoder("utf-8", { fatal: false }).decode(read_storage_bytes(runtime.objects_dir, project_id, blob.storage_key));
+    return new TextDecoder("utf-8", { fatal: false }).decode(read_ready_blob(runtime.db, runtime.objects_dir as string, project_id, candidate.body_blob_id).bytes);
   } catch {
-    return "";
+    return unreadable();
   }
 }
 
@@ -700,7 +703,11 @@ function run_prepare(runtime: CommandRuntime): CommandResult {
   };
 }
 
-/** One ready blob row plus its bytes in the object store; a file this call wrote is removed again if the command fails. */
+/**
+ * One ready blob row plus its bytes in the object store; a file this call wrote is removed again if the command fails.
+ * The removal runs after the ROLLBACK, so it re-checks under the write lock that no blob row (another connection's print of
+ * the same bytes, committed in between) now claims the file (files.ts delete_unclaimed_storage_file).
+ */
 function put_blob(runtime: CommandRuntime, project_id: string, actor_id: string, bytes: Uint8Array, media_type: string, name: string): string {
   const objects_dir = runtime.objects_dir;
   if (objects_dir === null) throw new ApiError("conflict", "no object store is configured");
@@ -712,7 +719,8 @@ function put_blob(runtime: CommandRuntime, project_id: string, actor_id: string,
   if (row === undefined || row.state !== "ready") throw new ApiError("conflict", "an equal blob exists but is not ready");
   if (!storage_file_is_regular(objects_dir, project_id, row.storage_key)) {
     write_storage_bytes(objects_dir, project_id, row.storage_key, bytes);
-    on_rollback(() => delete_storage_file(objects_dir, project_id, row.storage_key));
+    const db = runtime.db;
+    on_rollback(() => delete_unclaimed_storage_file(db, objects_dir, project_id, row.storage_key));
   }
   return blob.blob_id;
 }
