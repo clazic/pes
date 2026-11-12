@@ -32,19 +32,19 @@
         "data": {
           "set": {
             "id": "qset_01J9Z3K7QR",
-            "version_no": "2",
+            "version_no": 2,
             "form_key": "main"
           },
           "members": [
             {
               "question_id": "qst_01J9Z3K7QE",
               "version_id": "qvr_01J9Z3K7QF",
-              "position": 1
+              "position": 0
             },
             {
               "question_id": "qst_01J9Z3K7QB",
               "version_id": "qvr_01J9Z3K7QC",
-              "position": 2
+              "position": 1
             }
           ]
         },

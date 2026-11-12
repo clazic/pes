@@ -859,3 +859,37 @@ for (const spec of EXTRA) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// SEL-98 F1: question_sets.order 의 정상 응답 — set.version_no 는 숫자, members.position 은 0부터 연속,
+// members 의 순서는 요청한 순서와 같다. 픽스처의 예시와 실제 앱 응답이 같은 규칙을 지키는지 본다.
+
+function assert_order_data(data: any, requested: string[], where: string): void {
+  assert.equal(typeof data.set.version_no, "number", `${where}: set.version_no is a number`);
+  assert.deepEqual(
+    data.members.map((m: { position: number }) => m.position),
+    data.members.map((_: unknown, i: number) => i),
+    `${where}: members.position runs 0..n-1`,
+  );
+  assert.deepEqual(
+    data.members.map((m: { question_id: string }) => m.question_id),
+    requested,
+    `${where}: members follow the requested order`,
+  );
+}
+
+test("contract question_sets.order: the fixture's example body follows the same version_no and position rules", () => {
+  const c = (JSON.parse(readFileSync(new URL("question-set-order.json", FIXTURE_DIR), "utf8")) as Fixture).normal!;
+  assert_order_data(c.response.body.data, (c.request.body as { question_ids: string[] }).question_ids, "fixture normal");
+});
+
+test("contract question_sets.order: the real answer follows the same version_no and position rules", async () => {
+  await with_api(async (env) => {
+    const round = await open_round(env);
+    const first = await ask(env, round.stage_id, round.round_id);
+    const second = await ask(env, round.stage_id, round.round_id);
+    const requested = [second.question_id, first.question_id];
+    const data = assert_ok(await call(env, { method: "POST", path: P(env, `/question-sets/${second.set_id}/order`), auth: "owner", key: "idem_ord_real_01J9Z3K7Q2", body: { question_ids: requested } }), 201);
+    assert_order_data(data, requested, "real answer");
+  });
+});
