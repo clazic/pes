@@ -85,13 +85,9 @@ test("경계 사례(이력만 deny · 같은 blob 두 객체 · allow 되돌림 
     const a_v2 = await add("two-obj-a-v2", a_v1.object_id);
     const b = await upload_material(env, { blob_id: a_v2.blob_id });
     assert.equal(b.status, 201, `same blob reuse answered ${b.status} ${JSON.stringify(b.json)}`);
-    if (b.status === 201) {
-      const b_obj = (b.json.data as { object_id: string }).object_id;
-      closed = same([a_v1.object_id, b_obj], [a_v1.blob_id, a_v2.blob_id]);
-      assert.ok(closed.objects.has(a_v1.object_id) && !closed.objects.has(b_obj), "A (closed) hides, B (open) stays");
-    } else {
-      closed = same([a_v1.object_id], [a_v1.blob_id, a_v2.blob_id]);
-    }
+    const b_obj = (b.json.data as { object_id: string }).object_id;
+    closed = same([a_v1.object_id, b_obj], [a_v1.blob_id, a_v2.blob_id]);
+    assert.ok(closed.objects.has(a_v1.object_id) && !closed.objects.has(b_obj), "A (closed) hides, B (open) stays");
 
     // 3) allow 로 되돌림: deny 가 풀리면 두 길 모두 연다
     const back = await add("back-to-allow");
