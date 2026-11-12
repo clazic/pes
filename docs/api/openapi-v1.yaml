@@ -1313,7 +1313,7 @@ paths:
         (Node `--permission` without `--allow-worker`) the same refusal has `details.reason: worker_unavailable`. These two refusals are not answers about the file and
         write nothing (no row, blob, policy, receipt or event). `extract_timeout` and `extract_error` also say something about the moment, not the file: each such attempt is
         recorded (row, receipt, event) but does not answer the next request for the same file - it is tried again (`changed: true`). `too_large`, the damaged-file reasons,
-        `extracted`, `partial` and `unsupported` are final.
+        `extracted`, `partial` and `unsupported` are final. To try again send a NEW Idempotency-Key: the same key replays the first answer (`replayed: true`), also a recorded failure.
         While an extraction runs, the same server answers no other request (at most 15 s per extraction).
         Data `{extraction_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status: extracted|partial|unsupported|failed,
         reason, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings:[{code,message}], changed}`.
