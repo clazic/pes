@@ -431,6 +431,26 @@ test("9 만들기 뒤 앱 이동이 안 되면(204) 몇 초 뒤 sessionStorage �
   await expect(page).toHaveTitle("STOLEN:null");
 });
 
+// R2-3: 세션을 sessionStorage 에 못 넣는 브라우저(저장 거부)는 이동하지 않고 한 줄로 알린다 — 버튼은 되살아난다
+test("9 sessionStorage 에 못 쓰면 이동하지 않고 '터미널에서 pes open' 한 줄을 보이며 버튼을 되살린다", async ({ page }) => {
+  ws = await open_empty_home();
+  await page.addInitScript((k) => {
+    const real = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === k) throw new Error("synthetic quota");
+      return real.call(this, key, value);
+    };
+  }, STORE_KEY);
+  await open_with_code(page, ws);
+  await start_button(page).click();
+  await topic_input(page).fill("저장이 막힌 합성 주제");
+  await slug_input(page).fill("synthetic-store-refused");
+  await submit(page).click();
+  await expect(dialog(page).getByRole("alert")).toContainText("이 브라우저는 세션을 잠깐 넘길 수 없습니다 — 터미널에서 pes open 으로 여세요");
+  await expect(submit(page)).toBeEnabled();
+  expect(page.url(), "이동하지 않는다").not.toMatch(/\/p\//);
+});
+
 test("9 이동이 안 된 채 bfcache 복귀(pageshow persisted)여도 키를 지우고 pagehide 정리를 되살린다", async ({ page }) => {
   ws = await open_empty_home();
   seed_legacy_folder(ws);

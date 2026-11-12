@@ -266,9 +266,16 @@ button.primary,.now a.btn,.open a,.who.you { color:var(--on-accent); }
       }, 15000);
       const id = r.status >= 200 && r.status < 300 && isRec(r.json) && isRec(r.json.data) ? r.json.data.project_id : null;
       if (typeof id === 'string' && id !== '') {
-        handoff = { session: handoff.session, projects: { ...handoff.projects, [slug]: id } };
+        const next = { session: handoff.session, projects: { ...handoff.projects, [slug]: id } };
+        // 넘길 수 없으면(저장소 막힘) 이동하지 않는다 — 안내를 띄우고 버튼을 되살린다
+        if (!store(next)) {
+          setErr('이 브라우저는 세션을 잠깐 넘길 수 없습니다 — 터미널에서 pes open 으로 여세요');
+          flight = false;
+          go.disabled = false;
+          return;
+        }
+        handoff = next;
         leaving = true;
-        store(handoff);
         setTimeout(() => { leaving = false; unstore(); }, 3000);
         location.assign(`/p/${encodeURIComponent(slug)}/`);
         return;
