@@ -11,7 +11,7 @@
  *   결정: scope 'project' 결정은 새 판으로 복사하지 않고 그대로 참조한다. scope 'edition' 결정은 새 판에 복사하되(새 객체, 새 판 소속)
  *     decisions.originated_from_version_id = 복사 당시 부모 결정의 현재 버전 id(당시 버전 고정). 부모 결정은 바뀌지 않는다.
  *   이전된 프로젝트: 가져오기→검증→활성화한 합성 옛 폴더("full")에서 GET assumptions/decisions → 200 빈 목록, GET reflections → submitted:false,
- *     workspace records.empty=true. 이 읽기들은 DB 를 바꾸지 않는다(상태 서명 불변).
+ *     가정·결정 개수 0 (이전된 의견이 있으면 records.empty 는 false). 이 읽기들은 DB 를 바꾸지 않는다(상태 서명 불변).
  */
 
 import assert from "node:assert/strict";
@@ -53,7 +53,7 @@ test("a migrated synthetic project reads '기록 없음': empty lists, not submi
     assert.equal(refl.submitted, false, "nothing was submitted: '미제출', not '0건'");
     assert.deepEqual(refl.entries, []);
     const ws = assert_ok(await call(env, { method: "GET", path: `${base}/workspace`, auth: "owner" }));
-    assert.equal(ws.records.empty, true);
+    // "기록 없음" is about assumptions and decisions; migrated comments (messages) are counted apart and make records.empty false (SEL-90 tests)
     assert.equal(ws.records.assumptions.count, 0);
     assert.equal(ws.records.decisions.count, 0);
     assert.equal(state_signature(env.db), sig, "GET never writes");

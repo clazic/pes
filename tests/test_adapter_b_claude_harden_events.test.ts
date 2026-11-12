@@ -312,7 +312,7 @@ test("the tool ↔ route table in the contract is the requests the tools really 
   const table = read_doc("adapter-contract.md");
   const documented = new Map<string, Set<string>>();
   for (const line of table.split("\n")) {
-    const m = /^\| `(pes_[a-z]+)` \|.*\|\s*(`[^|]+)\|\s*$/.exec(line);
+    const m = /^\| `(pes_[a-z_]+)` \|.*\|\s*(`[^|]+)\|\s*$/.exec(line);
     if (m === null) continue;
     documented.set(m[1]!, new Set([...(m[2] ?? "").matchAll(/`((?:GET|POST) [^`]+)`/g)].map((r) => r[1]!)));
   }
@@ -353,6 +353,10 @@ test("the tool ↔ route table in the contract is the requests the tools really 
     await used("pes_release", { idempotency_key: "t-release" });
     await used("pes_claim", { run_id: run, idempotency_key: "t-claim-3" });
     await used("pes_complete", { status: "succeeded", idempotency_key: "t-complete" });
+    // SEL-93 U3a: the three proposal / reflection tools send exactly the documented routes
+    await used("pes_assumption_propose", { statement: "표 시험 가정", idempotency_key: "t-assume" });
+    await used("pes_decision_propose", { statement: "표 시험 결정", scope: "edition", idempotency_key: "t-decide" });
+    await used("pes_reflection_write", { target_round_id: env.round_id, entries: [], idempotency_key: "t-reflect" });
     await claim_fresh(client);
     await used("pes_cancel", { confirm: true, idempotency_key: "t-cancel" });
     for (const [tool, routes] of documented) {
