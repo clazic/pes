@@ -1,15 +1,17 @@
 // The PES MCP server for method-B adapters (stage 2 PR20a, SEL-53).
 //
 // An AI tool that runs on its own (Claude Code, and later Codex CLI / OpenCode TUI) talks to PES through
-// fourteen MCP tools. The server is a thin, closed bridge over the PES HTTP API:
+// sixteen MCP tools. The server is a thin, closed bridge over the PES HTTP API:
 //
 //   pes_context  pes_read  pes_claim  pes_submit  pes_ask  pes_wait  pes_complete  pes_heartbeat
 //   pes_release  pes_cancel  pes_receipt  pes_assumption_propose  pes_decision_propose  pes_reflection_write
+//   pes_thread_reply  pes_followup_propose
 //
 // - There is no tool for approving, reopening, sealing, changing policy, registering a project or minting a
 //   token: those are the human's. The same goes for judging an assumption and for adopting, superseding or
 //   revoking a decision (SEL-93): the three SEL-93 tools only PROPOSE or WRITE a reflection; PES refuses a
-//   token anything more (403 human_required). The tools can only do what the project agent token is allowed to do, and PES
+//   token anything more (403 human_required). SEL-99 adds a reply in a comment thread and a follow-up PROPOSAL; resolving a
+//   thread, adopting a follow-up and pinning an anchor are the person's and have no tool. The tools can only do what the project agent token is allowed to do, and PES
 //   (not this file) decides that.
 // - The server holds the agent token in memory and puts it only in the Authorization header of its own API
 //   calls. It never echoes it, and writes nothing but JSON-RPC lines to its output.
@@ -46,6 +48,9 @@ export const TOOL_NAMES = [
   "pes_assumption_propose",
   "pes_decision_propose",
   "pes_reflection_write",
+  // SEL-99 U4a: a reply in a comment thread and a follow-up proposal (both need the lease; neither resolves or adopts anything)
+  "pes_thread_reply",
+  "pes_followup_propose",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -149,10 +154,11 @@ const TOOLS: readonly ToolSpec[] = [
   {
     name: "pes_context",
     description:
-      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 한 번에 한 쪽(최대 50개) 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다.",
+      "프로젝트의 현재 상태(control_rev, digest, 단계, 자료 목록, 이전 프로젝트 참고자료 목록 references, 현재 lease)를 읽는다. 읽기만 한다. 실행을 아는 경우 그 실행에 온 답(inputs)도 한 번에 한 쪽(최대 50개) 함께 준다. 답이 더 있으면 inputs_has_more가 true이고, inputs_next_cursor를 inputs_cursor로 다시 주면 이어 읽는다. 답의 본문은 pes_read로 읽는다. reference_id를 주면 그 참고자료 하나(reference)와 고정한 버전의 본문(content, 인용 표시 포함)만 읽는다(run_id·inputs_cursor와 같이 주면 거절). content.items_status가 항목마다 ok·none(원본에 없음)·not_supported(아직 지원 안 함)·snapshot_content_unavailable(스냅숏 내용을 읽을 수 없음)을 알려 준다. 원본이 없거나 전송이 꺼져 있으면 content는 null이다. 이 읽기는 길이를 자르지 않는다.",
     properties: {
       run_id: { type: "string", description: "답(inputs)을 읽을 실행. 생략하면 마지막으로 아는 실행" },
       inputs_cursor: { type: "string", description: "앞선 pes_context가 준 inputs_next_cursor. 생략하면 처음부터" },
+      reference_id: { type: "string", description: "읽을 참고자료의 id(references[].id). 주면 상태 대신 그 참고자료만 읽는다" },
     },
     required: [],
     keyed: false,
@@ -337,6 +343,36 @@ const TOOLS: readonly ToolSpec[] = [
       },
     },
     required: ["target_round_id", "entries"],
+    keyed: true,
+  },
+  {
+    name: "pes_thread_reply",
+    description:
+      "댓글 스레드(구간 첨언 또는 질문 의견)에 답글을 단다. 실행 권한(lease)이 필요하다. 닫힌(해결된) 스레드에는 달 수 없다(thread_closed). 스레드를 해결하는 것은 사람만 한다.",
+    properties: {
+      ...GUARD_PROPERTIES,
+      thread_id: { type: "string", minLength: 1 },
+      body_md: { type: "string", minLength: 1 },
+      reply_to: { type: "string", description: "같은 스레드의 메시지 id(선택)" },
+    },
+    required: ["thread_id", "body_md"],
+    keyed: true,
+  },
+  {
+    name: "pes_followup_propose",
+    description:
+      "스레드의 후속 조치를 사람이 채택하도록 제안한다. 제안은 채택이 아니다: 글·스레드·반영 내역은 그대로이고 채택은 사람만 한다. kind: edit_text(proposed_body_md 필요), next_round_task·reopen_stage(target_stage_id 필요), none. 실행 권한(lease)이 필요하다.",
+    properties: {
+      ...GUARD_PROPERTIES,
+      thread_id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["edit_text", "next_round_task", "reopen_stage", "none"] },
+      description: { type: "string", minLength: 1 },
+      proposed_body_md: { type: "string", description: "edit_text: 새 본문(제안일 뿐, 현재 글은 바뀌지 않는다)" },
+      base_version_id: { type: "string", description: "edit_text: 기준 버전(생략하면 현재 버전)" },
+      target_stage_id: { type: "string" },
+      target_round_id: { type: "string" },
+    },
+    required: ["thread_id", "kind", "description"],
     keyed: true,
   },
 ];
@@ -594,6 +630,10 @@ export class McpServer {
         return this.#decision_propose(args, key);
       case "pes_reflection_write":
         return this.#reflection_write(args, key);
+      case "pes_thread_reply":
+        return this.#thread_reply(args, key);
+      case "pes_followup_propose":
+        return this.#followup_propose(args, key);
       default:
         return invalid("$.arguments", "알 수 없는 도구입니다.");
     }
@@ -640,6 +680,10 @@ export class McpServer {
         return { method: "POST", rest: "/decisions", body: {}, key };
       case "pes_reflection_write":
         return { method: "POST", rest: "/reflections", body: {}, key };
+      case "pes_thread_reply":
+        return { method: "POST", rest: "/threads/-/messages", body: {}, key };
+      case "pes_followup_propose":
+        return { method: "POST", rest: "/followups", body: {}, key };
       default:
         return { method: "POST", rest: "/claims", body: {}, key };
     }
@@ -658,8 +702,15 @@ export class McpServer {
   async #context(spec: ToolSpec, args: Record<string, unknown>): Promise<Outcome> {
     const unknown_arg = this.#unknown_arguments(spec, args);
     if (unknown_arg !== null) return unknown_arg;
-    const bad = this.#strings(args, ["run_id", "inputs_cursor"]);
+    const bad = this.#strings(args, ["run_id", "inputs_cursor", "reference_id"]);
     if (bad !== null) return bad;
+    if (typeof args.reference_id === "string") {
+      // a reference read takes no run: run_id / inputs_cursor given with it would be ignored silently, so refuse them
+      if (args.run_id !== undefined) return invalid("$.arguments.run_id", "reference_id 는 run_id 와 같이 쓸 수 없습니다. 참고자료 하나만 읽거나, run_id 로 상태와 답을 읽으세요.");
+      if (args.inputs_cursor !== undefined) return invalid("$.arguments.inputs_cursor", "reference_id 는 inputs_cursor 와 같이 쓸 수 없습니다. 참고자료 하나만 읽거나, inputs_cursor 로 답을 이어 읽으세요.");
+      // one reference, through the API read: it decides permission, the Go switches and a vanished original
+      return this.#from_api(await this.#send("GET", `/references/${encodeURIComponent(args.reference_id)}`, undefined, null));
+    }
     const context = this.#from_api(await this.#send("GET", "/context", undefined, null));
     if (!context.ok) return context;
     const run = typeof args.run_id === "string" ? args.run_id : (this.#guard?.run_id ?? this.#last_run_id);
@@ -881,6 +932,42 @@ export class McpServer {
 
   async #reflection_write(args: Record<string, unknown>, key: string): Promise<Outcome> {
     return this.#from_api(await this.#send("POST", "/reflections", this.#record_body(args), key));
+  }
+
+  /** A reply in a comment thread: written under the lease the server holds (PES refuses a token without it); it never resolves anything. */
+  async #thread_reply(args: Record<string, unknown>, key: string): Promise<Outcome> {
+    const bad = this.#strings(args, ["thread_id", "body_md", "reply_to"]);
+    if (bad !== null) return bad;
+    if (typeof args.thread_id !== "string") return invalid("$.arguments.thread_id", "thread_id가 필요합니다.");
+    if (typeof args.body_md !== "string") return invalid("$.arguments.body_md", "body_md가 필요합니다.");
+    const guard = this.#guard_of(args);
+    if (guard === null) return this.#no_guard("pes_thread_reply", args, key);
+    const body: Record<string, unknown> = { body_md: args.body_md, run_id: guard.run_id, lease_id: guard.lease_id, fence: guard.fence };
+    if (args.reply_to !== undefined) body.reply_to = args.reply_to;
+    return this.#from_api(await this.#send("POST", `/threads/${encodeURIComponent(args.thread_id)}/messages`, body, key));
+  }
+
+  /** A follow-up PROPOSAL for a thread; only a person adopts it (there is no tool for that). */
+  async #followup_propose(args: Record<string, unknown>, key: string): Promise<Outcome> {
+    const bad = this.#strings(args, ["thread_id", "kind", "description", "proposed_body_md", "base_version_id", "target_stage_id", "target_round_id"]);
+    if (bad !== null) return bad;
+    for (const name of ["thread_id", "kind", "description"]) {
+      if (typeof args[name] !== "string") return invalid(`$.arguments.${name}`, `${name}이 필요합니다.`);
+    }
+    const guard = this.#guard_of(args);
+    if (guard === null) return this.#no_guard("pes_followup_propose", args, key);
+    const body: Record<string, unknown> = {
+      origin_thread_id: args.thread_id,
+      kind: args.kind,
+      description: args.description,
+      run_id: guard.run_id,
+      lease_id: guard.lease_id,
+      fence: guard.fence,
+    };
+    for (const name of ["proposed_body_md", "base_version_id", "target_stage_id", "target_round_id"]) {
+      if (args[name] !== undefined) body[name] = args[name];
+    }
+    return this.#from_api(await this.#send("POST", "/followups", body, key));
   }
 
   async #receipt(args: Record<string, unknown>, key: string): Promise<Outcome> {

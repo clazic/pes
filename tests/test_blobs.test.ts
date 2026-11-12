@@ -139,11 +139,13 @@ const REPO = resolve(HERE, "..");
 const GRACE = 3_600_000; // 1 hour
 const ROLES = ["attachment", "image", "source", "rendered", "manifest"] as const;
 const FILE_COMMANDS = [
+  "file.ai_access_set",
   "file.attach_version",
   "file.complete_upload",
   "file.gc_orphans",
   "file.quarantine",
   "file.reserve_upload",
+  "file.upload",
 ] as const;
 
 function gc(env: Env, key: string, grace_ms = GRACE, svc = env.service): Promise<CommandOutcome> {
@@ -1067,7 +1069,7 @@ test("a failing reserve transaction leaves no blobs row and the same declaration
 // ---------------------------------------------------------------------------
 // Registry and static checks
 
-test("the five file commands are registered, project-scoped, not rev-bearing, with distinct actions, and nothing else is file.*", () => {
+test("the file commands are registered, project-scoped, not rev-bearing, with distinct actions, and nothing else is file.*", () => {
   const actions = new Set<string>();
   for (const name of FILE_COMMANDS) {
     const def = COMMANDS.get(name);

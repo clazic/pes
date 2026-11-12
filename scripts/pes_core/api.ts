@@ -51,7 +51,9 @@ import {
   submission_received_at,
   type ReceiptRow,
 } from "./commands/api_reads.ts";
+import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
+import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
 import { GO_MODEL_PREFIX, GO_PROVIDER, require_internal_ai_for_go_run } from "./commands/shared.ts";
 import { submit_results } from "./content.ts";
@@ -70,6 +72,15 @@ import {
   type PolicySnapshot,
 } from "./policy.ts";
 import { publish_set, revise_question, submit_answers } from "./questions.ts";
+import {
+  REFERENCE_SCOPE_ITEMS,
+  list_references,
+  read_reference,
+  reference_caller,
+  reference_row,
+  reference_view,
+  type ReferenceCaller,
+} from "./references.ts";
 import {
   cancel as run_cancel,
   claim as run_claim,
@@ -265,6 +276,9 @@ const FORMAT_VERSION = "1.0";
 /** SEL-102: a stored type outside the short safe list (see document_sandbox.ts — the same judgement as serve.ts static answers) is sent with this sandbox. */
 const FILE_DOCUMENT_CSP = "sandbox allow-scripts allow-popups allow-modals allow-downloads";
 
+/** SEL-115: the only stored types preview shows inline; everything else is offered as a download. */
+const PREVIEW_INLINE_TYPES: ReadonlySet<string> = new Set(["text/plain", "image/png", "application/pdf"]);
+
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_WAIT_MS = 25_000;
 const MIN_POLL_INTERVAL_MS = 1000;
@@ -335,6 +349,13 @@ const CREATED_ACTIONS = new Set([
   "decision.superseded",
   "decision.revoked",
   "reflection.created",
+  "reference.attached",
+  "file.material_uploaded",
+  "annotation.create",
+  "annotation.reanchor",
+  "thread.reply",
+  "thread.resolve",
+  "followup.propose",
 ]);
 const ACCEPTED_ACTIONS = new Set(["run.interrupted", "run.cancelled"]);
 
@@ -599,7 +620,30 @@ export class ApiApp {
       },
       route("GET", `${P}/context`, "context.get", {
         who: "any", scope: "context:read", go: true,
-        act: async (_r, project) => this.#context(project),
+        act: async (_r, project, auth) => this.#context(project, auth),
+      }),
+      // SEL-113 REF1a: reference material from earlier projects. Attaching, refreshing and detaching are the owner session's
+      // (403 human_required for a token); reading is a person's or a context:read token's, and every read goes through
+      // references.ts decide() — permission to the source, the stricter Go switch, original gone.
+      route("GET", `${P}/references`, "references.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (_r, project, auth) => this.#references_list(project, auth),
+      }),
+      route("POST", `${P}/references`, "references.create", {
+        who: "human",
+        act: async (r, project, auth) => this.#reference_attach(r, project, auth),
+      }),
+      route("GET", `${P}/references/{ref}`, "references.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project, auth) => this.#reference_get(r, project, auth),
+      }),
+      route("POST", `${P}/references/{ref}/refresh`, "references.refresh", {
+        who: "human",
+        act: async (r, project, auth) => this.#reference_refresh(r, project, auth),
+      }),
+      route("POST", `${P}/references/{ref}/detach`, "references.detach", {
+        who: "human",
+        act: async (r, project, auth) => this.#reference_detach(r, project, auth),
       }),
       route("GET", `${P}/objects/{o}/versions/{v}`, "object.version.get", {
         who: "any", scope: "context:read", go: true,
@@ -709,6 +753,36 @@ export class ApiApp {
         who: "any", scope: "run:submit",
         act: async (r, project, auth) => this.#thread_message(r, project, auth),
       }),
+      // SEL-99 U4a: selection comments and follow-ups. A token (with a lease) may comment, reply, re-judge an anchor and PROPOSE;
+      // resolving a thread, adopting a follow-up and pinning an anchor to a stretch are the owner session's (403 human_required).
+      route("GET", `${P}/threads`, "threads.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#threads_read(r, project),
+      }),
+      route("GET", `${P}/threads/{t}`, "threads.get", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#thread_read(r, project),
+      }),
+      route("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create", {
+        who: "human",
+        act: async (r, project, auth) => this.#thread_resolve(r, project, auth),
+      }),
+      route("POST", `${P}/threads/{t}/reanchor`, "threads.reanchor", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#thread_reanchor(r, project, auth),
+      }),
+      route("GET", `${P}/followups`, "followups.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (r, project) => this.#followups_read(r, project),
+      }),
+      route("POST", `${P}/followups`, "followups.create", {
+        who: "any", scope: "run:submit",
+        act: async (r, project, auth) => this.#followup_create(r, project, auth),
+      }),
+      route("POST", `${P}/followups/{f}/apply`, "followups.apply", {
+        who: "human",
+        act: async (r, project, auth) => this.#followup_apply(r, project, auth),
+      }),
       route("POST", `${P}/submissions`, "submissions.create", {
         who: "human",
         act: async (r, project, auth) => this.#submissions(r, project, auth),
@@ -773,13 +847,28 @@ export class ApiApp {
       }),
       route("GET", `${P}/files/{b}/content`, "files.content", {
         who: "any", scope: "file:read", go: true,
-        act: async (r, project, auth) => this.#file_read(r, project, auth),
+        act: async (r, project, auth) => this.#file_read(r, project, auth, false),
+      }),
+      route("GET", `${P}/files/{b}/preview`, "files.preview", {
+        who: "any", scope: "file:read", go: true,
+        act: async (r, project, auth) => this.#file_read(r, project, auth, true),
+      }),
+      // SEL-115 MAT1a: the user's own materials. Anyone with file:write may add one; the AI-reference switch of a file is the owner session's.
+      route("POST", `${P}/materials`, "materials.create", {
+        who: "any", scope: "file:write",
+        act: async (r, project, auth) => this.#material_upload(r, project, auth),
+      }),
+      route("GET", `${P}/materials`, "materials.list", {
+        who: "any", scope: "context:read", go: true,
+        act: async (_r, project, auth) => this.#materials_list(project, auth),
+      }),
+      route("POST", `${P}/file-policies/{fp}/ai-access`, "file_policies.ai_access.set", {
+        who: "session",
+        act: async (r, project, auth) => this.#file_ai_access_set(r, project, auth),
       }),
       unsupported("POST", `${P}/exports`, "exports.create"),
-      unsupported("POST", `${P}/threads/{t}/resolutions`, "threads.resolutions.create"),
       unsupported("POST", `${P}/editions`, "editions.create"),
       unsupported("POST", `${P}/agent-tokens`, "agent_tokens.create"),
-      unsupported("POST", `${P}/followups/{f}/apply`, "followups.apply"),
       unsupported("DELETE", P, "projects.delete"),
     ];
   }
@@ -1371,9 +1460,115 @@ export class ApiApp {
   // -------------------------------------------------------------------------
   // context, versions, changes
 
-  async #context(project: ProjectRow): Promise<HandlerResult> {
-    const data = read_tx(this.#db, () => this.#context_data(this.#project(project.id)));
+  async #context(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const data = read_tx(this.#db, () => ({
+      ...(this.#context_data(this.#project(project.id), this.#audience(auth)) as Record<string, unknown>),
+      references: list_references(this.#db, project.id, this.#reference_caller(auth)),
+    }));
     return { status: 200, data };
+  }
+
+  // -------------------------------------------------------------------------
+  // reference material (SEL-113 REF1a)
+
+  #reference_caller(auth: AuthInfo): ReferenceCaller {
+    return reference_caller(this.#db, auth.actor_id, !auth.session);
+  }
+
+  async #references_list(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const references = read_tx(this.#db, () => list_references(this.#db, project.id, this.#reference_caller(auth)));
+    return { status: 200, data: { references } };
+  }
+
+  async #reference_get(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const reference_id = request.params[1] as string;
+    try {
+      const data = read_tx(this.#db, () => read_reference(this.#db, project.id, reference_id, this.#reference_caller(auth)));
+      return { status: 200, data };
+    } catch (error) {
+      throw fail_from(error);
+    }
+  }
+
+  /** The row as the owner's session reads it, after a write; a replay whose row is gone since is a conflict. */
+  #reference_after_write(project: ProjectRow, auth: AuthInfo, reference_id: unknown): Record<string, unknown> {
+    const view = read_tx(this.#db, () => {
+      const row = typeof reference_id === "string" ? reference_row(this.#db, project.id, reference_id) : undefined;
+      return row === undefined ? undefined : reference_view(this.#db, row, this.#reference_caller(auth));
+    });
+    if (view === undefined) throw new Fail("conflict");
+    return view;
+  }
+
+  /** POST P/references — the owner session pins a snapshot of another project as reference material. */
+  async #reference_attach(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["referenced_project_id", "source_snapshot_id", "scope", "source_label"]);
+    const referenced = body.referenced_project_id;
+    if (typeof referenced !== "string" || referenced.length === 0 || !referenced.isWellFormed()) validation("$.body.referenced_project_id");
+    if (referenced === project.id) validation("$.body.referenced_project_id", { reason: "self_reference" });
+    const payload: Record<string, unknown> = { referenced_project_id: referenced };
+    if (body.source_snapshot_id !== undefined) {
+      const snapshot = body.source_snapshot_id;
+      if (typeof snapshot !== "string" || snapshot.length === 0 || !snapshot.isWellFormed()) validation("$.body.source_snapshot_id");
+      payload.source_snapshot_id = snapshot;
+    }
+    if (body.scope !== undefined) {
+      const scope = body.scope;
+      if (!Array.isArray(scope) || scope.length === 0) validation("$.body.scope");
+      const seen = new Set<string>();
+      for (const entry of scope) {
+        if (typeof entry !== "string" || !REFERENCE_SCOPE_ITEMS.includes(entry) || seen.has(entry)) validation("$.body.scope");
+        seen.add(entry);
+      }
+      payload.scope = scope;
+    }
+    if (body.source_label !== undefined) {
+      const label = body.source_label;
+      if (typeof label !== "string" || label.trim().length === 0 || label.length > 200 || !label.isWellFormed()) validation("$.body.source_label");
+      payload.source_label = label;
+    }
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "reference.attach", payload));
+    const result = result_record(out.result);
+    return { status: 201, data: { reference: this.#reference_after_write(project, auth, result.reference_id) }, replayed: out.replayed };
+  }
+
+  /** POST P/references/{ref}/refresh — the owner session moves the pin to another snapshot (default: the newest). */
+  async #reference_refresh(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["source_snapshot_id", "base_rev"]);
+    const payload: Record<string, unknown> = { reference_id: request.params[1] as string };
+    if (body.source_snapshot_id !== undefined) {
+      const snapshot = body.source_snapshot_id;
+      if (typeof snapshot !== "string" || snapshot.length === 0 || !snapshot.isWellFormed()) validation("$.body.source_snapshot_id");
+      payload.source_snapshot_id = snapshot;
+    }
+    const base_rev = optional_decimal(body, "base_rev");
+    if (base_rev !== undefined) payload.base_rev = base_rev;
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "reference.refresh", payload),
+      (error) => targeted(error, { rev_conflict: "$.body.base_rev" }),
+    );
+    const result = result_record(out.result);
+    return { status: 200, data: { reference: this.#reference_after_write(project, auth, result.reference_id) }, replayed: out.replayed };
+  }
+
+  /** POST P/references/{ref}/detach — the owner session removes the reference. */
+  async #reference_detach(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, []);
+    const out = await this.#exec(() =>
+      this.#service.execute(this.#ctx(project, auth, key), "reference.detach", { reference_id: request.params[1] as string }),
+    );
+    return { status: 200, data: out.result, replayed: out.replayed };
+  }
+
+  /** Who is reading: the human owner sees every file, anyone else only what the AI-access rule lets through (commands/file_access.ts). */
+  #audience(auth: AuthInfo): Audience {
+    return auth.kind === "human" ? "human" : "ai";
   }
 
   #version_content(project_id: string, kind: string, version_id: string): unknown {
@@ -1564,6 +1759,12 @@ export class ApiApp {
         version_id,
       );
       const visible = auth.kind === "human" ? files : files.filter((f) => !this.#blob_denied(project.id, f.blob_id));
+      // A closed file material's own text (title defaults to the file name, and a later version inherits it) and content_hash (it hashes
+      // the file's sha256) name the file: a non-human caller who knows the ids is told "forbidden", the same answer as files/{b}/content
+      // for a closed blob. The unit is the material object: a closed file in ANY version closes every version of it.
+      if (auth.kind !== "human" && row.kind === "source" && material_object_denied(this.#db, project.id, object_id)) {
+        throw new Fail("forbidden", { target: "$.path.version_id" });
+      }
       return {
         project_id: project.id,
         object_id: row.object_id,
@@ -1579,7 +1780,7 @@ export class ApiApp {
     return { status: 200, data };
   }
 
-  #context_data(project: ProjectRow): unknown {
+  #context_data(project: ProjectRow, audience: Audience = "ai"): unknown {
     const policy: PolicySnapshot = current_policy(this.#db, project.id);
     if (project.active_edition_id === null) {
       throw new ApiError("conflict", "the project has no active edition");
@@ -1598,7 +1799,7 @@ export class ApiApp {
       project.id,
       edition.id,
     );
-    const manifest = this.#db.all<ManifestRow>(
+    const full_manifest = this.#db.all<ManifestRow>(
       `SELECT o.id AS object_id, o.kind AS kind, v.id AS version_id, v.version_no AS version_no
          FROM objects o
          JOIN object_versions v
@@ -1608,6 +1809,12 @@ export class ApiApp {
         ORDER BY o.id`,
       project.id,
     );
+    // File materials closed to AI are not in the AI's manifest at all (object_id, version_id, kind and the count are all identity);
+    // the human sees every object, the closed ones marked so an export to an AI app can leave them out.
+    const closed = new Set(
+      full_manifest.filter((entry) => entry.kind === "source" && material_object_denied(this.#db, project.id, entry.object_id)).map((entry) => entry.object_id),
+    );
+    const manifest = audience === "ai" ? full_manifest.filter((entry) => !closed.has(entry.object_id)) : full_manifest;
     const lease = this.#db.get<LeaseRow>(
       `SELECT lease_id, run_id, fence, expires_at
          FROM project_leases
@@ -1617,7 +1824,12 @@ export class ApiApp {
       this.#now(),
     );
 
+    const materials = material_rows(this.#db, project.id, audience);
+    // The digest follows what AI may see, so switching a file to deny (or back) is a visible change; a project without materials hashes as before.
+    // The digest is per audience: `manifest` is the caller's own list (an AI caller's leaves out closed materials), so with a closed material the human digest and the AI digest differ.
+    const ai_materials = audience === "ai" ? materials : material_rows(this.#db, project.id, "ai");
     const digest_source = JSON.stringify({
+      ...(ai_materials.length === 0 ? {} : { materials: ai_materials.map((m) => [m.version_id, m.blob_id, m.role]) }),
       project_id: project.id,
       control_rev: project.control_rev.toString(),
       policy_rev: String(policy.policy_rev),
@@ -1669,8 +1881,10 @@ export class ApiApp {
         kind: entry.kind,
         version_id: entry.version_id,
         version_no: Number(entry.version_no),
+        ...(closed.has(entry.object_id) ? { ai_access: "deny" } : {}),
       })),
       digest,
+      materials,
       lease:
         lease === undefined
           ? null
@@ -1941,6 +2155,7 @@ export class ApiApp {
       const meta = db_meta(this.#db);
       if (given !== null && (given.d !== meta.database_instance_id || given.e !== meta.cursor_epoch)) {
         const fresh = this.#project(project.id);
+        // Default audience "ai": this snapshot.digest is the AI-audience digest even when the caller is a human (digest is per audience).
         const context = this.#context_data(fresh) as {
           control_rev: string;
           digest: string;
@@ -3377,18 +3592,96 @@ export class ApiApp {
     return value;
   }
 
-  /** SEL-90: POST P/threads — a comment thread on a question (annotation threads stay 501 until U4a). */
+  /**
+   * The API error of a thread / follow-up core refusal: the reasons the core carries (quote_not_found, thread_closed, basis_changed ...)
+   * become the documented codes, targets and next actions. `no_text_target` names the field when a version has no text to quote.
+   */
+  #thread_failure(error: unknown, no_text_target = "$.body.target_version_id"): Fail {
+    if (error instanceof ApiError && error.code === "invalid_payload" && is_record(error.details)) {
+      const reason = error.details.reason;
+      const target_version_id = error.details.target_version_id;
+      switch (reason) {
+        case "quote_not_found":
+        case "ambiguous_quote":
+          return new Fail("validation_failed", {
+            target: "$.body.anchor.exact_quote",
+            details: { reason, target_version_id: typeof target_version_id === "string" ? target_version_id : null },
+            next_action: "choose_exact_quote",
+          });
+        case "anchor_length_mismatch":
+          return new Fail("validation_failed", { target: "$.body.anchor", details: { reason } });
+        case "target_not_text":
+          return new Fail("validation_failed", { target: "$.body.target_object_id", details: { reason } });
+        case "no_text":
+          return new Fail("validation_failed", { target: no_text_target, details: { reason } });
+        case "range_empty":
+        case "range_outside":
+          return new Fail("validation_failed", { target: "$.body.end_cp", details: { reason } });
+        case "followup_kind":
+          return new Fail("validation_failed", { target: "$.body.followup.kind", details: { reason } });
+        case "followup_required":
+        case "followup_not_allowed":
+          return new Fail("validation_failed", { target: "$.body.followup", details: { reason } });
+        case "no_anchor":
+          return new Fail("validation_failed", { target: "$.path.thread_id", details: { reason } });
+        case "no_proposed_text":
+          return new Fail("validation_failed", { target: "$.path.followup_id", details: { reason } });
+        default:
+          break;
+      }
+    }
+    const failure = fail_from(error);
+    switch (failure.code) {
+      case "thread_closed":
+      case "already_resolved":
+        return new Fail(failure.code, { target: "$.path.thread_id", details: failure.details });
+      case "basis_changed":
+        return new Fail(failure.code, { target: "$.body.base_version_id", details: failure.details });
+      default:
+        return failure;
+    }
+  }
+
+  /** The anchor of a selection comment, as the API reads it (shape only; where the quote stands is the core's). */
+  #anchor_input(value: unknown): Record<string, unknown> {
+    if (!is_record(value)) invalid("$.body.anchor");
+    for (const key of Object.keys(value)) {
+      if (!["exact_quote", "prefix", "suffix", "start_cp", "end_cp"].includes(key)) invalid(`$.body.anchor.${key}`);
+    }
+    const quote = value.exact_quote;
+    if (typeof quote !== "string" || !quote.isWellFormed()) invalid("$.body.anchor.exact_quote");
+    if (quote.trim().length === 0) validation("$.body.anchor.exact_quote", { reason: "empty" });
+    const out: Record<string, unknown> = { exact_quote: quote };
+    for (const field of ["prefix", "suffix"]) {
+      const text = value[field];
+      if (text === undefined || text === null) continue;
+      if (typeof text !== "string" || !text.isWellFormed()) invalid(`$.body.anchor.${field}`);
+      out[field] = text;
+    }
+    for (const field of ["start_cp", "end_cp"]) {
+      const position = value[field];
+      if (position === undefined || position === null) continue;
+      if (typeof position !== "number" || !Number.isSafeInteger(position) || position < 0) invalid(`$.body.anchor.${field}`);
+      out[field] = position;
+    }
+    if ((out.start_cp === undefined) !== (out.end_cp === undefined)) invalid("$.body.anchor");
+    return out;
+  }
+
+  /** SEL-90 / SEL-99: POST P/threads — a comment thread on a question (question_comment) or on a stretch of a text (annotation). */
   async #thread_create(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
-    if (body.context_kind === "annotation") throw new Fail("not_supported");
     reject_unknown(
       body,
-      ["target_object_id", "target_version_id", "context_kind", "initial_message", "run_id", "lease_id", "fence"]);
+      ["target_object_id", "target_version_id", "context_kind", "anchor", "initial_message", "run_id", "lease_id", "fence"]);
     const target_object_id = require_text(body, "target_object_id");
     const target_version_id = optional_text(body, "target_version_id");
     if (body.context_kind === undefined) invalid_field("context_kind");
-    if (body.context_kind !== "question_comment") validation("$.body.context_kind");
+    if (body.context_kind !== "question_comment" && body.context_kind !== "annotation") validation("$.body.context_kind");
+    const annotation = body.context_kind === "annotation";
+    if (!annotation && body.anchor !== undefined) invalid("$.body.anchor");
+    const anchor = annotation ? this.#anchor_input(body.anchor) : null;
     const initial = body.initial_message;
     if (!is_record(initial)) invalid("$.body.initial_message");
     for (const field of Object.keys(initial)) {
@@ -3396,6 +3689,24 @@ export class ApiApp {
     }
     const body_md = this.#comment_body(initial.body_md, "$.body.initial_message.body_md");
     const guard = this.#guard_fields(body);
+    if (anchor !== null) {
+      const payload: Record<string, unknown> = { target_object_id, body_md, anchor };
+      if (target_version_id !== undefined) payload.target_version_id = target_version_id;
+      if (guard !== null && !auth.session) Object.assign(payload, guard);
+      const out = await this.#exec(
+        () => this.#service.execute(this.#ctx(project, auth, key), "annotation.create", payload),
+        (error) => this.#thread_failure(error),
+      );
+      const result = result_record(out.result);
+      return {
+        status: 201,
+        data: {
+          thread: { id: result.thread_id, state: "open", anchor_id: result.anchor_id, anchor_status: result.anchor_status },
+          message: { id: result.message_id, version_no: "1" },
+        },
+        replayed: out.replayed,
+      };
+    }
     const payload: Record<string, unknown> = { question_id: target_object_id, body_md };
     if (target_version_id !== undefined) payload.question_version_id = target_version_id;
     if (guard !== null && !auth.session) Object.assign(payload, guard);
@@ -3411,7 +3722,7 @@ export class ApiApp {
     };
   }
 
-  /** SEL-90: POST P/threads/{t}/messages — one more message in a question's comment thread. */
+  /** SEL-90 / SEL-99: POST P/threads/{t}/messages — one more message in a thread (a question's comment thread, or a selection comment). */
   async #thread_message(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
     const key = this.#require_key(request);
     const body = this.#json_body(request);
@@ -3420,22 +3731,247 @@ export class ApiApp {
     const body_md = this.#comment_body(body.body_md, "$.body.body_md");
     const reply_to = optional_text(body, "reply_to");
     const guard = this.#guard_fields(body);
-    const thread = this.#db.get<{ target_object_id: string; context_kind: string }>(
-      "SELECT target_object_id, context_kind FROM threads WHERE project_id = ? AND object_id = ?",
-      project.id,
-      thread_id,
-    );
-    if (thread === undefined || thread.context_kind !== "question_comment") throw new Fail("not_found");
-    const payload: Record<string, unknown> = { question_id: thread.target_object_id, thread_id, body_md };
+    // the same route the A thread.reply tool takes (thread_reply_route): one command per kind of thread
+    const route = thread_reply_route(this.#db, project.id, thread_id);
+    if (route === undefined) throw new Fail("not_found");
+    if (route.command === "thread.reply") {
+      const payload: Record<string, unknown> = { thread_id, body_md };
+      if (reply_to !== undefined) payload.reply_to = reply_to;
+      if (guard !== null && !auth.session) Object.assign(payload, guard);
+      const out = await this.#exec(
+        () => this.#service.execute(this.#ctx(project, auth, key), "thread.reply", payload),
+        (error) => this.#thread_failure(error),
+      );
+      const result = result_record(out.result);
+      return {
+        status: 201,
+        data: { thread_id, message: { id: result.message_id, version_no: "1", author_actor_id: auth.actor_id } },
+        replayed: out.replayed,
+      };
+    }
+    const payload: Record<string, unknown> = { question_id: route.question_id, thread_id, body_md };
     if (reply_to !== undefined) payload.reply_to = reply_to;
     if (guard !== null && !auth.session) Object.assign(payload, guard);
-    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload));
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "question.comment_add", payload),
+      (error) => this.#thread_failure(error),
+    );
     const result = result_record(out.result);
     return {
       status: 201,
       data: { message: { id: result.message_id, version_no: "1", thread_id } },
       replayed: out.replayed,
     };
+  }
+
+  /** SEL-99: POST P/threads/{t}/resolutions — the owner closes a thread; a change to be made becomes a PROPOSED follow-up (resolved is not applied). */
+  async #thread_resolve(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["resolution", "reason", "followup"]);
+    const thread_id = request.params[1] as string;
+    const resolution = body.resolution;
+    if (typeof resolution !== "string") invalid_field("resolution");
+    if (!["edit_text", "next_round_task", "reopen_stage", "none"].includes(resolution)) validation("$.body.resolution");
+    const reason = body.reason;
+    if (typeof reason !== "string" || !reason.isWellFormed()) invalid_field("reason");
+    if (reason.trim().length === 0) validation("$.body.reason", { reason: "empty" });
+    const payload: Record<string, unknown> = { thread_id, resolution, reason };
+    const raw = body.followup;
+    if (raw !== undefined && raw !== null) {
+      if (!is_record(raw)) invalid("$.body.followup");
+      for (const field of Object.keys(raw)) {
+        if (!["kind", "description", "proposed_body_md", "target_version_id", "target_stage_id", "target_round_id"].includes(field)) invalid(`$.body.followup.${field}`);
+      }
+      if (typeof raw.kind !== "string") invalid("$.body.followup.kind");
+      if (raw.kind !== resolution) validation("$.body.followup.kind", { reason: "followup_kind" });
+      for (const [field, value] of Object.entries(raw)) {
+        if (value !== null && (typeof value !== "string" || !value.isWellFormed())) invalid(`$.body.followup.${field}`);
+      }
+      payload.followup = raw;
+    }
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "thread.resolve", payload),
+      (error) => this.#thread_failure(error),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        thread: { id: thread_id, state: "resolved" },
+        followup: typeof result.followup_id === "string" ? { id: result.followup_id, state: "proposed" } : null,
+        applied: false,
+        note: "해결됨과 반영됨은 다릅니다.",
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-99: POST P/threads/{t}/reanchor — judge the anchor again (a person or a leased agent), or pin it to a stretch (the owner session only). */
+  async #thread_reanchor(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["version_id", "start_cp", "end_cp", "run_id", "lease_id", "fence"]);
+    const thread_id = request.params[1] as string;
+    const given = (field: string): boolean => body[field] !== undefined && body[field] !== null;
+    if ((given("start_cp") || given("end_cp")) && !auth.session) {
+      throw new Fail("human_required", { target: "$.headers.Authorization", details: { actor_kind: auth.kind, required: "human_owner" } });
+    }
+    const payload: Record<string, unknown> = { thread_id };
+    const version_id = optional_text(body, "version_id");
+    if (version_id !== undefined) payload.version_id = version_id;
+    for (const field of ["start_cp", "end_cp"]) {
+      if (!given(field)) continue;
+      const value = body[field];
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid_field(field);
+      payload[field] = value;
+    }
+    const guard = this.#guard_fields(body);
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "annotation.reanchor", payload),
+      (error) => this.#thread_failure(error, "$.body.version_id"),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: {
+        thread_id,
+        anchor: {
+          id: result.anchor_id,
+          status: result.status,
+          start_cp: result.start_cp,
+          end_cp: result.end_cp,
+          candidates: result.candidates,
+          evaluated_version_id: result.evaluated_version_id,
+          resolution_id: result.resolution_id,
+          confirmed_by_actor_id: result.confirmed_by_actor_id,
+        },
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-99: POST P/followups — propose a follow-up of a thread (a person or a leased agent; a proposal is never an adoption). */
+  async #followup_create(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, [
+      "origin_thread_id",
+      "kind",
+      "description",
+      "proposed_body_md",
+      "base_version_id",
+      "target_stage_id",
+      "target_round_id",
+      "run_id",
+      "lease_id",
+      "fence",
+    ]);
+    const origin_thread_id = require_text(body, "origin_thread_id");
+    const kind = body.kind;
+    if (typeof kind !== "string") invalid_field("kind");
+    if (!["edit_text", "next_round_task", "reopen_stage", "none"].includes(kind)) validation("$.body.kind");
+    const description = body.description;
+    if (typeof description !== "string" || !description.isWellFormed()) invalid_field("description");
+    if (description.trim().length === 0) validation("$.body.description", { reason: "empty" });
+    const payload: Record<string, unknown> = { origin_thread_id, kind, description };
+    for (const field of ["proposed_body_md", "base_version_id", "target_stage_id", "target_round_id"]) {
+      const value = body[field];
+      if (value === undefined || value === null) continue;
+      if (typeof value !== "string" || !value.isWellFormed()) invalid_field(field);
+      payload[field] = value;
+    }
+    const guard = this.#guard_fields(body);
+    if (guard !== null && !auth.session) Object.assign(payload, guard);
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "followup.propose", payload),
+      (error) => this.#thread_failure(error),
+    );
+    const result = result_record(out.result);
+    return {
+      status: 201,
+      data: { followup: { id: result.followup_id, kind: result.kind, state: "proposed", version_no: "1", base_version_id: result.base_version_id ?? null } },
+      replayed: out.replayed,
+    };
+  }
+
+  /** SEL-99: POST P/followups/{f}/apply — the owner adopts a follow-up; an edit becomes a new version of the text (the thread is not resolved by it). */
+  async #followup_apply(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["base_version_id", "expected_rev"]);
+    const followup_id = request.params[1] as string;
+    const base_version_id = require_text(body, "base_version_id");
+    const expected_rev = parse_decimal(body.expected_rev, "$.body.expected_rev");
+    const out = await this.#exec(
+      () => this.#service.execute(this.#ctx(project, auth, key), "followup.apply", { followup_id, base_version_id, expected_rev }),
+      (error) => {
+        const failure = this.#thread_failure(error);
+        return failure.code === "rev_conflict"
+          ? new Fail("rev_conflict", { target: "$.body.expected_rev", details: failure.details, next_action: "reread_followup" })
+          : failure;
+      },
+    );
+    const result = result_record(out.result);
+    return {
+      status: 200,
+      data: {
+        followup: { id: followup_id, state: "applied", applied_tx_id: result.applied_tx_id, result_version_id: result.result_version_id ?? null },
+        thread: typeof result.thread_id === "string" ? { id: result.thread_id, state: result.thread_state } : null,
+      },
+      replayed: out.replayed,
+    };
+  }
+
+  /** GET P/threads?target_object_id=&context_kind=&state= */
+  async #threads_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const filter: { target_object_id?: string; context_kind?: string; state?: string } = {};
+    const target = request.query.get("target_object_id");
+    if (target !== null) {
+      if (target.length === 0) invalid("$.query.target_object_id");
+      filter.target_object_id = target;
+    }
+    const context_kind = request.query.get("context_kind");
+    if (context_kind !== null) {
+      if (!THREAD_CONTEXT_KINDS.includes(context_kind)) invalid("$.query.context_kind");
+      filter.context_kind = context_kind;
+    }
+    const state = request.query.get("state");
+    if (state !== null) {
+      if (!THREAD_STATES.includes(state)) invalid("$.query.state");
+      filter.state = state;
+    }
+    return { status: 200, data: { threads: read_tx(this.#db, () => thread_rows(this.#db, project.id, filter)) } };
+  }
+
+  /** GET P/threads/{t} */
+  async #thread_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const thread_id = request.params[1] as string;
+    const detail = read_tx(this.#db, () => thread_detail(this.#db, project.id, thread_id));
+    if (detail === undefined) throw new Fail("not_found", { target: "$.path.thread_id" });
+    return { status: 200, data: detail };
+  }
+
+  /** GET P/followups?thread_id=&state=&kind= */
+  async #followups_read(request: RouteRequest, project: ProjectRow): Promise<HandlerResult> {
+    const filter: { thread_id?: string; state?: string; kind?: string } = {};
+    const thread_id = request.query.get("thread_id");
+    if (thread_id !== null) {
+      if (thread_id.length === 0) invalid("$.query.thread_id");
+      filter.thread_id = thread_id;
+    }
+    const state = request.query.get("state");
+    if (state !== null) {
+      if (!FOLLOWUP_STATES.includes(state)) invalid("$.query.state");
+      filter.state = state;
+    }
+    const kind = request.query.get("kind");
+    if (kind !== null) {
+      if (!FOLLOWUP_KINDS.includes(kind)) invalid("$.query.kind");
+      filter.kind = kind;
+    }
+    return { status: 200, data: { followups: read_tx(this.#db, () => followup_rows(this.#db, project.id, filter)) } };
   }
 
   // -------------------------------------------------------------------------
@@ -3653,23 +4189,40 @@ export class ApiApp {
     return { status: 200, data: out.result, replayed: out.replayed };
   }
 
-  /** A deny in the current policy or in the latest history row blocks AI access. */
+  /** A deny in the current policy or in the latest history row blocks AI access — one rule for every exit (commands/file_access.ts). */
   #blob_denied(project_id: string, blob_id: string): boolean {
-    const row = this.#db.get<{ current: string; latest: string | null }>(
-      `SELECT p.ai_access AS current,
-              (SELECT a.ai_access FROM file_ai_access_versions a
-                WHERE a.project_id = p.project_id AND a.file_policy_id = p.id
-                ORDER BY a.rev DESC LIMIT 1) AS latest
-         FROM file_policies p WHERE p.project_id = ? AND p.blob_id = ?`,
-      project_id,
-      blob_id,
-    );
-    // No policy row means no deny was ever recorded (an unattached blob).
-    if (row === undefined) return false;
-    return row.current === "deny" || row.latest === "deny";
+    return file_ai_denied(this.#db, project_id, blob_id);
   }
 
-  async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+  // SEL-115 MAT1a ---------------------------------------------------------
+
+  async #material_upload(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["blob_id", "title", "object_id", "role"]);
+    const { format_version: _format, ...payload } = body;
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "file.upload", payload));
+    return { status: 201, data: out.result, replayed: out.replayed };
+  }
+
+  async #materials_list(project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const audience = this.#audience(auth);
+    const materials = read_tx(this.#db, () => material_rows(this.#db, project.id, audience));
+    return { status: 200, data: { materials } };
+  }
+
+  async #file_ai_access_set(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["ai_access", "reason"]);
+    const payload: Record<string, unknown> = { file_policy_id: request.params[1], ai_access: body.ai_access };
+    if (body.reason !== undefined) payload.reason = body.reason;
+    const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "file.ai_access_set", payload));
+    return { status: 200, data: out.result, replayed: out.replayed };
+  }
+
+  /** `preview` = the same bytes and the same safety headers as content, plus a content-disposition: inline only for the few types a browser shows safely. */
+  async #file_read(request: RouteRequest, project: ProjectRow, auth: AuthInfo, preview: boolean): Promise<HandlerResult> {
     read_tx(this.#db, () => {
       if (auth.kind !== "human" && this.#blob_denied(project.id, request.params[1] as string)) {
         throw new Fail("forbidden", { target: "$.path.blob_id" });
@@ -3695,6 +4248,10 @@ export class ApiApp {
     };
     if (needs_document_sandbox(media_type)) {
       headers["content-security-policy"] = FILE_DOCUMENT_CSP;
+    }
+    if (preview) {
+      const bare = (media_type.split(";", 1)[0] ?? "").trim().toLowerCase();
+      headers["content-disposition"] = !media_type.includes(",") && PREVIEW_INLINE_TYPES.has(bare) ? "inline" : "attachment";
     }
     return { status: 200, bytes: found.bytes, headers };
   }

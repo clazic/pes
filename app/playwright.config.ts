@@ -1,15 +1,23 @@
 // SEL-81 U1a — 앱 e2e (루트 playwright.config.ts 와 별개: 루트 CI 의 `npx playwright test` 는 tests/e2e 만 돈다).
 // 실행: cd app && npm ci && npx playwright install chromium && npm run test:e2e
+// SEL-122: 실제 계정 홈에서는 거절한다. 임시 HOME·USERPROFILE 과 HOME 밖 브라우저 폴더로 돌린다(<브라우저 폴더> 는 고정 폴더 경로로 바꾼다):
+//   export PLAYWRIGHT_BROWSERS_PATH="<브라우저 폴더>"   # 처음 한 번: npx playwright install chromium
+//   tmp_home="$(mktemp -d)"; HOME="$tmp_home" USERPROFILE="$tmp_home" npm run test:e2e
+// 앱 Vitest 도 같은 방식: HOME="$tmp_home" USERPROFILE="$tmp_home" npx vitest run
 // 빌드한 앱(vite preview)을 127.0.0.1:<PES_E2E_PORT> 에 띄운다(env 가 없으면 빈 포트를 한 번 골라 env 에 넣는다 — 워커·설정 재로드가 같은 값을 물려받고, worktree 둘이 동시에 돌아도 부딪히지 않는다). 이 e2e 는 가짜 클라이언트(합성 자료)를 기본으로 쓰는 "시험 모드" 빌드(--mode e2e)를 별도 폴더(dist-e2e)에 만들어 연다 —
 // production 빌드(app/dist)는 세션 조각이 없으면 가짜 자료 대신 `pes open` 안내만 그린다(SEL-82 R1 필수 1, 루트 tests/e2e/app_real_api.spec.ts 가 그쪽을 못 박는다).
 // 폴더를 나누는 이유: 루트 시험이 읽는 app/dist(production)를 이 e2e 가 시험 모드 빌드로 덮어쓰지 않게. 실제 홈·실제 자료는 읽지 않는다(앱은 가짜 클라이언트만 쓴다) —
 // 그래도 자식 프로세스의 HOME·USERPROFILE·PES_HOME 은 임시 폴더로 바꿔 둔다.
 // 브라우저가 없으면 건너뛰지 않고 실패한다(CI 계약).
+import { assert_temp_home_env } from "../tests/helpers/temp_home_check.ts";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
+
+// SEL-122: 실제 계정 홈에서 시작하면 설정을 읽은 바로 뒤, 빈 포트를 고르거나 임시 폴더를 만들기 전에 거절한다(문자열만 비교 — 루트 playwright.config.ts 와 같다)
+assert_temp_home_env();
 
 // 임시 홈은 주 프로세스에서 한 번만 만든다(워커·설정 재로드는 환경변수로 물려받음) — 끝나면 globalTeardown 이 지운다
 process.env.PES_APP_E2E_HOME ??= mkdtempSync(join(tmpdir(), "pes-app-e2e-"));
@@ -40,6 +48,7 @@ const origin = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: "e2e",
   testMatch: "**/*.spec.ts",
+  globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
   workers: 1,

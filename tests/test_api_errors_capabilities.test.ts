@@ -314,8 +314,11 @@ test("capabilities is open, complete, and says what is not supported", async () 
     for (const op of ["runs.heartbeat", "runs.inputs", "runs.input_receipts", "submissions.create", "questions.create", "questions.withdraw", "questions.defer", "questions.merge", "threads.create", "threads.messages.create", "stages.approve", "changes.list", "rounds.seal", "runs.handoff", "runs.cancel"]) {
       assert.equal(caps.operations[op].supported, true, op);
     }
-    for (const op of ["exports.create", "threads.resolutions.create", "projects.delete"]) {
+    for (const op of ["exports.create", "projects.delete"]) {
       assert.equal(caps.operations[op].supported, false, op);
+    }
+    for (const op of ["threads.resolutions.create", "followups.apply", "threads.reanchor", "followups.create"]) {
+      assert.equal(caps.operations[op].supported, true, op); // SEL-99 U4a (leader 승인: 미지원→지원)
     }
     for (const op of ["decisions.create", "reflections.create", "assumptions.create"]) {
       assert.equal(caps.operations[op].supported, true, op); // SEL-93 U3a

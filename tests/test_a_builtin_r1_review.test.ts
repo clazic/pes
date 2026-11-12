@@ -4,7 +4,7 @@
 //   R3  an answer without a usage field counts at least the reserved output tokens
 //   R7  a connection's key_ref is always pes-ai-<its id>: no one connection can point at another's key
 //   R8  a very large answer body is not read to the end; the call is 'unknown'
-//   R9  the model is not offered thread.reply (the allowlist keeps it); Korean text is not under-estimated
+//   R9  the model is offered thread.reply (SEL-99 U4a connected it to a command); Korean text is not under-estimated
 // R5 / R6 (the OS key stores) are in test_a_builtin_keystore*.test.ts.
 
 import assert from "node:assert/strict";
@@ -389,20 +389,20 @@ test("R8: in a run, an endless answer body leaves the call 'unknown': one reques
 });
 
 // ---------------------------------------------------------------------------------------------------------
-// R9 — thread.reply is not offered; Korean is not under-estimated
+// R9 — thread.reply is offered (SEL-99 U4a); Korean is not under-estimated
 
-test("R9: the allowlist still names the 8 commands, but the model is offered 7 — no thread.reply", () => {
+test("R9: the allowlist names the 8 commands and the model is offered all 8 — thread.reply too (SEL-99 U4a connected it)", () => {
   assert.deepEqual([...A_TOOL_ALLOWLIST].sort(), [...A_TOOLS].sort());
   assert.equal(A_TOOL_ALLOWLIST.length, 8);
   assert.ok(A_TOOL_ALLOWLIST.includes("thread.reply"), "the allowlist keeps the name (decision 0013)");
   const offered = TOOL_SPECS.map((t) => t.name).sort();
-  assert.deepEqual(offered, (A_TOOLS as readonly string[]).filter((n) => n !== "thread.reply").sort());
-  assert.equal(offered.includes("thread.reply"), false);
+  assert.deepEqual(offered, (A_TOOLS as readonly string[]).slice().sort());
+  assert.equal(offered.includes("thread.reply"), true);
   for (const name of offered) assert.ok(A_TOOL_ALLOWLIST.includes(name), `${name} is on the allowlist`);
 });
 
 for (const format of FORMATS) {
-  test(`R9 ${format}: the request really sent carries no thread.reply tool`, async () => {
+  test(`R9 ${format}: the request really sent carries the thread.reply tool`, async () => {
     await with_a_env(format, async (env) => {
       await ready_project(env);
       const o = await open_stage(env, "plan");
@@ -411,8 +411,8 @@ for (const format of FORMATS) {
       assert.equal(res.status, "succeeded");
       for (const body of env.fake.bodies()) {
         const names = offered_tools(body);
-        assert.equal(names.includes("thread.reply"), false);
-        assert.deepEqual(names, (A_TOOLS as readonly string[]).filter((n) => n !== "thread.reply").sort());
+        assert.equal(names.includes("thread.reply"), true);
+        assert.deepEqual(names, (A_TOOLS as readonly string[]).slice().sort());
       }
     });
   });
