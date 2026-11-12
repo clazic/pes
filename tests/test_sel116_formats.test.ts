@@ -11,15 +11,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { with_api } from "./helpers/api_env.ts";
+import { assert_ok, with_api } from "./helpers/api_env.ts";
 import { sha256_hex } from "./helpers/backup_fixture.ts";
 import {
+  extract,
   extraction_rows,
   extracted,
   make_docx,
   make_hwpx,
   make_pptx,
   make_xlsx,
+  material_of,
   text_of,
 } from "./helpers/sel116_env.ts";
 
@@ -112,8 +114,10 @@ test("encoding: bytes that are not UTF-8 (EUC-KR, UTF-16 with BOM) are 'failed /
     const euc_kr = new Uint8Array([0xc7, 0xd1, 0xb1, 0xdb, 0x0a]); // "한글\n" in EUC-KR
     const utf16 = new Uint8Array([0xff, 0xfe, 0x5c, 0xd5, 0x00, 0xae, 0x0a, 0x00]);
     for (const [name, data] of [["옛글.txt", euc_kr], ["유니.txt", utf16]] as const) {
+      // 준비 오류 수정(leader 승인 대상): 개수는 올리기 뒤·추출 바로 전에 센다 — 올리기가 만든 원본 blob 은 셈에서 뺀다.
+      const m = await material_of(env, name, data);
       const before = Number(env.db.get<{ n: bigint }>("SELECT count(*) AS n FROM blobs")?.n);
-      const { r } = await extracted(env, name, data);
+      const r = assert_ok(await extract(env, m), 201);
       assert.equal(r.status, "failed", name);
       assert.equal(r.reason, "invalid_encoding", name);
       assert.ok(r.warnings.some((w: any) => w.code === "invalid_encoding"), name);

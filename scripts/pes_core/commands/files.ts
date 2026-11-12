@@ -41,6 +41,7 @@ import {
   type SourceFacts,
 } from "./content.ts";
 import { access_state_of_blob, access_state_of_policy, material_object_denied } from "./file_access.ts";
+import { run_extract } from "./file_extract.ts";
 import {
   insert_receipt,
   reject_unknown_fields,
@@ -1009,6 +1010,7 @@ const FILE_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> =
   ["file.attach_version", definition("file.version_attached", run_attach_version)],
   ["file.upload", definition("file.material_uploaded", run_upload)],
   ["file.ai_access_set", definition("file.ai_access_changed", run_ai_access_set)],
+  ["file.extract", definition("file.extracted", run_extract)],
   ["file.quarantine", definition("file.blob_quarantined", run_quarantine)],
   ["file.gc_orphans", definition("file.orphans_collected", run_gc_orphans)],
 ];

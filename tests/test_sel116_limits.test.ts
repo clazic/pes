@@ -21,6 +21,7 @@ import {
   extraction_rows,
   fake_legacy,
   fake_pdf,
+  http_blob,
   make_docx,
   make_xlsx,
   make_zip,
@@ -210,7 +211,8 @@ test("limit: a source larger than 32 MiB is 'failed / too_large' — no text at 
 test("limit: a source of 1 MiB is fine (the cap is not tiny)", async () => {
   await with_api(async (env) => {
     const text = "가나다라마바사\n".repeat(Math.ceil((1 * MIB) / 22));
-    const stored = await put_ready(env, bytes(text), "sel116-1mib");
+    // 준비 오류 수정(leader 승인 대상): put_ready 의 이름은 "합성.bin"(모르는 형식)이라 글자로 읽히지 않는다 — .txt 이름으로 올린다.
+    const stored = await http_blob(env, bytes(text), { name: "일메가.txt", media_type: "text/plain" });
     const up = assert_ok(await upload_material(env, { blob_id: stored.blob_id, title: "일 메가" }), 201);
     const r = assert_ok(
       await call(env, { method: "POST", path: P(env, "/file-extractions"), auth: "owner", body: { version_id: up.version_id, blob_id: stored.blob_id } }),

@@ -190,7 +190,7 @@ export function count(db: Db, table: string): number {
 }
 
 export function events_of(db: Db, type: string): Array<{ payload: string }> {
-  return db.all<{ payload: string }>("SELECT payload FROM events WHERE type = ? ORDER BY seq", type);
+  return db.all<{ payload: string }>("SELECT payload FROM events WHERE type = ? ORDER BY event_seq", type);
 }
 
 export function receipts_of(db: Db, action: string): number {

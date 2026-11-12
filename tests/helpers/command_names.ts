@@ -43,6 +43,7 @@ export const EXPECTED_COMMAND_NAMES: readonly string[] = [
   "file.ai_access_set",
   "file.attach_version",
   "file.complete_upload",
+  "file.extract",
   "file.gc_orphans",
   "file.quarantine",
   "file.reserve_upload",

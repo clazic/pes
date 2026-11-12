@@ -86,7 +86,17 @@ export function access_state_of_policy(db: ReadDb, project_id: string, policy_id
  * A blob without a policy row has no recorded deny (it is not attached to anything yet), so it is not denied.
  */
 export function file_ai_denied(db: ReadDb, project_id: string, blob_id: string): boolean {
-  return access_state_of_blob(db, project_id, blob_id)?.effective === "deny";
+  if (access_state_of_blob(db, project_id, blob_id)?.effective === "deny") return true;
+  // SEL-116: an extracted text blob is closed to AI when the policy of any file it was extracted from is closed (strict side wins),
+  // whatever its own policy says. One level: a source's own policy is its own row.
+  return db
+    .all<{ blob_id: string }>(
+      "SELECT DISTINCT blob_id FROM file_extractions WHERE project_id = ? AND text_blob_id = ? AND blob_id <> ?",
+      project_id,
+      blob_id,
+      blob_id,
+    )
+    .some((source) => access_state_of_blob(db, project_id, source.blob_id)?.effective === "deny");
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +177,88 @@ export interface MaterialDto {
   sha256: string;
   /** only for the human owner: the value in force. AI callers never get this key. */
   ai_access?: AiAccess;
+  /** SEL-116: the text-extraction state of this version's file; "not_extracted" when nobody has asked yet. */
+  extraction_status: ExtractionState;
+  extraction: ExtractionDto | null;
+}
+
+export type ExtractionState = "extracted" | "partial" | "unsupported" | "failed" | "not_extracted";
+
+export interface ExtractionDto {
+  extraction_id: string;
+  status: Exclude<ExtractionState, "not_extracted">;
+  source_format: string;
+  extractor: string;
+  extractor_version: string;
+  /** null when the text is closed to the caller (its own policy or its source's) or there is no text */
+  text_blob_id: string | null;
+  text_file_policy_id: string | null;
+  text_hash: string | null;
+  page_count: number | null;
+  table_count: number;
+  warnings: Array<{ code: string; message: string }>;
+  reason: string | null;
+  /** only for the human owner: the switch of the text's own policy */
+  text_ai_access?: AiAccess;
+}
+
+interface ExtractionRowForRead {
+  id: string;
+  status: string;
+  source_format: string;
+  extractor: string;
+  extractor_version: string;
+  text_blob_id: string | null;
+  text_file_policy_id: string | null;
+  text_hash: string | null;
+  page_count: bigint | null;
+  table_count: bigint | null;
+  warnings_json: string;
+}
+
+function read_warnings(json: string): Array<{ code: string; message: string }> {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((w): w is Record<string, unknown> => typeof w === "object" && w !== null)
+      .map((w) => ({ code: String(w.code ?? ""), message: String(w.message ?? "") }));
+  } catch {
+    return [];
+  }
+}
+
+/** The newest extraction of one version file, shaped for a caller. An AI caller never gets the ids of a closed text. */
+function extraction_of(db: ReadDb, project_id: string, version_id: string, blob_id: string, audience: Audience): ExtractionDto | null {
+  const row = db.get<ExtractionRowForRead>(
+    `SELECT id, status, source_format, extractor, extractor_version, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings_json
+       FROM file_extractions WHERE project_id = ? AND version_id = ? AND blob_id = ? ORDER BY rowid DESC LIMIT 1`,
+    project_id,
+    version_id,
+    blob_id,
+  );
+  if (row === undefined) return null;
+  const status: ExtractionDto["status"] = row.status === "ready" ? "extracted" : row.status === "partial" || row.status === "unsupported" ? row.status : "failed";
+  const warnings = read_warnings(row.warnings_json);
+  const text_open = row.text_blob_id !== null && (audience === "human" || !file_ai_denied(db, project_id, row.text_blob_id));
+  const dto: ExtractionDto = {
+    extraction_id: row.id,
+    status,
+    source_format: row.source_format,
+    extractor: row.extractor,
+    extractor_version: row.extractor_version,
+    text_blob_id: text_open ? row.text_blob_id : null,
+    text_file_policy_id: text_open ? row.text_file_policy_id : null,
+    text_hash: text_open ? row.text_hash : null,
+    page_count: row.page_count === null ? null : Number(row.page_count),
+    table_count: Number(row.table_count ?? 0n),
+    warnings,
+    reason: status === "extracted" ? null : (warnings[0]?.code ?? null),
+  };
+  if (audience === "human" && row.text_file_policy_id !== null) {
+    dto.text_ai_access = access_state_of_policy(db, project_id, row.text_file_policy_id)?.effective ?? "allow";
+  }
+  return dto;
 }
 
 interface MaterialRow {
@@ -232,8 +324,12 @@ export function material_rows(db: ReadDb, project_id: string, audience: Audience
       media_type: row.media_type,
       size: Number(row.size),
       sha256: row.sha256,
+      extraction_status: "not_extracted",
+      extraction: null,
     };
     if (audience === "human") dto.ai_access = denied ? "deny" : "allow";
+    dto.extraction = extraction_of(db, project_id, row.version_id, row.blob_id, audience);
+    dto.extraction_status = dto.extraction === null ? "not_extracted" : dto.extraction.status;
     out.push(dto);
   }
   return out;
