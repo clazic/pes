@@ -85,7 +85,10 @@ export interface HttpOptions {
 }
 
 export async function http(server: Server, path: string, opts: HttpOptions = {}): Promise<Http> {
-  const headers: Record<string, string> = { ...opts.headers };
+  // SEL-95: 요청마다 새 연결(Connection: close). 전역 fetch(undici)는 연결을 재사용하는데, 시험이 step() 같은 동기 자식 프로세스(spawnSync)로
+  // 이벤트 루프를 몇 초 막는 동안 서버(Node 기본 keepAliveTimeout 5 s)가 놀고 있는 연결을 먼저 닫는다 — 막힘이 풀린 뒤 fetch 가 그 죽은 소켓을
+  // 다시 쓰면 ECONNRESET("fetch failed"). 전체 npm test 처럼 부하가 크면 가끔이 아니라 자주 난다. 서버 쪽 정상 동작이라 시험 쪽에서 재사용을 끈다.
+  const headers: Record<string, string> = { connection: "close", ...opts.headers };
   const origin = opts.origin === undefined ? (opts.method && opts.method !== "GET" ? server.origin : null) : opts.origin;
   if (origin !== null) headers.Origin = origin;
   const res = await fetch(`${server.url}${path}`, { method: opts.method ?? "GET", headers, body: opts.body, redirect: "manual" });
