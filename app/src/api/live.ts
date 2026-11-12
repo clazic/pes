@@ -26,6 +26,16 @@ export function touchedToQueryKey(touched: string, slug: string, edition: number
   return m ? keys.round(slug, edition, m[1]!, m[2]!) : null;
 }
 
+/**
+ * 변경분 한 건이 다시 받게 하는 읽기 키들. 가정·결정·반영(U3b) 사건은 서버/가짜가 'workspace' 로만 알려 주므로
+ * workspace 는 그 판의 기록 읽기(['records', slug, edition])도 함께 다시 받는다.
+ */
+export function touchedToQueryKeys(touched: string, slug: string, edition: number): QueryKey[] {
+  const key = touchedToQueryKey(touched, slug, edition);
+  if (!key) return [];
+  return touched === "workspace" ? [key, keys.records(slug, edition)] : [key];
+}
+
 const timeoutError = () => Object.assign(new Error("변경분 읽기 시간 초과"), { name: "TimeoutError" });
 
 export function useLiveChanges(slug: string | undefined, edition: number) {
@@ -53,10 +63,9 @@ export function useLiveChanges(slug: string | undefined, edition: number) {
       for (const t of touched) {
         if (seen.has(t)) continue;
         seen.add(t);
-        const key = touchedToQueryKey(t, slug, edition);
         // 지금 화면에 붙은 읽기만 다시 받는다 — 나머지는 낡음 표시만(다음에 볼 때 받음)
-        // 'round:*' 는 앞부분 키라 exact 를 끈다 — 지금 붙은 라운드 읽기만 다시 받는 것은 같다
-        if (key) void qc.invalidateQueries({ queryKey: key, exact: t !== "round:*", refetchType: "active" });
+        // 앞부분 키로 맞춘다(exact 끔) — 'round:*' 와 구체 라운드 모두 그 아래 반영 읽기(reflections)까지 닿는다
+        for (const key of touchedToQueryKeys(t, slug, edition)) void qc.invalidateQueries({ queryKey: key, exact: false, refetchType: "active" });
       }
     };
 
@@ -64,6 +73,7 @@ export function useLiveChanges(slug: string | undefined, edition: number) {
       // 보이는 읽기(workspace · 지금 라운드)만 — 붙어 있는 쿼리만 다시 받는다
       void qc.invalidateQueries({ queryKey: keys.workspace(slug, edition), refetchType: "active" });
       void qc.invalidateQueries({ queryKey: ["round", slug, edition], refetchType: "active" });
+      void qc.invalidateQueries({ queryKey: keys.records(slug, edition), refetchType: "active" });
     };
 
     async function tick() {

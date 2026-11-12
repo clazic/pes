@@ -10,6 +10,13 @@ export type JudgeSpec =
   | { kind: "assess"; verdict: "confirm" | "reject" | "revise"; row: AssumptionRow }
   | { kind: "adopt" | "supersede" | "revoke"; row: DecisionRow };
 
+/** 사람이 쓰던 글 — rev_conflict 로 대화 상자를 닫아도 부모가 들고 있다가 같은 행·같은 동작을 다시 열 때 돌려준다. baseStatement = 쓸 때 보던 원문 */
+export interface JudgeDraft {
+  rationale: string;
+  statement: string;
+  baseStatement: string;
+}
+
 export const TITLE = { confirm: "가정 확인", reject: "가정 틀림", revise: "가정 고침", adopt: "결정 채택", supersede: "결정 대체", revoke: "결정 철회" } as const;
 const WHAT = {
   confirm: "이 가정을 확인으로 기록합니다.",
@@ -38,15 +45,17 @@ const fieldClass =
  *  - 답이 오지 않음(시간 초과 등)과 서버가 다시 보내도 된다고 한 거절(retryable): 실패가 아니라 “접수 확인 중”. 다시 누르면 같은 멱등 키로 보내 서버가 처음 영수증을 돌려준다.
  *  - 성공: onDone(영수증) → 부모가 닫고 접수 번호를 알린다. 행은 영수증 뒤 다시 읽어 바뀐다(낙관적 갱신 없음).
  */
-export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone, onStale }: { spec: JudgeSpec; slug: string; edition: number; opener: HTMLElement | null; onClose: () => void; onDone: (r: JudgeResult) => void; onStale: () => void }) {
+export function JudgeDialog({ spec, slug, edition, opener, draft, onClose, onDone, onStale }: { spec: JudgeSpec; slug: string; edition: number; opener: HTMLElement | null; draft?: JudgeDraft; onClose: () => void; onDone: (r: JudgeResult) => void; onStale: (draft: JudgeDraft) => void }) {
   const client = useClient();
   const qc = useQueryClient();
   const action = actionOf(spec);
   const title = TITLE[action];
   const extra = extraLabel(action);
   const needRationale = rationaleRequired(action);
-  const [rationale, setRationale] = React.useState("");
-  const [statement, setStatement] = React.useState(action === "revise" ? spec.row.statement : "");
+  const [rationale, setRationale] = React.useState(draft?.rationale ?? "");
+  const [statement, setStatement] = React.useState(draft?.statement ?? (action === "revise" ? spec.row.statement : ""));
+  /** 이어 쓰는 초안인데 그 사이 원문이 바뀌었다 — 바뀐 원문과 견주어 보라고 알린다 */
+  const sourceChanged = !!draft && draft.baseStatement !== spec.row.statement;
   const [invalid, setInvalid] = React.useState<{ rationale?: string; statement?: string }>({});
   const attempt = React.useRef<{ key: string; fingerprint: string } | null>(null);
   const done = React.useRef(false);
@@ -80,11 +89,24 @@ export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone, onSt
   /** 내가 본 버전이 낡았다 — 다시 읽어야 한다 */
   const stale = rejected?.body.error.code === "rev_conflict";
   const [reloading, setReloading] = React.useState(false);
+  const [rereadFailed, setRereadFailed] = React.useState(false);
   const reread = async () => {
     setReloading(true);
+    setRereadFailed(false);
+    try {
+      // 실제로 다시 받았을 때만 “다시 읽었어요”라고 한다 — 읽기 실패는 던져 대화 상자와 초안을 그대로 둔다
+      await Promise.all([
+        qc.refetchQueries({ queryKey: keys.records(slug, edition) }, { throwOnError: true }),
+        qc.refetchQueries({ queryKey: keys.workspace(slug, edition) }, { throwOnError: true }),
+      ]);
+    } catch {
+      setReloading(false);
+      setRereadFailed(true);
+      return;
+    }
     done.current = true; // 닫힐 때 초점은 부모가 알림 줄로 옮긴다
-    await Promise.all([qc.invalidateQueries({ queryKey: keys.records(slug, edition) }), qc.invalidateQueries({ queryKey: keys.workspace(slug, edition) })]);
-    onStale();
+    // 쓰던 글은 부모가 들고 있다가 다시 열 때 돌려준다
+    onStale({ rationale, statement, baseStatement: spec.row.statement });
   };
 
   const submit = (e: React.SyntheticEvent) => {
@@ -186,9 +208,22 @@ export function JudgeDialog({ spec, slug, edition, opener, onClose, onDone, onSt
             <p role="status" className="mt-3 text-meta text-ink-2">
               {sending ? "접수 확인 중 — 서버가 받았는지 확인하고 있어요." : unknown ? "접수 확인 중 — 답이 오지 않았어요. 실패한 것이 아닐 수 있어요. 다시 누르면 중복 없이 확인해요. 글을 고치고 누르면 새 요청으로 보내요." : ""}
             </p>
-            {stale ? (
+            {sourceChanged ? (
+              <p role="status" className="mt-3 text-meta font-medium text-ink">
+                쓰던 글을 그대로 두었어요. 그 사이 원문이 바뀌었으니 위 원문과 견주어 보고 판단해 주세요.
+              </p>
+            ) : draft ? (
+              <p role="status" className="mt-3 text-meta text-ink-2">
+                쓰던 글을 그대로 두었어요.
+              </p>
+            ) : null}
+            {rereadFailed ? (
+              <p role="alert" className="mt-2 text-meta font-medium text-bad">
+                다시 읽지 못했어요. 쓴 글은 그대로 있어요. 잠시 뒤 다시 보기를 눌러 주세요.
+              </p>
+            ) : stale ? (
               <p role="alert" className="mt-2 text-meta font-medium text-ink">
-                다른 곳에서 바뀌었어요. 지금 보고 있는 내용은 낡았어요. 다시 보고 판단해 주세요.
+                다른 곳에서 바뀌었어요. 지금 보고 있는 내용은 낡았어요. 다시 보고 판단해 주세요. 쓴 글은 그대로 남겨 둬요.
               </p>
             ) : rejected ? (
               <p role="alert" className="mt-2 text-meta font-medium text-bad">

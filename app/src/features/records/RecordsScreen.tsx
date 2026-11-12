@@ -5,9 +5,11 @@ import type { JudgeResult } from "@/api/types";
 import { useArrival } from "@/app/arrival";
 import { NotFound } from "@/app/NotFound";
 import { placeLabel } from "@/lib/labels";
-import { JudgeDialog, TITLE, actionOf, type JudgeSpec } from "./JudgeDialog";
+import { JudgeDialog, TITLE, actionOf, type JudgeDraft, type JudgeSpec } from "./JudgeDialog";
 import { AssumptionsSection, DecisionsSection } from "./RecordTables";
 import { ReflectionSection } from "./ReflectionSection";
+
+const draftKey = (spec: JudgeSpec) => `${spec.row.object_id}/${actionOf(spec)}`;
 
 /**
  * 가정·결정·반영 화면(U3b · F04 · F06) — `/p/:slug/e/:edition/records`. 연구 공간 틀(사이드바 · 머리줄) 안의 본문 하나.
@@ -22,7 +24,15 @@ export function RecordsScreen() {
   const w = ws.data;
   useArrival(!!w);
 
-  const [dialog, setDialog] = React.useState<{ spec: JudgeSpec; opener: HTMLElement } | null>(null);
+  const [dialog, setDialog] = React.useState<{ spec: JudgeSpec; opener: HTMLElement; draft?: JudgeDraft } | null>(null);
+  /** rev_conflict 로 닫힌 대화 상자의 쓰던 글 — "행 번호/동작"별. 같은 행·같은 동작을 다시 열면 한 번 돌려주고 비운다 */
+  const drafts = React.useRef(new Map<string, JudgeDraft>());
+  const openJudge = (spec: JudgeSpec, opener: HTMLElement) => {
+    const key = draftKey(spec);
+    const draft = drafts.current.get(key);
+    drafts.current.delete(key);
+    setDialog({ spec, opener, draft });
+  };
   const [receipt, setReceipt] = React.useState("");
   const receiptRef = React.useRef<HTMLParagraphElement>(null);
 
@@ -37,7 +47,8 @@ export function RecordsScreen() {
     window.setTimeout(() => receiptRef.current?.focus(), 0);
   }, []);
 
-  const onStale = React.useCallback(() => {
+  const onStale = React.useCallback((spec: JudgeSpec, draft: JudgeDraft) => {
+    drafts.current.set(draftKey(spec), draft);
     setReceipt("다른 곳에서 바뀌어 다시 읽었어요. 바뀐 내용을 보고 다시 판단해 주세요.");
     setDialog(null);
     window.setTimeout(() => receiptRef.current?.focus(), 0);
@@ -73,14 +84,14 @@ export function RecordsScreen() {
         >
           {receipt}
         </p>
-        <AssumptionsSection slug={w.slug} edition={w.edition} onJudge={(spec, opener) => setDialog({ spec, opener })} />
-        <DecisionsSection slug={w.slug} edition={w.edition} onJudge={(spec, opener) => setDialog({ spec, opener })} />
+        <AssumptionsSection slug={w.slug} edition={w.edition} onJudge={openJudge} />
+        <DecisionsSection slug={w.slug} edition={w.edition} onJudge={openJudge} />
         <div className="mt-8">
           <p className="mb-1 text-caption text-muted-foreground">{placeLabel(w.current.stage, w.current.round_id)} 첫머리에 보이는 내용</p>
           <ReflectionSection slug={w.slug} edition={w.edition} stage={w.current.stage} round={round} />
         </div>
       </div>
-      {dialog ? <JudgeDialog spec={dialog.spec} slug={w.slug} edition={w.edition} opener={dialog.opener} onClose={() => setDialog(null)} onDone={(r) => onDone(dialog.spec, r)} onStale={onStale} /> : null}
+      {dialog ? <JudgeDialog spec={dialog.spec} slug={w.slug} edition={w.edition} opener={dialog.opener} draft={dialog.draft} onClose={() => setDialog(null)} onDone={(r) => onDone(dialog.spec, r)} onStale={(d) => onStale(dialog.spec, d)} /> : null}
     </main>
   );
 }

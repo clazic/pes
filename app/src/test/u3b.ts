@@ -29,9 +29,9 @@ import { ready } from "@/test/ui";
  *     getReflections(slug, edition, stage, round): Promise<ReflectionView | null>   round = 숫자 문자열 또는 "start". null = 서버가 반영 자료를 주지 않음(이전된 프로젝트)
  *   쓰기(멱등 키 하나 → CommandResult<{ object_id, version_id }> ; 거절은 PesApiError):
  *     assessAssumption(slug, edition, objectId, input: { verdict: "confirm" | "reject" | "revise"; rationale: string; statement?: string }, idempotencyKey)
- *     adoptDecision(slug, edition, objectId, input: { rationale: string }, idempotencyKey)
- *     supersedeDecision(slug, edition, objectId, input: { statement: string; rationale: string }, idempotencyKey)   // 새 결정을 만든다(옛 결정은 덮어쓰지 않음)
- *     revokeDecision(slug, edition, objectId, input: { rationale: string }, idempotencyKey)
+ *     adoptDecision(slug, edition, objectId, input: { base_version_id: string; rationale: string }, idempotencyKey)
+ *     supersedeDecision(slug, edition, objectId, input: { base_version_id: string; statement: string; rationale: string }, idempotencyKey)   // 새 결정을 만든다(옛 결정은 덮어쓰지 않음)
+ *     revokeDecision(slug, edition, objectId, input: { base_version_id: string; rationale: string }, idempotencyKey)
  *   모양은 AssumptionRow · DecisionRow · ReflectionView 아래 타입. 기계 값만 싣고 화면 글자(상태 낱말 · 범위 이름)는 앱이 만든다. 시험의 가짜 클라이언트(createU3Client)가 이 모양을 그대로 돌려준다.
  *
  * [표시 어휘 — 화면 계약]
@@ -133,8 +133,10 @@ export interface ReflectionView {
   entries: ReflectionEntry[];
 }
 
+/** 네 쓰기 모두 사람이 본 버전(base_version_id)을 싣는다 — 현재 행의 version_id 와 다르면 서버는 rev_conflict 로 거절한다 */
 export interface AssessInput {
   verdict: "confirm" | "reject" | "revise";
+  base_version_id: string;
   rationale: string;
   statement?: string;
 }
@@ -143,9 +145,9 @@ export interface U3Methods {
   getDecisions(slug: string, edition: number): Promise<DecisionRow[]>;
   getReflections(slug: string, edition: number, stage: string, round: string): Promise<ReflectionView | null>;
   assessAssumption(slug: string, edition: number, objectId: string, input: AssessInput, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
-  adoptDecision(slug: string, edition: number, objectId: string, input: { rationale: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
-  supersedeDecision(slug: string, edition: number, objectId: string, input: { statement: string; rationale: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
-  revokeDecision(slug: string, edition: number, objectId: string, input: { rationale: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
+  adoptDecision(slug: string, edition: number, objectId: string, input: { base_version_id: string; rationale: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
+  supersedeDecision(slug: string, edition: number, objectId: string, input: { base_version_id: string; statement: string; rationale: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
+  revokeDecision(slug: string, edition: number, objectId: string, input: { base_version_id: string; rationale: string }, idempotencyKey: string | undefined): Promise<CommandResult<{ object_id: string; version_id: string }>>;
 }
 
 /* ───────────── 합성 자료 ───────────── */
@@ -328,6 +330,10 @@ export function createU3Client(data: U3Data, workspacePatch?: (w: unknown) => un
     }
     return structuredClone(r);
   }
+  /** 서버처럼: 사람이 본 버전이 현재 행의 version_id 와 다르면 rev_conflict(행은 그대로) */
+  const guard = (row: { version_id: string }, base: string) => {
+    if (base !== row.version_id) throw new PesApiError({ format_version: FORMAT_VERSION, error: { code: "rev_conflict", message: "기준 버전이 현재와 다릅니다.", retryable: false, next_action: "reread_context" }, request_id: "req-u3b" });
+  };
   const findA = (id: string) => store.assumptions.find((x) => x.object_id === id)!;
   const findD = (id: string) => store.decisions.find((x) => x.object_id === id)!;
 
@@ -350,6 +356,7 @@ export function createU3Client(data: U3Data, workspacePatch?: (w: unknown) => un
     assessAssumption: (_s, _e, id, input, key) =>
       command("assessAssumption", id, { ...input }, key, () => {
         const row = findA(id);
+        guard(row, input.base_version_id);
         if (input.verdict === "revise") {
           row.original ??= { version_id: row.version_id, statement: row.statement };
           row.statement = input.statement ?? row.statement;
@@ -360,33 +367,40 @@ export function createU3Client(data: U3Data, workspacePatch?: (w: unknown) => un
         row.needs_review = false;
         row.rationale = input.rationale;
         row.version += 1;
+        row.version_id = `${id}-v${seq + 1}`;
         return id;
       }),
     adoptDecision: (_s, _e, id, input, key) =>
       command("adoptDecision", id, { ...input }, key, () => {
         const row = findD(id);
+        guard(row, input.base_version_id);
         row.state = "adopted";
         row.decided_by = HUMAN;
         row.rationale = input.rationale;
         row.version += 1;
+        row.version_id = `${id}-v${seq + 1}`;
         return id;
       }),
     supersedeDecision: (_s, _e, id, input, key) =>
       command("supersedeDecision", id, { ...input }, key, () => {
         const old = findD(id);
+        guard(old, input.base_version_id);
         const newId = `dec-${nextObj++}`;
         old.state = "superseded";
         old.superseded_by = newId;
+        old.version_id = `${id}-v${seq + 1}`;
         store.decisions.push(d(newId, { statement: input.statement, state: "adopted", scope: old.scope, decided_by: HUMAN, rationale: input.rationale, supersedes: { object_id: id, statement: old.statement } }));
         return newId;
       }),
     revokeDecision: (_s, _e, id, input, key) =>
       command("revokeDecision", id, { ...input }, key, () => {
         const row = findD(id);
+        guard(row, input.base_version_id);
         row.state = "revoked";
         row.decided_by = HUMAN;
         row.rationale = input.rationale;
         row.version += 1;
+        row.version_id = `${id}-v${seq + 1}`;
         return id;
       }),
   };
