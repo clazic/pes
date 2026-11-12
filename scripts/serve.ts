@@ -492,13 +492,22 @@ async function start(config: Config): Promise<void> {
   };
 
   /**
-   * /p/<slug>/** is the app (its own router reads the rest), /_app/<file> is its build (base "/_app/"). A project name can never start with "_"
+   * /p/<slug>/** and /new are the app (its own router reads the rest), /_app/<file> is its build (base "/_app/"). A project name can never start with "_"
    * (SLUG), so the build's address never hides a project's page — unlike "/app/", which a project called "app" owns. Returns true when it answered.
    */
   const handle_app_get = async (req: IncomingMessage, res: ServerResponse, path: string): Promise<boolean> => {
     const words = py_unquote(path).split("/").filter((word) => word !== "");
     if (words[0] === "_app" && words.length >= 2) {
       const target = app_file(words.slice(1));
+      if (target === null) not_found(req, res);
+      else send_app_file(req, res, target);
+      return true;
+    }
+    if (words.length === 1 && words[0] === "new") {
+      // /new is the app's new-project screen (SEL-114): the same index.html, CSP and cookie-free answer as /p/<slug>/…. Only that one address — nothing below it, no neighbour name.
+      // A project that is itself called "new" keeps /new/… (like "p" and "app": the app never hides a user's project).
+      if (existsSync(join(root, "new", "project.json")) || (await db.route("new")) === "database") return false;
+      const target = app_file(["index.html"]);
       if (target === null) not_found(req, res);
       else send_app_file(req, res, target);
       return true;

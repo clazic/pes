@@ -542,6 +542,109 @@ export interface CommentInput {
   question_version_id?: string;
 }
 
+
+/* ───────────── 이전 프로젝트 참고자료(REF1b · SEL-114) — 서버 계약은 SEL-113(REF1a): GET/POST P/references · P/references/{ref}(/refresh · /detach) ───────────── */
+
+/** 서버가 정한 참고 상태 — 모르는 값은 사전이 “미상”으로 읽는다(허용·정상으로 해석하지 않음) */
+export type ReferenceState = "pinned" | "new_version" | "source_missing" | "source_archived" | "no_permission";
+
+export interface ReferenceAiDelivery {
+  allowed: boolean;
+  /** 알려진 값: source_go_off · project_go_off · source_missing. 처음 보는 값은 화면이 그대로 찍지 않는다 */
+  withheld_reason: string | null;
+}
+
+/** 서버가 안 주는 칸은 null — 권한 없는 줄은 id · access · state 만 값이 있고 나머지는 모두 null. rev 는 서버의 10진 문자열 그대로 */
+export interface ReferenceRow {
+  id: string;
+  access: "ok" | "no_permission";
+  state: ReferenceState;
+  referenced_project_id: string | null;
+  referenced_project_key: string | null;
+  source_label: string | null;
+  source_snapshot_id: string | null;
+  source_snapshot_key: string | null;
+  latest_snapshot_id: string | null;
+  new_version_available: boolean | null;
+  scope: string[] | null;
+  ai_delivery: ReferenceAiDelivery | null;
+  attached_at: IsoTime | null;
+  refreshed_at: IsoTime | null;
+  rev: string | null;
+}
+
+export interface ReferenceCitation {
+  reference_id: string;
+  project_id: string;
+  project_label: string;
+  snapshot_id: string;
+  object_id: string;
+  version_id: string;
+}
+
+/** 서버가 항목 종류별로만 주는 칸(보고서: title · summary · body_md / 출처: title · url · quote)을 안 준 쪽은 null */
+export interface ReferenceContentItem {
+  item: "final_report" | "sources";
+  object_id: string;
+  version_id: string;
+  kind: string;
+  title: string;
+  summary: string | null;
+  body_md: string | null;
+  url: string | null;
+  quote: string | null;
+  citation: ReferenceCitation;
+}
+
+export interface ReferenceContent {
+  items: ReferenceContentItem[];
+}
+
+export interface ReferenceSnapshot {
+  id: string;
+  key: string;
+  label: string;
+  approved: boolean;
+  recommended: boolean;
+}
+
+/** 붙일 수 있는 프로젝트와 각 프로젝트의 고를 수 있는 스냅숏 */
+export interface ReferenceCandidate {
+  project_id: string;
+  key: string;
+  label: string;
+  /** 이미 이 프로젝트에 붙인 프로젝트 */
+  attached: boolean;
+  snapshots: ReferenceSnapshot[];
+}
+
+export interface ReferenceAttachInput {
+  referenced_project_id: string;
+  source_snapshot_id: string;
+  scope?: string[];
+  source_label?: string;
+}
+
+export interface ReferenceRefreshInput {
+  source_snapshot_id?: string;
+  base_rev?: string;
+}
+
+/**
+ * 참고 프로젝트 읽기 · 쓰기 — 쓰기는 모두 멱등 키 필수(없으면 요청 없이 invalid_payload) · 같은 키·같은 요청은 처음 영수증을 replayed 로 · 거절은 PesApiError.
+ * 후보 읽기(getReferenceCandidates)는 서버에 읽는 길이 아직 없어 HTTP 클라이언트가 NotConnectedError 로 답한다(후속 SEL-120). scope=null 은 프로젝트가 아직 없는 생성 화면.
+ */
+export interface ReferencesMethods {
+  /** 모르는 slug · 없는 판 = [] */
+  getReferences(slug: string, edition: number): Promise<ReferenceRow[]>;
+  /** 없으면 null. 403 은 PesApiError */
+  getReference(slug: string, edition: number, refId: string): Promise<{ reference: ReferenceRow; content: ReferenceContent | null } | null>;
+  getReferenceCandidates(scope: { slug: string; edition: number } | null): Promise<ReferenceCandidate[]>;
+  attachReference(slug: string, edition: number, input: ReferenceAttachInput, idempotencyKey: string | undefined): Promise<CommandResult<{ reference: ReferenceRow }>>;
+  refreshReference(slug: string, edition: number, refId: string, input: ReferenceRefreshInput, idempotencyKey: string | undefined): Promise<CommandResult<{ reference: ReferenceRow }>>;
+  detachReference(slug: string, edition: number, refId: string, idempotencyKey: string | undefined): Promise<CommandResult<{ reference_id: string; detached: true }>>;
+}
+
 /* ───────────── 결과 글 첨언 · 후속(U4b · SEL-112) — 서버 계약은 SEL-99(U4a): P/threads(context_kind annotation) · P/followups ───────────── */
 
 /** 위치는 서버와 같은 code point(유니코드 스칼라) — `@/lib/anchor-text` */
@@ -688,7 +791,7 @@ export interface MaterialsMethods {
 }
 
 /** 가짜 클라이언트와 (U1b) HTTP 클라이언트가 같이 지키는 모양 */
-export interface PesClient extends MaterialsMethods {
+export interface PesClient extends MaterialsMethods, ReferencesMethods {
   listProjects(): Promise<ProjectRef[]>;
   /** 없으면 null(모르는 slug 에 자료를 지어내지 않는다) */
   getWorkspace(slug: string, edition: number): Promise<WorkspaceView | null>;
