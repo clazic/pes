@@ -1705,21 +1705,20 @@ export class ApiApp {
         return "corrupt";
       }
     })();
-    // The newest WORKSPACE_LIST_MAX of each list of the ACTIVE edition (largest rowid first), then shown oldest-first.
-    // A dispatch has no edition column; it belongs to its run (outbound_dispatches.run_id -> runs.edition_id, both NOT NULL),
-    // so both lists are narrowed to the active edition's runs. The inner query picks the newest rows from the one table
-    // (ORDER BY rowid DESC LIMIT), and the resolution / stage joins run on those rows only, never on every row of the project.
+    // The newest WORKSPACE_LIST_MAX of each list (largest rowid first), then shown oldest-first.
+    // runs are narrowed to the ACTIVE edition (a run is work of one edition). Dispatches are NOT: what was sent out and
+    // what must be settled (billing, recall) are facts of the whole project and stay true after a new edition, so the
+    // newest 50 dispatches of the project are sent whatever edition their run belongs to. In both lists the inner query
+    // picks the newest rows from one table (ORDER BY rowid DESC LIMIT), and the resolution / stage joins run on those rows only.
     const dispatches = this.#db
       .all<{ id: string; run_id: string; state: string; resolution: string | null }>(
         `SELECT n.id AS id, n.run_id AS run_id, n.state AS state, x.outcome AS resolution
            FROM (
              SELECT d.rowid AS rid, d.id AS id, d.run_id AS run_id, d.state AS state
-               FROM outbound_dispatches d JOIN runs r ON r.project_id = d.project_id AND r.id = d.run_id
-              WHERE d.project_id = ? AND r.edition_id = ? ORDER BY d.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
+               FROM outbound_dispatches d WHERE d.project_id = ? ORDER BY d.rowid DESC LIMIT ${WORKSPACE_LIST_MAX}
            ) n LEFT JOIN dispatch_resolutions x ON x.dispatch_id = n.id
           ORDER BY n.rid ASC`,
         project.id,
-        edition.id,
       )
       .map((row) => (row.resolution === null ? { id: row.id, run_id: row.run_id, state: row.state } : { id: row.id, run_id: row.run_id, state: row.state, resolution: row.resolution }));
     const handoff_runtimes: string[] = Object.values(HANDOFF_APPS).map((app) => app.runtime);

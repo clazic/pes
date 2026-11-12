@@ -1,8 +1,8 @@
 /**
  * SEL-87 1차 리뷰(R1) 수정 시험 — 필수 1 · 권장 1~4 (mid-worker). 합성 DB · 임시 HOME 뿐.
  *   필수 1  runs 는 활성 판(edition)의 것만 — 이전 판의 run 이 섞이지 않는다.
- *   권장 1  dispatches 는 dispatch 가 묶인 run 의 판(outbound_dispatches.run_id → runs.edition_id)으로 같은 판만.
- *   권장 2  50건 상한은 판마다 따로 센다(이전 판의 많은 행이 활성 판의 상한을 쓰지 않는다) · 상한 안에서 오래된 것부터.
+ *   R1-2 필수 1  dispatches 는 판과 무관한 프로젝트 전체 최근 50건 — 이전 판에서 나간 sent/unknown 전송도 남는다(전송·청구는 프로젝트 단위 사실). runs 만 활성 판.
+ *   권장 2  runs 의 50건 상한은 활성 판 안에서 센다(이전 판의 많은 행이 쓰지 않는다) · dispatches 는 프로젝트 전체 기준 · 상한 안에서 오래된 것부터.
  *   권장 3  승인 시각이 Date 범위 밖(손상)이어도 읽기는 200, past_approval.at 은 null.
  *   권장 4  past_approval 은 같은 단계의 가장 나중 승인 행(rowid)에서 온다 — 시각이 더 이르거나 origin 이 달라도.
  */
@@ -135,12 +135,14 @@ const ids_of = (rows: Array<{ id: string }>): string[] => rows.map((r) => r.id);
 // ---------------------------------------------------------------------------------------------------------------------------------------
 // 필수 1 · 권장 1 — 활성 판만
 
-test("edition: a new active edition shows none of the previous edition's runs or dispatches", async () => {
+test("edition: a new active edition shows none of the previous edition's runs, but keeps the project's earlier dispatches (unknown / sent / resolved)", async () => {
   await with_api(async (env) => {
     add_run(env, "run-old-1", {});
     add_run(env, "run-old-2", { status: "blocked_usage", mode: "A" });
     add_dispatch(env, "disp-old-1", "run-old-1", "unknown");
     add_dispatch(env, "disp-old-2", "run-old-2", "sent");
+    add_dispatch(env, "disp-old-3", "run-old-1", "response");
+    resolve_dispatch(env, "disp-old-3", "charged");
     assert.deepEqual(ids_of((await read(env)).runs), ["run-old-1", "run-old-2"], "before the switch they are the active edition's");
     const old_edition = edition_of(env);
 
@@ -148,24 +150,33 @@ test("edition: a new active edition shows none of the previous edition's runs or
     const fresh = await read(env);
     assert.equal(fresh.edition, 2);
     assert.deepEqual(fresh.runs, [], "the old edition's runs are not mixed into the new edition");
-    assert.deepEqual(fresh.ai_connection.dispatches, [], "a dispatch follows its run's edition");
+    // leader 승인: 리뷰 필수 1에 따라 단언 반전 — what was sent (and what is unsettled) is a project fact, not an edition one
+    assert.deepEqual(
+      fresh.ai_connection.dispatches,
+      [
+        { id: "disp-old-1", run_id: "run-old-1", state: "unknown" },
+        { id: "disp-old-2", run_id: "run-old-2", state: "sent" },
+        { id: "disp-old-3", run_id: "run-old-1", state: "response", resolution: "charged" },
+      ],
+      "an earlier edition's dispatches stay (the unknown one has no resolution yet; the settled one carries it)",
+    );
 
     add_run(env, "run-new-1", { stage: stage_ids(env.db, edition_of(env)).plan });
     add_dispatch(env, "disp-new-1", "run-new-1", "sent");
     const mixed = await read(env);
     assert.deepEqual(ids_of(mixed.runs), ["run-new-1"]);
     assert.equal(mixed.runs[0].stage, "plan", "the stage key is the new edition's stage row");
-    assert.deepEqual(ids_of(mixed.ai_connection.dispatches), ["disp-new-1"]);
-    assert.doesNotMatch(JSON.stringify(mixed), /run-old|disp-old/);
+    assert.deepEqual(ids_of(mixed.ai_connection.dispatches), ["disp-old-1", "disp-old-2", "disp-old-3", "disp-new-1"], "project-wide, oldest first");
+    assert.doesNotMatch(JSON.stringify(mixed.runs), /run-old/, "runs stay the active edition's only");
 
     activate(env, old_edition);
     const back = await read(env);
     assert.deepEqual(ids_of(back.runs), ["run-old-1", "run-old-2"], "and the other way: the old edition shows only its own");
-    assert.deepEqual(ids_of(back.ai_connection.dispatches), ["disp-old-1", "disp-old-2"]);
+    assert.deepEqual(ids_of(back.ai_connection.dispatches), ["disp-old-1", "disp-old-2", "disp-old-3", "disp-new-1"], "dispatches do not depend on which edition is active");
   });
 });
 
-test("edition: the 50-row cap is counted inside the active edition (an older edition's many rows do not use it up)", async () => {
+test("edition: the runs cap is counted inside the active edition; the dispatches cap is the newest 50 of the whole project", async () => {
   await with_api(async (env) => {
     const pad = (i: number) => String(i).padStart(3, "0");
     for (let i = 1; i <= 55; i += 1) add_run(env, `run-a${pad(i)}`, { mode: "A" });
@@ -175,7 +186,10 @@ test("edition: the 50-row cap is counted inside the active edition (an older edi
     for (let i = 1; i <= 3; i += 1) add_dispatch(env, `disp-b${pad(i)}`, `run-b${pad(i)}`, "sent");
     const data = await read(env);
     assert.deepEqual(ids_of(data.runs), ["run-b001", "run-b002", "run-b003"], "newer rowids of the active edition only; the 55 old ones are not in the 50");
-    assert.deepEqual(ids_of(data.ai_connection.dispatches), ["disp-b001", "disp-b002", "disp-b003"]);
+    const dispatches = ids_of(data.ai_connection.dispatches);
+    assert.equal(dispatches.length, 50, "newest 50 of the project: 47 old + 3 new");
+    assert.equal(dispatches[0], "disp-a009");
+    assert.deepEqual(dispatches.slice(-4), ["disp-a055", "disp-b001", "disp-b002", "disp-b003"]);
   });
 });
 
