@@ -13,7 +13,8 @@ const SAFE_TYPE = new RegExp(
       "image/(?:png|jpeg|gif|webp|avif|bmp|vnd\\.microsoft\\.icon|x-icon)",
       "application/(?:pdf|octet-stream|json|javascript|wasm|zip|gzip|x-tar|vnd\\.openxmlformats-officedocument\\.[a-z.]+)",
       "text/(?:plain|csv|markdown|css|javascript)",
-      "(?:audio|video|font)/[a-z0-9.+_-]+",
+      // no "+" — a structured-syntax suffix such as video/x-foo+xml can still be opened as an xml document (SEL-102 1차 2회차)
+      "(?:audio|video|font)/[a-z0-9._-]+",
     ].join("|") +
     ")$",
   "i",
