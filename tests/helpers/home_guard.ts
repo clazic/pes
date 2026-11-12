@@ -14,19 +14,24 @@
 //   3. assert_no_real_path(text) — a child's stdout / stderr / a produced file must not mention a protected real path.
 // "Real home" means BOTH os.homedir() (follows $HOME, i.e. the temp folder when the whole run is isolated) and
 // os.userInfo().homedir (the account's home, whatever $HOME says); a duplicate is looked at once.
-// 4. guard_process_fs()        — (SEL-95) the test process itself: every fs call (stat · read · readdir · exists · open · write …, sync, callback
-//                                  and promises) on a path inside the real <home>/.pes, <home>/pes-projects or <home>/.claude is recorded as a
+// 4. guard_process_fs()        — (SEL-95, SEL-103) the test process itself: every path-taking fs call (stat · read · readdir · exists · open · write ·
+//                                  realpath · statfs · glob · mkdtemp · chown · lutimes · watch · openAsBlob …, sync, callback and promises)
+//                                  on a path inside the real <home>/.pes, <home>/pes-projects or <home>/.claude is recorded as a
 //                                  PESHomeAccessViolation and thrown; use_home_guard() fails the file at the end even if the test swallowed the
 //                                  throw (try/catch "absent"). Layer 2 can only see *changes* of .pes / pes-projects; a test that stat()ed the real
 //                                  ~/.claude and compared mtimes (D13) passed or flaked depending on other Claude sessions — now it cannot even look.
+//                                  Deliberately NOT covered (documented in tests/README.md): calls on an already open file descriptor (fstatSync(fd) …,
+//                                  the fd was opened by a path call the guard saw), a symlink / junction alias that is spelled outside a protected
+//                                  folder (layer 2 and the child guard's realpath own that), wildcards that expand into a protected folder from an
+//                                  ancestor (`globSync("*/x", { cwd: home })` — only the cwd and the pattern's own spelling are looked at), other
+//                                  channels (child processes, node:sqlite, native addons, `process.binding`).
 // Layer 2 reuses the Playwright globalSetup listing (tests/e2e/helpers/home_guard.ts). All of it works with a *fake* "real home"
 // too, so the guard itself is tested without touching anything real (tests/test_home_guard.test.ts).
 
 import assert from "node:assert/strict";
-import { realpathSync } from "node:fs";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { homedir, userInfo } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before } from "node:test";
 
@@ -58,13 +63,19 @@ function homes_of(real_home: Homes | undefined): readonly string[] {
   return typeof real_home === "string" ? [real_home] : real_home;
 }
 
+const cjs_fs = createRequire(import.meta.url)("node:fs") as Record<string, any>;
+
+/** The guard's own realpath: the original, unwrapped `fs.realpathSync.native` taken when this module loads (before any guard wraps `fs`), so the
+ * guard's path decisions are never counted as (or refused as) accesses of the test. */
+const raw_realpath_native: (path: string) => string = cjs_fs.realpathSync.native;
+
 /** realpath.native of the longest existing prefix (symlinks, junctions, Windows 8.3 names), the missing tail appended unchanged. */
 function native(path: string): string {
   let current = resolve(path);
   const tail: string[] = [];
   for (;;) {
     try {
-      return join(realpathSync.native(current), ...[...tail].reverse());
+      return join(raw_realpath_native(current), ...[...tail].reverse());
     } catch {
       const parent = dirname(current);
       if (parent === current) return resolve(path);
@@ -96,9 +107,12 @@ export function protected_paths(real_home?: Homes): string[] {
   return [...out];
 }
 
+/** Only `..` itself (or `..<sep>…`) leaves the folder; `..cache` is an ordinary child name (SEL-103). */
 function inside(path: string, folder: string): boolean {
   const rel = relative(norm(folder), norm(path));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  if (rel === "") return true;
+  if (isAbsolute(rel)) return false; // another drive
+  return rel !== ".." && !rel.startsWith(`..${sep}`);
 }
 
 /**
@@ -170,15 +184,22 @@ export function assert_no_violation(text: string, what: string): void {
 // ---------------------------------------------------------------------------
 // layer 4 — the test process's own fs calls (SEL-95)
 
-const cjs_fs = createRequire(import.meta.url)("node:fs") as Record<string, any>;
-
+// Path-taking fs functions, by how many leading arguments are paths. A name that is not a function on this Node is skipped.
 const FS_ONE_PATH = [
-  "statSync", "lstatSync", "existsSync", "accessSync", "readFileSync", "readdirSync", "opendirSync", "openSync", "readlinkSync",
-  "createReadStream", "createWriteStream", "writeFileSync", "appendFileSync", "mkdirSync", "rmSync", "rmdirSync", "unlinkSync", "utimesSync", "chmodSync", "truncateSync",
-  "stat", "lstat", "exists", "access", "readFile", "readdir", "opendir", "open", "readlink", "writeFile", "appendFile", "mkdir", "rm", "rmdir", "unlink", "utimes", "chmod", "truncate",
+  // sync
+  "statSync", "lstatSync", "existsSync", "accessSync", "readFileSync", "readdirSync", "opendirSync", "openSync", "readlinkSync", "realpathSync", "statfsSync",
+  "createReadStream", "createWriteStream", "writeFileSync", "appendFileSync", "mkdirSync", "mkdtempSync", "mkdtempDisposableSync", "rmSync", "rmdirSync", "unlinkSync",
+  "utimesSync", "lutimesSync", "chmodSync", "lchmodSync", "chownSync", "lchownSync", "truncateSync", "watch", "watchFile",
+  // callback
+  "stat", "lstat", "exists", "access", "readFile", "readdir", "opendir", "open", "readlink", "realpath", "statfs", "writeFile", "appendFile", "mkdir", "mkdtemp", "rm", "rmdir", "unlink",
+  "utimes", "lutimes", "chmod", "lchmod", "chown", "lchown", "truncate",
 ] as const;
-const FS_TWO_PATH = ["copyFileSync", "cpSync", "renameSync", "linkSync", "copyFile", "cp", "rename", "link"] as const;
-const FS_PROMISE_NAMES = ["stat", "lstat", "access", "readFile", "readdir", "opendir", "open", "readlink", "writeFile", "appendFile", "mkdir", "rm", "rmdir", "unlink", "utimes", "chmod", "truncate", "copyFile", "cp", "rename", "link", "symlink"] as const;
+const FS_TWO_PATH = ["copyFileSync", "cpSync", "renameSync", "linkSync", "symlinkSync", "copyFile", "cp", "rename", "link", "symlink"] as const;
+const FS_PROMISE_ONE_PATH = [
+  "stat", "lstat", "access", "readFile", "readdir", "opendir", "open", "readlink", "realpath", "statfs", "writeFile", "appendFile", "mkdir", "mkdtemp", "mkdtempDisposable", "rm", "rmdir",
+  "unlink", "utimes", "lutimes", "chmod", "lchmod", "chown", "lchown", "truncate",
+] as const;
+const FS_PROMISE_TWO_PATH = ["copyFile", "cp", "rename", "link", "symlink"] as const;
 
 let allowed = 0;
 
@@ -213,8 +234,9 @@ export interface ProcessFsGuard {
 }
 
 /**
- * Deny (throw `PESHomeAccessViolation: <fn> <path>`) and record every fs call of this process whose path lies in a protected folder of the
- * real home(s). Decided from the spelling of the path alone (no realpath per call); a symlink alias is the child guard's and layer 2's job.
+ * Deny (throw `PESHomeAccessViolation: <fn> <path>`) and record every path-taking fs call of this process whose path lies in a protected folder of
+ * the real home(s). Decided from the spelling of the path alone (no realpath per call); a symlink alias is the child guard's and layer 2's job.
+ * Sync and callback forms throw at once; promise forms reject; the iterator forms (`promises.glob` · `promises.watch`) fail on the first iteration.
  */
 export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
   const bases = [...new Set(homes_of(real_home).flatMap((home) => [resolve(home), native(home)]))];
@@ -231,15 +253,26 @@ export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
       throw new Error(message);
     }
   };
+  const leading = (paths: number): Check => (args, fn) => {
+    for (let i = 0; i < paths; i += 1) hit(fn, args[i]);
+  };
+  // glob(pattern | patterns, { cwd }): the cwd, and every pattern as spelled (resolved against the cwd — `*` in a protected cwd, or an absolute pattern into one)
+  const glob_check: Check = (args, fn) => {
+    const options = typeof args[1] === "object" && args[1] !== null ? (args[1] as { cwd?: unknown }) : {};
+    const cwd = as_path(options.cwd);
+    if (cwd !== undefined) hit(fn, cwd);
+    for (const pattern of Array.isArray(args[0]) ? args[0] : [args[0]]) if (typeof pattern === "string") hit(fn, resolve(cwd ?? process.cwd(), pattern));
+  };
   const restore: Array<() => void> = [];
-  const wrap = (target: Record<string, any>, name: string, paths: number, label: string, promise: boolean): void => {
+  const wrap = (target: Record<string, any>, name: string, label: string, mode: Mode, check: Check): void => {
     const original = target[name];
     if (typeof original !== "function") return;
     const wrapped = function (this: unknown, ...args: unknown[]): unknown {
       try {
-        for (let i = 0; i < paths; i += 1) hit(`${label}${name}`, args[i]);
+        check(args, `${label}${name}`);
       } catch (error) {
-        if (promise) return Promise.reject(error);
+        if (mode === "promise") return Promise.reject(error);
+        if (mode === "iterator") return refused_iterator(error);
         throw error;
       }
       return original.apply(this, args);
@@ -250,10 +283,18 @@ export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
       target[name] = original;
     });
   };
-  for (const name of FS_ONE_PATH) wrap(cjs_fs, name, 1, "fs.", false);
-  for (const name of FS_TWO_PATH) wrap(cjs_fs, name, 2, "fs.", false);
-  wrap(cjs_fs, "symlinkSync", 2, "fs.", false);
-  for (const name of FS_PROMISE_NAMES) wrap(cjs_fs.promises, name, ["copyFile", "cp", "rename", "link", "symlink"].includes(name) ? 2 : 1, "fs.promises.", true);
+  for (const name of FS_ONE_PATH) wrap(cjs_fs, name, "fs.", "sync", leading(1));
+  for (const name of FS_TWO_PATH) wrap(cjs_fs, name, "fs.", "sync", leading(2));
+  wrap(cjs_fs, "openAsBlob", "fs.", "promise", leading(1));
+  wrap(cjs_fs, "globSync", "fs.", "sync", glob_check);
+  wrap(cjs_fs, "glob", "fs.", "sync", glob_check);
+  // `.native` of the two realpath functions is a function of its own (copied onto the wrapper above, so it is wrapped on the wrapper)
+  wrap(cjs_fs.realpathSync, "native", "fs.realpathSync.", "sync", leading(1));
+  wrap(cjs_fs.realpath, "native", "fs.realpath.", "sync", leading(1));
+  for (const name of FS_PROMISE_ONE_PATH) wrap(cjs_fs.promises, name, "fs.promises.", "promise", leading(1));
+  for (const name of FS_PROMISE_TWO_PATH) wrap(cjs_fs.promises, name, "fs.promises.", "promise", leading(2));
+  wrap(cjs_fs.promises, "glob", "fs.promises.", "iterator", glob_check);
+  wrap(cjs_fs.promises, "watch", "fs.promises.", "iterator", leading(1));
   syncBuiltinESMExports();
   return {
     violations,
@@ -266,16 +307,59 @@ export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
   };
 }
 
-/** Call once at the top of a test file: compares the real home before / after the file's tests, and denies every look at the real home (layer 4). */
-export function use_home_guard(): void {
+type Mode = "sync" | "promise" | "iterator";
+type Check = (args: unknown[], fn: string) => void;
+
+/** What an iterator-returning API (`promises.glob` · `promises.watch`) gives back when the call was refused: an iterator that throws at the first step. */
+function refused_iterator(error: unknown): AsyncGenerator<never> {
+  return (async function* (): AsyncGenerator<never> {
+    throw error;
+  })();
+}
+
+/**
+ * Call once at the top level of a test file: compares the real home before / after the file's tests, and denies every look at the real home (layer 4).
+ * `real_home` (a folder or several) replaces the default real homes — for the guard's own tests with a fake home; nothing real is looked at then.
+ *
+ * The guard's release + final snapshot are an `after` hook registered at the END of the file's loading (a microtask after the module body), so
+ * they run after every `after` hook the file registers, whenever in its body it does so — a cleanup hook that touches the protected folders is
+ * caught too. (Hooks registered after a top-level `await`, or while the tests run, can still come after it.)
+ */
+export function use_home_guard(real_home?: Homes): void {
   let snapshot: HomeSnapshot | undefined;
   let fs_guard: ProcessFsGuard | undefined;
+  let finished = false;
+  /** Release the fs guard and compare the snapshots (once); returns what failed. */
+  const finish = (): Error[] => {
+    if (finished) return [];
+    finished = true;
+    const errors: Error[] = [];
+    for (const step of [() => fs_guard?.release(), () => snapshot?.check()]) {
+      try {
+        step();
+      } catch (error) {
+        errors.push(error as Error);
+      }
+    }
+    // a failed file-level `after` hook does not change the exit code of a plain `node file.ts` run (only `node --test` counts it), so say it ourselves
+    if (errors.length > 0) process.exitCode = 1;
+    return errors;
+  };
   before(() => {
-    snapshot = take_home_snapshot();
-    fs_guard = guard_process_fs();
+    snapshot = take_home_snapshot(real_home);
+    fs_guard = guard_process_fs(real_home);
   });
-  after(() => {
-    fs_guard?.release();
-    snapshot?.check();
+  queueMicrotask(() => {
+    after(() => {
+      const errors = finish();
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) throw new AggregateError(errors, errors.map((error) => error.message).join("\n"));
+    });
+  });
+  // The runner skips the remaining `after` hooks once one has thrown (a later cleanup hook that hit the guard): then this is the last word.
+  process.once("exit", () => {
+    const wanted = fs_guard?.violations.slice() ?? [];
+    const errors = finish();
+    if (errors.length > 0) process.stderr.write(`home guard: ${errors.map((error) => error.message).join(" | ")}${wanted.length > 0 ? `\n${wanted.join("\n")}` : ""}\n`);
   });
 }

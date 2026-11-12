@@ -168,6 +168,13 @@ PR26의 첫 조각이다. 제품 코드는 바꾸지 않고, 0.15(Python)의 **�
 
 경로 판정(`touches_protected`)은 보호 폴더처럼 보이는 경로를 철자만으로 결정한다(파일 시스템을 건드리지 않는다). 보호 폴더처럼 안 보이는 경로만 `realpath` 로 풀어 심볼릭 링크·junction 별칭을 본다. 스냅샷은 두 보호 폴더의 이름·크기·mtime 만 `lstat` 으로 읽고 내용은 열지 않는다.
 
+**④ 시험 프로세스 자신의 fs 호출 (SEL-95·SEL-103, `guard_process_fs`·`use_home_guard`).** 실제 홈(`os.homedir()`·계정 홈)의 `.pes`·`pes-projects`·`.claude` 안쪽 경로를 받는 `node:fs` 호출은 동기·콜백·`promises` 모두 `PESHomeAccessViolation: <함수> <경로>` 로 던지고(또는 reject) 기록하며, 시험이 그 오류를 삼켜도 파일 끝에서 실패한다. 막는 것: stat·read·readdir·open·write·rm·rename·copy·symlink 류 전부 + `realpath`(+`.native`)·`statfs`·`glob`(`cwd` 와 패턴 철자)·`mkdtemp`(접두 경로)·`chown`·`lchown`·`lutimes`·`lchmod`·`watch`·`watchFile`·`openAsBlob`. `use_home_guard(real_home?)` 는 가짜 '실제 홈'(폴더 하나 또는 배열)을 받아 가드를 그 아래에서 시험할 수 있다 — 실제 홈은 어떤 시험도 건드리지 않는다.
+
+- **순서.** 가드 해제와 마지막 스냅샷은 파일이 `use_home_guard()` *뒤에* 등록한 모든 `after` 훅보다 나중에 돈다(파일 로딩이 끝난 마이크로태스크에서 `after` 를 등록한다). 정리 훅의 보호 경로 접근도 잡힌다. 한계: 최상위 `await` 뒤나 시험 도중에 등록한 `after` 는 그보다 늦을 수 있다. 훅이 던지면 러너가 남은 `after` 를 건너뛰므로 프로세스 종료 때 한 번 더 마무리하고 종료 코드를 1 로 둔다(맨 `node 파일.ts` 실행은 루트 `after` 실패를 종료 코드에 반영하지 않는다).
+- **이름 판정.** `..cache` 처럼 점 두 개로 *시작하는* 이름은 보통 하위 이름이다. `..` 자신(또는 `../`)만 폴더를 벗어난다.
+- **가드 내부 판정.** `touches_protected`·`assert_isolated_env`·스냅샷은 가드가 켜져 있어도 동작한다 — 모듈 로드 때 잡아 둔 래핑 전 원본 `realpathSync.native` 를 쓴다.
+- **일부러 막지 않는 것(한계).** ① 파일 디스크립터 호출(`fstatSync(fd)`·`readSync(fd)` …) — fd 는 경로 호출로 열렸고 그 호출이 가드를 지났다. ② 보호 폴더 *밖* 철자의 심볼릭 링크·junction 별칭 — fs 가드는 철자만 보며(호출마다 realpath 하지 않는다), 별칭은 `touches_protected`·자식 가드·② 전후 스냅샷의 몫이다. ③ 보호 폴더의 상위(홈)에서 와일드카드가 안으로 펼쳐지는 `glob`(`globSync("*/x", { cwd: 홈 })`) — `cwd` 와 패턴 철자만 본다. ④ 자식 프로세스, `node:sqlite` 의 `new DatabaseSync(경로)`, 네이티브 애드온, `process.binding`. 시험에서 이런 경로로 실제 홈을 열지 않는다.
+
 ## serve.ts·setup.ts 시험 (SEL-72, PR26c)
 
 PR26c 는 `scripts/serve.ts`(= `serve.py <PES 홈> [포트]` 직접 실행과 같은 계약)와 `scripts/setup.ts`(= `setup.py` 7개 명령)를 독립 진입점으로 옮긴다. `scripts/pes.ts` 는 SEL-71·77 몫이라 건드리지 않는다 — `pes serve`·`stop`·`hub`·`open`·`watch`·`doctor` 가 `serve.ts` 를 부르는 연결과 `/api/v1/*` 통과 길(serve.py 의 DB API)은 SEL-77 이후다.
