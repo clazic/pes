@@ -1536,14 +1536,23 @@ paths:
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
     get:
-      summary: Read the assumptions of the active edition (one current row each)
+      summary: Read the assumptions of an edition (one current row each; the active edition unless ?edition= says otherwise)
       description: |
-        data = {assumptions:[{id, version_id, version_no (decimal string), statement, state, needs_review (bool),
-        proposed_by_actor_id, assessed_by_actor_id|null, assessed_at|null (ISO 8601), rationale}]}. An object shows its
-        CURRENT version, so a judged assumption shows the judgement; the proposal stays in its older version. An empty
-        list is "no records", never a made-up row.
+        data = {edition (integer), assumptions:[{id, version_id, version_no (decimal string), statement, state, needs_review (bool),
+        proposed_by_actor_id, proposed_by {id, kind human|ai, name}, assessed_by_actor_id|null, assessed_by {id, kind, name}|null,
+        assessed_at|null (ISO 8601), rationale, revised_from_version_id|null, revised_from_statement|null}]}. An object shows its
+        CURRENT version, so a judged assumption shows the judgement; the proposal stays in its older version. revised_from_* are set
+        only when state is "revised": the version that stood before the fix and its sentence (both null otherwise). actor kind is
+        "human" for a human actor and "ai" for every other actor kind. An empty list is "no records", never a made-up row.
+        ?edition=<edition_no> reads that edition whatever its status (draft, completed, archived); a value that is not a positive
+        integer is 400 invalid_payload ($.query.edition) and an edition number the project does not have is 404 not_found
+        ($.query.edition). Reading writes nothing.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
+        - name: edition
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
       security: [{ agentToken: [] }, { localSession: [] }]
       responses:
         "200":
@@ -1551,9 +1560,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: "edition is not a positive integer" }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
-        "404": { description: Unknown project }
+        "404": { description: Unknown project or edition number }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/decisions:
     post:
@@ -1577,18 +1587,28 @@ paths:
         "401": { description: Missing or invalid credential }
         "403": { description: "Not allowed for this caller or scope (human_required: a token tried a judgement)" }
         "404": { description: Unknown project or target }
-        "409": { description: "supersedes_conflict (the decision it replaces is not adopted), a transition the table does not allow, stale base_version_id (rev_conflict), or idempotency key reuse" }
+        "409": { description: "supersedes_conflict (the decision it replaces is not adopted), conflict with details.reason edition_not_active (a decision of a draft edition widened to project scope), a transition the table does not allow, stale base_version_id (rev_conflict), or idempotency key reuse" }
         "413": { description: Payload too large (256 KiB JSON limit) }
-        "422": { description: "A field breaks the rules (validation_failed)" }
+        "422": { description: "A field breaks the rules (validation_failed; adopting or revoking with a statement that differs from the decision's own sentence is $.body.statement, reason statement_changed)" }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
     get:
-      summary: Read the decisions of the active edition and the project-wide ones (one current row each)
+      summary: Read the decisions of an edition and the project-wide ones (one current row each; the active edition unless ?edition= says otherwise)
       description: |
-        data = {decisions:[{id, version_id, version_no (decimal string), statement, state, scope, decided_by_actor_id|null,
-        rationale, supersedes_decision_id|null}]}. A superseded or revoked decision stays as a line with that state.
+        data = {edition (integer), decisions:[{id, version_id, version_no (decimal string), statement, state, scope,
+        decided_by_actor_id|null, decided_by {id, kind, name}|null, proposed_by {id, kind, name} (whoever wrote the first version),
+        rationale, supersedes_decision_id|null, superseded_by|null (the decision that replaced this one),
+        originated_from_version_id|null, originated_from_version_no|null (decimal string), originated_from_edition_no|null
+        (integer)}]}. A superseded or revoked decision stays as a line with that state. originated_from_* are set only for an
+        edition decision that was copied into a new edition: the parent's version it came from, that version's number and the
+        parent edition's number (all three null otherwise). The project-wide decisions are the same objects in every edition.
+        ?edition=<edition_no> reads that edition (same rules and errors as the assumptions read).
       parameters:
         - $ref: "#/components/parameters/ProjectId"
+        - name: edition
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
       security: [{ agentToken: [] }, { localSession: [] }]
       responses:
         "200":
@@ -1596,9 +1616,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: "edition is not a positive integer" }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
-        "404": { description: Unknown project }
+        "404": { description: Unknown project or edition number }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/reflections:
     post:
@@ -1628,18 +1649,36 @@ paths:
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
     get:
-      summary: Read one round's reflection, or list the rounds that have one
+      summary: Read one round's reflection (by round_id or by edition/stage/round_no), or list the rounds that have one
       description: |
-        With ?round_id=: data = {round_id, submitted (bool), counts:{applied, partial, rejected, deferred}, entries:[{id,
-        source_version_id, disposition, rationale, result_version_id|null, followup_id|null, applied_tx_id|null,
-        actor_id}]}. submitted is false before any submission and true after one, even when it had no entries ("0 items").
-        Without round_id: data = {reflections:[<the same object>]} for the rounds that have a submission.
+        With ?round_id=, or with ?stage=&round_no= (and optionally ?edition=<edition_no>, the active edition when absent):
+        data = {round_id, stage (stage key), round_no (integer), submitted (bool), counts:{applied, partial, rejected, deferred},
+        entries:[{id, source_version_id, source_text|null, disposition, rationale, result_version_id|null, followup_id|null,
+        followup {id, kind, state, description, result_version_id|null}|null, applied_tx_id|null, actor_id, actor {id, kind, name}}]}.
+        source_text is the sentence of the source when it is an assumption, decision or message version, and null for anything without a
+        sentence (a text artifact version). submitted is false before any submission and true after one, even when it had no entries
+        ("0 items"). round_id together with edition, stage or round_no is 400 invalid_payload; stage without round_no (or the other way
+        round) is 400; round_no that is not a positive integer is 400 ($.query.round_no); a stage key or round number the edition does not
+        have is 404 not_found ($.query.round_no), an edition number the project does not have is 404 ($.query.edition).
+        Without any of them: data = {reflections:[<the same object>]} for the rounds that have a submission.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - name: round_id
           in: query
           required: false
           schema: { type: string }
+        - name: edition
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+        - name: stage
+          in: query
+          required: false
+          schema: { type: string }
+        - name: round_no
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
       security: [{ agentToken: [] }, { localSession: [] }]
       responses:
         "200":
@@ -1647,9 +1686,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: "Mixed or malformed query" }
         "401": { description: Missing or invalid credential }
         "403": { description: Missing context:read scope or Go policy denied }
-        "404": { description: Unknown project or round }
+        "404": { description: Unknown project, round, stage or edition }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/submissions:
     post:

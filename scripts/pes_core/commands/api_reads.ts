@@ -409,6 +409,24 @@ function iso_of(ms: bigint | number | null): string | null {
   return ms === null ? null : new Date(Number(ms)).toISOString();
 }
 
+/** A person or an AI as the screens name them: the actor's id, whether it is a human or an AI, and its display name. */
+export interface ActorDto {
+  id: string;
+  kind: "human" | "ai";
+  name: string;
+}
+
+/**
+ * The actor behind an id, or null when the row is gone. `kind` is "human" for a human actor and "ai" for every other kind
+ * (internal_ai, external_agent, browser_agent, and also system / legacy_unknown, which no record route writes).
+ */
+export function actor_dto(db: Db, actor_id: string | null): ActorDto | null {
+  if (actor_id === null) return null;
+  const row = db.get<{ kind: string; display_name: string }>("SELECT kind, display_name FROM actors WHERE id = ?", actor_id);
+  if (row === undefined) return null;
+  return { id: actor_id, kind: row.kind === "human" ? "human" : "ai", name: row.display_name };
+}
+
 export interface AssumptionDto {
   id: string;
   version_id: string;
@@ -417,9 +435,14 @@ export interface AssumptionDto {
   state: string;
   needs_review: boolean;
   proposed_by_actor_id: string;
+  proposed_by: ActorDto | null;
   assessed_by_actor_id: string | null;
+  assessed_by: ActorDto | null;
   assessed_at: string | null;
   rationale: string;
+  /** Only for a revised assumption: the version that stood before the fix, and its sentence. */
+  revised_from_version_id: string | null;
+  revised_from_statement: string | null;
 }
 
 /** The assumptions of one edition, each as its current version (a judged one shows the judgement, not the proposal). */
@@ -436,31 +459,42 @@ export function assumption_rows(db: Db, project_id: string, edition_id: string):
       assessment_actor_id: string | null;
       assessed_at: bigint | null;
       rationale: string;
+      based_on_version_id: string | null;
+      based_on_statement: string | null;
     }>(
       `SELECT o.id AS id, o.current_version_id AS version_id, ov.version_no AS version_no, av.statement AS statement,
               av.state AS state, av.needs_review AS needs_review, a.proposed_by_actor_id AS proposed_by_actor_id,
-              av.assessment_actor_id AS assessment_actor_id, av.assessed_at AS assessed_at, av.rationale AS rationale
+              av.assessment_actor_id AS assessment_actor_id, av.assessed_at AS assessed_at, av.rationale AS rationale,
+              ov.based_on_version_id AS based_on_version_id, bv.statement AS based_on_statement
          FROM objects o
          JOIN assumptions a ON a.project_id = o.project_id AND a.object_id = o.id
          JOIN object_versions ov ON ov.project_id = o.project_id AND ov.id = o.current_version_id
          JOIN assumption_versions av ON av.project_id = o.project_id AND av.version_id = o.current_version_id
+         LEFT JOIN assumption_versions bv ON bv.project_id = o.project_id AND bv.version_id = ov.based_on_version_id
         WHERE o.project_id = ? AND o.edition_id = ? AND o.kind = 'assumption' AND o.archived_at IS NULL
         ORDER BY o.display_no`,
       project_id,
       edition_id,
     )
-    .map((row) => ({
-      id: row.id,
-      version_id: row.version_id,
-      version_no: row.version_no.toString(),
-      statement: row.statement,
-      state: row.state,
-      needs_review: row.needs_review === 1n,
-      proposed_by_actor_id: row.proposed_by_actor_id,
-      assessed_by_actor_id: row.assessment_actor_id,
-      assessed_at: iso_of(row.assessed_at),
-      rationale: row.rationale,
-    }));
+    .map((row) => {
+      const revised = row.state === "revised" && row.based_on_version_id !== null && row.based_on_statement !== null;
+      return {
+        id: row.id,
+        version_id: row.version_id,
+        version_no: row.version_no.toString(),
+        statement: row.statement,
+        state: row.state,
+        needs_review: row.needs_review === 1n,
+        proposed_by_actor_id: row.proposed_by_actor_id,
+        proposed_by: actor_dto(db, row.proposed_by_actor_id),
+        assessed_by_actor_id: row.assessment_actor_id,
+        assessed_by: actor_dto(db, row.assessment_actor_id),
+        assessed_at: iso_of(row.assessed_at),
+        rationale: row.rationale,
+        revised_from_version_id: revised ? row.based_on_version_id : null,
+        revised_from_statement: revised ? row.based_on_statement : null,
+      };
+    });
 }
 
 export interface DecisionDto {
@@ -471,8 +505,17 @@ export interface DecisionDto {
   state: string;
   scope: string;
   decided_by_actor_id: string | null;
+  decided_by: ActorDto | null;
+  /** Whoever wrote the first version of the decision. */
+  proposed_by: ActorDto | null;
   rationale: string;
   supersedes_decision_id: string | null;
+  /** The decision that replaced this one, or null. */
+  superseded_by: string | null;
+  /** Only for a decision copied into a new edition: the parent's version it came from, that version's number, the parent edition's number. */
+  originated_from_version_id: string | null;
+  originated_from_version_no: string | null;
+  originated_from_edition_no: number | null;
 }
 
 /** The decisions of one edition plus the project-wide ones, each as its current version (superseded and revoked ones stay as lines). */
@@ -488,14 +531,27 @@ export function decision_rows(db: Db, project_id: string, edition_id: string): D
       decided_by: string | null;
       rationale: string;
       supersedes_decision_id: string | null;
+      first_actor_id: string | null;
+      superseded_by: string | null;
+      originated_from_version_id: string | null;
+      originated_from_version_no: bigint | null;
+      originated_from_edition_no: bigint | null;
     }>(
       `SELECT o.id AS id, o.current_version_id AS version_id, ov.version_no AS version_no, dv.statement AS statement,
               dv.state AS state, d.scope AS scope, dv.decided_by AS decided_by, dv.rationale AS rationale,
-              dv.supersedes_decision_id AS supersedes_decision_id
+              dv.supersedes_decision_id AS supersedes_decision_id,
+              (SELECT fv.actor_id FROM object_versions fv WHERE fv.project_id = o.project_id AND fv.object_id = o.id AND fv.version_no = 1) AS first_actor_id,
+              (SELECT r.object_id FROM decision_versions r WHERE r.project_id = o.project_id AND r.supersedes_decision_id = o.id ORDER BY r.rowid LIMIT 1) AS superseded_by,
+              d.originated_from_version_id AS originated_from_version_id,
+              pv.version_no AS originated_from_version_no,
+              pe.edition_no AS originated_from_edition_no
          FROM objects o
          JOIN decisions d ON d.project_id = o.project_id AND d.object_id = o.id
          JOIN object_versions ov ON ov.project_id = o.project_id AND ov.id = o.current_version_id
          JOIN decision_versions dv ON dv.project_id = o.project_id AND dv.version_id = o.current_version_id
+         LEFT JOIN object_versions pv ON pv.project_id = d.project_id AND pv.id = d.originated_from_version_id
+         LEFT JOIN objects po ON po.project_id = pv.project_id AND po.id = pv.object_id
+         LEFT JOIN editions pe ON pe.project_id = po.project_id AND pe.id = po.edition_id
         WHERE o.project_id = ? AND o.kind = 'decision' AND o.archived_at IS NULL
           AND (o.edition_id = ? OR d.scope = 'project')
         ORDER BY o.display_no`,
@@ -510,9 +566,26 @@ export function decision_rows(db: Db, project_id: string, edition_id: string): D
       state: row.state,
       scope: row.scope,
       decided_by_actor_id: row.decided_by,
+      decided_by: actor_dto(db, row.decided_by),
+      proposed_by: actor_dto(db, row.first_actor_id),
       rationale: row.rationale,
       supersedes_decision_id: row.supersedes_decision_id,
+      superseded_by: row.superseded_by,
+      originated_from_version_id: row.originated_from_version_id,
+      originated_from_version_no: row.originated_from_version_id === null || row.originated_from_version_no === null ? null : row.originated_from_version_no.toString(),
+      originated_from_edition_no: row.originated_from_version_id === null || row.originated_from_edition_no === null ? null : Number(row.originated_from_edition_no),
     }));
+}
+
+/** The edition number of an edition id (for the `edition` the record reads answer with). */
+export function edition_no_of(db: Db, project_id: string, edition_id: string): number | null {
+  const row = db.get<{ edition_no: bigint }>("SELECT edition_no FROM editions WHERE project_id = ? AND id = ?", project_id, edition_id);
+  return row === undefined ? null : Number(row.edition_no);
+}
+
+/** The id of the edition with this number in the project, or null. */
+export function edition_id_by_no(db: Db, project_id: string, edition_no: number): string | null {
+  return db.get<{ id: string }>("SELECT id FROM editions WHERE project_id = ? AND edition_no = ?", project_id, edition_no)?.id ?? null;
 }
 
 /** The decision that replaced `decision_id` (it names it as the one it supersedes), or null. */
@@ -525,19 +598,33 @@ export function replacing_decision_id(db: Db, project_id: string, decision_id: s
   return row?.object_id ?? null;
 }
 
+export interface ReflectionFollowupDto {
+  id: string;
+  kind: string;
+  state: string;
+  description: string;
+  result_version_id: string | null;
+}
+
 export interface ReflectionEntryDto {
   id: string;
   source_version_id: string;
+  /** The sentence of the source when it is an assumption / decision / message version; null for anything without a sentence. */
+  source_text: string | null;
   disposition: string;
   rationale: string;
   result_version_id: string | null;
   followup_id: string | null;
+  followup: ReflectionFollowupDto | null;
   applied_tx_id: string | null;
   actor_id: string;
+  actor: ActorDto | null;
 }
 
 export interface ReflectionRoundDto {
   round_id: string;
+  stage: string;
+  round_no: number;
   submitted: boolean;
   counts: { applied: number; partial: number; rejected: number; deferred: number };
   entries: ReflectionEntryDto[];
@@ -555,22 +642,78 @@ export function reflection_submitted(db: Db, project_id: string, round_id: strin
   );
 }
 
+/** The round of an edition by stage key and round number, or null. */
+export function round_id_by_number(db: Db, project_id: string, edition_id: string, stage_key: string, round_no: number): string | null {
+  return (
+    db.get<{ id: string }>(
+      `SELECT r.id AS id FROM rounds r JOIN stages s ON s.project_id = r.project_id AND s.id = r.stage_id
+        WHERE r.project_id = ? AND r.edition_id = ? AND s.key = ? AND r.round_no = ?`,
+      project_id,
+      edition_id,
+      stage_key,
+      round_no,
+    )?.id ?? null
+  );
+}
+
 /** One round's reflection: the entries still standing (a corrected entry is replaced by the one that supersedes it) and the counts. */
 export function reflection_round(db: Db, project_id: string, round_id: string): ReflectionRoundDto {
-  const entries = db.all<ReflectionEntryDto>(
+  const rows = db.all<{
+    id: string;
+    source_version_id: string;
+    disposition: string;
+    rationale: string;
+    result_version_id: string | null;
+    followup_id: string | null;
+    applied_tx_id: string | null;
+    actor_id: string;
+    source_text: string | null;
+    fu_kind: string | null;
+    fu_state: string | null;
+    fu_description: string | null;
+    fu_result_version_id: string | null;
+  }>(
     `SELECT e.id AS id, e.source_version_id AS source_version_id, e.disposition AS disposition, e.rationale AS rationale,
             e.result_version_id AS result_version_id, e.followup_id AS followup_id, e.applied_tx_id AS applied_tx_id,
-            e.actor_id AS actor_id
+            e.actor_id AS actor_id,
+            COALESCE(sa.statement, sd.statement, sm.body_md) AS source_text,
+            fv.kind AS fu_kind, fv.state AS fu_state, fv.description AS fu_description, fv.result_version_id AS fu_result_version_id
        FROM reflection_entries e
+       LEFT JOIN assumption_versions sa ON sa.project_id = e.project_id AND sa.version_id = e.source_version_id
+       LEFT JOIN decision_versions sd ON sd.project_id = e.project_id AND sd.version_id = e.source_version_id
+       LEFT JOIN message_versions sm ON sm.project_id = e.project_id AND sm.version_id = e.source_version_id
+       LEFT JOIN objects fo ON fo.project_id = e.project_id AND fo.id = e.followup_id
+       LEFT JOIN followup_versions fv ON fv.project_id = fo.project_id AND fv.version_id = fo.current_version_id
       WHERE e.project_id = ? AND e.target_round_id = ?
         AND NOT EXISTS (SELECT 1 FROM reflection_entries n WHERE n.project_id = e.project_id AND n.supersedes_entry_id = e.id)
       ORDER BY e.rowid`,
     project_id,
     round_id,
   );
+  const entries: ReflectionEntryDto[] = rows.map((row) => ({
+    id: row.id,
+    source_version_id: row.source_version_id,
+    source_text: row.source_text,
+    disposition: row.disposition,
+    rationale: row.rationale,
+    result_version_id: row.result_version_id,
+    followup_id: row.followup_id,
+    followup:
+      row.followup_id === null || row.fu_kind === null || row.fu_state === null || row.fu_description === null
+        ? null
+        : { id: row.followup_id, kind: row.fu_kind, state: row.fu_state, description: row.fu_description, result_version_id: row.fu_result_version_id },
+    applied_tx_id: row.applied_tx_id,
+    actor_id: row.actor_id,
+    actor: actor_dto(db, row.actor_id),
+  }));
   const counts = { applied: 0, partial: 0, rejected: 0, deferred: 0 };
   for (const entry of entries) counts[entry.disposition as keyof typeof counts] += 1;
-  return { round_id, submitted: reflection_submitted(db, project_id, round_id), counts, entries };
+  const place = db.get<{ key: string; round_no: bigint }>(
+    "SELECT s.key AS key, r.round_no AS round_no FROM rounds r JOIN stages s ON s.project_id = r.project_id AND s.id = r.stage_id WHERE r.project_id = ? AND r.id = ?",
+    project_id,
+    round_id,
+  );
+  return { round_id, stage: place?.key ?? "", round_no: place === undefined ? 0 : Number(place.round_no), submitted: reflection_submitted(db, project_id, round_id), counts, entries };
 }
 
 /** The rounds that have a reflection submission, oldest first (no submission yet: an empty list). */

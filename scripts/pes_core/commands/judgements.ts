@@ -16,7 +16,9 @@
 // applied / partial evidence (the DDL CHECK only sees that the columns are filled; the meaning is checked here):
 //   - evidence_tx_id is a commit of this project;
 //   - result_version_id, when given, is a version of this project that THAT commit made (object_versions.tx_id), and is not the source;
-//   - followup_id, when given, is a follow-up whose current version is 'applied' with applied_tx_id = that commit;
+//   - result_version_id is not a proposal: an assumption / decision version in state 'proposed' is never a result (SEL-100);
+//   - followup_id, when given, is a follow-up whose origin_version_id is the entry's source and whose current version is 'applied'
+//     with applied_tx_id = that commit (a follow-up with no origin is refused too, SEL-100);
 //   - at least one of result / follow-up; when both are given, both must agree.
 
 import { read_credential_actor } from "../actors.ts";
@@ -495,6 +497,11 @@ function run_decision_supersede(runtime: CommandRuntime): CommandResult {
   // an edition-scope replacement of an edition-scope decision stays in the edition of the decision it replaces (a draft copy's replacement
   // must not appear in the active edition); a project-scope replacement, or a decision without an edition, goes to the active edition
   const resulting_scope = new_scope ?? head.scope;
+  // widening a record of a DRAFT edition (a new edition being prepared) to project scope would show it in the active edition at once,
+  // because a project-scope decision belongs to no edition: refuse (the draft's work stays in the draft)
+  if (head.scope === "edition" && resulting_scope === "project" && current.edition_id !== null && current.edition_id !== active_edition_id(runtime, scope.project_id)) {
+    throw new ApiError("conflict", "a decision of an edition that is not the active one cannot be widened to project scope", { reason: "edition_not_active" });
+  }
   const edition_id = head.scope === "edition" && resulting_scope === "edition" && current.edition_id !== null ? current.edition_id : active_edition_id(runtime, scope.project_id);
   const decision_id = runtime.new_id();
   const version_id = runtime.new_id();
@@ -632,10 +639,22 @@ function check_evidence(runtime: CommandRuntime, project_id: string, entry: Refl
     if (made === undefined) throw new ApiError("not_found", "result_version_id is not a version of this project", { index, field: "result_version_id" });
     if (entry.result_version_id === entry.source_version_id) evidence_mismatch(index, "result_version_id", "the source itself is not a result");
     if (made.tx_id !== tx) evidence_mismatch(index, "evidence_tx_id", "that commit did not make the result version");
+    // a proposal is made by anyone, in one step, so "the version that commit made" would always hold for it: only a judged version
+    // (the human owner's confirm / reject / revise / adopt / supersede / revoke) or a text counts as a result
+    const proposal = runtime.db.get(
+      `SELECT 1 FROM assumption_versions WHERE project_id = ? AND version_id = ? AND state = 'proposed'
+       UNION ALL
+       SELECT 1 FROM decision_versions WHERE project_id = ? AND version_id = ? AND state = 'proposed'`,
+      project_id,
+      entry.result_version_id,
+      project_id,
+      entry.result_version_id,
+    );
+    if (proposal !== undefined) evidence_mismatch(index, "result_version_id", "a proposal is not a result: it was not judged");
   }
   if (entry.followup_id !== null) {
-    const row = runtime.db.get<{ state: string | null; applied_tx_id: string | null }>(
-      `SELECT v.state AS state, v.applied_tx_id AS applied_tx_id
+    const row = runtime.db.get<{ state: string | null; applied_tx_id: string | null; origin_version_id: string | null }>(
+      `SELECT v.state AS state, v.applied_tx_id AS applied_tx_id, f.origin_version_id AS origin_version_id
          FROM followups f
          JOIN objects o ON o.project_id = f.project_id AND o.id = f.object_id
          LEFT JOIN followup_versions v ON v.project_id = o.project_id AND v.version_id = o.current_version_id
@@ -646,6 +665,8 @@ function check_evidence(runtime: CommandRuntime, project_id: string, entry: Refl
     if (row === undefined) throw new ApiError("not_found", "followup_id is not a follow-up of this project", { index, field: "followup_id" });
     if (row.state !== "applied") evidence_mismatch(index, "evidence_tx_id", "the follow-up is not applied");
     if (row.applied_tx_id !== tx) evidence_mismatch(index, "evidence_tx_id", "the follow-up was applied by another commit");
+    // the follow-up must come from this entry's source: an applied follow-up of some other opinion (or of none) is no evidence for it
+    if (row.origin_version_id !== entry.source_version_id) evidence_mismatch(index, "followup_id", "the follow-up did not come from this entry's source");
   }
 }
 
