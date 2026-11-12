@@ -125,6 +125,10 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/projects/{id}/decisions",
   "GET /api/v1/projects/{id}/reflections",
   "POST /api/v1/projects/{id}/reflections",
+  // SEL-119 U6a: range print (GET reads a stored print; the two POSTs prepare and commit one)
+  "GET /api/v1/projects/{id}/print",
+  "POST /api/v1/projects/{id}/print/prepare",
+  "POST /api/v1/projects/{id}/print/commit",
   "GET /api/v1/projects/{id}/context",
   "GET /api/v1/projects/{id}/files/{b}/content",
   "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
