@@ -1492,6 +1492,7 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/prompt-builds:
     post:
+      x-pes-read-only: true
       summary: Assemble the prompt of a question about one exact version (a read; nothing is written)
       description: |
         A READ that uses POST only because an unsubmitted draft exists in the client alone and arrives in the body. It writes no row,
