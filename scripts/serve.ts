@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ApiApp } from "./pes_core/api.ts";
@@ -340,6 +340,28 @@ async function start(config: Config): Promise<void> {
     }
   };
 
+  /**
+   * SEL-86: is `file` inside a project's reports/ or out/ folder (the first word under the slug, or under the home itself when the home is one project)?
+   * The AI's HTML lives there, so its text/html gets the sandbox. Judged on the translated path AND on the real path (a link whose real place is reports/ or
+   * out/ counts), words compared lower-case (a case-insensitive disk opens `Reports/`).
+   */
+  const in_report_zone = (file: string): boolean => {
+    const zone = (absolute: string, base: string): boolean => {
+      const rel = relative(base, absolute);
+      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+      const words = rel.split(sep).filter((word) => word !== "");
+      const first_under = (name: string | undefined): boolean => name !== undefined && (name.toLowerCase() === "reports" || name.toLowerCase() === "out");
+      if (existsSync(join(root, "project.json")) && first_under(words[0])) return true;
+      return words[0] !== undefined && SLUG.test(words[0]) && existsSync(join(base, words[0], "project.json")) && first_under(words[1]);
+    };
+    if (zone(file, root)) return true;
+    try {
+      return zone(realpathSync.native(file), real_root);
+    } catch {
+      return false;
+    }
+  };
+
   const serve_static = (req: IncomingMessage, res: ServerResponse): void => {
     const path = raw_path(req.url);
     let target = translate(path);
@@ -371,12 +393,14 @@ async function start(config: Config): Promise<void> {
       not_found(req, res);
       return;
     }
-    const headers = {
-      "Content-Type": guess_type(target),
+    const content_type = guess_type(target);
+    const headers: Record<string, string | number> = {
+      "Content-Type": content_type,
       "Content-Length": stat.size,
       "Last-Modified": new Date(stat.mtimeMs).toUTCString(),
       "Cache-Control": "no-store",
     };
+    if (/^text\/html/i.test(content_type) && in_report_zone(target)) headers["Content-Security-Policy"] = REPORT_HTML_CSP;
     if (req.method === "HEAD") {
       res.writeHead(200, headers);
       res.end();
