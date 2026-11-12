@@ -45,9 +45,16 @@ function fallbackBody(status: number): ApiError {
 /** 오류 응답 → PesApiError. 서버 봉투(`error.code` 가 있는 것)는 그대로 `.body` 에 둔다 */
 async function toApiError(res: Response): Promise<PesApiError> {
   const body: unknown = await res.json().catch(() => null);
-  if (isRecord(body) && isRecord(body.error) && typeof body.error.code === "string") return new PesApiError(body as unknown as ApiError);
-  return new PesApiError(fallbackBody(res.status));
+  const error = isRecord(body) && isRecord(body.error) && typeof body.error.code === "string" ? new PesApiError(body as unknown as ApiError) : new PesApiError(fallbackBody(res.status));
+  if (isDefiniteRejection(res.status)) definiteRejections.add(error);
+  return error;
 }
+
+/** 서버가 요청을 확정적으로 거절한 상태(4xx). 429(잠시 막힘)는 처리 여부가 불명이니 뺀다 — 5xx 와 함께 “확인 중”에 든다 */
+const isDefiniteRejection = (status: number): boolean => status >= 400 && status < 500 && status !== 429;
+
+/** toApiError 가 확정 거절로 판정한 오류들 — 메모를 지울지 정할 때 상태 코드를 다시 쓰지 않으려고 모아 둔다 */
+const definiteRejections = new WeakSet<PesApiError>();
 
 const isNotFound = (e: unknown): boolean => e instanceof PesApiError && e.body.error.code === "not_found";
 
@@ -354,6 +361,22 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return sameEdition(body.data, edition) ? body.data : null;
   }
 
+  /**
+   * 시작 자리(start) 읽기로 활성 판을 확인한다: 응답 판이 앱이 보는 판과 다르면 true. 시작 자리 읽기가 404 면 판을 가릴 자료가 없어 false(그대로 쓴다) —
+   * 시작 질문은 round_id 를 보내지 않으므로 지어내는 값은 없다.
+   */
+  async function startRoundOtherEdition(id: string, stage: string, edition: number, signal: AbortSignal): Promise<boolean> {
+    const res = await send(projectUrl(id, roundPath(stage, "start")), { method: "GET", headers: headers(), credentials: "omit", signal });
+    if (!res.ok) {
+      const error = await toApiError(res);
+      if (isNotFound(error)) return false;
+      throw error;
+    }
+    const body: unknown = await res.json();
+    if (!isRecord(body) || !isRecord(body.data)) throw new PesApiError(fallbackBody(500));
+    return !sameEdition(body.data, edition);
+  }
+
   /** 순서 바꾸기를 같은 멱등 키로 다시 보낼 때 같은 폼 세트 id 로 보내려고 처음 알아낸 값을 둔다(이 클라이언트의 수명 동안) */
   const orderSets = new Map<string, string>();
 
@@ -511,9 +534,9 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         orderSets.set(memo, setId);
       }
       // 서버가 확정적으로 거절했으면(409 stale_set · 422 · 404 …) 요청이 닿지 않은 것이 분명하다 — 메모를 지워, 같은 키로 다시 눌러도 세트 id 를 새로 읽는다.
-      // 시간 초과·끊김(확인 중)은 요청이 닿았을 수 있으니 메모를 남겨 같은 세트 id 로 재시도한다
+      // 5xx · 429 · 시간 초과 · 끊김(처리 여부 불명)은 요청이 닿았을 수 있으니 메모를 남겨 같은 세트 id 로 재시도한다
       const w = await write(slug, key, `/question-sets/${q(setId)}/order`, { question_ids: orderedIds }).catch((error: unknown) => {
-        if (error instanceof PesApiError) orderSets.delete(memo);
+        if (error instanceof PesApiError && definiteRejections.has(error)) orderSets.delete(memo);
         throw error;
       });
       const set = objectAt(w.data, "set");
@@ -532,6 +555,9 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
           const data = await timed((signal) => readRound(id, stage, round, edition, signal));
           if (data === null || typeof data.server_round_id !== "string" || !data.server_round_id) throw new PesApiError(fallbackBody(404));
           round_id = data.server_round_id;
+        } else if (await timed((signal) => startRoundOtherEdition(id, stage, edition, signal))) {
+          // 시작 자리도 활성 판을 확인한다 — 다른 판이면 쓰기 0 으로 거절(번호 라운드와 같은 404)
+          throw new PesApiError(fallbackBody(404));
         }
         const json = await timed(async (signal) => {
           const res = await send(projectUrl(id, "/context"), { method: "GET", headers: headers(), credentials: "omit", signal });

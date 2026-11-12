@@ -76,7 +76,7 @@ const make = async (s: ReturnType<typeof server>) => (await load())({ session: S
 const Q1 = {
   id: "qst-1", version_id: "qvr-1b", version_no: "2", display_no: 21, state: "open", type: "single", text: "정의 변경 앞뒤를 이어 볼까요?", required: true, allow_comment_as_answer: false,
   importance: "high", help: "각주가 필요해요", default_value: "split", options: [{ value: "join", label: "이어 보기", recommended: true }, { value: "split", label: "따로 보기" }], show_if: null, merged_into_question_id: null,
-  answer: { version_id: "ans-1", value: "join", question_version_id: "qvr-1b", used_default: false, state: "submitted", ...{ tx_id: "tx-50", receipt_no: "0050", committed_at: "2026-11-12T08:00:00+09:00" } },
+  answer: { version_id: "ans-1", value: "join", question_version_id: "qvr-1b", used_default: false, state: "submitted", tx_id: "tx-50", receipt_no: "0050", committed_at: "2026-11-12T08:00:00+09:00" },
 };
 const Q2 = {
   id: "qst-2", version_id: "qvr-2a", version_no: "1", display_no: 22, state: "open", type: "text", text: "더 볼 출처가 있나요?", required: false, allow_comment_as_answer: true,
