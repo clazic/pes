@@ -59,14 +59,17 @@
             "POST /api/v1/projects/{id}/uploads/{b}/complete",
             "GET /api/v1/projects/{id}/files/{b}/content",
             "POST /api/v1/projects/{id}/threads",
-            "POST /api/v1/projects/{id}/threads/{t}/messages"
+            "POST /api/v1/projects/{id}/threads/{t}/messages",
+            "POST /api/v1/projects/{id}/assumptions",
+            "GET /api/v1/projects/{id}/assumptions",
+            "POST /api/v1/projects/{id}/decisions",
+            "GET /api/v1/projects/{id}/decisions",
+            "POST /api/v1/projects/{id}/reflections",
+            "GET /api/v1/projects/{id}/reflections"
           ],
           "unsupported": [
             "POST /api/v1/projects/{id}/exports",
             "POST /api/v1/projects/{id}/threads/{t}/resolutions",
-            "POST /api/v1/projects/{id}/assumptions",
-            "POST /api/v1/projects/{id}/decisions",
-            "POST /api/v1/projects/{id}/reflections",
             "POST /api/v1/projects/{id}/editions",
             "POST /api/v1/projects/{id}/agent-tokens",
             "POST /api/v1/projects/{id}/followups/{f}/apply",
@@ -220,13 +223,22 @@
                 "supported": false
               },
               "assumptions.create": {
-                "supported": false
+                "supported": true
+              },
+              "assumptions.list": {
+                "supported": true
               },
               "decisions.create": {
-                "supported": false
+                "supported": true
+              },
+              "decisions.list": {
+                "supported": true
               },
               "reflections.create": {
-                "supported": false
+                "supported": true
+              },
+              "reflections.list": {
+                "supported": true
               },
               "editions.create": {
                 "supported": false
@@ -261,10 +273,12 @@
               "invalid_payload",
               "cursor_invalid",
               "validation_failed",
+              "evidence_required",
               "payload_too_large",
               "idempotency_key_reuse",
               "rev_conflict",
               "conflict",
+              "supersedes_conflict",
               "lease_lost",
               "run_terminal",
               "question_version_changed",

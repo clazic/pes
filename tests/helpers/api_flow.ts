@@ -118,6 +118,13 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "POST /api/v1/project-registrations",
   "POST /api/v1/projects",
   "GET /api/v1/projects/{id}/changes",
+  // SEL-93 U3a: assumptions / decisions / reflections (POST writes, GET reads)
+  "GET /api/v1/projects/{id}/assumptions",
+  "POST /api/v1/projects/{id}/assumptions",
+  "GET /api/v1/projects/{id}/decisions",
+  "POST /api/v1/projects/{id}/decisions",
+  "GET /api/v1/projects/{id}/reflections",
+  "POST /api/v1/projects/{id}/reflections",
   "GET /api/v1/projects/{id}/context",
   "GET /api/v1/projects/{id}/files/{b}/content",
   "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
@@ -160,9 +167,6 @@ export const EXPECTED_ROUTES: readonly string[] = [
 export const EXPECTED_UNSUPPORTED: readonly string[] = [
   "POST /api/v1/projects/{id}/exports",
   "POST /api/v1/projects/{id}/threads/{t}/resolutions",
-  "POST /api/v1/projects/{id}/assumptions",
-  "POST /api/v1/projects/{id}/decisions",
-  "POST /api/v1/projects/{id}/reflections",
 ];
 
 /**

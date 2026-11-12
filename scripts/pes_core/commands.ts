@@ -25,6 +25,7 @@ import { AI_COMMAND_ENTRIES } from "./commands/ai.ts";
 import { CONTENT_COMMAND_ENTRIES, RESULT_COMMAND_ENTRIES } from "./commands/content.ts";
 import { EDITION_COMMAND_ENTRIES } from "./commands/editions.ts";
 import { FILE_COMMAND_ENTRIES } from "./commands/files.ts";
+import { JUDGEMENT_COMMAND_ENTRIES } from "./commands/judgements.ts";
 import { LEGACY_COMMAND_ENTRIES } from "./commands/legacy.ts";
 import { MIGRATION_COMMAND_ENTRIES } from "./commands/migration.ts";
 import { POLICY_COMMAND_ENTRIES } from "./commands/policy.ts";
@@ -530,6 +531,7 @@ const COMMAND_TABLE: ReadonlyMap<string, CommandDefinition> = new Map<string, Co
   ...POLICY_COMMAND_ENTRIES,
   ...QUESTION_COMMAND_ENTRIES,
   ...RECORD_COMMAND_ENTRIES,
+  ...JUDGEMENT_COMMAND_ENTRIES,
   ...AI_COMMAND_ENTRIES,
 ]);
 

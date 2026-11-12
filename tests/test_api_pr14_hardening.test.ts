@@ -462,7 +462,9 @@ test("every listed route answers the shared Korean error envelope without a cred
       const bare = await call(env, { method, path, body: method === "GET" ? undefined : {} });
       envelope_ok(bare, `${entry} without credential`);
       if (path.includes("/projects/")) assert.equal(bare.status, 401, entry);
-      const wrong = await call(env, { method: method === "GET" ? "DELETE" : "GET", path, auth: "owner" });
+      // a path that has both GET and POST (SEL-93 records routes) is not wrong for either; use DELETE there
+      const both = EXPECTED_ROUTES.some((r) => r !== entry && r.split(" ")[1] === template);
+      const wrong = await call(env, { method: method === "GET" || both ? "DELETE" : "GET", path, auth: "owner" });
       envelope_ok(wrong, `${entry} wrong method`);
       assert.ok([404, 405].includes(wrong.status) || path === "/api/v1/projects", `${entry} wrong method ${wrong.status}`);
       if (method !== "GET") {

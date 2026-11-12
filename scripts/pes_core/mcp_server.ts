@@ -1,13 +1,15 @@
 // The PES MCP server for method-B adapters (stage 2 PR20a, SEL-53).
 //
 // An AI tool that runs on its own (Claude Code, and later Codex CLI / OpenCode TUI) talks to PES through
-// eleven MCP tools. The server is a thin, closed bridge over the PES HTTP API:
+// fourteen MCP tools. The server is a thin, closed bridge over the PES HTTP API:
 //
 //   pes_context  pes_read  pes_claim  pes_submit  pes_ask  pes_wait  pes_complete  pes_heartbeat
-//   pes_release  pes_cancel  pes_receipt
+//   pes_release  pes_cancel  pes_receipt  pes_assumption_propose  pes_decision_propose  pes_reflection_write
 //
 // - There is no tool for approving, reopening, sealing, changing policy, registering a project or minting a
-//   token: those are the human's. The tools can only do what the project agent token is allowed to do, and PES
+//   token: those are the human's. The same goes for judging an assumption and for adopting, superseding or
+//   revoking a decision (SEL-93): the three SEL-93 tools only PROPOSE or WRITE a reflection; PES refuses a
+//   token anything more (403 human_required). The tools can only do what the project agent token is allowed to do, and PES
 //   (not this file) decides that.
 // - The server holds the agent token in memory and puts it only in the Authorization header of its own API
 //   calls. It never echoes it, and writes nothing but JSON-RPC lines to its output.
@@ -40,6 +42,10 @@ export const TOOL_NAMES = [
   "pes_release",
   "pes_cancel",
   "pes_receipt",
+  // SEL-93 U3a: proposals and a round's reflection (no lease needed: they take the project token's run:submit scope)
+  "pes_assumption_propose",
+  "pes_decision_propose",
+  "pes_reflection_write",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -281,6 +287,56 @@ const TOOLS: readonly ToolSpec[] = [
       },
     },
     required: ["receipts"],
+    keyed: true,
+  },
+  {
+    name: "pes_assumption_propose",
+    description:
+      "가정 하나를 사람이 검토하도록 제안한다. 제안은 확정이 아니다(needs_review). 확인·반려·수정은 사람만 한다. lease가 필요 없다.",
+    properties: {
+      statement: { type: "string", minLength: 1, description: "가정 문장" },
+      rationale: { type: "string", description: "왜 그렇게 가정하는지(선택)" },
+    },
+    required: ["statement"],
+    keyed: true,
+  },
+  {
+    name: "pes_decision_propose",
+    description:
+      "결정 하나를 사람이 채택하도록 제안한다. 제안은 채택이 아니다. 채택·대체·폐기는 사람만 한다. lease가 필요 없다.",
+    properties: {
+      statement: { type: "string", minLength: 1, description: "결정 문장" },
+      scope: { type: "string", enum: ["project", "edition"], description: "프로젝트 전체인지 이번 판인지" },
+      rationale: { type: "string", description: "근거(선택)" },
+    },
+    required: ["statement", "scope"],
+    keyed: true,
+  },
+  {
+    name: "pes_reflection_write",
+    description:
+      "한 라운드의 반영 내역을 쓴다. 항목마다 disposition(applied·partial·rejected·deferred)과 이유. applied·partial은 증거(결과 버전과 그것을 만든 tx, 또는 적용된 후속)가 있어야 한다. entries가 빈 배열이면 '0건 제출'이다. lease가 필요 없다.",
+    properties: {
+      target_round_id: { type: "string", minLength: 1 },
+      entries: {
+        type: "array",
+        maxItems: 200,
+        items: {
+          type: "object",
+          properties: {
+            source_version_id: { type: "string" },
+            disposition: { type: "string", enum: ["applied", "partial", "rejected", "deferred"] },
+            rationale: { type: "string" },
+            result_version_id: { type: ["string", "null"] },
+            followup_id: { type: ["string", "null"] },
+            evidence_tx_id: { type: ["string", "null"] },
+            supersedes_entry_id: { type: ["string", "null"] },
+          },
+          required: ["source_version_id", "disposition", "rationale"],
+        },
+      },
+    },
+    required: ["target_round_id", "entries"],
     keyed: true,
   },
 ];
@@ -532,6 +588,12 @@ export class McpServer {
         return this.#cancel(args, key);
       case "pes_receipt":
         return this.#receipt(args, key);
+      case "pes_assumption_propose":
+        return this.#assumption_propose(args, key);
+      case "pes_decision_propose":
+        return this.#decision_propose(args, key);
+      case "pes_reflection_write":
+        return this.#reflection_write(args, key);
       default:
         return invalid("$.arguments", "알 수 없는 도구입니다.");
     }
@@ -572,6 +634,12 @@ export class McpServer {
         return { method: "POST", rest: `/runs/${run_path}/cancel`, body: {}, key };
       case "pes_receipt":
         return { method: "POST", rest: `/runs/${run_path}/input-receipts`, body: {}, key };
+      case "pes_assumption_propose":
+        return { method: "POST", rest: "/assumptions", body: {}, key };
+      case "pes_decision_propose":
+        return { method: "POST", rest: "/decisions", body: {}, key };
+      case "pes_reflection_write":
+        return { method: "POST", rest: "/reflections", body: {}, key };
       default:
         return { method: "POST", rest: "/claims", body: {}, key };
     }
@@ -794,6 +862,25 @@ export class McpServer {
     const out = this.#from_api(await this.#send("POST", `/runs/${encodeURIComponent(run)}/cancel`, body, key));
     if (out.ok) this.#lease_ended("pes_cancel", key, { run_id: run, lease_id: "", fence: "" }, out.data.replayed === true);
     return out;
+  }
+
+  /** The fields a SEL-93 tool forwards: every argument but the idempotency key. The API decides what is acceptable (types, blanks, evidence). */
+  #record_body(args: Record<string, unknown>): Record<string, unknown> {
+    const { idempotency_key: _key, ...rest } = args;
+    return rest;
+  }
+
+  /** A proposal needs no lease: the project token's run:submit scope is the whole permission, and it can only propose. */
+  async #assumption_propose(args: Record<string, unknown>, key: string): Promise<Outcome> {
+    return this.#from_api(await this.#send("POST", "/assumptions", { ...this.#record_body(args), state: "proposed" }, key));
+  }
+
+  async #decision_propose(args: Record<string, unknown>, key: string): Promise<Outcome> {
+    return this.#from_api(await this.#send("POST", "/decisions", { ...this.#record_body(args), state: "proposed", supersedes: null }, key));
+  }
+
+  async #reflection_write(args: Record<string, unknown>, key: string): Promise<Outcome> {
+    return this.#from_api(await this.#send("POST", "/reflections", this.#record_body(args), key));
   }
 
   async #receipt(args: Record<string, unknown>, key: string): Promise<Outcome> {

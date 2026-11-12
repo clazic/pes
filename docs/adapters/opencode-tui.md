@@ -1,6 +1,6 @@
 # 어댑터 노트 — OpenCode TUI (방식 B)
 
-사람이 터미널에서 직접 켠 **OpenCode TUI**(화면판)가 PES의 로컬 API로 일하게 하는 길이다. 공통 계약(도구 11개, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 OpenCode TUI만의 부분을 적는다. 문서 변환·스킬 대응에 대한 옛 노트는 [opencode.md](opencode.md)이고, 이 노트는 MCP 연결만 다룬다.
+사람이 터미널에서 직접 켠 **OpenCode TUI**(화면판)가 PES의 로컬 API로 일하게 하는 길이다. 공통 계약(도구 14개, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 OpenCode TUI만의 부분을 적는다. 문서 변환·스킬 대응에 대한 옛 노트는 [opencode.md](opencode.md)이고, 이 노트는 MCP 연결만 다룬다.
 
 ## OpenCode TUI는 내장 실행기가 아니다
 

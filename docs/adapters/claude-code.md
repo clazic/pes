@@ -23,7 +23,7 @@
 
 ## 방식 B: MCP 도구로 PES에 접속하기 (PR20a)
 
-Claude Code가 사람이 켠 세션으로 PES의 로컬 API에 일하게 하는 길이다. 공통 계약(도구 11개 — 읽기 `pes_context`·`pes_read` 포함, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 Claude Code만의 부분을 적는다.
+Claude Code가 사람이 켠 세션으로 PES의 로컬 API에 일하게 하는 길이다. 공통 계약(도구 14개 — 읽기 `pes_context`·`pes_read` 포함, `idempotency_key`, 진행 알림 형식, 오류)은 [adapter-contract.md](adapter-contract.md)이고, 여기에는 Claude Code만의 부분을 적는다.
 
 - **연결 항목**: `scripts/pes_core/adapters/claude_code.ts`의 `claude_code_mcp_entry`가 Claude Code의 MCP 설정에 넣을 항목을 만든다. 파일을 읽지도 쓰지도 않으니 설정 파일에 넣는 것은 사용자가 한다. 토큰은 **값이 아니라 참조**(`${PES_AGENT_TOKEN}`)로 적는다 — Claude Code가 시작할 때 환경변수에서 채운다. `command`는 node 실행 파일의 경로를 그대로 준다(`which`로 찾지 않는다).
 

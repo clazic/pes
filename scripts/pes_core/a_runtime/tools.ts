@@ -42,9 +42,18 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
     description: "Ask the person questions and wait for the answers. Each question: text, type, required, options.",
     parameters: { type: "object", properties: { questions: { type: "array", items: { type: "object" } } }, required: ["questions"] },
   },
-  { name: "assumption.propose", description: "Propose an assumption for a person to review.", parameters: TEXT_ARG },
-  { name: "decision.propose", description: "Propose a decision for a person to adopt. Only a person adopts.", parameters: TEXT_ARG },
-  { name: "reflection.write", description: "Write a short reflection on the work.", parameters: TEXT_ARG },
+  { name: "assumption.propose", description: "Propose an assumption for a person to review.", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+  {
+    name: "decision.propose",
+    description: "Propose a decision. Only a person adopts.",
+    parameters: { type: "object", properties: { text: { type: "string" }, scope: { type: "string", enum: ["project", "edition"] } }, required: ["text"] },
+  },
+  {
+    name: "reflection.write",
+    description:
+      "Write the round reflection. Entry: source_version_id, disposition, rationale; applied/partial add result_version_id, evidence_tx_id.",
+    parameters: { type: "object", properties: { entries: { type: "array", items: { type: "object" } } }, required: ["entries"] },
+  },
   // thread.reply stays on the allowlist above (decision 0013) but is NOT offered to a model yet: no PES command backs
   // it, so every call would only come back as an error and waste a turn. Add its spec here when the command exists.
   { name: "followup.propose", description: "Propose a follow-up task for a person.", parameters: TEXT_ARG },
@@ -52,9 +61,6 @@ export const TOOL_SPECS: readonly ToolSpec[] = Object.freeze([
 
 const RESULT_TEXT_MAX = 4000;
 const NOTE_LABEL: Record<string, string> = {
-  "assumption.propose": "[AI 제안: 가정]",
-  "decision.propose": "[AI 제안: 결정 — 사람이 채택해야 함]",
-  "reflection.write": "[AI 성찰]",
   "followup.propose": "[AI 제안: 후속 작업]",
 };
 
@@ -266,6 +272,39 @@ export async function run_tool(env: ToolEnv, call: ToolCall, index: number): Pro
       }
       case "thread.reply":
         return refused(call, "thread.reply is not connected to a PES command in this version");
+      case "assumption.propose": {
+        const text = args["text"];
+        if (typeof text !== "string" || text.trim().length === 0) return refused(call, "text must be a non-empty string");
+        if (env.run.stage_id === null) throw new ApiError("not_found", "this run has no stage");
+        const out = (await execute_with_retries(env, "assumption.propose", key, { statement: text.trim() })) as { object_id: string; version_id: string };
+        return ok(call, { recorded_as: out.object_id, id: out.object_id, version_id: out.version_id, state: "proposed", note: "a person must confirm it" });
+      }
+      case "decision.propose": {
+        const text = args["text"];
+        if (typeof text !== "string" || text.trim().length === 0) return refused(call, "text must be a non-empty string");
+        if (env.run.stage_id === null) throw new ApiError("not_found", "this run has no stage");
+        const scope = args["scope"] === undefined ? "edition" : args["scope"];
+        if (scope !== "project" && scope !== "edition") return refused(call, "scope must be project or edition");
+        const out = (await execute_with_retries(env, "decision.propose", key, { statement: text.trim(), scope })) as { object_id: string; version_id: string };
+        return ok(call, { recorded_as: out.object_id, id: out.object_id, version_id: out.version_id, state: "proposed", note: "a person must adopt it" });
+      }
+      case "reflection.write": {
+        if (env.run.stage_id === null) throw new ApiError("not_found", "this run has no stage");
+        const entries = args["entries"];
+        if (!Array.isArray(entries)) return refused(call, "entries must be an array");
+        // the reflection belongs to this run's own round; the tool has no round argument (naming another round is refused)
+        const target = env.run.round_id;
+        if (target === null) return refused(call, "this run has no round");
+        if (args["target_round_id"] !== undefined && args["target_round_id"] !== target) {
+          return refused(call, "the reflection is written to this run's round; leave target_round_id out");
+        }
+        const out = (await execute_with_retries(env, "reflection.create", key, { target_round_id: target, entries })) as {
+          count: number;
+          applied_count: number;
+          partial_count: number;
+        };
+        return ok(call, { count: out.count, applied_count: out.applied_count, partial_count: out.partial_count });
+      }
       default: {
         const text = note_text(call, args);
         if (text === null) return refused(call, "text must be a non-empty string");

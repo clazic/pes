@@ -894,7 +894,9 @@ test("every capabilities route exists in the app: any other method on its path i
     for (const route of caps.routes as string[]) {
       const [method, template] = route.split(" ");
       const path = template.replace("{id}", env.p.project_id).replace("{run}", "r1").replace("{blob}", "b1");
-      for (const other of ["GET", "POST", "PUT", "PATCH", "DELETE"].filter((m) => m !== method)) {
+      // a method that is registered on this very path (GET and POST of the SEL-93 records routes) is not "another" method
+      const registered = new Set((caps.routes as string[]).filter((r) => r.split(" ")[1] === template).map((r) => r.split(" ")[0]));
+      for (const other of ["GET", "POST", "PUT", "PATCH", "DELETE"].filter((m) => !registered.has(m))) {
         const res = await call(env, { method: other, path, auth: "owner", raw: "{}" });
         assert_error(res, 405, "method_not_allowed");
         assert.ok((res.headers["allow"] ?? "").split(/,\s*/).includes(method), `${route}: Allow lists ${method}`);
