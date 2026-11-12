@@ -45,3 +45,73 @@ test("closed_materials 의 닫힌 blob·자료 객체 집합이 file_ai_denied �
     assert.ok(!closed.blobs.has(loose.blob_id), "a file with no material and no deny is not closed");
   });
 });
+
+/**
+ * SEL-127 리뷰 F1-4 — 경계 사례에서도 closed_materials 가 낱개 판정(material_object_denied · file_ai_denied)과 같은 답을 낸다.
+ * 기존 시험의 단언은 바꾸지 않고, 그 뒤에 경계 사례마다 같은 비교를 한다. 합성 값만 쓴다.
+ */
+test("경계 사례(이력만 deny · 같은 blob 두 객체 · allow 되돌림 · deny 뒤 판 추가 · 보관 객체)에서도 closed_materials 와 낱개 판정이 같다", async () => {
+  await with_api(async (env) => {
+    const add = async (label: string, object_id?: string) => {
+      const blob = await http_blob(env, text_bytes(label, `SECRET-${label}`), { name: `합성-${label}.txt` });
+      const res = await upload_material(env, { blob_id: blob.blob_id, ...(object_id === undefined ? {} : { object_id }) });
+      assert.equal(res.status, 201, JSON.stringify(res.json));
+      return res.json.data as { object_id: string; version_id: string; blob_id: string; file_policy_id: string };
+    };
+    const project_id = env.p.project_id;
+    /** every object and blob named here must get the same answer from the set and from the per-item function */
+    const same = (objects: string[], blobs: string[]) => {
+      const closed = closed_materials(env.db, project_id);
+      for (const object_id of objects) {
+        assert.equal(closed.objects.has(object_id), material_object_denied(env.db, project_id, object_id), `object ${object_id}`);
+      }
+      for (const blob_id of blobs) {
+        assert.equal(closed.denied_blobs.has(blob_id), file_ai_denied(env.db, project_id, blob_id), `blob ${blob_id}`);
+      }
+      return closed;
+    };
+
+    // 1) 이력만 deny: 정책 행은 allow, 가장 새 이력 행은 deny
+    const hist = await add("hist-only");
+    assert_ok(await set_access(env, hist.file_policy_id, "deny"));
+    env.db.run("UPDATE file_policies SET ai_access = 'allow' WHERE project_id = ? AND id = ?", project_id, hist.file_policy_id);
+    let closed = same([hist.object_id], [hist.blob_id]);
+    assert.ok(file_ai_denied(env.db, project_id, hist.blob_id), "a deny in the newest history row alone closes the file");
+    assert.ok(closed.objects.has(hist.object_id));
+
+    // 2) 같은 blob 이 두 객체에 붙음: 닫힌 A 의 허용 v2 blob 을 열린 B 가 새 자료로 쓴다
+    const a_v1 = await add("two-obj-a");
+    assert_ok(await set_access(env, a_v1.file_policy_id, "deny"));
+    const a_v2 = await add("two-obj-a-v2", a_v1.object_id);
+    const b = await upload_material(env, { blob_id: a_v2.blob_id });
+    assert.equal(b.status, 201, `same blob reuse answered ${b.status} ${JSON.stringify(b.json)}`);
+    if (b.status === 201) {
+      const b_obj = (b.json.data as { object_id: string }).object_id;
+      closed = same([a_v1.object_id, b_obj], [a_v1.blob_id, a_v2.blob_id]);
+      assert.ok(closed.objects.has(a_v1.object_id) && !closed.objects.has(b_obj), "A (closed) hides, B (open) stays");
+    } else {
+      closed = same([a_v1.object_id], [a_v1.blob_id, a_v2.blob_id]);
+    }
+
+    // 3) allow 로 되돌림: deny 가 풀리면 두 길 모두 연다
+    const back = await add("back-to-allow");
+    assert_ok(await set_access(env, back.file_policy_id, "deny"));
+    assert_ok(await set_access(env, back.file_policy_id, "allow"));
+    closed = same([back.object_id], [back.blob_id]);
+    assert.ok(!closed.objects.has(back.object_id) && !file_ai_denied(env.db, project_id, back.blob_id), "allow again opens the file and its object");
+
+    // 4) deny 뒤 판 추가: 닫힌 객체에 새 판을 올려도 객체는 닫힌 채로 남고, 새 판도 닫힌 집합에 든다
+    const grow = await add("deny-then-version");
+    assert_ok(await set_access(env, grow.file_policy_id, "deny"));
+    const grow_v2 = await add("deny-then-version-v2", grow.object_id);
+    closed = same([grow.object_id], [grow.blob_id, grow_v2.blob_id]);
+    assert.ok(closed.objects.has(grow.object_id) && closed.versions.has(grow_v2.version_id), "the new version of a closed object is closed with it");
+
+    // 5) 보관 객체: archived_at 이 있어도 두 길 모두 같은 답(같은 FROM, archived_at 을 거르지 않는다)
+    const archived = await add("archived-closed");
+    assert_ok(await set_access(env, archived.file_policy_id, "deny"));
+    env.db.run("UPDATE objects SET archived_at = 1 WHERE project_id = ? AND id = ?", project_id, archived.object_id);
+    closed = same([archived.object_id], [archived.blob_id]);
+    assert.ok(closed.objects.has(archived.object_id), "an archived closed material stays closed");
+  });
+});
