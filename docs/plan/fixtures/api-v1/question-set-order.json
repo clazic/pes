@@ -1,0 +1,98 @@
+{
+  "operation": "question_sets.order",
+  "method": "POST",
+  "path": "/api/v1/projects/{project_id}/question-sets/{set}/order",
+  "auth": "human_or_permitted_agent",
+  "normal": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "set": "qset_01J9Z3K7QD"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_ord_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "question_ids": ["qst_01J9Z3K7QE", "qst_01J9Z3K7QB"]
+      }
+    },
+    "response": {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_ord_01J9Z3K7QN",
+        "data": {
+          "set": {
+            "id": "qset_01J9Z3K7QR",
+            "version_no": 2,
+            "form_key": "main"
+          },
+          "members": [
+            {
+              "question_id": "qst_01J9Z3K7QE",
+              "version_id": "qvr_01J9Z3K7QF",
+              "position": 0
+            },
+            {
+              "question_id": "qst_01J9Z3K7QB",
+              "version_id": "qvr_01J9Z3K7QC",
+              "position": 1
+            }
+          ]
+        },
+        "receipt": {
+          "receipt_no": "50",
+          "tx_id": "txn_01J9Z3K7R0A",
+          "committed_at": "2026-11-12T03:21:00.000Z"
+        }
+      }
+    }
+  },
+  "error": {
+    "request": {
+      "path_params": {
+        "project_id": "prj_01J9Z3K7Q2",
+        "set": "qset_01J9Z3K7QD"
+      },
+      "headers": {
+        "Cookie": "__Host-pes_session=${PES_SESSION}",
+        "X-CSRF-Token": "${PES_CSRF}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_ord_err_01J9Z3K7Q2"
+      },
+      "body": {
+        "format_version": "1.0",
+        "question_ids": ["qst_01J9Z3K7QB", "qst_01J9Z3K7QE"]
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "format_version": "1.0",
+        "request_id": "req_ord_err_01J9Z3K7QN",
+        "error": {
+          "code": "conflict",
+          "message": "현재 상태에서는 처리할 수 없는 요청입니다.",
+          "retryable": false,
+          "target": "$.path.set",
+          "details": {
+            "reason": "stale_set"
+          },
+          "next_action": "reread_context"
+        }
+      }
+    }
+  }
+}

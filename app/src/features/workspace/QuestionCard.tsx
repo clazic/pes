@@ -441,7 +441,7 @@ export function QuestionCard(p: CardProps) {
                 <div data-field-kind="old-answer" className="mt-1.5 rounded-md bg-surface-sunk px-3 py-2">
                   <p className="text-body whitespace-pre-wrap text-ink">{prev.answer}</p>
                   <p className="mt-1 text-caption text-muted-foreground">
-                    버전 {prev.version}에서 보낸 답 · <time dateTime={prev.committed_at}>{formatAt(prev.committed_at)}</time> · 접수 {prev.receipt_no} · 새 답 칸에는 옮기지 않았어요
+                    {prev.version ? `버전 ${prev.version}에서` : "이전 버전에서"} 보낸 답 · <time dateTime={prev.committed_at}>{formatAt(prev.committed_at)}</time> · 접수 {prev.receipt_no} · 새 답 칸에는 옮기지 않았어요
                   </p>
                 </div>
               ) : null}

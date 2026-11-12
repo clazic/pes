@@ -2,8 +2,9 @@
 // The server itself (serve / hub / open) is not started by this file; it only asks the hub ports "who are you" like pes.py does.
 
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
-import { basename, dirname, join, relative, isAbsolute } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
+import { escapes_parent } from "./rel_path.ts";
 import { Die, bridge, config_path, die, pdir, pes_home, read_config, resolve_path, say, write_config, write_text } from "./cli_support.ts";
 
 /** Hub ports of one PES home (HUB_PORTS in pes.py); 8765~8775 were the per-project servers of older versions. */
@@ -152,7 +153,7 @@ const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(do
 /** True when `d` is a folder inside the PES home (not the home itself): only such a root answered by an old server is ours to stop. */
 export function inside_pes_home(d: string): boolean {
   const rel = relative(resolve_path(pes_home()), resolve_path(d));
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  return rel !== "" && !escapes_parent(rel);
 }
 
 /** The old per-project server (8765~): stop it by its record, forget the record. */
@@ -272,7 +273,7 @@ async function project_dirs(root: string): Promise<string[]> {
 
 function inside(path: string, parent: string): boolean {
   const rel = relative(parent, path);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || !escapes_parent(rel);
 }
 
 function move_folder(from: string, to: string): void {
