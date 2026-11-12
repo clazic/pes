@@ -10,7 +10,7 @@
 //                  attached_by_actor_id 는 화면이 쓰지 않아 앱 행에 싣지 않는다. ai_delivery 가 없으면 null(allowed 로 간주하지 않는다). state 는 서버 값 그대로.
 //  getReference(slug, ed, ref)                        GET  P/references/{ref}                                  data {reference, content} → 같은 모양. 404 → null · 403 → PesApiError forbidden
 //     content = {items:[…]} | null.  항목: item · object_id · version_id · kind · title · summary · body_md · url · quote(서버가 그 종류에 안 준 칸은 null) · citation{reference_id, project_id, project_label, snapshot_id, object_id, version_id}
-//  getReferenceCandidates(scope)                      서버에 읽는 길이 없다(후보 프로젝트 · 스냅숏 목록 라우트 없음) → NotConnectedError, 요청 0  (화면이 정직하게 알린다. 서버 쪽 읽기 라우트는 후속 — 보고서 참고)
+//  getReferenceCandidates(scope)                      SEL-120: 작업 중은 GET P/reference-candidates, 생성 화면(null)은 NotConnectedError — 시험은 sel120-http.test.ts
 //  attachReference(slug, ed, input, key)              POST P/references {referenced_project_id, source_snapshot_id, scope?(줄 때만), source_label?(비어 있지 않을 때만)} + idempotency-key  → 201 data.reference
 //  refreshReference(slug, ed, ref, input, key)        POST P/references/{ref}/refresh {source_snapshot_id?, base_rev?}(준 것만)  → 200 data.reference
 //  detachReference(slug, ed, ref, key)                POST P/references/{ref}/detach {}  → 200 data {reference_id, detached:true}
@@ -20,7 +20,7 @@
 //  시간: 쓰기 한 번(요청 · 영수증 읽기 각각)에 timeoutMs 제한. 넘으면 name "TimeoutError" — 같은 키로 다시 보내면 서버가 재생한다.
 import { describe, expect, it, vi } from "vitest";
 import { WORKSPACE } from "@/api/fixture";
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type PesClient } from "@/api/types";
+import { FORMAT_VERSION, PesApiError, type PesClient } from "@/api/types";
 import { REF_ROW_KEYS, type ReferencesMethods } from "@/test/sel114";
 
 type Opts = { session: string; projects: Record<string, string>; baseUrl?: string; fetch?: typeof fetch; timeoutMs?: number };
@@ -201,16 +201,6 @@ describe("읽기 — getReference (GET P/references/{ref})", () => {
     expect(s.seen).toHaveLength(1);
     expect(s.seen[0]!.url.pathname).toBe(`${P}/references/ref%2F..%2Fx%3F`);
     expect(s.seen[0]!.url.search).toBe("");
-  });
-});
-
-describe("후보 읽기 — getReferenceCandidates", () => {
-  it("서버에 읽는 길이 없다: NotConnectedError, 요청 0 (후보를 지어내지 않는다) — 생성 화면(null)도 작업 중도 같다", async () => {
-    const s = server({});
-    const c = await make(s);
-    await expect(c.getReferenceCandidates({ slug: SLUG, edition: ED })).rejects.toBeInstanceOf(NotConnectedError);
-    await expect(c.getReferenceCandidates(null)).rejects.toBeInstanceOf(NotConnectedError);
-    expect(s.seen).toHaveLength(0);
   });
 });
 

@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCandidate, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferenceSnapshot, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey } from "./types";
 import { markAfterSend } from "./send-outcome";
 
 /**
@@ -624,6 +624,23 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     ];
   }
 
+  function snapshotRow(r: Json): ReferenceSnapshot[] {
+    if (typeof r.id !== "string" || !r.id) return [];
+    return [{ id: r.id, key: text(r.key) || r.id, label: nullable(r.label), approved: r.approved === true, recommended: r.recommended === true }];
+  }
+  function candidateRow(r: Json): ReferenceCandidate[] {
+    if (typeof r.project_id !== "string" || !r.project_id) return [];
+    return [
+      {
+        project_id: r.project_id,
+        key: text(r.key) || r.project_id,
+        label: text(r.label) || r.project_id,
+        attached: r.attached === true,
+        snapshots: (Array.isArray(r.snapshots) ? r.snapshots : []).flatMap((x) => (isRecord(x) ? snapshotRow(x) : [])),
+      },
+    ];
+  }
+
   const refPath = (ref: string, tail = ""): string => `/references/${q(ref)}${tail}`;
   const referenceOf = (data: Json): ReferenceRow => {
     if (!isRecord(data.reference)) throw new PesApiError(fallbackBody(500));
@@ -642,8 +659,14 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const content: ReferenceContent | null = isRecord(data.content) ? { items: (Array.isArray(data.content.items) ? data.content.items : []).flatMap((i) => (isRecord(i) ? referenceItem(i) : [])) } : null;
       return { reference: referenceOf(data), content };
     },
-    /** 서버에 후보 프로젝트 · 스냅숏을 읽는 길이 없다(후속 SEL-120) — 후보를 지어내지 않고 요청 없이 거절한다. 생성 화면(null)도 작업 중도 같다 */
-    getReferenceCandidates: notConnected("참고 프로젝트 후보 읽기"),
+    /**
+     * GET P/reference-candidates(소유자 세션만) — 작업 중 화면. 서버가 안 주는 칸(스냅숏 이름)은 null 그대로, 알 수 없는 모양은 버린다.
+     * 생성 화면(scope=null)은 프로젝트가 아직 없어 서버에 길이 없다 — 후보를 지어내지 않고 요청 없이 NotConnectedError. 모르는 slug · 서버 404 는 [].
+     */
+    async getReferenceCandidates(scope) {
+      if (scope === null) throw new NotConnectedError("참고 프로젝트 후보 읽기(생성 화면)");
+      return listOf(await readData(scope.slug, "/reference-candidates"), "candidates").flatMap(candidateRow);
+    },
     async attachReference(slug, _edition, input, key) {
       const body: Json = {
         referenced_project_id: input.referenced_project_id,
