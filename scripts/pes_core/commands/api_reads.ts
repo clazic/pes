@@ -4,7 +4,7 @@
 // business rule lives here. Callers wrap multi-read use in read_tx.
 
 import type { Db } from "../db.ts";
-import { event_denied } from "./file_access.ts";
+import { artifact_version_denied, event_denied, type Audience } from "./file_access.ts";
 
 export interface DbMeta {
   database_instance_id: string;
@@ -902,6 +902,30 @@ interface RoundQuestionRow {
   answer_used_default: bigint | null;
   answer_state: string | null;
   answer_tx_id: string | null;
+}
+
+/**
+ * SEL-126: the round's result text — the first `result` object the round was sealed with (round_contents, role 'result'), at its CURRENT
+ * version = the latest appended one (version_no max, the unit the annotation version check uses; not the one the seal held). null = no result: the stage-start place, an open round, a round sealed without one. For a
+ * non-human caller a current version that carries a file closed to AI is null with no trace (the same rule as every AI read exit).
+ * Read only; two queries at most however many results the round holds.
+ */
+export function round_result_data(db: Db, project_id: string, place: RoundPlace, audience: Audience): { object_id: string; version_id: string; body_md: string } | null {
+  if (place.server_round_id === null) return null;
+  const row = db.get<{ object_id: string; version_id: string; body_md: string | null }>(
+    `SELECT c.object_id AS object_id, ov.id AS version_id, av.body_md AS body_md
+       FROM round_contents c
+       JOIN object_versions ov ON ov.project_id = c.project_id AND ov.object_id = c.object_id
+        AND ov.version_no = (SELECT MAX(v2.version_no) FROM object_versions v2 WHERE v2.project_id = c.project_id AND v2.object_id = c.object_id)
+       JOIN artifact_versions av ON av.project_id = ov.project_id AND av.version_id = ov.id
+      WHERE c.project_id = ? AND c.round_id = ? AND c.role = 'result'
+      ORDER BY c.position, c.object_id LIMIT 1`,
+    project_id,
+    place.server_round_id,
+  );
+  if (row === undefined || row.body_md === null) return null;
+  if (audience === "ai" && artifact_version_denied(db, project_id, row.version_id)) return null;
+  return { object_id: row.object_id, version_id: row.version_id, body_md: row.body_md };
 }
 
 export function round_form_data(db: Db, project_id: string, place: RoundPlace): Record<string, unknown> {

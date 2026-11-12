@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView } from "./types";
+import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ApiError, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type AiAccess, type DecisionRow, type FollowupView, type MaterialRow, type Link, type PesClient, type ProjectRef, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type ResultView, type RoundView, type WorkspaceView } from "./types";
 import { markAfterSend } from "./send-outcome";
 
 /**
@@ -556,6 +556,26 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     return view;
   }
 
+  /**
+   * SEL-126 — 서버 라운드 읽기의 result{object_id, version_id, body_md}. 세 칸이 모두 문자열일 때만 싣는다(아니면 null — 첨언 도구를 켜지 않는다).
+   * 서버는 제목 · 버전 번호 · 채택 여부 · 시각을 주지 않는다: 제목은 본문 첫 머리글(없으면 "결과 글"), 나머지는 비워 둔 값(version 0 · draft · 시각 "")이고 지어낸 값을 보이지 않는다.
+   */
+  function resultViewOf(raw: unknown): ResultView | null {
+    if (!isRecord(raw) || typeof raw.object_id !== "string" || typeof raw.version_id !== "string" || typeof raw.body_md !== "string") return null;
+    const body = raw.body_md;
+    const heading = /^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m.exec(body)?.[1]?.trim();
+    return {
+      title: heading || "결과 글",
+      version: 0,
+      status: "draft",
+      updated_at: "",
+      paragraphs: body.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter((p) => p !== ""),
+      object_id: raw.object_id,
+      version_id: raw.version_id,
+      body_md: body,
+    };
+  }
+
   function roundViewOf(data: Json, stage: string): RoundView {
     const questions = (Array.isArray(data.questions) ? data.questions : []).flatMap((raw) => {
       const view = isRecord(raw) ? questionViewOf(raw) : null;
@@ -568,7 +588,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       form_version: typeof data.form_version === "number" ? data.form_version : 0,
       ...(typeof data.set_id === "string" && data.set_id ? { set_id: data.set_id } : {}),
       questions,
-      result: null,
+      result: resultViewOf(data.result),
       alerts: [],
       prompt: "",
     };
