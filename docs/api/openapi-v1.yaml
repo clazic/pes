@@ -1226,8 +1226,8 @@ paths:
         Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` key and with no trace of a closed file - not its name,
         ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
         material objects (the human manifest lists them with `ai_access: deny`); `digest` is computed from the manifest the caller gets, so it differs by audience.
-        `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` and the
-        hand-off bundle's `base_versions` leave out closed files and materials.
+        `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` leaves out
+        events whose payload names a closed file (`blob_id` or `file_policy_id`), by file and not by material object: a newer allowed version's upload events still show (`commands/file_access.ts` event_denied; `commands/shared.ts` write_events leaves `object_id` and version columns NULL). The hand-off bundle's `base_versions` leave out closed files and materials.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:
@@ -1311,7 +1311,7 @@ paths:
   /api/v1/projects/{id}/changes:
     get:
       summary: Change feed after an opaque cursor (whole transactions, ascending event_seq)
-      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after."
+      description: "cursor=head (SEL-82) reads no event: 200 {events: [], next_cursor: <the head cursor of this caller>, has_more: false, epoch}. The head cursor is the one a full read would end on; the next call with it returns only what happened after. For a caller that is not human, events that name a closed file (payload `blob_id` or `file_policy_id`) are left out and the cursor moves past them; the unit is the file, not the material object."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security: [{ agentToken: [] }, { localSession: [] }]
