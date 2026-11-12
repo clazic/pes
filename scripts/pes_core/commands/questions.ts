@@ -124,6 +124,7 @@ const STATE_FROM: Record<StateKind, ReadonlySet<string>> = {
   defer: new Set(["open"]),
   merge: new Set(["open", "deferred"]),
 };
+/** Not "question.withdrawn": the registry name test forbids /raw/ in a command's action name ("withd-raw-n"). */
 const STATE_ACTION: Record<StateKind, string> = {
   withdraw: "question.retracted",
   defer: "question.deferred",
@@ -910,7 +911,6 @@ function run_revise(runtime: CommandRuntime): CommandResult {
   if (project === null || actor_id === null) {
     throw new Error("question.revise must resolve a project and actor first");
   }
-  const { guard } = member_actor_with_guard(runtime, payload);
 
   const row = runtime.db.get<CurrentQuestionRow>(
     `SELECT qv.text, qv.type, qv.state, qv.importance, qv.required,
@@ -940,6 +940,8 @@ function run_revise(runtime: CommandRuntime): CommandResult {
   ) {
     throw new ApiError("not_found", "question not found");
   }
+  // same order as withdraw/defer/merge/comment_add: a question that does not exist is not_found for everyone
+  const { guard } = member_actor_with_guard(runtime, payload);
 
   if (has_own(payload, "base_version_id")) {
     const base = require_non_empty_string(payload, "base_version_id");
@@ -1412,7 +1414,6 @@ function run_comment_add(runtime: CommandRuntime): CommandResult {
   if (reply_given && !thread_given) {
     return invalid_payload("reply_to needs the thread_id of the thread it answers in");
   }
-  const { guard } = member_actor_with_guard(runtime, payload);
 
   const question = runtime.db.get<{ current_version_id: string | null }>(
     `SELECT o.current_version_id AS current_version_id
@@ -1426,6 +1427,8 @@ function run_comment_add(runtime: CommandRuntime): CommandResult {
   if (question === undefined || question.current_version_id === null) {
     throw new ApiError("not_found", "question not found");
   }
+  // same order as withdraw/defer/merge/revise: a question that does not exist is not_found for everyone
+  const { guard } = member_actor_with_guard(runtime, payload);
 
   let thread_id: string;
   let target_version_id: string | null = null;
@@ -1986,6 +1989,33 @@ function form_status(
   set_id: string,
   items: PlannedAnswer[],
 ): FormStatus {
+  const members = db.all<{ question_id: string }>(
+    "SELECT question_id FROM question_set_members WHERE project_id = ? AND set_id = ? ORDER BY position",
+    project_id,
+    set_id,
+  );
+  return judge_questions(
+    db,
+    project_id,
+    members.map((member) => member.question_id),
+    items,
+  );
+}
+
+/**
+ * Which of `question_ids` are hidden by their show_if right now (current submitted answers only). A hidden
+ * question is not required, so `resume_ready` skips it exactly as `form_complete` does. Read-only.
+ */
+export function hidden_questions(db: Db, project_id: string, question_ids: string[]): Set<string> {
+  return judge_questions(db, project_id, question_ids, []).hidden;
+}
+
+function judge_questions(
+  db: Db,
+  project_id: string,
+  question_ids: string[],
+  items: PlannedAnswer[],
+): FormStatus {
   const by_item = new Map(items.map((item) => [item.question_id, item]));
   const info_cache = new Map<
     string,
@@ -2072,22 +2102,17 @@ function form_status(
     return chosen.some((entry) => allowed.includes(JSON.stringify(entry)));
   };
 
-  const members = db.all<{ question_id: string }>(
-    "SELECT question_id FROM question_set_members WHERE project_id = ? AND set_id = ? ORDER BY position",
-    project_id,
-    set_id,
-  );
   const missing: string[] = [];
   const hidden = new Set<string>();
-  for (const member of members) {
-    const known = info(member.question_id);
+  for (const question_id of question_ids) {
+    const known = info(question_id);
     if (known === null) continue;
     if (!applicable(known.show_if)) {
-      hidden.add(member.question_id);
+      hidden.add(question_id);
       continue;
     }
-    if (known.open && known.required && answer_of(member.question_id) === null) {
-      missing.push(member.question_id);
+    if (known.open && known.required && answer_of(question_id) === null) {
+      missing.push(question_id);
     }
   }
   return { missing, hidden };

@@ -515,7 +515,11 @@ components:
       properties:
         format_version: { $ref: "#/components/schemas/FormatVersion" }
         base_version_id: { type: string, minLength: 1 }
-        defer_until: { description: "A time in ms (JSON integer or decimal string)" }
+        defer_until:
+          description: "A time in ms: a non-negative JSON integer, or a decimal string of one (a safe integer either way)"
+          oneOf:
+            - { type: integer, minimum: 0 }
+            - { type: string, pattern: "^(0|[1-9][0-9]*)$" }
         reason: { type: string }
         run_id: { type: string }
         lease_id: { type: string }

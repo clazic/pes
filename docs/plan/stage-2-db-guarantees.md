@@ -211,7 +211,7 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 
 ### 8.8 질문·답(PR8)
 
-`scripts/pes_core/commands/questions.ts`가 `question.publish_set`·`question.revise`·`answer.submit` 3개 명령을 정의하고, `scripts/pes_core/questions.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 읽기 전용 `validate_submission`·`resume_ready`는 직접 SQL을 읽기만 하며 쓰지 않는다. 질문·답 표의 INSERT/UPDATE는 `commands/questions.ts`에만 있다.
+`scripts/pes_core/commands/questions.ts`가 `question.publish_set`·`question.revise`·`question.withdraw`·`question.defer`·`question.merge`·`question.comment_add`·`answer.submit` 7개 명령을 정의하고, `scripts/pes_core/questions.ts`의 공개 함수는 각각 `CommandService.execute` 한 번만 호출한다. 읽기 전용 `validate_submission`·`resume_ready`는 직접 SQL을 읽기만 하며 쓰지 않는다. 질문·답 표의 INSERT/UPDATE는 `commands/questions.ts`에만 있다.
 
 - **본 버전 고정**: 제출은 그 폼(`question_sets`)의 구성원과 사람이 실제로 본 질문 버전(`question_set_members.question_version_id`)에 고정된다. 질문이 그 뒤 개정되어 구성원 버전이 현재 버전과 다르면 낡은 폼으로 보고 `conflict`로 거부한다(아무것도 쓰지 않음).
 - **개정·재확인**: `question.revise`는 새 질문 버전을 append하고 `objects.current_version_id`만 옮긴다. 옛 버전 행·옛 답·옛 폼 구성은 그대로 두며, 새 버전은 옛 답을 승계하지 않는다. `resume_ready`는 현재 답 버전이 `submitted`이면서 질문의 현재 버전에 고정된 경우에만 충족으로 본다. 옛 버전에만 답이 있으면 `needs_reconfirmation`, 답이 없으면 `unanswered`다.
@@ -222,7 +222,14 @@ PR4부터 모든 업무 쓰기는 `scripts/pes_core/commands.ts`의 `CommandServ
 - **필수 답**: `required=1` 질문에 빈 문자열·공백뿐인 문자열·빈 배열을 보내면 `invalid_payload`이고 묶음 전체를 거부한다.
 - **읽기 함수 계약**: `resume_ready`·`validate_submission`은 행위자·멤버십을 스스로 확인하지 않는 읽기 함수다. 이들을 노출하는 API/CLI 층이 프로젝트 멤버십과 행위자를 먼저 확인해야 한다.
 - **stage_start 세트**: `round_id`가 NULL인 stage_start 세트는 어느 라운드에도 속하지 않으므로 `resume_ready`의 라운드 재개 판정 밖이다.
-- **행위자**: `question.publish_set`·`question.revise`는 사람 멤버 또는 활성 lease guard(`run_id`·`lease_id`·`fence`)를 가진 에이전트만, `answer.submit`은 사람만 실행한다. 에이전트는 lease가 있어도 답할 수 없다.
+- **행위자**: `question.publish_set`·`question.revise`·`question.withdraw`·`question.defer`·`question.merge`·`question.comment_add`는 사람 멤버 또는 활성 lease guard(`run_id`·`lease_id`·`fence`)를 가진 에이전트만, `answer.submit`은 사람만 실행한다. 에이전트는 lease가 있어도 답할 수 없다.
+- **철회·보류·합치기(SEL-90 U2a)**: `question.withdraw`·`question.defer`·`question.merge`는 질문을 지우거나 고치지 않고 **새 질문 버전**(state `withdrawn`·`deferred`·`merged`, `defer_until`·`merged_into_question_id` 포함)을 append하며 `objects.current_version_id`만 비교 후 교체로 옮긴다. 옛 버전 행·옛 답·옛 세트는 그대로다. 전이표는 `open`→셋 모두, `deferred`→`withdrawn`·`merged`이고 나머지는 `conflict`(`reason=invalid_transition`)이며, 낡은 `base_version_id`는 `rev_conflict`다. merge 대상은 같은 프로젝트의 `open` 다른 질문이다(자기 자신 `invalid_payload`/`self_merge`, 없음·다른 프로젝트 `not_found`, 열려 있지 않음 `conflict`).
+- **빠지는 세트**: 그 질문이 폼의 **최신 세트**에 있으면 같은 tx에서 그 질문만 뺀 새 세트(`version_no`+1, 남은 구성원은 폼이 고정한 버전·순서 그대로)를 발행하고 `question.set_published` 사건을 남긴다. 닫힌(봉인된) 라운드의 세트와 활성 판이 아닌 판의 세트는 새 세트를 만들지 않는다. 마지막 질문을 빼면 구성원이 0인 최신 세트가 생긴다 — `publish_set`은 질문 0개를 받지 않지만 이 빈 세트는 허용하는 정상 상태("폼 없음")이며, 읽는 쪽은 빈 `questions`를 처음 만날 수 있다. `answer.submit`은 빈 세트에 `invalid_payload`이고 `publish_set`의 `extend_latest`로 이어 붙이면 `version_no`가 계속 늘어난다.
+- **순서: 존재 → 리스(SEL-90 R1)**: `question.revise`·`withdraw`·`defer`·`merge`·`comment_add`는 모두 (1) 본문 모양 검증 → (2) 질문 조회(이 프로젝트에 없으면 `not_found`, 누구에게나 같다) → (3) 행위자·리스 검사(리스 없는 에이전트는 `forbidden`) 순서다. 그래서 같은 토큰이 없는 질문에는 모든 명령이 404, 있는 질문에는 403이다. 프로젝트 밖의 질문 존재는 리스와 상관없이 알려지지 않는다. 본문 모양 검증(필수 필드 누락·`defer_until` 형식·`self_merge`)은 리스 검사보다 앞이라, 리스 없는 에이전트가 틀린 본문을 보내면 403이 아니라 400/422를 받을 수 있다(개정 이전부터의 규칙).
+- **사건 이름**: 영수증 `action`과 사건 `type`은 `question.retracted`(`question.withdraw` 명령)·`question.deferred`·`question.merged`·`question.commented`다. 철회만 `withdrawn` 어간을 쓰지 않는 이유는 레지스트리 이름 시험(`test_command_service_hardening`)이 action 이름에 `raw`를 금지하는데 `withd-raw-n`이 걸리기 때문이다. 이 이름 4개는 `test_sel90_review_fixes`가 고정한다. 앱의 `touched` 규칙(`http-client-changes`)은 이 사건을 아직 모르고 `workspace`만 새로고침한다 — U2b에서 다룬다. 폼에서 빠지는 경우 함께 나가는 `question.set_published`가 라운드 보기를 덮는다.
+- **의견은 답이 아니다**: `question.comment_add`는 `question_comment` 스레드·메시지만 쓰고 `answers`·`answer_versions`·`submissions`를 만들지 않는다. `resume_ready`는 `answer_versions.state='submitted'`만 본다.
+- **묶음·개별 제출과 완료 판정**: `answer.submit`의 닫힌 필드 `mode`는 `bundle`(적용되는 필수 질문이 이번 제출 + 현재 답으로 모두 차야 접수, `show_if`가 거짓인 질문에 대한 답은 거부)과 `single`(정확히 1개 항목)이다. 응답의 `form_complete`·`missing_required`는 제출 뒤 적용되는 필수 질문이 모두 현재 답을 가졌는지의 판정일 뿐 라운드·단계 상태를 바꾸지 않는다. `resume_ready`도 같은 적용 판정을 쓴다 — `show_if`가 거짓인 필수 질문은 요구하지 않아 두 판정이 어긋나지 않는다(R1).
+- **이어 붙이기**: `question.publish_set`의 `extend_latest=true`는 `(stage, form_key)`의 최신 세트에서 `open`인 질문을 같은 순서로 앞에 두고 새 질문을 뒤에 붙인 새 세트를 발행한다. 이어받는 대상은 최신 세트의 `round_id`와 상관없이 같은 `(stage, form_key)`의 최신 세트다 — 앞 라운드에서 풀리지 않은 열린 질문이 새 라운드의 폼으로 따라오는 것이 의도이고, 새 라운드의 답은 현재 질문 버전에 묶여 있어 이미 답한 질문을 `resume_ready`가 다시 요구하지 않는다. 철회·보류·합쳐진 질문은 따라오지 않는다.
 
 ### 8.9 legacy 이전(PR11)
 
