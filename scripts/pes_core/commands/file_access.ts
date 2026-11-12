@@ -120,6 +120,26 @@ export function material_object_denied(db: ReadDb, project_id: string, object_id
     .some((row) => file_ai_denied(db, project_id, row.blob_id));
 }
 
+/** True when this artifact version carries a file closed to AI: its body file, or a file attached to the version. */
+export function artifact_version_denied(db: ReadDb, project_id: string, version_id: string): boolean {
+  const body = db.get<{ body_blob_id: string | null }>("SELECT body_blob_id FROM artifact_versions WHERE project_id = ? AND version_id = ?", project_id, version_id);
+  if (body?.body_blob_id != null && file_ai_denied(db, project_id, body.body_blob_id)) return true;
+  return db
+    .all<{ blob_id: string }>("SELECT blob_id FROM version_files WHERE project_id = ? AND version_id = ?", project_id, version_id)
+    .some((row) => file_ai_denied(db, project_id, row.blob_id));
+}
+
+/**
+ * THE decision for a fact that comes from ONE object version (a quote a thread's anchor kept from the version it was made on): the
+ * version belongs to a file material that is closed (material_object_denied, object unit) or is an artifact version that carries a
+ * closed file (artifact_version_denied). The decision is made now, on the version the fact came from, not on the current one.
+ */
+export function version_ai_denied(db: ReadDb, project_id: string, version_id: string): boolean {
+  const owner = db.get<{ object_id: string }>("SELECT object_id FROM object_versions WHERE project_id = ? AND id = ?", project_id, version_id);
+  if (owner !== undefined && material_object_denied(db, project_id, owner.object_id)) return true;
+  return artifact_version_denied(db, project_id, version_id);
+}
+
 export interface EventFacts {
   object_id: string | null;
   before_version_id: string | null;

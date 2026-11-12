@@ -727,6 +727,27 @@ components:
         run_id: { type: string }
         lease_id: { type: string }
         fence: { type: string }
+    PrintBody:
+      type: object
+      required: [scope]
+      additionalProperties: false
+      description: |
+        scope round|stage|edition (no project-wide scope). Without an id the scope is the current round, the current stage or the
+        active edition. round_id belongs to scope round, stage_id to scope stage, edition_id to scope edition. all_editions (scope
+        edition only, default false) prints every edition and needs confirm_volume (commit). include is a non-empty subset of
+        body, table, footnote, comment, assumption, decision, reflection (default all seven).
+      properties:
+        scope: { type: string, enum: [round, stage, edition] }
+        round_id: { type: string, minLength: 1 }
+        stage_id: { type: string, minLength: 1 }
+        edition_id: { type: string, minLength: 1 }
+        all_editions: { type: boolean }
+        confirm_volume: { type: integer, minimum: 0 }
+        include:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [body, table, footnote, comment, assumption, decision, reflection] }
+        selection_hash: { type: string, description: "commit only: the preview's selection_hash; a changed content is 409 conflict" }
     AssumptionBody:
       type: object
       required: [state]
@@ -1386,6 +1407,111 @@ paths:
         "404": { description: Unknown project or target }
         "429": { description: Request budget spent; see Retry-After }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/print:
+    get:
+      summary: "Read a stored range print (SEL-119 U6a): the snapshot, its manifest, the output descriptor and the document. Pure read"
+      description: |
+        ?scope=round|stage|edition (required; anything else, e.g. project, is 400 invalid_payload). ?snapshot=<id> names a stored print
+        of that scope; without it the newest print of the current round, current stage or active edition is read. data = {snapshot
+        {id, scope, edition_id, stage_id|null, round_id|null, content_hash}, manifest, output {blob_id, sha256, size, media_type
+        "text/html"}, document (the stored HTML, utf-8; its sha256 is output.sha256)}. manifest = {format_version "1.0", kind "print",
+        scope, all_editions, include [body|table|footnote|comment|assumption|decision|reflection], targets [{edition_id, edition_no,
+        stages [{stage_id, stage_key, round_id|null, round_no|null, basis sealed|approved|open|none, basis_snapshot_id|null}]}], items
+        [{category, object_id, version_id, stage_id|null, position}; a footnote also has cited_by_version_id and citation_no; a reflection
+        has entry_id, source_version_id and round_id instead of object_id; a comment is one message of a thread on a printed body or table, object_id/version_id = the message and its version at print time, plus thread_id, thread_version_id, thread_state, context_kind, reply_to|null, anchor_id|null, anchor_status exact|moved|ambiguous|lost|null (where the anchor stands in the PRINTED version; lost is kept, not hidden), target_object_id and target_version_id], excluded [{category, reason, object_id?, version_id?}] (a
+        category not chosen: not_selected, which comes first; a removed or archived artifact, assumption or decision in a chosen category: its category with reason removed or archived and its object_id/version_id; an unsubmitted draft: unsubmitted_draft/unsubmitted; the token stream: token_stream/default_excluded,
+        always one line; an archived thread: comment/archived with the thread id/version; a withdrawn message: comment/withdrawn with the message id/version), comments {included, items} (items = the comment entries of items again), output}. A seal, approval or edition snapshot is
+        not a print: 404 not_found, as are an unknown id, a print of another scope and a scope nothing was printed for yet. Nothing is
+        built or written; a print is made by POST print/commit.
+
+        Who reads: only the owner session (a human). A print is a human's document: any other caller (an agent token, whatever its scopes,
+        or a built-in runner) is 403 forbidden with nothing told about the print (no id, hash, title, count; a snapshot that exists and
+        one that does not give the same answer), and the refused read writes no event and no receipt. There is no partial answer for a
+        non-human caller. The blobs a print made (its output and its manifest) are closed the same way on GET files/{b}/content and
+        GET files/{b}/preview: a non-human caller is 403 forbidden for them whatever the file policies say, and allowing a file again does not
+        reopen them. The owner session reads all of it as it was fixed.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, enum: [round, stage, edition] }
+        - name: snapshot
+          in: query
+          required: false
+          schema: { type: string, minLength: 1 }
+      security: [{ localSession: [] }]
+      responses:
+        "200":
+          description: The stored print
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: "scope missing or not round|stage|edition, or snapshot empty" }
+        "401": { description: Missing or invalid credential }
+        "403": { description: "Not the owner session (an agent token is forbidden, whatever its scopes)" }
+        "404": { description: Unknown project, no such stored print }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/print/prepare:
+    post:
+      summary: "Preview a range print's manifest (SEL-119 U6a; owner session only). Writes a receipt and one event, no snapshot, no blob, no file"
+      description: |
+        Body = PrintBody. 200 data = {project_id, scope, manifest (output null), selection_hash, volume {editions, stages, items, bytes},
+        confirm_required (true only for all_editions)}. An agent token is 403 forbidden.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PrintBody" }
+      responses:
+        "200":
+          description: The preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload (unknown field, scope, include, ids that do not belong to the scope) }
+        "401": { description: Missing or invalid credential }
+        "403": { description: An agent token (forbidden) }
+        "404": { description: Unknown project, round, stage or edition }
+        "409": { description: Idempotency key reuse, or the project has no active edition }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/print/commit:
+    post:
+      summary: "Fix a range print (SEL-119 U6a; owner session only): one snapshot, a manifest blob and an output blob, in one commit. Never seals a round"
+      description: |
+        Body = PrintBody (+ selection_hash). 201 data = {project_id, snapshot_id, scope, manifest_blob_id, output_blob_id, content_hash,
+        selection_hash}. A sealed round prints its seal, an approved stage its approved snapshot, an open round its stored current
+        versions at this moment (the round stays open). all_editions needs confirm_volume equal to the previewed volume.items (else 400
+        invalid_payload). A selection_hash that no longer matches the content is 409 conflict. A failure leaves no row and no file.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PrintBody" }
+      responses:
+        "201":
+          description: The stored print
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Invalid payload, or all_editions without the confirmed volume }
+        "401": { description: Missing or invalid credential }
+        "403": { description: An agent token (forbidden) }
+        "404": { description: Unknown project, round, stage or edition }
+        "409": { description: "Idempotency key reuse, stale selection_hash (conflict), or no object store" }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "429": { description: Request budget spent; see Retry-After }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/projects/{id}/operations/{op}:
     get:
       summary: Read an accepted (202) operation; the owner and the asker only
@@ -1937,6 +2063,11 @@ paths:
         messages:[{id, version_id, body_md, state, reply_to|null, actor_id, created_at}], followups:[{id, kind, state}]}.
         anchor.status is the first judgement; anchor.current is judged against the current version without writing: exact, moved, ambiguous
         (candidates only) or lost (the quote and the thread stay) are shown as they are.
+        An anchor keeps the quote of the version it was made on for good. For a caller that is not the owner session that quote follows the
+        AI-reference decision of that version (SEL-115): when the version is a file material closed to AI, or an artifact version that
+        carries a file closed to AI, exact_quote, prefix and suffix are left out of the anchor (no key, no trace) and anchor.current.text is
+        null; the anchor's id, status, start_cp, end_cp, target_version_id and current state stay. The text where the anchor stands now
+        is judged the same way for that version. Allowing the file again gives the whole anchor back. The owner session always gets all of it.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/ThreadId"

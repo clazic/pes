@@ -4,6 +4,7 @@
 
 import { cp_slice, judge_anchor, judge_on_origin, type AnchorStatus, type CpRange, type Judgement } from "../anchors.ts";
 import type { Db } from "../db.ts";
+import { material_object_denied, version_ai_denied, type Audience } from "./file_access.ts";
 
 export const THREAD_STATES: readonly string[] = ["open", "resolved", "archived"];
 export const THREAD_CONTEXT_KINDS: readonly string[] = ["annotation", "question_comment", "general"];
@@ -56,6 +57,20 @@ export function current_anchor(db: Db, project_id: string, anchor: Pick<AnchorRa
     version_id === null
       ? null
       : (db.get<{ body_md: string | null }>("SELECT body_md FROM artifact_versions WHERE project_id = ? AND object_id = ? AND version_id = ?", project_id, anchor.target_object_id, version_id)?.body_md ?? null);
+  return anchor_on_version(db, project_id, anchor, version_id, body);
+}
+
+/**
+ * Where an anchor stands in ONE given version of its text (`body` is that version's text, null when it has none), by the same
+ * rule as current_anchor (which uses it for the current version). The range print (SEL-119) uses it for the printed version.
+ */
+export function anchor_on_version(
+  db: Pick<Db, "get">,
+  project_id: string,
+  anchor: Pick<AnchorRaw, "id" | "exact_quote" | "prefix" | "suffix" | "start_cp" | "target_object_id" | "target_version_id">,
+  version_id: string | null,
+  body: string | null,
+): CurrentAnchor {
   const facts = { exact_quote: anchor.exact_quote, prefix: anchor.prefix, suffix: anchor.suffix, start_cp: num_or_null(anchor.start_cp) };
   let judgement: Judgement;
   let confirmed_by_actor_id: string | null = null;
@@ -179,8 +194,14 @@ function thread_followups(db: Db, project_id: string, thread_id: string): Array<
   );
 }
 
-/** One thread with its anchor (the original and where it stands now), messages and follow-ups; undefined when this project has no such thread. */
-export function thread_detail(db: Db, project_id: string, thread_id: string): Record<string, unknown> | undefined {
+/**
+ * One thread with its anchor (the original and where it stands now), messages and follow-ups; undefined when this project has no such thread.
+ * An anchor keeps the quote (and the text around it) of the version it was made on, even after it is lost. For an `ai` audience that quote
+ * follows the AI-reference decision of that version (SEL-115, version_ai_denied: a closed file material, or an artifact version carrying
+ * a closed file): then `exact_quote`, `prefix`, `suffix` and `current.text` are left out and only the anchor's state stays. Its text
+ * in the version where it stands now follows the same decision for that version.
+ */
+export function thread_detail(db: Db, project_id: string, thread_id: string, audience: Audience = "human"): Record<string, unknown> | undefined {
   const row = db.get<{
     context_kind: string;
     target_object_id: string;
@@ -229,12 +250,14 @@ export function thread_detail(db: Db, project_id: string, thread_id: string): Re
     const raw = anchor_raw(db, project_id, row.anchor_id);
     if (raw !== undefined) {
       const first = db.get<{ status: string }>("SELECT status FROM anchor_resolutions WHERE project_id = ? AND anchor_id = ? ORDER BY rowid LIMIT 1", project_id, raw.id);
-      const current = current_anchor(db, project_id, raw);
+      const full = current_anchor(db, project_id, raw);
+      const quote_closed =
+        audience === "ai" && (material_object_denied(db, project_id, raw.target_object_id) || version_ai_denied(db, project_id, raw.target_version_id));
+      const text_closed = quote_closed || (audience === "ai" && full.evaluated_version_id !== null && version_ai_denied(db, project_id, full.evaluated_version_id));
+      const current = text_closed ? { ...full, text: null } : full;
       anchor = {
         id: raw.id,
-        exact_quote: raw.exact_quote,
-        prefix: raw.prefix,
-        suffix: raw.suffix,
+        ...(quote_closed ? {} : { exact_quote: raw.exact_quote, prefix: raw.prefix, suffix: raw.suffix }),
         text_format_version: Number(raw.text_format_version),
         start_cp: num_or_null(raw.start_cp),
         end_cp: num_or_null(raw.end_cp),
