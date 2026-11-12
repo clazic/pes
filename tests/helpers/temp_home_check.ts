@@ -46,7 +46,8 @@ function admin_share_drive_path(text: string): string | undefined {
  * Removes a Windows namespace prefix so the SAME place has one spelling (`/` separators already): `//?/C:/x` · `//./C:/x` · `/??/C:/x` → `C:/x`,
  * `//?/UNC/localhost/c$/x` → `C:/x`, a plain `//localhost/c$/x` → `C:/x`. A namespace that is not a drive or UNC path (`//?/Volume{…}/…`, `//?/GLOBALROOT/…`,
  * `//./PhysicalDrive0`, `//?/`) cannot be told from the real home by spelling → `undefined` (refused). Any other `//host/share/…` is left to canon(), which
- * collapses the doubled slash exactly like a POSIX `//Users/x` — so no spelling of the real home slips through on either OS.
+ * collapses the doubled slash exactly like a POSIX `//Users/x` — on Windows keeping `host/share` as a root `..` cannot climb over (SEL-103) — so no spelling
+ * of the real home slips through on either OS.
  */
 function strip_windows_namespace(text: string): string | undefined {
   const namespaced = /^\/\/[?.]\/(.*)$/s.exec(text) ?? /^\/\?\?\/(.*)$/s.exec(text);
@@ -59,24 +60,43 @@ function strip_windows_namespace(text: string): string | undefined {
 }
 
 /**
+ * (SEL-103) The plain spelling of a Windows path, as a STRING (`/` separators): the namespace / administrative-share rewrite of strip_windows_namespace —
+ * `\\?\C:\x` · `\\.\C:\x` · `\??\C:\x` · `\\?\UNC\localhost\c$\x` · `\\localhost\c$\x` → `C:/x`, `\\?\UNC\host\share\x` → `//host/share/x`; any other path unchanged
+ * (separators aside). `undefined` for a namespace that cannot be read as a drive or UNC path. Shared by layer 0 (canon) and layer 4 (home_guard.ts), so
+ * both judge the same place under the same spelling.
+ */
+export function plain_windows_spelling(path: string): string | undefined {
+  return strip_windows_namespace(path.split("\\").join("/"));
+}
+
+/**
  * A platform-independent spelling of an absolute path: `\` → `/`, namespace prefixes removed, `.` / `..` / `//` resolved textually, no trailing `/`, a drive
  * letter kept, case folded on the case-insensitive systems. `undefined` for a path that is not absolute — relative, a drive-relative `D:` · `D:foo` (meaning
  * depends on that drive's current directory) — or whose namespace cannot be read. A root-relative path (`/x` with no drive: on Windows the current drive's
  * root) is returned without a drive. Never touches the file system (not even the cwd).
  */
-function canon(path: string, fold: boolean): string | undefined {
-  const text = strip_windows_namespace(path.split("\\").join("/"));
+function canon(path: string, fold: boolean, windows: boolean): string | undefined {
+  const text = plain_windows_spelling(path);
   if (text === undefined) return undefined;
   const drive = /^[A-Za-z]:/.exec(text)?.[0] ?? "";
   const rest = text.slice(drive.length);
   if (!rest.startsWith("/")) return undefined;
+  // (SEL-103) On Windows `\\host\share` is the ROOT of a UNC path: `..` never climbs over it (`\\server\share\..\hong` IS `\\server\share\hong`), so the
+  // two names are fixed. A UNC spelling without a share (or with `.` / `..` as host or share) cannot be read → refused. POSIX keeps `//x` = `/x`.
+  let fixed: string[] = [];
+  if (windows && drive === "" && /^\/\/[^/]/.test(rest)) {
+    const unc = /^\/\/([^/]+)\/([^/]+)(?:\/|$)/.exec(rest);
+    if (unc === null) return undefined;
+    fixed = [unc[1] as string, unc[2] as string];
+    if (fixed.some((part) => part === "." || part === "..")) return undefined;
+  }
   const stack: string[] = [];
-  for (const part of rest.split("/")) {
+  for (const part of rest.split("/").slice(fixed.length === 0 ? 0 : 4)) {
     if (part === "" || part === ".") continue;
     if (part === "..") stack.pop();
     else stack.push(part);
   }
-  const out = `${drive}/${stack.join("/")}`;
+  const out = `${drive}/${[...fixed, ...stack].join("/")}`;
   return fold ? out.toLowerCase() : out;
 }
 
@@ -86,8 +106,8 @@ function inside_or_same(path: string, folder: string): boolean {
 }
 
 /** Why `value` (the content of `key`) may not be the home of a test run — `undefined` when it is acceptable. */
-function problem_with(key: HomeKey, value: string, account_homes: readonly string[], fold: boolean): string | undefined {
-  const home = canon(value, fold);
+function problem_with(key: HomeKey, value: string, account_homes: readonly string[], fold: boolean, windows: boolean): string | undefined {
+  const home = canon(value, fold, windows);
   if (home === undefined) return `${key} 가 절대 경로가 아니거나 읽을 수 없는 표기다 (상대 경로·D: 같은 드라이브 상대 경로·알 수 없는 \\\\?\\ 네임스페이스)`;
   if (SHAPE_PARENT.test(home)) return `${key} 가 계정 홈의 부모 폴더(/ · /Users · /home · C:\\ · C:\\Users)다`;
   const shape = SHAPE_ROOT.exec(home);
@@ -99,7 +119,7 @@ function problem_with(key: HomeKey, value: string, account_homes: readonly strin
   }
   const drive_less = home.startsWith("/"); // root-relative: the drive it lives on is the current one — compare without the drive
   for (const account of account_homes) {
-    let real = canon(account, fold);
+    let real = canon(account, fold, windows);
     if (real === undefined) continue;
     if (drive_less) real = real.replace(/^[a-z]:/i, "");
     if (home === real) return `${key} 가 계정의 실제 홈이다`;
@@ -124,7 +144,7 @@ export function real_home_problem(env: Record<string, string | undefined>, accou
       if (key === driving) return `${key} 가 비어 있다 (Node 는 계정 DB 의 실제 홈으로 되돌아간다)`;
       continue;
     }
-    const problem = problem_with(key, value, account_homes, fold);
+    const problem = problem_with(key, value, account_homes, fold, platform === "win32");
     if (problem !== undefined) return problem;
   }
   return undefined;
@@ -149,9 +169,10 @@ export function default_account_homes(env: Record<string, string | undefined> = 
  */
 export function is_account_home(path: string, account_homes: readonly string[] = default_account_homes(), platform: string = process.platform): boolean {
   const fold = folds_case(platform);
-  const home = canon(path, fold);
+  const windows = platform === "win32";
+  const home = canon(path, fold, windows);
   if (home === undefined) return false;
-  return account_homes.some((account) => canon(account, fold) === home);
+  return account_homes.some((account) => canon(account, fold, windows) === home);
 }
 
 /** Throws before anything is listed or opened when the run starts in the real account home. */

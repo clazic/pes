@@ -22,6 +22,8 @@
 //                                  PESHomeAccessViolation and thrown; use_home_guard() fails the file at the end even if the test swallowed the
 //                                  throw (try/catch "absent"). Layer 2 can only see *changes* of .pes / pes-projects; a test that stat()ed the real
 //                                  ~/.claude and compared mtimes (D13) passed or flaked depending on other Claude sessions — now it cannot even look.
+//                                  Whole-tree calls (rm · rmdir · rename · cp, a recursive readdir / opendir / watch) are refused on a PARENT of a protected
+//                                  folder too — the home itself included; Windows spellings are made plain first, with layer 0's rewrite (SEL-103).
 //                                  Deliberately NOT covered (documented in tests/README.md): calls on an already open file descriptor (fstatSync(fd) …,
 //                                  the fd was opened by a path call the guard saw), a symlink / junction alias that is spelled outside a protected
 //                                  folder (layer 2 and the child guard's realpath own that), wildcards that expand into a protected folder from an
@@ -46,7 +48,7 @@ import { fileURLToPath } from "node:url";
 import { after, before } from "node:test";
 
 import { snapshot_of } from "../e2e/helpers/home_guard.ts";
-import { PROTECTED_NAMES, default_account_homes, is_account_home } from "./temp_home_check.ts";
+import { PROTECTED_NAMES, default_account_homes, is_account_home, plain_windows_spelling } from "./temp_home_check.ts";
 
 /** Folders of a real home no test may look at. `.pes` and `pes-projects` are also compared before / after (layer 2); `.claude` is denied only —
  * other Claude sessions write there all the time, so a before / after comparison of it is a flaky test, not a guard (SEL-95, D13). */
@@ -112,8 +114,15 @@ function native(path: string): string {
   }
 }
 
+/** Windows path rules (node:path is win32): the namespace / administrative-share spellings are rewritten first (SEL-103). */
+const WINDOWS_PATHS = sep === "\\";
+
+/**
+ * Absolute, case-folded on the case-insensitive systems. On Windows the spelling is first made plain with layer 0's own rewrite (plain_windows_spelling):
+ * `\\?\C:\x` · `\\localhost\c$\x` are `C:\x`, for a protected root and for a called path alike (SEL-103). An unreadable namespace stays as spelled.
+ */
 function norm(path: string): string {
-  const full = resolve(path);
+  const full = resolve(WINDOWS_PATHS ? (plain_windows_spelling(path) ?? path) : path);
   return process.platform === "win32" || process.platform === "darwin" ? full.toLowerCase() : full;
 }
 
@@ -227,6 +236,18 @@ const FS_PROMISE_ONE_PATH = [
   "unlink", "utimes", "lutimes", "chmod", "lchmod", "chown", "lchown", "truncate",
 ] as const;
 const FS_PROMISE_TWO_PATH = ["copyFile", "cp", "rename", "link", "symlink"] as const;
+/**
+ * (SEL-103) Calls that act on a whole tree: removing, moving or copying `~` (or a folder above it) removes, moves or reads `~/.pes` without the guard ever
+ * seeing a protected path — the recursion happens inside fs, not through the wrapped functions. For these, a path that is a PARENT of a protected folder
+ * (the home itself included) is refused as well, every path argument (source and destination). A plain stat / readdir / open of the home stays allowed.
+ */
+const WHOLE_TREE = new Set(["rmSync", "rm", "rmdirSync", "rmdir", "renameSync", "rename", "cpSync", "cp"]);
+/** The same, only when called with `{ recursive: true }` (they then walk below the folder). */
+const WHOLE_TREE_IF_RECURSIVE = new Set(["readdirSync", "readdir", "opendirSync", "opendir", "watch"]);
+
+function is_recursive(options: unknown): boolean {
+  return typeof options === "object" && options !== null && (options as { recursive?: unknown }).recursive === true;
+}
 
 let allowed = 0;
 
@@ -269,19 +290,22 @@ export function guard_process_fs(real_home?: Homes): ProcessFsGuard {
   const bases = base_spellings(homes_of(real_home));
   const folders = bases.flatMap((base) => PROTECTED_NAMES.map((name) => join(base, name)));
   const violations: string[] = [];
-  const hit = (fn: string, value: unknown): void => {
+  /** `whole_tree`: the call acts on everything below `value` (rm · rename · cp · a recursive readdir …) — then a PARENT of a protected folder is refused too. */
+  const hit = (fn: string, value: unknown, whole_tree = false): void => {
     if (allowed > 0) return;
     const path = as_path(value);
     if (path === undefined || path === "") return;
     const full = resolve(path);
-    if (folders.some((folder) => inside(full, folder))) {
+    if (folders.some((folder) => inside(full, folder) || (whole_tree && inside(folder, full)))) {
       const message = `PESHomeAccessViolation: ${fn} ${full}`;
       violations.push(message);
       throw new Error(message);
     }
   };
   const leading = (paths: number): Check => (args, fn) => {
-    for (let i = 0; i < paths; i += 1) hit(fn, args[i]);
+    const name = fn.slice(fn.lastIndexOf(".") + 1);
+    const whole_tree = WHOLE_TREE.has(name) || (WHOLE_TREE_IF_RECURSIVE.has(name) && is_recursive(args[1]));
+    for (let i = 0; i < paths; i += 1) hit(fn, args[i], whole_tree);
   };
   // glob(pattern | patterns, { cwd }): the cwd, and every pattern as spelled (resolved against the cwd — `*` in a protected cwd, or an absolute pattern into one)
   const glob_check: Check = (args, fn) => {
