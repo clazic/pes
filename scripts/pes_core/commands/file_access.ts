@@ -100,14 +100,20 @@ const MATERIAL_FILES_SQL = `SELECT vf.blob_id AS blob_id
   JOIN sources s ON s.project_id = ov.project_id AND s.object_id = ov.object_id AND s.kind = 'file'
  WHERE vf.project_id = ?`;
 
-/** True when this version belongs to a file material and carries at least one file closed to AI. */
+/**
+ * True when this version belongs to a file material and carries at least one file closed to AI.
+ * Version unit. The AI read exits do NOT use this (they use material_object_denied); it is for facts that name one version.
+ */
 export function material_version_denied(db: ReadDb, project_id: string, version_id: string): boolean {
   return db
     .all<{ blob_id: string }>(`${MATERIAL_FILES_SQL} AND vf.version_id = ?`, project_id, version_id)
     .some((row) => file_ai_denied(db, project_id, row.blob_id));
 }
 
-/** True when any version of this file material carries a file closed to AI (for events that name the object but no version). */
+/**
+ * True when any version of this file material carries a file closed to AI. THE unit of every AI-facing exit (materials list,
+ * context manifest, version read, A tool, change feed, material upload): a later version inherits the earlier title (the file name).
+ */
 export function material_object_denied(db: ReadDb, project_id: string, object_id: string): boolean {
   return db
     .all<{ blob_id: string }>(`${MATERIAL_FILES_SQL} AND ov.object_id = ?`, project_id, object_id)
@@ -180,8 +186,9 @@ interface MaterialRow {
 export type Audience = "human" | "ai";
 
 /**
- * The materials a caller may see. `human` = all, each with its `ai_access`; `ai` = allowed files only, without the
- * `ai_access` key and with no trace of the closed ones (not even a count). Both go through file_ai_denied.
+ * The materials a caller may see. `human` = all, each with its `ai_access` (that file's own switch); `ai` = the material objects
+ * with no closed file in any version, without the `ai_access` key and with no trace of the closed ones (not even a count).
+ * Both go through file_ai_denied; `ai` judges per object (material_object_denied), like every other AI exit.
  */
 export function material_rows(db: ReadDb, project_id: string, audience: Audience): MaterialDto[] {
   const rows = db.all<MaterialRow>(
@@ -200,9 +207,19 @@ export function material_rows(db: ReadDb, project_id: string, audience: Audience
     project_id,
   );
   const out: MaterialDto[] = [];
+  // An AI caller's unit is the material OBJECT, as at the write exits (run_upload, event_denied): a closed file in any version closes
+  // the whole object, because a later version may inherit the closed file's name as its title. Decided once per object.
+  const object_closed = new Map<string, boolean>();
   for (const row of rows) {
     const denied = file_ai_denied(db, project_id, row.blob_id);
-    if (audience === "ai" && denied) continue;
+    if (audience === "ai") {
+      let closed = object_closed.get(row.object_id);
+      if (closed === undefined) {
+        closed = material_object_denied(db, project_id, row.object_id);
+        object_closed.set(row.object_id, closed);
+      }
+      if (closed) continue;
+    }
     const dto: MaterialDto = {
       object_id: row.object_id,
       version_id: row.version_id,

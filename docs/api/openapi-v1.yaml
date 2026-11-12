@@ -1183,8 +1183,9 @@ paths:
         re-upload never resets a `deny`. Data: `{object_id, version_id, version_no, blob_id, file_policy_id, role, ai_access, original_name, media_type, size, sha256}`;
         `ai_access` is given to a human caller only (an AI caller never gets the key). A caller that is not human who names a blob closed to AI, or a material
         object that carries a closed file, gets the same 404 as for an unknown blob or object, before anything is written. Known limit: `POST uploads` returns
-        `blob_id` and `deduplicated: true` for bytes the project already holds, so whoever has the same bytes can learn that the file exists (no name, policy id,
-        deny state or text goes with it).
+        `blob_id` and `deduplicated: true` for bytes the project already holds, so whoever has the same bytes can learn that the file exists and whether it is
+        closed to AI (`GET files/{b}/content` is 403 for a closed file; `POST materials` is 404); no name, policy id or text goes with it. The unit of every
+        AI-facing read is the material object: a closed file in any version closes every version of it (a later version inherits the earlier title, the file name).
         Writes through the command `file.upload` (receipt and event `file.material_uploaded`). The same key and body replay the first answer;
         the same key with another body is 409 `idempotency_key_reuse`.
       parameters:

@@ -18,6 +18,7 @@ import { SESSION_SECRET, assert_ok, call, make_agent, with_api, type ApiEnv } fr
 import { with_cleanup } from "./helpers/adapter_b_flow.ts";
 import { P, http_blob, set_access, text_bytes, upload_material, wire_of } from "./helpers/sel115_env.ts";
 import { text_artifact } from "./helpers/sel99_env.ts";
+import { ai_material_rows } from "../scripts/pes_core/commands/file_access.ts";
 
 /** 제목 없이 올린 자료: title 기본값 = 파일 이름. */
 async function untitled_material(env: ApiEnv, label: string, marker: string, name: string) {
@@ -336,5 +337,93 @@ test("SEL-99 출구: 스레드·후속 읽기·변경분에 deny 자료의 흔�
       assert.ok(res.status < 500, `${path} ${res.status}`);
       assert_clean(wire_of(res), secret, `agent GET ${path}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 최종 리뷰 1 필수 F1 — AI 읽기 출구가 현재 버전 단위로 판정해서, deny 파일의 이름이 같은 자료의 다음 판 제목(제목 없이
+// 올리면 앞 판 제목을 물려받는다)으로 AI 에게 나갔다. AI 읽기 출구는 쓰기 출구(run_upload·event_denied)와 같은 객체 단위다:
+// 어느 판이든 deny 파일이 있으면 그 자료 객체 전체가 AI 에게 안 보인다.
+
+async function plain_blob(env: ApiEnv, label: string, name: string) {
+  const bytes = text_bytes(label, `PLAIN-${label}`);
+  return { blob: await http_blob(env, bytes, { name }), bytes };
+}
+
+for (const kind of ["external_agent", "internal_ai"] as const) {
+  for (const order of ["deny 먼저, 그 뒤 v2 올리기", "v2 올린 뒤 v1 deny"] as const) {
+    test(`F1 (${kind}, ${order}): 닫힌 v1 이 있는 자료는 v2(allow, 상속한 제목)도 AI 에게 통째로 안 보인다 — /materials·/context·/workspace·/changes·v2 읽기·A 도구; 사람은 그대로`, async () => {
+      await with_api(async (env) => {
+        const agent = await make_agent(env, "f1", ["context:read", "file:read"], kind);
+        const base = assert_ok(await agent_get(env, agent.token, "/context"));
+        const secret = await untitled_material(env, `f1-${kind}`, `SECRET-F1-${kind}`, `비공개-계약서-${kind}.txt`);
+
+        const second = await plain_blob(env, `f1b-${kind}`, `공개-v2-${kind}.txt`);
+        const add_v2 = async () => {
+          const res = await upload_material(env, { blob_id: second.blob.blob_id, object_id: secret.data.object_id });
+          assert.equal(res.status, 201, JSON.stringify(res.json));
+          return res.json.data as any;
+        };
+        let v2: any;
+        if (order === "deny 먼저, 그 뒤 v2 올리기") {
+          assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+          v2 = await add_v2();
+        } else {
+          v2 = await add_v2();
+          assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+        }
+        // v2 는 allow 다(이 시험의 전제) — 사람 응답의 ai_access.
+        assert.equal(v2.ai_access, "allow");
+        const v2_ids = [v2.version_id, v2.blob_id, v2.file_policy_id, second.blob.sha256, `공개-v2-${kind}.txt`];
+
+        const paths = ["/materials", "/context", "/workspace", "/changes?limit=100", `/objects/${secret.data.object_id}/versions/${v2.version_id}`];
+        for (const path of paths) {
+          const res = await agent_get(env, agent.token, path);
+          const wire = wire_of(res);
+          assert.ok(res.status < 500, `${path} ${res.status}`);
+          assert_clean(wire, secret, `agent GET ${path}`);
+          // v2 의 제목은 닫힌 파일 이름을 물려받았다 — 그 문자열과 v2 자체의 id 도 없어야 한다(자료 객체가 통째로 닫힘).
+          for (const needle of v2_ids) assert.ok(!wire.includes(needle), `agent GET ${path}: "${needle}" must not appear`);
+        }
+        const read_v2 = await agent_get(env, agent.token, `/objects/${secret.data.object_id}/versions/${v2.version_id}`);
+        assert.equal(read_v2.status, 403, JSON.stringify(read_v2.json));
+
+        const ctx = assert_ok(await agent_get(env, agent.token, "/context"));
+        assert.equal(ctx.manifest.length, base.manifest.length, "not even a count of the hidden material");
+        assert.deepEqual(ctx.materials, []);
+        assert.equal(ctx.digest, base.digest, "the digest is the same as without the material");
+
+        // A 도구·프롬프트가 쓰는 목록.
+        const a_rows = ai_material_rows(env.db, env.p.project_id, 50);
+        assert.equal(JSON.stringify(a_rows).includes(secret.name), false, "A context.get materials");
+        assert.equal(a_rows.length, 0);
+
+        // 사람: 그대로 본다.
+        const owner_materials = assert_ok(await call(env, { method: "GET", path: P(env, "/materials"), auth: "owner" })).materials;
+        assert.ok(owner_materials.some((m: any) => m.object_id === secret.data.object_id), "the owner sees the material");
+        const owner_read = await call(env, { method: "GET", path: P(env, `/objects/${secret.data.object_id}/versions/${v2.version_id}`), auth: "owner" });
+        assert.equal(owner_read.status, 200);
+        const owner_ctx = assert_ok(await call(env, { method: "GET", path: P(env, "/context"), auth: "owner" }));
+        const entry = owner_ctx.manifest.find((e: any) => e.object_id === secret.data.object_id);
+        assert.ok(entry, "the owner still sees the object in the manifest");
+        assert.equal(entry.ai_access, "deny", "the owner's manifest marks the whole object closed (same unit as the AI exits)");
+      });
+    });
+  }
+}
+
+test("F1: 닫힌 파일을 allow 로 되돌리면 자료 객체가 AI 에게 다시 나온다 (객체 단위 판정은 v1 의 스위치를 따른다)", async () => {
+  await with_api(async (env) => {
+    const secret = await untitled_material(env, "f1-back", "SECRET-F1-BACK", "비공개-back.txt");
+    const agent = await make_agent(env, "f1back", ["context:read", "file:read"]);
+    assert_ok(await set_access(env, secret.data.file_policy_id, "deny"));
+    const second = await plain_blob(env, "f1back2", "공개-back-v2.txt");
+    const up = await upload_material(env, { blob_id: second.blob.blob_id, object_id: secret.data.object_id });
+    assert.equal(up.status, 201);
+    assert.deepEqual(assert_ok(await agent_get(env, agent.token, "/materials")).materials, []);
+    assert_ok(await set_access(env, secret.data.file_policy_id, "allow"));
+    const back = assert_ok(await agent_get(env, agent.token, "/materials")).materials;
+    assert.equal(back.length, 1);
+    assert.equal(back[0].version_id, up.json.data.version_id);
   });
 });

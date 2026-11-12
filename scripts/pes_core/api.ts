@@ -51,7 +51,7 @@ import {
   submission_received_at,
   type ReceiptRow,
 } from "./commands/api_reads.ts";
-import { file_ai_denied, material_rows, material_version_denied, type Audience } from "./commands/file_access.ts";
+import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
 import { read_tx } from "./commands/read_tx.ts";
@@ -1625,9 +1625,10 @@ export class ApiApp {
         version_id,
       );
       const visible = auth.kind === "human" ? files : files.filter((f) => !this.#blob_denied(project.id, f.blob_id));
-      // A closed file material's own text (title defaults to the file name) and content_hash (it hashes the file's sha256) name the file:
-      // a non-human caller who knows the ids is told "forbidden", the same answer as files/{b}/content for a closed blob.
-      if (auth.kind !== "human" && row.kind === "source" && material_version_denied(this.#db, project.id, version_id)) {
+      // A closed file material's own text (title defaults to the file name, and a later version inherits it) and content_hash (it hashes
+      // the file's sha256) name the file: a non-human caller who knows the ids is told "forbidden", the same answer as files/{b}/content
+      // for a closed blob. The unit is the material object: a closed file in ANY version closes every version of it.
+      if (auth.kind !== "human" && row.kind === "source" && material_object_denied(this.#db, project.id, object_id)) {
         throw new Fail("forbidden", { target: "$.path.version_id" });
       }
       return {
@@ -1677,7 +1678,7 @@ export class ApiApp {
     // File materials closed to AI are not in the AI's manifest at all (object_id, version_id, kind and the count are all identity);
     // the human sees every object, the closed ones marked so an export to an AI app can leave them out.
     const closed = new Set(
-      full_manifest.filter((entry) => entry.kind === "source" && material_version_denied(this.#db, project.id, entry.version_id)).map((entry) => entry.object_id),
+      full_manifest.filter((entry) => entry.kind === "source" && material_object_denied(this.#db, project.id, entry.object_id)).map((entry) => entry.object_id),
     );
     const manifest = audience === "ai" ? full_manifest.filter((entry) => !closed.has(entry.object_id)) : full_manifest;
     const lease = this.#db.get<LeaseRow>(
