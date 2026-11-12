@@ -25,6 +25,10 @@
 //   text pieces, sheets, relationships, shared strings (MAX_ITEMS) — and time (MAX_EXTRACT_MS, checked while XML is read).
 //   Going over any of them stops the extraction right there as failed/too_large; no partial text is handed back.
 //   Sheets (MAX_SHEETS) and warnings (MAX_WARNINGS, then one "n more" line) have their own small caps.
+//
+// Second wall: the server does not call extract_text on its own thread. file_extract_isolated.ts runs it in a worker thread with a
+// heap limit and a wall-time limit, so whatever this budget misses ends that thread (failed/too_large, failed/extract_timeout), not the
+// server. This file stays pure and synchronous (tests and the thread call it directly).
 
 import { crc32, inflateRawSync } from "node:zlib";
 import { posix } from "node:path";
@@ -275,7 +279,8 @@ class ZipArchive {
 type XmlEvent =
   | { k: "open"; name: string; attrs: Record<string, string>; self: boolean }
   | { k: "close"; name: string }
-  | { k: "text"; text: string };
+  /** `literal`: CDATA, taken as written (no entity decoding). It is never re-escaped to be decoded again — that copy cost up to 5x before any budget saw it. */
+  | { k: "text"; text: string; literal?: boolean };
 
 class XmlError extends Error {}
 
@@ -409,6 +414,11 @@ export function xml_decode(text: string): string {
   return chunks.length === 1 ? (chunks[0] as string) : chunks.join("");
 }
 
+/** The characters of a text event: CDATA as written, everything else with its entities decoded. */
+function text_of(ev: { text: string; literal?: boolean }): string {
+  return ev.literal === true ? ev.text : xml_decode(ev.text);
+}
+
 function* xml_events(src: string, budget: Budget): Generator<XmlEvent> {
   const stack: string[] = [];
   let at = 0;
@@ -435,7 +445,7 @@ function* xml_events(src: string, budget: Budget): Generator<XmlEvent> {
     if (src.startsWith("<![CDATA[", lt)) {
       const end = src.indexOf("]]>", lt + 9);
       if (end < 0 || stack.length === 0) throw new XmlError("bad CDATA");
-      yield { k: "text", text: src.slice(lt + 9, end).replace(/&/g, "&amp;").replace(/</g, "&lt;") };
+      yield { k: "text", text: src.slice(lt + 9, end), literal: true };
       at = end + 3;
       continue;
     }
@@ -493,8 +503,81 @@ function attr_of(attrs: Record<string, string>, local: string): string | undefin
 // ---------------------------------------------------------------------------
 // Markdown pipe tables
 
-function cell_text(text: string): string {
-  return text.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
+/**
+ * Joins small pieces in groups, so a string made of millions of pieces never holds millions of them at once. (A global
+ * `replace` keeps one record per match — about 25 bytes each — and ran a 256 MB heap out of memory on 15,000,000 matches.)
+ */
+class PieceJoiner {
+  private chunks: string[] = [];
+  private pieces: string[] = [];
+  put(piece: string): void {
+    this.pieces.push(piece);
+    if (this.pieces.length >= 4096) {
+      this.chunks.push(this.pieces.join(""));
+      this.pieces = [];
+    }
+  }
+  done(): string {
+    this.chunks.push(this.pieces.join(""));
+    this.pieces = [];
+    const out = this.chunks.length === 1 ? (this.chunks[0] as string) : this.chunks.join("");
+    this.chunks = [];
+    return out;
+  }
+}
+
+/**
+ * One table cell: every run of white space becomes one space, the ends are trimmed and "|" becomes "\|" — in one pass
+ * (same result as text.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|"), same state machine as cell_text_length).
+ */
+export function cell_text(text: string): string {
+  const out = new PieceJoiner();
+  let run = -1; // where the current run of ordinary characters began
+  let pending_space = false;
+  let wrote = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    const space = is_space(code);
+    if (!space && code !== 124 /* | */) {
+      if (run < 0) {
+        if (pending_space) out.put(" ");
+        pending_space = false;
+        run = i;
+        wrote = true;
+      }
+      continue;
+    }
+    if (run >= 0) {
+      out.put(text.slice(run, i));
+      run = -1;
+    }
+    if (space) {
+      if (wrote) pending_space = true;
+    } else {
+      if (pending_space) out.put(" ");
+      pending_space = false;
+      out.put("\\|");
+      wrote = true;
+    }
+  }
+  if (run >= 0) out.put(text.slice(run));
+  return out.done();
+}
+
+/** CRLF and a lone CR become LF (same result as replace(/\r\n?/g, "\n"), without one record per match). */
+export function normalize_newlines(text: string): string {
+  let at = text.indexOf("\r");
+  if (at < 0) return text;
+  const out = new PieceJoiner();
+  let last = 0;
+  while (at >= 0) {
+    out.put(text.slice(last, at));
+    out.put("\n");
+    last = text.charCodeAt(at + 1) === 10 ? at + 2 : at + 1;
+    at = text.indexOf("\r", last);
+  }
+  out.put(text.slice(last));
+  return out.done();
 }
 
 /** The characters that /\s/ matches (ECMAScript WhiteSpace + LineTerminator), by code unit. */
@@ -577,11 +660,19 @@ interface SheetData {
   cols: number[];
   vals: string[];
   width: number;
+  /** characters paid for when the values were read (each value and its " | "); printing the sheet again must pay them again */
+  paid: number;
+  /** how many times the sheet has been printed */
+  printed: number;
 }
 
 /** A sheet -> the same pipe table, padded to the widest row. A row is only widened to the page width when it is printed. */
 function sparse_pipe_table(sheet: SheetData, budget: Budget): string[] {
   const { row_starts, cols, vals, width } = sheet;
+  // The values were paid for when they were read, for the first printing. Every further printing (several sheets that point at
+  // the same part) puts them out again, so it pays for them again - before a line is built.
+  if (sheet.printed > 0) budget.charge(sheet.paid);
+  sheet.printed += 1;
   const lines: string[] = [];
   row_starts.forEach((begin, index) => {
     const end = index + 1 < row_starts.length ? (row_starts[index + 1] as number) : cols.length;
@@ -685,7 +776,7 @@ function read_body(xml: string, budget: Budget): BodyResult {
           break;
       }
     } else if (ev.k === "text") {
-      if (text_depth > 0 && paras.length > 0) append(paras[paras.length - 1] as ParaFrame, xml_decode(ev.text));
+      if (text_depth > 0 && paras.length > 0) append(paras[paras.length - 1] as ParaFrame, text_of(ev));
     } else {
       switch (ev.name) {
         case "t":
@@ -891,7 +982,7 @@ function read_shared_strings(xml: string, budget: Budget): string[] {
       else if (ev.name === "t" && current !== null && phonetic === 0) in_t = true;
     } else if (ev.k === "text") {
       if (in_t && current !== null) {
-        const piece = xml_decode(ev.text);
+        const piece = text_of(ev);
         if (current !== "" && piece !== "") budget.item();
         current += piece;
       }
@@ -909,29 +1000,42 @@ function read_shared_strings(xml: string, budget: Budget): string[] {
 
 /**
  * Shared strings, escaped for a table cell at most once each (a string used by 200,000 cells is escaped once and the
- * cells share it). The budget still pays for every cell that prints it.
+ * cells share it). The escaped LENGTH is known without building anything (`length_of`), so the caller pays the budget
+ * first and only then asks for the text (`escaped_of`) — also the first time a string is used.
  */
 class SharedCells {
   private readonly escaped = new Map<number, string>();
+  private readonly lengths = new Map<number, number>();
   private readonly raw: string[];
   constructor(raw: string[]) {
     this.raw = raw;
   }
-  /** the raw text (to know whether the cell is empty) and the escaped text, or null for an unknown index */
-  get(index: number): { raw: string; escaped: string } | null {
-    const raw = this.raw[index];
-    if (raw === undefined) return null;
+  /** the raw text (to know whether the cell is empty), or undefined for an unknown index */
+  raw_of(index: number): string | undefined {
+    return this.raw[index];
+  }
+  /** length of the escaped text; counted, not built */
+  length_of(index: number): number {
+    let length = this.lengths.get(index);
+    if (length === undefined) {
+      length = cell_text_length([this.raw[index] as string]);
+      this.lengths.set(index, length);
+    }
+    return length;
+  }
+  /** the escaped text (built once); the caller has paid for length_of(index) before asking */
+  escaped_of(index: number): string {
     let escaped = this.escaped.get(index);
     if (escaped === undefined) {
-      escaped = cell_text(raw);
+      escaped = cell_text(this.raw[index] as string);
       this.escaped.set(index, escaped);
     }
-    return { raw, escaped };
+    return escaped;
   }
 }
 
 function read_sheet(xml: string, shared: SharedCells, budget: Budget): SheetData {
-  const sheet: SheetData = { row_starts: [], cols: [], vals: [], width: 0 };
+  const sheet: SheetData = { row_starts: [], cols: [], vals: [], width: 0, paid: 0, printed: 0 };
   let row_start = -1;
   let cell: { col: number; type: string; v: string; is: string } | null = null;
   let cap: "v" | "is" | null = null;
@@ -964,7 +1068,7 @@ function read_sheet(xml: string, shared: SharedCells, budget: Budget): SheetData
       }
     } else if (ev.k === "text") {
       if (cell !== null && cap !== null) {
-        const piece = xml_decode(ev.text);
+        const piece = text_of(ev);
         if (cell[cap] !== "" && piece !== "") budget.item();
         cell[cap] += piece;
       }
@@ -976,11 +1080,11 @@ function read_sheet(xml: string, shared: SharedCells, budget: Budget): SheetData
       in_is = false;
     } else if (ev.name === "c" && cell !== null && row_start >= 0) {
       let raw: string;
-      let escaped: string | null = null;
+      let shared_index = -1;
       if (cell.type === "s") {
-        const hit = shared.get(Number.parseInt(cell.v.trim(), 10));
-        raw = hit?.raw ?? "";
-        escaped = hit?.escaped ?? "";
+        const index = Number.parseInt(cell.v.trim(), 10);
+        raw = shared.raw_of(index) ?? "";
+        if (raw !== "") shared_index = index;
       } else if (cell.type === "inlineStr") raw = cell.is;
       else if (cell.type === "b") raw = cell.v.trim() === "1" ? "TRUE" : "FALSE";
       else raw = cell.v.trim();
@@ -988,12 +1092,19 @@ function read_sheet(xml: string, shared: SharedCells, budget: Budget): SheetData
       // 16,384 cells for the one value): the row is widened only when it is printed, against the output budget.
       if (raw !== "") {
         budget.item();
-        // the value is paid for BEFORE it is copied (a shared string is escaped once and only referenced here)
+        // the value is paid for BEFORE it is copied (a shared string is escaped once, after its first payment, and only referenced here)
         let value: string;
-        if (escaped !== null) {
-          budget.charge(escaped.length + 3);
-          value = escaped;
-        } else value = cell_out([raw], budget);
+        if (shared_index >= 0) {
+          const length = shared.length_of(shared_index);
+          budget.charge(length + 3);
+          sheet.paid += length + 3;
+          value = shared.escaped_of(shared_index);
+        } else {
+          const length = cell_text_length([raw]);
+          budget.charge(length + 3);
+          sheet.paid += length + 3;
+          value = length === 0 ? "" : cell_text(raw);
+        }
         sheet.cols.push(cell.col);
         sheet.vals.push(value);
         if (cell.col + 1 > sheet.width) sheet.width = cell.col + 1;
@@ -1099,7 +1210,7 @@ function extract_plain(format: "txt" | "md" | "csv", bytes: Uint8Array): Extract
     return failed("invalid_encoding", "UTF-8 이 아니어서 글자를 짐작하지 않고 멈췄습니다. UTF-8 로 저장해 다시 올려 주세요.");
   }
   if (decoded.charCodeAt(0) === 0xfeff) decoded = decoded.slice(1);
-  const text = decoded.replace(/\r\n?/g, "\n");
+  const text = normalize_newlines(decoded);
   return {
     status: "extracted",
     reason: null,

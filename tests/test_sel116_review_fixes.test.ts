@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { call, make_agent, with_api, type ApiEnv } from "./helpers/api_env.ts";
-import { MAX_TEXT_CHARS, extract_text } from "../scripts/pes_core/file_extract.ts";
+import { MAX_TEXT_CHARS, cell_text, extract_text, normalize_newlines } from "../scripts/pes_core/file_extract.ts";
 import { P, count, esc, extract, make_docx, make_pptx, make_zip, material_of, set_access, wire_of } from "./helpers/sel116_env.ts";
 
 const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
@@ -563,4 +563,174 @@ test("R1-2 R1: an ordinary 200,000-row one-column xlsx and a 150,000-row docx ta
   const table = extract_in_child("표십오만행.docx", docx_body(`<w:tbl>${"<w:tr><w:tc><w:p><w:t>x</w:t></w:p></w:tc></w:tr>".repeat(150_000)}</w:tbl>`));
   assert.equal(table.status, "extracted", JSON.stringify(table));
   assert.equal(table.text_length, 150_000 * 6 + "| --- |\n".length);
+});
+
+// ---------------------------------------------------------------------------
+// 1차 리뷰 R1-3 — 예산을 거치지 않던 할당 네 곳(N1~N4) + 추출 전체를 Worker 에서 돌리는 심층 방어.
+// 아래 시험은 **실제 서버 경로**(업로드 → POST /file-extractions → file.extract 명령 → DB)를 작은 힙(256 MB) 자식 프로세스에서 돌린다.
+// 고치기 전에는 추출이 서버 프로세스 안에서 돌아 FATAL(종료 코드 134)로 자식이 죽는다. 고친 뒤에는 서버가 살아서
+// 실패(too_large)를 기록하거나 정상 추출하고, 이어서 보통 파일 하나를 더 추출한다.
+
+const SERVER_CHILD = join(import.meta.dirname, "helpers", "sel116_server_child.ts");
+const REPO_ROOT = join(import.meta.dirname, "..");
+
+interface ServerResult {
+  http: number;
+  status: string | null;
+  reason: string | null;
+  text_length: number | null;
+  text_head: string | null;
+  new_blobs: number;
+  ms: number;
+  next_status: string | null;
+  rows: number;
+}
+
+/** 합성 파일을 서버 경로로 추출하는 자식(힙 256 MB)을 돌린다. 자식이 죽으면(힙 부족 등) 시험이 실패한다. */
+function server_in_child(name: string, bytes: Uint8Array | string, wall_ms = 120_000): ServerResult {
+  const dir = mkdtempSync(join(tmpdir(), "sel116-server-"));
+  try {
+    const file = join(dir, "input.bin");
+    writeFileSync(file, bytes);
+    const run = spawnSync(process.execPath, [`--max-old-space-size=${CHILD_HEAP_MB}`, "--import", "./tests/helpers/require_temp_home.ts", SERVER_CHILD, file, name], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      timeout: wall_ms,
+      maxBuffer: 1024 * 1024,
+      env: process.env,
+    });
+    assert.equal(run.error, undefined, `child did not finish: ${String(run.error)}`);
+    assert.equal(run.status, 0, `server child died (signal ${run.signal}): ${run.stderr.slice(-600)}`);
+    const out = JSON.parse(run.stdout.trim().split("\n").pop() as string) as ServerResult;
+    assert.equal(out.http, 201, JSON.stringify(out));
+    assert.equal(out.next_status, "extracted", `the server must still extract an ordinary file afterwards: ${JSON.stringify(out)}`);
+    return out;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function assert_too_large(out: ServerResult, wall_ms = 60_000): void {
+  assert.equal(out.status, "failed", JSON.stringify(out));
+  assert.equal(out.reason, "too_large", JSON.stringify(out));
+  assert.equal(out.text_length, null);
+  assert.equal(out.new_blobs, 0, "no text blob for a failed extraction");
+  assert.ok(out.ms < wall_ms, `took ${out.ms} ms`);
+}
+
+/** 리뷰 재현 gen.ts rerender: 공유 문자열 한 칸 + 같은 시트 부품(sheet1.xml)을 가리키는 시트 여러 개. */
+test("R1-3 N1: 20 sheets that all print the same 20M-character shared string are stopped by the text limit — server alive, too_large", () => {
+  const zip = raw_xlsx_preserve('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', ["a".repeat(20_000_000)], 20);
+  assert.ok(zip.byteLength < 100_000, `zip ${zip.byteLength} bytes`);
+  assert_too_large(server_in_child("재출력.xlsx", zip));
+});
+
+test("R1-3 N1: the same part printed twice is paid twice — in-process: 3 sheets over one 12M-character value exceed the 32M limit", () => {
+  const zip = raw_xlsx_preserve('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', ["b".repeat(12_000_000)], 3);
+  const out = extract_text("재출력3.xlsx", zip);
+  assert.equal(out.status, "failed");
+  assert.equal(out.reason, "too_large");
+  const two = extract_text("재출력2.xlsx", raw_xlsx_preserve('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', ["b".repeat(12_000_000)], 2));
+  assert.equal(two.status, "extracted", "two printings (24M characters) fit");
+  assert.equal(two.table_count, 2);
+});
+
+test("R1-3 N2: 60,000,000 '&' in an unused CDATA (59 KB zip) neither blow the heap nor change the text", () => {
+  const zip = docx_body(`<w:x><![CDATA[${"&".repeat(60_000_000)}]]></w:x><w:p><w:t>hi</w:t></w:p>`);
+  assert.ok(zip.byteLength < 100_000, `zip ${zip.byteLength} bytes`);
+  const out = server_in_child("씨데이타.docx", zip);
+  assert.equal(out.status, "extracted", JSON.stringify(out));
+  assert.equal(out.text_head, "hi\n");
+});
+
+test("R1-3 N2: CDATA text is taken as written ('&amp;' stays '&amp;', '<' stays '<'); ordinary text still has its entities decoded", () => {
+  const zip = docx_body("<w:p><w:t><![CDATA[a &amp; <b>]]> &amp; c</w:t></w:p>");
+  const out = extract_text("씨데이타값.docx", zip);
+  assert.equal(out.status, "extracted");
+  assert.equal(out.text, "a &amp; <b> & c\n");
+});
+
+test("R1-3 N2: 40,000,000 '&' inside <w:t> as CDATA — server alive; either too_large or extracted, never a crash", () => {
+  const zip = docx_body(`<w:p><w:t><![CDATA[${"&".repeat(40_000_000)}]]></w:t></w:p>`);
+  const out = server_in_child("씨데이타본문.docx", zip);
+  assert.ok(out.status === "failed" ? out.reason === "too_large" : out.status === "extracted", JSON.stringify(out));
+});
+
+test("R1-3 N3: a 60M-character shared string made of '|', referenced by one cell — too_large, server alive", () => {
+  const zip = raw_xlsx_preserve('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', ["|".repeat(60_000_000)]);
+  assert.ok(zip.byteLength < 100_000, `zip ${zip.byteLength} bytes`);
+  assert_too_large(server_in_child("파이프공유첫참조.xlsx", zip));
+});
+
+test("R1-3 N3: the escaped length is counted before anything is built (a shared string over the limit fails fast, in-process)", () => {
+  const zip = raw_xlsx_preserve('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', ["|".repeat(20_000_000)]);
+  const { value, ms } = timed(() => extract_text("파이프공유.xlsx", zip));
+  assert.equal(value.status, "failed");
+  assert.equal(value.reason, "too_large");
+  assert.ok(ms < 5_000, `took ${ms.toFixed(0)} ms`);
+});
+
+test("R1-3 N4a: one xlsx cell of 12,000,000 '|' (escaped: 24M characters) — server alive; extracted or too_large", () => {
+  const rows = `<row r="1"><c r="A1" t="inlineStr"><is><t>${"|".repeat(12_000_000)}</t></is></c></row>`;
+  const out = server_in_child("파이프칸.xlsx", raw_xlsx(rows));
+  assert.ok(out.status === "failed" ? out.reason === "too_large" : out.status === "extracted", JSON.stringify(out));
+});
+
+test("R1-3 N4b: one xlsx cell of 'a ' x 12,000,000 (12M white-space matches) — server alive; extracted or too_large", () => {
+  const rows = `<row r="1"><c r="A1" t="inlineStr"><is><t xml:space="preserve">${"a ".repeat(12_000_000)}</t></is></c></row>`;
+  const out = server_in_child("공백칸.xlsx", raw_xlsx(rows));
+  assert.ok(out.status === "failed" ? out.reason === "too_large" : out.status === "extracted", JSON.stringify(out));
+});
+
+test("R1-3 N4c: nested docx tables (depth 3) with 1,500,000 '|' in the innermost cell — server alive; extracted or too_large", () => {
+  const inner = `<w:tbl><w:tr><w:tc><w:p><w:t>${"|".repeat(1_500_000)}</w:t></w:p></w:tc></w:tr></w:tbl>`;
+  const wrap = (body: string): string => `<w:tbl><w:tr><w:tc>${body}<w:p/></w:tc></w:tr></w:tbl>`;
+  const out = server_in_child("중첩.docx", docx_body(wrap(wrap(wrap(inner)))));
+  assert.ok(out.status === "failed" ? out.reason === "too_large" : out.status === "extracted", JSON.stringify(out));
+});
+
+test("R1-3 N4d: a .txt of 16,000,000 CRLF (32 MB) and one of 32,000,000 lone CR are normalised without blowing the heap", () => {
+  const crlf = server_in_child("줄바꿈.txt", Buffer.from("\r\n".repeat(16_000_000)));
+  assert.equal(crlf.status, "extracted", JSON.stringify(crlf));
+  assert.equal(crlf.text_length, 16_000_000);
+  const cr = server_in_child("캐리지.txt", Buffer.from("\r".repeat(32_000_000)));
+  assert.equal(cr.status, "extracted", JSON.stringify(cr));
+  assert.equal(cr.text_length, 32_000_000);
+});
+
+test("R1-3 N4: cell_text and normalize_newlines give the same result as the regular expressions they replaced", () => {
+  const alphabet = ["a", "b", "|", " ", "\t", "\n", "\r", " ", "　", "﻿", "한", " "];
+  let seed = 12345;
+  const rnd = (n: number): number => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  for (let round = 0; round < 3000; round += 1) {
+    const length = rnd(24);
+    let text = "";
+    for (let i = 0; i < length; i += 1) text += alphabet[rnd(alphabet.length)];
+    assert.equal(cell_text(text), text.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|"), JSON.stringify(text));
+    assert.equal(normalize_newlines(text), text.replace(/\r\n?/g, "\n"), JSON.stringify(text));
+  }
+});
+
+// 지난 재현들 — 이번에는 실제 서버 경로로.
+
+test("R1-3 past: shared string with spaces x 16,384 columns, 'x|' x 200,000 cells, sheet bombs and table bombs — each ends as a recorded failure, the server lives", () => {
+  const cells = Array.from({ length: 16_384 }, (_v, c) => `<c r="${column_name(c)}1" t="s"><v>0</v></c>`).join("");
+  assert_too_large(server_in_child("공백공유.xlsx", raw_xlsx_preserve(`<row r="1">${cells}</row>`, ["가 ".repeat(500_000)])));
+  assert_too_large(server_in_child("파이프공유.xlsx", raw_xlsx_preserve(`<row r="1">${'<c r="A1" t="s"><v>0</v></c>'.repeat(200_000)}</row>`, ["x|".repeat(4_000_000)])));
+  assert_too_large(server_in_child("시트폭탄.xlsx", make_zip([{ name: "xl/workbook.xml", data: `${XML}<workbook><sheets>${"<sheet/>".repeat(7_000_000)}</sheets></workbook>` }])));
+  assert_too_large(server_in_child("같은부품.xlsx", raw_xlsx_preserve('<row><c r="A1"><v>1</v></c></row>', [], 500_000)));
+  assert_too_large(server_in_child("칸폭탄.docx", docx_body(`<w:tbl><w:tr>${"<w:tc/>".repeat(7_000_000)}</w:tr></w:tbl>`)));
+  assert_too_large(server_in_child("행폭탄.docx", docx_body(`<w:tbl>${"<w:tr><w:tc/></w:tr>".repeat(2_800_000)}</w:tbl>`)));
+});
+
+test("R1-3 normal: an ordinary 120,000-row xlsx and a 150,000-row docx table are extracted through the server — text blob readable", () => {
+  const rows = Array.from({ length: 120_000 }, (_v, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c><c r="B${i + 1}" t="inlineStr"><is><t>행 ${i}</t></is></c></row>`).join("");
+  const sheet = server_in_child("십이만행.xlsx", raw_xlsx(rows));
+  assert.equal(sheet.status, "extracted", JSON.stringify(sheet));
+  assert.ok(sheet.text_head?.startsWith("## 시트\n| 0 | 행 0 |\n| --- | --- |\n| 1 | 행 1 |"), sheet.text_head ?? "");
+  const table = server_in_child("표십오만행.docx", docx_body(`<w:tbl>${"<w:tr><w:tc><w:p><w:t>x</w:t></w:p></w:tc></w:tr>".repeat(150_000)}</w:tbl>`));
+  assert.equal(table.status, "extracted", JSON.stringify(table));
 });
