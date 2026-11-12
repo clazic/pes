@@ -1808,7 +1808,9 @@ paths:
         The assumptions and decisions are all of the version's edition (up to 50 of each kind), not only those that bear on the question.
         A file with file_policies.ai_access = deny is excluded (ai_access_denied) for the human owner session; for any other caller
         (a token) it is left out of every list, so its id never leaves (the version read hides it the same way). An allowed file is
-        listed by role and name, never its content, storage key or path. A token, the session secret, an API key or a local path in
+        listed by role and name, never its content, storage key or path. When the selected version is a file material closed to AI
+        (any of its versions holds a denied file: commands/file_access.ts material_object_denied, the version read's unit), the human
+        gets the build with the version text and the quote excluded (ai_access_denied, A and B) and any other caller gets 403. A token, the session secret, an API key or a local path in
         any input is erased and announced with the warning "redacted": values after names that end in token, secret, password,
         api key, secret/private/access key, session id, credential or signature, Korean labels (비밀번호, 암호, 토큰, 비밀키) followed by a value, Authorization and Cookie headers, credentials inside a URL, ?key= and ?sig=, private key
         blocks, long letter-and-digit runs of an unknown shape, and home, file: and drive paths. A blank draft is skipped.
@@ -1831,7 +1833,7 @@ paths:
               schema: { $ref: "#/components/schemas/Success" }
         "400": { description: "Missing or blank question, missing selection.version_id, unknown key, bad target or draft" }
         "401": { description: Missing or invalid credential }
-        "403": { description: Missing context:read scope or Go policy denied }
+         "403": { description: "Missing context:read scope, Go policy denied, or (a caller that is not the human) the selected version is a file material closed to AI — the same refusal as the version read" }
         "404": { description: "The version is not in this project (another project's version included)" }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "429": { description: Request budget spent; see Retry-After }
