@@ -211,19 +211,25 @@ export async function build_hub(root: string): Promise<string> {
 }
 
 export async function cmd_list(args: string[]): Promise<void> {
-  const root = projects_root(args);
+  const open = args.includes("--open");
+  const root = projects_root(args.filter((a) => a !== "--open"));
   const briefs = await all_briefs(root);
   if (briefs.length === 0) {
     say(`프로젝트 없음: ${root}`);
-    return;
+  } else {
+    const W: Record<string, string> = { you: "내 차례", ai: "Claude", done: "완료", err: "오류" };
+    const url = await server_url(root);
+    briefs.forEach((b, k) => {
+      const cur = (b.stages as Dict[]).find((x) => x.key === b.current);
+      say(`${k + 1}. [${W[b.who] ?? b.who}] ${b.topic}  (${b.slug})`);
+      say(`   ${cur !== undefined ? `${cur.label} R${cur.round}` : "-"} · ${b.todo} · 갱신 ${b.updated ?? ""} · ${url !== null ? `${url}${b.slug}/` : "서버 꺼짐"}${b.lock ? ` · 사용 중 세션 ${b.lock.owner}` : ""}`);
+    });
   }
-  const W: Record<string, string> = { you: "내 차례", ai: "Claude", done: "완료", err: "오류" };
-  const url = await server_url(root);
-  briefs.forEach((b, k) => {
-    const cur = (b.stages as Dict[]).find((x) => x.key === b.current);
-    say(`${k + 1}. [${W[b.who] ?? b.who}] ${b.topic}  (${b.slug})`);
-    say(`   ${cur !== undefined ? `${cur.label} R${cur.round}` : "-"} · ${b.todo} · 갱신 ${b.updated ?? ""} · ${url !== null ? `${url}${b.slug}/` : "서버 꺼짐"}${b.lock ? ` · 사용 중 세션 ${b.lock.owner}` : ""}`);
-  });
+  if (!open) return;
+  // SEL-128: nothing is started here — the server must already be on (like `pes open --app`); the list above is printed first, the address is the LAST line
+  const port = await root_port(root);
+  if (port === null) die("서버가 꺼져 있습니다 — 먼저 pes hub 로 서버를 켠 뒤 다시 하세요", 1);
+  await open_first_page(port, false);
 }
 
 // ---------------------------------------------------------------- serve, hub, open
@@ -248,8 +254,29 @@ export async function cmd_hub(args: string[]): Promise<void> {
     if (existsSync(join(d, ".pes-server")) || existsSync(join(d, ".pes-port"))) await stop_legacy(d);
   }
   await build_hub(root);
-  await ensure_server(root);
+  const port = await ensure_server(root);
+  if (args.includes("--open")) {
+    await open_first_page(port, true);
+    return;
+  }
   say((await server_url(root)) ?? `http://127.0.0.1:${(await root_port(root)) ?? ""}/`);
+}
+
+/**
+ * `pes hub --open` / `pes list --open` (SEL-128): opens the first page (the project list) with a ONE-TIME CODE for an empty `projects` ({}) in the URL fragment —
+ * the same SEL-85 code mechanism as `pes open <slug> --app`, nothing new in the server. The page trades the code for the owner session (its "프로젝트 시작" button
+ * needs one to create a project) and clears the fragment before drawing. The code is never printed when the browser is started (it is only in the browser
+ * command's argument); with PES_NO_BROWSER=1 the one address line is printed. The code is asked for BEFORE anything is printed, so a refusal leaves no output.
+ */
+async function open_first_page(port: number, hub: boolean): Promise<void> {
+  const address = `http://127.0.0.1:${port}/`;
+  const code = await issue_app_code(port, {});
+  if (process.env.PES_NO_BROWSER === "1") {
+    say(`${address}#code=${code}`);
+    return;
+  }
+  open_browser(`${address}#code=${code}`);
+  say(hub ? address : `프로젝트 목록을 브라우저로 열었습니다: ${address}`);
 }
 
 /** The command that opens `url` in the default browser: the address is the ONLY thing passed on (never a session — SEL-85 tests this for every platform). */

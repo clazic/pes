@@ -220,8 +220,8 @@ test("4 멱등: 만들기를 연달아 두 번 눌러도(응답이 늦어도) �
 test("5 이름 중복: 한국어 한 줄('이미' 또는 '중복')로 알리고 이동하지 않으며 아무것도 더 만들지 않는다", async ({ page }) => {
   ws = await open_empty_home();
   expect((await ws.api_create({ slug: "synthetic-dup", topic: "합성 먼저 있던 주제", owner_display_name: "합성 소유자" }, "seed-1")).status).toBe(201);
-  const tree = ws.tree();
   await open_with_code(page, ws);
+  const tree = ws.tree(); // 허브를 만든 뒤(pes hub 가 index.html·.pes-hub 를 쓴다) — 거절된 요청이 더 바꾸지 않는지 본다
   await start_button(page).click();
   await topic_input(page).fill("합성 중복 시도 주제");
   await slug_input(page).fill("synthetic-dup");
