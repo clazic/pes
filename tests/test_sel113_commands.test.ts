@@ -25,7 +25,7 @@
  *                                                                              source_missing 인 줄 → conflict. 다른 프로젝트 스냅숏 → not_found. 사람만. 원본은 건드리지 않는다.
  *  reference.source_gone {referenced_project_id, snapshot_id?}                 (ctx = 원본 프로젝트 사람 소유자) 원본 프로젝트(snapshot_id 생략) 또는 그 스냅숏 하나가 사라질 때, 그것을 가리키는
  *                                                                              모든 참조를 **같은 tx 에서** source_snapshot_id·latest_snapshot_id 를 NULL 로 비우고 status='source_missing'. key·label·scope 보존.
- *                                                                              프로젝트가 사라지면 referenced_project_id 도 NULL. rev+1. 결과 {released:[{reference_id, project_id}]}. 사람만. 다른 스냅숏/프로젝트 참조는 그대로.
+ *                                                                              프로젝트가 사라지면 referenced_project_id 도 NULL. rev+1. 결과 {released_count}(SEL-123: 다른 프로젝트 id 를 싣지 않는다). 사람만. 다른 스냅숏/프로젝트 참조는 그대로.
  *
  *  영수증/사건: 명령마다 mutation_commits 한 줄(action /^reference\./)과 같은 tx_id 의 사건 /^reference\./ (payload.reference_id). 같은 키 재전송 = replayed:true,
  *  같은 키 다른 본문 = idempotency_key_reuse, 거절은 아무것도 쓰지 않는다(state_signature 불변). 원본 프로젝트의 행은 attach/refresh/detach 가 바꾸지 않는다.
@@ -393,8 +393,8 @@ test("source_gone (one snapshot): pointers are emptied EXPLICITLY in the same tx
       referenced_project_id: src.p.project_id,
       snapshot_id: src.snapshot_id,
     });
-    assert.deepEqual(out.released.map((r: any) => r.reference_id), [ref.reference_id]);
-    assert.equal(out.released[0].project_id, env.p.project_id);
+    assert.equal(out.released_count, 1);
+    assert.equal(JSON.stringify(out).includes(env.p.project_id), false, "the source's receipt carries no id of the referencing project (SEL-123)");
     const row = ref_row(env.db, ref.reference_id)!;
     assert.equal(row.status, "source_missing");
     assert.equal(row.source_snapshot_id, null);
@@ -424,11 +424,11 @@ test("source_gone (whole project): referenced_project_id is emptied too; an unre
     // a snapshot that no reference points at: releasing it changes nothing
     const v2 = await add_new_version(env, a.src, 2);
     const noop = await ok(env, { ...a_ctx, client_request_id: "pg-0" }, "reference.source_gone", { referenced_project_id: a.src.p.project_id, snapshot_id: v2.snapshot_id });
-    assert.deepEqual(noop.released, []);
+    assert.equal(noop.released_count, 0);
     assert.equal(ref_row(env.db, a.ref.reference_id)!.status, "active");
 
     const out = await ok(env, a_ctx, "reference.source_gone", { referenced_project_id: a.src.p.project_id });
-    assert.deepEqual(out.released.map((r: any) => r.reference_id), [a.ref.reference_id]);
+    assert.equal(out.released_count, 1);
     const row = ref_row(env.db, a.ref.reference_id)!;
     assert.equal(row.status, "source_missing");
     assert.equal(row.referenced_project_id, null);

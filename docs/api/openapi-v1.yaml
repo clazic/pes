@@ -2562,6 +2562,13 @@ paths:
         is gone (state source_missing), and, for a token, when ai_delivery.allowed is false (Go off on either side). The
         owner session still reads it. No permission to the source is 403 forbidden with no content. An unknown id, or an id
         of another project, is 404. A GET writes nothing.
+
+        AI-reference files of the source (SEL-123): for a token (and A, B), an item the SOURCE project closes to AI - a report
+        version that carries a closed file, or a source version of a file material with a closed file (judged by the whole
+        material object) - is left out of `items` whole, judged on this read: no title, quote, body, object_id, version_id or
+        citation of it, no placeholder and no count. items_status counts only what the AI may see (all closed = "none"). Deny a
+        file after attaching and the item is gone from the next read; allow it again and it is back. The owner session still
+        reads every item.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/ReferenceId"
