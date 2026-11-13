@@ -466,6 +466,7 @@ const NEEDS: Need[] = [
   // 0022: 추측 금지 — 모르면 먼저 찾고, 못 찾으면 "확인하지 못함"
   { file: "skills/core/SKILL.md", id: "모르면 먼저 찾는다", re: /모르면 먼저 찾는다/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "찾지 못하면 확인하지 못함", re: /확인하지 못함/, sec: /^###\s+근거 기록/ },
+  { file: "skills/core/SKILL.md", id: "1차 출처 먼저, 2차 출처는 표시", re: /1차 출처를 먼저 쓴다[^\n]*"2차 출처"/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "추측하지 않는다 · (추정) 금지", re: /추측하지 않는다[^\n]*"\(추정\)" 문장을 쓰지 않는다/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "요약 줄마다 근거 항목 표기", re: /\(근거: 조사 #/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "원문 확인으로 치는 method (browser·kosis·law·vworld)", re: /browser[·, ]*kosis[·, ]*law[·, ]*vworld/ },
