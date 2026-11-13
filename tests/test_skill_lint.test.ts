@@ -463,7 +463,10 @@ const NEEDS: Need[] = [
   { file: "skills/core/SKILL.md", id: "판정 fail 이면 승인을 권하지 않는다", re: /fail[^\n]{0,30}승인을 권하지 않는다/ },
   // --- 근거 기록 (core) ---
   { file: "skills/core/SKILL.md", id: "사실·수치는 sources 에 있어야 한다", re: /sources[^\n]{0,30}있어야 한다/ },
-  { file: "skills/core/SKILL.md", id: "출처 없는 판단·추정 표시", re: /\(판단\)[\s\S]{0,20}\(추정\)/ },
+  // 0022: 추측 금지 — 모르면 먼저 찾고, 못 찾으면 "확인하지 못함"
+  { file: "skills/core/SKILL.md", id: "모르면 먼저 찾는다", re: /모르면 먼저 찾는다/, sec: /^###\s+근거 기록/ },
+  { file: "skills/core/SKILL.md", id: "찾지 못하면 확인하지 못함", re: /확인하지 못함/, sec: /^###\s+근거 기록/ },
+  { file: "skills/core/SKILL.md", id: "추측하지 않는다 · (추정) 금지", re: /추측하지 않는다[^\n]*"\(추정\)" 문장을 쓰지 않는다/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "요약 줄마다 근거 항목 표기", re: /\(근거: 조사 #/, sec: /^###\s+근거 기록/ },
   { file: "skills/core/SKILL.md", id: "원문 확인으로 치는 method (browser·kosis·law·vworld)", re: /browser[·, ]*kosis[·, ]*law[·, ]*vworld/ },
   // --- 점검·해석·보고서 (core) ---
