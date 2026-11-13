@@ -1,5 +1,6 @@
 import { FORMAT_VERSION, NotConnectedError, PesApiError, type Actor, type ApiError, type AiAccess, type AssumptionRow, type ChangesRead, type ChangeTx, type CommandResult, type DecisionRow, type FollowupView, type Link, type MaterialRow, type PesClient, type ProjectRef, type ReferenceCitation, type ReferenceContent, type ReferenceContentItem, type ReferenceRow, type ReferencesMethods, type QuestionInput, type CommentMessageView, type CommentThreadView, type QuestionKind, type QuestionStatus, type QuestionView, type Receipt, type ReflectionEntry, type RoundView, type WorkspaceView, type AnchorStatus, type AnnotationThreadView, type FollowupDetail, type FollowupKind, type FollowupState, type CpRange, type StageKey, type ResultView, type ReferenceCandidate, type ReferenceSnapshot } from "./types";
 import { markAfterSend } from "./send-outcome";
+import { showIfFromWire, showIfToWire } from "./show-if";
 
 /**
  * 실제 HTTP 클라이언트(U1b) — 가짜 클라이언트(fake-client.ts)와 같은 PesClient 모양을 지키고, 서버 JSON API(`/api/v1/`)를 읽는다.
@@ -229,7 +230,8 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       ...(q.default_value !== null && q.default_value !== undefined ? { default_value: q.default_value } : revise ? { default_value: null } : {}),
       // 수정은 부분 수정이라 options 키가 없으면 서버의 옛 선택지가 남는다 — 글로 바꿀 때는 빈 배열을 명시해 지운다(생성은 싣지 않는다)
       ...(choice ? { options: q.options.map((o) => ({ value: o.id, label: o.label })) } : revise ? { options: [] } : {}),
-      ...(q.show_if ? { show_if: { id: q.show_if.question_id, in: [q.show_if.equals] } } : revise ? { show_if: null } : {}),
+      // 앱이 못 다루는 서버 조건(show_if_unsupported)은 키를 아예 싣지 않는다 — 부분 수정이라 서버의 조건이 그대로 남는다(null 로 지우지 않는다)
+      ...(q.show_if_unsupported ? {} : q.show_if ? { show_if: showIfToWire(q.show_if) } : revise ? { show_if: null } : {}),
       ...(q.help ? { help: q.help } : revise ? { help: null } : {}),
     };
   }
@@ -520,7 +522,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     const rawOptions = Array.isArray(raw.options) ? raw.options : [];
     const options = kind === "free_text" ? [] : rawOptions.flatMap((o) => (isRecord(o) && typeof o.value === "string" ? [{ id: o.value, label: typeof o.label === "string" ? o.label : o.value }] : []));
     const status: QuestionStatus = raw.state === "withdrawn" || raw.state === "deferred" || raw.state === "merged" ? raw.state : "open";
-    const showIf = isRecord(raw.show_if) && typeof raw.show_if.id === "string" && Array.isArray(raw.show_if.in) && typeof raw.show_if.in[0] === "string" ? { question_id: raw.show_if.id, equals: raw.show_if.in[0] } : null;
+    const cond = showIfFromWire(raw.show_if);
     const view: QuestionView = {
       id: raw.id,
       number: Number(raw.display_no),
@@ -532,7 +534,9 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       kind,
       ...(kind === "free_text" ? {} : { options }),
       default_value: typeof raw.default_value === "string" ? raw.default_value : null,
-      show_if: showIf,
+      show_if: cond.show_if,
+      ...(cond.unsupported ? { show_if_unsupported: true } : {}),
+      ...(cond.judge ? { show_if_judge: cond.judge } : {}),
       direction: "ask_human",
       status,
       allow_comment_as_answer: raw.allow_comment_as_answer === true,
@@ -547,7 +551,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const receipt_no = text(a.receipt_no);
       const committed_at = text(a.committed_at);
       if (a.question_version_id === raw.version_id) {
-        view.sent = { answer, receipt_no, tx_id: text(a.tx_id), committed_at };
+        view.sent = { answer, receipt_no, tx_id: text(a.tx_id), committed_at, value: a.value };
         view.used_default = a.used_default === true;
       } else {
         view.needs_recheck = true;

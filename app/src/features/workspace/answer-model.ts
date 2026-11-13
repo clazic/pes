@@ -1,4 +1,5 @@
 import type { AnswerItemInput, QuestionView } from "@/api/types";
+import { judgeApplicable, type JudgeQuestion } from "@/api/show-if";
 import { isChoice, kindOf, optionLabel } from "./question-model";
 
 /**
@@ -8,6 +9,8 @@ import { isChoice, kindOf, optionLabel } from "./question-model";
  *  - 기본값을 쓴 답은 “쓴 그대로”일 때만 used_default (바꾸면 false). 추천은 기본값이 아니다.
  *  - 재확인 필요(needs_recheck)이고 보낸 답이 없는 질문은 ‘새 문구를 확인했어요’ 전에는 보내지 않는다.
  *  - show_if 가 안 맞는 질문은 적용되지 않는다: 필수로 치지 않고 보내지 않는다(초안은 지우지 않는다).
+ *    서버처럼 판정한다 — 조건 질문의 답은 저장된 답, 없으면 보낼 초안인데 숨은 질문의 초안은 요청에 실리지 않으니 쓰지 않는다(연쇄).
+ *    ‘이 답만 보내기’는 그 요청 하나만 가므로 저장된 답만 본다(부모가 미제출 초안이면 서버가 not_applicable 로 거절한다).
  *  - 의견 칸 글만 있는 항목은 질문이 allow_comment_as_answer 일 때만 보낸다(value null + comment).
  */
 
@@ -27,9 +30,13 @@ export function valueOfDraft(q: QuestionView, raw: string): string | string[] | 
   return one === "" ? null : one;
 }
 
-/** 보낸 답(q.sent.answer 는 화면 글)에서 조건 판단용 값을 되찾는다 — 선택지는 글 → id, 글 유형은 그대로 */
-export function sentValues(q: QuestionView): string[] {
+/**
+ * 보낸 답에서 조건 판단용 값을 되찾는다. 서버가 준 원래 값(q.sent.value)이 있으면 그 JSON 값 그대로(숫자는 숫자) —
+ * 없으면(이전 합성 자료) 화면 글(q.sent.answer)에서: 선택지는 글 → id, 글 유형은 그대로.
+ */
+export function sentValues(q: QuestionView): unknown[] {
   if (!q.sent) return [];
+  if (q.sent.value !== undefined && q.sent.value !== null) return Array.isArray(q.sent.value) ? [...q.sent.value] : [q.sent.value];
   const text = q.sent.answer;
   if (!isChoice(kindOf(q))) return [text];
   const options = q.options ?? [];
@@ -57,8 +64,10 @@ export interface Plan {
   skipped: { q: QuestionView; reason: SkipReason }[];
   /** 질문 id → 적용되는가 */
   applicable: Map<string, boolean>;
-  /** 질문 id → 개별 제출 항목(보낼 수 있으면) */
+  /** 질문 id → 개별 제출 항목(혼자 보낼 수 있으면) */
   single: Map<string, PlanItem>;
+  /** 묶음으로는 가지만 혼자는 못 가는 질문 — 조건 질문의 답이 아직 서버에 없다 */
+  singleBlocked: Set<string>;
 }
 
 export interface PlanInput {
@@ -83,21 +92,23 @@ export function makePlan({ open, draftOf, confirmed, defaultUsed }: PlanInput): 
     return { item: { q, value, comment, usedDefault: value !== null && defaultUsed(q) === d.answer }, skip: null, has };
   };
   const cands = new Map(open.map((q) => [q.id, candidate(q)]));
-  // 조건 판단 값: 보낸 답 → 없으면 보낼 수 있는 초안
-  const valuesById = new Map<string, string[]>();
-  for (const q of open) {
+  // 조건 판단은 서버와 같게: 저장된 답 · (적용되는) 보낼 초안
+  const judged: JudgeQuestion[] = open.map((q) => {
     const c = cands.get(q.id)!;
-    if (q.sent) valuesById.set(q.id, sentValues(q));
-    else if (c.item && c.item.value !== null) valuesById.set(q.id, Array.isArray(c.item.value) ? c.item.value : [c.item.value]);
-  }
-  const applicable = new Map<string, boolean>();
-  for (const q of open) {
-    const s = q.show_if;
-    applicable.set(q.id, !s || (valuesById.get(s.question_id) ?? []).includes(s.equals));
-  }
+    const s = q.show_if_judge ?? q.show_if;
+    return {
+      id: q.id,
+      cond: s,
+      ...(q.sent ? { stored: sentValues(q) } : {}),
+      ...(!q.sent && c.item && c.item.value !== null ? { draft: Array.isArray(c.item.value) ? c.item.value : [c.item.value] } : {}),
+    };
+  });
+  const applicable = judgeApplicable(judged, "bundle");
+  const aloneOk = judgeApplicable(judged, "single");
   const items: PlanItem[] = [];
   const skipped: Plan["skipped"] = [];
   const single = new Map<string, PlanItem>();
+  const singleBlocked = new Set<string>();
   for (const q of open) {
     const c = cands.get(q.id)!;
     if (!c.has) continue;
@@ -107,12 +118,13 @@ export function makePlan({ open, draftOf, confirmed, defaultUsed }: PlanInput): 
     }
     if (c.item) {
       items.push(c.item);
-      single.set(q.id, c.item);
+      if (aloneOk.get(q.id)) single.set(q.id, c.item);
+      else singleBlocked.add(q.id);
     } else if (c.skip) skipped.push({ q, reason: c.skip });
   }
   const filledNow = new Set(items.map((i) => i.q.id));
   const missing = open.filter((q) => q.required && applicable.get(q.id) && !q.sent && !filledNow.has(q.id));
-  return { items, missing, skipped, applicable, single };
+  return { items, missing, skipped, applicable, single, singleBlocked };
 }
 
 /** 서버로 보낼 항목 */

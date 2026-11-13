@@ -8,7 +8,7 @@
 //                                                                                                        questions[], result: null, alerts: [], prompt: ""}
 //     질문 → QuestionView: id, number: display_no, version: Number(version_no), version_id, required, importance(null 이면 칸 없음), source "ai", text, help(null 이면 칸 없음),
 //            kind: single→single_choice · multi→multi_choice · 그 밖(text 등)→free_text, options(선택지 유형만): [{id: value, label}], default_value(null 이면 null),
-//            show_if: {question_id: show_if.id, equals: show_if.in[0]} (없으면 null), direction "ask_human", status: state, merged_into(merged 일 때), allow_comment_as_answer.
+//            show_if: {question_id: show_if.id, in: show_if.in 전부} (없으면 null; SEL-129), direction "ask_human", status: state, merged_into(merged 일 때), allow_comment_as_answer.
 //            답: answer 가 있고 그 질문 버전이 현재 버전이면 sent = {answer: 선택지는 label(여럿은 ", "), 글은 그대로, receipt_no, tx_id, committed_at}, used_default = answer.used_default.
 //                answer.question_version_id 가 현재 version_id 와 다르면 needs_recheck: true + sent 없음 + previous_answer = {answer(같은 글), receipt_no, committed_at}. (version 칸은 서버가 안 줘서 단언하지 않는다)
 //     서버 404 → null. (옛 서버 호환: 라운드 경로가 404 이고 작업 공간에 그 자리가 있으면 질문 없는 빈 뷰를 돌려줘도 된다 — 기존 http-client.test.ts 의 getRound 단언이 그대로 통과하도록.)
@@ -107,7 +107,7 @@ describe("getRound — 서버 라운드 읽기 매핑", () => {
     const [q1, q2, q3] = (await (await make(s)).getRound(SLUG, ED, "research", "2"))!.questions;
     expect(q1).toMatchObject({ kind: "single_choice", required: true, importance: "high", help: "각주가 필요해요", default_value: "split", show_if: null, direction: "ask_human", status: "open" });
     expect(q1.options).toEqual([{ id: "join", label: "이어 보기" }, { id: "split", label: "따로 보기" }]);
-    expect(q2).toMatchObject({ kind: "free_text", required: false, allow_comment_as_answer: true, show_if: { question_id: "qst-1", equals: "join" } });
+    expect(q2).toMatchObject({ kind: "free_text", required: false, allow_comment_as_answer: true, show_if: { question_id: "qst-1", in: ["join"] } });
     expect("importance" in q2).toBe(false);
     expect("help" in q2).toBe(false);
     expect(q3).toMatchObject({ kind: "multi_choice", allow_comment_as_answer: false });

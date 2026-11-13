@@ -29,7 +29,7 @@ import { aside, createU2bClient, item, U2B_QUESTIONS, type U2bOptions, type Wire
  *     - 멱등 키 필수(없으면 invalid_payload) · 같은 키·같은 요청은 영수증 재생(replayed) · 거절은 PesApiError — 거절이면 아무것도 접수되지 않는다(부분 접수 0).
  *     - 거절 오류의 error.details: { reason: "required_missing", question_ids: string[] } | { reason: "not_applicable", question_ids } | { reason: "single_requires_one_item" }
  *       (U2a: invalid_payload) · 질문 버전이 어긋나면 conflict.  ApiError.error.details 는 types.ts 에 optional 로 더한다(서버 봉투는 이미 가진다).
- *     - mode "bundle": 이 제출 + 이미 낸 현재 답으로 폼의 “적용되는 필수 질문”이 모두 채워져야 한다. “적용된다” = show_if 없음, 또는 조건 질문의 답(이 제출 우선, 없으면 현재 답)이 equals 와 같음.
+ *     - mode "bundle": 이 제출 + 이미 낸 현재 답으로 폼의 “적용되는 필수 질문”이 모두 채워져야 한다. “적용된다” = show_if 없음, 또는 조건 질문의 답(이 제출 우선, 없으면 현재 답)이 in 의 값 중 하나(SEL-129: equals → in:[…]).
  *       의견(value null + comment)만 있는 항목은 질문의 allow_comment_as_answer 가 true 일 때만 필수를 채운다.
  *     - mode "single": 항목이 정확히 1개. 결과 form_complete 는 폼 전체가 채워졌는지, missing_required 는 아직 빈 적용 필수 질문 id 들.
  *   QuestionView 에 더하는 칸: allow_comment_as_answer?: boolean (없으면 false) · version_id?: string(서버 질문 버전 id; 가짜 클라이언트는 없어도 된다) · used_default?: boolean(보낸 답이 기본값 채택이었음; 읽기 전용)
@@ -111,10 +111,10 @@ export const U2C_QUESTIONS: Wire[] = [
       { id: "foot", label: "각주" },
       { id: "chart", label: "그림 설명" },
     ],
-    show_if: { question_id: "q-21", equals: "join" },
+    show_if: { question_id: "q-21", in: ["join"] },
   },
   { ...base, id: "q-24", number: 24, version: 1, required: true, importance: "high", text: "AI 가 지금까지 가정한 것을 한 줄로 정리해 주세요.", kind: "free_text", allow_comment_as_answer: true },
-  { ...base, id: "q-25", number: 25, version: 1, required: true, importance: "normal", text: "따로 본다면 두 구간의 경계 해를 적어 주세요.", kind: "free_text", allow_comment_as_answer: false, show_if: { question_id: "q-21", equals: "split" } },
+  { ...base, id: "q-25", number: 25, version: 1, required: true, importance: "normal", text: "따로 본다면 두 구간의 경계 해를 적어 주세요.", kind: "free_text", allow_comment_as_answer: false, show_if: { question_id: "q-21", in: ["split"] } },
   {
     ...base,
     id: "q-26",
@@ -218,10 +218,10 @@ export function createU2cClient(opts: U2cOptions = {}) {
   const open = () => h.questions().filter((q) => ((q.status as string) ?? "open") === "open") as Q[];
   const valueOf = (id: string, items: Map<string, { value: unknown }>) => (items.has(id) ? items.get(id)!.value : raw.get(id));
   const applicable = (q: Q, items: Map<string, { value: unknown }>) => {
-    const s = q.show_if as { question_id: string; equals: string } | null | undefined;
+    const s = q.show_if as { question_id: string; in: string[] } | null | undefined;
     if (!s) return true;
     const v = valueOf(s.question_id, items);
-    return Array.isArray(v) ? v.includes(s.equals) : v === s.equals;
+    return (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v as string]).some((x) => s.in.includes(x));
   };
   const satisfied = (q: Q, items: Map<string, { value: unknown; comment?: string | null }>) => {
     if (items.has(q.id)) {

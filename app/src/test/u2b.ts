@@ -20,7 +20,7 @@ import { ready } from "@/test/ui";
  *   type QuestionDirection = "ask_human" | "ask_ai";          // ask_human = AI 가 사람에게 묻는다 · ask_ai = 사람이 AI 에게(“내가 AI에게”)
  *   type QuestionStatus = "open" | "withdrawn" | "deferred" | "merged";
  *   interface QuestionOption { id: string; label: string }
- *   interface ShowIf { question_id: string; equals: string }  // equals = 그 질문의 선택지 id (또는 글 답 값)
+ *   interface ShowIf { question_id: string; in: string[] }  // in = 그 질문의 선택지 id(또는 글 답 값)들 — 하나라도 고르면 보임 (SEL-129 에서 equals 를 바꿈)
  *   // QuestionView 에 더하는 칸(전부 optional — 이전된 합성 프로젝트는 아래 칸이 하나도 없어도 깨지지 않는다)
  *   interface QuestionViewU2b extends QuestionView {
  *     importance?: Importance;                 // 없음 = 미정(이전된 프로젝트)
@@ -131,7 +131,7 @@ export const U2B_QUESTIONS: Wire[] = [
     ],
     default_value: null,
     recommendation: null,
-    show_if: { question_id: "q-21", equals: "join" },
+    show_if: { question_id: "q-21", in: ["join"] },
     direction: "ask_human",
     status: "open",
     needs_recheck: false,
