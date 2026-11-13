@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { spawnSync as named_spawn_sync } from "node:child_process";
@@ -81,6 +81,11 @@ test("legacy importer modules and everything they load at runtime never import c
   for (const file of files) {
     const text = readFileSync(file, "utf8");
     assert.doesNotMatch(text, /child_process/, `${file} must not use child_process`);
+    // worker_threads is not child_process: scripts/pes_core/file_extract_isolated.ts (file.extract, SEL-116) starts its extraction
+    // Worker only when an extraction is requested — loading the module starts nothing and the importer never asks for one. It is
+    // the ONE file named here; every other module in the closure still may not start workers (and child_process stays forbidden
+    // everywhere, this file included, by the line above).
+    if (basename(file) === "file_extract_isolated.ts") continue;
     assert.doesNotMatch(text, /\bworker_threads\b/, `${file} must not start workers`);
   }
 });

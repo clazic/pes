@@ -56,6 +56,7 @@ import {
   type ReceiptRow,
 } from "./commands/api_reads.ts";
 import { file_ai_denied, material_object_denied, material_rows, type Audience } from "./commands/file_access.ts";
+import { closed_to_ai, existing_extraction, extraction_result, find_target } from "./commands/file_extractions.ts";
 import { HANDOFF_APPS } from "./commands/handoff_import.ts";
 import { find_print_snapshot, is_print_scope, print_output_of, prints_using_blob } from "./commands/print.ts";
 import { followup_rows, FOLLOWUP_KINDS, FOLLOWUP_STATES, thread_detail, THREAD_CONTEXT_KINDS, THREAD_STATES, thread_reply_route, thread_rows } from "./commands/thread_reads.ts";
@@ -905,6 +906,11 @@ export class ApiApp {
         who: "any", scope: "context:read", go: true,
         act: async (_r, project, auth) => this.#materials_list(project, auth),
       }),
+      // SEL-116 MAT1b: text and tables out of one material file. file:write or the owner's session; asking again changes nothing.
+      route("POST", `${P}/file-extractions`, "file_extractions.create", {
+        who: "any", scope: "file:write",
+        act: async (r, project, auth) => this.#file_extract(r, project, auth),
+      }),
       route("POST", `${P}/file-policies/{fp}/ai-access`, "file_policies.ai_access.set", {
         who: "session",
         act: async (r, project, auth) => this.#file_ai_access_set(r, project, auth),
@@ -1028,7 +1034,7 @@ export class ApiApp {
       error: {
         code: failure.code,
         message: message_for(failure.code, failure.target),
-        retryable: retryable_for(failure.code),
+        retryable: retryable_for(failure.code, failure.details),
         target: failure.target,
         details: failure.details,
         next_action: failure.next_action ?? NEXT_ACTION[failure.code] ?? "retry_later",
@@ -4419,6 +4425,34 @@ export class ApiApp {
     reject_unknown(body, ["blob_id", "title", "object_id", "role"]);
     const { format_version: _format, ...payload } = body;
     const out = await this.#exec(() => this.#service.execute(this.#ctx(project, auth, key), "file.upload", payload));
+    return { status: 201, data: out.result, replayed: out.replayed };
+  }
+
+  async #file_extract(request: RouteRequest, project: ProjectRow, auth: AuthInfo): Promise<HandlerResult> {
+    const key = this.#require_key(request);
+    const body = this.#json_body(request);
+    reject_unknown(body, ["version_id", "blob_id"]);
+    const { format_version: _format, ...payload } = body;
+    const ctx = this.#ctx(project, auth, key);
+    // A target that was already extracted answers with the stored row and writes nothing (no receipt, no event) — unless this very key
+    // was used before: then the command decides (same body replays the first answer, another body is a key reuse).
+    const known = read_tx(this.#db, () => {
+      if (typeof payload.version_id !== "string" || typeof payload.blob_id !== "string") return null;
+      const used = this.#db.get<{ ok: bigint }>(
+        "SELECT 1 AS ok FROM mutation_commits WHERE project_id = ? AND actor_id = ? AND client_request_id = ?",
+        project.id,
+        auth.actor_id,
+        key,
+      );
+      if (used !== undefined) return null;
+      const target = find_target(this.#db, project.id, payload.version_id, payload.blob_id);
+      if (target === undefined) return null;
+      if (auth.kind !== "human" && closed_to_ai(this.#db, project.id, payload.blob_id, target.object_id)) return null;
+      const row = existing_extraction(this.#db, project.id, payload.version_id, payload.blob_id);
+      return row === undefined ? null : extraction_result(this.#db, project.id, row, false, auth.kind === "human");
+    });
+    if (known !== null) return { status: 201, data: known, replayed: false };
+    const out = await this.#exec(() => this.#service.execute(ctx, "file.extract", payload));
     return { status: 201, data: out.result, replayed: out.replayed };
   }
 

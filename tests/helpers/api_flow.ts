@@ -144,6 +144,8 @@ export const EXPECTED_ROUTES: readonly string[] = [
   "GET /api/v1/projects/{id}/materials",
   "POST /api/v1/projects/{id}/materials",
   "POST /api/v1/projects/{id}/file-policies/{fp}/ai-access",
+  // SEL-116 MAT1b: text and tables out of my materials
+  "POST /api/v1/projects/{id}/file-extractions",
   "GET /api/v1/projects/{id}/objects/{o}/versions/{v}",
   "GET /api/v1/projects/{id}/operations/{op}",
   "GET /api/v1/projects/{id}/requests/{key}",

@@ -225,6 +225,8 @@ PR26c 는 `scripts/serve.ts`(= `serve.py <PES 홈> [포트]` 직접 실행과 �
 
 **실행 방법(고정):** `node scripts/serve.ts <PES 홈> [포트]`, `node scripts/setup.ts <명령> …` — Node 26 이 타입을 지운다(tsx·ts-node·빌드 없음). 시험에서는 `node --permission --allow-fs-read=<저장소> --allow-fs-read=<임시 루트> --allow-fs-write=<임시 루트> --allow-net --import tests/helpers/ts_child_guard.ts …` 가 앞에 붙는다. **자식 프로세스는 기본 금지**(`--allow-child-process` 없음): `serve.ts` 는 답을 같은 프로세스 안에서 DB 에 쓴다(`cli_bridge` 를 요청마다 띄우지 않는다). `setup.ts` 는 실행하지 못하는 외부 도구를 '없음'으로 본다(setup.py 의 `run()` 이 모든 예외를 -1 로 삼킨 것과 같다). `keys` 만 키 화면 자식을 띄워야 해서 그 시험에서만 `allow_child_process` 를 켠다.
 
+**서버 자식 플래그 — 글자 추출(`file.extract`)을 시험하려면 `--allow-worker` 를 더한다(SEL-116):** 추출은 Worker 스레드에서 돌고 Node `--permission` 은 `--allow-worker` 없이는 Worker 를 못 띄운다 — 없으면 모든 추출이 409 `conflict`/`worker_unavailable` 로 거절된다 — 아무것도 저장하지 않는다(`tests/test_sel116_isolation.test.ts` 가 두 경우를, `tests/test_sel116_transient.test.ts` 가 API 경로의 쓰기 0 을 본다). 지금 서버 자식 시험 중 추출을 하는 것은 `--permission` 없이 뜨는 `sel116_server_child.ts` 뿐이다.
+
 **허용 목록 밖은 보이지 않는다:** `/opt/homebrew`·`/usr/local`·실제 홈이 허용 목록에 없으므로 개발 PC 에 설치된 kosis·vworld·korean-law·ego-browser 가 자식에게 보이지 않는다. 그래서 `setup.ts check` 의 행은 어느 PC 에서나 같고(`test_setup_ts_contract` 가 행 전체를 단언), 키 등록(`reg_*`)은 외부 도구를 부르지 못한다. 0.15(py) 쪽 E14 는 PATH 만 좁히므로 안정 행만 견주는 기존 방식을 그대로 둔다.
 
 **의도된 차이:** D03(답은 DB 제출 — 하네스가 DB 에서 읽어 `feedback/<이름>` 파일 해시와 `feedback.log` 줄을 0.15 철자로 바꿔 견준다; 응답의 `v` 는 정수인지 확인하고 뺀다; DB 가 붙이는 `id`·`set_id` 는 해시 전에 뺀다), D09(정적 서빙은 그대로라 차이 없음), **D12 신설**(setup: `check` 에 `python` 행이 없고 사용법 첫 줄이 `사용: (0.15 의 python 실행 줄)` 가 아니라 `사용: node scripts/setup.ts <명령>` — `adapt_ts_setup_stdout` 이 두 사실을 먼저 단언한 뒤 0.15 철자로 되돌려 한 번에 견준다).

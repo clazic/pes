@@ -148,7 +148,11 @@ export function message_for(code: string, target: string | null): string {
   return base;
 }
 
-export function retryable_for(code: string): boolean {
+/** conflict reasons of an attempt that could not start now (file.extract): the same request may succeed later. */
+const RETRYABLE_CONFLICT_REASONS: ReadonlySet<string> = new Set(["extract_busy", "worker_unavailable"]);
+
+export function retryable_for(code: string, details: Record<string, unknown> | null = null): boolean {
+  if (code === "conflict" && details !== null && typeof details.reason === "string") return RETRYABLE_CONFLICT_REASONS.has(details.reason);
   return code === "rate_limited" || code === "schema_not_ready";
 }
 
@@ -192,6 +196,9 @@ export function fail_from(error: unknown): Fail {
     if (["stale_stage", "stage_not_active", "already_sealed", "question_version_changed", "run_terminal", "thread_closed", "already_resolved", "basis_changed"].includes(reason as string)) {
       return new Fail(reason as string, { details: rest });
     }
+  }
+  if (code === "conflict" && details !== null && RETRYABLE_CONFLICT_REASONS.has(details.reason as string)) {
+    return new Fail("conflict", { details: { reason: details.reason }, next_action: "retry_later" });
   }
   if (!(code in ERROR_STATUS)) return new Fail("internal_error");
   if (code === "invalid_payload" && details !== null && VALIDATION_REASONS.has(details.reason as string)) {

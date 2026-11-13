@@ -30,6 +30,7 @@ import {
   scan_project_files,
   sha256_hex,
   storage_file_is_regular,
+  write_storage_bytes,
 } from "../files.ts";
 import {
   content_digest,
@@ -40,7 +41,27 @@ import {
   write_source_version,
   type SourceFacts,
 } from "./content.ts";
-import { access_state_of_blob, access_state_of_policy, material_object_denied } from "./file_access.ts";
+import { access_state_of_blob, access_state_of_policy, file_ai_denied, material_object_denied } from "./file_access.ts";
+import {
+  EXTRACTOR,
+  EXTRACTOR_VERSION,
+  MAX_SOURCE_BYTES,
+  NOT_STARTED_REASONS,
+  format_of,
+  too_large_outcome,
+  type ExtractOutcome,
+} from "../file_extract.ts";
+import { extract_text_isolated } from "../file_extract_isolated.ts";
+import {
+  closed_to_ai,
+  event_payload,
+  existing_extraction,
+  extraction_result,
+  hide_closed_text,
+  find_target,
+  require_id_field,
+  text_name_of,
+} from "./file_extractions.ts";
 import {
   insert_receipt,
   reject_unknown_fields,
@@ -575,11 +596,12 @@ function run_upload(runtime: CommandRuntime): CommandResult {
   const blob = read_blob(runtime, scope.project_id, blob_id);
   if (blob === undefined) throw new ApiError("not_found", "blob not found");
   // SEL-115 review 2 N1: a caller that is not human goes through the same decision as every read exit (file_ai_denied).
-  // A closed blob (or a material object that carries one) answers exactly like an unknown one — before any receipt or write —
-  // so a reserved duplicate (same bytes → blob_id) cannot be turned into the file's name, policy id or deny state.
+  // A closed blob (its own policy, or the policy of a closed source it was extracted from — SEL-116 final M1) or a material
+  // object that carries one answers exactly like an unknown one — before any receipt or write — so a reserved duplicate
+  // (same bytes → blob_id, e.g. a guess of a closed file's extracted text) cannot be turned into the file's name, policy id or deny state.
   const human = is_human_actor(runtime);
   if (!human) {
-    const closed = access_state_of_blob(runtime.db, scope.project_id, blob_id)?.effective === "deny";
+    const closed = file_ai_denied(runtime.db, scope.project_id, blob_id);
     if (closed) throw new ApiError("not_found", "blob not found");
     if (target_object_id !== null && material_object_denied(runtime.db, scope.project_id, target_object_id)) {
       throw new ApiError("not_found", "object not found");
@@ -635,7 +657,8 @@ function run_upload(runtime: CommandRuntime): CommandResult {
 
   const known_policy = access_state_of_blob(runtime.db, scope.project_id, blob_id);
   const file_policy_id = known_policy?.policy_id ?? runtime.new_id();
-  const ai_access = known_policy?.effective ?? "allow";
+  // the human's view is the one decision (as in GET /materials): a text extracted from a closed file shows as closed too
+  const ai_access = file_ai_denied(runtime.db, scope.project_id, blob_id) ? "deny" : "allow";
   const object_id = object?.id ?? runtime.new_id();
   const version_id = runtime.new_id();
   // `ai_access` is the human's view of the switch; an AI caller never gets the key (MaterialDto). The receipt stores what this
@@ -840,6 +863,229 @@ function run_ai_access_set(runtime: CommandRuntime): CommandResult {
 }
 
 // ---------------------------------------------------------------------------
+// file.extract — text and tables out of the file of one material version (SEL-116 MAT1b)
+//
+// Reads the stored bytes, runs the pure extractor (scripts/pes_core/file_extract.ts), stores the text as a blob of its own
+// with its OWN policy (allow, rev 1 — never inherited from the source) and records one file_extractions row, one receipt and
+// one event for every attempt. One blob has one policy, so text that is byte-for-byte the source points at the source blob and
+// policy. The reads and the "closed to AI" rule are in file_extractions.ts / file_access.ts.
+
+const EXTRACT_FIELDS = ["version_id", "blob_id"] as const;
+const EXTRACT_DB_STATUS: Record<ExtractOutcome["status"], string> = {
+  extracted: "ready",
+  partial: "partial",
+  unsupported: "unsupported",
+  failed: "failed",
+};
+
+function run_extract(runtime: CommandRuntime): CommandResult {
+  const payload = require_record(runtime.payload);
+  reject_unknown_fields(payload, EXTRACT_FIELDS);
+  const version_id = require_id_field(payload, "version_id");
+  const blob_id = require_id_field(payload, "blob_id");
+  const project = runtime.project;
+  const actor_id = runtime.actor_id;
+  if (project === null || actor_id === null) throw new Error("a file command must resolve a project and actor first");
+  const project_id = project.id;
+
+  const target = find_target(runtime.db, project_id, version_id, blob_id);
+  if (target === undefined) throw new ApiError("not_found", "version file not found");
+  // A caller that is not human gets a plain refusal for a closed file, before any receipt or write and without any name, id or hash.
+  if (!is_human_actor(runtime) && closed_to_ai(runtime.db, project_id, blob_id, target.object_id)) {
+    throw new ApiError("forbidden", "this file is closed to AI");
+  }
+  if (target.state !== "ready") throw new ApiError("conflict", "only a ready blob can be extracted");
+
+  // Asked again for the same version file and extractor: no new row, blob, policy or text — the same answer, said so.
+  const known = existing_extraction(runtime.db, project_id, version_id, blob_id);
+  if (known !== undefined) {
+    const result = extraction_result(runtime.db, project_id, known, false, is_human_actor(runtime));
+    insert_receipt(runtime, { project_id, actor_id, action: "file.extracted", base_control_rev: null, result });
+    return { result, events: [{ type: "file.extract_confirmed", payload: event_payload(known, target.file_policy_id, false) }] };
+  }
+
+  const format = format_of(target.original_name);
+  let outcome: ExtractOutcome;
+  if (Number(target.size) > MAX_SOURCE_BYTES) {
+    outcome = too_large_outcome();
+  } else {
+    const objects_dir = runtime.objects_dir;
+    if (objects_dir === null) throw new ApiError("conflict", "no object store is configured for file.extract");
+    let bytes: Uint8Array;
+    try {
+      bytes = read_storage_bytes(objects_dir, project_id, target.storage_key);
+    } catch {
+      throw new ApiError("conflict", "the stored bytes of the blob are not readable");
+    }
+    if (bytes.byteLength !== Number(target.size) || sha256_hex(bytes) !== target.sha256) {
+      throw new ApiError("conflict", "the stored bytes do not match the blob");
+    }
+    // in a worker thread with a heap and a time limit: a hostile file may end the extraction, never the server
+    outcome = extract_text_isolated(target.original_name, bytes);
+    // A try that could not even start (a thread still running, workers not allowed) says nothing about the file: it is refused, not
+    // recorded — no row, receipt or event, so repeated requests cannot pile up writes. The caller retries with a new Idempotency-Key.
+    if (outcome.status === "failed" && outcome.reason !== null && NOT_STARTED_REASONS.includes(outcome.reason)) {
+      throw new ApiError("conflict", outcome.warnings[0]?.message ?? "the extraction could not start now", { reason: outcome.reason });
+    }
+  }
+
+  const extraction_id = runtime.new_id();
+  const actor = runtime.db.get<{ user_id: string }>("SELECT user_id FROM actors WHERE id = ?", actor_id);
+  if (actor === undefined) throw new Error("the actor user was not found");
+
+  // The receipt is written first: the text policy row points at this transaction (tx_id).
+  let text_blob_id: string | null = null;
+  let text_policy_id: string | null = null;
+  let text_hash: string | null = null;
+  const text_bytes = outcome.text === null ? null : new TextEncoder().encode(outcome.text);
+  if (text_bytes !== null) {
+    text_hash = sha256_hex(text_bytes);
+    text_blob_id = runtime.new_id();
+    text_policy_id = runtime.new_id();
+  }
+  const draft = {
+    extraction_id,
+    version_id,
+    blob_id,
+    source_file_policy_id: target.file_policy_id,
+    source_format: format,
+    extractor: EXTRACTOR,
+    extractor_version: EXTRACTOR_VERSION,
+    status: outcome.status,
+    reason: outcome.reason,
+    text_hash,
+    page_count: outcome.page_count,
+    table_count: outcome.table_count,
+    warnings: outcome.warnings,
+    changed: true,
+  };
+
+  // Where does the text live? (1) the source itself when the bytes are identical, (2) a blob this project already has with
+  // these bytes, (3) a new blob. Each blob has exactly one policy; the extraction never copies the source's.
+  if (text_bytes !== null && text_hash !== null) {
+    if (text_hash === target.sha256 && text_bytes.byteLength === Number(target.size)) {
+      text_blob_id = blob_id;
+      text_policy_id = target.file_policy_id;
+    } else {
+      const same = runtime.db.get<{ id: string; storage_key: string; state: string }>(
+        "SELECT id, storage_key, state FROM blobs WHERE project_id = ? AND sha256 = ? AND size = ?",
+        project_id,
+        text_hash,
+        text_bytes.byteLength,
+      );
+      const objects_dir = runtime.objects_dir;
+      if (objects_dir === null) throw new ApiError("conflict", "no object store is configured for file.extract");
+      if (same !== undefined && same.state !== "ready") throw new ApiError("conflict", "the text blob is not ready");
+      if (same === undefined) {
+        const media_type = "text/plain; charset=utf-8";
+        const storage_key = `${project_id}/${text_hash}`;
+        write_storage_bytes(objects_dir, project_id, storage_key, text_bytes);
+        const written = runtime.db.run(
+          `INSERT INTO blobs (id, project_id, storage_key, sha256, size, media_type, original_name, state, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?)`,
+          text_blob_id,
+          project_id,
+          storage_key,
+          text_hash,
+          text_bytes.byteLength,
+          media_type,
+          text_name_of(target.original_name),
+          actor_id,
+        );
+        if (written.changes !== 1n) throw new Error("the text blob was not recorded");
+      } else {
+        text_blob_id = same.id;
+        if (!storage_file_is_regular(objects_dir, project_id, same.storage_key)) {
+          write_storage_bytes(objects_dir, project_id, same.storage_key, text_bytes);
+        }
+      }
+      const policy = runtime.db.get<{ id: string }>(
+        "SELECT id FROM file_policies WHERE project_id = ? AND blob_id = ?",
+        project_id,
+        text_blob_id,
+      );
+      // a blob that has no policy yet gets one below, after the receipt (its tx_id points at the receipt)
+      text_policy_id = policy?.id ?? (text_policy_id as string);
+    }
+  }
+
+  // What the caller is told (and what its receipt keeps) follows the one rule for non-human callers: a text that is, byte for byte,
+  // a closed file's text is not named (hide_closed_text). The stored file_extractions row below keeps the real ids.
+  const result = hide_closed_text(
+    runtime.db,
+    project_id,
+    { ...draft, text_blob_id, text_file_policy_id: text_policy_id },
+    is_human_actor(runtime),
+  );
+  insert_receipt(runtime, { project_id, actor_id, action: "file.extracted", base_control_rev: null, result: { ...result, reason: outcome.reason ?? null } });
+
+  if (text_blob_id !== null && text_policy_id !== null) {
+    const has_policy = runtime.db.get<{ ok: bigint }>("SELECT 1 AS ok FROM file_policies WHERE project_id = ? AND id = ?", project_id, text_policy_id);
+    if (has_policy === undefined) {
+      const policy = runtime.db.run(
+        `INSERT INTO file_policies
+           (id, project_id, blob_id, ai_access, rev, changed_by_actor_id, changed_by_user_id, changed_at, reason, tx_id)
+         VALUES (?, ?, ?, 'allow', 1, ?, ?, ?, NULL, ?)`,
+        text_policy_id,
+        project_id,
+        text_blob_id,
+        actor_id,
+        actor.user_id,
+        runtime.now_ms,
+        runtime.tx_id,
+      );
+      if (policy.changes !== 1n) throw new Error("the text file policy was not written");
+    }
+  }
+
+  const written = runtime.db.run(
+    `INSERT INTO file_extractions
+       (id, project_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status,
+        text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings_json, created_at, tx_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    extraction_id,
+    project_id,
+    version_id,
+    blob_id,
+    target.file_policy_id,
+    format,
+    EXTRACTOR,
+    EXTRACTOR_VERSION,
+    EXTRACT_DB_STATUS[outcome.status],
+    text_blob_id,
+    text_policy_id,
+    text_hash,
+    outcome.page_count,
+    outcome.table_count,
+    JSON.stringify(outcome.warnings),
+    runtime.now_ms,
+    runtime.tx_id,
+  );
+  if (written.changes !== 1n) throw new Error("the extraction was not recorded");
+
+  return {
+    result: { ...result, reason: outcome.reason ?? null },
+    events: [
+      {
+        type: "file.extracted",
+        payload: {
+          extraction_id,
+          status: outcome.status,
+          source_format: format,
+          page_count: outcome.page_count,
+          table_count: outcome.table_count,
+          warning_count: outcome.warnings.length,
+          // the SOURCE policy only: it lets the change feed hide this fact from a caller who may not see the source file
+          file_policy_id: target.file_policy_id,
+          changed: true,
+        },
+      },
+    ],
+  };
+}
+
+
+// ---------------------------------------------------------------------------
 // file.quarantine
 
 function run_quarantine(runtime: CommandRuntime): CommandResult {
@@ -1019,6 +1265,7 @@ const FILE_COMMAND_INPUTS: ReadonlyArray<readonly [string, CommandDefinition]> =
   ["file.attach_version", definition("file.version_attached", run_attach_version)],
   ["file.upload", definition("file.material_uploaded", run_upload)],
   ["file.ai_access_set", definition("file.ai_access_changed", run_ai_access_set)],
+  ["file.extract", definition("file.extracted", run_extract)],
   ["file.quarantine", definition("file.blob_quarantined", run_quarantine)],
   ["file.gc_orphans", definition("file.orphans_collected", run_gc_orphans)],
 ];

@@ -232,6 +232,7 @@ stage-0 7절과 1단계 설계서의 합의 결정은 다시 정하지 않는다
 | `GET P/workspace` | E/H | 3단계 U1b(SEL-82) | U1b 읽기 모델 | 앱 작업 공간 읽기(현재 단계·라운드·차례·권한별 가능 동작·기록 개수). 읽기 전용·새 표 없음, `context:read` |
 | `POST P/uploads`→`PUT P/uploads/{u}`→`POST P/uploads/{u}/complete`, `GET P/files/{b}/content` | E/H | PR13 | PR9 | 예약·업로드 완료·ready·hash·Go OFF 정책 검사 읽기 |
 | `GET P/files/{b}/preview`, `POST P/materials`, `GET P/materials`, `POST P/file-policies/{fp}/ai-access` | E/H (스위치는 H만) | 3단계 SEL-115 | PR9 | 내 자료 올리기(`file.upload`)·목록·파일별 AI 참조 스위치(`file.ai_access_set`)·content 와 같은 규칙의 preview — 자세한 규칙은 stage-1-api.md 6절 「내 자료」 행 |
+| `POST P/file-extractions` | E/H | 3단계 SEL-116 | PR9 | 내 자료 글자·표 추출(`file.extract`, 사건 `file.extracted`) — 형식·상한·정책 규칙은 stage-1-api.md 6절 「내 자료」 행의 「글자·표 추출」 |
 | `POST P/stages/{s}/rounds`·`POST P/rounds/{r}/seal` | H/E | PR14 | PR6 | 라운드 시작·봉인, 승인과 분리 |
 | `POST P/stages/{s}/approve`·`/reopen` | H | PR14 | PR6 | 사람만, 에이전트 거부 |
 | `POST P/policies/opencode-go/revisions` | H | PR14 | PR10 | 사람만, 정책 이력·재생 전 검사 |
