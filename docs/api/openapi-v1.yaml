@@ -1286,13 +1286,14 @@ paths:
     get:
       summary: List the user's own materials (SEL-115) - the file of each material's current version
       description: |
-        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?, object_ai_access?}]}`.
+        Data `{materials:[{object_id, version_id, version_no, blob_id, file_policy_id, role, title, original_name, media_type, size, sha256, ai_access?, object_ai_access?, extraction_status, extraction}]}`.
+        `extraction_status` is `extracted|partial|unsupported|failed|not_extracted` for the current version's file; `extraction` is `null` or `{extraction_id, status, source_format, extractor, extractor_version, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings, reason, text_ai_access?}` (SEL-116). An AI caller gets `text_*` as `null` when the text is closed (its own policy or its source's); `text_ai_access` is the owner's only.
         The owner session sees every material and each one's `ai_access` (the value in force for that row's file: `deny` when the policy row or its newest history row says deny) and `object_ai_access` (`deny` when any version of the material object carries a closed file, else `allow` - the state AI callers are judged by).
         Any other caller (agent token, internal AI) gets allowed files only, without the `ai_access` and `object_ai_access` keys and with no trace of a closed file - not its name,
         ids, hash or text, and not even a count. The same list is `data.materials` of `GET context`. In `GET context` the `manifest` an AI caller gets leaves out closed
         material objects (the human manifest lists them with `ai_access: deny`); `digest` is computed from the manifest the caller gets, so it differs by audience.
         `GET objects/{o}/versions/{v}` of a closed material is 403 `forbidden` for a caller that is not human (as `GET files/{b}/content`); `GET changes` leaves out
-        events about a closed material object (a closed file in any version), by material object: events whose payload names a closed file or one of that object's files, versions or ids (`blob_id`, `file_policy_id`, `object_id`, `version_id`) are left out, a newer allowed version's upload events included (`commands/file_access.ts` event_denied). The hand-off bundle's `base_versions` leave out closed files and materials.
+        events about a closed material object (a closed file in any version), by material object: events whose payload names a closed file or one of that object's files, versions or ids (`blob_id`, `file_policy_id`, `object_id`, `version_id`) are left out, a newer allowed version's upload events included (`commands/file_access.ts` event_denied). A file is closed when its own policy or the policy of any file it was extracted from (however many steps) denies (SEL-116); `closed_materials` and `file_ai_denied` give the same answer. The hand-off bundle's `base_versions` leave out closed files and materials.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       security:
@@ -1348,6 +1349,63 @@ paths:
         "403": { description: An agent token (whatever its scopes) - the switch is the owner's }
         "404": { description: Unknown file policy in this project }
         "409": { description: The key was used for another body (idempotency_key_reuse) }
+        "413": { description: Payload too large (256 KiB JSON limit) }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/projects/{id}/file-extractions:
+    post:
+      summary: Pull the text and tables out of one material file (SEL-116) - owner session or a file:write token
+      description: |
+        Body `{version_id, blob_id}` (the blob must be attached to that version). Reads the stored bytes, extracts, stores the text as a blob of its own and
+        records one `file_extractions` row, whatever the outcome. Formats by the original name's extension: `txt` `md` `csv` (UTF-8 only; BOM removed, CRLF/CR become LF;
+        another encoding is `failed / invalid_encoding`, the text is never guessed), `docx` `xlsx` `pptx` `hwpx` (zip + XML read with Node built-ins only; paragraphs one per line,
+        tables as Markdown pipe tables), and `hwp` `doc` `xls` `ppt` `pdf` or an unknown extension = `unsupported` (no text, no blob, no policy; nothing is made up).
+        A damaged file is `failed` (`invalid_container`, `invalid_document`); a file over 32 MiB, or a zip whose parts unpack past 64 MiB in total, is `failed / too_large`
+        (the cap is on the real unpacked bytes, never the size in the zip header; no part of the text is returned). One unreadable slide, sheet or section is `partial`
+        with a `part_unreadable` warning; the readable parts are kept. One extraction has ONE budget, paid before anything is built: 32 Mi output characters,
+        3,000,000 kept elements (cells, rows, paragraphs, text pieces, sheets), 1,000 sheets and 10 s; going over any of them is `failed / too_large`.
+        At most 50 warnings are listed; the rest become one `more_warnings` line.
+        The whole extraction runs in a worker thread with its own limits (256 MB heap, 15 s): the thread running out of memory is `failed / too_large`, over the time limit
+        `failed / extract_timeout`, ending without an answer `failed / extract_error`. A cut-off thread that a native step keeps alive is counted; while one is left a new
+        extraction starts no thread and is refused at once with 409 `conflict`, `details.reason: extract_busy`, `retryable: true`. Where worker threads are not allowed
+        (Node `--permission` without `--allow-worker`) the same refusal has `details.reason: worker_unavailable`. These two refusals are not answers about the file and
+        write nothing (no row, blob, policy, receipt or event). `extract_timeout` and `extract_error` also say something about the moment, not the file: each such attempt is
+        recorded (row, receipt, event) but does not answer the next request for the same file - it is tried again (`changed: true`). `too_large`, the damaged-file reasons,
+        `extracted`, `partial` and `unsupported` are final. To try again send a NEW Idempotency-Key: the same key replays the first answer (`replayed: true`), also a recorded failure.
+        While an extraction runs, the same server answers no other request (usually at most about 16 s per extraction; about 21 s in the rare case the supervisor thread cannot answer).
+        Data `{extraction_id, version_id, blob_id, source_file_policy_id, source_format, extractor, extractor_version, status: extracted|partial|unsupported|failed,
+        reason, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings:[{code,message}], changed}`.
+        The text blob has its OWN policy, created `allow` rev 1 (never inherited from the source). AI reads it only when the source policy AND the text policy both allow
+        (strict side wins; `GET files/{text_blob_id}/content|preview` is 403 otherwise, and the list hides the text ids). One blob has one policy, so when the extracted text is
+        byte-for-byte the source (a plain UTF-8 txt/md/csv without BOM or CRLF) no second blob exists: `text_blob_id` and `text_file_policy_id` are the source's own.
+        Asking again for the same version file and extractor, when the earlier answer is final, writes nothing (no row, blob, policy, receipt or event) and answers the stored result with `changed:false`.
+        A caller that is not human who names a closed file gets 403 `forbidden`, before anything is written. Writes through the command `file.extract` (receipt and event `file.extracted`;
+        the event carries no text and no file name).
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      security: [{ agentToken: [] }, { localSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version_id, blob_id]
+              properties:
+                version_id: { type: string }
+                blob_id: { type: string }
+      responses:
+        "201":
+          description: Extraction recorded (or the stored one, changed:false)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Success" }
+        "400": { description: Missing or mistyped field, or an unknown field }
+        "401": { description: Missing or invalid credential }
+        "403": { description: Missing file:write scope, or a caller that is not human names a file closed to AI }
+        "404": { description: Unknown version or blob, or a blob not attached to that version }
+        "409": { description: "The blob is not ready, or the key was used for another body (idempotency_key_reuse), or the extraction could not start now (conflict with details.reason extract_busy or worker_unavailable, retryable true, nothing written)" }
         "413": { description: Payload too large (256 KiB JSON limit) }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/project-registrations:
@@ -2690,7 +2748,7 @@ paths:
   /api/v1/projects/{id}/stages/{s}/rounds/{rd}:
     get:
       summary: "One place's form with each question's current version and current answer (SEL-98 U2d). Read-only, no new table"
-      description: "{rd} is start (the stage-start questions, round_id null) or a round number (a decimal string of 1 or more). data = { edition (the number of the ACTIVE edition, the same value as the work space read's edition: these paths read the active edition, so a client that shows another edition must not use the data), stage, round_id (the number, null for start), server_round_id (rounds.id of a numbered round; null for start; the round_id a POST P/questions takes), state (current|closed, the same value as the work space), set_id (the newest set of form_key main at that place, null when none was published), form_version (that set's version_no, or null), questions [{ id, version_id (the current version), version_no (decimal string), state, type, text, required, allow_comment_as_answer, importance, help, default_value, options, show_if, merged_into_question_id, display_no, answer }] } in the set's member order. answer is null or { version_id, value, question_version_id, question_version (the version number of the question version it answers, or null), used_default, state, tx_id, receipt_no, committed_at } (the current answer; the three receipt values are those of the write that made it). Number rule of this read: version_no is a decimal string (a Revision, like every version_no); form_version, display_no, round_id and answer.question_version are plain JSON numbers (small counters, not revisions). A place with no form is 200 with set_id null and questions []; an unknown stage, number or place is 404. The owner session, or a token with context:read."
+      description: "{rd} is start (the stage-start questions, round_id null) or a round number (a decimal string of 1 or more). data = { edition (the number of the ACTIVE edition, the same value as the work space read's edition: these paths read the active edition, so a client that shows another edition must not use the data), stage, round_id (the number, null for start), server_round_id (rounds.id of a numbered round; null for start; the round_id a POST P/questions takes), state (current|closed, the same value as the work space), set_id (the newest set of form_key main at that place, null when none was published), form_version (that set's version_no, or null), questions [{ id, version_id (the current version), version_no (decimal string), state, type, text, required, allow_comment_as_answer, importance, help, default_value, options, show_if, merged_into_question_id, display_no, answer }], result (SEL-126: null or { object_id, version_id, version_no (decimal string, the version number of that version), title (the artifact title of that version), created_at (ISO 8601 time that version was written, or null), body_md }) } in the set's member order. result is the round's result text: the first artifact (글) object the round was sealed with as role result (round_contents; objects that are not artifacts are skipped), read at its CURRENT version = objects.current_version_id, the version the annotation commands judge (content.set_current or an adopted edit_text moves it; a version only appended is not current), body_md exactly as stored (no normalising). When that first artifact's current version has no inline body_md (its body is a file blob, or it has no body), result is null; the next artifact is not tried. The key is always present: result is null before the seal (open round), at the stage-start place, and for a round sealed with no result. For a caller that is not the owner session (an agent token), a current version that carries a file closed to AI (ai_access deny, its body file or an attached file) gives result null with no trace of that object or version anywhere in the answer; the owner session sees it as usual; a version added later that carries no closed file is shown, and allowing the file shows it again. The read writes nothing. answer is null or { version_id, value, question_version_id, question_version (the version number of the question version it answers, or null), used_default, state, tx_id, receipt_no, committed_at } (the current answer; the three receipt values are those of the write that made it). Number rule of this read: version_no is a decimal string (a Revision, like every version_no); form_version, display_no, round_id and answer.question_version are plain JSON numbers (small counters, not revisions). A place with no form is 200 with set_id null and questions []; an unknown stage, number or place is 404. The owner session, or a token with context:read."
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/StageId"

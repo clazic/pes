@@ -81,12 +81,30 @@ export function access_state_of_policy(db: ReadDb, project_id: string, policy_id
   return row === undefined ? undefined : state_of(row);
 }
 
+// THE definition of "closed to AI", written once (SEL-116 × SEL-127). A blob is closed when its own policy denies (the policy row or
+// its newest history row says anything but allow) or when it is a text extracted — however many steps away — from a blob that is
+// closed. The walk goes from the denying policies down to the texts made from them. UNION (not UNION ALL) drops a blob already
+// visited, so a self-edge or a cycle in file_extractions ends it. One statement whatever the number of blobs or extraction steps.
+// Both consumers below read this one fragment: file_ai_denied (one blob) and closed_materials (the whole set). Params: project, project.
+const CLOSED_BLOBS_CTE = `WITH RECURSIVE closed(blob_id) AS (
+    SELECT p.blob_id FROM file_policies p
+     WHERE p.project_id = ?
+       AND (p.ai_access <> 'allow'
+         OR COALESCE((SELECT a.ai_access FROM file_ai_access_versions a
+                       WHERE a.project_id = p.project_id AND a.file_policy_id = p.id ORDER BY a.rev DESC LIMIT 1), 'allow') <> 'allow')
+    UNION
+    SELECT e.text_blob_id FROM file_extractions e JOIN closed c ON e.blob_id = c.blob_id WHERE e.project_id = ? AND e.text_blob_id IS NOT NULL
+  )`;
+const CLOSED_SET_SQL = `${CLOSED_BLOBS_CTE} SELECT blob_id FROM closed`;
+const CLOSED_ONE_SQL = `${CLOSED_BLOBS_CTE} SELECT 1 AS closed FROM closed WHERE blob_id = ? LIMIT 1`;
+
 /**
- * THE decision: is this blob closed to AI? True for a deny in the policy row or the newest history row.
- * A blob without a policy row has no recorded deny (it is not attached to anything yet), so it is not denied.
+ * THE decision: is this blob closed to AI? True for a deny in the policy row or the newest history row of the blob itself or of ANY
+ * file it was extracted from, however many extraction steps away (SEL-116: an extracted text can be pasted back as a material and
+ * extracted again; strict side wins, whatever the text's own policy says). A blob without a policy row has no recorded deny.
  */
 export function file_ai_denied(db: ReadDb, project_id: string, blob_id: string): boolean {
-  return access_state_of_blob(db, project_id, blob_id)?.effective === "deny";
+  return db.get<{ closed: bigint }>(CLOSED_ONE_SQL, project_id, project_id, blob_id) !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,13 +129,13 @@ export function material_object_denied(db: ReadDb, project_id: string, object_id
 }
 
 /**
- * The closed side of a whole project, decided in two queries (one per table family) instead of one per event/row.
+ * The closed side of a whole project, decided in three queries (closed blobs, policies, material files) instead of one per event/row.
  * It is the set form of the one rule above — a file is closed when file_ai_denied says so, a material OBJECT is closed when any
  * version of it carries a closed file (material_object_denied) — so the batch exits (change feed, materials list) cost the same
  * however many events or rows they look at. tests/test_sel127_closed_index.test.ts keeps it equal to the per-object functions.
  */
 export interface ClosedMaterials {
-  /** blobs whose own policy says deny (file_ai_denied is true) */
+  /** blobs closed to AI: a deny in their own policy or in the policy of any file they were extracted from (file_ai_denied is true) */
   denied_blobs: ReadonlySet<string>;
   /** material objects with a closed file in any version (material_object_denied is true) */
   objects: ReadonlySet<string>;
@@ -130,8 +148,10 @@ export interface ClosedMaterials {
 }
 
 export function closed_materials(db: ReadDb, project_id: string): ClosedMaterials {
-  const states = db.all<AccessRow>(`${STATE_SQL} WHERE p.project_id = ?`, project_id).map(state_of);
-  const denied_blobs = new Set(states.filter((state) => state.effective === "deny").map((state) => state.blob_id));
+  // Query 1: the closed blobs, extraction ancestors included (CLOSED_SET_SQL is the set form of file_ai_denied).
+  const denied_blobs = new Set(db.all<{ blob_id: string }>(CLOSED_SET_SQL, project_id, project_id).map((row) => row.blob_id));
+  // Query 2: the policies (to name a policy id in a payload). Query 3: the files of every material version.
+  const policy_blob = db.all<{ policy_id: string; blob_id: string }>("SELECT id AS policy_id, blob_id FROM file_policies WHERE project_id = ?", project_id);
   const files = db.all<{ blob_id: string; version_id: string; object_id: string }>(
     `SELECT vf.blob_id AS blob_id, vf.version_id AS version_id, ov.object_id AS object_id ${MATERIAL_FILES_FROM}`,
     project_id,
@@ -144,7 +164,7 @@ export function closed_materials(db: ReadDb, project_id: string): ClosedMaterial
     versions.add(file.version_id);
     blobs.add(file.blob_id);
   }
-  const policies = new Set(states.filter((state) => blobs.has(state.blob_id)).map((state) => state.policy_id));
+  const policies = new Set(policy_blob.filter((row) => blobs.has(row.blob_id)).map((row) => row.policy_id));
   return { denied_blobs, objects, versions, blobs, policies };
 }
 
@@ -251,8 +271,90 @@ export interface MaterialDto {
   sha256: string;
   /** only for the human owner: the value in force for THIS row's file. AI callers never get this key. */
   ai_access?: AiAccess;
+  /** SEL-116: the text-extraction state of this version's file; "not_extracted" when nobody has asked yet. */
+  extraction_status: ExtractionState;
+  extraction: ExtractionDto | null;
   /** only for the human owner: the object-unit state — deny when any version of the material carries a closed file (what AI callers are judged by). */
   object_ai_access?: AiAccess;
+}
+
+export type ExtractionState = "extracted" | "partial" | "unsupported" | "failed" | "not_extracted";
+
+export interface ExtractionDto {
+  extraction_id: string;
+  status: Exclude<ExtractionState, "not_extracted">;
+  source_format: string;
+  extractor: string;
+  extractor_version: string;
+  /** null when the text is closed to the caller (its own policy or its source's) or there is no text */
+  text_blob_id: string | null;
+  text_file_policy_id: string | null;
+  text_hash: string | null;
+  page_count: number | null;
+  table_count: number;
+  warnings: Array<{ code: string; message: string }>;
+  reason: string | null;
+  /** only for the human owner: the switch of the text's own policy */
+  text_ai_access?: AiAccess;
+}
+
+interface ExtractionRowForRead {
+  id: string;
+  status: string;
+  source_format: string;
+  extractor: string;
+  extractor_version: string;
+  text_blob_id: string | null;
+  text_file_policy_id: string | null;
+  text_hash: string | null;
+  page_count: bigint | null;
+  table_count: bigint | null;
+  warnings_json: string;
+}
+
+function read_warnings(json: string): Array<{ code: string; message: string }> {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((w): w is Record<string, unknown> => typeof w === "object" && w !== null)
+      .map((w) => ({ code: String(w.code ?? ""), message: String(w.message ?? "") }));
+  } catch {
+    return [];
+  }
+}
+
+/** The newest extraction of one version file, shaped for a caller. An AI caller never gets the ids of a closed text. */
+function extraction_of(db: ReadDb, project_id: string, version_id: string, blob_id: string, audience: Audience): ExtractionDto | null {
+  const row = db.get<ExtractionRowForRead>(
+    `SELECT id, status, source_format, extractor, extractor_version, text_blob_id, text_file_policy_id, text_hash, page_count, table_count, warnings_json
+       FROM file_extractions WHERE project_id = ? AND version_id = ? AND blob_id = ? ORDER BY rowid DESC LIMIT 1`,
+    project_id,
+    version_id,
+    blob_id,
+  );
+  if (row === undefined) return null;
+  const status: ExtractionDto["status"] = row.status === "ready" ? "extracted" : row.status === "partial" || row.status === "unsupported" ? row.status : "failed";
+  const warnings = read_warnings(row.warnings_json);
+  const text_open = row.text_blob_id !== null && (audience === "human" || !file_ai_denied(db, project_id, row.text_blob_id));
+  const dto: ExtractionDto = {
+    extraction_id: row.id,
+    status,
+    source_format: row.source_format,
+    extractor: row.extractor,
+    extractor_version: row.extractor_version,
+    text_blob_id: text_open ? row.text_blob_id : null,
+    text_file_policy_id: text_open ? row.text_file_policy_id : null,
+    text_hash: text_open ? row.text_hash : null,
+    page_count: row.page_count === null ? null : Number(row.page_count),
+    table_count: Number(row.table_count ?? 0n),
+    warnings,
+    reason: status === "extracted" ? null : (warnings[0]?.code ?? null),
+  };
+  if (audience === "human" && row.text_file_policy_id !== null) {
+    dto.text_ai_access = access_state_of_policy(db, project_id, row.text_file_policy_id)?.effective ?? "allow";
+  }
+  return dto;
 }
 
 interface MaterialRow {
@@ -312,11 +414,15 @@ export function material_rows(db: ReadDb, project_id: string, audience: Audience
       media_type: row.media_type,
       size: Number(row.size),
       sha256: row.sha256,
+      extraction_status: "not_extracted",
+      extraction: null,
     };
     if (audience === "human") {
       dto.ai_access = closed.denied_blobs.has(row.blob_id) ? "deny" : "allow";
       dto.object_ai_access = object_closed ? "deny" : "allow";
     }
+    dto.extraction = extraction_of(db, project_id, row.version_id, row.blob_id, audience);
+    dto.extraction_status = dto.extraction === null ? "not_extracted" : dto.extraction.status;
     out.push(dto);
   }
   return out;

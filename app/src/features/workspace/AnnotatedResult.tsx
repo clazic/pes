@@ -7,7 +7,7 @@ import { Kbd } from "@/components/pes/kbd";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cpLength, sliceCp, snapUtf16Range, utf16ToCp } from "@/lib/anchor-text";
-import { formatAt } from "@/lib/labels";
+import { ResultMeta } from "./ResultMeta";
 import { AnnotationRegion } from "./AnnotationRegion";
 import { AnnotationContext, ErrorLine, Quote, annotationScope, loadTaskProgress, pendingKeep, saveTaskProgress, useAnnotationWrite, useAnnotationCtx, type AnnotationCtx, type Note } from "./annotation-kit";
 import { controlClass, Field } from "./fields";
@@ -411,7 +411,7 @@ function SelectionToolbar({ picked, reanchoring, toolbarRef, onAnnotate, onAsk, 
 /**
  * 결과 글(첨언 가능) — 본문을 블록(문단 · 표 칸)으로 그려 위치(data-cp-start)를 싣고, 글에서 구간을 고르면 도구줄(첨언 · AI에게 묻기 · 할 일로)이 뜬다.
  * 그 아래 첨언 목록(앵커 4상태 · 해결 · 후속 채택). 서버가 본문 · 객체 · 버전을 주지 않으면 이 컴포넌트를 쓰지 않는다(위치를 지어내지 않는다).
- * enabled = 쓸 수 있는가(휴대폰 · 지난 라운드가 아님). 아니면 목록은 읽기만 되고 쓰기 단추는 이유와 함께 막힌다.
+ * enabled = 쓸 수 있는가(휴대폰 · 지난 판이 아님 — 활성 판의 봉인 라운드는 쓸 수 있다). 아니면 목록은 읽기만 되고 쓰기 단추는 이유와 함께 막힌다.
  */
 export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: WorkspaceView; round: RoundView; result: AnnotatableResult; blockedReason?: string }) {
   const qc = useQueryClient();
@@ -426,7 +426,7 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
   const [dialog, setDialog] = React.useState<"annotate" | "task" | null>(null);
   const [reanchoringRaw, setReanchoring] = React.useState<string | null>(null);
   const [focusTick, setFocusTick] = React.useState(0);
-  // 쓸 수 없게 되면(휴대폰으로 바뀜 · 지난 라운드로 이동) 도구를 거둔다 — 상태를 지우지 않고 보이는 값만 막는다
+  // 쓸 수 없게 되면(휴대폰으로 바뀜 · 지난 판으로 이동) 도구를 거둔다 — 상태를 지우지 않고 보이는 값만 막는다
   // 다른 글 버전에서 고른 구간은 지금 글에 쓰지 않는다(본문이 바뀐 그 커밋부터 도구 · 대화 상자가 그 좌표를 못 쓴다)
   const picked = enabled && pickedRaw?.version_id === result.version_id ? pickedRaw : null;
   // 본문이 새 버전으로 바뀐 렌더에서 옛 버전에서 고른 구간 · 열린 대화 상자를 거두고 다시 고르라고 알린다(다시 붙이기는 이어서 할 수 있다)
@@ -655,9 +655,7 @@ export function AnnotatedResult({ ws, round, result, blockedReason }: { ws: Work
         <h2 id="result-title" className="text-title text-ink">
           {result.title}
         </h2>
-        <p className="mt-0.5 text-caption text-muted-foreground">
-          v{result.version} · {result.status === "adopted" ? "채택본" : "초안"} · <time dateTime={result.updated_at}>{formatAt(result.updated_at, false)}</time>
-        </p>
+        <ResultMeta result={result} />
         <div className="mt-3 space-y-4">
           {blocks.map((b) => (
             <BlockView key={b.kind === "p" ? `p${b.start_cp}` : `t${b.rows[0]?.[0]?.start_cp ?? 0}`} block={b} marks={marks} />
